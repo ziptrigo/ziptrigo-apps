@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  user:
+    build:
+      context: .
+      dockerfile: user/Dockerfile
+    container_name: ziptrigo-user
+    ports:
+      - "8010:8010"
+    environment:
+      - DEBUG=${USER_DEBUG:-True}
+      - SECRET_KEY=${USER_SECRET_KEY:-django-insecure-user-change-in-production}
+      - ALLOWED_HOSTS=${USER_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - DATABASE_URL=${USER_DATABASE_URL:-}
+      - JWT_SECRET=${USER_JWT_SECRET:-change-me-in-production}
+      - JWT_ALGORITHM=${USER_JWT_ALGORITHM:-HS256}
+      - JWT_EXP_DELTA_SECONDS=${USER_JWT_EXP_DELTA_SECONDS:-1209600}
+    env_file:
+      - user/.env.dev
+    volumes:
+      - ./user:/app/user
+      - ./common:/app/common
+    networks:
+      - ziptrigo-network
+    restart: unless-stopped
+
+  qr_code:
+    build:
+      context: .
+      dockerfile: qr_code/Dockerfile
+    container_name: ziptrigo-qr-code
+    ports:
+      - "8020:8020"
+    environment:
+      - DEBUG=${QR_CODE_DEBUG:-False}
+      - SECRET_KEY=${QR_CODE_SECRET_KEY:-django-insecure-qr-code-change-in-production}
+      - ENVIRONMENT=${QR_CODE_ENVIRONMENT:-dev}
+      - DATABASE_URL=${QR_CODE_DATABASE_URL:-}
+      - BASE_URL=${QR_CODE_BASE_URL:-http://localhost:8020}
+      - EMAIL_BACKENDS=${QR_CODE_EMAIL_BACKENDS:-console}
+      - AWS_SES_SENDER=${QR_CODE_AWS_SES_SENDER:-no-reply@example.com}
+    env_file:
+      - qr_code/.env.dev
+    volumes:
+      - ./qr_code:/app/qr_code
+      - ./common:/app/common
+      - qr_code_media:/app/qr_code/media
+      - qr_code_static:/app/qr_code/staticfiles
+    networks:
+      - ziptrigo-network
+    restart: unless-stopped
+
+networks:
+  ziptrigo-network:
+    driver: bridge
+
+volumes:
+  qr_code_media:
+  qr_code_static:
