@@ -1,0 +1,301 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if qrcode %}Edit{% else %}Create{% endif %} QR Code - QR Code App{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  <h1 class="text-3xl font-bold mb-6 text-gray-900 dark:text-gray-100">{% if qrcode %}Edit{% else %}Create{% endif %} QR code</h1>
+
+  <div id="qrcode-msg" class="mb-4 text-sm"></div>
+
+  <form id="qrcode-form"
+        {% if qrcode %}hx-put="/api/qrcodes/{{ qrcode.id }}/"{% else %}hx-post="/api/qrcodes/"{% endif %}
+        hx-trigger="submit"
+        hx-swap="none">
+    {% csrf_token %}
+
+
+    <!-- Name -->
+    <div class="mb-4">
+      <label class="block mb-1 text-sm font-medium">Name</label>
+      <input type="text" name="name" maxlength="255" required value="{% if qrcode %}{{ qrcode.name }}{% else %}{{ prefill.name|default:'' }}{% endif %}"
+             class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+    </div>
+
+    <!-- Type (read-only in edit mode) -->
+    {% if qrcode %}
+    <div class="mb-4">
+      <label class="block mb-1 text-sm font-medium">Type</label>
+      <div class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
+        {{ qrcode.get_qr_type_display }}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Text / URL -->
+    <div class="mb-4">
+      <label class="block mb-1 text-sm font-medium">Text / URL{% if qrcode %} (read-only){% else %} to encode{% endif %}</label>
+      <textarea name="url" maxlength="1000" rows="4" {% if qrcode %}disabled{% else %}required{% endif %}
+                class="w-full rounded border border-gray-300 dark:border-gray-600 {% if qrcode %}bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed{% else %}bg-white dark:bg-gray-800{% endif %} px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">{% if qrcode %}{{ qrcode.content }}{% else %}{{ prefill.content|default:'' }}{% endif %}</textarea>
+      {% if not qrcode %}<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters. Can be any text; short URL is only meaningful when the content is a URL.</p>{% endif %}
+    </div>
+
+    {% if not qrcode %}
+    <!-- Options row: type + format + track (only in create mode) -->
+    <div class="mb-4 flex flex-col gap-4">
+      <!-- Type and Format dropdowns -->
+      <div class="flex flex-col sm:flex-row sm:items-end gap-4">
+        <div>
+          <label class="block mb-1 text-sm font-medium">Type</label>
+          <select id="qr_type" name="qr_type"
+                  class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <option value="text" {% if prefill.qr_type == 'text' or not prefill.qr_type %}selected{% endif %}>Text</option>
+            <option value="url" {% if prefill.qr_type == 'url' %}selected{% endif %}>URL</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block mb-1 text-sm font-medium">Format</label>
+          <select name="qr_format"
+                  class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <option value="png" {% if prefill.qr_format == 'png' or not prefill.qr_format %}selected{% endif %}>PNG</option>
+            <option value="svg" {% if prefill.qr_format == 'svg' %}selected{% endif %}>SVG</option>
+            <option value="pdf" {% if prefill.qr_format == 'pdf' %}selected{% endif %}>PDF</option>
+          </select>
+        </div>
+
+        <div class="flex items-end">
+          <label class="inline-flex items-center gap-2 pb-2">
+            <input id="use_url_shortening" type="checkbox" name="use_url_shortening" value="true" class="rounded" disabled {% if prefill.use_url_shortening %}checked{% endif %}>
+            <span class="text-sm">Track QR Code</span>
+            <i class="fas fa-question-circle text-gray-500 dark:text-gray-400 cursor-help" 
+               title="This tracks the QR Code usage and gives you analytical data about its usage."></i>
+          </label>
+        </div>
+      </div>
+
+      <!-- Short URL display (only visible when tracking is enabled) -->
+      <div id="short-url-container" class="hidden">
+        <label class="block mb-1 text-sm font-medium">Short URL</label>
+        <input id="short-url-display" type="text" readonly
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default"
+               placeholder="Short URL will be generated...">
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Preview + Image -->
+    <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {% if not qrcode %}
+      <button type="button"
+              id="qrcode-preview-btn"
+              hx-post="/api/qrcodes/preview"
+              hx-include="#qrcode-form"
+              hx-trigger="click"
+              hx-swap="none"
+              class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        Preview
+      </button>
+      {% else %}
+      <div class="text-sm font-medium text-gray-700 dark:text-gray-300">QR Code Preview:</div>
+      {% endif %}
+
+      <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-md p-2 min-h-[96px] min-w-[96px] self-start">
+        <img id="qrcode-preview-img"
+             src="{% if qrcode and qrcode.image_file %}/media/{{ qrcode.image_file }}{% else %}{% static 'images/logo_128x128.png' %}{% endif %}"
+             alt="QR code preview"
+             class="h-24 w-24 object-contain">
+      </div>
+    </div>
+
+    <!-- Final actions: Cancel + Save -->
+    <div class="mt-6 flex items-center justify-end gap-3">
+      <a href="{% url 'dashboard' %}"
+         class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        Cancel
+      </a>
+      <button type="submit"
+              class="inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        Save
+      </button>
+    </div>
+  </form>
+</div>
+
+<script>
+  (function(){
+    const form = document.getElementById('qrcode-form');
+    const msg = document.getElementById('qrcode-msg');
+    const previewBtn = document.getElementById('qrcode-preview-btn');
+    const previewImg = document.getElementById('qrcode-preview-img');
+    const isEditMode = {{ qrcode|yesno:"true,false" }};
+    const qrTypeSelect = document.getElementById('qr_type');
+    const urlShorteningCheckbox = document.getElementById('use_url_shortening');
+    const shortUrlContainer = document.getElementById('short-url-container');
+    const shortUrlDisplay = document.getElementById('short-url-display');
+    const hasPrefill = {% if prefill|length > 0 %}true{% else %}false{% endif %};
+    const prefillUseShort = {{ prefill.use_url_shortening|yesno:"true,false" }};
+    let generatedShortCode = null;
+
+    // Generate a random short code (8 characters)
+    function generateShortCode() {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let code = '';
+      for (let i = 0; i < 8; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return code;
+    }
+
+    // Update checkbox state and short URL visibility
+    function updateCheckboxState() {
+      if (qrTypeSelect && urlShorteningCheckbox) {
+        const isUrl = qrTypeSelect.value === 'url';
+        urlShorteningCheckbox.disabled = !isUrl;
+        if (!isUrl) {
+          urlShorteningCheckbox.checked = false;
+          if (shortUrlContainer) {
+            shortUrlContainer.classList.add('hidden');
+          }
+        }
+      }
+    }
+
+    // Update short URL display when checkbox changes
+    function updateShortUrlDisplay() {
+      if (urlShorteningCheckbox && shortUrlContainer && shortUrlDisplay) {
+        if (urlShorteningCheckbox.checked) {
+          shortUrlContainer.classList.remove('hidden');
+          // Generate short code if not already generated
+          if (!generatedShortCode) {
+            generatedShortCode = generateShortCode();
+          }
+          // Display the short URL
+          const baseUrl = window.location.origin;
+          shortUrlDisplay.value = `${baseUrl}/go/${generatedShortCode}/`;
+        } else {
+          shortUrlContainer.classList.add('hidden');
+          generatedShortCode = null;
+        }
+      }
+    }
+
+    // Initialize checkbox state on page load
+    if (!isEditMode) {
+      updateCheckboxState();
+
+      // If arriving via Duplicate with tracking enabled and type URL, show short URL
+      if (hasPrefill && prefillUseShort && qrTypeSelect && qrTypeSelect.value === 'url' && urlShorteningCheckbox) {
+        urlShorteningCheckbox.checked = true;
+        updateShortUrlDisplay();
+      }
+
+      // Add event listener for type changes
+      if (qrTypeSelect) {
+        qrTypeSelect.addEventListener('change', function(){
+          updateCheckboxState();
+          // Hide short URL when switching away from URL type
+          if (qrTypeSelect.value !== 'url' && shortUrlContainer) {
+            shortUrlContainer.classList.add('hidden');
+          }
+        });
+      }
+
+      // Add event listener for checkbox changes
+      if (urlShorteningCheckbox) {
+        urlShorteningCheckbox.addEventListener('change', updateShortUrlDisplay);
+      }
+    }
+
+    // Intercept htmx requests to add short_code if needed (only in create mode)
+    if (!isEditMode) {
+      document.body.addEventListener('htmx:configRequest', function(e) {
+        if ((e.target === previewBtn || e.target === form) && generatedShortCode && urlShorteningCheckbox && urlShorteningCheckbox.checked) {
+          // Add short_code to the request parameters
+          e.detail.parameters.short_code = generatedShortCode;
+        }
+      });
+    }
+
+    form.addEventListener('submit', function(ev){
+      if (!form.checkValidity()) {
+        if (isEditMode) {
+          msg.textContent = 'Please fill in the name.';
+        } else {
+          msg.textContent = 'Please fill in the name and provide valid text/URL (up to 1000 characters).';
+        }
+        msg.className = 'mb-4 text-sm text-red-600';
+        return;
+      }
+      msg.textContent = '';
+      msg.className = 'mb-4 text-sm';
+    });
+
+    document.body.addEventListener('htmx:afterRequest', function(e){
+      const status = e.detail.xhr.status;
+
+      // Preview button request (create mode only)
+      if (previewBtn && e.target === previewBtn) {
+        try {
+          const data = JSON.parse(e.detail.xhr.responseText || '{}');
+          if (status >= 200 && status < 300 && data.image_url) {
+            previewImg.src = data.image_url;
+            msg.textContent = '';
+            msg.className = 'mb-4 text-sm';
+          } else {
+            // Handle URL validation errors specifically
+            let userMsg = '';
+            if (data.url && Array.isArray(data.url)) {
+              userMsg = data.url[0];
+            } else if (data.url) {
+              userMsg = data.url;
+            } else {
+              userMsg = data.detail || data.message || 'Could not generate preview.';
+            }
+            msg.textContent = userMsg;
+            msg.className = 'mb-4 text-sm text-red-600';
+            console.error('Preview error (developer details):', data);
+          }
+        } catch (err) {
+          msg.textContent = 'Unexpected error while generating preview.';
+          msg.className = 'mb-4 text-sm text-red-600';
+          console.error('Preview error (non-JSON):', e.detail.xhr.responseText);
+        }
+        return;
+      }
+
+      // Final create/update request (form)
+      if (e.target === form) {
+        try {
+          const data = JSON.parse(e.detail.xhr.responseText || '{}');
+          if (status >= 200 && status < 300) {
+            window.location = '/dashboard/';
+          } else {
+            // Handle URL validation errors specifically
+            let userMsg = '';
+            if (data.url && Array.isArray(data.url)) {
+              userMsg = data.url[0];
+            } else if (data.url) {
+              userMsg = data.url;
+            } else {
+              userMsg = data.detail || data.message || (isEditMode ? 'Could not update QR code.' : 'Could not generate QR code.');
+            }
+            msg.textContent = userMsg;
+            msg.className = 'mb-4 text-sm text-red-600';
+            console.error((isEditMode ? 'Update' : 'Create') + ' QR error (developer details):', data);
+          }
+        } catch (err) {
+          if (status >= 200 && status < 300) {
+            window.location = '/dashboard/';
+          } else {
+            msg.textContent = 'An unexpected error occurred.';
+            msg.className = 'mb-4 text-sm text-red-600';
+            console.error((isEditMode ? 'Update' : 'Create') + ' QR error (non-JSON):', e.detail.xhr.responseText);
+          }
+        }
+      }
+    });
+  })();
+</script>
+{% endblock %}

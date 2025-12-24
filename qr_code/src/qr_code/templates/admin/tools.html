@@ -1,0 +1,172 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content %}
+<div id="content-main">
+    <h1>Admin Tools</h1>
+    
+    {% if messages %}
+        <ul class="messagelist">
+            {% for message in messages %}
+                <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    
+    <div class="module">
+        <h2>Email Testing</h2>
+        <p>Send a test email to any address.</p>
+        <form method="post" action="{% url 'custom_admin:admin_tools' %}" style="margin-top: 15px;">
+            {% csrf_token %}
+            <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 300px;">
+                    {{ email_form.recipient.errors }}
+                    <label for="id_recipient" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ email_form.recipient.label }}:</label>
+                    {{ email_form.recipient }}
+                    {% if email_form.recipient.help_text %}
+                        <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ email_form.recipient.help_text }}</div>
+                    {% endif %}
+                </div>
+                <input type="submit" name="send_test_email" value="Send test email" class="button" style="padding: 8px 16px;">
+            </div>
+        </form>
+    </div>
+
+    <div class="module" style="margin-top: 40px;">
+        <h2>Credits Adjustment</h2>
+        <p>Manually adjust a user's credits. This will always create a ledger entry of type <code>adjustment</code>.</p>
+        <form method="post" action="{% url 'custom_admin:admin_tools' %}" style="margin-top: 15px;">
+            {% csrf_token %}
+
+            <div style="display: grid; grid-template-columns: 1fr 200px 160px; gap: 10px; align-items: end;">
+                <div>
+                    {{ credit_form.user_email.errors }}
+                    <label for="id_user_email" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.user_email.label }}:</label>
+                    {{ credit_form.user_email }}
+                    {% if credit_form.user_email.help_text %}
+                        <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ credit_form.user_email.help_text }}</div>
+                    {% endif %}
+                </div>
+
+                <div>
+                    {{ credit_form.direction.errors }}
+                    <label for="id_direction" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.direction.label }}:</label>
+                    {{ credit_form.direction }}
+                </div>
+
+                <div>
+                    {{ credit_form.amount.errors }}
+                    <label for="id_amount" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.amount.label }}:</label>
+                    {{ credit_form.amount }}
+                </div>
+            </div>
+
+            <div style="margin-top: 10px;">
+                {{ credit_form.description.errors }}
+                <label for="id_description" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.description.label }}:</label>
+                {{ credit_form.description }}
+                {% if credit_form.description.help_text %}
+                    <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ credit_form.description.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
+                <input type="submit" name="adjust_credits" value="Apply" class="button" style="padding: 8px 16px;">
+            </div>
+        </form>
+    </div>
+
+    <div class="module" style="margin-top: 40px;">
+        <h2>Show Environment</h2>
+        <p>Display all environment variables available to this server process.</p>
+        <p style="margin-top: 10px;">
+            Environment: <code>{{ environment|default:"unknown" }}</code>
+        </p>
+        <form id="show-env-form" method="post" action="{% url 'custom_admin:admin_tools' %}" style="margin-top: 15px;">
+            {% csrf_token %}
+            <input type="hidden" name="show_environment" value="1">
+            <input type="submit" id="show-env-btn" value="Show" class="button" style="padding: 8px 16px;">
+        </form>
+
+        <!-- Confirmation Modal -->
+        <div id="confirm-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center;">
+            <div style="background:#fff; padding:20px; border-radius:4px; min-width:300px; max-width:90%; box-shadow:0 2px 10px rgba(0,0,0,0.3); margin:auto;">
+                <h3>Confirm</h3>
+                <p>Are you sure?</p>
+                <div style="margin-top:15px; display:flex; gap:8px; justify-content:flex-end;">
+                    <button type="button" id="confirm-cancel">Cancel</button>
+                    <button type="button" id="confirm-yes" class="default">Yes, continue</button>
+                </div>
+            </div>
+        </div>
+
+        {% if environment_variables %}
+        <div id="env-results" class="results">
+            <h3>Environment Variables</h3>
+            <table class="listing" style="width:100%; table-layout:fixed;">
+                <thead>
+                    <tr>
+                        <th style="width:30%">Name</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for key, value in environment_variables %}
+                    <tr>
+                        <td><code>{{ key }}</code></td>
+                        <td><code style="white-space:pre-wrap; word-break:break-all;">{{ value }}</code></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<script>
+// Ensure DOM is ready before querying elements added in the body
+document.addEventListener('DOMContentLoaded', function(){
+    const btn = document.getElementById('show-env-btn');
+    const modal = document.getElementById('confirm-modal');
+    const cancelBtn = document.getElementById('confirm-cancel');
+    const yesBtn = document.getElementById('confirm-yes');
+    const form = document.getElementById('show-env-form');
+    if (!btn || !modal || !cancelBtn || !yesBtn || !form) return;
+
+    // Initialize button label based on whether results are present
+    const setButtonLabel = () => {
+        const results = document.getElementById('env-results');
+        btn.value = results ? 'Hide' : 'Show';
+    };
+    setButtonLabel();
+
+    let confirmed = false;
+    form.addEventListener('submit', function(e){
+        const results = document.getElementById('env-results');
+        // If results are visible, treat submit as a local toggle to hide
+        if (results) {
+            e.preventDefault();
+            results.remove(); // remove from DOM as requested
+            setButtonLabel();
+            return;
+        }
+        // Otherwise, we are about to show them: ask for confirmation
+        if (confirmed) return;
+        e.preventDefault();
+        modal.style.display = 'flex';
+    });
+    cancelBtn.addEventListener('click', function(){
+        modal.style.display = 'none';
+    });
+    yesBtn.addEventListener('click', function(){
+        confirmed = true;
+        modal.style.display = 'none';
+        form.submit();
+    });
+});
+</script>
+{% endblock %}

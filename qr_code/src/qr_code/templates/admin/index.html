@@ -1,0 +1,20 @@
+{% extends "admin/index.html" %}
+
+{% block content %}
+{{ block.super }}
+
+<div class="module">
+    <table>
+        <caption>
+            <a href="{% url 'custom_admin:admin_tools' %}" class="section">Admin Tools</a>
+        </caption>
+        <tbody>
+            <tr>
+                <td>
+                    <a href="{% url 'custom_admin:admin_tools' %}">Access custom admin operations like sending test emails</a>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

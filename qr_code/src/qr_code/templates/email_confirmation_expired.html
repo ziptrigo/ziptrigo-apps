@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Confirmation link expired{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+    <div class="flex items-center justify-center gap-3 mb-6">
+      <img src="{% static 'images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
+      <h1 class="text-xl font-semibold">Confirmation link invalid or expired</h1>
+    </div>
+    
+    <p class="mb-6 text-center">The confirmation link is invalid or has expired. Please request a new one.</p>
+    
+    <form id="resend-form" class="space-y-4">
+      <div>
+        <label for="email" class="block text-sm font-medium mb-1">Email</label>
+        <input type="email"
+               id="email"
+               name="email"
+               required
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary"
+               placeholder="your@email.com">
+      </div>
+      
+      <div id="message" class="text-sm hidden"></div>
+      
+      <div class="flex gap-3">
+        <button type="submit"
+                class="flex-1 rounded bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:opacity-90">
+          Resend confirmation email
+        </button>
+        <button type="button"
+                onclick="window.location='/login/';"
+                class="flex-1 rounded border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 font-medium px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  document.getElementById('resend-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const email = document.getElementById('email').value;
+    const messageDiv = document.getElementById('message');
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending...';
+    messageDiv.classList.add('hidden');
+    
+    try {
+      const response = await fetch('/api/resend-confirmation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({ email: email })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        messageDiv.textContent = data.detail || 'Confirmation email sent. Please check your inbox.';
+        messageDiv.className = 'text-sm text-green-600 dark:text-green-400';
+        messageDiv.classList.remove('hidden');
+      } else {
+        messageDiv.textContent = data.detail || 'An error occurred. Please try again.';
+        messageDiv.className = 'text-sm text-red-600 dark:text-red-400';
+        messageDiv.classList.remove('hidden');
+      }
+    } catch (error) {
+      messageDiv.textContent = 'An error occurred. Please try again.';
+      messageDiv.className = 'text-sm text-red-600 dark:text-red-400';
+      messageDiv.classList.remove('hidden');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Resend confirmation email';
+    }
+  });
+  
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+</script>
+{% endblock %}
