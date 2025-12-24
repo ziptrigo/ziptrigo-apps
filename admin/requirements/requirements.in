@@ -1,0 +1,8 @@
+boto3
+django
+django-jazzmin          # Admin site theme
+django-ninja            # Django Ninja API framework
+django-ninja-jwt        # JWT authentication for Django Ninja
+pydantic>=2.0           # Pydantic v2 for schemas
+python-dotenv           # Environment variables
+typer                   # CLI app
