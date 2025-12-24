@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Register{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+    <div class="flex items-center gap-3 mb-6">
+      <img src="{% static 'images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
+      <h1 class="text-xl font-semibold">Create account</h1>
+    </div>
+
+    <div id="reg-msg" class="mb-4 text-sm"></div>
+
+    <form id="reg-form" x-data="{ loading: false }">
+      {% csrf_token %}
+
+      <label class="block mb-3">
+        <span class="block mb-1">Name</span>
+        <input type="text" name="name" required
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+      </label>
+
+      <label class="block mb-3">
+        <span class="block mb-1">Email</span>
+        <input type="email" name="email" required
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+      </label>
+
+      <label class="block mb-4">
+        <span class="block mb-1">Password</span>
+        <input type="password" name="password" required minlength="6"
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+      </label>
+
+      <button type="submit"
+              :disabled="loading"
+              class="w-full inline-flex justify-center items-center rounded bg-brand-primary text-gray-900 font-medium py-2 hover:opacity-90 disabled:opacity-50">
+        <span x-show="!loading">Create account</span>
+        <span x-show="loading" class="flex items-center">
+          <i class="fas fa-spinner fa-spin mr-2"></i>Creating...
+        </span>
+      </button>
+    </form>
+
+    <p class="mt-4 text-sm text-gray-600 dark:text-gray-300">
+      Already have an account? <a href="/login/" class="text-brand-primary underline">Sign in</a>
+    </p>
+  </div>
+</div>
+
+<script>
+  (function(){
+    const form = document.getElementById('reg-form');
+    const msg = document.getElementById('reg-msg');
+    const nameInput = form.querySelector('input[name="name"]');
+    const emailInput = form.querySelector('input[name="email"]');
+    const passwordInput = form.querySelector('input[name="password"]');
+
+    form.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+
+      if (!form.checkValidity()) {
+        msg.textContent = 'Please provide name, a valid email and a password (min 6 chars).';
+        msg.className = 'mb-4 text-sm text-red-600';
+        return;
+      }
+
+      // Clear previous message
+      msg.textContent = '';
+      msg.className = 'mb-4 text-sm';
+
+      // Set loading state
+      form.dispatchEvent(new CustomEvent('alpine:set-loading', { detail: true }));
+
+      const name = nameInput.value;
+      const email = emailInput.value;
+      const password = passwordInput.value;
+
+      try {
+        const result = await Auth.signup(name, email, password);
+
+        if (result.success) {
+          window.location.href = '/account-created/';
+        } else {
+          const userMsg = result.error.detail || result.error.message || 'Could not create account.';
+          msg.textContent = userMsg;
+          msg.className = 'mb-4 text-sm text-red-600';
+          console.error('Signup error:', result.error);
+        }
+      } catch (error) {
+        msg.textContent = 'An unexpected error occurred.';
+        msg.className = 'mb-4 text-sm text-red-600';
+        console.error('Signup exception:', error);
+      } finally {
+        form.dispatchEvent(new CustomEvent('alpine:set-loading', { detail: false }));
+      }
+    });
+
+    // Alpine loading state handler
+    form.addEventListener('alpine:set-loading', function(e) {
+      const alpineData = Alpine.$data(form);
+      if (alpineData) {
+        alpineData.loading = e.detail;
+      }
+    });
+  })();
+</script>
+{% endblock %}

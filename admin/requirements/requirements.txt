@@ -1,0 +1,108 @@
+annotated-types==0.7.0
+    # via pydantic
+asgiref==3.11.0
+    # via
+    #   django
+    #   django-ninja-extra
+boto3==1.42.15
+    # via -r requirements.in
+botocore==1.42.15
+    # via
+    #   boto3
+    #   s3transfer
+cffi==2.0.0
+    # via cryptography
+click==8.3.1
+    # via typer
+colorama==0.4.6
+    # via click
+contextlib2==21.6.0
+    # via django-ninja-extra
+cryptography==46.0.3
+    # via pyjwt
+django==6.0
+    # via
+    #   -r requirements.in
+    #   django-jazzmin
+    #   django-ninja
+    #   django-ninja-extra
+    #   django-ninja-jwt
+django-jazzmin==3.0.1
+    # via -r requirements.in
+django-ninja==1.5.1
+    # via
+    #   -r requirements.in
+    #   django-ninja-extra
+django-ninja-extra==0.30.8
+    # via
+    #   -r requirements.in
+    #   django-ninja-jwt
+django-ninja-jwt==5.4.2
+    # via -r requirements.in
+injector==0.23.0
+    # via django-ninja-extra
+jinja2==3.1.6
+    # via -r requirements.in
+jmespath==1.0.1
+    # via
+    #   boto3
+    #   botocore
+markdown-it-py==4.0.0
+    # via rich
+markupsafe==3.0.3
+    # via jinja2
+mdurl==0.1.2
+    # via markdown-it-py
+pillow==12.0.0
+    # via -r requirements.in
+pycparser==2.23
+    # via cffi
+pydantic==2.12.5
+    # via
+    #   -r requirements.in
+    #   django-ninja
+    #   pydantic-settings
+pydantic-core==2.41.5
+    # via pydantic
+pydantic-settings==2.12.0
+    # via django-ninja-jwt
+pygments==2.19.2
+    # via rich
+pyjwt[crypto]==2.10.1
+    # via django-ninja-jwt
+python-dateutil==2.9.0.post0
+    # via botocore
+python-dotenv==1.2.1
+    # via
+    #   -r requirements.in
+    #   pydantic-settings
+rich==14.2.0
+    # via typer
+s3transfer==0.16.0
+    # via boto3
+segno==1.6.6
+    # via -r requirements.in
+shellingham==1.5.4
+    # via typer
+six==1.17.0
+    # via python-dateutil
+sqlparse==0.5.5
+    # via django
+typer==0.20.1
+    # via -r requirements.in
+typing-extensions==4.15.0
+    # via
+    #   pydantic
+    #   pydantic-core
+    #   typer
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   pydantic
+    #   pydantic-settings
+tzdata==2025.3
+    # via django
+urllib3==2.6.2
+    # via botocore
+whitenoise==6.11.0
+    # via -r requirements.in

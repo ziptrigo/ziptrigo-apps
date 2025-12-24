@@ -1,0 +1,19 @@
+{# Subject #}
+Confirm your QR Code account email
+
+{# Text body #}
+Hi {{ user.name or user.email }},
+
+Welcome to QR Code! Please confirm your email address to complete your registration.
+
+Click the link below to confirm your email (valid for {{ ttl_hours }} hours):
+{{ confirmation_url }}
+
+If you did not create this account, you can ignore this email.
+
+{# HTML body #}
+<p>Hi {{ user.name or user.email }},</p>
+<p>Welcome to QR Code! Please confirm your email address to complete your registration.</p>
+<p>Click the link below to confirm your email (valid for {{ ttl_hours }} hours):</p>
+<p><a href="{{ confirmation_url }}">{{ confirmation_url }}</a></p>
+<p>If you did not create this account, you can ignore this email.</p>

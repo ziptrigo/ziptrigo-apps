@@ -1,0 +1,451 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Dashboard - QR Code App{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-4xl">
+    <h1 class="text-3xl font-bold mb-8 text-gray-900 dark:text-gray-100">QR codes</h1>
+
+    <!-- Search + Generate button -->
+    <div class="mb-8 flex items-center justify-between gap-4">
+        <form method="get" class="relative flex-1">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+            </div>
+            <input type="text" name="q" id="search-input" value="{{ query|default:'' }}" 
+                class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
+                placeholder="Search by name">
+            <button type="button" id="clear-search" 
+                class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors{% if not query %} hidden{% endif %}"
+                aria-label="Clear search">
+                <i class="fas fa-times"></i>
+            </button>
+        </form>
+        <a href="{% url 'qrcode-create' %}"
+           class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            Generate QR code
+        </a>
+    </div>
+
+    <!-- Table -->
+    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            <!-- Header -->
+            <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between sm:px-6">
+                <div class="flex items-center">
+                    <div class="flex items-center h-5">
+                        <input type="checkbox" id="select-all" class="focus:ring-brand-primary h-4 w-4 text-brand-primary border-gray-300 rounded">
+                    </div>
+                    <div class="ml-4 flex items-center">
+                         <span class="text-sm font-medium text-gray-900 dark:text-gray-100 mr-4">Select all</span>
+                         <a href="?sort=name&q={{ query|default:'' }}" class="group flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                            Name
+                            <svg class="ml-1 h-4 w-4 text-gray-400 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+            </li>
+
+            <!-- List -->
+            {% for qr in qrcodes %}
+            <li class="px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
+                <div class="flex items-center min-w-0 flex-1">
+                    <div class="flex items-center h-5 mr-4">
+                        <input type="checkbox" name="selected_qr" value="{{ qr.id }}" class="qr-checkbox focus:ring-brand-primary h-4 w-4 text-brand-primary border-gray-300 rounded">
+                    </div>
+                    <div class="flex-shrink-0">
+                        <!-- QR thumbnail is clickable to open a larger modal preview -->
+                        <button type="button"
+                                class="focus:outline-none group"
+                                data-full-src="{% if qr.image_file %}/media/{{ qr.image_file }}{% else %}{% static 'images/logo_128x128.png' %}{% endif %}"
+                                aria-label="Open QR code preview">
+                            <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                                 src="{% if qr.image_file %}/media/{{ qr.image_file }}{% else %}{% static 'images/logo_32x32.png' %}{% endif %}"
+                                 alt="{{ qr.name }}">
+                        </button>
+                    </div>
+                    <div class="min-w-0 flex-1 px-4 md:grid md:grid-cols-2 md:gap-4">
+                        <div>
+                            <p class="text-sm font-medium text-brand-primary truncate">{{ qr.name }}</p>
+                            <p class="mt-2 flex items-center text-xs text-gray-500 dark:text-gray-400">
+                                <span class="truncate">{{ qr.content }}</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <!-- Dropdown menu -->
+                <div class="relative ml-4 flex-shrink-0">
+                    <button type="button"
+                            class="qr-dropdown-btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                            data-qr-id="{{ qr.id }}"
+                            aria-label="QR code actions">
+                        <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
+                    </button>
+                    <div class="qr-dropdown-menu hidden absolute top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right"
+                         data-qr-id="{{ qr.id }}"
+                         style="right: 0;">
+                        <a href="{% url 'qrcode-edit' qr.id %}"
+                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">
+                            <i class="fas fa-edit mr-2"></i>Edit
+                        </a>
+                        <a href="{% url 'qrcode-duplicate' qr.id %}"
+                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">
+                            <i class="fas fa-clone mr-2"></i>Duplicate
+                        </a>
+                        <button type="button"
+                                class="qr-delete-btn w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"
+                                data-qr-id="{{ qr.id }}"
+                                data-qr-name="{{ qr.name }}">
+                            <i class="fas fa-trash mr-2"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            </li>
+            {% empty %}
+            <li class="px-4 py-12 text-center sm:px-6">
+                <p class="text-sm text-gray-500 dark:text-gray-400">No QR codes found.</p>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+<!-- QR Code Modal Preview -->
+<div id="qr-modal-overlay"
+     class="fixed inset-0 z-40 hidden bg-black/60 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
+    <div class="bg-gray-900 dark:bg-black p-24 rounded-lg relative max-w-full max-h-full flex items-center justify-center transform transition-transform duration-150 ease-out scale-95">
+        <button type="button"
+                id="qr-modal-close"
+                class="absolute top-4 right-4 text-gray-300 hover:text-white text-xl font-semibold focus:outline-none"
+                aria-label="Close QR code preview">
+            &times;
+        </button>
+        <img id="qr-modal-image"
+             src=""
+             alt="QR code preview"
+             class="max-h-[70vh] max-w-[70vw] object-contain bg-white rounded" />
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="delete-modal-overlay"
+     class="fixed inset-0 z-50 hidden bg-black/50 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
+        <div class="p-6">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR Code</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                Are you sure you want to delete <span id="delete-qr-name" class="font-medium text-gray-900 dark:text-gray-100"></span>?
+            </p>
+            <div class="flex justify-end gap-3">
+                <button type="button"
+                        id="delete-modal-cancel"
+                        class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                    Cancel
+                </button>
+                <button type="button"
+                        id="delete-modal-confirm"
+                        class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+  (function(){
+    // Clear search functionality
+    const searchInput = document.getElementById('search-input');
+    const clearBtn = document.getElementById('clear-search');
+
+    if (clearBtn && searchInput) {
+      // Clear search and reload page without query param
+      clearBtn.addEventListener('click', function() {
+        window.location.href = window.location.pathname;
+      });
+
+      // Show/hide clear button based on input value
+      searchInput.addEventListener('input', function() {
+        if (searchInput.value.trim()) {
+          clearBtn.classList.remove('hidden');
+        } else {
+          clearBtn.classList.add('hidden');
+        }
+      });
+    }
+
+    // QR modal functionality
+    const overlay = document.getElementById('qr-modal-overlay');
+    const modalImg = document.getElementById('qr-modal-image');
+    const closeBtn = document.getElementById('qr-modal-close');
+
+    function openModal(src) {
+      if (!overlay || !modalImg) return;
+      modalImg.src = src || '';
+      overlay.classList.remove('hidden');
+      // trigger fade/scale in
+      requestAnimationFrame(function() {
+        overlay.classList.remove('opacity-0');
+        const panel = overlay.querySelector('div');
+        if (panel) {
+          panel.classList.remove('scale-95');
+        }
+      });
+    }
+
+    function closeModal() {
+      if (!overlay || !modalImg) return;
+      // fade/scale out then hide
+      overlay.classList.add('opacity-0');
+      const panel = overlay.querySelector('div');
+      if (panel) {
+        panel.classList.add('scale-95');
+      }
+      setTimeout(function() {
+        overlay.classList.add('hidden');
+        modalImg.src = '';
+      }, 150);
+    }
+
+    document.addEventListener('click', function(ev) {
+      const target = ev.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      // Thumbnail button click
+      const thumbButton = target.closest('button[data-full-src]');
+      if (thumbButton) {
+        const fullSrc = thumbButton.getAttribute('data-full-src');
+        if (fullSrc) {
+          openModal(fullSrc);
+        }
+        return;
+      }
+
+      // Click outside modal content closes (but not when clicking the inner panel)
+      if (target === overlay) {
+        closeModal();
+      }
+    });
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function() {
+        closeModal();
+      });
+    }
+
+    // Close on Escape
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape') {
+        if (!overlay.classList.contains('hidden')) {
+          closeModal();
+        }
+      }
+    });
+
+    // Select all checkbox functionality
+    const selectAllCheckbox = document.getElementById('select-all');
+    if (selectAllCheckbox) {
+      selectAllCheckbox.addEventListener('change', function() {
+        const qrCheckboxes = document.querySelectorAll('.qr-checkbox');
+        qrCheckboxes.forEach(function(checkbox) {
+          checkbox.checked = selectAllCheckbox.checked;
+        });
+      });
+    }
+
+    // Dropdown menu functionality
+    const dropdownButtons = document.querySelectorAll('.qr-dropdown-btn');
+    const dropdownMenus = document.querySelectorAll('.qr-dropdown-menu');
+    let currentOpenDropdown = null;
+
+    function closeAllDropdowns() {
+      dropdownMenus.forEach(function(menu) {
+        menu.classList.add('hidden');
+      });
+      currentOpenDropdown = null;
+    }
+
+    dropdownButtons.forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const qrId = btn.getAttribute('data-qr-id');
+        const menu = document.querySelector('.qr-dropdown-menu[data-qr-id="' + qrId + '"]');
+        
+        if (menu) {
+          // If this dropdown is already open, close it
+          if (currentOpenDropdown === menu) {
+            closeAllDropdowns();
+          } else {
+            // Close all dropdowns first, then open this one
+            closeAllDropdowns();
+            menu.classList.remove('hidden');
+            currentOpenDropdown = menu;
+            
+            // Adjust position if dropdown would overflow viewport bottom
+            setTimeout(function() {
+              const menuRect = menu.getBoundingClientRect();
+              const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+              
+              // Check if menu overflows bottom of viewport
+              if (menuRect.bottom > viewportHeight) {
+                // Position above the button instead
+                menu.style.bottom = '100%';
+                menu.style.top = 'auto';
+                menu.style.marginTop = '0';
+                menu.style.marginBottom = '0.5rem';
+              } else {
+                // Reset to default positioning
+                menu.style.bottom = 'auto';
+                menu.style.top = '100%';
+                menu.style.marginTop = '0.5rem';
+                menu.style.marginBottom = '0';
+              }
+            }, 0);
+          }
+        }
+      });
+    });
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', function(e) {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      
+      // Don't close if clicking inside a dropdown menu
+      const isInsideDropdown = target.closest('.qr-dropdown-menu');
+      const isDropdownButton = target.closest('.qr-dropdown-btn');
+      
+      if (!isInsideDropdown && !isDropdownButton) {
+        closeAllDropdowns();
+      }
+    });
+
+    // Delete modal functionality
+    const deleteOverlay = document.getElementById('delete-modal-overlay');
+    const deleteQrName = document.getElementById('delete-qr-name');
+    const deleteCancelBtn = document.getElementById('delete-modal-cancel');
+    const deleteConfirmBtn = document.getElementById('delete-modal-confirm');
+    let currentDeleteQrId = null;
+
+    function openDeleteModal(qrId, qrName) {
+      if (!deleteOverlay || !deleteQrName) return;
+      currentDeleteQrId = qrId;
+      deleteQrName.textContent = qrName;
+      deleteOverlay.classList.remove('hidden');
+      // trigger fade/scale in
+      requestAnimationFrame(function() {
+        deleteOverlay.classList.remove('opacity-0');
+        const panel = deleteOverlay.querySelector('div');
+        if (panel) {
+          panel.classList.remove('scale-95');
+        }
+      });
+    }
+
+    function closeDeleteModal() {
+      if (!deleteOverlay) return;
+      // fade/scale out then hide
+      deleteOverlay.classList.add('opacity-0');
+      const panel = deleteOverlay.querySelector('div');
+      if (panel) {
+        panel.classList.add('scale-95');
+      }
+      setTimeout(function() {
+        deleteOverlay.classList.add('hidden');
+        currentDeleteQrId = null;
+      }, 150);
+    }
+
+    function getCookie(name) {
+      let cookieValue = null;
+      if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+          const cookie = cookies[i].trim();
+          if (cookie.substring(0, name.length + 1) === (name + '=')) {
+            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+            break;
+          }
+        }
+      }
+      return cookieValue;
+    }
+
+    async function deleteQrCode(qrId) {
+      try {
+        const response = await Auth.authenticatedFetch(`/api/qrcodes/${qrId}/`, {
+          method: 'DELETE',
+          headers: {
+            'X-CSRFToken': getCookie('csrftoken'),
+          },
+        });
+        
+        if (response.ok) {
+          // Reload the page to reflect the deletion
+          window.location.reload();
+        } else {
+          console.error('Failed to delete QR code');
+          alert('Failed to delete QR code. Please try again.');
+        }
+      } catch (error) {
+        console.error('Error deleting QR code:', error);
+        alert('An error occurred. Please try again.');
+      }
+    }
+
+    // Handle delete button clicks
+    document.addEventListener('click', function(e) {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+
+      const deleteBtn = target.closest('.qr-delete-btn');
+      if (deleteBtn) {
+        e.stopPropagation();
+        const qrId = deleteBtn.getAttribute('data-qr-id');
+        const qrName = deleteBtn.getAttribute('data-qr-name');
+        if (qrId && qrName) {
+          closeAllDropdowns();
+          openDeleteModal(qrId, qrName);
+        }
+        return;
+      }
+
+      // Click outside modal closes it
+      if (target === deleteOverlay) {
+        closeDeleteModal();
+      }
+    });
+
+    if (deleteCancelBtn) {
+      deleteCancelBtn.addEventListener('click', function() {
+        closeDeleteModal();
+      });
+    }
+
+    if (deleteConfirmBtn) {
+      deleteConfirmBtn.addEventListener('click', function() {
+        if (currentDeleteQrId) {
+          deleteQrCode(currentDeleteQrId);
+        }
+      });
+    }
+
+    // Close delete modal on Escape
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape') {
+        if (!deleteOverlay.classList.contains('hidden')) {
+          closeDeleteModal();
+        }
+      }
+    });
+  })();
+</script>
+
+{% endblock %}

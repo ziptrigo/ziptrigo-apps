@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Account Settings{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-2xl bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+    <div class="flex items-center gap-3 mb-6">
+      <i class="fas fa-user-cog text-2xl text-brand-primary"></i>
+      <h1 class="text-2xl font-semibold">Account Settings</h1>
+    </div>
+
+    <div id="account-msg" class="mb-4 text-sm"></div>
+
+    <!-- Profile Information Section -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Profile Information</h2>
+      
+      <form id="profile-form"
+            hx-put="/api/account"
+            hx-trigger="submit"
+            hx-swap="none"
+            x-data="{ loading: false }">
+        {% csrf_token %}
+
+        <!-- Username (read-only) -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Username</span>
+          <input type="text" 
+                 value="{{ request.user.username }}" 
+                 disabled
+                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 text-gray-500 dark:text-gray-400 cursor-not-allowed">
+          <span class="text-xs text-gray-500 dark:text-gray-400 mt-1 block">Username cannot be changed</span>
+        </label>
+
+        <!-- Name -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Name</span>
+          <input type="text" 
+                 name="name" 
+                 id="profile-name"
+                 value="{{ request.user.name }}"
+                 required
+                 maxlength="255"
+                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        </label>
+
+        <!-- Email -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Email</span>
+          <input type="email" 
+                 name="email" 
+                 id="profile-email"
+                 value="{{ request.user.email }}"
+                 required
+                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+          <span class="text-xs text-gray-500 dark:text-gray-400 mt-1 block">Changing your email will require confirmation</span>
+        </label>
+
+        <button type="submit"
+                :disabled="loading"
+                class="inline-flex justify-center items-center rounded bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span x-show="!loading">Save Profile</span>
+          <span x-show="loading" class="flex items-center">
+            <i class="fas fa-spinner fa-spin mr-2"></i>Saving...
+          </span>
+        </button>
+      </form>
+    </section>
+
+    <!-- Credits Section -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Credits</h2>
+
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <div class="text-sm text-gray-600 dark:text-gray-300">Current balance</div>
+          <div class="text-2xl font-semibold">{{ request.user.credits }} credits</div>
+        </div>
+        <a href="{% url 'credits-history-page' %}"
+           class="inline-flex justify-center items-center rounded bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:opacity-90">
+          Usage History
+        </a>
+      </div>
+    </section>
+
+    <!-- Password Change Section -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Change Password</h2>
+      
+      <form id="password-form"
+            hx-put="/api/account"
+            hx-trigger="submit"
+            hx-swap="none"
+            x-data="{ loading: false }">
+        {% csrf_token %}
+
+        <!-- Current Password -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Current Password</span>
+          <div class="relative">
+            <input id="current-password-input" 
+                   type="password" 
+                   name="current_password"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <button type="button" 
+                    class="toggle-password absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
+                    data-target="current-password-input"
+                    aria-label="Toggle password visibility">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </label>
+
+        <!-- New Password -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">New Password</span>
+          <div class="relative">
+            <input id="new-password-input" 
+                   type="password" 
+                   name="new_password"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <button type="button" 
+                    class="toggle-password absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
+                    data-target="new-password-input"
+                    aria-label="Toggle password visibility">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+          <span class="text-xs text-gray-500 dark:text-gray-400 mt-1 block">At least 6 characters with one digit</span>
+        </label>
+
+        <!-- Confirm New Password -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Confirm New Password</span>
+          <div class="relative">
+            <input id="confirm-password-input" 
+                   type="password" 
+                   name="new_password_confirm"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <button type="button" 
+                    class="toggle-password absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
+                    data-target="confirm-password-input"
+                    aria-label="Toggle password visibility">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </label>
+
+        <button type="submit"
+                :disabled="loading"
+                class="inline-flex justify-center items-center rounded bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span x-show="!loading">Change Password</span>
+          <span x-show="loading" class="flex items-center">
+            <i class="fas fa-spinner fa-spin mr-2"></i>Changing...
+          </span>
+        </button>
+      </form>
+    </section>
+
+    <!-- Back to Dashboard Link -->
+    <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+      <a href="{% url 'dashboard' %}" class="text-brand-primary hover:underline">
+        <i class="fas fa-arrow-left mr-2"></i>Back to Dashboard
+      </a>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    const profileForm = document.getElementById('profile-form');
+    const passwordForm = document.getElementById('password-form');
+    const msg = document.getElementById('account-msg');
+
+    // Password visibility toggle
+    document.querySelectorAll('.toggle-password').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const targetId = btn.getAttribute('data-target');
+        const input = document.getElementById(targetId);
+        const icon = btn.querySelector('i');
+        
+        if (input.type === 'password') {
+          input.type = 'text';
+          icon.classList.remove('fa-eye');
+          icon.classList.add('fa-eye-slash');
+        } else {
+          input.type = 'password';
+          icon.classList.remove('fa-eye-slash');
+          icon.classList.add('fa-eye');
+        }
+      });
+    });
+
+    // Profile form validation
+    profileForm.addEventListener('submit', function(ev){
+      const name = document.getElementById('profile-name').value.trim();
+      const email = document.getElementById('profile-email').value.trim();
+      
+      if (!name || !email) {
+        ev.preventDefault();
+        showMessage('Please fill in all fields.', 'error');
+        return;
+      }
+      
+      if (!isValidEmail(email)) {
+        ev.preventDefault();
+        showMessage('Please enter a valid email address.', 'error');
+        return;
+      }
+      
+      clearMessage();
+    });
+
+    // Password form validation
+    passwordForm.addEventListener('submit', function(ev){
+      const current = document.getElementById('current-password-input').value;
+      const newPass = document.getElementById('new-password-input').value;
+      const confirm = document.getElementById('confirm-password-input').value;
+      
+      // Check if any field is filled
+      if (!current && !newPass && !confirm) {
+        ev.preventDefault();
+        showMessage('Please fill in all password fields to change your password.', 'error');
+        return;
+      }
+      
+      // If any field is filled, all must be filled
+      if (!current || !newPass || !confirm) {
+        ev.preventDefault();
+        showMessage('All password fields are required.', 'error');
+        return;
+      }
+      
+      // Validate password strength
+      if (newPass.length < 6) {
+        ev.preventDefault();
+        showMessage('New password must be at least 6 characters long.', 'error');
+        return;
+      }
+      
+      if (!/\d/.test(newPass)) {
+        ev.preventDefault();
+        showMessage('New password must contain at least one digit.', 'error');
+        return;
+      }
+      
+      // Check password confirmation
+      if (newPass !== confirm) {
+        ev.preventDefault();
+        showMessage('New passwords do not match.', 'error');
+        return;
+      }
+      
+      clearMessage();
+    });
+
+    // Handle profile form response
+    document.body.addEventListener('htmx:afterRequest', function(e){
+      if (e.target !== profileForm) return;
+      
+      const status = e.detail.xhr.status;
+      try {
+        const data = JSON.parse(e.detail.xhr.responseText || '{}');
+        if (status >= 200 && status < 300) {
+          showMessage(data.message || 'Profile updated successfully!', 'success');
+          // Update displayed values
+          if (data.user) {
+            document.getElementById('profile-name').value = data.user.name;
+            document.getElementById('profile-email').value = data.user.email;
+          }
+        } else {
+          handleErrorResponse(data);
+        }
+      } catch (err) {
+        showMessage('An unexpected error occurred.', 'error');
+        console.error('Profile update error:', e.detail.xhr.responseText);
+      }
+    });
+
+    // Handle password form response
+    document.body.addEventListener('htmx:afterRequest', function(e){
+      if (e.target !== passwordForm) return;
+      
+      const status = e.detail.xhr.status;
+      try {
+        const data = JSON.parse(e.detail.xhr.responseText || '{}');
+        if (status >= 200 && status < 300) {
+          showMessage('Password changed successfully!', 'success');
+          // Clear password fields
+          document.getElementById('current-password-input').value = '';
+          document.getElementById('new-password-input').value = '';
+          document.getElementById('confirm-password-input').value = '';
+        } else {
+          handleErrorResponse(data);
+        }
+      } catch (err) {
+        showMessage('An unexpected error occurred.', 'error');
+        console.error('Password change error:', e.detail.xhr.responseText);
+      }
+    });
+
+    function showMessage(text, type) {
+      msg.textContent = text;
+      if (type === 'success') {
+        msg.className = 'mb-4 text-sm p-3 rounded bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border border-green-300 dark:border-green-700';
+      } else {
+        msg.className = 'mb-4 text-sm p-3 rounded bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700';
+      }
+      msg.style.whiteSpace = 'pre-line';
+      // Scroll to message
+      msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function clearMessage() {
+      msg.textContent = '';
+      msg.className = 'mb-4 text-sm';
+    }
+
+    function handleErrorResponse(data) {
+      let errorMsg = '';
+      
+      if (typeof data === 'string') {
+        errorMsg = data;
+      } else if (data.detail || data.message) {
+        errorMsg = data.detail || data.message;
+      } else if (typeof data === 'object') {
+        // Handle field-specific errors
+        const errors = [];
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            errors.push(...messages);
+          } else if (typeof messages === 'string') {
+            errors.push(messages);
+          }
+        }
+        errorMsg = errors.join('\n') || 'Validation error occurred.';
+      } else {
+        errorMsg = 'An error occurred.';
+      }
+      
+      showMessage(errorMsg, 'error');
+      console.error('Error details:', data);
+    }
+
+    function isValidEmail(email) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+  })();
+</script>
+{% endblock %}
