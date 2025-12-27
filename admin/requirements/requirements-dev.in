@@ -1,4 +1,8 @@
--r requirements.txt
+# Requirements for local development
+# Includes all the requirements for all the apps plus testing/linting
+-r requirements-base.txt
+-r requirements-app-qr_code.txt
+-r requirements-app-user.txt
 
 black
 boto3-stubs[s3,ses]
