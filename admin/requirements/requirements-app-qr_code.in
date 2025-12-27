@@ -1,0 +1,4 @@
+# Requirements specific to the QR Code app
+
+pillow                              # Imaging
+segno                               # QR Code generation
