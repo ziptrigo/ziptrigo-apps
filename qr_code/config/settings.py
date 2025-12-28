@@ -31,7 +31,7 @@ try:
     if 'pytest' in sys.modules or 'mypy' in sys.modules:
         os.environ.setdefault('ENVIRONMENT', 'dev')
 
-    from src.qr_code.common.environment import select_env
+    from qr_code.common.environment import select_env
 
     _selection = select_env(PROJECT_ROOT)
     if _selection.errors:
@@ -75,7 +75,7 @@ ALLOWED_HOSTS: list[str] = ['localhost', '127.0.0.1', 'joaonc.pythonanywhere.com
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [
     'ninja_extra',
     'ninja_jwt',
-    'src.qr_code',
+    'qr_code',
 ]
 
 MIDDLEWARE = [
@@ -88,7 +88,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [PROJECT_ROOT / 'src' / 'qr_code' / 'templates'],
+        'DIRS': [PROJECT_ROOT / 'qr_code' / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': COMMON_TEMPLATE_CONTEXT_PROCESSORS,
@@ -138,7 +138,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
-    PROJECT_ROOT / 'src' / 'qr_code' / 'static',
+    PROJECT_ROOT / 'qr_code' / 'static',
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 

@@ -28,13 +28,13 @@ ziptrigo-apps/
 │       └── base.py       # Shared Django settings
 ├── users/                # Users service
 │   ├── config/           # Django configuration
-│   ├── src/              # Application code
+│   ├── users/            # Application code
 │   ├── tests/            # Tests
 │   ├── Dockerfile        # Docker configuration
 │   └── .env.dev          # Development environment variables
 ├── qr_code/              # QR Code service
 │   ├── config/           # Django configuration
-│   ├── src/              # Application code
+│   ├── qr_code/          # Application code
 │   ├── tests/            # Tests
 │   ├── Dockerfile        # Docker configuration
 │   └── .env.dev          # Development environment variables

@@ -57,7 +57,7 @@ ziptrigo-apps/
 │   │   ├── urls.py                 # URL routing with /users/ prefix support
 │   │   ├── wsgi.py
 │   │   └── asgi.py
-│   ├── src/users/                  # Application code
+│   ├── users/                      # Application code
 │   ├── tests/                      # Tests (pytest)
 │   ├── admin/                      # Admin utilities (lint, test commands)
 │   ├── Dockerfile                  # Multi-stage build for minimal image size
@@ -70,7 +70,7 @@ ziptrigo-apps/
 │   │   ├── urls.py                # URL routing with /qr-code/ prefix support
 │   │   ├── wsgi.py
 │   │   └── asgi.py
-│   ├── src/qr_code/               # Application code
+│   ├── qr_code/                   # Application code
 │   ├── tests/                     # Tests (pytest)
 │   ├── admin/                     # Admin utilities (lint, test commands)
 │   ├── media/                     # User-uploaded media files
@@ -141,7 +141,7 @@ ziptrigo-apps/
 
 3. **External Databases**: No database containers in docker-compose, services expect external DBs
 
-4. **QR Code Environment**: QR Code service uses custom environment selection logic via `src.qr_code.common.environment.select_env()`
+4. **QR Code Environment**: QR Code service uses custom environment selection logic via `qr_code.common.environment.select_env()`
 
 5. **Static Files**: Users service uses basic Django static files, QR Code uses WhiteNoise
 
@@ -157,7 +157,7 @@ ziptrigo-apps/
 
 ### Adding Service-Specific Code
 1. Work within the service directory (`users/` or `qr_code/`)
-2. Follow existing patterns (src/, tests/, admin/)
+2. Follow existing patterns (users/, qr_code/, tests/, admin/)
 3. Update service-specific settings/urls as needed
 4. Update service Dockerfile if new dependencies
 

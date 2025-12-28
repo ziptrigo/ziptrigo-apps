@@ -52,7 +52,7 @@ ALLOWED_HOSTS: list[str] = [
 
 # Application definition
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [
-    'src.users',
+    'users',
 ]
 
 MIDDLEWARE = COMMON_MIDDLEWARE
@@ -62,7 +62,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [PROJECT_ROOT / 'src' / 'users' / 'templates'],
+        'DIRS': [PROJECT_ROOT / 'users' / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': COMMON_TEMPLATE_CONTEXT_PROCESSORS,
@@ -91,7 +91,7 @@ DATABASES = {
 # Static files
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
-    PROJECT_ROOT / 'src' / 'users' / 'static',
+    PROJECT_ROOT / 'users' / 'static',
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 
@@ -99,12 +99,11 @@ STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 # Default primary key field type - using common settings from base
 
 # Custom user model
-# AppConfig.name is `src.users`, so the app label is `users`.
 AUTH_USER_MODEL = 'users.User'
 
 # Authentication backends
 AUTHENTICATION_BACKENDS = [
-    'src.users.backends.EmailBackend',
+    'users.backends.EmailBackend',
 ]
 
 # JWT settings (backward compatibility)
@@ -129,7 +128,7 @@ NINJA_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'sub',
     'USER_AUTHENTICATION_RULE': 'ninja_jwt.authentication.default_user_authentication_rule',
-    'AUTH_TOKEN_CLASSES': ('src.users.tokens.CustomAccessToken',),
+    'AUTH_TOKEN_CLASSES': ('users.tokens.CustomAccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
     'JTI_CLAIM': 'jti',
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
