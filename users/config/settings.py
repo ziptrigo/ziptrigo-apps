@@ -59,7 +59,7 @@ ALLOWED_HOSTS: list[str] = [
 
 # Application definition
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [
-    'users',
+    'users.apps.UsersConfig',
 ]
 
 MIDDLEWARE = COMMON_MIDDLEWARE
