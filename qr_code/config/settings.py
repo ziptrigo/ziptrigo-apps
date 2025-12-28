@@ -31,7 +31,7 @@ try:
     if 'pytest' in sys.modules or 'mypy' in sys.modules:
         os.environ.setdefault('ENVIRONMENT', 'dev')
 
-    from qr_code.common.environment import select_env
+    from common.environment import select_env
 
     _selection = select_env(PROJECT_ROOT)
     if _selection.errors:
@@ -46,15 +46,15 @@ except Exception:
     raise
 
 # Import common settings
-from common.settings.base import (  # noqa: E402
+from common.settings.base import (  # noqa: E402, F401
     COMMON_INSTALLED_APPS,
     COMMON_JAZZMIN_SETTINGS,
     COMMON_TEMPLATE_CONTEXT_PROCESSORS,
-    DEFAULT_AUTO_FIELD,  # noqa: F401
-    LANGUAGE_CODE,  # noqa: F401
-    TIME_ZONE,  # noqa: F401
-    USE_I18N,  # noqa: F401
-    USE_TZ,  # noqa: F401
+    DEFAULT_AUTO_FIELD,
+    LANGUAGE_CODE,
+    TIME_ZONE,
+    USE_I18N,
+    USE_TZ,
 )
 
 # Quick-start development settings - unsuitable for production

@@ -16,6 +16,7 @@ class Environment(Enum):
     DEV = 'dev'
     PROD = 'prod'
 
+
 class App(Enum):
     QR_CODE = 'qr_code'
     USERS = 'users'

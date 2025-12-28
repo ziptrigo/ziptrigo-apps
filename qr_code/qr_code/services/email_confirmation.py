@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -9,6 +8,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ninja_jwt.exceptions import TokenError
 from ninja_jwt.settings import api_settings
 
+from common import PROJECT_ROOT
 from ..models.user import User
 from ..tokens import EmailConfirmationToken
 from .email_service import EmailBackendClass, asend_email, get_email_backend
@@ -71,7 +71,6 @@ def render_email_confirmation_email(*, user: User, confirmation_url: str) -> tup
     Template: ``src/qr_code/static/emails/email_validation.j2``.
     """
 
-    PROJECT_ROOT = Path(settings.PROJECT_ROOT)
     template_path = PROJECT_ROOT / 'src' / 'qr_code' / 'static' / 'emails'
 
     env = Environment(

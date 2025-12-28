@@ -27,17 +27,17 @@ sys.path.insert(0, str(PROJECT_ROOT.parent))
 load_dotenv(dotenv_path=PROJECT_ROOT / '.env')
 
 # Import common settings
-from common.settings.base import (  # noqa: E402
+from common.settings.base import (  # noqa: E402, F401
     COMMON_AUTH_PASSWORD_VALIDATORS,
     COMMON_INSTALLED_APPS,
     COMMON_JAZZMIN_SETTINGS,
     COMMON_MIDDLEWARE,
     COMMON_TEMPLATE_CONTEXT_PROCESSORS,
-    DEFAULT_AUTO_FIELD,  # noqa: F401
-    LANGUAGE_CODE,  # noqa: F401
-    TIME_ZONE,  # noqa: F401
-    USE_I18N,  # noqa: F401
-    USE_TZ,  # noqa: F401
+    DEFAULT_AUTO_FIELD,
+    LANGUAGE_CODE,
+    TIME_ZONE,
+    USE_I18N,
+    USE_TZ,
 )
 
 # Quick-start development settings - unsuitable for production
@@ -55,7 +55,6 @@ DEBUG = os.getenv('DEBUG', 'False').lower() in ['true', '1']
 ALLOWED_HOSTS: list[str] = [
     h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()
 ]
-
 
 # Application definition
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [
