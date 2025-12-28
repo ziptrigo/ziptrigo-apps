@@ -10,7 +10,8 @@ import sys
 
 import typer
 
-from admin.utils import DryAnnotation, Environment, EnvironmentAnnotation, run
+from admin import PROJECT_ROOT
+from admin.utils import DryAnnotation, Environment, EnvironmentAnnotation, run, AppAnnotation
 
 app = typer.Typer(
     help=__doc__,
@@ -22,6 +23,7 @@ app = typer.Typer(
 
 @app.command(name='run')
 def server_run(
+    app: AppAnnotation,
     environment: EnvironmentAnnotation = Environment.DEV,
     dry: DryAnnotation = False,
 ):
@@ -40,6 +42,7 @@ def server_run(
         'manage.py',
         'runserver',
         dry=dry,
+        cwd=PROJECT_ROOT / app.value,
         env=os.environ | {'ENVIRONMENT': environment.value},
     )
 
