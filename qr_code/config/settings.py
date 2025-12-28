@@ -47,16 +47,14 @@ except Exception:
 
 # Import common settings
 from common.settings.base import (  # noqa: E402
-    COMMON_AUTH_PASSWORD_VALIDATORS,
     COMMON_INSTALLED_APPS,
     COMMON_JAZZMIN_SETTINGS,
-    COMMON_MIDDLEWARE,
     COMMON_TEMPLATE_CONTEXT_PROCESSORS,
-    DEFAULT_AUTO_FIELD,
-    LANGUAGE_CODE,
-    TIME_ZONE,
-    USE_I18N,
-    USE_TZ,
+    DEFAULT_AUTO_FIELD,  # noqa: F401
+    LANGUAGE_CODE,  # noqa: F401
+    TIME_ZONE,  # noqa: F401
+    USE_I18N,  # noqa: F401
+    USE_TZ,  # noqa: F401
 )
 
 # Quick-start development settings - unsuitable for production
