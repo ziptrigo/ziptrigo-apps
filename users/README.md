@@ -20,7 +20,7 @@ The Users service provides:
 ## Installation
 
 1. Create and activate virtual environment:
-```bash
+```
 python -m venv .venv
 .venv\Scripts\activate  # Windows
 # or
@@ -28,22 +28,22 @@ source .venv/bin/activate  # Linux/Mac
 ```
 
 2. Install dependencies:
-```bash
+```
 pip install -r requirements.txt
 ```
 
 3. Run migrations:
-```bash
+```
 python manage.py migrate
 ```
 
 4. Create superuser:
-```bash
+```
 python manage.py createsuperuser --email admin@example.com
 ```
 
 5. Start development server:
-```bash
+```
 python manage.py runserver
 ```
 
