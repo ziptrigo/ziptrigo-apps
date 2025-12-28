@@ -9,6 +9,7 @@ from ninja_jwt.exceptions import TokenError
 from ninja_jwt.settings import api_settings
 
 from common import PROJECT_ROOT
+
 from ..models.user import User
 from ..tokens import EmailConfirmationToken
 from .email_service import EmailBackendClass, asend_email, get_email_backend
