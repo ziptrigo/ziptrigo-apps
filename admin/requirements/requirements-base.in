@@ -10,5 +10,6 @@ django-ses>=4.0.0,<5.0              # AWS SES for Django email
 django>=6.0,<6.1                    # Django and Core
 jinja2>=3.1.0,<4.0                  # Templating
 # psycopg2-binary>=2.9.9,<3.0         # Database
+pydantic[email]                     # Pydantic with email validator
 pyjwt>=2.8.0,<3.0                   # Authentication
 python-dotenv>=1.0.0,<2.0           # Environment
