@@ -1,3 +1,0 @@
-# Requirements specific to the User app
-
-django-ses>=4.0.0,<5.0              # AWS SES for Django email

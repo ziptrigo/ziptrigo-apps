@@ -30,7 +30,9 @@ class Requirements(StrEnum):
     Add new requirements files here.
     """
 
-    MAIN = 'requirements'
+    BASE = 'requirements-base'
+    APP_USERS = 'requirements-app-users'
+    APP_QR_CODE = 'requirements-app-qr_code'
     DEV = 'requirements-dev'
 
 
@@ -42,7 +44,7 @@ class RequirementsType(StrEnum):
 
 REQUIREMENTS_TASK_HELP = {
     'requirements': '`.in` file. Full name not required, just the initial name after the dash '
-    f'(ex. "{Requirements.DEV.name}"). For main file use "{Requirements.MAIN.name}". '
+    f'(ex. "{Requirements.DEV.name}"). For main file use "{Requirements.BASE.name}". '
     f'Available requirements: {", ".join(Requirements)}.'
 }
 
