@@ -65,7 +65,7 @@ django_settings_module = 'config.settings'
 
 [[tool.mypy.overrides]]
 module = [
-    'decouple', 'segno', 'segno.*'
+    'decouple', 'ninja_jwt.*', 'segno', 'segno.*'
 ]
 ignore_missing_imports = true
 
@@ -85,8 +85,12 @@ exclude = [
 
 [tool.typer-invoke]
 modules = [
+    'admin.aws',
     'admin.db',
     'admin.lint',
+    'admin.openapi',
     'admin.pip',
+    'admin.qrcode',
+    'admin.server',
     'admin.test',
 ]
