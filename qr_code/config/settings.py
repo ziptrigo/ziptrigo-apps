@@ -47,9 +47,16 @@ except Exception:
 
 # Import common settings
 from common.settings.base import (  # noqa: E402
+    COMMON_AUTH_PASSWORD_VALIDATORS,
     COMMON_INSTALLED_APPS,
+    COMMON_JAZZMIN_SETTINGS,
     COMMON_MIDDLEWARE,
     COMMON_TEMPLATE_CONTEXT_PROCESSORS,
+    DEFAULT_AUTO_FIELD,
+    LANGUAGE_CODE,
+    TIME_ZONE,
+    USE_I18N,
+    USE_TZ,
 )
 
 # Quick-start development settings - unsuitable for production
@@ -60,7 +67,12 @@ SECRET_KEY = os.getenv(
     'SECRET_KEY', 'django-insecure-8eho-(3@jki^spuj0q%+k!m9a@%d82mqy+fxe65w)6jr_e=ld2'
 )
 
-ALLOWED_HOSTS: list[str] = ['localhost', '127.0.0.1', 'joaonc.pythonanywhere.com']
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = os.getenv('DEBUG', 'False').lower() in ['true', '1']
+
+ALLOWED_HOSTS: list[str] = [
+    h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()
+]
 
 
 # Application definition
@@ -73,7 +85,13 @@ INSTALLED_APPS = COMMON_INSTALLED_APPS + [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
-] + COMMON_MIDDLEWARE[1:]  # Skip first SecurityMiddleware to avoid duplicate
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
 
 ROOT_URLCONF = 'config.urls'
 
@@ -102,8 +120,9 @@ DATABASES = {
 }
 
 
-# Password validation - using common settings from base
-# Note: qr_code has custom min_length of 6, override if needed
+# Password validation
+# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
+# Override common validators with custom min_length of 6 for qr_code service
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -122,9 +141,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization - using common settings from base
-
-
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
@@ -141,7 +157,6 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = PROJECT_ROOT / 'media'
 
-# Default primary key field type - using common settings from base
 
 # Custom user model
 AUTH_USER_MODEL = 'qr_code.User'
@@ -201,19 +216,13 @@ AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@example.com')
 
 # Jazzmin configuration
 JAZZMIN_SETTINGS = {
+    **COMMON_JAZZMIN_SETTINGS,
     'site_title': 'QR Code Admin',
     'site_header': 'QR Code Administration',
     'site_brand': 'QR Code',
     'welcome_sign': 'QR Code Admin',
     'copyright': 'QR Code Project',
     'search_model': ['qr_code.User', 'qr_code.QRCode'],
-    'user_avatar': None,
-    'login_logo': 'images/logo_128x128.png',
-    'site_logo': 'images/logo_128x128.png',
-    'show_sidebar': True,
-    'navigation_expanded': True,
-    'theme': 'default',
-    'dark_mode_theme': 'darkly',
     'icons': {
         'auth': 'fas fa-users-cog',
         'auth.user': 'fas fa-user',
@@ -221,9 +230,6 @@ JAZZMIN_SETTINGS = {
         'qr_code.QRCode': 'fas fa-qrcode',
         'qr_code.User': 'fas fa-user-circle',
     },
-    'default_icon_parents': 'fas fa-chevron-right',
-    'default_icon_children': 'fas fa-arrow-right',
-    'related_modal_active': True,
     'custom_links': {
         'qr_code': [
             {
@@ -234,6 +240,4 @@ JAZZMIN_SETTINGS = {
             }
         ],
     },
-    'custom_css': 'css/jazzmin_custom.css',
-    'custom_js': 'js/admin_theme_toggle.js',
 }

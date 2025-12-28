@@ -14,6 +14,8 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: PROJECT_ROOT / 'subdir'.
 # PROJECT_ROOT, aka BASE_DIR.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,11 +23,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Add parent directory to path for common imports
 sys.path.insert(0, str(PROJECT_ROOT.parent))
 
+# Load environment variables from .env file
+load_dotenv(dotenv_path=PROJECT_ROOT / '.env')
+
 # Import common settings
 from common.settings.base import (  # noqa: E402
+    COMMON_AUTH_PASSWORD_VALIDATORS,
     COMMON_INSTALLED_APPS,
+    COMMON_JAZZMIN_SETTINGS,
     COMMON_MIDDLEWARE,
     COMMON_TEMPLATE_CONTEXT_PROCESSORS,
+    DEFAULT_AUTO_FIELD,
+    LANGUAGE_CODE,
+    TIME_ZONE,
+    USE_I18N,
+    USE_TZ,
 )
 
 # Quick-start development settings - unsuitable for production
@@ -37,8 +49,11 @@ SECRET_KEY = os.getenv(
     'django-insecure-ku-j+zx16yg_lyrpt)ohcm-2rldm0z23vaa0#p66vxlni=@nj8',
 )
 
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = os.getenv('DEBUG', 'False').lower() in ['true', '1']
+
 ALLOWED_HOSTS: list[str] = [
-    h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()
+    h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()
 ]
 
 
@@ -76,8 +91,9 @@ DATABASES = {
 }
 
 
-# Password validation - using common settings from base
-# Internationalization - using common settings from base
+# Password validation
+# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
+AUTH_PASSWORD_VALIDATORS = COMMON_AUTH_PASSWORD_VALIDATORS
 
 
 # Static files
@@ -87,8 +103,6 @@ STATICFILES_DIRS = [
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 
-
-# Default primary key field type - using common settings from base
 
 # Custom user model
 AUTH_USER_MODEL = 'users.User'
@@ -131,19 +145,13 @@ NINJA_JWT = {
 
 # Jazzmin configuration
 JAZZMIN_SETTINGS = {
+    **COMMON_JAZZMIN_SETTINGS,
     'site_title': 'User Admin',
     'site_header': 'User Administration',
     'site_brand': 'User',
     'welcome_sign': 'User Admin',
     'copyright': 'User Project',
     'search_model': ['users.User', 'users.Service', 'users.Role', 'users.Permission'],
-    'user_avatar': None,
-    'login_logo': 'images/logo_128x128.png',
-    'site_logo': 'images/logo_128x128.png',
-    'show_sidebar': True,
-    'navigation_expanded': True,
-    'theme': 'default',
-    'dark_mode_theme': 'darkly',
     'icons': {
         'auth': 'fas fa-users-cog',
         'auth.user': 'fas fa-user',
@@ -153,9 +161,4 @@ JAZZMIN_SETTINGS = {
         'users.Service': 'fas fa-cubes',
         'users.User': 'fas fa-user-circle',
     },
-    'default_icon_parents': 'fas fa-chevron-right',
-    'default_icon_children': 'fas fa-arrow-right',
-    'related_modal_active': True,
-    'custom_css': 'css/jazzmin_custom.css',
-    'custom_js': 'js/admin_theme_toggle.js',
 }

@@ -5,12 +5,6 @@ This module contains common configuration that is shared across all services.
 Individual services should import from this module and override/extend as needed.
 """
 
-import os
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'False').lower() in ['true', '1']
-
-
 # Application definition - common middleware
 COMMON_MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -25,7 +19,8 @@ COMMON_MIDDLEWARE = [
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
-AUTH_PASSWORD_VALIDATORS = [
+# Services can override this if they need different validation rules
+COMMON_AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
     },
@@ -73,3 +68,26 @@ COMMON_INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 ]
+
+
+# Static files configuration (common pattern)
+# Services should override STATIC_URL, STATICFILES_DIRS, and STATIC_ROOT
+COMMON_STATIC_URL = '/static/'
+
+
+# Common Jazzmin base settings
+# Services should extend/override as needed
+COMMON_JAZZMIN_SETTINGS = {
+    'show_sidebar': True,
+    'navigation_expanded': True,
+    'theme': 'default',
+    'dark_mode_theme': 'darkly',
+    'default_icon_parents': 'fas fa-chevron-right',
+    'default_icon_children': 'fas fa-arrow-right',
+    'related_modal_active': True,
+    'custom_css': 'css/jazzmin_custom.css',
+    'custom_js': 'js/admin_theme_toggle.js',
+    'user_avatar': None,
+    'login_logo': 'images/logo_128x128.png',
+    'site_logo': 'images/logo_128x128.png',
+}
