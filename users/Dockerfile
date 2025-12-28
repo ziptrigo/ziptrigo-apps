@@ -1,4 +1,4 @@
-# Multi-stage build for user service
+# Multi-stage build for users service
 # Stage 1: Builder
 FROM python:3.13-slim as builder
 
@@ -10,10 +10,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY requirements/base.txt requirements/user.txt /app/requirements/
+COPY requirements/base.txt requirements/users.txt /app/requirements/
 
 # Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements/user.txt
+RUN pip install --no-cache-dir --user -r requirements/users.txt
 
 
 # Stage 2: Runtime
@@ -30,10 +30,10 @@ ENV PATH=/root/.local/bin:$PATH
 # Copy common code
 COPY common/ /app/common/
 
-# Copy user app code
-COPY user/ /app/user/
+# Copy users app code
+COPY users/ /app/users/
 
-WORKDIR /app/user
+WORKDIR /app/users
 
 # Set Python path to include parent directory for common imports
 ENV PYTHONPATH=/app:$PYTHONPATH

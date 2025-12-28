@@ -6,7 +6,7 @@ A monorepo containing multiple Django-based microservices for the Ziptrigo platf
 
 This repository contains two separate Django applications:
 
-- **user** - User authentication and authorization service (port 8010)
+- **users** - User authentication and authorization service (port 8010)
 - **qr_code** - QR code generation and management service (port 8020)
 
 ### Key Features
@@ -24,7 +24,7 @@ ziptrigo-apps/
 ├── common/                 # Shared code across services
 │   └── settings/
 │       └── base.py        # Shared Django settings
-├── user/                  # User service
+├── users/                 # Users service
 │   ├── config/           # Django configuration
 │   ├── src/              # Application code
 │   ├── tests/            # Tests
@@ -38,7 +38,7 @@ ziptrigo-apps/
 │   └── .env.dev          # Development environment variables
 ├── requirements/          # Python dependencies
 │   ├── base.txt          # Shared dependencies
-│   ├── user.txt          # User service dependencies
+│   ├── users.txt         # Users service dependencies
 │   └── qr_code.txt       # QR Code service dependencies
 ├── docker-compose.yml    # Docker Compose configuration
 ├── README.md             # This file
@@ -55,13 +55,13 @@ ziptrigo-apps/
 
 ### Local Development (without Docker)
 
-#### User Service
+#### Users Service
 
 ```bash
-cd user
+cd users
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r ../requirements/user.txt
+pip install -r ../requirements/users.txt
 python manage.py migrate
 python manage.py runserver 8010
 ```
@@ -88,8 +88,8 @@ docker-compose up --build
 Run individual services:
 
 ```bash
-# User service only
-docker-compose up user
+# Users service only
+docker-compose up users
 
 # QR Code service only
 docker-compose up qr_code
@@ -97,7 +97,7 @@ docker-compose up qr_code
 
 ### Accessing Services
 
-- **User Service**: http://localhost:8010
+- **Users Service**: http://localhost:8010
   - Admin: http://localhost:8010/admin/
   - API: http://localhost:8010/api/
   - API Docs: http://localhost:8010/api/docs
@@ -113,7 +113,7 @@ docker-compose up qr_code
 
 Each service requires its own environment configuration:
 
-#### User Service (.env.dev)
+#### Users Service (.env.dev)
 - `DEBUG` - Debug mode (True/False)
 - `SECRET_KEY` - Django secret key
 - `ALLOWED_HOSTS` - Comma-separated list of allowed hosts
@@ -140,8 +140,8 @@ Both services use external databases. Configure via `DATABASE_URL` environment v
 ### Running Tests
 
 ```bash
-# User service tests
-cd user
+# Users service tests
+cd users
 pytest
 
 # QR Code service tests
@@ -176,15 +176,15 @@ from common.settings.base import COMMON_MIDDLEWARE
 
 When deploying behind an API gateway (nginx, Traefik, etc.):
 
-1. Update `user/config/urls.py` - uncomment the prefixed urlpatterns
+1. Update `users/config/urls.py` - uncomment the prefixed urlpatterns
 2. Update `qr_code/config/urls.py` - uncomment the prefixed urlpatterns
 3. Configure gateway to route:
-   - `/user/*` → User service
+   - `/users/*` → Users service
    - `/qr-code/*` → QR Code service
 
 ## Future Plans
 
-- **Shared Authentication**: QR Code service will use User service for authentication
+- **Shared Authentication**: QR Code service will use Users service for authentication
 - **Additional Services**: More microservices can be added following the same pattern
 - **API Gateway**: Implement unified entry point for all services
 - **Common Utilities**: Expand shared code for database utilities, logging, etc.
@@ -201,7 +201,7 @@ When making changes:
 ## Git History
 
 This repository was created by merging two separate repositories using git subtree, preserving the commit history from both:
-- User service original repository
+- Users service original repository
 - QR Code service original repository
 
 ## License

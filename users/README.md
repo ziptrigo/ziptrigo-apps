@@ -1,10 +1,10 @@
-# User Service
+# Users Service
 
 Centralized Single Sign-On (SSO) authentication and authorization service for ZipTrigo web applications.
 
 ## Overview
 
-The User service provides:
+The Users service provides:
 - **Single Sign-On (SSO)** across multiple first-party web apps
 - **Centralized identity, roles, and permissions** management
 - **JWT-based authentication** for users
@@ -142,7 +142,7 @@ X-Client-Secret: <client_secret>
 
 ## Configuration
 Key settings live in `config/settings.py`.
-- Custom user model: `src.user.models.user.User` (set via `AUTH_USER_MODEL`).
+- Custom user model: `src.users.models.user.User` (set via `AUTH_USER_MODEL`).
 - DRF defaults: `IsAuthenticated`; admin endpoints layer `IsAdminUser`.
 - JWT:
   - `JWT_SECRET` (set via environment in production)
@@ -167,9 +167,9 @@ Django admin: http://127.0.0.1:8020/admin/
 ```
 config/                   # Django project config (settings, urls, wsgi/asgi)
 src/
-  user/                   # Django app (installed as `src.user`)
+  users/                  # Django app (installed as `src.users`)
     models/               # Django models package (one model per file)
-      __init__.py         # Re-exports models for `from src.user.models import ...`
+      __init__.py         # Re-exports models for `from src.users.models import ...`
       service.py
       permission.py
       role.py
