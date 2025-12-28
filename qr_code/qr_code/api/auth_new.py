@@ -4,7 +4,7 @@ from asgiref.sync import sync_to_async
 from django.contrib.auth import authenticate, get_user_model
 from ninja import Router
 from ninja_jwt.authentication import AsyncJWTAuth
-from src.qr_code.schemas import (
+from qr_code.schemas import (
     AccountUpdateSchema,
     EmailConfirmSchema,
     LoginSchema,
@@ -15,8 +15,8 @@ from src.qr_code.schemas import (
     TokenResponseSchema,
     UserResponseSchema,
 )
-from src.qr_code.services.email_confirmation import get_email_confirmation_service
-from src.qr_code.services.password_reset import get_password_reset_service
+from qr_code.services.email_confirmation import get_email_confirmation_service
+from qr_code.services.password_reset import get_password_reset_service
 
 User = get_user_model()
 router = Router()
