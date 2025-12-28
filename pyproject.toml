@@ -86,7 +86,6 @@ exclude = [
 [tool.typer-invoke]
 modules = [
     'admin.aws',
-    'admin.db',
     'admin.lint',
     'admin.openapi',
     'admin.pip',

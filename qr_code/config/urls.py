@@ -12,8 +12,8 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include, path
 
-from src.qr_code.admin import custom_admin_site
-from src.qr_code.api.router import api
+from ..qr_code.admin import custom_admin_site
+from ..qr_code.api.router import api
 
 # Base patterns (when accessed directly on port 8020)
 base_patterns = [

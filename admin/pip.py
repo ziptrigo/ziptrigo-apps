@@ -30,9 +30,9 @@ class Requirements(StrEnum):
     Add new requirements files here.
     """
 
-    BASE = 'requirements-base'
-    APP_USERS = 'requirements-app-users'
     APP_QR_CODE = 'requirements-app-qr_code'
+    APP_USERS = 'requirements-app-users'
+    BASE = 'requirements-base'
     DEV = 'requirements-dev'
 
 
@@ -85,7 +85,7 @@ def _get_requirements_file(
 def _get_requirements_files(
     requirements: list[str | Requirements] | None, requirements_type: str | RequirementsType
 ) -> list[Path]:
-    """Get full filename+extension and sort by the order defined in ``Requirements``"""
+    """Get full filename+extension and sort by the order defined in ``Requirements``."""
     requirements_files = list(Requirements) if requirements is None else requirements
     return [_get_requirements_file(r, requirements_type) for r in requirements_files]
 

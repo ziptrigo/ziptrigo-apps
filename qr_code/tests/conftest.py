@@ -8,7 +8,6 @@ import pytest
 from django.contrib.auth import get_user_model
 from ninja.testing import TestAsyncClient
 from rest_framework.test import APIClient  # type: ignore[import-not-found]
-
 from src.qr_code.api.router import api
 from src.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat, QRCodeType
 from src.qr_code.tokens import EmailConfirmationToken, PasswordResetToken

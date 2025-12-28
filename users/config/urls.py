@@ -10,7 +10,7 @@ from django.contrib import admin
 from django.urls import path
 from django.views.generic import TemplateView
 
-from src.users.api import api
+from users.api import api
 
 # Base patterns (when accessed directly on port 8010)
 base_patterns = [
