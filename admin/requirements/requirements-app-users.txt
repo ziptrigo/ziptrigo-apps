@@ -1,0 +1,127 @@
+annotated-types==0.7.0
+    # via
+    #   -r requirements-base.txt
+    #   pydantic
+asgiref==3.11.0
+    # via
+    #   -r requirements-base.txt
+    #   django
+    #   django-cors-headers
+    #   django-ninja-extra
+boto3==1.42.16
+    # via
+    #   -r requirements-base.txt
+    #   django-ses
+botocore==1.42.16
+    # via
+    #   -r requirements-base.txt
+    #   boto3
+    #   s3transfer
+cffi==2.0.0
+    # via
+    #   -r requirements-base.txt
+    #   cryptography
+contextlib2==21.6.0
+    # via
+    #   -r requirements-base.txt
+    #   django-ninja-extra
+cryptography==46.0.3
+    # via
+    #   -r requirements-base.txt
+    #   pyjwt
+django==6.0
+    # via
+    #   -r requirements-base.txt
+    #   django-cors-headers
+    #   django-jazzmin
+    #   django-ninja
+    #   django-ninja-extra
+    #   django-ninja-jwt
+    #   django-ses
+django-cors-headers==4.9.0
+    # via -r requirements-base.txt
+django-jazzmin==3.0.1
+    # via -r requirements-base.txt
+django-ninja==1.5.1
+    # via
+    #   -r requirements-base.txt
+    #   django-ninja-extra
+django-ninja-extra==0.30.8
+    # via
+    #   -r requirements-base.txt
+    #   django-ninja-jwt
+django-ninja-jwt==5.4.2
+    # via -r requirements-base.txt
+django-ses==4.5.0
+    # via -r requirements-base.txt
+injector==0.23.0
+    # via
+    #   -r requirements-base.txt
+    #   django-ninja-extra
+jinja2==3.1.6
+    # via -r requirements-base.txt
+jmespath==1.0.1
+    # via
+    #   -r requirements-base.txt
+    #   boto3
+    #   botocore
+markupsafe==3.0.3
+    # via
+    #   -r requirements-base.txt
+    #   jinja2
+pycparser==2.23
+    # via
+    #   -r requirements-base.txt
+    #   cffi
+pydantic==2.12.5
+    # via
+    #   -r requirements-base.txt
+    #   django-ninja
+    #   pydantic-settings
+pydantic-core==2.41.5
+    # via
+    #   -r requirements-base.txt
+    #   pydantic
+pydantic-settings==2.12.0
+    # via
+    #   -r requirements-base.txt
+    #   django-ninja-jwt
+pyjwt[crypto]==2.10.1
+    # via
+    #   -r requirements-base.txt
+    #   django-ninja-jwt
+python-dateutil==2.9.0.post0
+    # via
+    #   -r requirements-base.txt
+    #   botocore
+python-dotenv==1.2.1
+    # via
+    #   -r requirements-base.txt
+    #   pydantic-settings
+s3transfer==0.16.0
+    # via
+    #   -r requirements-base.txt
+    #   boto3
+six==1.17.0
+    # via
+    #   -r requirements-base.txt
+    #   python-dateutil
+sqlparse==0.5.5
+    # via
+    #   -r requirements-base.txt
+    #   django
+typing-extensions==4.15.0
+    # via
+    #   -r requirements-base.txt
+    #   pydantic
+    #   pydantic-core
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   -r requirements-base.txt
+    #   pydantic
+    #   pydantic-settings
+urllib3==2.6.2
+    # via
+    #   -r requirements-base.txt
+    #   botocore

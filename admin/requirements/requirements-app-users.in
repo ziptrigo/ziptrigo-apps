@@ -1,3 +1,2 @@
 # Requirements specific to the Users app
--r requirements.txt
-
+-r requirements-base.txt

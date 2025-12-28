@@ -1,5 +1,5 @@
 # Requirements specific to the QR Code app
--r requirements.txt
+-r requirements-base.txt
 
 pillow                              # Imaging
 segno                               # QR Code generation
