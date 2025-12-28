@@ -131,7 +131,7 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='roles',
-                        to='user.service',
+                        to='users.service',
                     ),
                 ),
             ],
@@ -162,7 +162,7 @@ class Migration(migrations.Migration):
                         null=True,
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='permissions',
-                        to='user.service',
+                        to='users.service',
                     ),
                 ),
             ],
@@ -179,7 +179,7 @@ class Migration(migrations.Migration):
                 (
                     'permission',
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to='user.permission'
+                        on_delete=django.db.models.deletion.CASCADE, to='users.permission'
                     ),
                 ),
                 (
@@ -203,7 +203,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     'role',
-                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='user.role'),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='users.role'),
                 ),
                 (
                     'user',
@@ -240,7 +240,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='user_assignments',
-                        to='user.service',
+                        to='users.service',
                     ),
                 ),
                 (
@@ -265,7 +265,7 @@ class Migration(migrations.Migration):
                 (
                     'permission',
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to='user.permission'
+                        on_delete=django.db.models.deletion.CASCADE, to='users.permission'
                     ),
                 ),
                 (
@@ -273,7 +273,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='user_permissions',
-                        to='user.service',
+                        to='users.service',
                     ),
                 ),
                 (
@@ -297,14 +297,14 @@ class Migration(migrations.Migration):
                 ),
                 (
                     'role',
-                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='user.role'),
+                    models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='users.role'),
                 ),
                 (
                     'service',
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='user_roles',
-                        to='user.service',
+                        to='users.service',
                     ),
                 ),
                 (
@@ -331,7 +331,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='permission_roles',
-                        to='user.permission',
+                        to='users.permission',
                     ),
                 ),
                 (
@@ -339,7 +339,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name='role_permissions',
-                        to='user.role',
+                        to='users.role',
                     ),
                 ),
             ],

@@ -2,12 +2,11 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+import boto3
 from asgiref.sync import sync_to_async
 from botocore.exceptions import ClientError
 from django.conf import settings
 from mypy_boto3_ses import SESClient
-
-from ..common.aws import boto3_client, get_aws_params
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +43,8 @@ class SesEmailBackend:
         if html_body is None:
             html_body = f'<pre>{text_body}</pre>'
 
-        client: SESClient = boto3_client('ses', *get_aws_params())  # type: ignore
+        region = getattr(settings, 'AWS_REGION', 'us-east-1')
+        client: SESClient = boto3.client('ses', region_name=region)  # type: ignore
 
         try:
             client.send_email(

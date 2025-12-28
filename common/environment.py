@@ -15,7 +15,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import PROJECT_ROOT
+from common import PROJECT_ROOT
 
 SUPPORTED_ENVIRONMENTS = ['dev', 'prod']
 IGNORED_ENV_FILE_SUFFIXES = {'example'}

@@ -12,14 +12,14 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include, path
 
-from ..qr_code.admin import custom_admin_site
-from ..qr_code.api.router import api
+from qr_code.admin import custom_admin_site
+from qr_code.api.router import api
 
 # Base patterns (when accessed directly on port 8020)
 base_patterns = [
     path('admin/', custom_admin_site.urls),
     path('api/', api.urls),  # Django Ninja API with built-in docs at /api/docs
-    path('', include('src.qr_code.urls')),
+    path('', include('qr_code.urls')),
 ]
 
 # Serve media files (WhiteNoise automatically handles static files)

@@ -1,7 +1,7 @@
 """Pydantic schemas for QR code endpoints."""
 
 from ninja import ModelSchema, Schema
-from src.qr_code.models import QRCode
+from qr_code.models import QRCode
 
 
 class QRCodeCreateSchema(ModelSchema):

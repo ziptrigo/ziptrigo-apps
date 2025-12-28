@@ -16,6 +16,7 @@ class Environment(Enum):
     DEV = 'dev'
     PROD = 'prod'
 
+
 class App(Enum):
     QR_CODE = 'qr_code'
     USERS = 'users'
@@ -25,9 +26,7 @@ EnvironmentAnnotation = Annotated[
     Environment, typer.Argument(help='Environment to start the server in.', show_default=True)
 ]
 
-AppAnnotation = Annotated[
-    App, typer.Argument(help='Application to use.', show_default=False)
-]
+AppAnnotation = Annotated[App, typer.Argument(help='Application to use.', show_default=False)]
 
 DryAnnotation = Annotated[
     bool,
