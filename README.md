@@ -1,17 +1,19 @@
-# Ziptrigo Apps
+# ZipTrigo Apps
 
-A monorepo containing multiple Django-based microservices for the Ziptrigo platform. Services are developed independently but share common code and infrastructure.
+A monorepo containing multiple Django-based microservices for the Ziptrigo platform.
+Services are developed independently but share common code and infrastructure.
 
 ## Architecture
 
 This repository contains two separate Django applications:
 
-- **users** - User authentication and authorization service (port 8010)
-- **qr_code** - QR code generation and management service (port 8020)
+- **users** - User authentication and authorization service
+- **qr_code** - QR code generation and management service
 
 ### Key Features
 
-- **Monorepo Structure**: Both services live in the same repository for easier code sharing and unified development
+- **Monorepo Structure**: Both services live in the same repository for easier code sharing and
+  unified development
 - **Shared Configuration**: Common Django settings in `common/settings/base.py` reduce duplication
 - **Independent Deployment**: Each service has its own Dockerfile and can be deployed separately
 - **Docker Compose**: Local development orchestration for both services
@@ -21,10 +23,10 @@ This repository contains two separate Django applications:
 
 ```
 ziptrigo-apps/
-├── common/                 # Shared code across services
+├── common/               # Shared code across services
 │   └── settings/
-│       └── base.py        # Shared Django settings
-├── users/                 # Users service
+│       └── base.py       # Shared Django settings
+├── users/                # Users service
 │   ├── config/           # Django configuration
 │   ├── src/              # Application code
 │   ├── tests/            # Tests
@@ -36,13 +38,8 @@ ziptrigo-apps/
 │   ├── tests/            # Tests
 │   ├── Dockerfile        # Docker configuration
 │   └── .env.dev          # Development environment variables
-├── requirements/          # Python dependencies
-│   ├── base.txt          # Shared dependencies
-│   ├── users.txt         # Users service dependencies
-│   └── qr_code.txt       # QR Code service dependencies
 ├── docker-compose.yml    # Docker Compose configuration
-├── README.md             # This file
-└── WARP.md              # AI agent context
+└── WARP.md               # AI agent context
 ```
 
 ## Getting Started
@@ -57,7 +54,7 @@ ziptrigo-apps/
 
 #### Users Service
 
-```bash
+```
 cd users
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
@@ -68,7 +65,7 @@ python manage.py runserver 8010
 
 #### QR Code Service
 
-```bash
+```
 cd qr_code
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
@@ -81,13 +78,13 @@ python manage.py runserver 8020
 
 Build and run both services:
 
-```bash
+```
 docker-compose up --build
 ```
 
 Run individual services:
 
-```bash
+```
 # Users service only
 docker-compose up users
 
@@ -133,13 +130,14 @@ Each service requires its own environment configuration:
 
 ### Databases
 
-Both services use external databases. Configure via `DATABASE_URL` environment variable or update `DATABASES` in the respective `config/settings.py` files.
+Both services use external databases. Configure via `DATABASE_URL` environment variable or update
+`DATABASES` in the respective `config/settings.py` files.
 
 ## Development Workflow
 
 ### Running Tests
 
-```bash
+```
 # Users service tests
 cd users
 pytest
@@ -151,11 +149,13 @@ pytest
 
 ### Linting and Type Checking
 
-Each service has its own admin utilities for linting and type checking. Check the respective `admin/` directories for available commands.
+Each service has its own admin utilities for linting and type checking. Check the respective
+`admin/` directories for available commands.
 
 ### Adding Shared Code
 
-Place shared utilities, models, or helpers in the `common/` directory. Both services can import from this directory:
+Place shared utilities, models, or helpers in the `common/` directory. Both services can import
+from this directory:
 
 ```python
 from common.settings.base import COMMON_MIDDLEWARE
@@ -200,7 +200,8 @@ When making changes:
 
 ## Git History
 
-This repository was created by merging two separate repositories using git subtree, preserving the commit history from both:
+This repository was created by merging two separate repositories using git subtree, preserving the
+commit history from both:
 - Users service original repository
 - QR Code service original repository
 

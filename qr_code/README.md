@@ -38,7 +38,7 @@ python manage.py runserver
 ```
 
 ### Mac / Linux
-```bash
+```
 # Create and activate virtual environment
 python3.13 -m venv .venv313
 source .venv313/bin/activate
