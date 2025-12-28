@@ -11,7 +11,6 @@ When deploying with an API gateway, route /qr-code/* requests to this service.
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include, path
-
 from src.qr_code.admin import custom_admin_site
 from src.qr_code.api.router import api
 

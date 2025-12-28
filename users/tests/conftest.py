@@ -2,7 +2,6 @@ import uuid
 from datetime import timedelta
 
 import pytest
-
 from tests.factories import UserFactory
 
 
@@ -42,7 +41,6 @@ def _jwt_settings(settings):
 @pytest.fixture()
 def api_client():
     from ninja.testing import TestClient
-
     from src.users.api import api
 
     return TestClient(api)

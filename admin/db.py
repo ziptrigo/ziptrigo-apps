@@ -18,7 +18,6 @@ django.setup()
 
 # These imports need to come after Django setup
 from django.db.models import Count  # noqa: E402
-
 from src.models import Purchase, Series, User, VideoProduct  # noqa: E402
 
 app = typer.Typer(help='Seed database with test data')

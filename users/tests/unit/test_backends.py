@@ -1,5 +1,4 @@
 import pytest
-
 from src.users.backends import EmailBackend
 from src.users.models import User
 

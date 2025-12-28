@@ -2,7 +2,6 @@
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-
 from src.qr_code.services.password_reset import render_password_reset_email
 
 User = get_user_model()

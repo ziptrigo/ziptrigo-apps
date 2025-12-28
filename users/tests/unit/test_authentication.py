@@ -1,7 +1,6 @@
 from unittest.mock import Mock
 
 import pytest
-
 from src.users.auth import AdminAuth, JWTAuth
 from src.users.models import User
 from src.users.tokens import CustomAccessToken

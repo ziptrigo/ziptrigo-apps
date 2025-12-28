@@ -6,7 +6,6 @@ simple unit-style checks.
 
 import pytest
 from django.contrib.auth import get_user_model
-
 from src.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat
 from src.qr_code.services import QRCodeGenerator
 

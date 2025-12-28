@@ -6,7 +6,6 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
-
 from src.qr_code.models.time_limited_token import TimeLimitedToken
 from src.qr_code.services.password_reset import PasswordResetService
 

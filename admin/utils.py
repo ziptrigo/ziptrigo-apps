@@ -40,7 +40,6 @@ class OS(str, Enum):
 
 def set_environment(environment: str):
     from dotenv import load_dotenv
-
     from src.common.environment import select_env
 
     selection = select_env(PROJECT_ROOT, environment)

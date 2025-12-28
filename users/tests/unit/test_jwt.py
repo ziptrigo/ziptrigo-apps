@@ -1,6 +1,5 @@
 import pytest
 from ninja_jwt.exceptions import TokenError
-
 from src.users.models import (
     Permission,
     RolePermission,

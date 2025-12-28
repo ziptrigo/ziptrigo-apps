@@ -35,7 +35,6 @@ from common.settings.base import (  # noqa: E402
     USE_TZ,
 )
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
