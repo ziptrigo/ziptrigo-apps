@@ -30,7 +30,7 @@ def _jwt_settings(settings):
         'USER_ID_FIELD': 'id',
         'USER_ID_CLAIM': 'sub',
         'USER_AUTHENTICATION_RULE': 'ninja_jwt.authentication.default_user_authentication_rule',
-        'AUTH_TOKEN_CLASSES': ('src.user.tokens.CustomAccessToken',),
+        'AUTH_TOKEN_CLASSES': ('src.users.tokens.CustomAccessToken',),
         'TOKEN_TYPE_CLAIM': 'token_type',
         'JTI_CLAIM': 'jti',
         'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
@@ -43,7 +43,7 @@ def _jwt_settings(settings):
 def api_client():
     from ninja.testing import TestClient
 
-    from src.user.api import api
+    from src.users.api import api
 
     return TestClient(api)
 
@@ -60,7 +60,7 @@ def regular_user():
 
 @pytest.fixture()
 def service():
-    from src.user.models import Service
+    from src.users.models import Service
 
     return Service.objects.create(
         name=f'service-{uuid.uuid4().hex}',
@@ -73,7 +73,7 @@ def service():
 
 @pytest.fixture()
 def service_permission(service):
-    from src.user.models import Permission
+    from src.users.models import Permission
 
     return Permission.objects.create(
         type=Permission.TYPE_SERVICE,
@@ -85,7 +85,7 @@ def service_permission(service):
 
 @pytest.fixture()
 def global_permission():
-    from src.user.models import Permission
+    from src.users.models import Permission
 
     return Permission.objects.create(
         type=Permission.TYPE_GLOBAL,
@@ -97,13 +97,13 @@ def global_permission():
 
 @pytest.fixture()
 def service_role(service):
-    from src.user.models import Role
+    from src.users.models import Role
 
     return Role.objects.create(service=service, name='editor', description='Editor role')
 
 
 @pytest.fixture()
 def global_role():
-    from src.user.models import Role
+    from src.users.models import Role
 
     return Role.objects.create(service=None, name='super_admin', description='Global super admin')

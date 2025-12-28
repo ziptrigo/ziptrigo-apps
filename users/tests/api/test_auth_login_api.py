@@ -1,7 +1,7 @@
 import pytest
 
-from src.user.models import User
-from src.user.tokens import CustomAccessToken
+from src.users.models import User
+from src.users.tokens import CustomAccessToken
 
 pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 

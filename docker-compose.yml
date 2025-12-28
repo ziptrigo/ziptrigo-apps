@@ -1,25 +1,25 @@
 version: '3.8'
 
 services:
-  user:
+  users:
     build:
       context: .
-      dockerfile: user/Dockerfile
-    container_name: ziptrigo-user
+      dockerfile: users/Dockerfile
+    container_name: ziptrigo-users
     ports:
       - "8010:8010"
     environment:
-      - DEBUG=${USER_DEBUG:-True}
-      - SECRET_KEY=${USER_SECRET_KEY:-django-insecure-user-change-in-production}
-      - ALLOWED_HOSTS=${USER_ALLOWED_HOSTS:-localhost,127.0.0.1}
-      - DATABASE_URL=${USER_DATABASE_URL:-}
-      - JWT_SECRET=${USER_JWT_SECRET:-change-me-in-production}
-      - JWT_ALGORITHM=${USER_JWT_ALGORITHM:-HS256}
-      - JWT_EXP_DELTA_SECONDS=${USER_JWT_EXP_DELTA_SECONDS:-1209600}
+      - DEBUG=${USERS_DEBUG:-True}
+      - SECRET_KEY=${USERS_SECRET_KEY:-django-insecure-users-change-in-production}
+      - ALLOWED_HOSTS=${USERS_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - DATABASE_URL=${USERS_DATABASE_URL:-}
+      - JWT_SECRET=${USERS_JWT_SECRET:-change-me-in-production}
+      - JWT_ALGORITHM=${USERS_JWT_ALGORITHM:-HS256}
+      - JWT_EXP_DELTA_SECONDS=${USERS_JWT_EXP_DELTA_SECONDS:-1209600}
     env_file:
-      - user/.env.dev
+      - users/.env.dev
     volumes:
-      - ./user:/app/user
+      - ./users:/app/users
       - ./common:/app/common
     networks:
       - ziptrigo-network

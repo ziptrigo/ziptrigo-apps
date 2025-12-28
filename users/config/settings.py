@@ -52,7 +52,7 @@ ALLOWED_HOSTS: list[str] = [
 
 # Application definition
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [
-    'src.user',
+    'src.users',
 ]
 
 MIDDLEWARE = COMMON_MIDDLEWARE
@@ -62,7 +62,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [PROJECT_ROOT / 'src' / 'user' / 'templates'],
+        'DIRS': [PROJECT_ROOT / 'src' / 'users' / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': COMMON_TEMPLATE_CONTEXT_PROCESSORS,
@@ -91,7 +91,7 @@ DATABASES = {
 # Static files
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
-    PROJECT_ROOT / 'src' / 'user' / 'static',
+    PROJECT_ROOT / 'src' / 'users' / 'static',
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 
@@ -99,12 +99,12 @@ STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 # Default primary key field type - using common settings from base
 
 # Custom user model
-# AppConfig.name is `src.user`, so the app label is `user`.
-AUTH_USER_MODEL = 'user.User'
+# AppConfig.name is `src.users`, so the app label is `users`.
+AUTH_USER_MODEL = 'users.User'
 
 # Authentication backends
 AUTHENTICATION_BACKENDS = [
-    'src.user.backends.EmailBackend',
+    'src.users.backends.EmailBackend',
 ]
 
 # JWT settings (backward compatibility)
@@ -129,7 +129,7 @@ NINJA_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'sub',
     'USER_AUTHENTICATION_RULE': 'ninja_jwt.authentication.default_user_authentication_rule',
-    'AUTH_TOKEN_CLASSES': ('src.user.tokens.CustomAccessToken',),
+    'AUTH_TOKEN_CLASSES': ('src.users.tokens.CustomAccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
     'JTI_CLAIM': 'jti',
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
@@ -145,7 +145,7 @@ JAZZMIN_SETTINGS = {
     'site_brand': 'User',
     'welcome_sign': 'User Admin',
     'copyright': 'User Project',
-    'search_model': ['user.User', 'user.Service', 'user.Role', 'user.Permission'],
+    'search_model': ['users.User', 'users.Service', 'users.Role', 'users.Permission'],
     'user_avatar': None,
     'login_logo': 'images/logo_128x128.png',
     'site_logo': 'images/logo_128x128.png',
@@ -157,10 +157,10 @@ JAZZMIN_SETTINGS = {
         'auth': 'fas fa-users-cog',
         'auth.user': 'fas fa-user',
         'auth.Group': 'fas fa-users',
-        'user.Permission': 'fas fa-key',
-        'user.Role': 'fas fa-user-tag',
-        'user.Service': 'fas fa-cubes',
-        'user.User': 'fas fa-user-circle',
+        'users.Permission': 'fas fa-key',
+        'users.Role': 'fas fa-user-tag',
+        'users.Service': 'fas fa-cubes',
+        'users.User': 'fas fa-user-circle',
     },
     'default_icon_parents': 'fas fa-chevron-right',
     'default_icon_children': 'fas fa-arrow-right',

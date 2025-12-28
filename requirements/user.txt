@@ -1,9 +1,0 @@
-# User service specific requirements
--r base.txt
-
-# django-ninja and JWT for user service
-django-ninja>=1.0.0
-django-ninja-jwt>=5.3.0
-
-# TODO: Add user-specific dependencies from user/pyproject.toml
-# Review the actual pyproject.toml and migrate dependencies here

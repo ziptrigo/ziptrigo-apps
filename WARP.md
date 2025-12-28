@@ -8,17 +8,17 @@ This document provides context for AI agents (like Warp Agent) working on the zi
 
 ### Services
 
-1. **user** (Port 8010)
+1. **users** (Port 8010)
    - User authentication and authorization service
    - Uses django-ninja and django-ninja-jwt
    - Custom User model with email-based authentication
    - JWT token-based API authentication
-   - Located in: `user/`
+   - Located in: `users/`
 
 2. **qr_code** (Port 8020)
    - QR code generation and management service
    - Uses django-ninja-extra and django-ninja-jwt
-   - Custom User model (separate from user service)
+   - Custom User model (separate from users service)
    - File uploads (media) and email functionality (AWS SES)
    - Located in: `qr_code/`
 
@@ -37,8 +37,8 @@ This document provides context for AI agents (like Warp Agent) working on the zi
 - Services use external databases (not shared)
 
 ### Future Architecture
-- QR Code service will authenticate against User service (not yet implemented)
-- API Gateway will provide unified entry point with `/user/` and `/qr-code/` prefixes
+- QR Code service will authenticate against Users service (not yet implemented)
+- API Gateway will provide unified entry point with `/users/` and `/qr-code/` prefixes
 - More microservices can be added following the same pattern
 
 ## Key Files and Directories
@@ -51,13 +51,13 @@ ziptrigo-apps/
 │       ├── __init__.py
 │       └── base.py                  # Shared Django settings (middleware, validators, etc.)
 │
-├── user/                            # User service
+├── users/                           # Users service
 │   ├── config/
-│   │   ├── settings.py             # Imports from common.settings.base, user-specific config
-│   │   ├── urls.py                 # URL routing with /user/ prefix support
+│   │   ├── settings.py             # Imports from common.settings.base, users-specific config
+│   │   ├── urls.py                 # URL routing with /users/ prefix support
 │   │   ├── wsgi.py
 │   │   └── asgi.py
-│   ├── src/user/                   # Application code
+│   ├── src/users/                  # Application code
 │   ├── tests/                      # Tests (pytest)
 │   ├── admin/                      # Admin utilities (lint, test commands)
 │   ├── Dockerfile                  # Multi-stage build for minimal image size
@@ -81,7 +81,7 @@ ziptrigo-apps/
 │
 ├── requirements/                   # Python dependencies
 │   ├── base.txt                   # Shared: Django, Jazzmin
-│   ├── user.txt                   # User-specific: django-ninja, django-ninja-jwt
+│   ├── users.txt                  # Users-specific: django-ninja, django-ninja-jwt
 │   └── qr_code.txt               # QR Code-specific: django-ninja-extra, whitenoise, etc.
 │
 ├── docker-compose.yml             # Orchestrates both services
@@ -109,7 +109,7 @@ ziptrigo-apps/
 ### URL Configuration
 - Services currently run standalone on different ports (8010, 8020)
 - URL files prepared for API gateway with commented-out prefixed patterns
-- To enable prefixes: uncomment `path('user/', include(base_patterns))` pattern
+- To enable prefixes: uncomment `path('users/', include(base_patterns))` pattern
 
 ### Docker Setup
 - Multi-stage builds: builder stage + slim runtime stage
@@ -121,8 +121,8 @@ ziptrigo-apps/
 ### Testing
 - Each service uses pytest
 - Test structure: `tests/api/`, `tests/unit/`, `tests/common/`
-- Factories for test data (e.g., `tests/factories.py` in user)
-- Run tests from service directory: `cd user && pytest`
+- Factories for test data (e.g., `tests/factories.py` in users)
+- Run tests from service directory: `cd users && pytest`
 
 ### Admin Utilities
 - Both services have `admin/` directory with invoke/typer-based utilities
@@ -143,7 +143,7 @@ ziptrigo-apps/
 
 4. **QR Code Environment**: QR Code service uses custom environment selection logic via `src.qr_code.common.environment.select_env()`
 
-5. **Static Files**: User service uses basic Django static files, QR Code uses WhiteNoise
+5. **Static Files**: Users service uses basic Django static files, QR Code uses WhiteNoise
 
 6. **Media Files**: Only QR Code service handles media files (user uploads)
 
@@ -156,7 +156,7 @@ ziptrigo-apps/
 4. Consider backward compatibility
 
 ### Adding Service-Specific Code
-1. Work within the service directory (`user/` or `qr_code/`)
+1. Work within the service directory (`users/` or `qr_code/`)
 2. Follow existing patterns (src/, tests/, admin/)
 3. Update service-specific settings/urls as needed
 4. Update service Dockerfile if new dependencies
@@ -165,19 +165,19 @@ ziptrigo-apps/
 1. Determine if shared or service-specific
 2. Add to appropriate requirements file:
    - `requirements/base.txt` for shared
-   - `requirements/user.txt` or `requirements/qr_code.txt` for service-specific
+   - `requirements/users.txt` or `requirements/qr_code.txt` for service-specific
 3. Use `-r base.txt` in service files to include shared deps
 4. Rebuild Docker images: `docker-compose build`
 
 ### Running Services
-- **Docker**: `docker-compose up` (both) or `docker-compose up user` (one)
-- **Local**: `cd user && python manage.py runserver 8010`
-- **Tests**: `cd user && pytest`
+- **Docker**: `docker-compose up` (both) or `docker-compose up users` (one)
+- **Local**: `cd users && python manage.py runserver 8010`
+- **Tests**: `cd users && pytest`
 
 ## Migration Guide (for reference)
 
 This repo was created via:
-1. `git subtree add --prefix=user user-repo/main --squash`
+1. `git subtree add --prefix=users users-repo/main --squash`
 2. `git subtree add --prefix=qr_code qr-code-repo/main --squash`
 3. Created `common/` for shared code
 4. Updated settings to import from common base
@@ -187,7 +187,7 @@ This repo was created via:
 
 ## Future Work
 
-- [ ] Implement cross-service authentication (QR Code → User)
+- [ ] Implement cross-service authentication (QR Code → Users)
 - [ ] Add API Gateway (nginx/Traefik) with proper routing
 - [ ] Extract more shared utilities to common/
 - [ ] Migrate from requirements.txt to unified pyproject.toml

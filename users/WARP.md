@@ -1,4 +1,4 @@
-# User Service Project
+# Users Service Project
 
 ## Project Overview
 Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT-based user authentication, service (machine-to-machine) authentication via client_id/client_secret, centralized users/roles/permissions, and a minimal HTMX landing page.
@@ -18,17 +18,17 @@ Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT
 - DB: SQLite for dev; PostgreSQL recommended for prod
 
 ## App and Project Structure
-The Django project config lives in `config/`, and the Django app is `src/user` (installed as `src.user`).
-- Models: `src/user/models/` is a package (one model per file). Import via `from src.user.models import ...`.
-- Schemas: `src/user/schemas/` contains Pydantic v2 schemas grouped by domain.
-- Routers: `src/user/routers/` contains Django Ninja routers grouped by domain.
-- API: `src/user/api.py` is the main NinjaAPI instance that registers all routers.
-- Auth/JWT helpers: `src/user/auth.py` (Ninja auth classes), `src/user/backends.py`, `src/user/jwt.py`.
-- Templates: `src/user/templates/`.
+The Django project config lives in `config/`, and the Django app is `src/users` (installed as `src.users`).
+- Models: `src/users/models/` is a package (one model per file). Import via `from src.users.models import ...`.
+- Schemas: `src/users/schemas/` contains Pydantic v2 schemas grouped by domain.
+- Routers: `src/users/routers/` contains Django Ninja routers grouped by domain.
+- API: `src/users/api.py` is the main NinjaAPI instance that registers all routers.
+- Auth/JWT helpers: `src/users/auth.py` (Ninja auth classes), `src/users/backends.py`, `src/users/jwt.py`.
+- Templates: `src/users/templates/`.
 
 ## Current Status
 - Custom `User` model with email as username
-- JWT utilities: `src/user/jwt.py` builds tokens including global + per-service roles/permissions
+- JWT utilities: `src/users/tokens.py` builds tokens including global + per-service roles/permissions
 - Django Ninja authentication:
   - `JWTAuth` class (Authorization: Bearer <token>)
   - `AdminAuth` class (extends JWTAuth, requires is_staff)
@@ -50,13 +50,13 @@ The Django project config lives in `config/`, and the Django app is `src/user` (
 
 ## Configuration
 Key settings live in `config/settings.py`:
-- Custom user model: `src.user.models.user.User` (set via `AUTH_USER_MODEL`).
+- Custom user model: `src.users.models.user.User` (set via `AUTH_USER_MODEL`).
 - Django Ninja: authentication handled per-endpoint via `auth=` parameter.
 - JWT:
   - `JWT_SECRET` (set via env in prod)
   - `JWT_ALGORITHM` (default: HS256)
   - `JWT_EXP_DELTA_SECONDS` (default: 14 days)
-- Email-based auth backend: `src.user.backends.EmailBackend`.
+- Email-based auth backend: `src.users.backends.EmailBackend`.
 
 ## How to Run (dev)
 1. Create venv and install deps: `pip install -r admin/requirements/requirements.txt`
