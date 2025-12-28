@@ -257,6 +257,7 @@ def seed_all(
     logger.info('  Admin: admin@example.com / admin123')
     logger.info('  User1: user1@example.com / password123')
 
+
 @app.command()
 def clear(confirm: bool = typer.Option(False, '--yes', '-y', help='Skip confirmation')):
     """Clear all seeded data from the database."""

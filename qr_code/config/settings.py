@@ -47,16 +47,9 @@ except Exception:
 
 # Import common settings
 from common.settings.base import (  # noqa: E402
-    AUTH_PASSWORD_VALIDATORS,
     COMMON_INSTALLED_APPS,
     COMMON_MIDDLEWARE,
     COMMON_TEMPLATE_CONTEXT_PROCESSORS,
-    DEBUG,
-    DEFAULT_AUTO_FIELD,
-    LANGUAGE_CODE,
-    TIME_ZONE,
-    USE_I18N,
-    USE_TZ,
 )
 
 # Quick-start development settings - unsuitable for production
