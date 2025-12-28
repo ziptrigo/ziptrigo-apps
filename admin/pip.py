@@ -30,7 +30,9 @@ class Requirements(StrEnum):
     Add new requirements files here.
     """
 
-    MAIN = 'requirements'
+    BASE = 'requirements-base'
+    APP_USERS = 'requirements-app-users'
+    APP_QR_CODE = 'requirements-app-qr_code'
     DEV = 'requirements-dev'
 
 
