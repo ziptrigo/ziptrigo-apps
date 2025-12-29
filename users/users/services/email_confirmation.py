@@ -66,12 +66,12 @@ def get_email_confirmation_service() -> EmailConfirmationService:
 
 def render_email_confirmation_email(*, user: User, confirmation_url: str) -> tuple[str, str, str]:
     """Render email subject, text, and HTML body for a confirmation email.
-    
+
     Returns:
         Tuple of (subject, text_body, html_body).
     """
     subject = 'Confirm your Ziptrigo Users account email'
-    
+
     text_body = f'''Hi{' ' + user.name if user.name else ''},
 
 Thank you for creating an account! Please confirm your email address by clicking the link below:
@@ -85,7 +85,7 @@ If you did not create this account, please ignore this email.
 --
 The Ziptrigo Users Team
 '''
-    
+
     html_body = f'''<html>
 <head></head>
 <body>
@@ -98,5 +98,5 @@ The Ziptrigo Users Team
 The Ziptrigo Users Team</p>
 </body>
 </html>'''
-    
+
     return subject, text_body, html_body

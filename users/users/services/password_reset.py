@@ -20,7 +20,7 @@ class PasswordResetService:
 
     def request_reset(self, email: str):
         """Create a reset token for the user with the given email and send email.
-        
+
         If the user does not exist, this method does nothing. This keeps behavior
         indistinguishable from the caller's perspective.
         """
@@ -67,12 +67,12 @@ def get_password_reset_service() -> PasswordResetService:
 
 def render_password_reset_email(*, user: User, reset_url: str) -> tuple[str, str, str]:
     """Render email subject, text, and HTML body for a reset email.
-    
+
     Returns:
         Tuple of (subject, text_body, html_body).
     """
     subject = 'Reset your Ziptrigo Users account password'
-    
+
     text_body = f'''Hi{' ' + user.name if user.name else ''},
 
 You requested to reset your password. Click the link below to set a new password:
@@ -86,7 +86,7 @@ If you did not request this, please ignore this email.
 --
 The Ziptrigo Users Team
 '''
-    
+
     html_body = f'''<html>
 <head></head>
 <body>
@@ -99,5 +99,5 @@ The Ziptrigo Users Team
 The Ziptrigo Users Team</p>
 </body>
 </html>'''
-    
+
     return subject, text_body, html_body

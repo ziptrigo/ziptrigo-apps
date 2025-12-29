@@ -66,7 +66,7 @@ class SesEmailBackend:
 @dataclass(slots=True)
 class ConsoleEmailBackend:
     """Email backend that logs emails to stdout.
-    
+
     Useful for development and tests.
     """
 
@@ -99,7 +99,7 @@ def parse_email_backend_kinds(raw: str) -> list[str]:
 
 def get_email_backend() -> list[EmailBackendClass]:
     """Return the configured email backend classes.
-    
+
     Selection is controlled via the `EMAIL_BACKENDS` setting (comma-separated kinds).
     """
     raw_backends = getattr(settings, 'EMAIL_BACKENDS', '')
@@ -132,7 +132,7 @@ def send_email(
     backend_classes: list[EmailBackendClass] | None = None,
 ) -> tuple[int, int]:
     """Send the same email using all configured backends.
-    
+
     Returns a tuple of (success_count, failure_count).
     """
     if backend_classes is None:

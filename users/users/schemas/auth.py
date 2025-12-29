@@ -12,7 +12,7 @@ class SignupRequest(BaseModel):
     name: str
     email: EmailStr
     password: str
-    
+
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
@@ -38,7 +38,7 @@ class PasswordResetConfirm(BaseModel):
     token: str
     password: str
     password_confirm: str
-    
+
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
@@ -46,7 +46,7 @@ class PasswordResetConfirm(BaseModel):
         validator = PasswordValidator()
         validator.validate(v)
         return v
-    
+
     def validate_passwords_match(self) -> bool:
         """Check if passwords match."""
         return self.password == self.password_confirm

@@ -116,13 +116,13 @@ def login(request: HttpRequest, payload: LoginRequest) -> TokenResponse:
 
     if user.status != User.STATUS_ACTIVE:
         raise HttpError(403, 'User not active')
-    
+
     # Check if email is confirmed
     if not user.email_confirmed:
         raise HttpError(
             403,
             'Please confirm your email address before logging in. '
-            'Check your inbox for the confirmation link.'
+            'Check your inbox for the confirmation link.',
         )
 
     # Generate tokens

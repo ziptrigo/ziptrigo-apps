@@ -19,7 +19,7 @@ def api_client():
 def user(db):
     """Create a test user with confirmed email."""
     from datetime import UTC, datetime
-    
+
     user = User.objects.create_user(
         email='test@example.com',
         password='testpass123',
@@ -204,9 +204,9 @@ class TestPasswordResetFlow:
     def test_reset_password_mismatched_passwords(self, api_client, user):
         """Test that reset password rejects mismatched passwords."""
         from users.tokens import PasswordResetToken
-        
+
         token = PasswordResetToken.for_user(user)
-        
+
         data = {
             'token': str(token),
             'password': 'onepass123',
@@ -226,20 +226,20 @@ class TestEmailConfirmation:
     def test_confirm_email_valid_token(self, api_client, db):
         """Test email confirmation with valid token."""
         from users.tokens import EmailConfirmationToken
-        
+
         user = User.objects.create_user(
             email='confirm@example.com',
             password='password123',
             name='Confirm User',
         )
-        
+
         token = EmailConfirmationToken.for_user(user)
         data = {'token': str(token)}
 
         response = api_client.post('/auth/confirm-email', json=data)
 
         assert response.status_code == 200
-        
+
         user.refresh_from_db()
         assert user.email_confirmed is True
         assert user.email_confirmed_at is not None
