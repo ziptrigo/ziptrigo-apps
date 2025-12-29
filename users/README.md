@@ -9,6 +9,7 @@ The Users service provides:
 - **Centralized identity, roles, and permissions** management
 - **JWT-based authentication** for users
 - **Client ID/Secret authentication** for services
+- **Credit management system** for user accounts
 - **RESTful API** under `/api`
 
 ## Tech Stack
@@ -103,6 +104,53 @@ Create a service to obtain `client_id` and `client_secret` the first time.
 - `GET /api/users/{user_id}/services` - List user's service assignments
 - `PATCH /api/users/{user_id}/services/{service_id}` - Update user roles/permissions
 - `DELETE /api/users/{user_id}/services/{service_id}` - Remove service assignment
+
+### Credits Management (Admin only)
+
+- `POST /api/users/{user_id}/credits` - Add or remove credits from user account
+- `GET /api/users/{user_id}/credits` - Get user's current credit balance
+
+**Transaction Types:**
+- `purchase` - User purchased credits
+- `spend` - User spent credits
+- `adjustment` - Manual adjustment by admin
+- `refund` - Refund to user
+
+**Example: Add credits**
+```
+POST /api/users/{user_id}/credits
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "transaction_type": "purchase",
+  "amount": 100,
+  "description": "Initial purchase"
+}
+
+Response 201:
+{
+  "id": 1,
+  "user_id": "uuid",
+  "amount": 100,
+  "type": "purchase",
+  "description": "Initial purchase",
+  "created_at": "2025-12-29T04:13:22Z"
+}
+```
+
+**Example: Spend credits**
+```
+POST /api/users/{user_id}/credits
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "transaction_type": "spend",
+  "amount": -30,
+  "description": "Used for service"
+}
+```
 
 ## Authentication Methods
 

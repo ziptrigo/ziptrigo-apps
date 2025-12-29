@@ -1,3 +1,4 @@
+from .credit_transaction import CreditTransaction, CreditTransactionType
 from .permission import Permission
 from .role import Role
 from .role_permission import RolePermission
@@ -21,4 +22,6 @@ __all__ = [
     'UserServicePermission',
     'UserGlobalRole',
     'UserGlobalPermission',
+    'CreditTransaction',
+    'CreditTransactionType',
 ]
