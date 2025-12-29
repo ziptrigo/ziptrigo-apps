@@ -1,5 +1,7 @@
+from datetime import timedelta
 from typing import Any
 
+from django.conf import settings
 from ninja_jwt.tokens import Token
 
 from .models import (
@@ -121,3 +123,17 @@ class CustomRefreshToken(Token):
         token['email'] = user.email
 
         return token  # type: ignore
+
+
+class EmailConfirmationToken(Token):
+    """JWT token for email confirmation links."""
+
+    token_type = 'email_confirmation'
+    lifetime = timedelta(hours=settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS)  # type: ignore[assignment]
+
+
+class PasswordResetToken(Token):
+    """JWT token for password reset links."""
+
+    token_type = 'password_reset'
+    lifetime = timedelta(hours=settings.PASSWORD_RESET_TOKEN_TTL_HOURS)  # type: ignore[assignment]

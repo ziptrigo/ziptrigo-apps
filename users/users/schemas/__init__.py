@@ -1,5 +1,14 @@
 from .account import AccountUpdateRequest, AccountUpdateResponse
-from .auth import LoginRequest, RefreshRequest, TokenResponse
+from .auth import (
+    EmailConfirmRequest,
+    LoginRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    RefreshRequest,
+    ResendConfirmationRequest,
+    SignupRequest,
+    TokenResponse,
+)
 from .credits import (
     CreditTransactionRequest,
     CreditTransactionResponse,
@@ -32,8 +41,13 @@ from .users import (
 __all__ = [
     'AccountUpdateRequest',
     'AccountUpdateResponse',
+    'EmailConfirmRequest',
     'LoginRequest',
+    'PasswordResetConfirm',
+    'PasswordResetRequest',
     'RefreshRequest',
+    'ResendConfirmationRequest',
+    'SignupRequest',
     'TokenResponse',
     'CreditTransactionRequest',
     'CreditTransactionResponse',
