@@ -1,3 +1,4 @@
+from .account import AccountUpdateRequest, AccountUpdateResponse
 from .auth import LoginRequest, RefreshRequest, TokenResponse
 from .credits import (
     CreditTransactionRequest,
@@ -29,6 +30,8 @@ from .users import (
 )
 
 __all__ = [
+    'AccountUpdateRequest',
+    'AccountUpdateResponse',
     'LoginRequest',
     'RefreshRequest',
     'TokenResponse',
