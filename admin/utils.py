@@ -10,13 +10,8 @@ import typer
 from rich.logging import RichHandler
 
 from admin import PROJECT_ROOT
+from common.environment import Environment
 from common.web_app import WebApp
-
-
-class Environment(Enum):
-    DEV = 'dev'
-    PROD = 'prod'
-
 
 EnvironmentAnnotation = Annotated[
     Environment, typer.Argument(help='Environment to start the server in.', show_default=True)

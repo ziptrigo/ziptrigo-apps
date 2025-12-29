@@ -13,11 +13,11 @@ import typer
 from admin import PROJECT_ROOT
 from admin.utils import (
     DryAnnotation,
-    Environment,
     EnvironmentAnnotation,
     WebAppAnnotation,
     run,
 )
+from common.environment import Environment
 
 app = typer.Typer(
     help=__doc__,
