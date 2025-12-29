@@ -20,6 +20,7 @@ from common import PROJECT_ROOT
 
 IGNORED_ENV_FILE_SUFFIXES = {'example'}
 
+
 class Environment(Enum):
     DEV = 'dev'
     PROD = 'prod'
@@ -118,19 +119,19 @@ def select_env(project_root: Path = PROJECT_ROOT, environment: str | None = None
 
     if not valid_files:
         errors.append(f'No environment file found in `{project_root}` matching `.env.<env>`.')
-        return EnvSelection(environment=None,  errors=errors, warnings=warnings)
+        return EnvSelection(environment=None, errors=errors, warnings=warnings)
 
     if len(valid_files) > 1:
         errors.append(
             'More than one environment file found in project root:\n'
             + '\n'.join(map(str, valid_files))
         )
-        return EnvSelection(environment=None,  errors=errors, warnings=warnings)
+        return EnvSelection(environment=None, errors=errors, warnings=warnings)
 
     file = valid_files[0]
     env = env_from_file(file)
     if not env:
         errors.append(f'Could not parse environment from file `{file}`.')
-        return EnvSelection(environment=None,  errors=errors, warnings=warnings)
+        return EnvSelection(environment=None, errors=errors, warnings=warnings)
 
     return EnvSelection(environment=env, env_path=file, errors=errors, warnings=warnings)

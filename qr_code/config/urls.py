@@ -2,7 +2,7 @@
 URL configuration for qr_code service.
 
 The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
+    https://docs.djangoproject.com/en/6.0/topics/http/urls/
 
 Note: URLs are configured with /qr-code/ prefix for future API gateway integration.
 When deploying with an API gateway, route /qr-code/* requests to this service.
