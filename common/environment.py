@@ -17,6 +17,7 @@ from enum import Enum
 from pathlib import Path
 
 from common import PROJECT_ROOT
+from common.web_app import WebApp
 
 IGNORED_ENV_FILE_SUFFIXES = {'example'}
 
@@ -29,14 +30,29 @@ class Environment(Enum):
 @dataclass(frozen=True, slots=True)
 class EnvSelection:
     environment: Environment | None
+
+    web_app: WebApp | None = None
+    """
+    The web app that the environment is for, if any.
+
+    If the web app is not set, this class is used to represent the common environment and the
+    environment file is the first position of ``all_env_paths``.
+    """
+
     env_path: Path | None = None
+    """The path to the environment file for the web app, if any."""
+
     errors: list[str] = field(default_factory=list)
+
     warnings: list[str] = field(default_factory=list)
 
     @property
     def all_env_paths(self) -> list[Path]:
         """
         Returns a list of environment file paths to be loaded, in the order they should be loaded.
+
+        The common environment file is always loaded first, followed by the web app environment
+        file.
         """
         if not self.environment:
             return []
@@ -63,34 +79,43 @@ def file_from_env(project_root: Path, environment: Environment) -> Path:
     return project_root / f'.env.{environment.value}'
 
 
-def select_env(project_root: Path = PROJECT_ROOT, environment: str | None = None) -> EnvSelection:
+def select_env(
+    project_root: Path = PROJECT_ROOT,
+    environment: str | Environment | None = None,
+    web_app: WebApp | None = None,
+) -> EnvSelection:
     errors: list[str] = []
     warnings: list[str] = []
 
-    environment: str = (environment or os.getenv('ENVIRONMENT', '')).lower().strip()  # type: ignore
+    environment = environment or os.getenv('ENVIRONMENT', '')
 
     # Environment is set, return that selection
     if environment:
-        try:
-            env = Environment(environment.lower())
-        except ValueError:
-            errors.append(
-                f'Environment `{environment}` must be one of '
-                f'{[x.value for x in Environment]} (case insensitive).'
-            )
-            return EnvSelection(
-                environment=None,
-                errors=errors,
-                warnings=warnings,
-            )
+        if isinstance(environment, str):
+            try:
+                env = Environment(environment.lower().strip())
+            except ValueError:
+                errors.append(
+                    f'Environment `{environment}` must be one of '
+                    f'{[x.value for x in Environment]} (case insensitive).'
+                )
+                return EnvSelection(
+                    environment=None,
+                    web_app=web_app,
+                    errors=errors,
+                    warnings=warnings,
+                )
+        else:
+            env = environment
 
         env_path = file_from_env(project_root, env)
         if not env_path.exists():
             errors.append(f'Environment file `{env_path}` not found.')
-            return EnvSelection(environment=env, errors=errors, warnings=warnings)
+            return EnvSelection(environment=env, web_app=web_app, errors=errors, warnings=warnings)
 
         return EnvSelection(
             environment=env,
+            web_app=web_app,
             errors=errors,
             warnings=warnings,
         )
@@ -119,19 +144,21 @@ def select_env(project_root: Path = PROJECT_ROOT, environment: str | None = None
 
     if not valid_files:
         errors.append(f'No environment file found in `{project_root}` matching `.env.<env>`.')
-        return EnvSelection(environment=None, errors=errors, warnings=warnings)
+        return EnvSelection(environment=None, web_app=web_app, errors=errors, warnings=warnings)
 
     if len(valid_files) > 1:
         errors.append(
             'More than one environment file found in project root:\n'
             + '\n'.join(map(str, valid_files))
         )
-        return EnvSelection(environment=None, errors=errors, warnings=warnings)
+        return EnvSelection(environment=None, web_app=web_app, errors=errors, warnings=warnings)
 
     file = valid_files[0]
     env = env_from_file(file)
     if not env:
         errors.append(f'Could not parse environment from file `{file}`.')
-        return EnvSelection(environment=None, errors=errors, warnings=warnings)
+        return EnvSelection(environment=None, web_app=web_app, errors=errors, warnings=warnings)
 
-    return EnvSelection(environment=env, env_path=file, errors=errors, warnings=warnings)
+    return EnvSelection(
+        environment=env, web_app=web_app, env_path=file, errors=errors, warnings=warnings
+    )

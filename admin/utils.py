@@ -36,12 +36,12 @@ class OS(str, Enum):
     Windows = 'win'
 
 
-def set_environment(environment: str):
+def set_environment(environment: str | Environment, web_app: WebApp | None = None):
     from dotenv import load_dotenv
 
     from common.environment import select_env
 
-    selection = select_env(PROJECT_ROOT, environment)
+    selection = select_env(PROJECT_ROOT, environment, web_app)
     if selection.errors:
         raise ValueError('\n'.join(selection.errors))
     if not selection.environment:
