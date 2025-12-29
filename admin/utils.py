@@ -48,7 +48,9 @@ def set_environment(environment: str):
         raise ValueError('Environment not set.')
 
     os.environ['ENVIRONMENT'] = selection.environment
-    load_dotenv(dotenv_path=selection.env_path)
+
+    for env_path in selection.all_env_paths:
+        load_dotenv(dotenv_path=env_path, override=True)
 
 
 def get_os() -> OS:

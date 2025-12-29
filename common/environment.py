@@ -12,14 +12,13 @@ Selection rules:
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
 from common import PROJECT_ROOT
 
 IGNORED_ENV_FILE_SUFFIXES = {'example'}
-
 
 class Environment(Enum):
     DEV = 'dev'
@@ -29,9 +28,22 @@ class Environment(Enum):
 @dataclass(frozen=True, slots=True)
 class EnvSelection:
     environment: Environment | None
-    env_path: Path | None
-    errors: list[str]
-    warnings: list[str]
+    env_path: Path | None = None
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def all_env_paths(self) -> list[Path]:
+        """
+        Returns a list of environment file paths to be loaded, in the order they should be loaded.
+        """
+        if not self.environment:
+            return []
+
+        env_paths = [file_from_env(PROJECT_ROOT / 'common', self.environment)]
+        if self.env_path:
+            env_paths.append(self.env_path)
+        return env_paths
 
 
 def env_from_file(file: Path) -> Environment | None:
@@ -67,7 +79,6 @@ def select_env(project_root: Path = PROJECT_ROOT, environment: str | None = None
             )
             return EnvSelection(
                 environment=None,
-                env_path=None,
                 errors=errors,
                 warnings=warnings,
             )
@@ -75,11 +86,10 @@ def select_env(project_root: Path = PROJECT_ROOT, environment: str | None = None
         env_path = file_from_env(project_root, env)
         if not env_path.exists():
             errors.append(f'Environment file `{env_path}` not found.')
-            return EnvSelection(environment=env, env_path=None, errors=errors, warnings=warnings)
+            return EnvSelection(environment=env, errors=errors, warnings=warnings)
 
         return EnvSelection(
             environment=env,
-            env_path=env_path,
             errors=errors,
             warnings=warnings,
         )
@@ -108,19 +118,19 @@ def select_env(project_root: Path = PROJECT_ROOT, environment: str | None = None
 
     if not valid_files:
         errors.append(f'No environment file found in `{project_root}` matching `.env.<env>`.')
-        return EnvSelection(environment=None, env_path=None, errors=errors, warnings=warnings)
+        return EnvSelection(environment=None,  errors=errors, warnings=warnings)
 
     if len(valid_files) > 1:
         errors.append(
             'More than one environment file found in project root:\n'
             + '\n'.join(map(str, valid_files))
         )
-        return EnvSelection(environment=None, env_path=None, errors=errors, warnings=warnings)
+        return EnvSelection(environment=None,  errors=errors, warnings=warnings)
 
     file = valid_files[0]
     env = env_from_file(file)
     if not env:
         errors.append(f'Could not parse environment from file `{file}`.')
-        return EnvSelection(environment=None, env_path=None, errors=errors, warnings=warnings)
+        return EnvSelection(environment=None,  errors=errors, warnings=warnings)
 
     return EnvSelection(environment=env, env_path=file, errors=errors, warnings=warnings)

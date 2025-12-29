@@ -211,7 +211,7 @@ if not EMAIL_BACKENDS:
     if 'pytest' in sys.modules:
         EMAIL_BACKENDS = 'console'
 
-AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@example.com')
+AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@ziptrigo.com')
 
 # Jazzmin configuration
 JAZZMIN_SETTINGS = {

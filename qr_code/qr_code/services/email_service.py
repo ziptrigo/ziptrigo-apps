@@ -120,7 +120,7 @@ def get_email_backend() -> list[EmailBackendClass]:
 def build_email_backend(backend_cls: EmailBackendClass) -> EmailBackend:
     if backend_cls is SesEmailBackend:
         return SesEmailBackend(
-            sender=getattr(settings, 'AWS_SES_SENDER', 'no-reply@example.com'),
+            sender=getattr(settings, 'AWS_SES_SENDER', 'no-reply@ziptrigo.com'),
         )
     return backend_cls()
 
