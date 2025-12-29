@@ -89,6 +89,51 @@ ziptrigo-apps/
 └── WARP.md                       # This file (AI agent context)
 ```
 
+## Design System
+
+### Color Palette
+
+The Ziptrigo brand uses a sage green color palette extracted from the service logos (`qr_code/qr_code/static/images/logo_128x128.png` and `users/users/static/images/logo_128x128.png`).
+
+#### Primary Colors
+- **Sage Green**: `#8FA89E` - Main brand color (mid-tone green-gray)
+- **Dark Slate**: `#3B4A47` - Dark gray-green for text and accents
+- **Light Sage**: `#B5C7BE` - Lighter variant for backgrounds and subtle elements
+
+#### Supporting Colors
+- **Deep Charcoal**: `#2C3432` - Darkest tone for primary text and borders
+- **Soft Mint**: `#D4E0DA` - Very light green-gray for backgrounds
+- **White**: `#FFFFFF` - For contrast and backgrounds
+
+#### Usage Guidelines
+- **Headers/Primary Text**: Deep Charcoal or Dark Slate
+- **Backgrounds (Light Mode)**: White or Soft Mint
+- **Backgrounds (Dark Mode)**: Deep Charcoal with Dark Slate accents
+- **Buttons/CTAs**: Sage Green with white text
+- **Hover States**: Dark Slate
+- **Borders/Dividers**: Light Sage or Soft Mint
+
+#### Tailwind CSS Scale
+
+```css
+colors: {
+  sage: {
+    50: '#f4f7f6',
+    100: '#d4e0da',
+    200: '#b5c7be',
+    300: '#8fa89e',
+    400: '#728e84',
+    500: '#5a736a',
+    600: '#475a53',
+    700: '#3b4a47',
+    800: '#2c3432',
+    900: '#1e2422'
+  }
+}
+```
+
+**When building new web interfaces**: Always use this palette to maintain brand consistency across all microservices.
+
 ## Development Patterns
 
 ### Settings Architecture
