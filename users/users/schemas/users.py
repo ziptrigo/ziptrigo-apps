@@ -24,6 +24,7 @@ class UserResponse(BaseModel):
     email: str
     name: str
     status: str
+    credits: int
     inactive_at: datetime | None
     inactive_reason: str
     deleted_at: datetime | None

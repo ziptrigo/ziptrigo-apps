@@ -51,6 +51,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=255, blank=True)
+    credits = models.IntegerField(default=0, help_text='Current credits balance.')
 
     status = models.CharField(
         max_length=16,

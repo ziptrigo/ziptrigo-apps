@@ -8,6 +8,7 @@ Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT
 - Issue JWTs that client apps can validate
 - Provide a clean REST API under `/api`
 - Manage service-level credentials for first-party apps
+- Manage user credit balances with transaction history
 
 ## Tech Stack
 - Python 3.13
@@ -28,6 +29,11 @@ The Django project config lives in `config/`, and the Django app is `src/users` 
 
 ## Current Status
 - Custom `User` model with email as username
+- User credit system with transaction ledger:
+  - `User.credits` field stores current balance (default: 0)
+  - `CreditTransaction` model provides immutable audit trail
+  - Transaction types: purchase, spend, adjustment, refund
+  - Atomic credit updates with database transactions
 - JWT utilities: `src/users/tokens.py` builds tokens including global + per-service roles/permissions
 - Django Ninja authentication:
   - `JWTAuth` class (Authorization: Bearer <token>)
@@ -45,6 +51,9 @@ The Django project config lives in `config/`, and the Django app is `src/users` 
     - POST `/api/users/{user_id}/deactivate`, `/api/users/{user_id}/reactivate`
     - GET `/api/users/{user_id}/services`
     - PATCH/DELETE `/api/users/{user_id}/services/{service_id}`
+  - Credits management:
+    - POST `/api/users/{user_id}/credits` — add/remove credits with transaction record
+    - GET `/api/users/{user_id}/credits` — get user's current credit balance
 - Minimal UI: `/` renders `hello.html`
 - API Documentation: `/api/docs` (interactive Swagger UI)
 

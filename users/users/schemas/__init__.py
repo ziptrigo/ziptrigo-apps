@@ -1,4 +1,9 @@
 from .auth import LoginRequest, RefreshRequest, TokenResponse
+from .credits import (
+    CreditTransactionRequest,
+    CreditTransactionResponse,
+    UserCreditsResponse,
+)
 from .roles_permissions import (
     PermissionCreate,
     PermissionListResponse,
@@ -27,6 +32,9 @@ __all__ = [
     'LoginRequest',
     'RefreshRequest',
     'TokenResponse',
+    'CreditTransactionRequest',
+    'CreditTransactionResponse',
+    'UserCreditsResponse',
     'PermissionCreate',
     'PermissionListResponse',
     'PermissionResponse',
