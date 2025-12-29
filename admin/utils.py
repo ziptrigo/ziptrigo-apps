@@ -17,7 +17,7 @@ class Environment(Enum):
     PROD = 'prod'
 
 
-class App(Enum):
+class WebApp(Enum):
     QR_CODE = 'qr_code'
     USERS = 'users'
 
@@ -26,7 +26,7 @@ EnvironmentAnnotation = Annotated[
     Environment, typer.Argument(help='Environment to start the server in.', show_default=True)
 ]
 
-AppAnnotation = Annotated[App, typer.Argument(help='Application to use.', show_default=False)]
+WebAppAnnotation = Annotated[WebApp, typer.Argument(help='Application to use.', show_default=False)]
 
 DryAnnotation = Annotated[
     bool,
@@ -47,7 +47,8 @@ class OS(str, Enum):
 
 def set_environment(environment: str):
     from dotenv import load_dotenv
-    from src.common.environment import select_env
+
+    from common.environment import select_env
 
     selection = select_env(PROJECT_ROOT, environment)
     if selection.errors:
