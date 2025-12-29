@@ -16,7 +16,7 @@ from users.api import api
 base_patterns = [
     path('admin/', admin.site.urls),
     path('api/', api.urls),
-    path('', TemplateView.as_view(template_name='hello.html'), name='hello'),
+    path('', TemplateView.as_view(template_name='home.html'), name='home'),
 ]
 
 # For API gateway deployment, use prefixed patterns

@@ -1,11 +1,230 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>User Service</title>
-  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Users Service{% endblock %}</title>
+
+    <!-- Favicon -->
+    {% load static %}
+    <link rel="icon" type="image/png" href="{% static 'images/logo_32x32.png' %}">
+
+    <!-- Early theme boot: apply class before CSS to avoid FOUC -->
+    <script>
+      (function () {
+        try {
+          const mode = localStorage.getItem('theme') || 'system';
+          const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          let wantDark = false;
+          
+          if (mode === 'dark') {
+            wantDark = true;
+          } else if (mode === 'light') {
+            wantDark = false;
+          } else {
+            // system
+            wantDark = prefersDark;
+          }
+          
+          if (wantDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (_) { /* noop */ }
+      })();
+    </script>
+
+    <!-- Tailwind (Play CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configure Tailwind with Sage Green palette -->
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              sage: {
+                50: '#f4f7f6',
+                100: '#d4e0da',
+                200: '#b5c7be',
+                300: '#8fa89e',
+                400: '#728e84',
+                500: '#5a736a',
+                600: '#475a53',
+                700: '#3b4a47',
+                800: '#2c3432',
+                900: '#1e2422'
+              }
+            }
+          }
+        }
+      };
+    </script>
+
+    <!-- htmx -->
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- CSRF helper for htmx requests -->
+    <script>
+      function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+      }
+      document.addEventListener('htmx:configRequest', (e) => {
+        const token = getCookie('csrftoken');
+        if (token) {
+          e.detail.headers['X-CSRFToken'] = token;
+        }
+      });
+    </script>
+
+    {% block extra_css %}{% endblock %}
 </head>
-<body>
-  {% block content %}{% endblock %}
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <header class="bg-gray-100 dark:bg-gray-800 shadow">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex space-x-6">
+                <a href="{% url 'home' %}" class="text-lg font-semibold hover:text-sage-300">Home</a>
+                <a href="#" class="text-lg hover:text-sage-300">About</a>
+                <a href="#" class="text-lg hover:text-sage-300">Contact</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <!-- Theme toggle button -->
+                <button
+                  id="theme-toggle"
+                  type="button"
+                  class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                  aria-label="Toggle theme"
+                  title="Toggle theme"
+                  data-icon-light="{% static 'images/theme-light_128x128.png' %}"
+                  data-icon-dark="{% static 'images/theme-dark_128x128.png' %}"
+                  data-icon-system="{% static 'images/theme-system_128x128.png' %}"
+                >
+                  <img id="theme-icon" alt="Theme icon" class="h-6 w-6" src="{% static 'images/theme-system_128x128.png' %}">
+                </button>
+
+                <div id="auth-nav">
+                    <a href="#" class="text-lg hover:text-sage-300">Login/Register</a>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main class="flex-grow flex flex-col">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-gray-100 dark:bg-gray-800 mt-auto py-6">
+        <div class="container mx-auto px-4 flex items-center justify-between space-x-8">
+            <div class="flex justify-center space-x-8 flex-1">
+                <a href="#" class="hover:text-sage-300">FAQ</a>
+                <a href="#" class="hover:text-sage-300">Feedback</a>
+            </div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                &copy; {% now "Y" %} Joao Coelho. Licensed under MIT.
+            </div>
+        </div>
+    </footer>
+
+    <!-- Theme control script: cycles system -> light -> dark and persists to localStorage -->
+    <script>
+      (function () {
+        function getEls() {
+          const btn = document.getElementById('theme-toggle');
+          const icon = document.getElementById('theme-icon');
+          return { btn, icon };
+        }
+
+        function getIcons(btn) {
+          if (!btn) return {};
+          return {
+            light: btn.getAttribute('data-icon-light'),
+            dark: btn.getAttribute('data-icon-dark'),
+            system: btn.getAttribute('data-icon-system'),
+          };
+        }
+
+        const mql = window.matchMedia('(prefers-color-scheme: dark)');
+        let mqlHandlerAttached = false;
+
+        function applyTheme(mode) {
+          const html = document.documentElement;
+          
+          if (mode === 'light') {
+            html.classList.remove('dark');
+          } else if (mode === 'dark') {
+            html.classList.add('dark');
+          } else {
+            // system
+            if (mql.matches) {
+              html.classList.add('dark');
+            } else {
+              html.classList.remove('dark');
+            }
+          }
+          
+          const { btn, icon } = getEls();
+          const ICONS = getIcons(btn);
+          if (icon && ICONS) {
+            const newSrc = ICONS[mode] || ICONS.system;
+            if (newSrc && (newSrc.startsWith('/') || newSrc.startsWith('http'))) {
+              icon.src = newSrc;
+            }
+          }
+        }
+
+        function attachMqlIfNeeded(mode) {
+          if (mode === 'system' && !mqlHandlerAttached) {
+            mql.addEventListener('change', () => {
+              if ((localStorage.getItem('theme') || 'system') === 'system') {
+                applyTheme('system');
+              }
+            });
+            mqlHandlerAttached = true;
+          }
+        }
+
+        function currentMode() {
+          return localStorage.getItem('theme') || 'system';
+        }
+
+        function nextMode(mode) {
+          return mode === 'system' ? 'light' : (mode === 'light' ? 'dark' : 'system');
+        }
+
+        // Initialize icon and theme on load
+        const initial = currentMode();
+        applyTheme(initial);
+        attachMqlIfNeeded(initial);
+
+        // Delegated click handler works even if header gets re-rendered
+        document.addEventListener('click', function (e) {
+          const target = e.target instanceof Element ? e.target : null;
+          if (!target) return;
+          // Check if we clicked the button itself or any child (like the img)
+          const btn = target.id === 'theme-toggle' ? target : target.closest('#theme-toggle');
+          if (!btn) return;
+
+          e.preventDefault();
+          e.stopPropagation();
+          const cur = currentMode();
+          const nxt = nextMode(cur);
+          
+          try { localStorage.setItem('theme', nxt); } catch (_) { /* ignore */ }
+          // Reload page to apply new theme (Tailwind CDN doesn't support runtime dark mode changes)
+          window.location.reload();
+        });
+      })();
+    </script>
+
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

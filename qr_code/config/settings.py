@@ -145,6 +145,7 @@ AUTH_PASSWORD_VALIDATORS = [
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     PROJECT_ROOT / 'qr_code' / 'static',
+    PROJECT_ROOT.parent / 'common' / 'static',
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 
