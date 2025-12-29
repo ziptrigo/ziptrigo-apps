@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+    <div class="flex items-center gap-3 mb-6">
+      <img src="{% static 'images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
+      <h1 class="text-xl font-semibold">Sign in</h1>
+    </div>
+
+    <div id="login-msg" class="mb-4 text-sm"></div>
+
+    <form id="login-form" x-data="{ loading: false }">
+      {% csrf_token %}
+
+      <label class="block mb-3">
+        <span class="block mb-1">Email</span>
+        <input type="email" name="email" required
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sage-300">
+      </label>
+
+      <label class="block mb-3">
+        <span class="block mb-1">Password</span>
+        <div class="relative">
+          <input id="password-input" type="password" name="password" required
+                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-sage-300">
+          <button type="button" id="toggle-password"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
+                  aria-label="Toggle password visibility">
+            <i class="fa-solid fa-eye" id="eye-icon"></i>
+          </button>
+        </div>
+      </label>
+
+      <button type="submit"
+              :disabled="loading"
+              class="w-full inline-flex justify-center items-center rounded bg-sage-300 text-gray-900 font-medium py-2 hover:opacity-90 disabled:opacity-50">
+        <span x-show="!loading">Sign in</span>
+        <span x-show="loading" class="flex items-center">
+          <i class="fas fa-spinner fa-spin mr-2"></i>Signing in...
+        </span>
+      </button>
+    </form>
+
+    <div class="mt-4 flex flex-col gap-2 text-sm text-gray-600 dark:text-gray-300">
+      <p>
+        No account? <a href="{% url 'register-page' %}" class="text-sage-300 underline">Create one</a>
+      </p>
+      <p>
+        <a href="{% url 'forgot-password-page' %}" class="text-sage-300 underline">Forgot your password?</a>
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    const form = document.getElementById('login-form');
+    const msg = document.getElementById('login-msg');
+    const passwordInput = document.getElementById('password-input');
+    const toggleBtn = document.getElementById('toggle-password');
+    const eyeIcon = document.getElementById('eye-icon');
+    const emailInput = form.querySelector('input[name="email"]');
+    const passwordField = form.querySelector('input[name="password"]');
+
+    // Password visibility toggle
+    toggleBtn.addEventListener('click', function() {
+      if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        eyeIcon.classList.remove('fa-eye');
+        eyeIcon.classList.add('fa-eye-slash');
+      } else {
+        passwordInput.type = 'password';
+        eyeIcon.classList.remove('fa-eye-slash');
+        eyeIcon.classList.add('fa-eye');
+      }
+    });
+
+    form.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+
+      if (!form.checkValidity()) {
+        msg.textContent = 'Please fill in email and password (valid email required).';
+        msg.className = 'mb-4 text-sm text-red-600';
+        return;
+      }
+
+      // Clear previous message
+      msg.textContent = '';
+      msg.className = 'mb-4 text-sm';
+
+      // Set loading state
+      const alpineData = Alpine.$data(form);
+      if (alpineData) alpineData.loading = true;
+
+      const email = emailInput.value;
+      const password = passwordField.value;
+      const csrfToken = form.querySelector('[name="csrfmiddlewaretoken"]').value;
+
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          // Store tokens
+          localStorage.setItem('access_token', data.access_token);
+          localStorage.setItem('refresh_token', data.refresh_token);
+          // Redirect to account page
+          window.location.href = '/account/';
+        } else {
+          const userMsg = data.detail || data.message || 'Could not sign in. Check your credentials.';
+          msg.textContent = userMsg;
+          msg.className = 'mb-4 text-sm text-red-600';
+          msg.style.whiteSpace = 'pre-line';
+        }
+      } catch (error) {
+        msg.textContent = 'An unexpected error occurred.';
+        msg.className = 'mb-4 text-sm text-red-600';
+        console.error('Login exception:', error);
+      } finally {
+        const alpineData = Alpine.$data(form);
+        if (alpineData) alpineData.loading = false;
+      }
+    });
+  })();
+</script>
+{% endblock %}

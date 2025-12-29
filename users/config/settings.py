@@ -117,6 +117,16 @@ JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
 JWT_EXP_DELTA_SECONDS = int(os.getenv('JWT_EXP_DELTA_SECONDS', str(14 * 24 * 3600)))
 
+# Email confirmation and password reset settings
+BASE_URL = os.getenv('BASE_URL', 'http://localhost:8010')
+EMAIL_CONFIRMATION_TOKEN_TTL_HOURS = int(os.getenv('EMAIL_CONFIRMATION_TOKEN_TTL_HOURS', '48'))
+PASSWORD_RESET_TOKEN_TTL_HOURS = int(os.getenv('PASSWORD_RESET_TOKEN_TTL_HOURS', '48'))
+
+# Email backend configuration
+EMAIL_BACKENDS = os.getenv('EMAIL_BACKENDS', 'console')  # comma-separated: console,ses
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@example.com')
+
 # django-ninja-jwt settings
 NINJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(seconds=JWT_EXP_DELTA_SECONDS),
