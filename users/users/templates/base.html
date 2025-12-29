@@ -174,7 +174,10 @@
           const { btn, icon } = getEls();
           const ICONS = getIcons(btn);
           if (icon && ICONS) {
-            icon.src = ICONS[mode] || ICONS.system || icon.src;
+            const newSrc = ICONS[mode] || ICONS.system;
+            if (newSrc && (newSrc.startsWith('/') || newSrc.startsWith('http'))) {
+              icon.src = newSrc;
+            }
           }
         }
 
