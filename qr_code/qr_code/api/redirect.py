@@ -4,6 +4,7 @@ from asgiref.sync import sync_to_async
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from ninja import Router
+
 from qr_code.models import QRCode
 
 router = Router()

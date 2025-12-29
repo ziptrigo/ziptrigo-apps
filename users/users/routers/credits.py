@@ -6,7 +6,11 @@ from ninja.errors import HttpError
 
 from ..auth import AdminAuth
 from ..models import CreditTransaction, CreditTransactionType, User
-from ..schemas import CreditTransactionRequest, CreditTransactionResponse, UserCreditsResponse
+from ..schemas import (
+    CreditTransactionRequest,
+    CreditTransactionResponse,
+    UserCreditsResponse,
+)
 
 router = Router()
 admin_auth = AdminAuth()

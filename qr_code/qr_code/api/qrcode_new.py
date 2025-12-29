@@ -5,6 +5,7 @@ import uuid
 from asgiref.sync import sync_to_async
 from ninja import Router
 from ninja_jwt.authentication import AsyncJWTAuth
+
 from qr_code.models import QRCode
 from qr_code.schemas import (
     QRCodeCreateSchema,
