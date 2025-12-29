@@ -10,16 +10,12 @@ import typer
 from rich.logging import RichHandler
 
 from admin import PROJECT_ROOT
+from common.web_app import WebApp
 
 
 class Environment(Enum):
     DEV = 'dev'
     PROD = 'prod'
-
-
-class WebApp(Enum):
-    QR_CODE = 'qr_code'
-    USERS = 'users'
 
 
 EnvironmentAnnotation = Annotated[
