@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Account created{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6 text-center">
+    <div class="flex items-center justify-center gap-3 mb-6">
+      <img src="{% static 'images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
+      <h1 class="text-xl font-semibold">Account created!</h1>
+    </div>
+    
+    <p class="mb-6">
+      Your account has been created successfully. Please check your email to confirm your address before logging in.
+    </p>
+    
+    <p class="mb-6 text-sm text-gray-600 dark:text-gray-400">
+      The confirmation link will expire in 48 hours.
+    </p>
+    
+    <button type="button"
+            onclick="window.location='/login/';"
+            class="inline-flex justify-center items-center rounded bg-sage-300 text-gray-900 font-medium px-4 py-2 hover:opacity-90">
+      Go to Login
+    </button>
+  </div>
+</div>
+{% endblock %}
