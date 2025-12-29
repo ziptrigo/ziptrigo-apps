@@ -112,7 +112,13 @@
                 </button>
 
                 <div id="auth-nav">
+                    {% if user.is_authenticated %}
+                    <a href="{% url 'account-page' %}" class="text-lg hover:text-sage-300">
+                        <i class="fas fa-user-circle mr-1"></i>Account
+                    </a>
+                    {% else %}
                     <a href="#" class="text-lg hover:text-sage-300">Login/Register</a>
+                    {% endif %}
                 </div>
             </div>
         </nav>

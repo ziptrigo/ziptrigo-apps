@@ -11,12 +11,15 @@ from django.urls import path
 from django.views.generic import TemplateView
 
 from users.api import api
+from users.views import account_page, credits_history_page
 
 # Base patterns (when accessed directly on port 8010)
 base_patterns = [
     path('admin/', admin.site.urls),
     path('api/', api.urls),
     path('', TemplateView.as_view(template_name='home.html'), name='home'),
+    path('account/', account_page, name='account-page'),
+    path('account/credits/history/', credits_history_page, name='credits-history-page'),
 ]
 
 # For API gateway deployment, use prefixed patterns

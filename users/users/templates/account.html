@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Account Settings{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-2xl bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+    <div class="flex items-center gap-3 mb-6">
+      <i class="fas fa-user-cog text-2xl text-sage-300"></i>
+      <h1 class="text-2xl font-semibold">Account Settings</h1>
+    </div>
+
+    <div id="account-msg" class="mb-4 text-sm"></div>
+
+    <!-- Profile Information Section -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Profile Information</h2>
+      
+      <form id="profile-form"
+            hx-put="/api/account"
+            hx-trigger="submit"
+            hx-swap="none"
+            x-data="{ loading: false }">
+        {% csrf_token %}
+
+        <!-- Email (read-only / username) -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Email</span>
+          <input type="text" 
+                 value="{{ request.user.email }}" 
+                 disabled
+                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 text-gray-500 dark:text-gray-400 cursor-not-allowed">
+          <span class="text-xs text-gray-500 dark:text-gray-400 mt-1 block">Email cannot be changed</span>
+        </label>
+
+        <!-- Name -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Name</span>
+          <input type="text" 
+                 name="name" 
+                 id="profile-name"
+                 value="{{ request.user.name }}"
+                 required
+                 maxlength="255"
+                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sage-300">
+        </label>
+
+        <button type="submit"
+                :disabled="loading"
+                class="inline-flex justify-center items-center rounded bg-sage-300 text-gray-900 font-medium px-4 py-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span x-show="!loading">Save Profile</span>
+          <span x-show="loading" class="flex items-center">
+            <i class="fas fa-spinner fa-spin mr-2"></i>Saving...
+          </span>
+        </button>
+      </form>
+    </section>
+
+    <!-- Credits Section -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Credits</h2>
+
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <div class="text-sm text-gray-600 dark:text-gray-300">Current balance</div>
+          <div class="text-2xl font-semibold">{{ request.user.credits }} credits</div>
+        </div>
+        <a href="{% url 'credits-history-page' %}"
+           class="inline-flex justify-center items-center rounded bg-sage-300 text-gray-900 font-medium px-4 py-2 hover:opacity-90">
+          Usage History
+        </a>
+      </div>
+    </section>
+
+    <!-- Password Change Section (UI only, no backend) -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Change Password</h2>
+      
+      <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded p-4 mb-4">
+        <div class="flex items-start gap-2">
+          <i class="fas fa-info-circle text-yellow-600 dark:text-yellow-400 mt-0.5"></i>
+          <div class="text-sm text-yellow-800 dark:text-yellow-200">
+            Password change functionality is coming soon. This feature is currently under development.
+          </div>
+        </div>
+      </div>
+
+      <form id="password-form"
+            x-data="{ loading: false }"
+            @submit.prevent="showComingSoon">
+        {% csrf_token %}
+
+        <!-- Current Password -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Current Password</span>
+          <div class="relative">
+            <input id="current-password-input" 
+                   type="password" 
+                   name="current_password"
+                   disabled
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 pr-10 text-gray-500 dark:text-gray-400 cursor-not-allowed">
+            <button type="button" 
+                    class="toggle-password absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 cursor-not-allowed"
+                    disabled
+                    aria-label="Toggle password visibility">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </label>
+
+        <!-- New Password -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">New Password</span>
+          <div class="relative">
+            <input id="new-password-input" 
+                   type="password" 
+                   name="new_password"
+                   disabled
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 pr-10 text-gray-500 dark:text-gray-400 cursor-not-allowed">
+            <button type="button" 
+                    class="toggle-password absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 cursor-not-allowed"
+                    disabled
+                    aria-label="Toggle password visibility">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+          <span class="text-xs text-gray-500 dark:text-gray-400 mt-1 block">At least 6 characters with one digit</span>
+        </label>
+
+        <!-- Confirm New Password -->
+        <label class="block mb-4">
+          <span class="block mb-1 text-sm font-medium">Confirm New Password</span>
+          <div class="relative">
+            <input id="confirm-password-input" 
+                   type="password" 
+                   name="new_password_confirm"
+                   disabled
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 pr-10 text-gray-500 dark:text-gray-400 cursor-not-allowed">
+            <button type="button" 
+                    class="toggle-password absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 cursor-not-allowed"
+                    disabled
+                    aria-label="Toggle password visibility">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </label>
+
+        <button type="submit"
+                disabled
+                class="inline-flex justify-center items-center rounded bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 font-medium px-4 py-2 cursor-not-allowed">
+          Change Password
+        </button>
+      </form>
+    </section>
+
+    <!-- Back to Home Link -->
+    <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+      <a href="{% url 'home' %}" class="text-sage-300 hover:underline">
+        <i class="fas fa-arrow-left mr-2"></i>Back to Home
+      </a>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    const profileForm = document.getElementById('profile-form');
+    const msg = document.getElementById('account-msg');
+
+    // Profile form validation
+    profileForm.addEventListener('submit', function(ev){
+      const name = document.getElementById('profile-name').value.trim();
+      
+      if (!name) {
+        ev.preventDefault();
+        showMessage('Please fill in your name.', 'error');
+        return;
+      }
+      
+      clearMessage();
+    });
+
+    // Handle profile form response
+    document.body.addEventListener('htmx:afterRequest', function(e){
+      if (e.target !== profileForm) return;
+      
+      const status = e.detail.xhr.status;
+      try {
+        const data = JSON.parse(e.detail.xhr.responseText || '{}');
+        if (status >= 200 && status < 300) {
+          showMessage(data.message || 'Profile updated successfully!', 'success');
+          // Update displayed values
+          if (data.user) {
+            document.getElementById('profile-name').value = data.user.name;
+          }
+        } else {
+          handleErrorResponse(data);
+        }
+      } catch (err) {
+        showMessage('An unexpected error occurred.', 'error');
+        console.error('Profile update error:', e.detail.xhr.responseText);
+      }
+    });
+
+    // Coming soon message for password change
+    window.showComingSoon = function() {
+      showMessage('Password change functionality is coming soon.', 'info');
+    };
+
+    function showMessage(text, type) {
+      msg.textContent = text;
+      if (type === 'success') {
+        msg.className = 'mb-4 text-sm p-3 rounded bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border border-green-300 dark:border-green-700';
+      } else if (type === 'info') {
+        msg.className = 'mb-4 text-sm p-3 rounded bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700';
+      } else {
+        msg.className = 'mb-4 text-sm p-3 rounded bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700';
+      }
+      msg.style.whiteSpace = 'pre-line';
+      // Scroll to message
+      msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function clearMessage() {
+      msg.textContent = '';
+      msg.className = 'mb-4 text-sm';
+    }
+
+    function handleErrorResponse(data) {
+      let errorMsg = '';
+      
+      if (typeof data === 'string') {
+        errorMsg = data;
+      } else if (data.detail || data.message) {
+        errorMsg = data.detail || data.message;
+      } else if (typeof data === 'object') {
+        // Handle field-specific errors
+        const errors = [];
+        for (const [field, messages] of Object.entries(data)) {
+          if (Array.isArray(messages)) {
+            errors.push(...messages);
+          } else if (typeof messages === 'string') {
+            errors.push(messages);
+          }
+        }
+        errorMsg = errors.join('\n') || 'Validation error occurred.';
+      } else {
+        errorMsg = 'An error occurred.';
+      }
+      
+      showMessage(errorMsg, 'error');
+      console.error('Error details:', data);
+    }
+  })();
+</script>
+{% endblock %}

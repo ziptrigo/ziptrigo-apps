@@ -1,6 +1,6 @@
 from ninja import NinjaAPI
 
-from .routers import auth, credits, roles_permissions, services, users
+from .routers import account, auth, credits, roles_permissions, services, users
 
 api = NinjaAPI(
     title='User Service API',
@@ -9,6 +9,7 @@ api = NinjaAPI(
 )
 
 # Register routers
+api.add_router('/', account.router, tags=['Account'])
 api.add_router('/auth/', auth.router, tags=['Authentication'])
 api.add_router('/services/', services.router, tags=['Services'])
 api.add_router('/services/', roles_permissions.router, tags=['Roles & Permissions'])
