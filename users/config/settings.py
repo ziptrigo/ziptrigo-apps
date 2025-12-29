@@ -99,6 +99,7 @@ AUTH_PASSWORD_VALIDATORS = COMMON_AUTH_PASSWORD_VALIDATORS
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     PROJECT_ROOT / 'users' / 'static',
+    PROJECT_ROOT.parent / 'common' / 'static',
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 
