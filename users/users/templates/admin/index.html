@@ -4,19 +4,14 @@
 {{ block.super }}
 
 <div class="module">
-    <table>
-        <caption>
-            <a href="{% url 'custom_admin:admin_tools' %}" class="section">Admin Tools</a>
-        </caption>
-        <tbody>
-            <tr>
-                <td>
-                    <a href="{% url 'custom_admin:admin_tools' %}">
-                        Access utilities such as sending test emails or viewing masked environment variables.
-                    </a>
-                </td>
-            </tr>
-        </tbody>
-    </table>
+    <h2>Admin Tools</h2>
+    <p>
+        <a href="{% url 'custom_admin:admin_tools' %}" class="button default">
+            Open Admin Tools
+        </a>
+    </p>
+    <p class="help">
+        Access utilities such as sending test emails or viewing masked environment variables.
+    </p>
 </div>
 {% endblock %}
