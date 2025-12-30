@@ -161,7 +161,7 @@ JAZZMIN_SETTINGS = {
     'welcome_sign': 'User Admin',
     'copyright': 'User Project',
     'search_model': ['users.User'],
-'icons': {
+    'icons': {
         'auth': 'fas fa-users-cog',
         'auth.user': 'fas fa-user',
         'users.User': 'fas fa-user-circle',

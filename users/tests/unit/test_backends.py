@@ -1,6 +1,6 @@
 import pytest
-from src.users.backends import EmailBackend
-from src.users.models import User
+from users.users.backends import EmailBackend
+from users.users.models import User
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
