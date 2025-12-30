@@ -6,11 +6,11 @@ Note: URLs are configured with /users/ prefix for future API gateway integration
 When deploying with an API gateway, route /users/* requests to this service.
 """
 
-from django.contrib import admin
 from django.urls import path
 from django.views.generic import TemplateView
 
 from users.api import api
+from users.admin import custom_admin_site
 from users.views import (
     account_created_page,
     account_page,
@@ -26,7 +26,7 @@ from users.views import (
 
 # Base patterns (when accessed directly on port 8010)
 base_patterns = [
-    path('admin/', admin.site.urls),
+    path('admin/', custom_admin_site.urls),
     path('api/', api.urls),
     path('', TemplateView.as_view(template_name='home.html'), name='home'),
     path('login/', login_page, name='login-page'),
