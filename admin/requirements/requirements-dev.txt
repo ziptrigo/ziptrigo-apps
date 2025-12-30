@@ -124,8 +124,12 @@ email-validator==2.3.0
     #   -r requirements-app-users.txt
     #   -r requirements-base.txt
     #   pydantic
-faker==39.0.0
+factory-boy==3.3.3
     # via -r requirements-dev.in
+faker==39.0.0
+    # via
+    #   -r requirements-dev.in
+    #   factory-boy
 flake8==7.3.0
     # via
     #   -r requirements-dev.in
