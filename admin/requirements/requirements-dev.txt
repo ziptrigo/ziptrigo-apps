@@ -259,6 +259,10 @@ pytest-cov==7.0.0
     # via -r requirements-dev.in
 pytest-django==4.11.1
     # via -r requirements-dev.in
+playwright==1.57.0
+    # via -r requirements-dev.in
+pytest-playwright==0.7.2
+    # via -r requirements-dev.in
 python-dateutil==2.9.0.post0
     # via
     #   -r requirements-app-qr_code.txt

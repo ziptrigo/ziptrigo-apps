@@ -17,5 +17,7 @@ pip-tools
 pytest
 pytest-cov
 pytest-django
+playwright
+pytest-playwright
 typer
 typer-invoke
