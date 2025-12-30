@@ -21,7 +21,7 @@ app = typer.Typer(
 )
 
 
-AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@joao-coelho.com')
+AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@ziptrigo.com')
 
 
 def _send_email(

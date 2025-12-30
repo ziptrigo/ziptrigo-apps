@@ -47,7 +47,7 @@ def set_environment(environment: str | Environment, web_app: WebApp | None = Non
     if not selection.environment:
         raise ValueError('Environment not set.')
 
-    os.environ['ENVIRONMENT'] = selection.environment
+    os.environ['ENVIRONMENT'] = selection.environment.value  # type: ignore
 
     for env_path in selection.all_env_paths:
         load_dotenv(dotenv_path=env_path, override=True)

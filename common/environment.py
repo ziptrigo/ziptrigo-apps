@@ -108,16 +108,16 @@ def select_env(
         else:
             env = environment
 
-        env_path = file_from_env(project_root, env)
+        if not web_app:
+            return EnvSelection(environment=env, errors=errors, warnings=warnings)
+
+        env_path = file_from_env(project_root / web_app.value, env)
         if not env_path.exists():
             errors.append(f'Environment file `{env_path}` not found.')
             return EnvSelection(environment=env, web_app=web_app, errors=errors, warnings=warnings)
 
         return EnvSelection(
-            environment=env,
-            web_app=web_app,
-            errors=errors,
-            warnings=warnings,
+            environment=env, web_app=web_app, env_path=env_path, errors=errors, warnings=warnings
         )
 
     # Environment was not set, check if there's only one environment file and return that selection
