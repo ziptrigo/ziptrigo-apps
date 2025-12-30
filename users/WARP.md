@@ -1,10 +1,10 @@
 # Users Service Project
 
 ## Project Overview
-Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT-based user authentication, service (machine-to-machine) authentication via client_id/client_secret, centralized users/roles/permissions, and a minimal HTMX landing page.
+Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT-based user authentication, service (machine-to-machine) authentication via client_id/client_secret, and a minimal HTMX landing page.
 
 ## Goals
-- Single source of truth for identity, roles and permissions
+- Single source of truth for user identity
 - Issue JWTs that client apps can validate
 - Provide a clean REST API under `/api`
 - Manage service-level credentials for first-party apps
@@ -34,7 +34,7 @@ The Django project config lives in `config/`, and the Django app is `src/users` 
   - `CreditTransaction` model provides immutable audit trail
   - Transaction types: purchase, spend, adjustment, refund
   - Atomic credit updates with database transactions
-- JWT utilities: `src/users/tokens.py` builds tokens including global + per-service roles/permissions
+- JWT utilities: `src/users/tokens.py` builds tokens with user ID and email
 - Django Ninja authentication:
   - `JWTAuth` class (Authorization: Bearer <token>)
   - `AdminAuth` class (extends JWTAuth, requires is_staff)
@@ -42,15 +42,10 @@ The Django project config lives in `config/`, and the Django app is `src/users` 
 - Endpoints (admin-only unless noted):
   - POST `/api/auth/login` (open) — returns JWT for active users
   - Services: POST/GET `/api/services/`, GET/PATCH `/api/services/{id}`
-  - Roles & Permissions per service:
-    - POST/GET `/api/services/{service_id}/permissions`
-    - POST/GET `/api/services/{service_id}/roles`
-  - Users & assignments:
-    - POST `/api/services/{service_id}/users`
+  - Users:
+    - POST `/api/users/` - Create user
     - GET/PATCH/DELETE `/api/users/{user_id}` (soft delete)
     - POST `/api/users/{user_id}/deactivate`, `/api/users/{user_id}/reactivate`
-    - GET `/api/users/{user_id}/services`
-    - PATCH/DELETE `/api/users/{user_id}/services/{service_id}`
   - Credits management:
     - POST `/api/users/{user_id}/credits` — add/remove credits with transaction record
     - GET `/api/users/{user_id}/credits` — get user's current credit balance
