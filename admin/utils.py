@@ -10,23 +10,14 @@ import typer
 from rich.logging import RichHandler
 
 from admin import PROJECT_ROOT
-
-
-class Environment(Enum):
-    DEV = 'dev'
-    PROD = 'prod'
-
-
-class App(Enum):
-    QR_CODE = 'qr_code'
-    USERS = 'users'
-
+from common.environment import Environment
+from common.web_app import WebApp
 
 EnvironmentAnnotation = Annotated[
     Environment, typer.Argument(help='Environment to start the server in.', show_default=True)
 ]
 
-AppAnnotation = Annotated[App, typer.Argument(help='Application to use.', show_default=False)]
+WebAppAnnotation = Annotated[WebApp, typer.Argument(help='Application to use.', show_default=False)]
 
 DryAnnotation = Annotated[
     bool,
@@ -45,18 +36,21 @@ class OS(str, Enum):
     Windows = 'win'
 
 
-def set_environment(environment: str):
+def set_environment(environment: str | Environment, web_app: WebApp | None = None):
     from dotenv import load_dotenv
-    from src.common.environment import select_env
 
-    selection = select_env(PROJECT_ROOT, environment)
+    from common.environment import select_env
+
+    selection = select_env(PROJECT_ROOT, environment, web_app)
     if selection.errors:
         raise ValueError('\n'.join(selection.errors))
     if not selection.environment:
         raise ValueError('Environment not set.')
 
-    os.environ['ENVIRONMENT'] = selection.environment
-    load_dotenv(dotenv_path=selection.env_path)
+    os.environ['ENVIRONMENT'] = selection.environment.value  # type: ignore
+
+    for env_path in selection.all_env_paths:
+        load_dotenv(dotenv_path=env_path, override=True)
 
 
 def get_os() -> OS:

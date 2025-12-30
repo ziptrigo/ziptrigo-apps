@@ -45,8 +45,7 @@ from common.settings.base import (  # noqa: E402, F401
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv(
-    'SECRET_KEY',
-    'django-insecure-ku-j+zx16yg_lyrpt)ohcm-2rldm0z23vaa0#p66vxlni=@nj8',
+    'SECRET_KEY', 'django-insecure-ku-j+zx16yg_lyrpt)ohcm-2rldm0z23vaa0#p66vxlni=@nj8'
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -125,7 +124,7 @@ PASSWORD_RESET_TOKEN_TTL_HOURS = int(os.getenv('PASSWORD_RESET_TOKEN_TTL_HOURS',
 # Email backend configuration
 EMAIL_BACKENDS = os.getenv('EMAIL_BACKENDS', 'console')  # comma-separated: console,ses
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@example.com')
+AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@ziptrigo.com')
 
 # django-ninja-jwt settings
 NINJA_JWT = {

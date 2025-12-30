@@ -12,12 +12,12 @@ import typer
 
 from admin import PROJECT_ROOT
 from admin.utils import (
-    AppAnnotation,
     DryAnnotation,
-    Environment,
     EnvironmentAnnotation,
+    WebAppAnnotation,
     run,
 )
+from common.environment import Environment
 
 app = typer.Typer(
     help=__doc__,
@@ -29,7 +29,7 @@ app = typer.Typer(
 
 @app.command(name='run')
 def server_run(
-    app: AppAnnotation,
+    web_app: WebAppAnnotation,
     environment: EnvironmentAnnotation = Environment.DEV,
     dry: DryAnnotation = False,
 ):
@@ -48,7 +48,7 @@ def server_run(
         'manage.py',
         'runserver',
         dry=dry,
-        cwd=PROJECT_ROOT / app.value,
+        cwd=PROJECT_ROOT / web_app.value,
         env=os.environ | {'ENVIRONMENT': environment.value},
     )
 

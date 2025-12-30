@@ -54,6 +54,18 @@ django-ninja-jwt==5.4.2
     # via -r requirements-base.txt
 django-ses==4.5.0
     # via -r requirements-base.txt
+dnspython==2.8.0
+    # via
+    #   -r requirements-base.txt
+    #   email-validator
+email-validator==2.3.0
+    # via
+    #   -r requirements-base.txt
+    #   pydantic
+idna==3.11
+    # via
+    #   -r requirements-base.txt
+    #   email-validator
 injector==0.23.0
     # via
     #   -r requirements-base.txt
@@ -73,7 +85,7 @@ pycparser==2.23
     # via
     #   -r requirements-base.txt
     #   cffi
-pydantic==2.12.5
+pydantic[email]==2.12.5
     # via
     #   -r requirements-base.txt
     #   django-ninja
@@ -121,6 +133,8 @@ typing-inspection==0.4.2
     #   -r requirements-base.txt
     #   pydantic
     #   pydantic-settings
+tzdata==2025.3
+    # via django
 urllib3==2.6.2
     # via
     #   -r requirements-base.txt

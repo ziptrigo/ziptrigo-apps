@@ -39,7 +39,7 @@ services:
       - DATABASE_URL=${QR_CODE_DATABASE_URL:-}
       - BASE_URL=${QR_CODE_BASE_URL:-http://localhost:8020}
       - EMAIL_BACKENDS=${QR_CODE_EMAIL_BACKENDS:-console}
-      - AWS_SES_SENDER=${QR_CODE_AWS_SES_SENDER:-no-reply@example.com}
+      - AWS_SES_SENDER=${QR_CODE_AWS_SES_SENDER:-no-reply@ziptrigo.com}
     env_file:
       - qr_code/.env.dev
     volumes:
