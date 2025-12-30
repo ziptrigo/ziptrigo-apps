@@ -88,3 +88,15 @@ def test_adjust_credits_creates_transaction(client, admin_user: User):
     transaction = CreditTransaction.objects.get(user=target)
     assert transaction.amount == 25
     assert transaction.description == 'Manual top-up'
+
+
+def test_admin_dashboard_shows_tools_link(client, admin_user: User):
+    """Dashboard should display a module linking to the admin tools."""
+
+    client.force_login(admin_user)
+    response = client.get('/admin/')
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert 'Admin Tools' in content
+    assert reverse('custom_admin:admin_tools') in content
