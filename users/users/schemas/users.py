@@ -8,8 +8,6 @@ class UserCreateRequest(BaseModel):
     email: EmailStr
     name: str = ''
     password: str | None = None
-    roles: list[str] = []
-    permissions: list[str] = []
 
 
 class UserUpdateRequest(BaseModel):
@@ -34,19 +32,3 @@ class UserResponse(BaseModel):
 
 class UserDeactivateRequest(BaseModel):
     reason: str = ''
-
-
-class UserServiceInfo(BaseModel):
-    service_id: str
-    service_name: str
-    roles: list[str]
-    permissions: list[str]
-
-
-class UserServicesListResponse(BaseModel):
-    services: list[UserServiceInfo]
-
-
-class UserServiceAssignmentUpdate(BaseModel):
-    roles: list[str] = []
-    permissions: list[str] = []

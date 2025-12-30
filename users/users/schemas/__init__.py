@@ -14,14 +14,6 @@ from .credits import (
     CreditTransactionResponse,
     UserCreditsResponse,
 )
-from .roles_permissions import (
-    PermissionCreate,
-    PermissionListResponse,
-    PermissionResponse,
-    RoleCreate,
-    RoleListResponse,
-    RoleResponse,
-)
 from .services import (
     ServiceCreate,
     ServiceListResponse,
@@ -32,9 +24,6 @@ from .users import (
     UserCreateRequest,
     UserDeactivateRequest,
     UserResponse,
-    UserServiceAssignmentUpdate,
-    UserServiceInfo,
-    UserServicesListResponse,
     UserUpdateRequest,
 )
 
@@ -52,12 +41,6 @@ __all__ = [
     'CreditTransactionRequest',
     'CreditTransactionResponse',
     'UserCreditsResponse',
-    'PermissionCreate',
-    'PermissionListResponse',
-    'PermissionResponse',
-    'RoleCreate',
-    'RoleListResponse',
-    'RoleResponse',
     'ServiceCreate',
     'ServiceListResponse',
     'ServiceResponse',
@@ -65,8 +48,5 @@ __all__ = [
     'UserCreateRequest',
     'UserDeactivateRequest',
     'UserResponse',
-    'UserServiceAssignmentUpdate',
-    'UserServiceInfo',
-    'UserServicesListResponse',
     'UserUpdateRequest',
 ]
