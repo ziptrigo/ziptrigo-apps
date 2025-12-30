@@ -1,3 +1,3 @@
-from . import account, auth, credits, services, users
+from . import account, auth, credits, users
 
-__all__ = ['account', 'auth', 'credits', 'services', 'users']
+__all__ = ['account', 'auth', 'credits', 'users']

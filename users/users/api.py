@@ -1,6 +1,6 @@
 from ninja import NinjaAPI
 
-from .routers import account, auth, credits, services, users
+from .routers import account, auth, credits, users
 
 api = NinjaAPI(
     title='User Service API',
@@ -11,6 +11,5 @@ api = NinjaAPI(
 # Register routers
 api.add_router('/', account.router, tags=['Account'])
 api.add_router('/auth/', auth.router, tags=['Authentication'])
-api.add_router('/services/', services.router, tags=['Services'])
 api.add_router('/users/', users.router, tags=['Users'])
 api.add_router('/users/', credits.router, tags=['Credits'])

@@ -14,12 +14,6 @@ from .credits import (
     CreditTransactionResponse,
     UserCreditsResponse,
 )
-from .services import (
-    ServiceCreate,
-    ServiceListResponse,
-    ServiceResponse,
-    ServiceUpdate,
-)
 from .users import (
     UserCreateRequest,
     UserDeactivateRequest,
@@ -41,10 +35,6 @@ __all__ = [
     'CreditTransactionRequest',
     'CreditTransactionResponse',
     'UserCreditsResponse',
-    'ServiceCreate',
-    'ServiceListResponse',
-    'ServiceResponse',
-    'ServiceUpdate',
     'UserCreateRequest',
     'UserDeactivateRequest',
     'UserResponse',

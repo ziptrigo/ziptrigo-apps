@@ -8,7 +8,6 @@ The Users service provides:
 - **Single Sign-On (SSO)** across multiple first-party web apps
 - **Centralized user identity** management
 - **JWT-based authentication** for users
-- **Client ID/Secret authentication** for services
 - **Credit management system** for user accounts
 - **RESTful API** under `/api`
 
@@ -76,15 +75,6 @@ Response 200:
   "token_type": "Bearer"
 }
 ```
-
-### Services (Admin only)
-
-Create a service to obtain `client_id` and `client_secret` the first time.
-
-- `POST /api/services` - Create a new service
-- `GET /api/services` - List all services
-- `GET /api/services/{id}` - Get service details
-- `PATCH /api/services/{id}` - Update service
 
 ### User Management (Admin only)
 
@@ -187,10 +177,9 @@ Default superuser credentials for local testing (if you created as shown above):
 - Password: `admin123`
 
 Quick manual test sequence:
-1) Create a service (admin-only): `POST /api/services` — returns generated `client_id` and `client_secret`.
-2) Create a user: `POST /api/users` with email and optional password.
-3) Login as that user: `POST /api/auth/login` — receive JWT.
-4) Call protected endpoints with `Authorization: Bearer <token>`.
+1) Create a user: `POST /api/users` with email and optional password.
+2) Login as that user: `POST /api/auth/login` — receive JWT.
+3) Call protected endpoints with `Authorization: Bearer <token>`.
 
 Django admin: http://127.0.0.1:8020/admin/
 
@@ -202,21 +191,18 @@ src/
     models/               # Django models package (one model per file)
       __init__.py         # Re-exports models for `from src.users.models import ...`
       credit_transaction.py
-      service.py
       user.py
     schemas/              # Pydantic v2 schemas split by domain
       __init__.py
       account.py
       auth.py
       credits.py
-      services.py
       users.py
     routers/              # Django Ninja routers split by domain
       __init__.py
       account.py
       auth.py
       credits.py
-      services.py
       users.py
     admin.py              # Django admin registrations
     api.py                # Main NinjaAPI instance

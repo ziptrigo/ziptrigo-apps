@@ -1,13 +1,12 @@
 # Users Service Project
 
 ## Project Overview
-Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT-based user authentication, service (machine-to-machine) authentication via client_id/client_secret, and a minimal HTMX landing page.
+Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT-based user authentication, minimal HTMX landing page, and user credit management.
 
 ## Goals
 - Single source of truth for user identity
 - Issue JWTs that client apps can validate
 - Provide a clean REST API under `/api`
-- Manage service-level credentials for first-party apps
 - Manage user credit balances with transaction history
 
 ## Tech Stack
@@ -41,7 +40,6 @@ The Django project config lives in `config/`, and the Django app is `src/users` 
 - Pydantic v2 schemas for all request/response validation
 - Endpoints (admin-only unless noted):
   - POST `/api/auth/login` (open) — returns JWT for active users
-  - Services: POST/GET `/api/services/`, GET/PATCH `/api/services/{id}`
   - Users:
     - POST `/api/users/` - Create user
     - GET/PATCH/DELETE `/api/users/{user_id}` (soft delete)
