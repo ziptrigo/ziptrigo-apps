@@ -160,14 +160,11 @@ JAZZMIN_SETTINGS = {
     'site_brand': 'User',
     'welcome_sign': 'User Admin',
     'copyright': 'User Project',
-    'search_model': ['users.User', 'users.Service', 'users.Role', 'users.Permission'],
+    'search_model': ['users.User'],
     'icons': {
         'auth': 'fas fa-users-cog',
         'auth.user': 'fas fa-user',
         'auth.Group': 'fas fa-users',
-        'users.Permission': 'fas fa-key',
-        'users.Role': 'fas fa-user-tag',
-        'users.Service': 'fas fa-cubes',
         'users.User': 'fas fa-user-circle',
     },
 }
