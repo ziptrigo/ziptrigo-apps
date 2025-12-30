@@ -1,4 +1,3 @@
-import uuid
 from datetime import timedelta
 
 import pytest
@@ -54,5 +53,3 @@ def admin_user():
 @pytest.fixture()
 def regular_user():
     return UserFactory()
-
-

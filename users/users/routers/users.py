@@ -93,5 +93,3 @@ def reactivate_user(request, user_id: UUID):
     user.reactivate()
 
     return UserResponse.model_validate(user)
-
-
