@@ -9,13 +9,11 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.sites import NotRegistered
 from django.contrib.auth.models import Group
-from django.db import transaction
-from django.db.models import F
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.urls import path
 from django.utils import timezone
-
+from .models import CreditTransaction, User
 from .models import CreditTransaction, CreditTransactionType, User
 from .services.email_service import send_email
 
@@ -92,35 +90,6 @@ class TestEmailForm(forms.Form):
     )
 
 
-class CreditAdjustmentForm(forms.Form):
-    """Form for adding or removing credits from a user."""
-
-    user_email: forms.EmailField = forms.EmailField(
-        label='User email',
-        required=True,
-        help_text='Email address of the user to adjust.',
-        widget=forms.EmailInput(attrs={'size': '60'}),
-    )
-    direction: forms.ChoiceField = forms.ChoiceField(
-        label='Direction',
-        required=True,
-        choices=[('add', 'Add'), ('spend', 'Spend')],
-        initial='add',
-    )
-    amount: forms.IntegerField = forms.IntegerField(
-        label='Amount',
-        required=True,
-        min_value=1,
-        help_text='Number of credits to add/spend. Must be > 0.',
-    )
-    description: forms.CharField = forms.CharField(
-        label='Description',
-        required=False,
-        max_length=255,
-        help_text='Optional description for the ledger entry.',
-        widget=forms.TextInput(attrs={'size': '60'}),
-    )
-
 
 class CustomAdminSite(admin.AdminSite):
     """Custom admin site with additional tools."""
@@ -143,7 +112,6 @@ class CustomAdminSite(admin.AdminSite):
         environment_variables: list[tuple[str, str]] | None = None
         initial_email = getattr(request.user, 'email', '') or ''
         email_form: forms.Form = TestEmailForm(initial={'recipient': initial_email})
-        credit_form: forms.Form = CreditAdjustmentForm()
 
         if not request.user.is_superuser:
             messages.error(request, 'You do not have permission to access this page.')
@@ -151,7 +119,6 @@ class CustomAdminSite(admin.AdminSite):
                 **self.each_context(request),
                 'title': 'Admin Tools',
                 'email_form': email_form,
-                'credit_form': credit_form,
                 'environment': environment,
                 'environment_variables': None,
             }
@@ -232,52 +199,11 @@ class CustomAdminSite(admin.AdminSite):
                 messages.success(request, 'Environment variables loaded.')
             except Exception as exc:  # pragma: no cover
                 messages.error(request, f'Failed to load environment variables: {exc}')
-        elif request.method == 'POST' and 'adjust_credits' in request.POST:
-            credit_form = CreditAdjustmentForm(request.POST)
-            if credit_form.is_valid():
-                user_email = credit_form.cleaned_data['user_email']
-                direction = credit_form.cleaned_data['direction']
-                amount = int(credit_form.cleaned_data['amount'])
-                description = str(credit_form.cleaned_data.get('description') or '').strip()
-                if not description:
-                    description = 'Admin adjustment'
-
-                try:
-                    target = User.objects.get(email=user_email)
-                except User.DoesNotExist:
-                    messages.error(request, f'No user found with email: {user_email}')
-                else:
-                    delta = amount if direction == 'add' else -amount
-                    try:
-                        with transaction.atomic():
-                            User.objects.filter(pk=target.pk).update(
-                                credits=F('credits') + delta
-                            )
-                            CreditTransaction.objects.create(
-                                user=target,
-                                amount=delta,
-                                type=CreditTransactionType.ADJUSTMENT,
-                                description=description,
-                            )
-                        target.refresh_from_db(fields=['credits'])
-                        messages.success(
-                            request,
-                            (
-                                f'Adjusted credits for {target.email}. '
-                                f'New balance: {target.credits}.'
-                            ),
-                        )
-                        credit_form = CreditAdjustmentForm()
-                    except Exception as exc:  # pragma: no cover
-                        messages.error(request, f'Failed to adjust credits: {exc}')
-            else:
-                messages.error(request, 'Please correct the errors below.')
 
         context = {
             **self.each_context(request),
             'title': 'Admin Tools',
             'email_form': email_form,
-            'credit_form': credit_form,
             'environment': environment,
             'environment_variables': environment_variables,
         }

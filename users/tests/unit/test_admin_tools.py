@@ -1,8 +1,7 @@
 import pytest
 from django.urls import reverse
 
-from src.users.models import CreditTransaction, User
-from tests.factories import UserFactory
+from src.users.models import User
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -62,32 +61,6 @@ def test_send_test_email_invokes_service(client, admin_user: User, monkeypatch):
     assert response.status_code == 200
     assert captured['to'] == 'ops@example.com'
 
-
-def test_adjust_credits_creates_transaction(client, admin_user: User):
-    """Adjusting credits should update the ledger and balance."""
-
-    client.force_login(admin_user)
-    url = reverse('custom_admin:admin_tools')
-    target = UserFactory(email='target@example.com', credits=10)
-
-    response = client.post(
-        url,
-        {
-            'user_email': target.email,
-            'direction': 'add',
-            'amount': 25,
-            'description': 'Manual top-up',
-            'adjust_credits': '1',
-        },
-    )
-
-    assert response.status_code == 200
-    target.refresh_from_db()
-    assert target.credits == 35
-
-    transaction = CreditTransaction.objects.get(user=target)
-    assert transaction.amount == 25
-    assert transaction.description == 'Manual top-up'
 
 
 def test_admin_dashboard_shows_tools_link(client, admin_user: User):

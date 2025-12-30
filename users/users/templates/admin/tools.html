@@ -32,49 +32,6 @@
         </form>
     </div>
 
-    <div class="module" style="margin-top: 40px;">
-        <h2>Credits Adjustment</h2>
-        <p>Manually adjust a user's credits. This will always create a ledger entry of type <code>adjustment</code>.</p>
-        <form method="post" action="{% url 'custom_admin:admin_tools' %}" style="margin-top: 15px;">
-            {% csrf_token %}
-
-            <div style="display: grid; grid-template-columns: 1fr 200px 160px; gap: 10px; align-items: end;">
-                <div>
-                    {{ credit_form.user_email.errors }}
-                    <label for="id_user_email" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.user_email.label }}:</label>
-                    {{ credit_form.user_email }}
-                    {% if credit_form.user_email.help_text %}
-                        <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ credit_form.user_email.help_text }}</div>
-                    {% endif %}
-                </div>
-
-                <div>
-                    {{ credit_form.direction.errors }}
-                    <label for="id_direction" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.direction.label }}:</label>
-                    {{ credit_form.direction }}
-                </div>
-
-                <div>
-                    {{ credit_form.amount.errors }}
-                    <label for="id_amount" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.amount.label }}:</label>
-                    {{ credit_form.amount }}
-                </div>
-            </div>
-
-            <div style="margin-top: 10px;">
-                {{ credit_form.description.errors }}
-                <label for="id_description" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ credit_form.description.label }}:</label>
-                {{ credit_form.description }}
-                {% if credit_form.description.help_text %}
-                    <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ credit_form.description.help_text }}</div>
-                {% endif %}
-            </div>
-
-            <div style="margin-top: 10px;">
-                <input type="submit" name="adjust_credits" value="Apply" class="button" style="padding: 8px 16px;">
-            </div>
-        </form>
-    </div>
 
     <div class="module" style="margin-top: 40px;">
         <h2>Show Environment</h2>
