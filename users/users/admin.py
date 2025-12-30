@@ -13,7 +13,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.urls import path
 from django.utils import timezone
-from .models import CreditTransaction, User
+
 from .models import CreditTransaction, CreditTransactionType, User
 from .services.email_service import send_email
 
@@ -88,7 +88,6 @@ class TestEmailForm(forms.Form):
         help_text='Email address to send the test email to.',
         widget=forms.EmailInput(attrs={'size': '60'}),
     )
-
 
 
 class CustomAdminSite(admin.AdminSite):

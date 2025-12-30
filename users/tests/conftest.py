@@ -28,7 +28,7 @@ def _jwt_settings(settings):
         'USER_ID_FIELD': 'id',
         'USER_ID_CLAIM': 'sub',
         'USER_AUTHENTICATION_RULE': 'ninja_jwt.authentication.default_user_authentication_rule',
-        'AUTH_TOKEN_CLASSES': ('src.users.tokens.CustomAccessToken',),
+        'AUTH_TOKEN_CLASSES': ('users.users.tokens.CustomAccessToken',),
         'TOKEN_TYPE_CLAIM': 'token_type',
         'JTI_CLAIM': 'jti',
         'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
@@ -40,7 +40,7 @@ def _jwt_settings(settings):
 @pytest.fixture()
 def api_client():
     from ninja.testing import TestClient
-    from src.users.api import api
+    from users.users.api import api
 
     return TestClient(api)
 

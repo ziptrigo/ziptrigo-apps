@@ -9,8 +9,8 @@ When deploying with an API gateway, route /users/* requests to this service.
 from django.urls import path
 from django.views.generic import TemplateView
 
-from users.api import api
 from users.admin import custom_admin_site
+from users.api import api
 from users.views import (
     account_created_page,
     account_page,
