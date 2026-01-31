@@ -4,20 +4,20 @@ import subprocess
 import sys
 from enum import Enum
 from itertools import chain
+from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.console import Console
 from rich.logging import RichHandler
 
 from admin import PROJECT_ROOT
-from common.environment import Environment
-from common.web_app import WebApp
+from config.constants import Environment
 
 EnvironmentAnnotation = Annotated[
-    Environment, typer.Argument(help='Environment to start the server in.', show_default=True)
+    Environment | None,
+    typer.Argument(help='Environment to use.', show_default=False),
 ]
-
-WebAppAnnotation = Annotated[WebApp, typer.Argument(help='Application to use.', show_default=False)]
 
 DryAnnotation = Annotated[
     bool,
@@ -36,21 +36,109 @@ class OS(str, Enum):
     Windows = 'win'
 
 
-def set_environment(environment: str | Environment, web_app: WebApp | None = None):
-    from dotenv import load_dotenv
+class NoHighlightRichHandler(RichHandler):
+    """Custom RichHandler that completely disables highlighting."""
 
-    from common.environment import select_env
+    def render_message(self, record, message):
+        """Override to disable auto-highlighting while keeping markup."""
+        from rich.text import Text
 
-    selection = select_env(PROJECT_ROOT, environment, web_app)
-    if selection.errors:
-        raise ValueError('\n'.join(selection.errors))
-    if not selection.environment:
-        raise ValueError('Environment not set.')
+        # Process markup but don't apply highlighting
+        if self.markup:
+            return Text.from_markup(message)
+        return Text(message)
 
-    os.environ['ENVIRONMENT'] = selection.environment.value  # type: ignore
 
-    for env_path in selection.all_env_paths:
-        load_dotenv(dotenv_path=env_path, override=True)
+def read_env_file_from_path(env_path: Path) -> dict[str, str]:
+    """
+    Read a `.env` file. Minimal parser, no dependencies.
+    Does not update environment.
+
+    Rules:
+
+    - Ignores blank lines and comments.
+    - Supports `export KEY=VALUE`.
+    - Strips surrounding single/double quotes.
+    """
+    if not env_path.exists():
+        raise FileNotFoundError(f'Env file not found: {env_path}')
+
+    env = {}
+    for raw_line in env_path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        if line.startswith('export '):
+            line = line.removeprefix('export ').lstrip()
+
+        key, sep, value = line.partition('=')
+        if not sep:
+            continue
+
+        key = key.strip()
+        value = value.strip()
+        if (value.startswith("'") and value.endswith("'")) or (
+            value.startswith('"') and value.endswith('"')
+        ):
+            value = value[1:-1]
+
+        env[key] = value
+
+    return env
+
+
+def read_env_file(environment: Environment) -> dict[str, str]:
+    return read_env_file_from_path(PROJECT_ROOT / f'.env.{environment.value}')
+
+
+def select_environment(
+    environment: Environment | None = None,
+    set_env: bool = True,
+    **select_enum_kwargs,
+) -> Environment:
+    """
+    Select an environment and load its `.env` file into `os.environ`.
+
+    This project used to rely on `python-dotenv` for this. We keep the behavior (populate
+    `os.environ`) without depending on `python-dotenv`.
+    """
+
+    from textual_searchable_selectionlist.options import SelectionStrategy
+    from textual_searchable_selectionlist.select import select_enum
+
+    if environment:
+        env = Environment(environment)
+    else:
+        try:
+            selected = select_enum(
+                Environment,
+                selection_strategy=SelectionStrategy.ONE,
+                title='Environment',
+                select_by='value',
+                **select_enum_kwargs,
+            )
+        except Exception as e:
+            logger.error(f'Error selecting environment: {type(e).__name__}: {e}')
+            raise typer.Exit(1)
+
+        if not selected:
+            logger.error('No environment selected.')
+            raise typer.Exit(1)
+
+        env = selected[0]
+
+    if set_env:
+        logger.debug(f'Setting environment `{env.value}`')
+        os.environ['ENVIRONMENT'] = env.value
+
+        resolved_env_path = PROJECT_ROOT / f'.env.{env.value}'
+        env_values = read_env_file_from_path(resolved_env_path)
+        os.environ.update(env_values)
+    else:
+        logger.debug(f'Selected environment `{env.value}`')
+
+    return env
 
 
 def get_os() -> OS:
@@ -76,7 +164,8 @@ def run(*args, dry: bool = False, **kwargs) -> subprocess.CompletedProcess | Non
     If you need access to the output, add the ``capture_output=True`` argument and do
     ``.stdout.strip()`` to get the output as a string.
     """
-    logger.info(' '.join(map(str, args)))
+    args_filtered = [x for arg in args if arg is not None and (x := str(arg).strip())]  # noqa
+    logger.info(' '.join(args_filtered))
 
     if dry:
         return None
@@ -89,7 +178,7 @@ def run(*args, dry: bool = False, **kwargs) -> subprocess.CompletedProcess | Non
     )
 
     try:
-        return subprocess.run(args, **(defaults | kwargs))  # type: ignore
+        return subprocess.run(args_filtered, **(defaults | kwargs))  # type: ignore
     except subprocess.CalledProcessError as e:
         msg = str(e)
         if e.stdout:
@@ -159,12 +248,15 @@ def multiple_parameters(parameter: str, *options) -> list[str]:
 def get_logger(name: str | None = 'typer-invoke', level=logging.DEBUG) -> logging.Logger:
     """Set up logging configuration with Rich handler and custom formatting."""
 
-    # Create logger
     _logger = logging.getLogger(name)
     _logger.setLevel(level)
     _logger.handlers.clear()
-    handler = RichHandler(
+
+    console = Console(markup=True)
+
+    handler = NoHighlightRichHandler(
         level=level,
+        console=console,
         show_time=False,
         show_level=True,
         show_path=False,
@@ -172,12 +264,9 @@ def get_logger(name: str | None = 'typer-invoke', level=logging.DEBUG) -> loggin
         rich_tracebacks=False,
     )
 
-    # Set custom format string and add handler
-    formatter = logging.Formatter(fmt='%(message)s', datefmt='[%X]')  # Time format: [HH:MM:SS]
+    formatter = logging.Formatter(fmt='%(message)s', datefmt='[%X]')
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
-
-    # Prevent logs from being handled by root logger (avoid duplicate output)
     _logger.propagate = False
 
     return _logger
