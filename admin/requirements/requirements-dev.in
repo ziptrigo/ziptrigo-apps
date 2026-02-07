@@ -19,5 +19,6 @@ pytest-cov
 pytest-django
 playwright
 pytest-playwright
+textual-searchable-selectionlist
 typer
 typer-invoke
