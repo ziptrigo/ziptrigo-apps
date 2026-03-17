@@ -3,8 +3,9 @@
 Testing with pytest.
 """
 
-import typer
 from typing import Annotated
+
+import typer
 
 from admin.utils import DryAnnotation, run
 
