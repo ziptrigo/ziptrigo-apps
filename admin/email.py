@@ -5,7 +5,6 @@ Send emails using AWS SES.
 AWS credentials must be configured.
 """
 
-
 import os
 from typing import Annotated
 

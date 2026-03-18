@@ -6,6 +6,7 @@ Requires the AWS CLI to be installed.
 
 https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html
 """
+
 import os
 from pathlib import Path
 from typing import Annotated
