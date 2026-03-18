@@ -15,10 +15,16 @@ from rich.text import Text
 
 from admin import PROJECT_ROOT
 from common.environment import Environment
+from common.web_app import WebApp
 
 EnvironmentAnnotation = Annotated[
     Environment | None,
     typer.Argument(help='Environment to use.', show_default=False),
+]
+
+WebAppAnnotation = Annotated[
+    WebApp,
+    typer.Argument(help='Web app to use.', show_default=False),
 ]
 
 DryAnnotation = Annotated[
@@ -45,7 +51,6 @@ class NoHighlightRichHandler(RichHandler):
         """Override to disable auto-highlighting while keeping markup."""
         from rich.text import Text
 
-        # Process markup but don't apply highlighting
         if self.markup:
             return Text.from_markup(message)
         return Text(message)
@@ -122,7 +127,6 @@ def select_environment(
     This project used to rely on `python-dotenv` for this. We keep the behavior (populate
     `os.environ`) without depending on `python-dotenv`.
     """
-
     from textual_searchable_selectionlist.options import SelectionStrategy
     from textual_searchable_selectionlist.select import select_enum
 
@@ -160,9 +164,41 @@ def select_environment(
     return env
 
 
+def set_environment(
+    environment: Environment | str | None = None,
+    web_app: WebApp | str | None = None,
+) -> Environment:
+    """Load the selected common and app-specific environment files into `os.environ`."""
+    from common.environment import select_env
+
+    try:
+        resolved_web_app = (
+            web_app if web_app is None or isinstance(web_app, WebApp) else WebApp(web_app)
+        )
+    except ValueError:
+        logger.error(f'Unknown web app: {web_app}')
+        raise typer.Exit(1)
+
+    selection = select_env(PROJECT_ROOT, environment=environment, web_app=resolved_web_app)
+
+    for warning in selection.warnings:
+        logger.warning(warning)
+
+    if selection.errors or not selection.environment:
+        for error in selection.errors:
+            logger.error(error)
+        raise typer.Exit(1)
+
+    os.environ['ENVIRONMENT'] = selection.environment.value
+    for env_path in selection.all_env_paths:
+        os.environ.update(read_env_file_from_path(env_path))
+
+    return selection.environment
+
+
 def get_os() -> OS:
     """
-    Similar to ``sys.platform`` and ``platform.system()``, but less ambiguous by returning an Enum
+    Similar to `sys.platform` and `platform.system()`, but less ambiguous by returning an Enum
     instead of a string.
 
     Doesn't make granular distinctions of linux variants, OS versions, etc.
@@ -180,12 +216,12 @@ def run(
     """
     Run a CLI command synchronously (i.e., wait for the command to finish) and return the result.
 
-    This function is a wrapper around ``subprocess.run(...)``.
+    This function is a wrapper around `subprocess.run(...)`.
 
-    If you need access to the output, add the ``capture_output=True`` argument and do
-    ``.stdout`` to get the output as a string.
+    If you need access to the output, add the `capture_output=True` argument and do
+    `.stdout` to get the output as a string.
 
-    Note that ``stdout`` and ``stderr`` will be stripped of ANSI escape sequences by default.
+    Note that `stdout` and `stderr` will be stripped of ANSI escape sequences by default.
     """
     logger.info(' '.join(map(str, args)))
 
@@ -230,7 +266,7 @@ def run_async(*args, dry: bool = False, **kwargs) -> subprocess.Popen | None:
         process.kill()              # Send SIGKILL (force)
         process.returncode          # Access return code after completion
 
-    See ``subprocess.Popen(...)`` for more details.
+    See `subprocess.Popen(...)` for more details.
     """
     logger.info(' '.join(map(str, args)))
 
@@ -280,7 +316,6 @@ def strip_ansi(text: str) -> str:
 
 def get_logger(name: str | None = 'typer-invoke', level=logging.DEBUG) -> logging.Logger:
     """Set up logging configuration with Rich handler and custom formatting."""
-
     _logger = logging.getLogger(name)
     _logger.setLevel(level)
     _logger.handlers.clear()

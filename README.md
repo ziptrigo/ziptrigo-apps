@@ -46,32 +46,43 @@ ziptrigo-apps/
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.13+
+- `uv`
 - Docker and Docker Compose (for containerized development)
 - Git
 
 ### Local Development (without Docker)
 
+Create and activate the shared development environment at the repo root, then sync the locked
+dependencies:
+
+```powershell
+uv venv .venv313 --python 3.13
+.venv313\Scripts\Activate.ps1
+uv sync --active --group dev
+```
+
 #### Users Service
 
-```
-cd users
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r ../requirements/users.txt
-python manage.py migrate
-python manage.py runserver 8010
+```powershell
+python users\manage.py migrate
+python users\manage.py runserver 8010
 ```
 
 #### QR Code Service
 
+```powershell
+python qr_code\manage.py migrate
+python qr_code\manage.py runserver 8020
 ```
-cd qr_code
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r ../requirements/qr_code.txt
-python manage.py migrate
-python manage.py runserver 8020
+
+You can also use the shared admin commands:
+
+```powershell
+inv server run users
+inv server run qr_code
+inv test unit users
+inv test unit qr_code
 ```
 
 ### Docker Development
@@ -137,20 +148,21 @@ Both services use external databases. Configure via `DATABASE_URL` environment v
 
 ### Running Tests
 
-```
-# Users service tests
-cd users
-pytest
-
-# QR Code service tests
-cd qr_code
-pytest
+```powershell
+inv test unit users
+inv test unit qr_code
+inv test e2e
 ```
 
 ### Linting and Type Checking
 
-Each service has its own admin utilities for linting and type checking. Check the respective
-`admin/` directories for available commands.
+Shared repo tooling lives under `admin/` and uses `ruff` plus `mypy`:
+
+```powershell
+inv lint all
+inv lint ruff --check .
+inv lint mypy .
+```
 
 ### Adding Shared Code
 

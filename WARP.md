@@ -32,7 +32,7 @@ This document provides context for AI agents (like Warp Agent) working on the zi
 
 ### Independent Deployment
 - Each service has its own Dockerfile for separate container builds
-- Separate dependencies managed via `requirements/*.txt` files
+- Shared dependencies are managed from the root `pyproject.toml` and `uv.lock`
 - Each service maintains its own SECRET_KEY and configuration
 - Services use external databases (not shared)
 
@@ -79,12 +79,9 @@ ziptrigo-apps/
 │   ├── manage.py
 │   └── .env.dev                   # Development environment variables
 │
-├── requirements/                   # Python dependencies
-│   ├── base.txt                   # Shared: Django, Jazzmin
-│   ├── users.txt                  # Users-specific: django-ninja, django-ninja-jwt
-│   └── qr_code.txt               # QR Code-specific: django-ninja-extra, whitenoise, etc.
-│
 ├── docker-compose.yml             # Orchestrates both services
+├── pyproject.toml                 # Shared dependencies and tool configuration
+├── uv.lock                        # Locked dependency graph for all apps
 ├── README.md                      # User-facing documentation
 └── WARP.md                       # This file (AI agent context)
 ```
@@ -170,9 +167,9 @@ colors: {
 - Run tests from service directory: `cd users && pytest`
 
 ### Admin Utilities
-- Both services have `admin/` directory with invoke/typer-based utilities
+- The repo has a shared root `admin/` directory with invoke/typer-based utilities
 - Common commands: `server.py`, `test.py`, `lint.py`, `pip.py`
-- QR Code has additional: `aws.py`, `db.py`, `email.py`, `openapi.py`, `qrcode.py`
+- App-specific helpers include `aws.py`, `email.py`, `openapi.py`, and `qrcode.py`
 
 ## Common Gotchas
 
@@ -207,17 +204,15 @@ colors: {
 4. Update service Dockerfile if new dependencies
 
 ### Adding Dependencies
-1. Determine if shared or service-specific
-2. Add to appropriate requirements file:
-   - `requirements/base.txt` for shared
-   - `requirements/users.txt` or `requirements/qr_code.txt` for service-specific
-3. Use `-r base.txt` in service files to include shared deps
+1. Add shared runtime dependencies to `[project.dependencies]` in `pyproject.toml`
+2. Add app-specific or tooling dependencies to `[dependency-groups]`
+3. Refresh `uv.lock`
 4. Rebuild Docker images: `docker-compose build`
 
 ### Running Services
 - **Docker**: `docker-compose up` (both) or `docker-compose up users` (one)
-- **Local**: `cd users && python manage.py runserver 8010`
-- **Tests**: `cd users && pytest`
+- **Local**: `uv sync --active --group dev`, then `python users/manage.py runserver 8010`
+- **Tests**: `inv test unit users`
 
 ## Migration Guide (for reference)
 
@@ -226,7 +221,7 @@ This repo was created via:
 2. `git subtree add --prefix=qr_code qr-code-repo/main --squash`
 3. Created `common/` for shared code
 4. Updated settings to import from common base
-5. Created unified requirements structure
+5. Created shared root tooling and dependency management
 6. Created Dockerfiles and docker-compose.yml
 7. Updated URL configurations for future API gateway
 
@@ -235,7 +230,6 @@ This repo was created via:
 - [ ] Implement cross-service authentication (QR Code → Users)
 - [ ] Add API Gateway (nginx/Traefik) with proper routing
 - [ ] Extract more shared utilities to common/
-- [ ] Migrate from requirements.txt to unified pyproject.toml
 - [ ] Add shared database utilities if services need to share data
 - [ ] Consider shared logging/monitoring infrastructure
 

@@ -2,6 +2,7 @@
 """
 Generate OpenAPI specification.
 """
+
 import json
 import os
 import sys
@@ -53,7 +54,7 @@ def generate_openapi(
     file: Annotated[
         Path | None,
         typer.Option(
-            help='File path to save the specification. If not provided, ' 'displays on screen.',
+            help='File path to save the specification. If not provided, displays on screen.',
             show_default=False,
         ),
     ] = None,

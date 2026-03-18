@@ -61,7 +61,7 @@ Key settings live in `config/settings.py`:
 - Email-based auth backend: `src.users.backends.EmailBackend`.
 
 ## How to Run (dev)
-1. Create venv and install deps: `pip install -r admin/requirements/requirements.txt`
+1. Create the shared repo venv and sync deps: `uv venv ../.venv313 --python 3.13 && uv sync --active --group dev`
 2. Migrate: `python manage.py migrate`
 3. Create superuser: `python manage.py createsuperuser --email admin@example.com`
 4. Run: `python manage.py runserver`
@@ -78,6 +78,8 @@ Key settings live in `config/settings.py`:
 - PEP8 with 100-char line limit
 - Strings are single quotes; docstrings use triple double quotes
 - Python 3.12+ typing style (e.g., `str | None`)
+- Format and import-sort with `ruff`
+- Type-check with `mypy`
 
 ## Documentation
 - Keep root `README.md` up to date

@@ -22,9 +22,12 @@ A complete QR code generation and management service with Django Ninja async API
 
 ### Windows
 ```powershell
+# Create and activate the shared environment
+uv venv ..\.venv313 --python 3.13
+..\.venv313\Scripts\Activate.ps1
+
 # Install dependencies
-.venv313\Scripts\Activate.ps1
-pip install -r requirements.txt
+uv sync --active --group dev
 
 # Setup database
 python manage.py migrate
@@ -38,13 +41,13 @@ python manage.py runserver
 ```
 
 ### Mac / Linux
-```
-# Create and activate virtual environment
-python3.13 -m venv .venv313
-source .venv313/bin/activate
+```bash
+# Create and activate the shared virtual environment
+uv venv ../.venv313 --python 3.13
+source ../.venv313/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
+uv sync --active --group dev
 
 # Copy environment file (optional but recommended)
 cp .env.example .env
@@ -184,8 +187,8 @@ See [setup.md](docs/setup.md) for complete installation, configuration, and usag
 
 ## Development
 
-- Sort imports: `isort .`
-- Format code: `black .`
+- Lint and fix: `ruff check --fix .`
+- Format code: `ruff format .`
 
 ## CLI Usage
 
@@ -210,7 +213,7 @@ python cli.py list
 - **Validation**: Pydantic v2
 - **CLI**: typer
 - **Database**: SQLite (MySQL / PostgreSQL ready)
-- **Tooling**: [pytest](https://pytest.org), pytest-asyncio, pytest-cov, black, isort, flake8, mypy
+- **Tooling**: [pytest](https://pytest.org), pytest-asyncio, pytest-cov, ruff, mypy, uv
 
 ## License
 
