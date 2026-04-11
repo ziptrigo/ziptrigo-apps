@@ -1,4 +1,4 @@
-from .credit_transaction import CreditTransaction, CreditTransactionType
+from django.conf import settings
 from .qrcode import (
     QRCode,
     QRCodeErrorCorrection,
@@ -6,13 +6,8 @@ from .qrcode import (
     QRCodeType,
     generate_short_code,
 )
-from .user import InsufficientCreditsError, User
 
 __all__ = [
-    'User',
-    'InsufficientCreditsError',
-    'CreditTransaction',
-    'CreditTransactionType',
     'QRCode',
     'QRCodeFormat',
     'QRCodeErrorCorrection',

@@ -5,41 +5,42 @@ Services are developed independently but share common code and infrastructure.
 
 ## Architecture
 
-This repository contains two separate Django applications:
+This repository contains multiple services and shared components:
 
-- **users** - User authentication and authorization service
-- **qr_code** - QR code generation and management service
+- **user-service** - Central user authentication, authorization, and profile management service.
+- **qr_code** - QR code generation and management service (consumes `user-service` for auth).
+- **shared/auth_client** - A shared Python package for services to easily integrate with `user-service`.
+- **shared/utils** - Common utilities, models, and settings shared across services.
+- **admin** - Project-level administration and maintenance scripts.
 
 ### Key Features
 
-- **Monorepo Structure**: Both services live in the same repository for easier code sharing and
-  unified development
-- **Shared Configuration**: Common Django settings in `common/settings/base.py` reduce duplication
-- **Independent Deployment**: Each service has its own Dockerfile and can be deployed separately
-- **Docker Compose**: Local development orchestration for both services
-- **API Gateway Ready**: URL configurations support future integration with an API gateway
+- **Service-Oriented Architecture**: Decoupled services that communicate via well-defined APIs and shared authentication.
+- **Shared Packages**: Common logic is encapsulated in installable Python packages in the `shared/` directory.
+- **Unified Auth**: `user-service` is the single source of truth for users; other services use `auth_client` to verify identity.
+- **Independent Deployment**: Each service has its own Dockerfile and can be scaled or deployed separately.
+- **Docker Compose**: Orchestration for local development of all services and the database.
 
 ## Project Structure
 
 ```
 ziptrigo-apps/
-├── common/               # Shared code across services
-│   └── settings/
-│       └── base.py       # Shared Django settings
-├── users/                # Users service
-│   ├── config/           # Django configuration
-│   ├── users/            # Application code
-│   ├── tests/            # Tests
-│   ├── Dockerfile        # Docker configuration
-│   └── .env.dev          # Development environment variables
-├── qr_code/              # QR Code service
-│   ├── config/           # Django configuration
-│   ├── qr_code/          # Application code
-│   ├── tests/            # Tests
-│   ├── Dockerfile        # Docker configuration
-│   └── .env.dev          # Development environment variables
-├── docker-compose.yml    # Docker Compose configuration
-└── WARP.md               # AI agent context
+├── admin/               # Project administration scripts (lint, test, etc.)
+├── shared/              # Shared Python packages
+│   ├── auth_client/     # User-service integration client
+│   └── utils/           # Shared utilities and base settings
+├── user-service/        # Authentication & User service
+│   ├── config/          # Django configuration
+│   ├── users/           # Application logic
+│   ├── tests/           # Service-specific tests
+│   └── Dockerfile       # Container configuration
+├── qr_code/             # QR Code service
+│   ├── config/          # Django configuration
+│   ├── qr_code/         # Application logic
+│   ├── tests/           # Service-specific tests
+│   └── Dockerfile       # Container configuration
+├── docker-compose.yml   # Local development orchestration
+└── WARP.md              # AI agent context
 ```
 
 ## Getting Started
@@ -50,6 +51,14 @@ ziptrigo-apps/
 - `uv`
 - Docker and Docker Compose (for containerized development)
 - Git
+
+### Local Development (with Docker)
+
+The easiest way to get started is using Docker Compose:
+
+```bash
+docker-compose up --build
+```
 
 ### Local Development (without Docker)
 
@@ -105,7 +114,7 @@ docker-compose up qr_code
 
 ### Accessing Services
 
-- **Users Service**: http://localhost:8010
+- **User Service**: http://localhost:8010
   - Admin: http://localhost:8010/admin/
   - API: http://localhost:8010/api/
   - API Docs: http://localhost:8010/api/docs
@@ -121,7 +130,7 @@ docker-compose up qr_code
 
 Each service requires its own environment configuration:
 
-#### Users Service (.env.dev)
+#### User Service (.env.dev)
 - `DEBUG` - Debug mode (True/False)
 - `SECRET_KEY` - Django secret key
 - `ALLOWED_HOSTS` - Comma-separated list of allowed hosts
@@ -166,11 +175,11 @@ inv lint mypy .
 
 ### Adding Shared Code
 
-Place shared utilities, models, or helpers in the `common/` directory. Both services can import
-from this directory:
+Place shared utilities, models, or helpers in the `shared/utils/utils/` directory. Both services can import
+from the `utils` package:
 
 ```python
-from common.settings.base import COMMON_MIDDLEWARE
+from utils.settings.base import COMMON_MIDDLEWARE
 ```
 
 ## Deployment
@@ -188,18 +197,18 @@ from common.settings.base import COMMON_MIDDLEWARE
 
 When deploying behind an API gateway (nginx, Traefik, etc.):
 
-1. Update `users/config/urls.py` - uncomment the prefixed urlpatterns
+1. Update `user-service/config/urls.py` - uncomment the prefixed urlpatterns
 2. Update `qr_code/config/urls.py` - uncomment the prefixed urlpatterns
 3. Configure gateway to route:
-   - `/users/*` → Users service
+   - `/users/*` → User service
    - `/qr-code/*` → QR Code service
 
 ## Future Plans
 
-- **Shared Authentication**: QR Code service will use Users service for authentication
-- **Additional Services**: More microservices can be added following the same pattern
-- **API Gateway**: Implement unified entry point for all services
-- **Common Utilities**: Expand shared code for database utilities, logging, etc.
+- **Service Communication**: Implement more robust inter-service communication patterns.
+- **Shared Authentication**: Enhance `auth_client` for more granular permission checks.
+- **Additional Services**: More microservices can be added following the same pattern.
+- **API Gateway**: Implement unified entry point for all services.
 
 ## Design System
 

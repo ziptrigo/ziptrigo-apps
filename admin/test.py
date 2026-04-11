@@ -10,7 +10,7 @@ import typer
 
 from admin import PROJECT_ROOT
 from admin.utils import DryAnnotation, run
-from common.web_app import WebApp
+from admin.web_app import WebApp
 
 app = typer.Typer(
     help=__doc__,

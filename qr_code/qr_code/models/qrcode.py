@@ -3,9 +3,8 @@ import string
 import uuid
 
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import models
-
-from .user import User
 
 
 def generate_short_code(length: int = 8) -> str:
@@ -45,7 +44,7 @@ class QRCode(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='qrcodes')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='qrcodes')
 
     # QR Code content and settings
     name = models.CharField(

@@ -13,9 +13,9 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.text import Text
 
-from admin import PROJECT_ROOT
-from common.environment import Environment
-from common.web_app import WebApp
+from . import PROJECT_ROOT
+from .environment import Environment
+from .web_app import WebApp
 
 EnvironmentAnnotation = Annotated[
     Environment | None,
@@ -26,7 +26,6 @@ WebAppAnnotation = Annotated[
     WebApp,
     typer.Argument(help='Web app to use.', show_default=False),
 ]
-
 DryAnnotation = Annotated[
     bool,
     typer.Option(
@@ -50,7 +49,7 @@ class NoHighlightRichHandler(RichHandler):
     def render_message(self, record, message):
         """Override to disable auto-highlighting while keeping markup."""
         from rich.text import Text
-
+        # Process markup but don't apply highlighting
         if self.markup:
             return Text.from_markup(message)
         return Text(message)
@@ -127,6 +126,7 @@ def select_environment(
     This project used to rely on `python-dotenv` for this. We keep the behavior (populate
     `os.environ`) without depending on `python-dotenv`.
     """
+
     from textual_searchable_selectionlist.options import SelectionStrategy
     from textual_searchable_selectionlist.select import select_enum
 
@@ -169,7 +169,7 @@ def set_environment(
     web_app: WebApp | str | None = None,
 ) -> Environment:
     """Load the selected common and app-specific environment files into `os.environ`."""
-    from common.environment import select_env
+    from .environment import select_env
 
     try:
         resolved_web_app = (
@@ -223,7 +223,8 @@ def run(
 
     Note that `stdout` and `stderr` will be stripped of ANSI escape sequences by default.
     """
-    logger.info(' '.join(map(str, args)))
+    args_filtered = [x for arg in args if arg is not None and (x := str(arg).strip())]  # noqa
+    logger.info(' '.join(args_filtered))
 
     if dry:
         return None
@@ -237,7 +238,7 @@ def run(
     final_kwargs = defaults | kwargs
 
     try:
-        result = subprocess.run(args, **final_kwargs)
+        result = subprocess.run(args_filtered, **final_kwargs)
     except subprocess.CalledProcessError as e:
         msg = str(e)
         if e.stdout:

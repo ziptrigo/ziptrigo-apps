@@ -3,14 +3,16 @@ from datetime import UTC, datetime
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.urls import reverse
+
+User = get_user_model()
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ninja_jwt.exceptions import TokenError
 from ninja_jwt.settings import api_settings
 
-from common import PROJECT_ROOT
+from utils import PROJECT_ROOT
 
-from ..models.user import User
 from ..tokens import EmailConfirmationToken
 from .email_service import EmailBackendClass, asend_email, get_email_backend
 

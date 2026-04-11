@@ -28,16 +28,20 @@ COPY --from=builder /app/.venv /app/.venv
 # Make sure scripts in the virtualenv are usable
 ENV PATH=/app/.venv/bin:$PATH
 
-# Copy common code
-COPY common/ /app/common/
+# Copy shared packages
+COPY shared/ /app/shared/
 
-# Copy qr_code app code
+# Install shared packages
+RUN pip install -e /app/shared/utils -e /app/shared/auth_client
+
+# Copy qr_code and user-service (for the User model)
 COPY qr_code/ /app/qr_code/
+COPY user-service/ /app/user-service/
 
 WORKDIR /app/qr_code
 
-# Set Python path to include parent directory for common imports
-ENV PYTHONPATH=/app:$PYTHONPATH
+# Set Python path
+ENV PYTHONPATH=/app/qr_code:/app/user-service:/app/shared/utils:/app/shared/auth_client:$PYTHONPATH
 
 # Create directories for media and static files
 RUN mkdir -p /app/qr_code/media /app/qr_code/staticfiles

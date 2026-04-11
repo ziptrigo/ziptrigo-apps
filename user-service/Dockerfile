@@ -28,16 +28,19 @@ COPY --from=builder /app/.venv /app/.venv
 # Make sure scripts in the virtualenv are usable
 ENV PATH=/app/.venv/bin:$PATH
 
-# Copy common code
-COPY common/ /app/common/
+# Copy shared packages
+COPY shared/ /app/shared/
 
-# Copy users app code
-COPY users/ /app/users/
+# Install shared packages
+RUN pip install -e /app/shared/utils -e /app/shared/auth_client
 
-WORKDIR /app/users
+# Copy user-service code
+COPY user-service/ /app/user-service/
 
-# Set Python path to include parent directory for common imports
-ENV PYTHONPATH=/app:$PYTHONPATH
+WORKDIR /app/user-service
+
+# Set Python path
+ENV PYTHONPATH=/app/user-service:/app/shared/utils:/app/shared/auth_client:$PYTHONPATH
 
 # Expose port
 EXPOSE 8010

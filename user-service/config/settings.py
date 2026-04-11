@@ -20,14 +20,16 @@ from dotenv import load_dotenv
 # PROJECT_ROOT, aka BASE_DIR.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Add parent directory to path for common imports
+# Add parent directory and shared packages to path
 sys.path.insert(0, str(PROJECT_ROOT.parent))
+sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'utils'))
+sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'auth_client'))
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path=PROJECT_ROOT / '.env')
 
-# Import common settings
-from common.settings.base import (  # noqa: E402, F401
+# Import common settings from shared utils
+from utils.settings.base import (  # noqa: E402, F401
     COMMON_AUTH_PASSWORD_VALIDATORS,
     COMMON_INSTALLED_APPS,
     COMMON_JAZZMIN_SETTINGS,
@@ -98,7 +100,7 @@ AUTH_PASSWORD_VALIDATORS = COMMON_AUTH_PASSWORD_VALIDATORS
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     PROJECT_ROOT / 'users' / 'static',
-    PROJECT_ROOT.parent / 'common' / 'static',
+    PROJECT_ROOT.parent / 'shared' / 'utils' / 'utils' / 'static',
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 

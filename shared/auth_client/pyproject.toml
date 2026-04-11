@@ -1,0 +1,12 @@
+[project]
+name = "ziptrigo-auth-client"
+version = "0.1.0"
+description = "Authentication client for Ziptrigo services"
+dependencies = [
+    "django>=6.0",
+    "ninja-jwt>=0.7.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
