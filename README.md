@@ -63,35 +63,45 @@ docker-compose up --build
 ### Local Development (without Docker)
 
 Create and activate the shared development environment at the repo root, then sync the locked
-dependencies:
+dependencies using the administrative tools:
 
-```powershell
+```bash
+# Create a virtual environment (one-time setup)
 uv venv .venv313 --python 3.13
-.venv313\Scripts\Activate.ps1
-uv sync --active --group dev
+source .venv313/bin/activate  # On Windows: .venv313\Scripts\activate
+
+# Sync all dependencies (dev + all apps)
+python3 -m admin.pip sync
+```
+
+Alternatively, you can sync only the dependencies needed for a specific app:
+
+```bash
+# Sync dev tools + users service dependencies
+python3 -m admin.pip sync dev -a users
 ```
 
 #### Users Service
 
-```powershell
-python users\manage.py migrate
-python users\manage.py runserver 8010
+```bash
+python user-service/manage.py migrate
+python user-service/manage.py runserver 8010
 ```
 
 #### QR Code Service
 
-```powershell
-python qr_code\manage.py migrate
-python qr_code\manage.py runserver 8020
+```bash
+python qr_code/manage.py migrate
+python qr_code/manage.py runserver 8020
 ```
 
 You can also use the shared admin commands:
 
-```powershell
-inv server run users
-inv server run qr_code
-inv test unit users
-inv test unit qr_code
+```bash
+python3 -m admin.server run users
+python3 -m admin.server run qr_code
+python3 -m admin.test unit users
+python3 -m admin.test unit qr_code
 ```
 
 ### Docker Development
@@ -157,21 +167,59 @@ Both services use external databases. Configure via `DATABASE_URL` environment v
 
 ### Running Tests
 
-```powershell
-inv test unit users
-inv test unit qr_code
-inv test e2e
+```bash
+python3 -m admin.test unit users
+python3 -m admin.test unit qr_code
+python3 -m admin.test e2e
 ```
 
 ### Linting and Type Checking
 
 Shared repo tooling lives under `admin/` and uses `ruff` plus `mypy`:
 
-```powershell
-inv lint all
-inv lint ruff --check .
-inv lint mypy .
+```bash
+python3 -m admin.lint all
+python3 -m admin.lint ruff --check .
+python3 -m admin.lint mypy .
 ```
+
+### Package Management
+
+The project uses `uv` for dependency management. A custom administrative tool `admin.pip` is provided
+to manage the shared `uv.lock` file and synchronize the local environment for different apps.
+
+#### Basic Commands
+
+```bash
+# Sync the local environment with all dependency groups (dev + all apps)
+python3 -m admin.pip sync
+
+# Sync for a specific app (includes main dependencies by default)
+python3 -m admin.pip sync -a users
+
+# Sync for a specific app including dev tools
+python3 -m admin.pip sync dev -a qr_code
+
+# Refresh the lockfile (updates all dependencies to latest versions allowed)
+python3 -m admin.pip upgrade
+
+# Refresh the lockfile from scratch (deletes uv.lock and regenerates it)
+python3 -m admin.pip compile --clean
+```
+
+#### Updating Specific Packages
+
+To update a specific package to its latest version:
+
+```bash
+# Upgrade 'django' package in the shared lockfile
+python3 -m admin.pip package dev -p django
+```
+
+#### Available Scopes and Apps
+
+- **Scopes**: `main` (core dependencies), `dev` (development tools)
+- **Apps** (`--app` or `-a`): `users`, `qr_code`
 
 ### Adding Shared Code
 
