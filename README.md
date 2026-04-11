@@ -47,8 +47,9 @@ ziptrigo-apps/
 
 ### Prerequisites
 
-- Python 3.12+
-- Docker and Docker Compose
+- Python 3.13+
+- `uv`
+- Docker and Docker Compose (for containerized development)
 - Git
 
 ### Local Development (with Docker)
@@ -61,28 +62,36 @@ docker-compose up --build
 
 ### Local Development (without Docker)
 
-If running locally, you need to install the shared packages and service-specific requirements.
+Create and activate the shared development environment at the repo root, then sync the locked
+dependencies:
 
-#### 1. Setup Shared Packages
-```bash
-pip install -e ./shared/utils
-pip install -e ./shared/auth_client
+```powershell
+uv venv .venv313 --python 3.13
+.venv313\Scripts\Activate.ps1
+uv sync --active --group dev
 ```
 
-#### 2. User Service
-```bash
-cd user-service
-pip install -r requirements.txt  # Or use your preferred env manager
-python manage.py migrate
-python manage.py runserver 8010
+#### Users Service
+
+```powershell
+python users\manage.py migrate
+python users\manage.py runserver 8010
 ```
 
-#### 3. QR Code Service
-```bash
-cd qr_code
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver 8020
+#### QR Code Service
+
+```powershell
+python qr_code\manage.py migrate
+python qr_code\manage.py runserver 8020
+```
+
+You can also use the shared admin commands:
+
+```powershell
+inv server run users
+inv server run qr_code
+inv test unit users
+inv test unit qr_code
 ```
 
 ### Docker Development
@@ -148,25 +157,20 @@ Both services use external databases. Configure via `DATABASE_URL` environment v
 
 ### Running Tests
 
-```bash
-# All tests
-python -m admin.test
-
-# User service tests
-cd user-service
-pytest
-
-# QR Code service tests
-cd qr_code
-pytest
+```powershell
+inv test unit users
+inv test unit qr_code
+inv test e2e
 ```
 
 ### Linting and Type Checking
 
-Use the project-level admin scripts:
+Shared repo tooling lives under `admin/` and uses `ruff` plus `mypy`:
 
-```bash
-python -m admin.lint
+```powershell
+inv lint all
+inv lint ruff --check .
+inv lint mypy .
 ```
 
 ### Adding Shared Code

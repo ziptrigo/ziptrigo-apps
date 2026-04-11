@@ -19,17 +19,15 @@ The Users service provides:
 
 ## Installation
 
-1. Create and activate virtual environment:
-```
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# or
-source .venv/bin/activate  # Linux/Mac
+1. Create and activate the shared repo environment:
+```powershell
+uv venv ..\.venv313 --python 3.13
+..\.venv313\Scripts\Activate.ps1
 ```
 
 2. Install dependencies:
-```
-pip install -r requirements.txt
+```powershell
+uv sync --active --group dev
 ```
 
 3. Run migrations:
@@ -212,7 +210,7 @@ src/
     templates/            # Minimal UI templates
     static/               # Static assets (if used)
 manage.py
-pyproject.toml
+..\pyproject.toml
 README.md
 WARP.md
 ```

@@ -5,15 +5,16 @@ FROM python:3.13-slim as builder
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update &&     apt-get install -y --no-install-recommends gcc &&     rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements/base.txt requirements/qr_code.txt /app/requirements/
+# Install uv
+RUN python -m pip install --no-cache-dir uv
+
+# Copy locked dependency metadata
+COPY pyproject.toml uv.lock /app/
 
 # Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements/qr_code.txt
+RUN uv sync --frozen --no-install-project --group qr_code
 
 
 # Stage 2: Runtime
@@ -22,10 +23,10 @@ FROM python:3.13-slim
 WORKDIR /app
 
 # Copy Python dependencies from builder
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder /app/.venv /app/.venv
 
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
+# Make sure scripts in the virtualenv are usable
+ENV PATH=/app/.venv/bin:$PATH
 
 # Copy shared packages
 COPY shared/ /app/shared/

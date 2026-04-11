@@ -6,6 +6,7 @@ QR Code CLI - Command line interface for QR code generation and management.
 
 This CLI provides commands to interact with the QR code service.
 """
+
 import os
 from pathlib import Path
 from typing import Optional

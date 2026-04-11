@@ -85,9 +85,7 @@ SES configuration (when using the `ses` backend):
   `Optional[str]` and `list[str]` instead of `List[str]`. Functions that don't return anything
   (or return `None`) should not have a return type hint.
 - Use static type checking
-- Use black
-- Use isort
-- Use flake8
+- Use ruff for linting, formatting, and import sorting
 - Use mypy
 - Use single quotes for strings, except when triple quotes are necessary (ex: docstrings), in which
   case use double quotes

@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
 from pathlib import Path
@@ -10,15 +11,21 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.text import Text
 
 from . import PROJECT_ROOT
 from .environment import Environment
+from .web_app import WebApp
 
 EnvironmentAnnotation = Annotated[
     Environment | None,
     typer.Argument(help='Environment to use.', show_default=False),
 ]
 
+WebAppAnnotation = Annotated[
+    WebApp,
+    typer.Argument(help='Web app to use.', show_default=False),
+]
 DryAnnotation = Annotated[
     bool,
     typer.Option(
@@ -42,11 +49,27 @@ class NoHighlightRichHandler(RichHandler):
     def render_message(self, record, message):
         """Override to disable auto-highlighting while keeping markup."""
         from rich.text import Text
-
         # Process markup but don't apply highlighting
         if self.markup:
             return Text.from_markup(message)
         return Text(message)
+
+
+@dataclass
+class StripOutput:
+    strip_ansi: bool = True
+    normal_strip: bool = True
+    extra_chars: str | None = None
+
+    def strip(self, text: str) -> str:
+        if self.strip_ansi:
+            text = strip_ansi(text)
+        if self.normal_strip:
+            text = text.strip()
+        if self.extra_chars:
+            text = text.strip(self.extra_chars)
+
+        return text
 
 
 def read_env_file_from_path(env_path: Path) -> dict[str, str]:
@@ -141,9 +164,41 @@ def select_environment(
     return env
 
 
+def set_environment(
+    environment: Environment | str | None = None,
+    web_app: WebApp | str | None = None,
+) -> Environment:
+    """Load the selected common and app-specific environment files into `os.environ`."""
+    from .environment import select_env
+
+    try:
+        resolved_web_app = (
+            web_app if web_app is None or isinstance(web_app, WebApp) else WebApp(web_app)
+        )
+    except ValueError:
+        logger.error(f'Unknown web app: {web_app}')
+        raise typer.Exit(1)
+
+    selection = select_env(PROJECT_ROOT, environment=environment, web_app=resolved_web_app)
+
+    for warning in selection.warnings:
+        logger.warning(warning)
+
+    if selection.errors or not selection.environment:
+        for error in selection.errors:
+            logger.error(error)
+        raise typer.Exit(1)
+
+    os.environ['ENVIRONMENT'] = selection.environment.value
+    for env_path in selection.all_env_paths:
+        os.environ.update(read_env_file_from_path(env_path))
+
+    return selection.environment
+
+
 def get_os() -> OS:
     """
-    Similar to ``sys.platform`` and ``platform.system()``, but less ambiguous by returning an Enum
+    Similar to `sys.platform` and `platform.system()`, but less ambiguous by returning an Enum
     instead of a string.
 
     Doesn't make granular distinctions of linux variants, OS versions, etc.
@@ -155,14 +210,18 @@ def get_os() -> OS:
     return OS.Linux
 
 
-def run(*args, dry: bool = False, **kwargs) -> subprocess.CompletedProcess | None:
+def run(
+    *args, dry: bool = False, strip_output: StripOutput | None = StripOutput(), **kwargs
+) -> subprocess.CompletedProcess | None:
     """
     Run a CLI command synchronously (i.e., wait for the command to finish) and return the result.
 
-    This function is a wrapper around ``subprocess.run(...)``.
+    This function is a wrapper around `subprocess.run(...)`.
 
-    If you need access to the output, add the ``capture_output=True`` argument and do
-    ``.stdout.strip()`` to get the output as a string.
+    If you need access to the output, add the `capture_output=True` argument and do
+    `.stdout` to get the output as a string.
+
+    Note that `stdout` and `stderr` will be stripped of ANSI escape sequences by default.
     """
     args_filtered = [x for arg in args if arg is not None and (x := str(arg).strip())]  # noqa
     logger.info(' '.join(args_filtered))
@@ -176,9 +235,10 @@ def run(*args, dry: bool = False, **kwargs) -> subprocess.CompletedProcess | Non
         text=True,
         check=True,
     )
+    final_kwargs = defaults | kwargs
 
     try:
-        return subprocess.run(args_filtered, **(defaults | kwargs))  # type: ignore
+        result = subprocess.run(args_filtered, **final_kwargs)
     except subprocess.CalledProcessError as e:
         msg = str(e)
         if e.stdout:
@@ -187,6 +247,12 @@ def run(*args, dry: bool = False, **kwargs) -> subprocess.CompletedProcess | Non
             msg += f'\nSTDERR:\n{e.stderr}'
         logger.error(msg)
         raise typer.Exit(1)
+
+    if final_kwargs.get('capture_output') and strip_output:
+        result.stdout = strip_output.strip(result.stdout)
+        result.stderr = strip_output.strip(result.stderr)
+
+    return result
 
 
 def run_async(*args, dry: bool = False, **kwargs) -> subprocess.Popen | None:
@@ -201,7 +267,7 @@ def run_async(*args, dry: bool = False, **kwargs) -> subprocess.Popen | None:
         process.kill()              # Send SIGKILL (force)
         process.returncode          # Access return code after completion
 
-    See ``subprocess.Popen(...)`` for more details.
+    See `subprocess.Popen(...)` for more details.
     """
     logger.info(' '.join(map(str, args)))
 
@@ -245,9 +311,12 @@ def multiple_parameters(parameter: str, *options) -> list[str]:
     return list(chain.from_iterable(zip([parameter] * len(options), map(str, options))))
 
 
+def strip_ansi(text: str) -> str:
+    return Text.from_ansi(text).plain
+
+
 def get_logger(name: str | None = 'typer-invoke', level=logging.DEBUG) -> logging.Logger:
     """Set up logging configuration with Rich handler and custom formatting."""
-
     _logger = logging.getLogger(name)
     _logger.setLevel(level)
     _logger.handlers.clear()
