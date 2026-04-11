@@ -16,8 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from common import PROJECT_ROOT
-from common.web_app import WebApp
+from . import PROJECT_ROOT
+from .web_app import WebApp
 
 IGNORED_ENV_FILE_SUFFIXES = {'example'}
 

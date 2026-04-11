@@ -11,8 +11,8 @@ import typer
 from rich.console import Console
 from rich.logging import RichHandler
 
-from admin import PROJECT_ROOT
-from config.constants import Environment
+from . import PROJECT_ROOT
+from .environment import Environment
 
 EnvironmentAnnotation = Annotated[
     Environment | None,

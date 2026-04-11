@@ -12,7 +12,7 @@ from typing import Annotated
 
 import typer
 
-from admin.utils import DryAnnotation, logger, run
+from .utils import DryAnnotation, logger, run
 
 app = typer.Typer(
     help=__doc__,

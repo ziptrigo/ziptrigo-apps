@@ -6,7 +6,7 @@ Testing with pytest.
 import typer
 from typing import Annotated
 
-from admin.utils import DryAnnotation, run
+from .utils import DryAnnotation, run
 
 app = typer.Typer(
     help=__doc__,

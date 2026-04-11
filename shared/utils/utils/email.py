@@ -11,7 +11,7 @@ from typing import Annotated
 
 import typer
 
-from admin.utils import EnvironmentAnnotation, logger, set_environment
+from .utils import EnvironmentAnnotation, logger, set_environment
 
 app = typer.Typer(
     help=__doc__,
@@ -32,7 +32,7 @@ def _send_email(
 ):
     from mypy_boto3_ses import SESClient
 
-    from common.aws import boto3_client, get_aws_params
+    from .aws import boto3_client, get_aws_params
 
     # session = boto3.Session(profile_name=profile)
     # client = session.client('ses', region_name=os.getenv('AWS_REGION')

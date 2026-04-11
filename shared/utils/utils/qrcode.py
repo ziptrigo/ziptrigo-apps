@@ -14,7 +14,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from admin.utils import EnvironmentAnnotation, logger, set_environment
+from .utils import EnvironmentAnnotation, logger, set_environment
 
 app = typer.Typer(
     help=__doc__,

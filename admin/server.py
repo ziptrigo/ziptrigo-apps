@@ -10,14 +10,14 @@ import sys
 
 import typer
 
-from admin import PROJECT_ROOT
-from admin.utils import (
+from . import PROJECT_ROOT
+from .web_app import WebApp
+from .utils import (
     DryAnnotation,
     EnvironmentAnnotation,
-    WebAppAnnotation,
     run,
 )
-from common.environment import Environment
+from .environment import Environment
 
 app = typer.Typer(
     help=__doc__,
@@ -29,8 +29,8 @@ app = typer.Typer(
 
 @app.command(name='run')
 def server_run(
-    web_app: WebAppAnnotation,
-    environment: EnvironmentAnnotation = Environment.DEV,
+    web_app: WebApp,
+    environment: Environment = Environment.DEV,
     dry: DryAnnotation = False,
 ):
     """

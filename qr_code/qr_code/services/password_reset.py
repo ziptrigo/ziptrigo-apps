@@ -3,11 +3,12 @@ from dataclasses import dataclass
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.urls import reverse
+from django.contrib.auth import get_user_model
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ninja_jwt.exceptions import TokenError
 from ninja_jwt.settings import api_settings
 
-from ..models.user import User
+User = get_user_model()
 from ..tokens import PasswordResetToken
 from .email_service import EmailBackendClass, asend_email, get_email_backend
 

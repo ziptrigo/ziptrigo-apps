@@ -11,8 +11,8 @@ from typing import Annotated
 
 import typer
 
-from admin import PROJECT_ROOT
-from admin.utils import logger
+from . import PROJECT_ROOT
+from .utils import logger
 
 app = typer.Typer(
     help=__doc__,
@@ -66,7 +66,7 @@ def generate_openapi(
     """
     setup_django()
 
-    from src.qr_code.api.router import api
+    from qr_code.api.router import api
 
     try:
         logger.info(f'Generating OpenAPI schema in {format.value} format...')

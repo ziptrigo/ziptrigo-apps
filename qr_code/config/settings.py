@@ -21,8 +21,10 @@ from dotenv import load_dotenv
 # PROJECT_ROOT, aka BASE_DIR.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Add parent directory to path for common imports
+# Add parent directory and shared packages to path
 sys.path.insert(0, str(PROJECT_ROOT.parent))
+sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'utils'))
+sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'auth_client'))
 
 # Load environment variables from the selected `.env.<ENVIRONMENT>` file.
 # This must happen before reading any `os.getenv(...)` values.
@@ -31,7 +33,7 @@ try:
     if 'pytest' in sys.modules or 'mypy' in sys.modules:
         os.environ.setdefault('ENVIRONMENT', 'dev')
 
-    from common.environment import select_env
+    from utils.environment import select_env
 
     _selection = select_env(PROJECT_ROOT)
     if _selection.errors:
@@ -45,8 +47,8 @@ except Exception:
     # Fail fast if env selection is broken; otherwise we'd silently read wrong defaults.
     raise
 
-# Import common settings
-from common.settings.base import (  # noqa: E402, F401
+# Import common settings from shared utils
+from utils.settings.base import (  # noqa: E402, F401
     COMMON_INSTALLED_APPS,
     COMMON_JAZZMIN_SETTINGS,
     COMMON_TEMPLATE_CONTEXT_PROCESSORS,
@@ -78,6 +80,7 @@ INSTALLED_APPS = COMMON_INSTALLED_APPS + [
     'ninja_extra',
     'ninja_jwt',
     'qr_code',
+    'users',
 ]
 
 MIDDLEWARE = [

@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  users:
+  user-service:
     build:
       context: .
-      dockerfile: users/Dockerfile
-    container_name: ziptrigo-users
+      dockerfile: user-service/Dockerfile
+    container_name: ziptrigo-user-service
     ports:
       - "8010:8010"
     environment:
@@ -17,10 +17,10 @@ services:
       - JWT_ALGORITHM=${USERS_JWT_ALGORITHM:-HS256}
       - JWT_EXP_DELTA_SECONDS=${USERS_JWT_EXP_DELTA_SECONDS:-1209600}
     env_file:
-      - users/.env.dev
+      - user-service/.env.dev
     volumes:
-      - ./users:/app/users
-      - ./common:/app/common
+      - ./user-service:/app/user-service
+      - ./shared:/app/shared
     networks:
       - ziptrigo-network
     restart: unless-stopped
@@ -44,7 +44,8 @@ services:
       - qr_code/.env.dev
     volumes:
       - ./qr_code:/app/qr_code
-      - ./common:/app/common
+      - ./user-service:/app/user-service
+      - ./shared:/app/shared
       - qr_code_media:/app/qr_code/media
       - qr_code_static:/app/qr_code/staticfiles
     networks:
