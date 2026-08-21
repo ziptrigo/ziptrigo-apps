@@ -1,10 +1,13 @@
 import uuid
+from datetime import datetime
+from typing import ClassVar, cast
 
 from django.contrib.auth.models import (
     AbstractBaseUser,
     BaseUserManager,
     PermissionsMixin,
 )
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.utils import timezone
 
@@ -21,11 +24,11 @@ class UserManager(BaseUserManager):
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
         if password:
-            user.set_password(password)  # type: ignore
+            user.set_password(password)
         else:
-            user.set_unusable_password()  # type: ignore
+            user.set_unusable_password()
         user.save(using=self._db)
-        return user  # type: ignore
+        return user
 
     def create_superuser(
         self,
@@ -49,21 +52,34 @@ class User(AbstractBaseUser, PermissionsMixin):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    email = models.EmailField(unique=True)
-    name = models.CharField(max_length=255, blank=True)
-    email_confirmed = models.BooleanField(default=False, help_text='Whether email is confirmed')
-    email_confirmed_at = models.DateTimeField(
-        null=True, blank=True, help_text='When email was confirmed'
+    # These fields are re-typed with `cast(...)` to their actual Python value type rather than
+    # left as the declared `models.Field` subclass: Django model fields are descriptors handled by
+    # `ModelBase`'s metaclass at runtime, but `ty` (unlike mypy+django-stubs, which has a plugin
+    # for this) has no insight into that, so it type-checks instance attribute access against the
+    # field class itself. `cast` overrides that with the type Django actually produces, without
+    # changing what's constructed at class-body evaluation time. Only fields that are
+    # read/assigned in a type-sensitive way elsewhere in the codebase are cast -- see #45.
+    email = cast(str, models.EmailField(unique=True))
+    name = cast(str, models.CharField(max_length=255, blank=True))
+    email_confirmed = cast(
+        bool, models.BooleanField(default=False, help_text='Whether email is confirmed')
+    )
+    email_confirmed_at = cast(
+        datetime | None,
+        models.DateTimeField(null=True, blank=True, help_text='When email was confirmed'),
     )
     credits = models.IntegerField(default=0, help_text='Current credits balance.')
 
-    status = models.CharField(
-        max_length=16,
-        choices=STATUS_CHOICES,
-        default=STATUS_ACTIVE,
+    status = cast(
+        str,
+        models.CharField(
+            max_length=16,
+            choices=STATUS_CHOICES,
+            default=STATUS_ACTIVE,
+        ),
     )
-    inactive_at = models.DateTimeField(null=True, blank=True)
-    inactive_reason = models.TextField(blank=True)
+    inactive_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    inactive_reason = cast(str, models.TextField(blank=True))
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     is_staff = models.BooleanField(default=False)
@@ -76,6 +92,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = []
 
     objects = UserManager()
+    # Django's `ModelBase` metaclass injects `DoesNotExist` on every concrete model; `ty` has no
+    # equivalent of django-stubs' plugin for that, so it doesn't know this attribute exists. See
+    # the field-casting comment above for the same root cause.
+    DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
     def mark_deleted(self) -> None:
         self.status = self.STATUS_DELETED

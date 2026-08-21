@@ -23,6 +23,18 @@ except NotRegistered:  # pragma: no cover
     pass
 
 
+class AuthenticatedHttpRequest(HttpRequest):
+    """`HttpRequest` typed with the `.user` attribute `AuthenticationMiddleware` adds at runtime.
+
+    `HttpRequest` itself doesn't declare `.user` -- `ty` has no equivalent of django-stubs' plugin
+    to know middleware adds it, so admin methods reached through `admin_view()` (which redirects
+    unauthenticated/non-staff requests before the view body runs, guaranteeing a concrete `User`
+    here) need this instead.
+    """
+
+    user: User
+
+
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
     """Admin interface for the custom User model."""
@@ -104,7 +116,7 @@ class CustomAdminSite(admin.AdminSite):
         ]
         return custom_urls + urls
 
-    def tools_view(self, request: HttpRequest) -> HttpResponse:
+    def tools_view(self, request: AuthenticatedHttpRequest) -> HttpResponse:
         """Custom admin page for various tools."""
 
         environment = os.getenv('ENVIRONMENT')

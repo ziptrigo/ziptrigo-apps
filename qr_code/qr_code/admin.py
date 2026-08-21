@@ -13,12 +13,24 @@ from .models import CreditTransaction, InsufficientCreditsError, QRCode, User
 from .services.email_service import send_email
 
 
+class AuthenticatedHttpRequest(HttpRequest):
+    """`HttpRequest` typed with the `.user` attribute `AuthenticationMiddleware` adds at runtime.
+
+    `HttpRequest` itself doesn't declare `.user` -- `ty` has no equivalent of django-stubs' plugin
+    to know middleware adds it, so admin methods reached through `admin_view()` (which redirects
+    unauthenticated/non-staff requests before the view body runs, guaranteeing a concrete `User`
+    here) need this instead.
+    """
+
+    user: User
+
+
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
     """Admin interface for User."""
 
     # Extend the default fieldsets with our custom fields.
-    fieldsets = DjangoUserAdmin.fieldsets + (  # type: ignore
+    fieldsets = DjangoUserAdmin.fieldsets + (
         (
             'Custom Fields',
             {
@@ -30,7 +42,7 @@ class UserAdmin(DjangoUserAdmin):
                 )
             },
         ),
-    )  # type: ignore[assignment,operator]
+    )
 
     list_display = [
         'username',
@@ -130,7 +142,7 @@ class CustomAdminSite(admin.AdminSite):
         ]
         return custom_urls + urls
 
-    def tools_view(self, request: HttpRequest) -> HttpResponse:
+    def tools_view(self, request: AuthenticatedHttpRequest) -> HttpResponse:
         """Custom admin page for various tools."""
         environment_variables = None
         environment = os.getenv('ENVIRONMENT')

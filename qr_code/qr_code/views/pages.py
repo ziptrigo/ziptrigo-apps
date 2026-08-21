@@ -3,11 +3,22 @@ from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from ..models import QRCode
+from ..models import QRCode, User
+
+
+class AuthenticatedHttpRequest(HttpRequest):
+    """`HttpRequest` typed with the `.user` attribute `AuthenticationMiddleware` adds at runtime.
+
+    `HttpRequest` itself doesn't declare `.user` -- `ty` has no equivalent of django-stubs' plugin
+    to know middleware adds it. Kept unioned with `AnonymousUser` (rather than narrowed to `User`)
+    to match the `isinstance` guards already below, which exist for the same reason.
+    """
+
+    user: User | AnonymousUser
 
 
 @login_required
-def dashboard(request: HttpRequest) -> HttpResponse:
+def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render the user dashboard with their QR codes."""
     user = request.user
 
@@ -36,7 +47,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def qrcode_editor(request: HttpRequest, qr_id: str | None = None) -> HttpResponse:
+def qrcode_editor(request: AuthenticatedHttpRequest, qr_id: str | None = None) -> HttpResponse:
     """Render the QR code editor page for creating or editing QR codes.
 
     Args:
@@ -65,7 +76,7 @@ def qrcode_editor(request: HttpRequest, qr_id: str | None = None) -> HttpRespons
 
 
 @login_required
-def qrcode_duplicate(request: HttpRequest, qr_id: str) -> HttpResponse:
+def qrcode_duplicate(request: AuthenticatedHttpRequest, qr_id: str) -> HttpResponse:
     """Render the QR code editor in create mode, pre-filled from an existing QR code."""
     user = request.user
 

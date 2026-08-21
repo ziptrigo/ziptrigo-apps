@@ -1,10 +1,15 @@
 import random
 import string
 import uuid
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
+
+if TYPE_CHECKING:
+    from django.db.models import Manager
 
 
 def generate_short_code(length: int = 8) -> str:
@@ -40,6 +45,18 @@ class QRCodeType(models.TextChoices):
 class QRCode(models.Model):
     """Model to store QR code data and settings."""
 
+    # Not explicitly assigned -- Django's `ModelBase` metaclass injects both of these on every
+    # concrete model that doesn't declare its own; `ty` (unlike mypy+django-stubs, which has a
+    # plugin for this) has no insight into that.
+    objects: ClassVar['Manager']
+    DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+
+    # `qr_code/api/qrcode_new.py:list_qrcodes` sets these on instances right before returning them
+    # for serialization -- they're computed, not stored, so they're declared here rather than as
+    # model fields.
+    image_url: str
+    redirect_url: str | None
+
     # Primary identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -55,7 +72,13 @@ class QRCode(models.Model):
     qr_type = models.CharField(
         max_length=10, choices=QRCodeType.choices, help_text='Type of QR code content'
     )
-    content = models.TextField(help_text='The actual content encoded in the QR code')
+    # The fields below are re-typed with `cast(...)` to their actual Python value type rather than
+    # left as the declared `models.Field` subclass: Django model fields are descriptors handled by
+    # `ModelBase`'s metaclass at runtime, but `ty` has no insight into that (see the class-level
+    # comment above), so it type-checks instance attribute access against the field class itself.
+    # Only fields that are read/assigned in a type-sensitive way elsewhere in the codebase are
+    # cast -- see #45.
+    content = cast(str, models.TextField(help_text='The actual content encoded in the QR code'))
     original_url = models.URLField(
         max_length=2000,
         null=True,
@@ -65,33 +88,56 @@ class QRCode(models.Model):
     use_url_shortening = models.BooleanField(
         default=False, help_text='Whether to use URL shortening'
     )
-    short_code = models.CharField(
-        max_length=16, unique=True, null=True, blank=True, help_text='Short code for URL shortening'
+    short_code = cast(
+        'str | None',
+        models.CharField(
+            max_length=16,
+            unique=True,
+            null=True,
+            blank=True,
+            help_text='Short code for URL shortening',
+        ),
     )
 
     # QR Code customization
-    qr_format = models.CharField(
-        max_length=10, choices=QRCodeFormat.choices, default=QRCodeFormat.PNG
+    qr_format = cast(
+        str,
+        models.CharField(max_length=10, choices=QRCodeFormat.choices, default=QRCodeFormat.PNG),
     )
     size = models.IntegerField(default=10, help_text='Scale factor for QR code size')
-    error_correction = models.CharField(
-        max_length=1, choices=QRCodeErrorCorrection.choices, default=QRCodeErrorCorrection.MEDIUM
+    error_correction = cast(
+        str,
+        models.CharField(
+            max_length=1,
+            choices=QRCodeErrorCorrection.choices,
+            default=QRCodeErrorCorrection.MEDIUM,
+        ),
     )
     border = models.IntegerField(default=4, help_text='Border size (quiet zone)')
 
     # Colors
-    background_color = models.CharField(
-        max_length=20, default='white', help_text='Background color (hex, name, or "transparent")'
+    background_color = cast(
+        str,
+        models.CharField(
+            max_length=20,
+            default='white',
+            help_text='Background color (hex, name, or "transparent")',
+        ),
     )
-    foreground_color = models.CharField(
-        max_length=20, default='black', help_text='Foreground (data) color'
+    foreground_color = cast(
+        str,
+        models.CharField(max_length=20, default='black', help_text='Foreground (data) color'),
     )
 
     # File storage
-    image_file = models.CharField(max_length=255, help_text='Path to generated image file')
+    image_file = cast(
+        str, models.CharField(max_length=255, help_text='Path to generated image file')
+    )
 
     # Analytics
-    scan_count = models.IntegerField(default=0, help_text='Number of times QR code was scanned')
+    scan_count = cast(
+        int, models.IntegerField(default=0, help_text='Number of times QR code was scanned')
+    )
     last_scanned_at = models.DateTimeField(null=True, blank=True)
 
     # Soft delete

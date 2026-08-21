@@ -1,4 +1,7 @@
+from typing import ClassVar, cast
+
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models, transaction
 from django.db.models import F
 
@@ -22,10 +25,22 @@ class User(AbstractUser):
     # Credits system
     # - ``credits`` stores the current balance.
     # - ``CreditTransaction`` stores the immutable history (ledger).
-    credits = models.PositiveBigIntegerField(
-        default=0,
-        help_text='Current credits balance.',
+    # `cast` re-types this to `int` (Django's runtime value) instead of the declared
+    # `models.PositiveBigIntegerField`: model fields are descriptors handled by `ModelBase`'s
+    # metaclass at runtime, but `ty` (unlike mypy+django-stubs, which has a plugin for this) has
+    # no insight into that, so it type-checks attribute access against the field class itself.
+    credits = cast(
+        int,
+        models.PositiveBigIntegerField(
+            default=0,
+            help_text='Current credits balance.',
+        ),
     )
+
+    # `AbstractUser` already declares `objects`; `DoesNotExist` isn't explicitly assigned though --
+    # Django's `ModelBase` metaclass injects it on every concrete model that doesn't declare its
+    # own, which `ty` (unlike mypy+django-stubs) has no insight into.
+    DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
     class Meta:
         verbose_name = 'User'

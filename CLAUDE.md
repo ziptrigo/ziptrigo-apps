@@ -195,15 +195,6 @@ matching dead DRF-era source modules — only the `_new` variants are wired into
   key. Finishing the consolidation means implementing `auth_client`, rewriting
   `qr_code/qr_code/migrations/0001_initial.py`, and re-pointing `admin.py` — at which point those
   restored models get deleted again.
-- **`ty`'s type-diagnostic backlog is untriaged.** mypy was replaced with `ty` (Astral's type
-  checker; see `admin/lint.py:lint_ty`) because mypy+django-stubs couldn't construct its plugin from
-  the repo root — both services name their settings package `config`, so `[tool.django-stubs]
-  django_settings_module = 'config.settings'` was ambiguous. `ty` has no plugin-construction step,
-  so that failure mode is gone, but it surfaces a real backlog of diagnostics (50 across the three
-  targets as of the switch) that hasn't been triaged — a good chunk is Django model/queryset
-  attribute-inference that mypy+django-stubs used to resolve via a semantic-analysis plugin `ty`
-  doesn't have yet. `lint_ty` runs `ty check --exit-zero` so `inv lint all` / CI stay green in the
-  meantime; triaging the backlog and dropping `--exit-zero` is tracked in #45.
 - Both services' `README.md` and `WARP.md` still describe the old `src/` layout.
 
 ## Conventions
@@ -216,8 +207,12 @@ matching dead DRF-era source modules — only the `_new` variants are wired into
   `inv lint ruff .` before committing.
 - **Single-quoted strings** (`ruff format --quote-style single`); triple-double-quoted docstrings.
 - Modern type syntax: `str | None`, not `Optional[str]`. Type-checked with `ty` (see
-  `[tool.ty.src]` in `pyproject.toml` and `admin/lint.py:lint_ty`); its diagnostic backlog is
-  untriaged and non-blocking for now — see "Still outstanding".
+  `[tool.ty.src]` in `pyproject.toml` and `admin/lint.py:lint_ty`), which gates `inv lint all` /
+  CI. Django model/queryset attributes that only exist via metaclass magic (`.objects`,
+  `.DoesNotExist`, a `ForeignKey`'s auto `_id` companion attribute) or descriptor-based field
+  typing that `ty` can't infer without a django-stubs-equivalent plugin are handled at the point of
+  declaration with an explicit annotation or `cast(...)`, or -- where that's not practical --
+  suppressed at the point of use with a targeted `# ty: ignore[rule-name]` and a comment.
 - Models, schemas, routers/api, and services are packages with one domain per file, re-exported from
   `__init__.py`. Follow this when adding to either service.
 - Admin CLIs: typer apps with `no_args_is_help=True`, a module docstring as `help`, and a `--dry`

@@ -29,13 +29,14 @@ def _send_email(
     text_body: str,
     html_body: str | None = None,
 ):
+    import boto3
     from mypy_boto3_ses import SESClient
 
-    from .aws import boto3_client, get_aws_params
-
-    # session = boto3.Session(profile_name=profile)
-    # client = session.client('ses', region_name=os.getenv('AWS_REGION')
-    client: SESClient = boto3_client('ses', *get_aws_params())  # type: ignore
+    # Mirrors the client construction in both services' `email_service.py:SesEmailBackend` --
+    # relies on `AWS_REGION` plus whatever credentials/profile are active in the environment (see
+    # `aws_login` in `admin/aws.py` for logging into one).
+    region = os.getenv('AWS_REGION', 'us-east-1')
+    client: SESClient = boto3.client('ses', region_name=region)
 
     if html_body is None:
         html_body = f'<pre>{text_body}</pre>'

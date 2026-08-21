@@ -242,7 +242,12 @@ def run(
     final_kwargs = defaults | kwargs
 
     try:
-        result = subprocess.run(args_filtered, **final_kwargs)
+        # `final_kwargs` is a plain `dict[str, Any]` built by merging two dicts, so its values
+        # lose the literal types (`text=True`, `check=True`, ...) that `subprocess.run`'s
+        # `@overload`s are keyed on -- there's no way to thread that through a runtime dict merge
+        # without hand-writing every overload here too. Not a real bug: this is the same call
+        # `subprocess.run(*args_filtered, text=True, check=True, ...)` would make.
+        result = subprocess.run(args_filtered, **final_kwargs)  # ty: ignore[no-matching-overload]
     except subprocess.CalledProcessError as e:
         msg = str(e)
         if e.stdout:
@@ -283,7 +288,8 @@ def run_async(*args, dry: bool = False, **kwargs) -> subprocess.Popen | None:
     )
 
     try:
-        return subprocess.Popen(args, **(defaults | kwargs))
+        # Same `dict`-merge overload-resolution limitation as `run()` above, not a real bug.
+        return subprocess.Popen(args, **(defaults | kwargs))  # ty: ignore[no-matching-overload]
     except subprocess.CalledProcessError as e:
         logger.error(e)
         raise typer.Exit(1)

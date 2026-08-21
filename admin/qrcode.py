@@ -62,7 +62,7 @@ def qrcode_login(environment: EnvironmentAnnotation, username: str, password: st
     """
     import requests
 
-    set_environment(environment.value)
+    set_environment(environment)
 
     try:
         response = requests.post(
@@ -101,7 +101,7 @@ def qrcode_create(
     """
     import requests
 
-    set_environment(environment.value)
+    set_environment(environment)
 
     if not url and not data:
         logger.error('Error: Either --url or --data must be provided')
@@ -153,7 +153,7 @@ def qrcode_list(
     """
     import requests
 
-    set_environment(environment.value)
+    set_environment(environment)
 
     try:
         response = requests.get(f'{API_BASE_URL}/api/qrcodes/', headers=get_headers())
@@ -199,7 +199,7 @@ def qrcode_get(environment: EnvironmentAnnotation, qr_id: str):
     """
     import requests
 
-    set_environment(environment.value)
+    set_environment(environment)
 
     try:
         response = requests.get(f'{API_BASE_URL}/api/qrcodes/{qr_id}/', headers=get_headers())
@@ -232,7 +232,7 @@ def qrcode_delete(environment: EnvironmentAnnotation, qr_id: str):
     """
     import requests
 
-    set_environment(environment.value)
+    set_environment(environment)
 
     try:
         response = requests.delete(f'{API_BASE_URL}/api/qrcodes/{qr_id}/', headers=get_headers())

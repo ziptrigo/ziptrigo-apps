@@ -88,13 +88,12 @@ def lint_ty(
     `shared/auth_client/`, `tests/` (both services) and `tests_e2e/` are still not checked; they're
     search paths only.
 
-    TODO(#45): this currently surfaces a real, untriaged backlog of type errors -- see the issue
-    for counts. A good chunk of it is Django model/queryset attribute-inference that
-    mypy+django-stubs used to catch via a semantic-analysis plugin; `ty` has no equivalent plugin
-    yet, so it reports those as unresolved attributes on the generic Django base classes instead of
-    on the project's actual models. Triaging the backlog is separate follow-up work tracked in
-    #45, not this change. `--exit-zero` keeps this step non-blocking in `inv lint all` until that
-    triage lands -- remove it once the backlog is clear so `ty` actually gates the build.
+    The diagnostic backlog this surfaced when `ty` replaced mypy (see #44) was triaged in #45: real
+    issues were fixed, and the rest -- mostly Django model/queryset attribute-inference that
+    mypy+django-stubs used to catch via a semantic-analysis plugin `ty` has no equivalent of yet --
+    were suppressed at the point of use with a targeted `# ty: ignore[rule-name]` and a comment
+    explaining why. `ty` now gates `inv lint all` / CI like the other linters; there's no
+    `--exit-zero` here to keep it non-blocking anymore.
     """
     shared_search_path_args = []
     for shared_package_path in _SHARED_PACKAGE_PATHS:
@@ -119,7 +118,6 @@ def lint_ty(
         run(
             'ty',
             'check',
-            '--exit-zero',
             '--extra-search-path',
             '.',
             *shared_search_path_args,
@@ -133,8 +131,13 @@ def lint_ty(
         run(
             'ty',
             'check',
-            '--exit-zero',
             *shared_search_path_args,
+            # `admin/openapi.py:setup_django` inserts the `qr_code` service directory onto
+            # `sys.path` at runtime (mirroring `qr_code/manage.py`'s layout) before importing
+            # `qr_code.api.router`. Mirror that here so `ty` can resolve the same import
+            # statically instead of reporting it unresolved.
+            '--extra-search-path',
+            str(PROJECT_ROOT / 'qr_code'),
             'admin',
             dry=dry,
             cwd=PROJECT_ROOT,

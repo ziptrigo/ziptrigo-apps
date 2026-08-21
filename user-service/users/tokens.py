@@ -14,7 +14,10 @@ class CustomAccessToken(Token):
     lifetime = api_settings.ACCESS_TOKEN_LIFETIME
 
     @classmethod
-    def for_user(cls, user: User) -> 'CustomAccessToken':  # type: ignore[override]
+    # Narrows `Token.for_user`'s `user: AbstractBaseUser` to this service's own concrete `User`,
+    # which is technically an LSP violation ty (correctly) flags -- but this project only ever
+    # has the one concrete user model, so the narrower signature is deliberate, not a bug.
+    def for_user(cls, user: User) -> 'CustomAccessToken':  # ty: ignore[invalid-method-override]
         """Create a token for the given user with basic claims."""
         token = super().for_user(user)
         token['email'] = user.email
@@ -40,14 +43,15 @@ class CustomRefreshToken(Token):
 
         # Copy claims from refresh token (except no_copy_claims)
         for claim, value in self.payload.items():
-            if claim in self.no_copy_claims:
+            if claim is None or claim in self.no_copy_claims:
                 continue
             access[claim] = value
 
         return access
 
     @classmethod
-    def for_user(cls, user: User) -> 'CustomRefreshToken':  # type: ignore[override]
+    # See `CustomAccessToken.for_user` above for why this narrowing is suppressed rather than fixed.
+    def for_user(cls, user: User) -> 'CustomRefreshToken':  # ty: ignore[invalid-method-override]
         """Create a refresh token for the given user."""
         token = super().for_user(user)
         token['email'] = user.email
