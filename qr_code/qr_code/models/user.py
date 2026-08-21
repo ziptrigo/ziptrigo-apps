@@ -29,6 +29,10 @@ class User(AbstractUser):
     # `models.PositiveBigIntegerField`: model fields are descriptors handled by `ModelBase`'s
     # metaclass at runtime, but `ty` (unlike mypy+django-stubs, which has a plugin for this) has
     # no insight into that, so it type-checks attribute access against the field class itself.
+    # Only fields read/assigned in a type-sensitive way elsewhere in the codebase are cast; that
+    # set is demand-driven, not exhaustive, and it'll grow over time. It deliberately differs from
+    # `user-service/users/models/user.py`'s cast set, since the two models' fields are
+    # read/assigned in different places.
     credits = cast(
         int,
         models.PositiveBigIntegerField(

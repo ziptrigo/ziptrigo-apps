@@ -91,9 +91,10 @@ def lint_ty(
     The diagnostic backlog this surfaced when `ty` replaced mypy (see #44) was triaged in #45: real
     issues were fixed, and the rest -- mostly Django model/queryset attribute-inference that
     mypy+django-stubs used to catch via a semantic-analysis plugin `ty` has no equivalent of yet --
-    were suppressed at the point of use with a targeted `# ty: ignore[rule-name]` and a comment
-    explaining why. `ty` now gates `inv lint all` / CI like the other linters; there's no
-    `--exit-zero` here to keep it non-blocking anymore.
+    were handled at the point of declaration with an explicit annotation or `cast(...)`, or --
+    where that's not practical -- suppressed at the point of use with a targeted
+    `# ty: ignore[rule-name]` and a comment explaining why. `ty` now gates `inv lint all` locally
+    like the other linters; there's no `--exit-zero` here to keep it non-blocking anymore.
     """
     shared_search_path_args = []
     for shared_package_path in _SHARED_PACKAGE_PATHS:
@@ -137,7 +138,7 @@ def lint_ty(
             # `qr_code.api.router`. Mirror that here so `ty` can resolve the same import
             # statically instead of reporting it unresolved.
             '--extra-search-path',
-            str(PROJECT_ROOT / 'qr_code'),
+            str(PROJECT_ROOT / WebApp.QR_CODE.value),
             'admin',
             dry=dry,
             cwd=PROJECT_ROOT,

@@ -6,11 +6,19 @@ AWS credentials must be configured.
 """
 
 import os
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
+from .aws import select_aws_profile
 from .utils import EnvironmentAnnotation, logger, set_environment
+
+if TYPE_CHECKING:
+    # `mypy_boto3_ses` ships in the dev-only `boto3-stubs` group (see `pyproject.toml`), so it
+    # isn't installed in production. Keep this import type-checking-only -- the annotation below
+    # is on a local variable, which Python never evaluates at runtime -- mirroring the guard in
+    # both services' `email_service.py:SesEmailBackend`.
+    from mypy_boto3_ses import SESClient
 
 app = typer.Typer(
     help=__doc__,
@@ -30,13 +38,14 @@ def _send_email(
     html_body: str | None = None,
 ):
     import boto3
-    from mypy_boto3_ses import SESClient
 
-    # Mirrors the client construction in both services' `email_service.py:SesEmailBackend` --
-    # relies on `AWS_REGION` plus whatever credentials/profile are active in the environment (see
-    # `aws_login` in `admin/aws.py` for logging into one).
+    # Unlike both services' `email_service.py:SesEmailBackend`, which relies on ambient
+    # credentials (that's the right call in a deployed environment where the profile is already
+    # selected), this is a local dev CLI -- go through `select_aws_profile` so `inv email send`
+    # can't silently hit whatever account happens to be ambient.
     region = os.getenv('AWS_REGION', 'us-east-1')
-    client: SESClient = boto3.client('ses', region_name=region)
+    session = boto3.Session(profile_name=select_aws_profile())
+    client: 'SESClient' = session.client('ses', region_name=region)
 
     if html_body is None:
         html_body = f'<pre>{text_body}</pre>'

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -239,15 +239,16 @@ def run(
         text=True,
         check=True,
     )
-    final_kwargs = defaults | kwargs
+    # Explicitly `dict[str, Any]`: a runtime dict merge loses the literal types (`text=True`,
+    # `check=True`, ...) that `subprocess.run`'s `@overload`s are keyed on -- there's no way to
+    # thread that through without hand-writing every overload here too. `Any` tells ty to accept
+    # whatever `subprocess.run` resolves to at the call below rather than trying (and failing) to
+    # match an overload; it's not a real bug, just the same call
+    # `subprocess.run(*args_filtered, text=True, check=True, ...)` would make.
+    final_kwargs: dict[str, Any] = defaults | kwargs
 
     try:
-        # `final_kwargs` is a plain `dict[str, Any]` built by merging two dicts, so its values
-        # lose the literal types (`text=True`, `check=True`, ...) that `subprocess.run`'s
-        # `@overload`s are keyed on -- there's no way to thread that through a runtime dict merge
-        # without hand-writing every overload here too. Not a real bug: this is the same call
-        # `subprocess.run(*args_filtered, text=True, check=True, ...)` would make.
-        result = subprocess.run(args_filtered, **final_kwargs)  # ty: ignore[no-matching-overload]
+        result = subprocess.run(args_filtered, **final_kwargs)
     except subprocess.CalledProcessError as e:
         msg = str(e)
         if e.stdout:
@@ -286,10 +287,11 @@ def run_async(*args, dry: bool = False, **kwargs) -> subprocess.Popen | None:
     defaults = dict(
         cwd=PROJECT_ROOT,
     )
+    # Same `dict`-merge overload-resolution limitation as `run()` above, not a real bug.
+    final_kwargs: dict[str, Any] = defaults | kwargs
 
     try:
-        # Same `dict`-merge overload-resolution limitation as `run()` above, not a real bug.
-        return subprocess.Popen(args, **(defaults | kwargs))  # ty: ignore[no-matching-overload]
+        return subprocess.Popen(args, **final_kwargs)
     except subprocess.CalledProcessError as e:
         logger.error(e)
         raise typer.Exit(1)

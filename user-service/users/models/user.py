@@ -58,7 +58,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     # for this) has no insight into that, so it type-checks instance attribute access against the
     # field class itself. `cast` overrides that with the type Django actually produces, without
     # changing what's constructed at class-body evaluation time. Only fields that are
-    # read/assigned in a type-sensitive way elsewhere in the codebase are cast -- see #45.
+    # read/assigned in a type-sensitive way elsewhere in the codebase are cast -- see #45. That
+    # set is demand-driven, not exhaustive: it'll grow as more fields get used that way, and it
+    # deliberately differs from `qr_code/qr_code/models/user.py`'s cast set, since the two models'
+    # fields are read/assigned in different places.
     email = cast(str, models.EmailField(unique=True))
     name = cast(str, models.CharField(max_length=255, blank=True))
     email_confirmed = cast(

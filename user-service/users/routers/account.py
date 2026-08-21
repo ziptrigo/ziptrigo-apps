@@ -1,4 +1,3 @@
-from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -11,12 +10,15 @@ jwt_auth = JWTAuth()
 
 
 @router.put('/account', response=AccountUpdateResponse, auth=jwt_auth)
-def update_account(request: HttpRequest, payload: AccountUpdateRequest):
+def update_account(request, payload: AccountUpdateRequest):
     """Update current user's account information (name and/or email).
 
     Requires JWT authentication.
     """
-    user: User = request.auth  # type: ignore
+    # `request` is left unannotated (as elsewhere in this package, e.g. `routers/credits.py`)
+    # rather than typed `HttpRequest`, which doesn't declare `.auth` -- `JWTAuth` (see `jwt_auth`
+    # above) sets it to the authenticated `User` at runtime.
+    user: User = request.auth
 
     # Update name if provided
     if payload.name is not None:

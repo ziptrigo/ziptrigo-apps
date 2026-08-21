@@ -6,19 +6,21 @@ from django.shortcuts import render
 from ..models import QRCode, User
 
 
-class AuthenticatedHttpRequest(HttpRequest):
+class MaybeAuthenticatedHttpRequest(HttpRequest):
     """`HttpRequest` typed with the `.user` attribute `AuthenticationMiddleware` adds at runtime.
 
     `HttpRequest` itself doesn't declare `.user` -- `ty` has no equivalent of django-stubs' plugin
-    to know middleware adds it. Kept unioned with `AnonymousUser` (rather than narrowed to `User`)
-    to match the `isinstance` guards already below, which exist for the same reason.
+    to know middleware adds it. Kept unioned with `AnonymousUser` (rather than narrowed to `User`,
+    as `user-service/users/views.py`'s `AuthenticatedHttpRequest` is) to match the `isinstance`
+    guards already below, which exist for the same reason: `@login_required` only redirects
+    unauthenticated *browser* requests, so ty still sees `AnonymousUser` as possible here.
     """
 
     user: User | AnonymousUser
 
 
 @login_required
-def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
+def dashboard(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
     """Render the user dashboard with their QR codes."""
     user = request.user
 
@@ -47,7 +49,7 @@ def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
 
 
 @login_required
-def qrcode_editor(request: AuthenticatedHttpRequest, qr_id: str | None = None) -> HttpResponse:
+def qrcode_editor(request: MaybeAuthenticatedHttpRequest, qr_id: str | None = None) -> HttpResponse:
     """Render the QR code editor page for creating or editing QR codes.
 
     Args:
@@ -76,7 +78,7 @@ def qrcode_editor(request: AuthenticatedHttpRequest, qr_id: str | None = None) -
 
 
 @login_required
-def qrcode_duplicate(request: AuthenticatedHttpRequest, qr_id: str) -> HttpResponse:
+def qrcode_duplicate(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> HttpResponse:
     """Render the QR code editor in create mode, pre-filled from an existing QR code."""
     user = request.user
 

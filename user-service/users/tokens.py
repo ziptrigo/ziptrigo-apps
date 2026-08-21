@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import cast
 
 from django.conf import settings
 from ninja_jwt.settings import api_settings
@@ -21,7 +22,10 @@ class CustomAccessToken(Token):
         """Create a token for the given user with basic claims."""
         token = super().for_user(user)
         token['email'] = user.email
-        return token  # type: ignore
+        # `Token.for_user` is typed as returning `Self`, but `Self` on the base class resolves to
+        # `Token`, not this subclass -- ty has no way to know the actual runtime type follows
+        # `cls`, so it's cast rather than fixed.
+        return cast(CustomAccessToken, token)
 
 
 class CustomRefreshToken(Token):
@@ -43,9 +47,13 @@ class CustomRefreshToken(Token):
 
         # Copy claims from refresh token (except no_copy_claims)
         for claim, value in self.payload.items():
-            if claim is None or claim in self.no_copy_claims:
+            if claim in self.no_copy_claims:
                 continue
-            access[claim] = value
+            # `self.payload` is typed as `dict[str, Any]`, but ty widens `claim` to
+            # `str | None` when iterating `.items()` here -- JWT claim keys are always `str` at
+            # runtime, so this is a cast rather than a real `None`-guard (see the `for_user`
+            # cast below for the same kind of ty/runtime gap).
+            access[cast(str, claim)] = value
 
         return access
 
@@ -56,18 +64,19 @@ class CustomRefreshToken(Token):
         token = super().for_user(user)
         token['email'] = user.email
 
-        return token  # type: ignore
+        # See `CustomAccessToken.for_user` above for why this is a cast, not a bug.
+        return cast(CustomRefreshToken, token)
 
 
 class EmailConfirmationToken(Token):
     """JWT token for email confirmation links."""
 
     token_type = 'email_confirmation'
-    lifetime = timedelta(hours=settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS)  # type: ignore[assignment]
+    lifetime = timedelta(hours=settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS)
 
 
 class PasswordResetToken(Token):
     """JWT token for password reset links."""
 
     token_type = 'password_reset'
-    lifetime = timedelta(hours=settings.PASSWORD_RESET_TOKEN_TTL_HOURS)  # type: ignore[assignment]
+    lifetime = timedelta(hours=settings.PASSWORD_RESET_TOKEN_TTL_HOURS)

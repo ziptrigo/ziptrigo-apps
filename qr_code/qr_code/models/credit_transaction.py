@@ -51,8 +51,9 @@ class CreditTransaction(models.Model):
         help_text='Human-readable notes describing why this transaction happened.',
     )
     # See the matching comment in `qr_code/models/user.py` for why this is `cast` instead of left
-    # as the declared `models.DateTimeField`.
-    created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
+    # as the declared `models.DateTimeField`. `datetime | None`, not bare `datetime`: `auto_now_add`
+    # only populates this on save, so it's `None` on an instance that hasn't been saved yet.
+    created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
 
     class Meta:
         ordering = ['-created_at', '-id']
@@ -61,4 +62,5 @@ class CreditTransaction(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f'{self.user_id} {self.type} {self.amount} @ {self.created_at.isoformat()}'
+        created_at = self.created_at.isoformat() if self.created_at else 'unsaved'
+        return f'{self.user_id} {self.type} {self.amount} @ {created_at}'
