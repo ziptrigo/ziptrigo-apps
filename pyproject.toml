@@ -27,10 +27,8 @@ qr_code = [
 ]
 dev = [
     'boto3-stubs[s3,ses]',
-    'django-stubs',
     'factory-boy',
     'faker',
-    'mypy',
     'playwright',
     'pytest',
     'pytest-asyncio',
@@ -43,6 +41,7 @@ dev = [
     'segno>=1.6,<2.0',
     'pillow>=12.0,<13.0',
     'textual-searchable-selectionlist',
+    'ty',
     'typer',
     'typer-invoke',
 ]
@@ -101,33 +100,12 @@ skip_empty = true
 [tool.coverage.html]
 directory = 'htmlcov'
 
-[tool.mypy]
-python_version = '3.14'
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-check_untyped_defs = true
-plugins = ['mypy_django_plugin.main']
+[tool.ty.src]
 exclude = [
     'migrations',
-    '.venv.*',
-    'venv.*',
+    '.venv*',
+    'venv*',
 ]
-
-[tool.django-stubs]
-django_settings_module = 'config.settings'
-
-[[tool.mypy.overrides]]
-module = [
-    'dotenv',
-    'mypy_boto3_ses',
-    'ninja_jwt.*',
-    'rest_framework.*',
-    'segno',
-    'segno.*',
-    'textual_searchable_selectionlist.*',
-]
-ignore_missing_imports = true
 
 [tool.typer-invoke]
 modules = [
