@@ -175,12 +175,12 @@ python3 -m admin.test e2e
 
 ### Linting and Type Checking
 
-Shared repo tooling lives under `admin/` and uses `ruff` plus `mypy`:
+Shared repo tooling lives under `admin/` and uses `ruff` plus `ty`:
 
 ```bash
 python3 -m admin.lint all
 python3 -m admin.lint ruff --check .
-python3 -m admin.lint mypy .
+python3 -m admin.lint ty
 ```
 
 ### Package Management

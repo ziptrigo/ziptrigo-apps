@@ -225,7 +225,10 @@ def run(
     Note that `stdout` and `stderr` will be stripped of ANSI escape sequences by default.
     """
     args_filtered = [x for arg in args if arg is not None and (x := str(arg).strip())]  # noqa
-    logger.info(' '.join(args_filtered))
+    # Parens, not brackets: the logging handler renders messages as Rich markup, where `[...]`
+    # is a style tag rather than literal text.
+    cwd = kwargs.get('cwd', PROJECT_ROOT)
+    logger.info(f'({cwd}) {" ".join(args_filtered)}')
 
     if dry:
         return None

@@ -29,8 +29,10 @@ sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'auth_client'))
 # This must happen before reading any `os.getenv(...)` values.
 from utils.environment import select_env  # noqa: E402
 
-# Test runs and static analysis may have multiple env files in the repo; default to dev.
-_RUNNING_TOOLING = 'pytest' in sys.modules or 'mypy' in sys.modules
+# Test runs may have multiple env files in the repo; default to dev. (`ty`, which replaced mypy for
+# static analysis, is a standalone binary that never imports this module, so there's no equivalent
+# sentinel to check for it.)
+_RUNNING_TOOLING = 'pytest' in sys.modules
 if _RUNNING_TOOLING:
     os.environ.setdefault('ENVIRONMENT', 'dev')
 
