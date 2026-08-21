@@ -2,12 +2,18 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
-from mypy_boto3_ses import SESClient
+
+if TYPE_CHECKING:
+    # `mypy_boto3_ses` ships in the dev-only `boto3-stubs` group (see `pyproject.toml`), so it
+    # isn't installed in production. Keep this import type-checking-only -- the annotations below
+    # are local variables, which Python never evaluates at runtime -- rather than reintroducing the
+    # `ImportError` this used to raise as soon as this module was imported in prod.
+    from mypy_boto3_ses import SESClient
 
 logger = logging.getLogger(__name__)
 

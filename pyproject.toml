@@ -26,11 +26,17 @@ qr_code = [
     'segno>=1.6,<2.0',
 ]
 dev = [
+    # Dev-only type stubs for `mypy_boto3_ses`, needed for `ty` to resolve the `SESClient`
+    # annotation in both services' `email_service.py` and in `admin/email.py`. The import of
+    # `mypy_boto3_ses` itself never runs outside of type checking: it's behind `if TYPE_CHECKING:`
+    # in both `email_service.py` modules, and function-local (so lazily deferred) in
+    # `admin/email.py`. That's deliberate, not incidental -- Docker builds run
+    # `uv sync --group <app>` without the dev group, so an unguarded top-level import in either
+    # `email_service.py` would raise `ImportError` as soon as production code imported that module.
+    # Don't drop this dependency without also checking those guards.
     'boto3-stubs[s3,ses]',
-    'django-stubs',
     'factory-boy',
     'faker',
-    'mypy',
     'playwright',
     'pytest',
     'pytest-asyncio',
@@ -43,6 +49,7 @@ dev = [
     'segno>=1.6,<2.0',
     'pillow>=12.0,<13.0',
     'textual-searchable-selectionlist',
+    'ty',
     'typer',
     'typer-invoke',
 ]
@@ -101,33 +108,19 @@ skip_empty = true
 [tool.coverage.html]
 directory = 'htmlcov'
 
-[tool.mypy]
-python_version = '3.14'
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-check_untyped_defs = true
-plugins = ['mypy_django_plugin.main']
+# `ty` anchors patterns that don't start with `**` to the project root, unlike ruff's `exclude`,
+# so these need the `**/` prefix to match nested directories (e.g. `qr_code/qr_code/migrations`)
+# rather than only a top-level one.
+#
+# Dropped from `[tool.mypy]` with no `ty` equivalent: `check_untyped_defs` / `disallow_untyped_defs`
+# are moot (`ty` checks everything) and `python_version` is covered by `requires-python`, but
+# `warn_return_any` has no `ty` equivalent and is silently gone.
+[tool.ty.src]
 exclude = [
-    'migrations',
-    '.venv.*',
-    'venv.*',
+    '**/migrations',
+    '**/.venv*',
+    '**/venv*',
 ]
-
-[tool.django-stubs]
-django_settings_module = 'config.settings'
-
-[[tool.mypy.overrides]]
-module = [
-    'dotenv',
-    'mypy_boto3_ses',
-    'ninja_jwt.*',
-    'rest_framework.*',
-    'segno',
-    'segno.*',
-    'textual_searchable_selectionlist.*',
-]
-ignore_missing_imports = true
 
 [tool.typer-invoke]
 modules = [

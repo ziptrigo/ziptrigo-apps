@@ -16,7 +16,7 @@ shared/utils/         Installable pkg `utils` — base Django settings + `.env` 
 shared/auth_client/   Installable pkg `auth_client` — intended cross-service auth. EMPTY STUB.
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
-pyproject.toml        Single source of deps, ruff/mypy/pytest config, `inv` module registry.
+pyproject.toml        Single source of deps, ruff/ty/pytest config, `inv` module registry.
 uv.lock               One lockfile shared by both services.
 ```
 
@@ -30,10 +30,10 @@ Tooling is exposed through `typer-invoke`, which mounts each `admin/*.py` module
 subcommand group. The module registry is `[tool.typer-invoke].modules` in `pyproject.toml`.
 
 ```bash
-inv lint all                  # ruff check --fix + ruff format + mypy
+inv lint all                  # ruff check --fix + ruff format + ty
 inv lint all --check          # CI mode: report only, non-zero exit
 inv lint ruff <path>
-inv lint mypy <path>
+inv lint ty [target]          # target: a web app dir name or `admin`; omit to check everything
 inv test unit                 # all services
 inv test unit qr_code         # one service (positional, repeatable; names are directories)
 inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
@@ -101,8 +101,10 @@ Services compose, e.g. `INSTALLED_APPS = COMMON_INSTALLED_APPS + [...]`.
 ### Environment loading
 
 Both services call `select_env()` from `shared/utils/utils/environment.py` and **raise on failure**
-rather than falling back to defaults — except under pytest/mypy, which must not depend on
-machine-local config and fall through to the defaults baked into `settings.py`. qr_code also
+rather than falling back to defaults — except under pytest, which must not depend on machine-local
+config and falls through to the defaults baked into `settings.py`. (Static analysis used to get the
+same treatment for mypy; `ty` is a standalone binary that never imports `settings.py`, so there's no
+equivalent case to handle.) qr_code also
 registers Django system checks in `qr_code/qr_code/checks.py` that re-validate env selection and
 `EMAIL_BACKENDS` at startup.
 
@@ -193,12 +195,15 @@ matching dead DRF-era source modules — only the `_new` variants are wired into
   key. Finishing the consolidation means implementing `auth_client`, rewriting
   `qr_code/qr_code/migrations/0001_initial.py`, and re-pointing `admin.py` — at which point those
   restored models get deleted again.
-- **mypy can't run from the repo root, and is on its way out.** `inv lint mypy` dies with `Error
-  constructing plugin instance of NewSemanalDjangoPlugin`, because `[tool.django-stubs]
-  django_settings_module = 'config.settings'` doesn't resolve there — both services name their
-  settings package `config`. Rather than fix it, the plan is to replace mypy with `ty`; see the
-  tracking issue. Until then `inv lint all` fails at the mypy step even though ruff passes, so use
-  `inv lint ruff --check .` in CI.
+- **`ty`'s type-diagnostic backlog is untriaged.** mypy was replaced with `ty` (Astral's type
+  checker; see `admin/lint.py:lint_ty`) because mypy+django-stubs couldn't construct its plugin from
+  the repo root — both services name their settings package `config`, so `[tool.django-stubs]
+  django_settings_module = 'config.settings'` was ambiguous. `ty` has no plugin-construction step,
+  so that failure mode is gone, but it surfaces a real backlog of diagnostics (50 across the three
+  targets as of the switch) that hasn't been triaged — a good chunk is Django model/queryset
+  attribute-inference that mypy+django-stubs used to resolve via a semantic-analysis plugin `ty`
+  doesn't have yet. `lint_ty` runs `ty check --exit-zero` so `inv lint all` / CI stay green in the
+  meantime; triaging the backlog and dropping `--exit-zero` is tracked in #45.
 - Both services' `README.md` and `WARP.md` still describe the old `src/` layout.
 
 ## Conventions
@@ -210,8 +215,9 @@ matching dead DRF-era source modules — only the `_new` variants are wired into
 - **`ruff check .` and `ruff format --check .` both pass.** Keep them that way — run
   `inv lint ruff .` before committing.
 - **Single-quoted strings** (`ruff format --quote-style single`); triple-double-quoted docstrings.
-- Modern type syntax: `str | None`, not `Optional[str]`. mypy runs with `check_untyped_defs` and
-  `warn_return_any` on, `disallow_untyped_defs` off, using `mypy_django_plugin`.
+- Modern type syntax: `str | None`, not `Optional[str]`. Type-checked with `ty` (see
+  `[tool.ty.src]` in `pyproject.toml` and `admin/lint.py:lint_ty`); its diagnostic backlog is
+  untriaged and non-blocking for now — see "Still outstanding".
 - Models, schemas, routers/api, and services are packages with one domain per file, re-exported from
   `__init__.py`. Follow this when adding to either service.
 - Admin CLIs: typer apps with `no_args_is_help=True`, a module docstring as `help`, and a `--dry`
