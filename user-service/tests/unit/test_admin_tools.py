@@ -1,6 +1,6 @@
 import pytest
 from django.urls import reverse
-from users.users.models import User
+from users.models import User
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -47,7 +47,7 @@ def test_send_test_email_invokes_service(client, admin_user: User, monkeypatch):
         captured['to'] = kwargs['to']
         return 1, 0
 
-    monkeypatch.setattr('users.users.admin.send_email', fake_send_email)
+    monkeypatch.setattr('users.admin.send_email', fake_send_email)
 
     response = client.post(
         url,

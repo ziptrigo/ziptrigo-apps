@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 from django.conf import settings
-from src.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat
-from src.qr_code.services import QRCodeGenerator
+from qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat
+from qr_code.services import QRCodeGenerator
 
 
 @pytest.mark.django_db

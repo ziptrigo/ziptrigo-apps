@@ -5,9 +5,9 @@ Unit and integration tests for authentication endpoints.
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from qr_code.models.time_limited_token import TimeLimitedToken
+from qr_code.services.password_reset import PasswordResetService
 from rest_framework import status
-from src.qr_code.models.time_limited_token import TimeLimitedToken
-from src.qr_code.services.password_reset import PasswordResetService
 
 User = get_user_model()
 
@@ -557,7 +557,7 @@ class TestPasswordResetFlow:
 
         # Patch the helper used by the API module so SES is never touched.
         monkeypatch.setattr(
-            'src.qr_code.api.auth._get_password_reset_service',
+            'qr_code.api.auth._get_password_reset_service',
             _get_service,
         )
 

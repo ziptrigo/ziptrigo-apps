@@ -11,8 +11,6 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ninja_jwt.exceptions import TokenError
 from ninja_jwt.settings import api_settings
 
-from utils import PROJECT_ROOT
-
 from ..tokens import EmailConfirmationToken
 from .email_service import EmailBackendClass, asend_email, get_email_backend
 
@@ -71,10 +69,10 @@ def get_email_confirmation_service() -> EmailConfirmationService:
 def render_email_confirmation_email(*, user: User, confirmation_url: str) -> tuple[str, str, str]:
     """Render email subject, text, and HTML body for a confirmation email using Jinja2.
 
-    Template: ``src/qr_code/static/emails/email_validation.j2``.
+    Template: ``qr_code/static/emails/email_validation.j2``.
     """
 
-    template_path = PROJECT_ROOT / 'src' / 'qr_code' / 'static' / 'emails'
+    template_path = settings.PROJECT_ROOT / 'qr_code' / 'static' / 'emails'
 
     env = Environment(
         loader=FileSystemLoader(str(template_path)),

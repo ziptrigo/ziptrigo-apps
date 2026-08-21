@@ -1,5 +1,5 @@
 import pytest
-from users.users.models import CreditTransaction, CreditTransactionType, User
+from users.models import CreditTransaction, CreditTransactionType, User
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 

@@ -28,24 +28,25 @@ sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'auth_client'))
 
 # Load environment variables from the selected `.env.<ENVIRONMENT>` file.
 # This must happen before reading any `os.getenv(...)` values.
-try:
-    # Test runs and static analysis may have multiple env files in the repo; default to dev.
-    if 'pytest' in sys.modules or 'mypy' in sys.modules:
-        os.environ.setdefault('ENVIRONMENT', 'dev')
+from utils.environment import select_env  # noqa: E402
 
-    from utils.environment import select_env
+# Test runs and static analysis may have multiple env files in the repo; default to dev.
+_RUNNING_TOOLING = 'pytest' in sys.modules or 'mypy' in sys.modules
+if _RUNNING_TOOLING:
+    os.environ.setdefault('ENVIRONMENT', 'dev')
 
-    _selection = select_env(PROJECT_ROOT)
-    if _selection.errors:
-        raise RuntimeError('\n'.join(_selection.errors))
-    if _selection.environment:
-        os.environ.setdefault('ENVIRONMENT', _selection.environment)
-        load_dotenv(dotenv_path=_selection.env_path)
-    else:
-        raise RuntimeError('Environment not set.')
-except Exception:
-    # Fail fast if env selection is broken; otherwise we'd silently read wrong defaults.
-    raise
+_selection = select_env(PROJECT_ROOT)
+
+# Fail fast if env selection is broken; otherwise we'd silently read wrong defaults. Tests and
+# static analysis must not require machine-local configuration, so they fall back to the defaults
+# baked into this module.
+if _selection.errors and not _RUNNING_TOOLING:
+    raise RuntimeError('\n'.join(_selection.errors))
+
+if _selection.environment:
+    os.environ.setdefault('ENVIRONMENT', _selection.environment.value)
+if _selection.env_path:
+    load_dotenv(dotenv_path=_selection.env_path)
 
 # Import common settings from shared utils
 from utils.settings.base import (  # noqa: E402, F401
@@ -80,7 +81,6 @@ INSTALLED_APPS = COMMON_INSTALLED_APPS + [
     'ninja_extra',
     'ninja_jwt',
     'qr_code',
-    'users',
 ]
 
 MIDDLEWARE = [
@@ -148,7 +148,7 @@ AUTH_PASSWORD_VALIDATORS = [
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     PROJECT_ROOT / 'qr_code' / 'static',
-    PROJECT_ROOT.parent / 'common' / 'static',
+    PROJECT_ROOT.parent / 'shared' / 'utils' / 'utils' / 'static',
 ]
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
 

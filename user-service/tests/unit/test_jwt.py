@@ -1,7 +1,7 @@
 import pytest
 from ninja_jwt.exceptions import TokenError
-from users.users.models import User
-from users.users.tokens import CustomAccessToken, CustomRefreshToken
+from users.models import User
+from users.tokens import CustomAccessToken, CustomRefreshToken
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 

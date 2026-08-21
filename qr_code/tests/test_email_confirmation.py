@@ -8,12 +8,12 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-from rest_framework import status
-from src.qr_code.models.time_limited_token import TimeLimitedToken
-from src.qr_code.services.email_confirmation import (
+from qr_code.models.time_limited_token import TimeLimitedToken
+from qr_code.services.email_confirmation import (
     EmailConfirmationService,
     get_email_confirmation_service,
 )
+from rest_framework import status
 
 User = get_user_model()
 
@@ -22,7 +22,7 @@ User = get_user_model()
 class TestSignupWithEmailConfirmation:
     """Test cases for signup with email confirmation."""
 
-    @patch('src.qr_code.services.email_confirmation.send_email')
+    @patch('qr_code.services.email_confirmation.send_email')
     def test_signup_sends_confirmation_email(self, mock_send_email, api_client):
         """Test that signup sends a confirmation email."""
 
@@ -59,7 +59,7 @@ class TestSignupWithEmailConfirmation:
         assert user.email_confirmed is False
         assert user.email_confirmed_at is None
 
-    @patch('src.qr_code.services.email_confirmation.send_email')
+    @patch('qr_code.services.email_confirmation.send_email')
     def test_signup_creates_confirmation_token(self, mock_send_email, api_client):
         """Test that signup creates an email confirmation token."""
 
@@ -281,7 +281,7 @@ class TestConfirmEmailEndpoint:
 class TestResendConfirmationEndpoint:
     """Test cases for the resend confirmation API endpoint."""
 
-    @patch('src.qr_code.services.email_confirmation.send_email')
+    @patch('qr_code.services.email_confirmation.send_email')
     def test_resend_confirmation_for_unconfirmed_user(self, mock_send_email, api_client):
         """Test resending confirmation email for an unconfirmed user."""
 
@@ -303,7 +303,7 @@ class TestResendConfirmationEndpoint:
         assert 'confirmation email will be sent' in response.data['detail'].lower()
         mock_send_email.assert_called_once()
 
-    @patch('src.qr_code.services.email_confirmation.send_email')
+    @patch('qr_code.services.email_confirmation.send_email')
     def test_resend_confirmation_for_confirmed_user(self, mock_send_email, api_client):
         """Test that resend does not send email for already confirmed users."""
 
@@ -328,7 +328,7 @@ class TestResendConfirmationEndpoint:
         # But email should not actually be sent
         mock_send_email.assert_not_called()
 
-    @patch('src.qr_code.services.email_confirmation.send_email')
+    @patch('qr_code.services.email_confirmation.send_email')
     def test_resend_confirmation_for_nonexistent_user(self, mock_send_email, api_client):
         """Test that resend gives generic response for nonexistent users."""
 
@@ -425,7 +425,7 @@ class TestConfirmEmailPage:
 class TestEmailConfirmationService:
     """Test cases for the EmailConfirmationService."""
 
-    @patch('src.qr_code.services.email_confirmation.send_email')
+    @patch('qr_code.services.email_confirmation.send_email')
     def test_send_confirmation_email(self, mock_send_email):
         """Test sending a confirmation email."""
 

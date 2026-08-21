@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.conf import settings
+from ninja_jwt.settings import api_settings
 from ninja_jwt.tokens import Token
 
 from .models import User
@@ -10,7 +11,7 @@ class CustomAccessToken(Token):
     """Custom access token."""
 
     token_type = 'access'
-    lifetime_setting = 'ACCESS_TOKEN_LIFETIME'
+    lifetime = api_settings.ACCESS_TOKEN_LIFETIME
 
     @classmethod
     def for_user(cls, user: User) -> 'CustomAccessToken':  # type: ignore[override]
@@ -24,7 +25,7 @@ class CustomRefreshToken(Token):
     """Custom refresh token."""
 
     token_type = 'refresh'
-    lifetime_setting = 'REFRESH_TOKEN_LIFETIME'
+    lifetime = api_settings.REFRESH_TOKEN_LIFETIME
     no_copy_claims = (
         'token_type',
         'exp',

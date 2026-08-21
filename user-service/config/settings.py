@@ -25,8 +25,27 @@ sys.path.insert(0, str(PROJECT_ROOT.parent))
 sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'utils'))
 sys.path.insert(0, str(PROJECT_ROOT.parent / 'shared' / 'auth_client'))
 
-# Load environment variables from .env file
-load_dotenv(dotenv_path=PROJECT_ROOT / '.env')
+# Load environment variables from the selected `.env.<ENVIRONMENT>` file.
+# This must happen before reading any `os.getenv(...)` values.
+from utils.environment import select_env  # noqa: E402
+
+# Test runs and static analysis may have multiple env files in the repo; default to dev.
+_RUNNING_TOOLING = 'pytest' in sys.modules or 'mypy' in sys.modules
+if _RUNNING_TOOLING:
+    os.environ.setdefault('ENVIRONMENT', 'dev')
+
+_selection = select_env(PROJECT_ROOT)
+
+# Fail fast if env selection is broken; otherwise we'd silently read wrong defaults. Tests and
+# static analysis must not require machine-local configuration, so they fall back to the defaults
+# baked into this module.
+if _selection.errors and not _RUNNING_TOOLING:
+    raise RuntimeError('\n'.join(_selection.errors))
+
+if _selection.environment:
+    os.environ.setdefault('ENVIRONMENT', _selection.environment.value)
+if _selection.env_path:
+    load_dotenv(dotenv_path=_selection.env_path)
 
 # Import common settings from shared utils
 from utils.settings.base import (  # noqa: E402, F401
