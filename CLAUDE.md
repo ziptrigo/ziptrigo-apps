@@ -1,238 +1,209 @@
-# Ziptrigo Apps - AI Agent Context
+# CLAUDE.md
 
-This document provides context for AI agents (like Warp Agent) working on the ziptrigo-apps monorepo.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Repository shape
 
-**ziptrigo-apps** is a monorepo containing two Django microservices that are developed together but deployed independently. The repository was created by merging two separate repositories using git subtree, preserving commit history from both.
-
-### Services
-
-1. **users** (Port 8010)
-   - User authentication and authorization service
-   - Uses django-ninja and django-ninja-jwt
-   - Custom User model with email-based authentication
-   - JWT token-based API authentication
-   - Located in: `users/`
-
-2. **qr_code** (Port 8020)
-   - QR code generation and management service
-   - Uses django-ninja-extra and django-ninja-jwt
-   - Custom User model (separate from users service)
-   - File uploads (media) and email functionality (AWS SES)
-   - Located in: `qr_code/`
-
-## Architecture Principles
-
-### Monorepo Benefits
-- **Shared Code**: Common utilities and settings in `common/` directory
-- **Unified Development**: Both services in one repository for easier coordination
-- **Atomic Changes**: Changes affecting both services can be committed together
-- **Preserved History**: Git history from both original repositories maintained via subtree
-
-### Independent Deployment
-- Each service has its own Dockerfile for separate container builds
-- Shared dependencies are managed from the root `pyproject.toml` and `uv.lock`
-- Each service maintains its own SECRET_KEY and configuration
-- Services use external databases (not shared)
-
-### Future Architecture
-- QR Code service will authenticate against Users service (not yet implemented)
-- API Gateway will provide unified entry point with `/users/` and `/qr-code/` prefixes
-- More microservices can be added following the same pattern
-
-## Key Files and Directories
+Monorepo of two independently-deployable Django 6 microservices plus shared packages. Created by
+`git subtree`-merging two standalone repos, then refactored twice (`src/` layout → flat layout,
+then `users/` → `user-service/` and `common/` → `shared/`). **Both refactors left dangling
+references** — see "Known-broken state" below before trusting any command.
 
 ```
-ziptrigo-apps/
-├── common/                          # Shared code
-│   ├── __init__.py
-│   └── settings/
-│       ├── __init__.py
-│       └── base.py                  # Shared Django settings (middleware, validators, etc.)
-│
-├── users/                           # Users service
-│   ├── config/
-│   │   ├── settings.py             # Imports from common.settings.base, users-specific config
-│   │   ├── urls.py                 # URL routing with /users/ prefix support
-│   │   ├── wsgi.py
-│   │   └── asgi.py
-│   ├── users/                      # Application code
-│   ├── tests/                      # Tests (pytest)
-│   ├── admin/                      # Admin utilities (lint, test commands)
-│   ├── Dockerfile                  # Multi-stage build for minimal image size
-│   ├── manage.py
-│   └── .env.dev                    # Development environment variables
-│
-├── qr_code/                        # QR Code service
-│   ├── config/
-│   │   ├── settings.py            # Imports from common.settings.base, qr_code-specific config
-│   │   ├── urls.py                # URL routing with /qr-code/ prefix support
-│   │   ├── wsgi.py
-│   │   └── asgi.py
-│   ├── qr_code/                   # Application code
-│   ├── tests/                     # Tests (pytest)
-│   ├── admin/                     # Admin utilities (lint, test commands)
-│   ├── media/                     # User-uploaded media files
-│   ├── staticfiles/               # Collected static files
-│   ├── Dockerfile                 # Multi-stage build for minimal image size
-│   ├── manage.py
-│   └── .env.dev                   # Development environment variables
-│
-├── docker-compose.yml             # Orchestrates both services
-├── pyproject.toml                 # Shared dependencies and tool configuration
-├── uv.lock                        # Locked dependency graph for all apps
-├── README.md                      # User-facing documentation
-└── WARP.md                       # This file (AI agent context)
+user-service/         Django project (config/) + `users` app. SSO / identity. Port 8010.
+qr_code/              Django project (config/) + `qr_code` app. QR generation. Port 8020.
+shared/utils/         Installable pkg `utils` — base settings, AWS/email/qrcode CLI helpers.
+shared/auth_client/   Installable pkg `auth_client` — intended cross-service auth. EMPTY STUB.
+admin/                Typer CLIs for lint/test/server/pip/openapi. Exposed via `inv`.
+tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
+pyproject.toml        Single source of deps, ruff/mypy/pytest config, `inv` module registry.
+uv.lock               One lockfile shared by both services.
 ```
 
-## Design System
+Each service also has a `README.md` and `WARP.md`; **both are stale** (they document the old `src/`
+layout). The root `README.md` is mostly accurate but its command examples are wrong (see below).
+`AGENTS.md` just redirects here.
 
-### Color Palette
+## Commands
 
-The Ziptrigo brand uses a sage green color palette extracted from the service logos (`qr_code/qr_code/static/images/logo_128x128.png` and `users/users/static/images/logo_128x128.png`).
+Tooling is exposed through `typer-invoke`, which mounts each `admin/*.py` module as an `inv`
+subcommand group. The module registry is `[tool.typer-invoke].modules` in `pyproject.toml`.
 
-#### Primary Colors
-- **Sage Green**: `#8FA89E` - Main brand color (mid-tone green-gray)
-- **Dark Slate**: `#3B4A47` - Dark gray-green for text and accents
-- **Light Sage**: `#B5C7BE` - Lighter variant for backgrounds and subtle elements
-
-#### Supporting Colors
-- **Deep Charcoal**: `#2C3432` - Darkest tone for primary text and borders
-- **Soft Mint**: `#D4E0DA` - Very light green-gray for backgrounds
-- **White**: `#FFFFFF` - For contrast and backgrounds
-
-#### Usage Guidelines
-- **Headers/Primary Text**: Deep Charcoal or Dark Slate
-- **Backgrounds (Light Mode)**: White or Soft Mint
-- **Backgrounds (Dark Mode)**: Deep Charcoal with Dark Slate accents
-- **Buttons/CTAs**: Sage Green with white text
-- **Hover States**: Dark Slate
-- **Borders/Dividers**: Light Sage or Soft Mint
-
-#### Tailwind CSS Scale
-
-```css
-colors: {
-  sage: {
-    50: '#f4f7f6',
-    100: '#d4e0da',
-    200: '#b5c7be',
-    300: '#8fa89e',
-    400: '#728e84',
-    500: '#5a736a',
-    600: '#475a53',
-    700: '#3b4a47',
-    800: '#2c3432',
-    900: '#1e2422'
-  }
-}
+```bash
+inv lint all                  # ruff check --fix + ruff format + mypy
+inv lint all --check          # CI mode: report only, non-zero exit
+inv lint ruff <path>
+inv lint mypy <path>
+inv test unit                 # all services
+inv test unit qr_code         # one service (positional, repeatable)
+inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
+inv server run qr_code [dev|prod]   # runserver for one service
+inv pip sync                  # uv sync --frozen, all groups
+inv openapi generate --format json --file <path>
 ```
 
-**When building new web interfaces**: Always use this palette to maintain brand consistency across all microservices.
+Every command accepts `--dry` to print the shell command without running it.
 
-## Development Patterns
+The two entry points are *not* interchangeable for single-command modules. `admin/server.py` and
+`admin/openapi.py` each define one typer command, which typer collapses away when the module is run
+directly but which `inv` preserves:
 
-### Settings Architecture
-- **common/settings/base.py**: Contains shared Django configuration
-  - Common middleware, password validators, internationalization
-  - Template context processors, installed apps (base Django + Jazzmin)
-- **Service settings**: Import from common base and extend/override
-  - Each service adds `sys.path.insert(0, str(PROJECT_ROOT.parent))` for common imports
-  - Each service defines its own SECRET_KEY, INSTALLED_APPS, DATABASES
-  - Use pattern: `from common.settings.base import COMMON_MIDDLEWARE`
+```bash
+inv server run qr_code            # via inv: subcommand required
+python3 -m admin.server qr_code   # direct: subcommand collapsed away
+```
 
-### Django Configuration
-- Both services use Django 6.0+
-- Python 3.12+ with type hints (Python 3.12 syntax: `str | None` instead of `Optional[str]`)
-- PEP 8 convention with 100-column limit
-- Single-quoted strings except triple-double-quoted docstrings
+Multi-command modules (`lint`, `test`, `pip`) take the subcommand either way.
 
-### URL Configuration
-- Services currently run standalone on different ports (8010, 8020)
-- URL files prepared for API gateway with commented-out prefixed patterns
-- To enable prefixes: uncomment `path('users/', include(base_patterns))` pattern
+### Running tests directly
 
-### Docker Setup
-- Multi-stage builds: builder stage + slim runtime stage
-- Python 3.13-slim base images for minimal size
-- Dependencies installed with `--user` flag in builder, copied to runtime
-- PYTHONPATH set to `/app` for common imports
-- Volumes mount both service code and common code
+`inv test unit` shells out to pytest with `cwd` set to the service directory and `PYTHONPATH`
+pointing at the repo root, with `ENVIRONMENT=dev`. To run a single test, reproduce that yourself:
 
-### Testing
-- Each service uses pytest
-- Test structure: `tests/api/`, `tests/unit/`, `tests/common/`
-- Factories for test data (e.g., `tests/factories.py` in users)
-- Run tests from service directory: `cd users && pytest`
+```bash
+cd user-service && PYTHONPATH=.. ENVIRONMENT=dev pytest tests/unit/test_jwt.py::test_access_token
+```
 
-### Admin Utilities
-- The repo has a shared root `admin/` directory with invoke/typer-based utilities
-- Common commands: `server.py`, `test.py`, `lint.py`, `pip.py`
-- App-specific helpers include `aws.py`, `email.py`, `openapi.py`, and `qrcode.py`
+`DJANGO_SETTINGS_MODULE=config.settings` is set globally in `pyproject.toml`, which is why pytest
+must run from inside a service directory — both services name their config package `config`.
+Default addopts include `--reuse-db --no-migrations`.
 
-## Common Gotchas
+### Dependencies
 
-1. **Import Path**: Services must add parent directory to sys.path to import from common
-   ```python
-   sys.path.insert(0, str(PROJECT_ROOT.parent))
-   from common.settings.base import COMMON_MIDDLEWARE
-   ```
+`admin/pip.py` wraps `uv` over the shared lockfile. Dependency scopes are `main` / `dev`; app groups
+are `users` / `qr_code` (`--app` / `-a`). The lockfile is always global — locking is never filtered
+by scope, only syncing is.
 
-2. **Separate SECRET_KEYs**: Each service has its own SECRET_KEY, don't share
+```bash
+inv pip sync dev -a qr_code       # dev tools + qr_code group
+inv pip package dev -p django     # upgrade one declared package
+inv pip compile --clean           # delete uv.lock and re-lock from scratch
+inv pip install                   # sync --inexact (won't prune unrelated packages)
+```
 
-3. **External Databases**: No database containers in docker-compose, services expect external DBs
+Add shared runtime deps to `[project.dependencies]`; app-specific or tooling deps to
+`[dependency-groups]`. `admin/pip.py` validates `-p` names against what's declared, so update
+`pyproject.toml` first.
 
-4. **QR Code Environment**: QR Code service uses custom environment selection logic via `qr_code.common.environment.select_env()`
+## Architecture
 
-5. **Static Files**: Users service uses basic Django static files, QR Code uses WhiteNoise
+### Settings composition
 
-6. **Media Files**: Only QR Code service handles media files (user uploads)
+Both services' `config/settings.py` follow the same prologue: compute `PROJECT_ROOT`, then
+`sys.path.insert` the repo root, `shared/utils`, and `shared/auth_client`, then import shared
+constants from `utils.settings.base` (hence the `# noqa: E402` on those imports). Each service owns
+its `SECRET_KEY`, `INSTALLED_APPS`, `DATABASES`, and `NINJA_JWT` block.
 
-## When Making Changes
+`shared/utils/utils/settings/base.py` exports only `COMMON_*` constants (middleware, validators,
+installed apps, Jazzmin, context processors) plus a few plain settings (`TIME_ZONE`, `USE_TZ`, …).
+Services compose, e.g. `INSTALLED_APPS = COMMON_INSTALLED_APPS + [...]`.
 
-### Adding Shared Code
-1. Place in `common/` directory
-2. Create proper `__init__.py` files for packages
-3. Update both services to import if needed
-4. Consider backward compatibility
+### Environment loading — the two services differ
 
-### Adding Service-Specific Code
-1. Work within the service directory (`users/` or `qr_code/`)
-2. Follow existing patterns (users/, qr_code/, tests/, admin/)
-3. Update service-specific settings/urls as needed
-4. Update service Dockerfile if new dependencies
+- **user-service**: plain `load_dotenv(PROJECT_ROOT / '.env')`. Simple, no env selection.
+- **qr_code**: calls `select_env()` and **raises on failure** rather than falling back to defaults.
+  It also registers Django system checks in `qr_code/qr_code/checks.py` that re-validate env
+  selection and `EMAIL_BACKENDS` at startup.
 
-### Adding Dependencies
-1. Add shared runtime dependencies to `[project.dependencies]` in `pyproject.toml`
-2. Add app-specific or tooling dependencies to `[dependency-groups]`
-3. Refresh `uv.lock`
-4. Rebuild Docker images: `docker-compose build`
+The selection convention (implemented in `admin/environment.py`) is: `.env.<environment>` files
+where `<environment>` ∈ {`dev`, `prod`}; if `ENVIRONMENT` is set, use it; otherwise require exactly
+one `.env.*` file (ignoring `.env.example`) and fail if there are zero or several.
 
-### Running Services
-- **Docker**: `docker-compose up` (both) or `docker-compose up users` (one)
-- **Local**: `uv sync --active --group dev`, then `python users/manage.py runserver 8010`
-- **Tests**: `inv test unit users`
+### Auth — two disconnected user models
 
-## Migration Guide (for reference)
+The intended design is that `user-service` is the identity authority and other services verify via
+`shared/auth_client`. **This is not implemented.** `auth_client/__init__.py` is a 0-byte file. Today
+each service has its own `AUTH_USER_MODEL` (`users.User` and `qr_code.User`) with its own database
+and its own JWT signing key, and `qr_code/config/settings.py` even lists `'users'` in
+`INSTALLED_APPS`. Don't assume a shared identity when changing auth code.
 
-This repo was created via:
-1. `git subtree add --prefix=users users-repo/main --squash`
-2. `git subtree add --prefix=qr_code qr-code-repo/main --squash`
-3. Created `common/` for shared code
-4. Updated settings to import from common base
-5. Created shared root tooling and dependency management
-6. Created Dockerfiles and docker-compose.yml
-7. Updated URL configurations for future API gateway
+The two services also differ in their Ninja stack and JWT claim shape:
 
-## Future Work
+| | user-service | qr_code |
+|---|---|---|
+| API | `NinjaAPI` (`users/api.py`) | `NinjaExtraAPI` + `NinjaJWTDefaultController` (`qr_code/api/router.py`) |
+| user id claim | `sub` | `user_id` |
+| signing key | `JWT_SECRET` env var | `SECRET_KEY` |
+| access token TTL | 14 days (env-tunable) | 60 min |
+| token class | `users.tokens.CustomAccessToken` | stock `ninja_jwt.tokens.AccessToken` |
 
-- [ ] Implement cross-service authentication (QR Code → Users)
-- [ ] Add API Gateway (nginx/Traefik) with proper routing
-- [ ] Extract more shared utilities to common/
-- [ ] Add shared database utilities if services need to share data
-- [ ] Consider shared logging/monitoring infrastructure
+`qr_code/qr_code/api/` contains both `auth.py`/`qrcode.py` and `auth_new.py`/`qrcode_new.py`. Only
+the `_new` variants are wired into `router.py`; the others are dead DRF-era code.
 
-## Contact
+### URL prefixing for a future gateway
 
-For questions about this architecture, refer to commit history or original service documentation in respective directories.
+Both `config/urls.py` files build a `base_patterns` list and assign `urlpatterns = base_patterns`,
+with a commented-out `urlpatterns = [path('users/', include(base_patterns))]` line above it. Behind
+an API gateway, swap those two lines and route `/users/*` → 8010, `/qr-code/*` → 8020.
+
+### Docker
+
+`docker-compose.yml` defines services `user-service` and `qr_code` (note: the compose service is
+`user-service`, not `users`). Build context is the repo root so `shared/` can be copied in;
+Dockerfiles are multi-stage (`uv sync --frozen --group <app>` in a builder, venv copied to a
+python:3.13-slim runtime) and `pip install -e` the two shared packages. No database container —
+services expect external DBs via `DATABASE_URL`, though `settings.py` currently hardcodes SQLite.
+
+## Known-broken state
+
+The repo does not currently run. These are refactor leftovers, not intentional design — fix the
+reference rather than working around it, and check whether a sibling reference needs the same fix.
+
+1. **`admin/web_app.py`**: `WebApp.USERS = 'users'`, but the directory is `user-service`. Any
+   `inv server users` / `inv test unit users` dies with `FileNotFoundError: .../ziptrigo-apps/users`.
+2. **`shared/utils/utils/environment.py` does not exist**, but `qr_code/config/settings.py` imports
+   `from utils.environment import select_env`. All qr_code tests fail at collection with
+   `ImportError: No module named 'utils.environment'`. The working implementation lives in
+   `admin/environment.py` and needs to move (it is deliberately Django-free so settings can import it).
+3. **`qr_code/qr_code/checks.py`** imports `from . import PROJECT_ROOT` and
+   `from .common.environment import ...` — the package `__init__.py` is empty and `common/` is gone.
+4. **user-service tests** import `from users.users.models import ...` (old nested layout). Correct
+   is `users.models`. Affects every file under `user-service/tests/`, including `conftest.py`'s
+   `AUTH_TOKEN_CLASSES` string.
+5. **qr_code tests** import `from src.qr_code...` — a layout two refactors old.
+6. **`shared/utils/utils/{aws,email,qrcode}.py`** are typer CLIs importing `from .utils import ...`,
+   but there is no `shared/utils/utils/utils.py` — only `admin/utils.py`. Correspondingly
+   `[tool.typer-invoke].modules` still lists `admin.aws`, `admin.email`, `admin.qrcode`, so `inv`
+   prints three import warnings on every invocation.
+7. **`qr_code/config/settings.py`** points `STATICFILES_DIRS` at `PROJECT_ROOT.parent / 'common' /
+   'static'`; the assets are now at `shared/utils/utils/static`. user-service already has this right.
+8. **`admin/environment.py:60`** builds a common env path from `PROJECT_ROOT / 'common'`.
+9. **`tests_e2e/conftest.py`** launches the server with `cwd='users'`.
+10. **No `.env.dev` files exist** (only `user-service/.env.example`), yet `docker-compose.yml`
+    declares `env_file: user-service/.env.dev` and `qr_code/.env.dev`.
+11. **`admin/pip.py`** defaults `VIRTUAL_ENV` to `.venv313`; the checked-out venv is `.venv` and runs
+    Python 3.14, while `pyproject.toml` targets `py313`.
+12. `ruff check .` reports 39 errors and `ruff format --check .` wants to reformat 13 files. Run
+    `inv lint all` before committing, but scope fixes to files you touched — a repo-wide format
+    would bury real changes.
+
+## Conventions
+
+- Python 3.13 target, 100-column lines, PEP 8. Ruff lint set is `E,F,W,I` with `E266,E501,E701,F811`
+  ignored; migrations are excluded.
+- **Single-quoted strings** (`ruff format --quote-style single`); triple-double-quoted docstrings.
+- Modern type syntax: `str | None`, not `Optional[str]`. mypy runs with `check_untyped_defs` and
+  `warn_return_any` on, `disallow_untyped_defs` off, using `mypy_django_plugin`.
+- Models, schemas, routers/api, and services are packages with one domain per file, re-exported from
+  `__init__.py`. Follow this when adding to either service.
+- Admin CLIs: typer apps with `no_args_is_help=True`, a module docstring as `help`, and a `--dry`
+  option threaded through `admin.utils.run`.
+
+## Design system
+
+Sage green palette derived from the service logos. Use it for any new web interface in either
+service.
+
+| Token | Hex | Use |
+|---|---|---|
+| Sage Green | `#8FA89E` | brand, buttons/CTAs |
+| Dark Slate | `#3B4A47` | headers, hover states |
+| Light Sage | `#B5C7BE` | borders, subtle fills |
+| Deep Charcoal | `#2C3432` | primary text, dark-mode bg |
+| Soft Mint | `#D4E0DA` | light backgrounds, dividers |
+
+Tailwind scale: `50 #f4f7f6 · 100 #d4e0da · 200 #b5c7be · 300 #8fa89e · 400 #728e84 · 500 #5a736a ·
+600 #475a53 · 700 #3b4a47 · 800 #2c3432 · 900 #1e2422`.
+
+Both services use django-jazzmin for the admin, themed via `COMMON_JAZZMIN_SETTINGS` with a custom
+`css/jazzmin_custom.css` and a `js/admin_theme_toggle.js` light/dark toggle.
