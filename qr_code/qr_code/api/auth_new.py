@@ -63,12 +63,17 @@ async def login_view(request, payload: LoginSchema):
         }
 
     # Generate JWT tokens using ninja-jwt
+    from typing import cast
+
     from ninja_jwt.tokens import RefreshToken
 
-    refresh = RefreshToken.for_user(user)
+    # `Token.for_user` (which `RefreshToken` inherits) is annotated as returning `Token`, not
+    # `Self`/`RefreshToken` -- a ninja_jwt stub imprecision, not a Django one. At runtime it
+    # constructs and returns `cls()`, i.e. actually a `RefreshToken` here.
+    refresh = cast(RefreshToken, RefreshToken.for_user(user))
 
     return {
-        'access': str(refresh.access_token),  # type: ignore[attr-defined]
+        'access': str(refresh.access_token),
         'refresh': str(refresh),
     }
 

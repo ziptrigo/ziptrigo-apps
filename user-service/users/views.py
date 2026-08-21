@@ -1,12 +1,32 @@
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import AnonymousUser
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 
-from .models import CreditTransaction
+from .models import CreditTransaction, User
 from .services.email_confirmation import get_email_confirmation_service
 from .services.password_reset import get_password_reset_service
+
+
+class AuthenticatedHttpRequest(HttpRequest):
+    """`HttpRequest` typed with the `.user` attribute `AuthenticationMiddleware` adds at runtime.
+
+    `HttpRequest` itself doesn't declare `.user` -- `ty` has no equivalent of django-stubs' plugin
+    to know middleware adds it. Narrowed to the concrete `User` (not unioned with `AnonymousUser`)
+    because `@login_required` redirects anonymous requests before the view body runs.
+    """
+
+    user: User
+
+
+class MaybeAuthenticatedHttpRequest(HttpRequest):
+    """Same as `AuthenticatedHttpRequest`, but for views that check `.is_authenticated` themselves
+    instead of relying on `@login_required`, so `.user` may still be `AnonymousUser`.
+    """
+
+    user: User | AnonymousUser
 
 
 @login_required
@@ -16,7 +36,7 @@ def account_page(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def credits_history_page(request: HttpRequest) -> HttpResponse:
+def credits_history_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render the credits usage history page for the authenticated user."""
     user = request.user
 
@@ -82,7 +102,7 @@ def email_confirmation_success(request: HttpRequest) -> HttpResponse:
     return render(request, 'email_confirmation_success.html')
 
 
-def logout_page(request: HttpRequest) -> HttpResponse:
+def logout_page(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
     """Log out the current user and redirect to the homepage."""
     if request.user.is_authenticated:
         auth_logout(request)

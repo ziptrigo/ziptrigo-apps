@@ -51,7 +51,7 @@ class SesEmailBackend:
             html_body = f'<pre>{text_body}</pre>'
 
         region = getattr(settings, 'AWS_REGION', 'us-east-1')
-        client: SESClient = boto3.client('ses', region_name=region)  # type: ignore
+        client: SESClient = boto3.client('ses', region_name=region)
 
         try:
             client.send_email(

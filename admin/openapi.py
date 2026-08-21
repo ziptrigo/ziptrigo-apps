@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from django.utils.functional import Promise
 
 from . import PROJECT_ROOT
 from .utils import logger
@@ -30,12 +31,38 @@ class Format(str, Enum):
     YAML = 'yaml'
 
 
+def _resolve_lazy(value):
+    """
+    Recursively force lazy translation proxies to plain strings.
+
+    Django validators (e.g. `UnicodeUsernameValidator.message`, which ends up in the schema via
+    `ninja_jwt`'s username field) wrap their text in `gettext_lazy`, producing
+    `django.utils.functional.Promise` instances rather than `str`. Neither serializer below can
+    handle them as-is: `json.dumps` doesn't know how to encode them, and `yaml.dump` falls back
+    to its generic-object representer, which can't reconstruct them from `__reduce__` either.
+    Resolving them up front, right after pulling the schema out of Ninja, sidesteps both.
+    """
+    if isinstance(value, Promise):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _resolve_lazy(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_lazy(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_resolve_lazy(item) for item in value)
+    return value
+
+
 def setup_django():
     """Configure Django settings."""
     import django
     from django.apps import apps
 
-    sys.path.insert(0, str(PROJECT_ROOT.resolve()))
+    # `config` and `qr_code` (the app package) live inside the `qr_code/` service directory, not
+    # the repo root -- same layout `qr_code/manage.py` relies on by running with that directory as
+    # `cwd`. `config.settings`'s own prologue inserts the repo root and shared packages once it
+    # runs, so inserting the service directory here is enough to resolve both imports.
+    sys.path.insert(0, str((PROJECT_ROOT / 'qr_code').resolve()))
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
     if not apps.ready:
@@ -72,7 +99,7 @@ def generate_openapi(
     try:
         logger.info(f'Generating OpenAPI schema in {format.value} format...')
 
-        schema = api.get_openapi_schema()
+        schema = _resolve_lazy(api.get_openapi_schema())
 
         # Convert to the desired format
         if format == Format.JSON:

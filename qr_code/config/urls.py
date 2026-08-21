@@ -23,12 +23,11 @@ base_patterns = [
 
 # Serve media files (WhiteNoise automatically handles static files)
 if settings.DEBUG:
-    # mypy struggles with the return type of static(); this is fine at runtime.
-    base_patterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)  # type: ignore[arg-type]
+    base_patterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 else:
     # Serve media files even when DEBUG=False for local testing
     # In production, use a proper web server (nginx, Apache, etc.) for media files
-    base_patterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)  # type: ignore[arg-type]
+    base_patterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 # For API gateway deployment, use prefixed patterns
 # Uncomment this and comment out the line below when deploying behind an API gateway:

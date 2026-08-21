@@ -260,7 +260,7 @@ def pip_package(
     requirements: RequirementsAnnotation = None,
     apps: AppAnnotation = None,
     package: Annotated[
-        list[str], typer.Option('--package', '-p', help='One or more packages to upgrade.')
+        list[str] | None, typer.Option('--package', '-p', help='One or more packages to upgrade.')
     ] = None,
     dry: DryAnnotation = False,
 ):

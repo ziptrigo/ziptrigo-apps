@@ -29,8 +29,8 @@ async def list_qrcodes(request):
 
     # Add computed fields (dynamic attributes for serialization)
     for qr in qrcodes:
-        qr.image_url = QRCodeGenerator.get_file_url(qr.image_file)  # type: ignore[attr-defined]
-        qr.redirect_url = qr.get_redirect_url()  # type: ignore[attr-defined]
+        qr.image_url = QRCodeGenerator.get_file_url(qr.image_file)
+        qr.redirect_url = qr.get_redirect_url()
 
     return qrcodes
 
@@ -75,8 +75,8 @@ async def create_qrcode(request, payload: QRCodeCreateSchema):
     await sync_to_async(qrcode.save)(update_fields=['image_file'])
 
     # Add computed fields (dynamic attributes for serialization)
-    qrcode.image_url = QRCodeGenerator.get_file_url(image_path)  # type: ignore[attr-defined]
-    qrcode.redirect_url = qrcode.get_redirect_url()  # type: ignore[attr-defined]
+    qrcode.image_url = QRCodeGenerator.get_file_url(image_path)
+    qrcode.redirect_url = qrcode.get_redirect_url()
 
     return 201, qrcode
 
@@ -94,8 +94,8 @@ async def retrieve_qrcode(request, qr_id: uuid.UUID):
         return 404, {'detail': 'QR code not found.'}
 
     # Add computed fields (dynamic attributes for serialization)
-    qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)  # type: ignore[attr-defined]
-    qrcode.redirect_url = qrcode.get_redirect_url()  # type: ignore[attr-defined]
+    qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)
+    qrcode.redirect_url = qrcode.get_redirect_url()
 
     return qrcode
 
@@ -119,8 +119,8 @@ async def update_qrcode(request, qr_id: uuid.UUID, payload: QRCodeUpdateSchema):
         await sync_to_async(qrcode.save)(update_fields=['name'])
 
     # Add computed fields (dynamic attributes for serialization)
-    qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)  # type: ignore[attr-defined]
-    qrcode.redirect_url = qrcode.get_redirect_url()  # type: ignore[attr-defined]
+    qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)
+    qrcode.redirect_url = qrcode.get_redirect_url()
 
     return qrcode
 
