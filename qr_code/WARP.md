@@ -9,7 +9,7 @@ A Python project for generating and manipulating QR codes.
 - Provide API, CLI and programmatic interfaces
 
 ## Tech Stack
-- Python 3.13
+- Python 3.14
 - Django 6.0 + Django Ninja for async API (JWT auth, htmx + Tailwind templates)
 - Django Ninja JWT for Bearer token authentication (access + refresh tokens)
 - Pydantic v2 for request/response validation and serialization
@@ -81,7 +81,7 @@ SES configuration (when using the `ses` backend):
 ### Coding guidelines
 - Use PEP8
 - Use docstrings
-- Use type hints. Type hints to use python 3.13 standards, ex. `str | None` instead of
+- Use type hints. Type hints to use python 3.14 standards, ex. `str | None` instead of
   `Optional[str]` and `list[str]` instead of `List[str]`. Functions that don't return anything
   (or return `None`) should not have a return type hint.
 - Use static type checking

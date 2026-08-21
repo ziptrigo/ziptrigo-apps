@@ -58,7 +58,7 @@ class PasswordResetService:
             if user_id is None:
                 return None
             return await sync_to_async(User.objects.get)(pk=user_id)
-        except (TokenError, User.DoesNotExist):
+        except TokenError, User.DoesNotExist:
             return None
 
 

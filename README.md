@@ -47,7 +47,7 @@ ziptrigo-apps/
 
 ### Prerequisites
 
-- Python 3.13+
+- Python 3.14+
 - `uv`
 - Docker and Docker Compose (for containerized development)
 - Git
@@ -67,8 +67,8 @@ dependencies using the administrative tools:
 
 ```bash
 # Create a virtual environment (one-time setup)
-uv venv .venv313 --python 3.13
-source .venv313/bin/activate  # On Windows: .venv313\Scripts\activate
+uv venv --python 3.14
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Sync all dependencies (dev + all apps)
 python3 -m admin.pip sync

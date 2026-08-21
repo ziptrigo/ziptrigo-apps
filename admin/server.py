@@ -12,13 +12,12 @@ import sys
 import typer
 
 from . import PROJECT_ROOT
-from .web_app import WebApp
+from .environment import Environment
 from .utils import (
     DryAnnotation,
-    EnvironmentAnnotation,
     run,
 )
-from .environment import Environment
+from .web_app import WebApp
 
 app = typer.Typer(
     help=__doc__,

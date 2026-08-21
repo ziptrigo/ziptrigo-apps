@@ -17,7 +17,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 application = get_wsgi_application()
 
 # Wrap with WhiteNoise for static file serving in production
-if not os.environ.get('DEBUG', 'False').lower() in ['true', '1']:
+if os.environ.get('DEBUG', 'False').lower() not in ['true', '1']:
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parent.parent

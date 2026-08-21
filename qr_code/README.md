@@ -23,8 +23,8 @@ A complete QR code generation and management service with Django Ninja async API
 ### Windows
 ```powershell
 # Create and activate the shared environment
-uv venv ..\.venv313 --python 3.13
-..\.venv313\Scripts\Activate.ps1
+uv venv ..\.venv --python 3.14
+..\.venv\Scripts\Activate.ps1
 
 # Install dependencies
 uv sync --active --group dev
@@ -43,8 +43,8 @@ python manage.py runserver
 ### Mac / Linux
 ```bash
 # Create and activate the shared virtual environment
-uv venv ../.venv313 --python 3.13
-source ../.venv313/bin/activate
+uv venv ../.venv --python 3.14
+source ../.venv/bin/activate
 
 # Install dependencies
 uv sync --active --group dev

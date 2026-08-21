@@ -110,9 +110,7 @@ def forgot_password(request):
 
     return Response(
         {
-            'detail': (
-                'If the account exists, an email will be sent with a password ' 'reset link.'
-            ),
+            'detail': ('If the account exists, an email will be sent with a password reset link.'),
         },
         status=status.HTTP_200_OK,
     )
@@ -182,8 +180,7 @@ def resend_confirmation(request):
     return Response(
         {
             'detail': (
-                'If the account exists and is not yet confirmed, '
-                'a confirmation email will be sent.'
+                'If the account exists and is not yet confirmed, a confirmation email will be sent.'
             ),
         },
         status=status.HTTP_200_OK,

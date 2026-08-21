@@ -16,7 +16,7 @@ from admin.utils import DryAnnotation, logger, multiple_parameters, run
 
 PYPROJECT_FILE = PROJECT_ROOT / 'pyproject.toml'
 UV_LOCK_FILE = PROJECT_ROOT / 'uv.lock'
-DEFAULT_VIRTUAL_ENV = PROJECT_ROOT / '.venv313'
+DEFAULT_VIRTUAL_ENV = PROJECT_ROOT / '.venv'
 
 app = typer.Typer(
     help=__doc__,
@@ -175,9 +175,6 @@ def _sync_command(
     if inexact:
         args.append('--inexact')
 
-    selected_reqs = _get_requirements(requirements)
-    selected_apps = _get_apps(apps)
-
     if (requirements is None or len(requirements) == 0) and (apps is None or len(apps) == 0):
         args.append('--all-groups')
         return args
@@ -250,7 +247,9 @@ def pip_compile(
 
 @app.command(name='sync')
 def pip_sync(
-    requirements: RequirementsAnnotation = None, apps: AppAnnotation = None, dry: DryAnnotation = False
+    requirements: RequirementsAnnotation = None,
+    apps: AppAnnotation = None,
+    dry: DryAnnotation = False,
 ):
     """Synchronize the environment with `uv.lock`."""
     run(*_sync_command(requirements, apps), dry=dry, env=_uv_env())
@@ -286,7 +285,9 @@ def pip_package(
 
 @app.command(name='upgrade')
 def pip_upgrade(
-    requirements: RequirementsAnnotation = None, apps: AppAnnotation = None, dry: DryAnnotation = False
+    requirements: RequirementsAnnotation = None,
+    apps: AppAnnotation = None,
+    dry: DryAnnotation = False,
 ):
     """
     Try to upgrade all dependencies to their latest versions.
@@ -296,7 +297,9 @@ def pip_upgrade(
 
 @app.command(name='install')
 def pip_install(
-    requirements: RequirementsAnnotation = None, apps: AppAnnotation = None, dry: DryAnnotation = False
+    requirements: RequirementsAnnotation = None,
+    apps: AppAnnotation = None,
+    dry: DryAnnotation = False,
 ):
     """Install dependencies from `uv.lock` without removing unrelated packages."""
     run(*_sync_command(requirements, apps, inexact=True), dry=dry, env=_uv_env())

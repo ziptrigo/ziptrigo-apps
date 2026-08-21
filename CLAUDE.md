@@ -149,7 +149,7 @@ an API gateway, swap those two lines and route `/users/*` → 8010, `/qr-code/*`
 `docker-compose.yml` defines services `user-service` and `qr_code` (note: the compose service is
 `user-service`, not `users`). Build context is the repo root so `shared/` can be copied in;
 Dockerfiles are multi-stage (`uv sync --frozen --group <app>` in a builder, venv copied to a
-python:3.13-slim runtime) and `pip install -e` the two shared packages. No database container —
+python:3.14-slim runtime) and `pip install -e` the two shared packages. No database container —
 services expect external DBs via `DATABASE_URL`, though `settings.py` currently hardcodes SQLite.
 
 ## State of the test suites
@@ -193,22 +193,22 @@ matching dead DRF-era source modules — only the `_new` variants are wired into
   key. Finishing the consolidation means implementing `auth_client`, rewriting
   `qr_code/qr_code/migrations/0001_initial.py`, and re-pointing `admin.py` — at which point those
   restored models get deleted again.
-- **Python version drift.** The checked-out venv is `.venv` running Python 3.14, while
-  `admin/pip.py` defaults `VIRTUAL_ENV` to `.venv313`, `pyproject.toml` targets `py313`, and the
-  Dockerfiles build on `python:3.13-slim`. Left alone deliberately — pick one and align the rest.
-- **`ruff check .` reports 20 errors** and `ruff format --check .` wants 12 files reformatted, all
-  pre-existing. Scope fixes to files you touch; a repo-wide format would bury real changes.
-- **mypy can't run from the repo root.** `inv lint mypy` dies with `Error constructing plugin
-  instance of NewSemanalDjangoPlugin`, because `[tool.django-stubs] django_settings_module =
-  'config.settings'` doesn't resolve there — both services name their settings package `config`.
-  Pre-existing (reproduces at `cebc9b7`). `inv lint all` never reaches it, since ruff exits
-  non-zero first. Fixing it means per-service mypy config, the same way pytest is run per service.
+- **mypy can't run from the repo root, and is on its way out.** `inv lint mypy` dies with `Error
+  constructing plugin instance of NewSemanalDjangoPlugin`, because `[tool.django-stubs]
+  django_settings_module = 'config.settings'` doesn't resolve there — both services name their
+  settings package `config`. Rather than fix it, the plan is to replace mypy with `ty`; see the
+  tracking issue. Until then `inv lint all` fails at the mypy step even though ruff passes, so use
+  `inv lint ruff --check .` in CI.
 - Both services' `README.md` and `WARP.md` still describe the old `src/` layout.
 
 ## Conventions
 
-- Python 3.13 target, 100-column lines, PEP 8. Ruff lint set is `E,F,W,I` with `E266,E501,E701,F811`
-  ignored; migrations are excluded.
+- Python 3.14 (pinned by `.python-version`; Dockerfiles build on `python:3.14-slim`), 100-column
+  lines, PEP 8. Ruff lint set is `E,F,W,I` with `E266,E501,E701,F811` ignored; migrations are
+  excluded. `E402` is ignored per-file for the two qr_code service modules that must bind
+  `User = get_user_model()` partway down the import block.
+- **`ruff check .` and `ruff format --check .` both pass.** Keep them that way — run
+  `inv lint ruff .` before committing.
 - **Single-quoted strings** (`ruff format --quote-style single`); triple-double-quoted docstrings.
 - Modern type syntax: `str | None`, not `Optional[str]`. mypy runs with `check_untyped_defs` and
   `warn_return_any` on, `disallow_untyped_defs` off, using `mypy_django_plugin`.

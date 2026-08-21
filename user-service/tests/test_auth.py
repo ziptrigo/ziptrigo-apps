@@ -3,7 +3,6 @@
 import pytest
 from django.contrib.auth import get_user_model
 from ninja.testing import TestClient
-
 from users.api import api
 
 User = get_user_model()
