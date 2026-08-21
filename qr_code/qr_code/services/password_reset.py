@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ninja_jwt.exceptions import TokenError
 from ninja_jwt.settings import api_settings
@@ -72,7 +72,7 @@ def render_password_reset_email(*, user: User, reset_url: str) -> tuple[str, str
     Template: ``src/qr_code/static/emails/password_reset.j2``.
     """
 
-    template_path = settings.PROJECT_ROOT / 'src' / 'qr_code' / 'static' / 'emails'
+    template_path = settings.PROJECT_ROOT / 'qr_code' / 'static' / 'emails'
 
     env = Environment(
         loader=FileSystemLoader(str(template_path)),

@@ -1,9 +1,9 @@
 from unittest.mock import Mock
 
 import pytest
-from users.users.auth import AdminAuth, JWTAuth
-from users.users.models import User
-from users.users.tokens import CustomAccessToken
+from users.auth import AdminAuth, JWTAuth
+from users.models import User
+from users.tokens import CustomAccessToken
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 

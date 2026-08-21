@@ -3,7 +3,7 @@ Unit tests for QRCode model.
 """
 
 import pytest
-from src.qr_code.models import (
+from qr_code.models import (
     QRCode,
     QRCodeErrorCorrection,
     QRCodeFormat,

@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from django.test import Client
-from src.qr_code.models import CreditTransaction, InsufficientCreditsError
+from qr_code.models import CreditTransaction, InsufficientCreditsError
 
 
 @pytest.mark.django_db

@@ -1,6 +1,6 @@
 import pytest
 from django.utils import timezone
-from users.users.models import User
+from users.models import User
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 

@@ -6,9 +6,8 @@ import os
 
 from django.conf import settings
 from django.core.checks import Error, Warning, register
+from utils.environment import SUPPORTED_ENVIRONMENTS, select_env
 
-from . import PROJECT_ROOT
-from .common.environment import SUPPORTED_ENVIRONMENTS, select_env
 from .services.email_service import (
     EMAIL_BACKEND_KIND_TO_CLASS,
     parse_email_backend_kinds,
@@ -19,7 +18,7 @@ from .services.email_service import (
 def check_environment(*args, **kwargs):
     checks: list[Warning | Error] = []
 
-    selection = select_env(PROJECT_ROOT)
+    selection = select_env(settings.PROJECT_ROOT)
 
     if selection.warnings:
         checks.append(
@@ -31,7 +30,7 @@ def check_environment(*args, **kwargs):
         )
 
     if selection.errors:
-        if any('ENVIRONMENT environment variable' in e for e in selection.errors):
+        if any('must be one of' in e for e in selection.errors):
             checks.append(
                 Error(
                     '\n'.join(selection.errors),

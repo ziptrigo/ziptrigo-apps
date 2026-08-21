@@ -7,10 +7,9 @@ import os
 import pytest
 from django.contrib.auth import get_user_model
 from ninja.testing import TestAsyncClient
-from rest_framework.test import APIClient  # type: ignore[import-not-found]
-from src.qr_code.api.router import api
-from src.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat, QRCodeType
-from src.qr_code.tokens import EmailConfirmationToken, PasswordResetToken
+from qr_code.api.router import api
+from qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat, QRCodeType
+from qr_code.tokens import EmailConfirmationToken, PasswordResetToken
 
 # Ensure settings that require env vars have sane defaults during tests.
 os.environ.setdefault('EMAIL_BACKENDS', 'console')
@@ -20,12 +19,6 @@ os.environ.pop('ENVIRONMENT', None)
 
 
 User = get_user_model()
-
-
-@pytest.fixture
-def api_client():
-    """Provide a DRF API client for testing (legacy)."""
-    return APIClient()
 
 
 @pytest.fixture
@@ -50,13 +43,6 @@ def user(db):
     user.email_confirmed_at = datetime.now(UTC)
     user.save()
     return user
-
-
-@pytest.fixture
-def authenticated_client(api_client, user):
-    """Provide an authenticated DRF API client (legacy)."""
-    api_client.force_authenticate(user=user)
-    return api_client
 
 
 @pytest.fixture

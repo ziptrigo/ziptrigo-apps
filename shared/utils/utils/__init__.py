@@ -1,11 +1,7 @@
-from pathlib import Path
+"""
+Shared utilities for Ziptrigo services.
 
-PROJECT_ROOT = Path(__file__).parents[1]
-PROJECT_NAME = PROJECT_ROOT.name.replace('-', '_')
-SOURCE_DIR = PROJECT_ROOT / 'src' / PROJECT_NAME
-
-import os
-from pathlib import Path
-
-# Provide a root path similar to what was in common/admin
-PROJECT_ROOT = Path(__file__).resolve().parent
+Importable both from Django settings (``utils.environment``, ``utils.settings.base``) and from
+application code. Nothing here may import Django at module level -- ``utils.environment`` in
+particular is loaded from ``settings.py`` before Django is configured.
+"""

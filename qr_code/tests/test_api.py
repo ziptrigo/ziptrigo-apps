@@ -5,8 +5,8 @@ Integration tests for QR code API endpoints.
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from qr_code.models import QRCode, QRCodeType
 from rest_framework import status
-from src.qr_code.models import QRCode, QRCodeType
 
 User = get_user_model()
 

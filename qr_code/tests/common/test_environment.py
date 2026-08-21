@@ -1,11 +1,11 @@
 """Unit tests for environment file selection.
 
-`src/qr_code/common/environment.py` must remain Django-free so it can be imported from `config/settings.py`.
+`shared/utils/utils/environment.py` must remain Django-free so it can be imported from `config/settings.py`.
 """
 
 import os
 
-from src.qr_code.common.environment import SUPPORTED_ENVIRONMENTS, select_env
+from utils.environment import SUPPORTED_ENVIRONMENTS, select_env
 
 
 class TestSelectEnv:
@@ -31,7 +31,9 @@ class TestSelectEnv:
 
     def test_invalid_environment_is_error(self, tmp_path) -> None:
         selection = select_env(tmp_path, environment='invalid')
-        assert selection.environment == 'invalid'
+        # An unparseable value is reported through `errors` rather than echoed back, so callers
+        # can rely on `environment` being a valid `Environment` whenever it is set.
+        assert selection.environment is None
         assert selection.env_path is None
         assert any('must be one of' in e.lower() for e in selection.errors)
 
