@@ -219,7 +219,7 @@ class CustomAdminSite(admin.AdminSite):
                     if len(s) <= 4:
                         return '*' * len(s)
                     segment = max(int(len(s) / 5), 2)
-                    return f'{s[:segment]}{"*"*(len(s)-segment*2)}{s[-segment:]}'
+                    return f'{s[:segment]}{"*" * (len(s) - segment * 2)}{s[-segment:]}'
 
                 # Build final list with masking
                 environment_variables = []

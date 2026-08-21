@@ -49,7 +49,7 @@ class EmailConfirmationService:
             if user_id is None:
                 return None
             return User.objects.get(pk=user_id)
-        except (TokenError, User.DoesNotExist):
+        except TokenError, User.DoesNotExist:
             return None
 
     @staticmethod
@@ -72,7 +72,7 @@ def render_email_confirmation_email(*, user: User, confirmation_url: str) -> tup
     """
     subject = 'Confirm your Ziptrigo Users account email'
 
-    text_body = f'''Hi{' ' + user.name if user.name else ''},
+    text_body = f"""Hi{' ' + user.name if user.name else ''},
 
 Thank you for creating an account! Please confirm your email address by clicking the link below:
 
@@ -84,7 +84,7 @@ If you did not create this account, please ignore this email.
 
 --
 The Ziptrigo Users Team
-'''
+"""
 
     html_body = f'''<html>
 <head></head>

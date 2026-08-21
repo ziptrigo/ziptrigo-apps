@@ -13,7 +13,7 @@ The Users service provides:
 
 ## Tech Stack
 
-- Backend: Django 6.0, Python 3.13, Django Ninja
+- Backend: Django 6.0, Python 3.14, Django Ninja
 - Frontend: HTMX (minimal landing page)
 - Database: SQLite (development) / PostgreSQL (production)
 
@@ -21,8 +21,8 @@ The Users service provides:
 
 1. Create and activate the shared repo environment:
 ```powershell
-uv venv ..\.venv313 --python 3.13
-..\.venv313\Scripts\Activate.ps1
+uv venv ..\.venv --python 3.14
+..\.venv\Scripts\Activate.ps1
 ```
 
 2. Install dependencies:

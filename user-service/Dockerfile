@@ -1,6 +1,6 @@
 # Multi-stage build for users service
 # Stage 1: Builder
-FROM python:3.13-slim as builder
+FROM python:3.14-slim as builder
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN uv sync --frozen --no-install-project --group users
 
 
 # Stage 2: Runtime
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 

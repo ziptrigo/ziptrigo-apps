@@ -57,7 +57,7 @@ class PasswordResetService:
             if user_id is None:
                 return None
             return User.objects.get(pk=user_id)
-        except (TokenError, User.DoesNotExist):
+        except TokenError, User.DoesNotExist:
             return None
 
 
@@ -73,7 +73,7 @@ def render_password_reset_email(*, user: User, reset_url: str) -> tuple[str, str
     """
     subject = 'Reset your Ziptrigo Users account password'
 
-    text_body = f'''Hi{' ' + user.name if user.name else ''},
+    text_body = f"""Hi{' ' + user.name if user.name else ''},
 
 You requested to reset your password. Click the link below to set a new password:
 
@@ -85,7 +85,7 @@ If you did not request this, please ignore this email.
 
 --
 The Ziptrigo Users Team
-'''
+"""
 
     html_body = f'''<html>
 <head></head>

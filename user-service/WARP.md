@@ -10,7 +10,7 @@ Centralized Single Sign-On (SSO) service for ZipTrigo applications. Provides JWT
 - Manage user credit balances with transaction history
 
 ## Tech Stack
-- Python 3.13
+- Python 3.14
 - Django 6.0 + Django Ninja
 - Pydantic v2 (schemas/validation)
 - JWT (PyJWT)
@@ -61,7 +61,7 @@ Key settings live in `config/settings.py`:
 - Email-based auth backend: `src.users.backends.EmailBackend`.
 
 ## How to Run (dev)
-1. Create the shared repo venv and sync deps: `uv venv ../.venv313 --python 3.13 && uv sync --active --group dev`
+1. Create the shared repo venv and sync deps: `uv venv ../.venv --python 3.14 && uv sync --active --group dev`
 2. Migrate: `python manage.py migrate`
 3. Create superuser: `python manage.py createsuperuser --email admin@example.com`
 4. Run: `python manage.py runserver`

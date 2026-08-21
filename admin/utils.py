@@ -49,6 +49,7 @@ class NoHighlightRichHandler(RichHandler):
     def render_message(self, record, message):
         """Override to disable auto-highlighting while keeping markup."""
         from rich.text import Text
+
         # Process markup but don't apply highlighting
         if self.markup:
             return Text.from_markup(message)

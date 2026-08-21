@@ -1,13 +1,14 @@
 import uuid
-import pytest
+
 from playwright.sync_api import Page, expect
+
 
 # Disable django-pytest for these tests as they don't use the django test runner
 # but interact with a separate server process.
 def test_create_account(page: Page, users_server: str):
     # Use a unique email to avoid conflicts
     email = f'testuser_{uuid.uuid4().hex[:8]}@example.com'
-    
+
     # Go to the registration page
     page.goto(f'{users_server}/register/')
 

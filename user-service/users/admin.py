@@ -14,7 +14,7 @@ from django.shortcuts import render
 from django.urls import path
 from django.utils import timezone
 
-from .models import CreditTransaction, CreditTransactionType, User
+from .models import CreditTransaction, User
 from .services.email_service import send_email
 
 try:

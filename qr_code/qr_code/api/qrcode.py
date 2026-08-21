@@ -130,6 +130,6 @@ def redirect_view(request, short_code):
         return redirect(qr_code.original_url)
 
     return Response(
-        {"error": "No redirect URL available for this QR code"},
+        {'error': 'No redirect URL available for this QR code'},
         status=status.HTTP_400_BAD_REQUEST,
     )
