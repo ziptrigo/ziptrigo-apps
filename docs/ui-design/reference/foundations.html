@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foundations - UI reference - ZipTrigo</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <!-- Site header, as in apps/core/templates/core/base.html -->
+    <header class="bg-gray-100 dark:bg-gray-800 shadow">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex space-x-6">
+                <a href="index.html" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="list-page.html" class="text-lg hover:text-sage-300"><i class="fas fa-qrcode mr-1"></i>QR Codes</a>
+                <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="theme-toggle" type="button" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                    <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                         src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                         data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+                </button>
+                <div>
+                    <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+                    <button type="button" class="text-lg hover:text-sage-300">Logout</button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Reference navigation (documentation chrome, not part of the site) -->
+    <div class="border-b border-dashed border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+            <span class="text-xs font-semibold uppercase tracking-wide text-sage-600 dark:text-sage-300">UI reference</span>
+            <a href="index.html" class="hover:text-gray-900 dark:hover:text-gray-100">Overview</a>
+            <a href="foundations.html" class="font-semibold text-gray-900 dark:text-gray-100">Foundations</a>
+            <a href="components.html" class="hover:text-gray-900 dark:hover:text-gray-100">Components</a>
+            <a href="list-page.html" class="hover:text-gray-900 dark:hover:text-gray-100">List page</a>
+            <a href="form-page.html" class="hover:text-gray-900 dark:hover:text-gray-100">Form page</a>
+            <span class="ml-auto text-xs">Theme: <span id="theme-label" class="font-medium">system</span></span>
+        </div>
+    </div>
+
+    <main class="flex-grow flex flex-col">
+        <div class="container mx-auto px-4 py-8 max-w-4xl">
+            <h1 class="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">Foundations</h1>
+            <p class="mb-8 text-gray-700 dark:text-gray-300">
+                The tokens every component is built from. Sections match
+                <code class="px-1 rounded bg-gray-100 dark:bg-gray-800 text-sm">docs/ui-design/README.md</code>.
+            </p>
+
+            <nav class="mb-10 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                <a href="#colour" class="text-sage-600 dark:text-sage-300 hover:underline">Colour</a>
+                <a href="#neutrals" class="text-sage-600 dark:text-sage-300 hover:underline">Neutrals &amp; dark mode</a>
+                <a href="#contrast" class="text-sage-600 dark:text-sage-300 hover:underline">Contrast</a>
+                <a href="#type" class="text-sage-600 dark:text-sage-300 hover:underline">Typography</a>
+                <a href="#spacing" class="text-sage-600 dark:text-sage-300 hover:underline">Spacing &amp; layout</a>
+                <a href="#shape" class="text-sage-600 dark:text-sage-300 hover:underline">Radius &amp; elevation</a>
+                <a href="#icons" class="text-sage-600 dark:text-sage-300 hover:underline">Icons</a>
+                <a href="#motion" class="text-sage-600 dark:text-sage-300 hover:underline">Motion</a>
+            </nav>
+
+            <!-- ============================================================ Colour -->
+            <section id="colour" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Colour: sage</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    From the logos. <code>brand-primary</code> = <code>sage-300</code>, <code>brand-dark</code> = <code>sage-800</code>.
+                    Sage marks brand, the primary action and focus; structure stays gray.
+                </p>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                    <div><div class="h-16 rounded-md bg-sage-50 border border-gray-200 dark:border-gray-700"></div><p class="mt-2 text-sm font-medium">sage-50</p><p class="text-xs text-gray-500 dark:text-gray-400">#f4f7f6 · card bg</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-100"></div><p class="mt-2 text-sm font-medium">sage-100</p><p class="text-xs text-gray-500 dark:text-gray-400">#d4e0da · Soft Mint · dividers</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-200"></div><p class="mt-2 text-sm font-medium">sage-200</p><p class="text-xs text-gray-500 dark:text-gray-400">#b5c7be · Light Sage · borders</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-300 ring-2 ring-offset-2 ring-sage-300 ring-offset-white dark:ring-offset-gray-900"></div><p class="mt-2 text-sm font-semibold">sage-300 · brand-primary</p><p class="text-xs text-gray-500 dark:text-gray-400">#8fa89e · Sage Green · CTAs, focus</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-400"></div><p class="mt-2 text-sm font-medium">sage-400</p><p class="text-xs text-gray-500 dark:text-gray-400">#728e84 · product icons</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-500"></div><p class="mt-2 text-sm font-medium">sage-500</p><p class="text-xs text-gray-500 dark:text-gray-400">#5a736a · unused</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-600"></div><p class="mt-2 text-sm font-medium">sage-600</p><p class="text-xs text-gray-500 dark:text-gray-400">#475a53 · brand text on light</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-700"></div><p class="mt-2 text-sm font-medium">sage-700</p><p class="text-xs text-gray-500 dark:text-gray-400">#3b4a47 · Dark Slate · headings</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-800 border border-gray-200 dark:border-gray-700"></div><p class="mt-2 text-sm font-medium">sage-800 · brand-dark</p><p class="text-xs text-gray-500 dark:text-gray-400">#2c3432 · Deep Charcoal</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-900 border border-gray-200 dark:border-gray-700"></div><p class="mt-2 text-sm font-medium">sage-900</p><p class="text-xs text-gray-500 dark:text-gray-400">#1e2422 · unused</p></div>
+                </div>
+
+                <h3 class="text-lg font-semibold mt-10 mb-4">Semantic</h3>
+                <div class="flex flex-wrap gap-6 items-center">
+                    <div class="flex items-center gap-3"><div class="h-10 w-10 rounded-md bg-red-600"></div><div><p class="text-sm font-medium">Danger</p><p class="text-xs text-gray-500 dark:text-gray-400">bg-red-600 · hover red-700</p></div></div>
+                    <p class="text-sm text-red-600 dark:text-red-400"><i class="fas fa-trash mr-2"></i>text-red-600 / dark:text-red-400</p>
+                </div>
+                <p class="mt-4 text-xs text-gray-500 dark:text-gray-400">No success/warning/info colours yet. When needed: Tailwind green/amber/blue at the same steps.</p>
+            </section>
+
+            <!-- ============================================================ Neutrals -->
+            <section id="neutrals" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Neutrals &amp; dark mode</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Each tile renders its class pair live, so flip the theme to see both halves.
+                    Dark mode steps one gray lighter per level of elevation: page 900 → surface 800 → hover 700 → 600.
+                </p>
+                <div class="grid sm:grid-cols-2 gap-4 text-sm">
+                    <div class="p-4 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"><p class="font-medium">Page</p><code class="text-xs text-gray-500 dark:text-gray-400">bg-white dark:bg-gray-900</code></div>
+                    <div class="p-4 rounded-md bg-gray-100 dark:bg-gray-800 shadow"><p class="font-medium">Header / footer</p><code class="text-xs text-gray-500 dark:text-gray-400">bg-gray-100 dark:bg-gray-800</code></div>
+                    <div class="p-4 rounded-md bg-white dark:bg-gray-800 shadow"><p class="font-medium">Raised surface (list card, menu, modal)</p><code class="text-xs text-gray-500 dark:text-gray-400">bg-white dark:bg-gray-800</code></div>
+                    <div class="p-4 rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700"><p class="font-medium">Recessed (list header)</p><code class="text-xs text-gray-500 dark:text-gray-400">bg-gray-50 dark:bg-gray-900</code></div>
+                    <div class="p-4 rounded-md bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400"><p class="font-medium">Read-only field</p><code class="text-xs">bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400</code></div>
+                    <div class="p-4 rounded-md bg-white dark:bg-gray-800 shadow hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out"><p class="font-medium">Row hover (hover me)</p><code class="text-xs text-gray-500 dark:text-gray-400">hover:bg-gray-50 dark:hover:bg-gray-700</code></div>
+                </div>
+
+                <div class="mt-6 p-4 rounded-md bg-white dark:bg-gray-800 shadow text-sm space-y-2">
+                    <p class="text-gray-900 dark:text-gray-100">Primary text: <code class="text-xs">text-gray-900 dark:text-gray-100</code></p>
+                    <p class="text-gray-700 dark:text-gray-300">Body text: <code class="text-xs">text-gray-700 dark:text-gray-300</code></p>
+                    <p class="text-gray-500 dark:text-gray-400">Muted text: <code class="text-xs">text-gray-500 dark:text-gray-400</code></p>
+                    <p class="text-gray-400">Placeholder / decorative icon: <code class="text-xs">text-gray-400</code></p>
+                    <div class="pt-2 flex flex-wrap gap-4">
+                        <span class="px-3 py-1 rounded border border-gray-300 dark:border-gray-600">Field border: gray-300 / 600</span>
+                        <span class="px-3 py-1 rounded border border-gray-200 dark:border-gray-700">Divider: gray-200 / 700</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Contrast -->
+            <section id="contrast" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Contrast</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">WCAG 2.x ratios. 4.5:1 is the minimum for body-size text.</p>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-sage-300 text-gray-900"><span class="text-sm font-medium">gray-900 on sage-300</span><span class="text-sm">6.98 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-sage-300 text-white"><span class="text-sm font-medium">white on sage-300</span><span class="text-sm">2.54 <i class="fas fa-xmark ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-sage-300"><span class="text-sm font-medium">sage-300 on white</span><span class="text-sm">2.54 <i class="fas fa-xmark ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-sage-600"><span class="text-sm font-medium">sage-600 on white</span><span class="text-sm">7.35 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-sage-700"><span class="text-sm font-medium">sage-700 on white</span><span class="text-sm">9.31 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-gray-800 text-sage-300"><span class="text-sm font-medium">sage-300 on gray-800</span><span class="text-sm">5.78 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-gray-500"><span class="text-sm font-medium">gray-500 on white</span><span class="text-sm">4.83 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-red-600"><span class="text-sm font-medium">red-600 on white</span><span class="text-sm">4.83 <i class="fas fa-check ml-1"></i></span></div>
+                </div>
+                <ul class="mt-6 text-sm text-gray-700 dark:text-gray-300 list-disc pl-5 space-y-1">
+                    <li>Text on a sage button is always <code>text-gray-900</code>. Never white.</li>
+                    <li>Sage-coloured text on light backgrounds is <code>text-sage-600</code>; in dark mode <code>dark:text-sage-300</code>.</li>
+                    <li><code>sage-300</code> on white is fine for non-text: focus rings, borders, checkbox fill, icons next to a label.</li>
+                </ul>
+            </section>
+
+            <!-- ============================================================ Typography -->
+            <section id="type" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Typography</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">System sans (Tailwind default). Tailwind's scale only.</p>
+                <div class="divide-y divide-gray-200 dark:divide-gray-700">
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Landing hero<br>text-4xl font-bold text-sage-700 dark:text-sage-300</code>
+                        <p class="sm:col-span-2 text-4xl font-bold text-sage-700 dark:text-sage-300">Welcome to ZipTrigo</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Page title (h1)<br>text-3xl font-bold</code>
+                        <p class="sm:col-span-2 text-3xl font-bold text-gray-900 dark:text-gray-100">Create QR code</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Section title (h2)<br>text-xl font-semibold</code>
+                        <p class="sm:col-span-2 text-xl font-semibold">Your transfers</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Modal / card title (h3)<br>text-lg font-semibold</code>
+                        <p class="sm:col-span-2 text-lg font-semibold text-gray-900 dark:text-gray-100">Delete QR code</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Nav link<br>text-lg</code>
+                        <p class="sm:col-span-2 text-lg"><i class="fas fa-qrcode mr-1"></i>QR Codes</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Body<br>text-base text-gray-700</code>
+                        <p class="sm:col-span-2 text-gray-700 dark:text-gray-300">Send large files to anyone with a link that expires.</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Label / button / list title<br>text-sm font-medium</code>
+                        <p class="sm:col-span-2 text-sm font-medium">Name</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Meta / help<br>text-xs text-gray-500</code>
+                        <p class="sm:col-span-2 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters.</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Error<br>text-sm text-red-600</code>
+                        <p class="sm:col-span-2 text-sm text-red-600">Name: This field is required.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Spacing -->
+            <section id="spacing" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Spacing &amp; layout</h2>
+
+                <h3 class="text-lg font-semibold mb-3">Vertical rhythm</h3>
+                <div class="space-y-3 text-sm mb-8">
+                    <div class="flex items-center gap-4"><div class="h-4 bg-sage-200 dark:bg-sage-700" style="width:4px"></div><code class="w-20">mb-1</code><span class="text-gray-700 dark:text-gray-300">label → control; <code>mt-1</code> control → help</span></div>
+                    <div class="flex items-center gap-4"><div class="h-4 bg-sage-200 dark:bg-sage-700" style="width:12px"></div><code class="w-20">gap-3</code><span class="text-gray-700 dark:text-gray-300">between buttons</span></div>
+                    <div class="flex items-center gap-4"><div class="h-4 bg-sage-200 dark:bg-sage-700" style="width:16px"></div><code class="w-20">mb-4 / gap-4</code><span class="text-gray-700 dark:text-gray-300">between fields; toolbar and field-row gaps; message slot</span></div>
+                    <div class="flex items-center gap-4"><div class="h-4 bg-sage-200 dark:bg-sage-700" style="width:24px"></div><code class="w-20">mb-6 / mt-6</code><span class="text-gray-700 dark:text-gray-300">form title; before form actions; preview row</span></div>
+                    <div class="flex items-center gap-4"><div class="h-4 bg-sage-200 dark:bg-sage-700" style="width:32px"></div><code class="w-20">mb-8</code><span class="text-gray-700 dark:text-gray-300">list title; toolbar → list</span></div>
+                </div>
+
+                <h3 class="text-lg font-semibold mb-3">Containers</h3>
+                <p class="mb-4 text-sm text-gray-700 dark:text-gray-300">
+                    All pages: <code>container mx-auto px-4 py-8</code> plus a max width.
+                </p>
+                <div class="space-y-2 text-sm">
+                    <div class="max-w-4xl px-3 py-2 rounded bg-sage-100 dark:bg-sage-800">max-w-4xl: list / dashboard</div>
+                    <div class="max-w-3xl px-3 py-2 rounded bg-sage-100 dark:bg-sage-800">max-w-3xl: form, product intro</div>
+                    <div class="max-w-md px-3 py-2 rounded bg-sage-100 dark:bg-sage-800">max-w-md: auth card, modal panel</div>
+                </div>
+
+                <h3 class="text-lg font-semibold mt-8 mb-3">Responsive</h3>
+                <ul class="text-sm text-gray-700 dark:text-gray-300 list-disc pl-5 space-y-1">
+                    <li><code>sm:</code> (640px) is the breakpoint that matters. Mobile-first.</li>
+                    <li>Field rows: <code>flex flex-col sm:flex-row sm:items-end gap-4</code>.</li>
+                    <li>List: <code>px-4 sm:px-6</code>, card corners <code>sm:rounded-md</code> (edge to edge on phones).</li>
+                    <li>List item content: <code>md:grid md:grid-cols-2 md:gap-4</code>.</li>
+                </ul>
+            </section>
+
+            <!-- ============================================================ Shape -->
+            <section id="shape" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Radius &amp; elevation</h2>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-10 text-sm">
+                    <div><div class="h-16 rounded bg-sage-100 dark:bg-sage-800 border border-sage-200 dark:border-sage-700"></div><p class="mt-2 font-medium">rounded</p><p class="text-xs text-gray-500 dark:text-gray-400">inputs, selects, thumbnails</p></div>
+                    <div><div class="h-16 rounded-md bg-sage-100 dark:bg-sage-800 border border-sage-200 dark:border-sage-700"></div><p class="mt-2 font-medium">rounded-md</p><p class="text-xs text-gray-500 dark:text-gray-400">buttons, list card, menus</p></div>
+                    <div><div class="h-16 rounded-lg bg-sage-100 dark:bg-sage-800 border border-sage-200 dark:border-sage-700"></div><p class="mt-2 font-medium">rounded-lg</p><p class="text-xs text-gray-500 dark:text-gray-400">modals, product/auth cards</p></div>
+                    <div><div class="h-16 w-16 rounded-full bg-sage-100 dark:bg-sage-800 border border-sage-200 dark:border-sage-700"></div><p class="mt-2 font-medium">rounded-full</p><p class="text-xs text-gray-500 dark:text-gray-400">icon buttons</p></div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-6 text-sm">
+                    <div><div class="h-16 rounded-md bg-white dark:bg-gray-800 shadow-sm"></div><p class="mt-3 font-medium">shadow-sm</p><p class="text-xs text-gray-500 dark:text-gray-400">buttons</p></div>
+                    <div><div class="h-16 rounded-md bg-white dark:bg-gray-800 shadow"></div><p class="mt-3 font-medium">shadow</p><p class="text-xs text-gray-500 dark:text-gray-400">header, list card</p></div>
+                    <div><div class="h-16 rounded-md bg-white dark:bg-gray-800 shadow-md"></div><p class="mt-3 font-medium">shadow-md</p><p class="text-xs text-gray-500 dark:text-gray-400">card hover</p></div>
+                    <div><div class="h-16 rounded-md bg-white dark:bg-gray-800 shadow-lg"></div><p class="mt-3 font-medium">shadow-lg</p><p class="text-xs text-gray-500 dark:text-gray-400">dropdown menu · z-50</p></div>
+                    <div><div class="h-16 rounded-md bg-white dark:bg-gray-800 shadow-xl"></div><p class="mt-3 font-medium">shadow-xl</p><p class="text-xs text-gray-500 dark:text-gray-400">modal · z-50 (image z-40)</p></div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Icons -->
+            <section id="icons" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Icons</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Font Awesome 6 solid. <code>mr-1</code> before text in nav/links, <code>mr-2</code> in menu items and buttons.
+                    Icon-only controls need <code>aria-label</code>.
+                </p>
+                <div class="grid grid-cols-3 sm:grid-cols-6 gap-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-qrcode text-2xl text-sage-400"></i><p class="mt-2">fa-qrcode</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-paper-plane text-2xl text-sage-400"></i><p class="mt-2">fa-paper-plane</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-edit text-xl text-gray-700 dark:text-gray-200"></i><p class="mt-2">fa-edit</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-clone text-xl text-gray-700 dark:text-gray-200"></i><p class="mt-2">fa-clone</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-trash text-xl text-red-600 dark:text-red-400"></i><p class="mt-2">fa-trash</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-ellipsis-v text-xl text-gray-500 dark:text-gray-400"></i><p class="mt-2">fa-ellipsis-v</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-magnifying-glass text-xl text-gray-400"></i><p class="mt-2">fa-magnifying-glass</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-times text-xl text-gray-400"></i><p class="mt-2">fa-times</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-question-circle text-xl text-gray-500 dark:text-gray-400"></i><p class="mt-2">fa-question-circle</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-user-circle text-xl text-gray-700 dark:text-gray-200"></i><p class="mt-2">fa-user-circle</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-spinner fa-spin text-xl text-gray-700 dark:text-gray-200"></i><p class="mt-2">fa-spinner fa-spin</p></div>
+                    <div class="p-3 rounded-md border border-gray-200 dark:border-gray-700"><i class="fas fa-chevron-down text-xl text-gray-400"></i><p class="mt-2">fa-chevron-down</p></div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Motion -->
+            <section id="motion" class="mb-6 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Motion</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">150 ms, ease-out. Hover the samples.</p>
+                <div class="flex flex-wrap items-center gap-8">
+                    <button type="button" class="focus:outline-none group" aria-label="Thumbnail hover sample">
+                        <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                             src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="">
+                    </button>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">Thumbnail: <code>group-hover:scale-110</code></span>
+                    <button type="button" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors" aria-label="Icon button sample">
+                        <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
+                    </button>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">Controls: <code>transition-colors</code></span>
+                </div>
+                <p class="mt-6 text-sm text-gray-700 dark:text-gray-300">
+                    Modals fade (<code>opacity-0</code> → 100) and scale (<code>scale-95</code> → 100) over 150 ms.
+                    See <a href="components.html#modal" class="text-sage-600 dark:text-sage-300 underline">Components → Confirmation modal</a>.
+                </p>
+            </section>
+        </div>
+    </main>
+
+    <footer class="bg-gray-100 dark:bg-gray-800 mt-auto py-6">
+        <div class="container mx-auto px-4 flex items-center justify-between space-x-8">
+            <div class="flex justify-center space-x-8 flex-1">
+                <a href="#" class="hover:text-sage-300">FAQ</a>
+                <a href="#" class="hover:text-sage-300">Feedback</a>
+            </div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                &copy; 2026 Joao Coelho. Licensed under MIT.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

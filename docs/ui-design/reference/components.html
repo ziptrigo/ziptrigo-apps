@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Components - UI reference - ZipTrigo</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <!-- Site header, as in apps/core/templates/core/base.html -->
+    <header class="bg-gray-100 dark:bg-gray-800 shadow">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex space-x-6">
+                <a href="index.html" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="list-page.html" class="text-lg hover:text-sage-300"><i class="fas fa-qrcode mr-1"></i>QR Codes</a>
+                <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="theme-toggle" type="button" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                    <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                         src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                         data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+                </button>
+                <div>
+                    <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+                    <button type="button" class="text-lg hover:text-sage-300">Logout</button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Reference navigation (documentation chrome, not part of the site) -->
+    <div class="border-b border-dashed border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+            <span class="text-xs font-semibold uppercase tracking-wide text-sage-600 dark:text-sage-300">UI reference</span>
+            <a href="index.html" class="hover:text-gray-900 dark:hover:text-gray-100">Overview</a>
+            <a href="foundations.html" class="hover:text-gray-900 dark:hover:text-gray-100">Foundations</a>
+            <a href="components.html" class="font-semibold text-gray-900 dark:text-gray-100">Components</a>
+            <a href="list-page.html" class="hover:text-gray-900 dark:hover:text-gray-100">List page</a>
+            <a href="form-page.html" class="hover:text-gray-900 dark:hover:text-gray-100">Form page</a>
+            <span class="ml-auto text-xs">Theme: <span id="theme-label" class="font-medium">system</span></span>
+        </div>
+    </div>
+
+    <main class="flex-grow flex flex-col">
+        <div class="container mx-auto px-4 py-8 max-w-4xl">
+            <h1 class="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">Components</h1>
+            <p class="mb-2 text-gray-700 dark:text-gray-300">
+                Each example is live. Open <span class="font-medium">HTML</span> under it for the markup to copy.
+            </p>
+            <p class="mb-8 text-sm text-gray-500 dark:text-gray-400">
+                Image paths in snippets point into the repo from this folder; in templates use
+                <code>{% static '…' %}</code>. Where the guidelines fix a
+                <a href="../README.md#15-known-deviations-in-the-current-code" class="text-sage-600 dark:text-sage-300 underline">known deviation</a>,
+                the examples show the fixed version.
+            </p>
+
+            <nav class="mb-10 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                <a href="#buttons" class="text-sage-600 dark:text-sage-300 hover:underline">Buttons</a>
+                <a href="#fields" class="text-sage-600 dark:text-sage-300 hover:underline">Form fields</a>
+                <a href="#actions" class="text-sage-600 dark:text-sage-300 hover:underline">Form actions</a>
+                <a href="#messages" class="text-sage-600 dark:text-sage-300 hover:underline">Messages</a>
+                <a href="#search" class="text-sage-600 dark:text-sage-300 hover:underline">Search &amp; toolbar</a>
+                <a href="#list" class="text-sage-600 dark:text-sage-300 hover:underline">List</a>
+                <a href="#menu" class="text-sage-600 dark:text-sage-300 hover:underline">Dropdown menu</a>
+                <a href="#modal" class="text-sage-600 dark:text-sage-300 hover:underline">Confirmation modal</a>
+                <a href="#lightbox" class="text-sage-600 dark:text-sage-300 hover:underline">Image preview</a>
+                <a href="#well" class="text-sage-600 dark:text-sage-300 hover:underline">Preview well</a>
+                <a href="#cards" class="text-sage-600 dark:text-sage-300 hover:underline">Cards &amp; sections</a>
+            </nav>
+
+            <!-- ============================================================ Buttons -->
+            <section id="buttons" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Buttons</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    At most one primary per view. Groups right-align with the primary last. <code>&lt;a&gt;</code> for navigation, <code>&lt;button&gt;</code> for actions.
+                </p>
+
+                <div class="grid sm:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="text-sm font-medium mb-2">Primary</h3>
+                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                            <button type="button"
+                                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium mb-2">Secondary</h3>
+                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                            <a href="#"
+                               class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                                Cancel
+                            </a>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium mb-2">Subtle <span class="font-normal text-gray-500 dark:text-gray-400">(Cancel inside a modal)</span></h3>
+                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                            <button type="button"
+                                    class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium mb-2">Danger</h3>
+                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                            <button type="button"
+                                    class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium mb-2">Icon</h3>
+                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                            <button type="button"
+                                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                                    aria-label="QR code actions">
+                                <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium mb-2">Busy <span class="font-normal text-gray-500 dark:text-gray-400">(shown disabled; htmx sets it via <code>hx-disabled-elt</code>)</span></h3>
+                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                            <button type="submit" disabled
+                                    class="group inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                                <span class="group-disabled:hidden">Save</span>
+                                <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2"></i>Saving…</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Fields -->
+            <section id="fields" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Form fields</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Wrapper <code>mb-4</code>, label <code>block mb-1 text-sm font-medium</code> tied with <code>for</code>, help <code>mt-1 text-xs</code>.
+                </p>
+
+                <h3 class="text-sm font-medium mb-2">Text input</h3>
+                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="mb-4">
+                        <label for="ex-name" class="block mb-1 text-sm font-medium">Name</label>
+                        <input id="ex-name" type="text" name="name" maxlength="255" required value="Summer menu"
+                               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    </div>
+                </div>
+
+                <h3 class="text-sm font-medium mb-2">Textarea with help text</h3>
+                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="mb-4">
+                        <label for="ex-content" class="block mb-1 text-sm font-medium">Text / URL to encode</label>
+                        <textarea id="ex-content" name="url" maxlength="1000" rows="4" required
+                                  class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu</textarea>
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters. Can be any text; short URL is only meaningful when the content is a URL.</p>
+                    </div>
+                </div>
+
+                <h3 class="text-sm font-medium mb-2">Option row: selects + dependent checkbox with help hint</h3>
+                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="flex flex-col sm:flex-row sm:items-end gap-4">
+                        <div>
+                            <label for="ex-type" class="block mb-1 text-sm font-medium">Type</label>
+                            <select id="ex-type" name="qr_type"
+                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                <option value="text">Text</option>
+                                <option value="url" selected>URL</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="ex-format" class="block mb-1 text-sm font-medium">Format</label>
+                            <select id="ex-format" name="qr_format"
+                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                <option value="png">PNG</option>
+                                <option value="svg">SVG</option>
+                                <option value="pdf">PDF</option>
+                            </select>
+                        </div>
+                        <div class="flex items-end">
+                            <label class="inline-flex items-center gap-2 pb-2">
+                                <input type="checkbox" name="use_url_shortening" value="true"
+                                       class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                <span class="text-sm">Track QR code</span>
+                                <i class="fas fa-question-circle text-gray-500 dark:text-gray-400 cursor-help"
+                                   title="This tracks the QR code usage and gives you analytical data about its usage."></i>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="text-sm font-medium mb-2">Read-only value, disabled control, generated value</h3>
+                <div class="mb-2 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="mb-4">
+                        <span class="block mb-1 text-sm font-medium">Type</span>
+                        <div class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
+                            URL
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label for="ex-content-ro" class="block mb-1 text-sm font-medium">Text / URL (read-only)</label>
+                        <textarea id="ex-content-ro" rows="2" disabled
+                                  class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu</textarea>
+                    </div>
+                    <div>
+                        <label for="ex-short-url" class="block mb-1 text-sm font-medium">Short URL</label>
+                        <input id="ex-short-url" type="text" readonly value="https://ziptrigo.com/go/a1B2c3"
+                               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default">
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400">A value fixed after creation is a <code>&lt;div&gt;</code>; a control shown but not editable is <code>disabled</code> and says "(read-only)"; a server-issued value is <code>readonly</code>.</p>
+            </section>
+
+            <!-- ============================================================ Actions -->
+            <section id="actions" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Form actions</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">Last block of the form. Cancel links back to the list; Save submits.</p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="mt-6 flex items-center justify-end gap-3">
+                        <a href="#"
+                           class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                            Cancel
+                        </a>
+                        <button type="submit"
+                                class="inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                            Save
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Messages -->
+            <section id="messages" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Messages &amp; validation errors</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    One slot above the fields (<code>id="&lt;form&gt;-msg" class="mb-4 text-sm"</code>). The view returns
+                    the errors partial with status <strong>422</strong>; htmx swaps it into the slot.
+                </p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div id="qrcode-msg" class="mb-4 text-sm">
+                        <div class="text-red-600">
+                            Name: This field is required.<br>
+                            Text / URL: Enter a valid URL.<br>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Search & toolbar -->
+            <section id="search" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Search &amp; toolbar</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    A GET form. The clear button appears once there's text (type to see it). The toolbar puts the page's primary action on the right.
+                </p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="flex items-center justify-between gap-4">
+                        <form method="get" class="relative flex-1" onsubmit="return false">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <i class="fas fa-magnifying-glass text-gray-400"></i>
+                            </div>
+                            <input type="text" name="q" placeholder="Search by name" aria-label="Search by name"
+                                   class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                            <button type="button" data-demo-search-clear
+                                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors hidden"
+                                    aria-label="Clear search">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </form>
+                        <a href="#"
+                           class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                            Generate QR code
+                        </a>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ List -->
+            <section id="list" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">List</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    A stacked list in a card, not a <code>&lt;table&gt;</code>. <code>overflow-visible</code> so row menus aren't clipped.
+                    Row titles use <code>text-sage-600 dark:text-sage-300</code> (not <code>text-brand-primary</code>, which fails contrast on white).
+                </p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+                        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+                            <!-- Header -->
+                            <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between sm:px-6">
+                                <div class="flex items-center">
+                                    <input type="checkbox" id="ex-select-all" class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                    <label for="ex-select-all" class="ml-4 mr-4 text-sm font-medium text-gray-900 dark:text-gray-100">Select all</label>
+                                    <a href="#" class="group flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                                        Name
+                                        <i class="fas fa-chevron-down ml-1 text-xs text-gray-400 group-hover:text-gray-500"></i>
+                                    </a>
+                                </div>
+                            </li>
+
+                            <!-- Row -->
+                            <li class="px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
+                                <div class="flex items-center min-w-0 flex-1">
+                                    <input type="checkbox" name="selected_qr" value="1" aria-label="Select Summer menu"
+                                           class="mr-4 h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                    <button type="button" class="flex-shrink-0 focus:outline-none group" aria-label="Open QR code preview">
+                                        <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                                             src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="Summer menu">
+                                    </button>
+                                    <div class="min-w-0 flex-1 px-4">
+                                        <p class="text-sm font-medium text-sage-600 dark:text-sage-300 truncate">Summer menu</p>
+                                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">https://example.com/menu/summer-2026</p>
+                                    </div>
+                                </div>
+                                <div class="relative ml-4 flex-shrink-0">
+                                    <button type="button" data-demo-dropdown
+                                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                                            aria-label="QR code actions">
+                                        <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
+                                    </button>
+                                    <div data-demo-dropdown-menu
+                                         class="hidden absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right">
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-edit mr-2"></i>Edit</a>
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-clone mr-2"></i>Duplicate</a>
+                                        <button type="button" data-demo-modal-open="ex-delete-modal"
+                                                class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-trash mr-2"></i>Delete</button>
+                                    </div>
+                                </div>
+                            </li>
+
+                            <!-- Row -->
+                            <li class="px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
+                                <div class="flex items-center min-w-0 flex-1">
+                                    <input type="checkbox" name="selected_qr" value="2" aria-label="Select Wi-Fi guest note"
+                                           class="mr-4 h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                    <button type="button" class="flex-shrink-0 focus:outline-none group" aria-label="Open QR code preview">
+                                        <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                                             src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="Wi-Fi guest note">
+                                    </button>
+                                    <div class="min-w-0 flex-1 px-4">
+                                        <p class="text-sm font-medium text-sage-600 dark:text-sage-300 truncate">Wi-Fi guest note</p>
+                                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">Network: Guest · Ask at the front desk for the password</p>
+                                    </div>
+                                </div>
+                                <div class="relative ml-4 flex-shrink-0">
+                                    <button type="button" data-demo-dropdown
+                                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                                            aria-label="QR code actions">
+                                        <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
+                                    </button>
+                                    <div data-demo-dropdown-menu
+                                         class="hidden absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right">
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-edit mr-2"></i>Edit</a>
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-clone mr-2"></i>Duplicate</a>
+                                        <button type="button" data-demo-modal-open="ex-delete-modal"
+                                                class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-trash mr-2"></i>Delete</button>
+                                    </div>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <h3 class="text-sm font-medium mt-8 mb-2">Empty state</h3>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="bg-white dark:bg-gray-800 shadow sm:rounded-md">
+                        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+                            <li class="px-4 py-12 text-center sm:px-6">
+                                <p class="text-sm text-gray-500 dark:text-gray-400">No QR codes found.</p>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Menu -->
+            <section id="menu" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Dropdown menu</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Shown open. Destructive item last, in red, opening a confirmation. One menu at a time; closes on
+                    outside click or Esc; flips above the trigger near the viewport bottom.
+                </p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700">
+                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-edit mr-2"></i>Edit</a>
+                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-clone mr-2"></i>Duplicate</a>
+                        <button type="button" class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-trash mr-2"></i>Delete</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Modal -->
+            <section id="modal" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Confirmation modal</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Names the object. Subtle Cancel, Danger confirm on the right. Closes on Cancel, Esc and a backdrop click.
+                </p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <button type="button" data-demo-modal-open="ex-delete-modal"
+                            class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                        Open delete confirmation
+                    </button>
+
+                    <div id="ex-delete-modal" data-demo-modal
+                         class="fixed inset-0 z-50 hidden opacity-0 bg-black/50 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
+                        <div role="dialog" aria-modal="true" aria-labelledby="ex-delete-title"
+                             class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
+                            <div class="p-6">
+                                <h3 id="ex-delete-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR code</h3>
+                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                                    Are you sure you want to delete <span class="font-medium text-gray-900 dark:text-gray-100">Summer menu</span>?
+                                </p>
+                                <div class="flex justify-end gap-3">
+                                    <button type="button" data-demo-modal-close
+                                            class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                                        Cancel
+                                    </button>
+                                    <button type="button" data-demo-modal-close
+                                            class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Lightbox -->
+            <section id="lightbox" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Image preview</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Click the thumbnail. The image sits on white so a QR code still scans in dark mode.
+                </p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <button type="button" data-demo-modal-open="ex-image-modal" class="focus:outline-none group" aria-label="Open QR code preview">
+                        <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                             src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="Summer menu">
+                    </button>
+
+                    <div id="ex-image-modal" data-demo-modal
+                         class="fixed inset-0 z-40 hidden opacity-0 bg-black/60 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
+                        <div role="dialog" aria-modal="true" aria-label="QR code preview"
+                             class="bg-gray-900 dark:bg-black p-24 rounded-lg relative max-w-full max-h-full flex items-center justify-center transform transition-transform duration-150 ease-out scale-95">
+                            <button type="button" data-demo-modal-close
+                                    class="absolute top-4 right-4 text-gray-300 hover:text-white text-xl font-semibold focus:outline-none"
+                                    aria-label="Close QR code preview">
+                                &times;
+                            </button>
+                            <img src="../../../apps/qr_code/static/qr_code/images/logo_128x128.png" alt="QR code preview"
+                                 class="max-h-[70vh] max-w-[70vw] object-contain bg-white rounded">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Preview well -->
+            <section id="well" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Preview well</h2>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Holds a generated preview in place, showing the product logo until there is one. The htmx Preview button swaps the <code>&lt;img&gt;</code>.
+                </p>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <button type="button"
+                                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                            Preview
+                        </button>
+                        <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-md p-2 min-h-[96px] min-w-[96px] self-start">
+                            <img id="qrcode-preview-img" src="../../../apps/qr_code/static/qr_code/images/logo_128x128.png"
+                                 alt="QR code preview" class="h-24 w-24 object-contain">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Cards & sections -->
+            <section id="cards" class="mb-6 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Cards &amp; sections</h2>
+
+                <h3 class="text-sm font-medium mb-2">Product card <span class="font-normal text-gray-500 dark:text-gray-400">(landing page; the one place sage is a surface)</span></h3>
+                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <a href="#"
+                       class="block text-left p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
+                        <div class="flex items-center gap-3 mb-2">
+                            <i class="fas fa-qrcode text-2xl text-sage-400"></i>
+                            <h2 class="text-xl font-semibold">QR Codes</h2>
+                        </div>
+                        <p class="text-gray-700 dark:text-gray-300">Generate QR codes for URLs and text, with trackable short links.</p>
+                    </a>
+                </div>
+
+                <h3 class="text-sm font-medium mb-2">Product page header + ruled section</h3>
+                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="flex items-center gap-3 mb-6">
+                        <i class="fas fa-paper-plane text-2xl text-sage-400"></i>
+                        <h1 class="text-3xl font-semibold">File Transfer</h1>
+                    </div>
+                    <section>
+                        <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Your transfers</h2>
+                        <p class="text-gray-500 dark:text-gray-400">No transfers yet.</p>
+                    </section>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="bg-gray-100 dark:bg-gray-800 mt-auto py-6">
+        <div class="container mx-auto px-4 flex items-center justify-between space-x-8">
+            <div class="flex justify-center space-x-8 flex-1">
+                <a href="#" class="hover:text-sage-300">FAQ</a>
+                <a href="#" class="hover:text-sage-300">Feedback</a>
+            </div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                &copy; 2026 Joao Coelho. Licensed under MIT.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

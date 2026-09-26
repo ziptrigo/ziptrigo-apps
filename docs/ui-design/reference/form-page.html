@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create QR Code - ZipTrigo</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<!--
+  Form page pattern, from apps/qr_code/templates/qr_code/qrcode_editor.html.
+  One template serves create and edit. Here the three states are toggled from the reference bar
+  (#create, #edit, #errors); in Django it's {% if qrcode %} … {% endif %}.
+  Structure:  h1 (mb-6) → message slot (mb-4) → fields (mb-4 each) → preview row (mb-6) → actions (mt-6).
+  Differences from the current template follow the guidelines' "Known deviations" table:
+  labels tied with for/id, sentence-case "Track QR code" / "QR code preview".
+-->
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <header class="bg-gray-100 dark:bg-gray-800 shadow">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex space-x-6">
+                <a href="index.html" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="list-page.html" class="text-lg hover:text-sage-300"><i class="fas fa-qrcode mr-1"></i>QR Codes</a>
+                <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="theme-toggle" type="button" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                    <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                         src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                         data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+                </button>
+                <div>
+                    <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+                    <button type="button" class="text-lg hover:text-sage-300">Logout</button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Reference navigation (documentation chrome, not part of the site) -->
+    <div class="border-b border-dashed border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+            <span class="text-xs font-semibold uppercase tracking-wide text-sage-600 dark:text-sage-300">UI reference</span>
+            <a href="index.html" class="hover:text-gray-900 dark:hover:text-gray-100">Overview</a>
+            <a href="foundations.html" class="hover:text-gray-900 dark:hover:text-gray-100">Foundations</a>
+            <a href="components.html" class="hover:text-gray-900 dark:hover:text-gray-100">Components</a>
+            <a href="list-page.html" class="hover:text-gray-900 dark:hover:text-gray-100">List page</a>
+            <a href="form-page.html" class="font-semibold text-gray-900 dark:text-gray-100">Form page</a>
+            <span class="flex items-center gap-2 text-xs">
+                State:
+                <a href="#create" data-state-link="create" class="px-2 py-0.5 rounded">Create</a>
+                <a href="#edit" data-state-link="edit" class="px-2 py-0.5 rounded">Edit</a>
+                <a href="#errors" data-state-link="errors" class="px-2 py-0.5 rounded">With errors</a>
+            </span>
+            <span class="ml-auto text-xs">Theme: <span id="theme-label" class="font-medium">system</span></span>
+        </div>
+    </div>
+
+    <main class="flex-grow flex flex-col">
+        <div class="container mx-auto px-4 py-8 max-w-3xl">
+            <h1 class="text-3xl font-bold mb-6 text-gray-900 dark:text-gray-100"><span id="title-verb">Create</span> QR code</h1>
+
+            <!-- Message slot: the form's hx-target. Errors arrive here as a 422 partial. -->
+            <div id="qrcode-msg" class="mb-4 text-sm"></div>
+
+            <form id="qrcode-form" onsubmit="return false">
+                <!-- Name -->
+                <div class="mb-4">
+                    <label for="name" class="block mb-1 text-sm font-medium">Name</label>
+                    <input id="name" type="text" name="name" maxlength="255" required value="Summer menu"
+                           class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                </div>
+
+                <!-- Type: read-only value, edit mode only -->
+                <div class="mb-4" data-mode="edit">
+                    <span class="block mb-1 text-sm font-medium">Type</span>
+                    <div class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
+                        URL
+                    </div>
+                </div>
+
+                <!-- Text / URL: editable on create -->
+                <div class="mb-4" data-mode="create">
+                    <label for="content" class="block mb-1 text-sm font-medium">Text / URL to encode</label>
+                    <textarea id="content" name="url" maxlength="1000" rows="4" required
+                              class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu/summer-2026</textarea>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters. Can be any text; short URL is only meaningful when the content is a URL.</p>
+                </div>
+
+                <!-- Text / URL: disabled on edit -->
+                <div class="mb-4" data-mode="edit">
+                    <label for="content-ro" class="block mb-1 text-sm font-medium">Text / URL (read-only)</label>
+                    <textarea id="content-ro" name="url" rows="4" disabled
+                              class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu/summer-2026</textarea>
+                </div>
+
+                <!-- Options row: create mode only -->
+                <div class="mb-4 flex flex-col gap-4" data-mode="create">
+                    <div class="flex flex-col sm:flex-row sm:items-end gap-4">
+                        <div>
+                            <label for="qr_type" class="block mb-1 text-sm font-medium">Type</label>
+                            <select id="qr_type" name="qr_type"
+                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                <option value="text">Text</option>
+                                <option value="url" selected>URL</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="qr_format" class="block mb-1 text-sm font-medium">Format</label>
+                            <select id="qr_format" name="qr_format"
+                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                <option value="png" selected>PNG</option>
+                                <option value="svg">SVG</option>
+                                <option value="pdf">PDF</option>
+                            </select>
+                        </div>
+                        <div class="flex items-end">
+                            <label class="inline-flex items-center gap-2 pb-2">
+                                <input id="use_url_shortening" type="checkbox" name="use_url_shortening" value="true"
+                                       class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                <span class="text-sm">Track QR code</span>
+                                <i class="fas fa-question-circle text-gray-500 dark:text-gray-400 cursor-help"
+                                   title="This tracks the QR code usage and gives you analytical data about its usage."></i>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Short URL: revealed when Track is on; the server issues the code -->
+                    <div id="short-url-container" class="hidden">
+                        <label for="short-url-display" class="block mb-1 text-sm font-medium">Short URL</label>
+                        <input id="short-url-display" type="text" readonly value="https://ziptrigo.com/go/a1B2c3"
+                               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default">
+                    </div>
+                </div>
+
+                <!-- Preview row -->
+                <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <button type="button" data-mode="create"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                        Preview
+                    </button>
+                    <div data-mode="edit" class="text-sm font-medium text-gray-700 dark:text-gray-300">QR code preview:</div>
+
+                    <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-md p-2 min-h-[96px] min-w-[96px] self-start">
+                        <img id="qrcode-preview-img" src="../../../apps/qr_code/static/qr_code/images/logo_128x128.png"
+                             alt="QR code preview" class="h-24 w-24 object-contain">
+                    </div>
+                </div>
+
+                <!-- Actions: Cancel + Save -->
+                <div class="mt-6 flex items-center justify-end gap-3">
+                    <a href="list-page.html"
+                       class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                        Cancel
+                    </a>
+                    <button type="submit"
+                            class="inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                        Save
+                    </button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <footer class="bg-gray-100 dark:bg-gray-800 mt-auto py-6">
+        <div class="container mx-auto px-4 flex items-center justify-between space-x-8">
+            <div class="flex justify-center space-x-8 flex-1">
+                <a href="#" class="hover:text-sage-300">FAQ</a>
+                <a href="#" class="hover:text-sage-300">Feedback</a>
+            </div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                &copy; 2026 Joao Coelho. Licensed under MIT.
+            </div>
+        </div>
+    </footer>
+
+    <script>
+      (function () {
+        // The errors partial (qr_code/partials/form_errors.html), as swapped in on a 422.
+        const ERRORS =
+          '<div class="text-red-600">Name: This field is required.<br>' +
+          'Text / URL: Enter a valid URL.<br></div>';
+
+        const typeSelect = document.getElementById('qr_type');
+        const track = document.getElementById('use_url_shortening');
+        const shortUrl = document.getElementById('short-url-container');
+
+        function showState() {
+          const state = (location.hash || '#create').slice(1);
+          const mode = state === 'edit' ? 'edit' : 'create';
+          document.querySelectorAll('[data-mode]').forEach(function (el) {
+            el.classList.toggle('hidden', el.dataset.mode !== mode);
+          });
+          document.getElementById('title-verb').textContent = mode === 'edit' ? 'Edit' : 'Create';
+          document.title = (mode === 'edit' ? 'Edit' : 'Create') + ' QR Code - ZipTrigo';
+          document.getElementById('qrcode-msg').innerHTML = state === 'errors' ? ERRORS : '';
+          document.getElementById('name').value = state === 'errors' ? '' : 'Summer menu';
+          document.querySelectorAll('[data-state-link]').forEach(function (a) {
+            const on = a.dataset.stateLink === state;
+            a.classList.toggle('bg-sage-300', on);
+            a.classList.toggle('text-gray-900', on);
+            a.classList.toggle('font-medium', on);
+          });
+        }
+
+        // Track is only available for URLs; turning it on reveals the server-issued short URL.
+        function syncTrack() {
+          const isUrl = typeSelect.value === 'url';
+          track.disabled = !isUrl;
+          if (!isUrl) track.checked = false;
+          shortUrl.classList.toggle('hidden', !track.checked);
+        }
+
+        typeSelect.addEventListener('change', syncTrack);
+        track.addEventListener('change', syncTrack);
+        window.addEventListener('hashchange', showState);
+        syncTrack();
+        showState();
+      })();
+    </script>
+</body>
+</html>
