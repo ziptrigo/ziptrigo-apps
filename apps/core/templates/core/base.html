@@ -196,8 +196,14 @@
           const ICONS = getIcons(btn);
           if (icon && ICONS) {
             const newSrc = ICONS[mode] || ICONS.system;
-            if (newSrc && (newSrc.startsWith('/') || newSrc.startsWith('http'))) {
-              icon.src = newSrc;
+            try {
+              // Only same-origin URLs may be used as the icon source.
+              const parsed = new URL(newSrc, window.location.origin);
+              if (parsed.origin === window.location.origin) {
+                icon.src = parsed.href;
+              }
+            } catch (e) {
+              // Ignore malformed icon URLs.
             }
           }
         }
