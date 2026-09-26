@@ -1,0 +1,8 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools-items %}
+    <a href="{% url 'custom_admin:billing_credittransaction_adjust' %}" class="btn btn-block btn-outline-primary btn-sm">
+        <i class="fas fa-coins"></i> Adjust credits
+    </a>
+    {{ block.super }}
+{% endblock %}

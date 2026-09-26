@@ -1,0 +1,40 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+    <div class="flex items-center gap-3 mb-6">
+      <img src="{% static 'accounts/images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
+      <h1 class="text-xl font-semibold">Sign in</h1>
+    </div>
+
+    {% include 'accounts/partials/login_form.html' %}
+
+    <div class="mt-4 flex flex-col gap-2 text-sm text-gray-600 dark:text-gray-300">
+      <p>
+        No account? <a href="{% url 'accounts:register' %}" class="text-sage-300 underline">Create one</a>
+      </p>
+      <p>
+        <a href="{% url 'accounts:forgot-password' %}" class="text-sage-300 underline">Forgot your password?</a>
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Password visibility toggle. Delegated, because htmx replaces the form on a failed login.
+  document.addEventListener('click', function (e) {
+    const toggleBtn = e.target instanceof Element ? e.target.closest('#toggle-password') : null;
+    if (!toggleBtn) return;
+    const passwordInput = document.getElementById('password-input');
+    const eyeIcon = document.getElementById('eye-icon');
+    const show = passwordInput.type === 'password';
+    passwordInput.type = show ? 'text' : 'password';
+    eyeIcon.classList.toggle('fa-eye', !show);
+    eyeIcon.classList.toggle('fa-eye-slash', show);
+  });
+</script>
+{% endblock %}

@@ -17,7 +17,6 @@ from .utils import (
     DryAnnotation,
     run,
 )
-from .web_app import WebApp
 
 app = typer.Typer(
     help=__doc__,
@@ -29,7 +28,6 @@ app = typer.Typer(
 
 @app.command(name='run')
 def server_run(
-    web_app: WebApp,
     environment: Environment = Environment.DEV,
     dry: DryAnnotation = False,
 ):
@@ -48,7 +46,7 @@ def server_run(
         'manage.py',
         'runserver',
         dry=dry,
-        cwd=PROJECT_ROOT / web_app.value,
+        cwd=PROJECT_ROOT,
         env=os.environ | {'ENVIRONMENT': environment.value},
     )
 

@@ -15,17 +15,12 @@ from rich.text import Text
 
 from . import PROJECT_ROOT
 from .environment import Environment
-from .web_app import WebApp
 
 EnvironmentAnnotation = Annotated[
     Environment | None,
     typer.Argument(help='Environment to use.', show_default=False),
 ]
 
-WebAppAnnotation = Annotated[
-    WebApp,
-    typer.Argument(help='Web app to use.', show_default=False),
-]
 DryAnnotation = Annotated[
     bool,
     typer.Option(
@@ -165,22 +160,11 @@ def select_environment(
     return env
 
 
-def set_environment(
-    environment: Environment | str | None = None,
-    web_app: WebApp | str | None = None,
-) -> Environment:
-    """Load the selected common and app-specific environment files into `os.environ`."""
+def set_environment(environment: Environment | str | None = None) -> Environment:
+    """Load the selected environment file into `os.environ`."""
     from .environment import select_env
 
-    try:
-        resolved_web_app = (
-            web_app if web_app is None or isinstance(web_app, WebApp) else WebApp(web_app)
-        )
-    except ValueError:
-        logger.error(f'Unknown web app: {web_app}')
-        raise typer.Exit(1)
-
-    selection = select_env(PROJECT_ROOT, environment=environment, web_app=resolved_web_app)
+    selection = select_env(PROJECT_ROOT, environment=environment)
 
     for warning in selection.warnings:
         logger.warning(warning)
@@ -191,8 +175,8 @@ def set_environment(
         raise typer.Exit(1)
 
     os.environ['ENVIRONMENT'] = selection.environment.value
-    for env_path in selection.all_env_paths:
-        os.environ.update(read_env_file_from_path(env_path))
+    if selection.env_path:
+        os.environ.update(read_env_file_from_path(selection.env_path))
 
     return selection.environment
 

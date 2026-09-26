@@ -26,13 +26,6 @@ app = typer.Typer(
 )
 
 
-class App(StrEnum):
-    """App-specific dependency groups."""
-
-    USERS = 'users'
-    QR_CODE = 'qr_code'
-
-
 class Requirements(StrEnum):
     """Dependency scopes."""
 
@@ -45,18 +38,6 @@ RequirementsAnnotation = Annotated[
     typer.Argument(
         help='Dependency scope(s) to operate on. If not set, all scopes are used.\nValues can be '
         + ', '.join([f'`{x.value}`' for x in Requirements])
-        + '.',
-        show_default=False,
-    ),
-]
-
-AppAnnotation = Annotated[
-    list[str] | None,
-    typer.Option(
-        '--app',
-        '-a',
-        help='App-specific dependency group(s) to operate on.\nValues can be '
-        + ', '.join([f'`{x.value}`' for x in App])
         + '.',
         show_default=False,
     ),
@@ -95,33 +76,6 @@ def _normalize_requirement(requirement: str | Requirements) -> Requirements:
             raise typer.Exit(1)
 
 
-def _normalize_app(app_name: str | App) -> App:
-    if isinstance(app_name, App):
-        return app_name
-
-    normalized = app_name.strip().lower()
-    try:
-        return App[normalized.upper()]
-    except KeyError:
-        try:
-            return App(normalized)
-        except ValueError:
-            logger.error(f'`{app_name}` is an unknown app.')
-            raise typer.Exit(1)
-
-
-def _get_apps(apps: list[str | App] | None) -> list[App]:
-    if apps is None:
-        return []
-
-    unique_apps: list[App] = []
-    for app_name in apps:
-        normalized = _normalize_app(app_name)
-        if normalized not in unique_apps:
-            unique_apps.append(normalized)
-    return unique_apps
-
-
 def _get_requirements(requirements: list[str | Requirements] | None) -> list[Requirements]:
     if requirements is None or len(requirements) == 0:
         return []
@@ -147,25 +101,18 @@ def _log_shared_lockfile(requirements: list[str | Requirements] | None, action: 
         )
 
 
-def _selected_groups(
-    requirements: list[str | Requirements] | None, apps: list[str | App] | None
-) -> list[str]:
+def _selected_groups(requirements: list[str | Requirements] | None) -> list[str]:
     selected_reqs = set(_get_requirements(requirements))
-    selected_apps = set(_get_apps(apps))
     groups: list[str] = []
 
     if Requirements.DEV in selected_reqs:
         groups.append(Requirements.DEV.value)
-
-    for app_name in selected_apps:
-        groups.append(app_name.value)
 
     return groups
 
 
 def _sync_command(
     requirements: list[str | Requirements] | None,
-    apps: list[str | App] | None = None,
     *,
     inexact: bool = False,
 ) -> list[str]:
@@ -175,11 +122,11 @@ def _sync_command(
     if inexact:
         args.append('--inexact')
 
-    if (requirements is None or len(requirements) == 0) and (apps is None or len(apps) == 0):
+    if requirements is None or len(requirements) == 0:
         args.append('--all-groups')
         return args
 
-    for group in _selected_groups(requirements, apps):
+    for group in _selected_groups(requirements):
         args.extend(['--group', group])
 
     return args
@@ -196,41 +143,33 @@ def _extract_requirement_name(requirement: str) -> str:
     return _canonical_package_name(match.group())
 
 
-def _load_declared_packages() -> dict[Requirements | App, set[str]]:
+def _load_declared_packages() -> dict[Requirements, set[str]]:
     config = tomllib.loads(PYPROJECT_FILE.read_text(encoding='utf-8'))
     project = config.get('project', {})
     dependency_groups = config.get('dependency-groups', {})
 
     main = {_extract_requirement_name(dep) for dep in project.get('dependencies', [])}
-    qr_code = {_extract_requirement_name(dep) for dep in dependency_groups.get('qr_code', [])}
-    users = {_extract_requirement_name(dep) for dep in dependency_groups.get('users', [])}
     dev = {_extract_requirement_name(dep) for dep in dependency_groups.get('dev', [])}
     return {
         Requirements.MAIN: main,
-        App.USERS: main | users,
-        App.QR_CODE: main | qr_code,
         Requirements.DEV: main | dev,
     }
 
 
 def _get_declared_packages_for_requirements(
-    requirements: list[str | Requirements] | None, apps: list[str | App] | None
+    requirements: list[str | Requirements] | None,
 ) -> set[str]:
     declared_packages = _load_declared_packages()
     selected_reqs = _get_requirements(requirements)
-    selected_apps = _get_apps(apps)
     packages: set[str] = set()
     for requirement in selected_reqs:
         packages |= declared_packages[requirement]
-    for app_name in selected_apps:
-        packages |= declared_packages[app_name]
     return packages
 
 
 @app.command(name='compile')
 def pip_compile(
     requirements: RequirementsAnnotation = None,
-    apps: AppAnnotation = None,
     clean: Annotated[
         bool,
         typer.Option(help='Delete the existing `uv.lock` file, forcing a clean lock refresh.'),
@@ -241,24 +180,22 @@ def pip_compile(
     if clean and not dry:
         UV_LOCK_FILE.unlink(missing_ok=True)
 
-    # Note: uv.lock is always shared, we don't filter it by apps/requirements during lock
+    # Note: uv.lock is always shared, we don't filter it by requirements during lock
     run('uv', 'lock', dry=dry)
 
 
 @app.command(name='sync')
 def pip_sync(
     requirements: RequirementsAnnotation = None,
-    apps: AppAnnotation = None,
     dry: DryAnnotation = False,
 ):
     """Synchronize the environment with `uv.lock`."""
-    run(*_sync_command(requirements, apps), dry=dry, env=_uv_env())
+    run(*_sync_command(requirements), dry=dry, env=_uv_env())
 
 
 @app.command(name='package')
 def pip_package(
     requirements: RequirementsAnnotation = None,
-    apps: AppAnnotation = None,
     package: Annotated[
         list[str] | None, typer.Option('--package', '-p', help='One or more packages to upgrade.')
     ] = None,
@@ -269,7 +206,7 @@ def pip_package(
         logger.error('No packages specified to upgrade.')
         raise typer.Exit(1)
 
-    declared_packages = _get_declared_packages_for_requirements(requirements, apps)
+    declared_packages = _get_declared_packages_for_requirements(requirements)
     unknown_packages = [
         item for item in package if _canonical_package_name(item) not in declared_packages
     ]
@@ -286,7 +223,6 @@ def pip_package(
 @app.command(name='upgrade')
 def pip_upgrade(
     requirements: RequirementsAnnotation = None,
-    apps: AppAnnotation = None,
     dry: DryAnnotation = False,
 ):
     """
@@ -298,11 +234,10 @@ def pip_upgrade(
 @app.command(name='install')
 def pip_install(
     requirements: RequirementsAnnotation = None,
-    apps: AppAnnotation = None,
     dry: DryAnnotation = False,
 ):
     """Install dependencies from `uv.lock` without removing unrelated packages."""
-    run(*_sync_command(requirements, apps, inexact=True), dry=dry, env=_uv_env())
+    run(*_sync_command(requirements, inexact=True), dry=dry, env=_uv_env())
 
 
 if __name__ == '__main__':
