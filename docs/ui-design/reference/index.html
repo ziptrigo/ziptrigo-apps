@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI reference - ZipTrigo</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <!-- Site header, as in apps/core/templates/core/base.html -->
+    <header class="bg-gray-100 dark:bg-gray-800 shadow">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex space-x-6">
+                <a href="index.html" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="list-page.html" class="text-lg hover:text-sage-300"><i class="fas fa-qrcode mr-1"></i>QR Codes</a>
+                <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="theme-toggle" type="button" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                    <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                         src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                         data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+                </button>
+                <div>
+                    <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+                    <button type="button" class="text-lg hover:text-sage-300">Logout</button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Reference navigation (documentation chrome, not part of the site) -->
+    <div class="border-b border-dashed border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+            <span class="text-xs font-semibold uppercase tracking-wide text-sage-600 dark:text-sage-300">UI reference</span>
+            <a href="index.html" class="font-semibold text-gray-900 dark:text-gray-100">Overview</a>
+            <a href="foundations.html" class="hover:text-gray-900 dark:hover:text-gray-100">Foundations</a>
+            <a href="components.html" class="hover:text-gray-900 dark:hover:text-gray-100">Components</a>
+            <a href="list-page.html" class="hover:text-gray-900 dark:hover:text-gray-100">List page</a>
+            <a href="form-page.html" class="hover:text-gray-900 dark:hover:text-gray-100">Form page</a>
+            <span class="ml-auto text-xs">Theme: <span id="theme-label" class="font-medium">system</span></span>
+        </div>
+    </div>
+
+    <main class="flex-grow flex flex-col">
+        <div class="container mx-auto px-4 py-12 flex flex-col items-center text-center">
+            <div class="mb-8">
+                <img src="../../../apps/core/static/core/images/logo_128x128.png" alt="ZipTrigo logo" class="w-32 h-32 object-contain">
+            </div>
+
+            <h1 class="text-4xl font-bold mb-6 text-sage-700 dark:text-sage-300">UI reference</h1>
+
+            <p class="text-xl mb-4 max-w-2xl text-gray-700 dark:text-gray-300">
+                The ZipTrigo design, rendered with the site's own Tailwind config.
+            </p>
+            <p class="mb-10 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
+                Taken from the QR code pages. The written rules are in
+                <code class="px-1 rounded bg-gray-100 dark:bg-gray-800">docs/ui-design/README.md</code>.
+                Use the theme button in the header to check light and dark.
+            </p>
+
+            <div class="grid gap-6 w-full max-w-4xl sm:grid-cols-2">
+                <a href="foundations.html"
+                   class="block text-left p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
+                    <div class="flex items-center gap-3 mb-2">
+                        <i class="fas fa-palette text-2xl text-sage-400"></i>
+                        <h2 class="text-xl font-semibold">Foundations</h2>
+                    </div>
+                    <p class="text-gray-700 dark:text-gray-300">Colour, dark-mode pairs, contrast, type, spacing, radius, elevation, icons, motion.</p>
+                </a>
+                <a href="components.html"
+                   class="block text-left p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
+                    <div class="flex items-center gap-3 mb-2">
+                        <i class="fas fa-shapes text-2xl text-sage-400"></i>
+                        <h2 class="text-xl font-semibold">Components</h2>
+                    </div>
+                    <p class="text-gray-700 dark:text-gray-300">Buttons, fields, search, list, row menu, modals, preview well, messages, with copyable markup.</p>
+                </a>
+                <a href="list-page.html"
+                   class="block text-left p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
+                    <div class="flex items-center gap-3 mb-2">
+                        <i class="fas fa-list text-2xl text-sage-400"></i>
+                        <h2 class="text-xl font-semibold">List page</h2>
+                    </div>
+                    <p class="text-gray-700 dark:text-gray-300">The QR dashboard pattern: title, toolbar, list card, row actions, confirmation.</p>
+                </a>
+                <a href="form-page.html"
+                   class="block text-left p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
+                    <div class="flex items-center gap-3 mb-2">
+                        <i class="fas fa-pen-to-square text-2xl text-sage-400"></i>
+                        <h2 class="text-xl font-semibold">Form page</h2>
+                    </div>
+                    <p class="text-gray-700 dark:text-gray-300">The QR editor pattern: create/edit, field states, preview, errors, actions.</p>
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-gray-100 dark:bg-gray-800 mt-auto py-6">
+        <div class="container mx-auto px-4 flex items-center justify-between space-x-8">
+            <div class="flex justify-center space-x-8 flex-1">
+                <a href="#" class="hover:text-sage-300">FAQ</a>
+                <a href="#" class="hover:text-sage-300">Feedback</a>
+            </div>
+            <div class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                &copy; 2026 Joao Coelho. Licensed under MIT.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
