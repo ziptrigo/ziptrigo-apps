@@ -233,6 +233,12 @@ token?) or a real port of a DRF-era module.
 - Admin CLIs: typer apps with `no_args_is_help=True`, a module docstring as `help`, and a `--dry`
   option threaded through `admin.utils.run`.
 
+### GitHub issues
+
+Label every issue with the app(s) it applies to: `Users` (accounts), `Billing`, `Core`, `QR Code`,
+`File Transfer`. Work that happens in the separate `infra` repository is tracked here under
+`Infra`. An issue that touches several apps gets several labels.
+
 ### Adding an app
 
 1. `apps/<name>/` with the layout above; `AppConfig` with `name = 'apps.<name>'`,
