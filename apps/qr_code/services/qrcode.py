@@ -1,3 +1,5 @@
+import base64
+import io
 from pathlib import Path
 
 import segno
@@ -53,6 +55,28 @@ class QRCodeGenerator:
 
         # Return relative path for storage
         return f'qrcodes/{file_name}'
+
+    @staticmethod
+    def render_png_data_uri(qr_code_instance: QRCode) -> str:
+        """Render the QR code as a PNG `data:` URI, without writing a file.
+
+        Used for previews, which would otherwise leave a file behind on every click. Always PNG:
+        a preview only needs to show what the code looks like, and `<img>` can't show a PDF.
+        """
+        qr = segno.make(
+            qr_code_instance.content, error=qr_code_instance.error_correction, micro=False
+        )
+        buffer = io.BytesIO()
+        qr.save(
+            buffer,
+            kind='png',
+            scale=qr_code_instance.size,
+            border=qr_code_instance.border,
+            dark=QRCodeGenerator._parse_color(qr_code_instance.foreground_color),
+            light=QRCodeGenerator._parse_color(qr_code_instance.background_color),
+        )
+        encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
+        return f'data:image/png;base64,{encoded}'
 
     @staticmethod
     def _parse_color(color_value: str) -> str | None:

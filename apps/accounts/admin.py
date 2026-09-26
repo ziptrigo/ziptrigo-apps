@@ -1,14 +1,22 @@
 """Admin registrations for the accounts app."""
 
-from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from apps.core.admin_site import custom_admin_site
 
+from .forms.admin import UserAdminChangeForm, UserAdminCreationForm
 from .models import User
 
 
-class UserAdmin(admin.ModelAdmin):
-    """Admin interface for the custom User model."""
+class UserAdmin(DjangoUserAdmin):
+    """Admin interface for the custom User model.
+
+    Built on Django's `UserAdmin`, so the password is shown as a read-only hash with a link to the
+    change-password form, and new users get hashed passwords.
+    """
+
+    form = UserAdminChangeForm
+    add_form = UserAdminCreationForm
 
     list_display = [
         'email',
@@ -42,6 +50,15 @@ class UserAdmin(admin.ModelAdmin):
         (
             'Important dates',
             {'fields': ('last_login', 'created_at', 'updated_at')},
+        ),
+    )
+    add_fieldsets = (
+        (
+            None,
+            {
+                'classes': ('wide',),
+                'fields': ('email', 'name', 'usable_password', 'password1', 'password2'),
+            },
         ),
     )
 

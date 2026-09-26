@@ -1,10 +1,9 @@
-from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 
 from ..forms import ProfileForm
-from ..http import AuthenticatedHttpRequest, MaybeAuthenticatedHttpRequest
+from ..http import AuthenticatedHttpRequest
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.password_reset import get_password_reset_service
 
@@ -13,11 +12,6 @@ from ..services.password_reset import get_password_reset_service
 def account_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render the account settings page for the authenticated user."""
     return render(request, 'accounts/account.html', {'form': ProfileForm(instance=request.user)})
-
-
-def login_page(request: HttpRequest) -> HttpResponse:
-    """Render the login page."""
-    return render(request, 'accounts/login.html')
 
 
 def register_page(request: HttpRequest) -> HttpResponse:
@@ -56,16 +50,9 @@ def confirm_email_page(request: HttpRequest, token: str) -> HttpResponse:
 
     # Confirm the email
     service.confirm_email(user)
-    return redirect('email-confirmation-success')
+    return redirect('accounts:email-confirmed')
 
 
 def email_confirmation_success(request: HttpRequest) -> HttpResponse:
     """Render the email confirmation success page."""
     return render(request, 'accounts/email_confirmation_success.html')
-
-
-def logout_page(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
-    """Log out the current user and redirect to the homepage."""
-    if request.user.is_authenticated:
-        auth_logout(request)
-    return redirect('home')

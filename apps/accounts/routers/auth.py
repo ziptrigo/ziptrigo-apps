@@ -1,6 +1,5 @@
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.contrib.auth import login as auth_login
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 from ninja import Router
@@ -125,12 +124,6 @@ def login(request: HttpRequest, payload: LoginRequest) -> TokenResponse:
             'Please confirm your email address before logging in. '
             'Check your inbox for the confirmation link.',
         )
-
-    # Also start a Django session, so the server-rendered pages (`@login_required`) recognise the
-    # user; the tokens below are what the `/api/` endpoints authenticate with. Requests that never
-    # went through `SessionMiddleware` (e.g. Ninja's `TestClient`) have no session to start.
-    if hasattr(request, 'session'):
-        auth_login(request, user)
 
     # Generate tokens
     refresh = CustomRefreshToken.for_user(user)

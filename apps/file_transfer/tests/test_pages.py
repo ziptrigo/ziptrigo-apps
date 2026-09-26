@@ -15,7 +15,7 @@ def test_index_redirects_anonymous_user_to_login(client):
     response = client.get(reverse('file_transfer:index'))
 
     assert response.status_code == 302
-    assert response['Location'].startswith(reverse('login-page'))
+    assert response['Location'].startswith(reverse('accounts:login'))
 
 
 def test_index_renders_for_logged_in_user(client, user: User):

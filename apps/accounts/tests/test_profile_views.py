@@ -11,18 +11,18 @@ HTMX = {'HTTP_HX_REQUEST': 'true'}
 def test_account_page_renders_profile_form(client, user):
     client.force_login(user)
 
-    response = client.get(reverse('account-page'))
+    response = client.get(reverse('accounts:account'))
 
     assert response.status_code == 200
     content = response.content.decode()
-    assert f'hx-post="{reverse("profile-update")}"' in content
+    assert f'hx-post="{reverse("accounts:profile-update")}"' in content
     assert 'value="Test User"' in content
 
 
 def test_updates_name_and_returns_form_partial(client, user):
     client.force_login(user)
 
-    response = client.post(reverse('profile-update'), {'name': 'New Name'}, **HTMX)
+    response = client.post(reverse('accounts:profile-update'), {'name': 'New Name'}, **HTMX)
 
     assert response.status_code == 200
     content = response.content.decode()
@@ -36,7 +36,9 @@ def test_updates_name_and_returns_form_partial(client, user):
 def test_email_cannot_be_changed(client, user):
     client.force_login(user)
 
-    client.post(reverse('profile-update'), {'name': 'X', 'email': 'new@example.com'}, **HTMX)
+    client.post(
+        reverse('accounts:profile-update'), {'name': 'X', 'email': 'new@example.com'}, **HTMX
+    )
 
     user.refresh_from_db()
     assert user.email == 'testuser@example.com'
@@ -45,7 +47,7 @@ def test_email_cannot_be_changed(client, user):
 def test_blank_name_returns_errors(client, user):
     client.force_login(user)
 
-    response = client.post(reverse('profile-update'), {'name': ''}, **HTMX)
+    response = client.post(reverse('accounts:profile-update'), {'name': ''}, **HTMX)
 
     assert response.status_code == 422
     assert 'Please fill in your name.' in response.content.decode()
@@ -56,14 +58,14 @@ def test_blank_name_returns_errors(client, user):
 def test_without_htmx_redirects_to_account_page(client, user):
     client.force_login(user)
 
-    response = client.post(reverse('profile-update'), {'name': 'New Name'})
+    response = client.post(reverse('accounts:profile-update'), {'name': 'New Name'})
 
     assert response.status_code == 302
-    assert response['Location'] == reverse('account-page')
+    assert response['Location'] == reverse('accounts:account')
 
 
 def test_requires_login(client):
-    response = client.post(reverse('profile-update'), {'name': 'New Name'})
+    response = client.post(reverse('accounts:profile-update'), {'name': 'New Name'})
 
     assert response.status_code == 302
-    assert response['Location'].startswith(reverse('login-page'))
+    assert response['Location'].startswith(reverse('accounts:login'))

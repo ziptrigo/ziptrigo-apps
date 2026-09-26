@@ -1,5 +1,5 @@
 from .delete import qrcode_delete
-from .editor import qrcode_create_submit, qrcode_edit_submit, qrcode_preview
+from .editor import qrcode_create_submit, qrcode_edit_submit, qrcode_preview, qrcode_short_code
 from .pages import (
     dashboard,
     qrcode_duplicate,
@@ -15,5 +15,6 @@ __all__ = [
     'qrcode_edit_submit',
     'qrcode_editor',
     'qrcode_preview',
+    'qrcode_short_code',
     'redirect_short_url',
 ]

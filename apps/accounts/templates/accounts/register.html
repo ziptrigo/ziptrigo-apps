@@ -46,7 +46,7 @@
     </form>
 
     <p class="mt-4 text-sm text-gray-600 dark:text-gray-300">
-      Already have an account? <a href="{% url 'login-page' %}" class="text-sage-300 underline">Sign in</a>
+      Already have an account? <a href="{% url 'accounts:login' %}" class="text-sage-300 underline">Sign in</a>
     </p>
   </div>
 </div>
@@ -94,7 +94,7 @@
         const data = await response.json();
 
         if (response.ok) {
-          window.location.href = '{% url 'account-created-page' %}';
+          window.location.href = '{% url 'accounts:created' %}';
         } else {
           const userMsg = data.detail || data.message || 'Could not create account.';
           msg.textContent = userMsg;

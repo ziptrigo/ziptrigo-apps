@@ -22,7 +22,7 @@ def profile_update(request: AuthenticatedHttpRequest) -> HttpResponse:
     if form.is_valid():
         form.save()
         if not is_htmx(request):
-            return redirect('account-page')
+            return redirect('accounts:account')
         context = {'form': ProfileForm(instance=request.user), 'saved': True}
         return render(request, 'accounts/partials/profile_form.html', context)
 

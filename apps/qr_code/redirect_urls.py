@@ -8,6 +8,8 @@ from django.urls import re_path
 
 from .views import redirect_short_url
 
+app_name = 'go'
+
 urlpatterns = [
-    re_path(r'^go/(?P<short_code>[^/]+)/?$', redirect_short_url, name='qrcode-redirect'),
+    re_path(r'^go/(?P<short_code>[^/]+)/?$', redirect_short_url, name='redirect'),
 ]

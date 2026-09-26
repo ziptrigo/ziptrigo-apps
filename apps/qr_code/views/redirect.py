@@ -16,7 +16,7 @@ async def redirect_short_url(request: HttpRequest, short_code: str) -> HttpRespo
 
     # Redirect to dashboard if QR code is soft-deleted
     if qrcode.deleted_at:
-        return redirect('dashboard')
+        return redirect('qr_code:dashboard')
 
     # Increment scan count
     await qrcode.aincrement_scan_count()

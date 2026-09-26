@@ -12,7 +12,7 @@ def test_render_password_reset_email_includes_user_name_and_url(settings, client
     """Rendered email should contain user name (or email) and reset URL in both bodies."""
 
     # Build a fake reset URL similar to real one.
-    reset_url = 'https://example.com' + reverse('reset-password-page', args=['TOKEN'])
+    reset_url = 'https://example.com' + reverse('accounts:reset-password', args=['TOKEN'])
 
     subject, text_body, html_body = render_password_reset_email(user=user, reset_url=reset_url)
 
@@ -35,7 +35,7 @@ def test_render_password_reset_email_works_without_name(settings, client, db):
         name='',
     )
 
-    reset_url = 'https://example.com' + reverse('reset-password-page', args=['TOKEN2'])
+    reset_url = 'https://example.com' + reverse('accounts:reset-password', args=['TOKEN2'])
 
     subject, text_body, html_body = render_password_reset_email(user=user, reset_url=reset_url)
 

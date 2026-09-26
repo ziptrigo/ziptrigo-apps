@@ -38,7 +38,7 @@ class EmailConfirmationService:
 
     def _build_confirmation_url(self, token: str) -> str:
         base = settings.BASE_URL.rstrip('/')
-        path = reverse('confirm-email-page', args=[token])
+        path = reverse('accounts:confirm-email', args=[token])
         return f'{base}{path}'
 
     @staticmethod

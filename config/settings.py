@@ -17,9 +17,11 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 from .environment import select_env
+from .secret_checks import insecure_secrets
 
 # Build paths inside the project like this: PROJECT_ROOT / 'subdir'.
 # PROJECT_ROOT, aka BASE_DIR.
@@ -181,19 +183,29 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # Login URL for @login_required decorator
-LOGIN_URL = 'login-page'
+LOGIN_URL = 'accounts:login'
 
 # Base URL used to build absolute links (emails, QR code redirects).
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
 
 # Email confirmation and password reset settings
 EMAIL_CONFIRMATION_TOKEN_TTL_HOURS = int(os.getenv('EMAIL_CONFIRMATION_TOKEN_TTL_HOURS', '48'))
-PASSWORD_RESET_TOKEN_TTL_HOURS = int(os.getenv('PASSWORD_RESET_TOKEN_TTL_HOURS', '48'))
+PASSWORD_RESET_TOKEN_TTL_HOURS = int(os.getenv('PASSWORD_RESET_TOKEN_TTL_HOURS', '4'))
 
 # JWT signing for the `/api/` endpoints. Separate from `SECRET_KEY` so it can be rotated on its own.
 JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
 JWT_EXP_DELTA_SECONDS = int(os.getenv('JWT_EXP_DELTA_SECONDS', str(14 * 24 * 3600)))
+
+# Production must not run on the development fallbacks above: anyone could forge sessions and
+# JWTs signed with them.
+if os.getenv('ENVIRONMENT') == 'prod':
+    _insecure = insecure_secrets({'SECRET_KEY': SECRET_KEY, 'JWT_SECRET': JWT_SECRET})
+    if _insecure:
+        raise ImproperlyConfigured(
+            f'Set real values for {", ".join(_insecure)} in production; '
+            'they are missing or still placeholders.'
+        )
 
 # django-ninja-jwt settings
 NINJA_JWT = {
@@ -263,14 +275,12 @@ JAZZMIN_SETTINGS = {
         'billing.CreditAccount': 'fas fa-wallet',
         'qr_code.QRCode': 'fas fa-qrcode',
     },
-    'custom_links': {
-        'accounts': [
-            {
-                'name': 'Admin Tools',
-                'url': '/admin/tools/',
-                'permissions': ['accounts.add_user'],
-                'icon': 'fas fa-tools',
-            }
-        ],
-    },
+    'topmenu_links': [
+        {'name': 'Site', 'url': 'core:home'},
+        {
+            'name': 'Admin Tools',
+            'url': 'custom_admin:admin_tools',
+            'permissions': ['accounts.add_user'],
+        },
+    ],
 }

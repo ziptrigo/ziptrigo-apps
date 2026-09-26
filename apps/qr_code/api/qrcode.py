@@ -3,7 +3,9 @@
 import uuid
 
 from asgiref.sync import sync_to_async
+from django.core.exceptions import ValidationError
 from ninja import Router
+from ninja.errors import HttpError
 
 from apps.accounts.auth import AsyncJWTAuth
 
@@ -47,12 +49,12 @@ async def create_qrcode(request, payload: QRCodeCreateSchema):
     data = getattr(payload, 'data', None)
     fields = payload.dict(exclude={'url', 'data'})
 
-    qrcode = await sync_to_async(services.create_qrcode)(
-        user,
-        content=url or data or '',
-        original_url=url or None,
-        **fields,
-    )
+    try:
+        qrcode = await sync_to_async(services.create_qrcode)(
+            user, content=url or data or '', **fields
+        )
+    except ValidationError as e:
+        raise HttpError(400, e.messages[0])
 
     # Add computed fields (dynamic attributes for serialization)
     qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)
@@ -134,7 +136,11 @@ async def preview_qrcode(request, payload: QRCodeCreateSchema):
     data = getattr(payload, 'data', None)
     fields = payload.dict(exclude={'url', 'data'})
 
-    image_url = await sync_to_async(services.render_preview)(
-        request.auth, content=url or data or '', **fields
-    )
+    try:
+        image_url = await sync_to_async(services.render_preview)(
+            request.auth, content=url or data or '', **fields
+        )
+    except ValidationError as e:
+        raise HttpError(400, e.messages[0])
+    # A PNG `data:` URI; previews aren't written to disk.
     return {'image_url': image_url}

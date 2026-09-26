@@ -68,3 +68,4 @@ class QRCodePreviewSchema(Schema):
     """Schema for QR code preview response."""
 
     image_url: str
+    """The preview as a PNG `data:` URI."""

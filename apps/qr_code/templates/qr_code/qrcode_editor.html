@@ -10,7 +10,7 @@
   <div id="qrcode-msg" class="mb-4 text-sm"></div>
 
   <form id="qrcode-form"
-        hx-post="{% if qrcode %}{% url 'qrcode-edit-submit' qrcode.id %}{% else %}{% url 'qrcode-create-submit' %}{% endif %}"
+        hx-post="{% if qrcode %}{% url 'qr_code:edit-submit' qrcode.id %}{% else %}{% url 'qr_code:create-submit' %}{% endif %}"
         hx-target="#qrcode-msg"
         hx-swap="innerHTML"
         hx-disabled-elt="find button[type='submit']">
@@ -91,7 +91,7 @@
       {% if not qrcode %}
       <button type="button"
               id="qrcode-preview-btn"
-              hx-post="{% url 'qrcode-preview' %}"
+              hx-post="{% url 'qr_code:preview' %}"
               hx-include="#qrcode-form"
               hx-trigger="click"
               hx-target="#qrcode-preview-img"
@@ -114,7 +114,7 @@
 
     <!-- Final actions: Cancel + Save -->
     <div class="mt-6 flex items-center justify-end gap-3">
-      <a href="{% url 'dashboard' %}"
+      <a href="{% url 'qr_code:dashboard' %}"
          class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
         Cancel
       </a>
@@ -130,25 +130,12 @@
   (function(){
     const form = document.getElementById('qrcode-form');
     const msg = document.getElementById('qrcode-msg');
-    const previewBtn = document.getElementById('qrcode-preview-btn');
     const isEditMode = {{ qrcode|yesno:"true,false" }};
     const qrTypeSelect = document.getElementById('qr_type');
     const urlShorteningCheckbox = document.getElementById('use_url_shortening');
     const shortUrlContainer = document.getElementById('short-url-container');
-    const shortUrlDisplay = document.getElementById('short-url-display');
     const hasPrefill = {% if prefill|length > 0 %}true{% else %}false{% endif %};
     const prefillUseShort = {{ prefill.use_url_shortening|yesno:"true,false" }};
-    let generatedShortCode = null;
-
-    // Generate a random short code (8 characters)
-    function generateShortCode() {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      let code = '';
-      for (let i = 0; i < 8; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return code;
-    }
 
     // Update checkbox state and short URL visibility
     function updateCheckboxState() {
@@ -166,19 +153,13 @@
 
     // Update short URL display when checkbox changes
     function updateShortUrlDisplay() {
-      if (urlShorteningCheckbox && shortUrlContainer && shortUrlDisplay) {
+      if (urlShorteningCheckbox && shortUrlContainer) {
         if (urlShorteningCheckbox.checked) {
           shortUrlContainer.classList.remove('hidden');
-          // Generate short code if not already generated
-          if (!generatedShortCode) {
-            generatedShortCode = generateShortCode();
-          }
-          // Display the short URL
-          const baseUrl = window.location.origin;
-          shortUrlDisplay.value = `${baseUrl}/go/${generatedShortCode}/`;
+          // The server issues the short code (and keeps it for the save).
+          htmx.ajax('GET', '{% url 'qr_code:short-code' %}', {target: '#short-url-display', swap: 'outerHTML'});
         } else {
           shortUrlContainer.classList.add('hidden');
-          generatedShortCode = null;
         }
       }
     }
@@ -208,16 +189,6 @@
       if (urlShorteningCheckbox) {
         urlShorteningCheckbox.addEventListener('change', updateShortUrlDisplay);
       }
-    }
-
-    // Intercept htmx requests to add short_code if needed (only in create mode)
-    if (!isEditMode) {
-      document.body.addEventListener('htmx:configRequest', function(e) {
-        if ((e.target === previewBtn || e.target === form) && generatedShortCode && urlShorteningCheckbox && urlShorteningCheckbox.checked) {
-          // Add short_code to the request parameters
-          e.detail.parameters.short_code = generatedShortCode;
-        }
-      });
     }
 
     form.addEventListener('submit', function(ev){

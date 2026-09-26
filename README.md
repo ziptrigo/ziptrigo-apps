@@ -125,6 +125,9 @@ Environment variables are loaded from `.env.<environment>` at the repo root (`de
 `.env.example` for the full list. If `ENVIRONMENT` is set, that file is used; otherwise there must
 be exactly one `.env.*` file.
 
+With `ENVIRONMENT=prod`, the site refuses to start unless `SECRET_KEY` and `JWT_SECRET` are set to
+real values.
+
 The database is SQLite (`db.sqlite3`) for now.
 
 ## Development Workflow

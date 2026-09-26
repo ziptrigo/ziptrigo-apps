@@ -1,7 +1,7 @@
 <form id="profile-form"
       method="post"
-      action="{% url 'profile-update' %}"
-      hx-post="{% url 'profile-update' %}"
+      action="{% url 'accounts:profile-update' %}"
+      hx-post="{% url 'accounts:profile-update' %}"
       hx-target="this"
       hx-swap="outerHTML"
       hx-disabled-elt="find button[type='submit']">

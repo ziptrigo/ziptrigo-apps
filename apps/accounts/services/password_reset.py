@@ -46,7 +46,7 @@ class PasswordResetService:
 
     def _build_reset_url(self, token: str) -> str:
         base = settings.BASE_URL.rstrip('/')
-        path = reverse('reset-password-page', args=[token])
+        path = reverse('accounts:reset-password', args=[token])
         return f'{base}{path}'
 
     @staticmethod

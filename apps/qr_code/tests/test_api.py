@@ -49,8 +49,54 @@ def test_preview_is_not_shadowed_by_detail_route(client, auth_headers):
     )
 
     assert response.status_code == 200
-    assert response.json()['image_url'].startswith('/media/qrcodes/')
+    assert response.json()['image_url'].startswith('data:image/png;base64,')
     assert not QRCode.objects.exists()
+
+
+def test_create_text_type_has_no_original_url_or_short_link(client, user, auth_headers):
+    response = client.post(
+        '/api/qr/',
+        {
+            'name': 'Text',
+            'qr_type': 'text',
+            'qr_format': 'png',
+            'url': 'just some text',
+            'use_url_shortening': True,
+        },
+        content_type='application/json',
+        **auth_headers,
+    )
+
+    assert response.status_code == 201
+    qrcode = QRCode.objects.get(id=response.json()['id'])
+    assert qrcode.original_url is None
+    assert not qrcode.use_url_shortening
+    assert qrcode.content == 'just some text'
+
+
+@pytest.mark.parametrize('url', ['not a url', 'javascript:alert(1)'])
+def test_create_rejects_invalid_url(client, auth_headers, url):
+    response = client.post(
+        '/api/qr/',
+        {'name': 'Bad', 'qr_type': 'url', 'qr_format': 'png', 'url': url},
+        content_type='application/json',
+        **auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert 'valid URL' in response.json()['detail']
+    assert not QRCode.objects.exists()
+
+
+def test_create_rejects_empty_content(client, auth_headers):
+    response = client.post(
+        '/api/qr/',
+        {'name': 'Empty', 'qr_type': 'text', 'qr_format': 'png'},
+        content_type='application/json',
+        **auth_headers,
+    )
+
+    assert response.status_code == 400
 
 
 def test_requires_token(client):

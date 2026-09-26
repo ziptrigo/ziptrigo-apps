@@ -110,19 +110,25 @@ The convention: `.env.<environment>` at the repo root where `<environment>` ∈ 
 `.env.example`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
 re-validates env selection and `EMAIL_BACKENDS` at `runserver` startup.
 
+With `ENVIRONMENT=prod`, settings raise `ImproperlyConfigured` if `SECRET_KEY` or `JWT_SECRET` is
+missing or still a placeholder (`config/secret_checks.py`, also Django-free).
+
 ### Auth
 
 One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mechanisms coexist:
 
 - **Django sessions** for the web UI: every page and every HTMX form view is `@login_required`
-  (`LOGIN_URL='login-page'`). The browser never holds a JWT.
+  (`LOGIN_URL='accounts:login'`). The login page is a session form view
+  (`apps/accounts/views/login.py`, CSRF-protected, honours a same-site `next`); logout is
+  POST-only. The browser never holds a JWT.
 - **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py` (`apps.accounts.auth.JWTAuth` /
   `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE` users). Claim `sub`, signed with
   `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
 
-The login page posts to `POST /api/auth/login`, which returns JWTs *and* starts a session; the page
-ignores the tokens. The other unauthenticated account pages (register, password reset, resend
-confirmation) also still post JSON to `/api/auth/…`.
+`POST /api/auth/login` only issues JWTs; it never starts a session. The other unauthenticated
+account pages (register, password reset, resend confirmation) still post JSON to `/api/auth/…`.
+Changing the email through `PUT /api/account` un-confirms the account and sends a new
+confirmation email.
 
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.
@@ -138,6 +144,9 @@ and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr
 `apps/core/admin_site.py` owns `custom_admin_site` (mounted at `/admin/`) and the tools page (test
 email, masked environment). Every app registers its `ModelAdmin`s on it from its own `admin.py`.
 The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/billing/credittransaction/adjust/`).
+The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
+so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
+and to the admin tools page.
 
 ### HTMX form views
 
@@ -149,8 +158,14 @@ package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
 - On validation errors, return the partial with status **422**. `core/base.html` configures htmx
   (`htmx-config` meta tag) to swap 422 responses; use `HX-Retarget` to send errors somewhere
   other than the request's target (see `apps/qr_code/views/editor.py`).
-- Put shared create/update logic in the app's `services/` so the web view and the API endpoint
-  both call it (e.g. `apps.qr_code.services.create_qrcode`).
+- Put shared create/update logic *and its validation rules* in the app's `services/`, so the web
+  view and the API endpoint both call it and enforce the same rules (e.g.
+  `apps.qr_code.services.create_qrcode` / `validate_content`). Forms call the service validators
+  to show friendly errors; the API maps the service's `ValidationError` to a 400.
+
+QR code specifics: previews are returned as PNG `data:` URIs and never written to disk. Short codes
+for tracked QR codes are issued by the server (`qr_code:short-code`) and kept in the session until
+the save, so users can't choose their own; a code taken in the meantime is replaced.
 
 ### Templates and static files
 
@@ -161,12 +176,13 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 ### Docker
 
 One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`)
-and one `web` service in `docker-compose.yml` on port 8000. `.env.dev` is mounted into the
-container because settings require an env file.
+and one `web` service in `docker-compose.yml` on port 8000. The build runs `collectstatic` so
+WhiteNoise can serve static files with `DEBUG=False`. `.env.dev` is mounted into the container
+because settings require an env file.
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 109 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 161 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -186,9 +202,9 @@ token?) or a real port of a DRF-era module.
 
 ## Known gaps
 
-- Login, register and password-reset pages still post JSON to `/api/auth/…` (they work, but
-  aren't session form views yet).
-- Every QR preview writes an image to `MEDIA_ROOT/qrcodes/` that is never cleaned up.
+- Register and password-reset pages still post JSON to `/api/auth/…` (they work, but aren't
+  session form views yet).
+- No rate limiting anywhere (login, previews, API).
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` has no models yet. Expected shape: `Transfer`/`TransferFile`, direct-to-S3
@@ -212,8 +228,8 @@ token?) or a real port of a DRF-era module.
   of use with a targeted `# ty: ignore[rule-name]` and a comment.
 - Models, schemas, forms, routers/api, services and views are packages with one domain per file,
   re-exported from `__init__.py`. Follow this when adding to any app.
-- New apps namespace their URLs (`app_name = '<app>'`, see `file_transfer`). The older apps still
-  use global URL names (`'dashboard'`, `'login-page'`, ...).
+- Every app namespaces its URLs with `app_name` (its label): `'accounts:login'`,
+  `'qr_code:dashboard'`, `'core:home'`, … The `/go/<code>` short links are `'go:redirect'`.
 - Admin CLIs: typer apps with `no_args_is_help=True`, a module docstring as `help`, and a `--dry`
   option threaded through `admin.utils.run`.
 
