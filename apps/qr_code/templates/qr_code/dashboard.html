@@ -187,7 +187,16 @@
 
     function openModal(src) {
       if (!overlay || !modalImg) return;
-      modalImg.src = src || '';
+      // Only same-origin http(s) URLs may be loaded; anything else is rejected.
+      let safeUrl;
+      try {
+        const parsed = new URL(src, window.location.origin);
+        if (parsed.origin !== window.location.origin) return;
+        safeUrl = parsed.href;
+      } catch (e) {
+        return;
+      }
+      modalImg.src = safeUrl;
       overlay.classList.remove('hidden');
       // trigger fade/scale in
       requestAnimationFrame(function() {
