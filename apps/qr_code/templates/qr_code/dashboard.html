@@ -100,7 +100,8 @@
                         <button type="button"
                                 class="qr-delete-btn w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"
                                 data-qr-id="{{ qr.id }}"
-                                data-qr-name="{{ qr.name }}">
+                                data-qr-name="{{ qr.name }}"
+                                data-delete-url="{% url 'qrcode-delete' qr.id %}">
                             <i class="fas fa-trash mr-2"></i>Delete
                         </button>
                     </div>
@@ -379,9 +380,10 @@
     }
 
     async function deleteQrCode(qrId) {
+      const deleteBtn = document.querySelector(`.qr-delete-btn[data-qr-id="${qrId}"]`);
       try {
-        const response = await Auth.authenticatedFetch(`/api/qr/${qrId}/`, {
-          method: 'DELETE',
+        const response = await fetch(deleteBtn.dataset.deleteUrl, {
+          method: 'POST',
           headers: {
             'X-CSRFToken': getCookie('csrftoken'),
           },

@@ -67,7 +67,8 @@
       };
     </script>
 
-    <!-- htmx -->
+    <!-- htmx. Also swap 422 responses: form views re-render with errors using that status. -->
+    <meta name="htmx-config" content='{"responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "422", "swap": true}, {"code": "[45]..", "swap": false, "error": true}]}'>
     <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 
     <!-- Alpine.js -->
@@ -76,10 +77,7 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-    <!-- JWT Auth utility -->
-    <script src="{% static 'core/js/auth.js' %}"></script>
-
-    <!-- CSRF helper for htmx requests (`auth.js` adds the JWT header) -->
+    <!-- CSRF helper for htmx requests -->
     <script>
       function getCookie(name) {
         const value = `; ${document.cookie}`;
@@ -129,7 +127,7 @@
                     <a href="{% url 'account-page' %}" class="text-lg hover:text-sage-300">
                         <i class="fas fa-user-circle mr-1"></i>Account
                     </a>
-                    <button type="button" id="logout-btn" class="text-lg hover:text-sage-300">Logout</button>
+                    <a href="{% url 'logout-page' %}" class="text-lg hover:text-sage-300">Logout</a>
                     {% else %}
                     <a href="{% url 'login-page' %}" class="text-lg hover:text-sage-300">Login</a>
                     {% endif %}
@@ -153,18 +151,6 @@
             </div>
         </div>
     </footer>
-
-    <!-- Logout button handler -->
-    <script>
-      (function() {
-        const logoutBtn = document.getElementById('logout-btn');
-        if (logoutBtn) {
-          logoutBtn.addEventListener('click', function() {
-            Auth.logout();
-          });
-        }
-      })();
-    </script>
 
     <!-- Theme control script: cycles system -> light -> dark and persists to localStorage -->
     <script>

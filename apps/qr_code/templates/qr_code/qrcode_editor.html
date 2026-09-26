@@ -10,9 +10,10 @@
   <div id="qrcode-msg" class="mb-4 text-sm"></div>
 
   <form id="qrcode-form"
-        {% if qrcode %}hx-put="/api/qr/{{ qrcode.id }}/"{% else %}hx-post="/api/qr/"{% endif %}
-        hx-trigger="submit"
-        hx-swap="none">
+        hx-post="{% if qrcode %}{% url 'qrcode-edit-submit' qrcode.id %}{% else %}{% url 'qrcode-create-submit' %}{% endif %}"
+        hx-target="#qrcode-msg"
+        hx-swap="innerHTML"
+        hx-disabled-elt="find button[type='submit']">
     {% csrf_token %}
 
 
@@ -90,10 +91,12 @@
       {% if not qrcode %}
       <button type="button"
               id="qrcode-preview-btn"
-              hx-post="/api/qr/preview"
+              hx-post="{% url 'qrcode-preview' %}"
               hx-include="#qrcode-form"
               hx-trigger="click"
-              hx-swap="none"
+              hx-target="#qrcode-preview-img"
+              hx-swap="outerHTML"
+              hx-disabled-elt="this"
               class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
         Preview
       </button>
@@ -128,7 +131,6 @@
     const form = document.getElementById('qrcode-form');
     const msg = document.getElementById('qrcode-msg');
     const previewBtn = document.getElementById('qrcode-preview-btn');
-    const previewImg = document.getElementById('qrcode-preview-img');
     const isEditMode = {{ qrcode|yesno:"true,false" }};
     const qrTypeSelect = document.getElementById('qr_type');
     const urlShorteningCheckbox = document.getElementById('use_url_shortening');
@@ -230,71 +232,6 @@
       }
       msg.textContent = '';
       msg.className = 'mb-4 text-sm';
-    });
-
-    document.body.addEventListener('htmx:afterRequest', function(e){
-      const status = e.detail.xhr.status;
-
-      // Preview button request (create mode only)
-      if (previewBtn && e.target === previewBtn) {
-        try {
-          const data = JSON.parse(e.detail.xhr.responseText || '{}');
-          if (status >= 200 && status < 300 && data.image_url) {
-            previewImg.src = data.image_url;
-            msg.textContent = '';
-            msg.className = 'mb-4 text-sm';
-          } else {
-            // Handle URL validation errors specifically
-            let userMsg = '';
-            if (data.url && Array.isArray(data.url)) {
-              userMsg = data.url[0];
-            } else if (data.url) {
-              userMsg = data.url;
-            } else {
-              userMsg = data.detail || data.message || 'Could not generate preview.';
-            }
-            msg.textContent = userMsg;
-            msg.className = 'mb-4 text-sm text-red-600';
-            console.error('Preview error (developer details):', data);
-          }
-        } catch (err) {
-          msg.textContent = 'Unexpected error while generating preview.';
-          msg.className = 'mb-4 text-sm text-red-600';
-          console.error('Preview error (non-JSON):', e.detail.xhr.responseText);
-        }
-        return;
-      }
-
-      // Final create/update request (form)
-      if (e.target === form) {
-        try {
-          const data = JSON.parse(e.detail.xhr.responseText || '{}');
-          if (status >= 200 && status < 300) {
-            window.location = '{% url 'dashboard' %}';
-          } else {
-            // Handle URL validation errors specifically
-            let userMsg = '';
-            if (data.url && Array.isArray(data.url)) {
-              userMsg = data.url[0];
-            } else if (data.url) {
-              userMsg = data.url;
-            } else {
-              userMsg = data.detail || data.message || (isEditMode ? 'Could not update QR code.' : 'Could not generate QR code.');
-            }
-            msg.textContent = userMsg;
-            msg.className = 'mb-4 text-sm text-red-600';
-            console.error((isEditMode ? 'Update' : 'Create') + ' QR error (developer details):', data);
-          }
-        } catch (err) {
-          if (status >= 200 && status < 300) {
-            window.location = '{% url 'dashboard' %}';
-          } else {
-            msg.textContent = 'An unexpected error occurred.';
-            msg.className = 'mb-4 text-sm text-red-600';
-            console.error((isEditMode ? 'Update' : 'Create') + ' QR error (non-JSON):', e.detail.xhr.responseText);
-          }
-        }
-      }
     });
   })();
 </script>

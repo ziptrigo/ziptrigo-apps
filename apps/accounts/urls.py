@@ -8,12 +8,14 @@ from .views import (
     forgot_password_page,
     login_page,
     logout_page,
+    profile_update,
     register_page,
     reset_password_page,
 )
 
 urlpatterns = [
     path('', account_page, name='account-page'),
+    path('profile/', profile_update, name='profile-update'),
     path('login/', login_page, name='login-page'),
     path('register/', register_page, name='register-page'),
     path('logout/', logout_page, name='logout-page'),

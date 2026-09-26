@@ -3,15 +3,16 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 
-from .http import MaybeAuthenticatedHttpRequest
-from .services.email_confirmation import get_email_confirmation_service
-from .services.password_reset import get_password_reset_service
+from ..forms import ProfileForm
+from ..http import AuthenticatedHttpRequest, MaybeAuthenticatedHttpRequest
+from ..services.email_confirmation import get_email_confirmation_service
+from ..services.password_reset import get_password_reset_service
 
 
 @login_required
-def account_page(request: HttpRequest) -> HttpResponse:
+def account_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render the account settings page for the authenticated user."""
-    return render(request, 'accounts/account.html')
+    return render(request, 'accounts/account.html', {'form': ProfileForm(instance=request.user)})
 
 
 def login_page(request: HttpRequest) -> HttpResponse:

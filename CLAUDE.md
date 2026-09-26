@@ -114,15 +114,15 @@ re-validates env selection and `EMAIL_BACKENDS` at `runserver` startup.
 
 One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mechanisms coexist:
 
-- **Django sessions** for the server-rendered pages (`@login_required`, `LOGIN_URL='login-page'`).
-- **JWTs** for `/api/` (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also
-  reject non-`ACTIVE` users). Claim `sub`, signed with `JWT_SECRET`, token classes in
-  `apps/accounts/tokens.py`.
+- **Django sessions** for the web UI: every page and every HTMX form view is `@login_required`
+  (`LOGIN_URL='login-page'`). The browser never holds a JWT.
+- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py` (`apps.accounts.auth.JWTAuth` /
+  `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE` users). Claim `sub`, signed with
+  `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
 
-`POST /api/auth/login` returns JWTs *and* starts a session, so both work after the login page.
-The browser keeps the JWTs in `localStorage` via `apps/core/static/core/js/auth.js`, which also
-adds the `Authorization` header to every HTMX request. The intended end state is sessions + HTMX
-form posts for the web UI, with JWTs only for external API clients.
+The login page posts to `POST /api/auth/login`, which returns JWTs *and* starts a session; the page
+ignores the tokens. The other unauthenticated account pages (register, password reset, resend
+confirmation) also still post JSON to `/api/auth/…`.
 
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.
@@ -139,6 +139,19 @@ and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr
 email, masked environment). Every app registers its `ModelAdmin`s on it from its own `admin.py`.
 The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/billing/credittransaction/adjust/`).
 
+### HTMX form views
+
+Web forms post (form-encoded) to session-authenticated Django views in each app's `views/`
+package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
+
+- Validate with a Django form (`forms/` package). On success, `hx_redirect()` or return the
+  updated partial (`templates/<app>/partials/`); without htmx, fall back to a plain redirect.
+- On validation errors, return the partial with status **422**. `core/base.html` configures htmx
+  (`htmx-config` meta tag) to swap 422 responses; use `HX-Retarget` to send errors somewhere
+  other than the request's target (see `apps/qr_code/views/editor.py`).
+- Put shared create/update logic in the app's `services/` so the web view and the API endpoint
+  both call it (e.g. `apps.qr_code.services.create_qrcode`).
+
 ### Templates and static files
 
 Always namespaced: `apps/<app>/templates/<app>/…` and `apps/<app>/static/<app>/…`. Every page
@@ -153,7 +166,7 @@ container because settings require an env file.
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 84 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 109 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -173,9 +186,9 @@ token?) or a real port of a DRF-era module.
 
 ## Known gaps
 
-- **HTMX forms post form-encoded bodies to JSON-only Ninja endpoints** (`account.html`'s profile
-  form → `PUT /api/account`, `qrcode_editor.html` → `POST /api/qr/`), so they 400. This predates
-  the consolidation. Fixing it belongs with moving the web UI to sessions + HTMX form views.
+- Login, register and password-reset pages still post JSON to `/api/auth/…` (they work, but
+  aren't session form views yet).
+- Every QR preview writes an image to `MEDIA_ROOT/qrcodes/` that is never cleaned up.
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` has no models yet. Expected shape: `Transfer`/`TransferFile`, direct-to-S3
@@ -197,7 +210,7 @@ token?) or a real port of a DRF-era module.
   without a django-stubs-equivalent plugin are handled at the point of declaration with an
   explicit annotation or `cast(...)`, or -- where that's not practical -- suppressed at the point
   of use with a targeted `# ty: ignore[rule-name]` and a comment.
-- Models, schemas, routers/api, services and views are packages with one domain per file,
+- Models, schemas, forms, routers/api, services and views are packages with one domain per file,
   re-exported from `__init__.py`. Follow this when adding to any app.
 - New apps namespace their URLs (`app_name = '<app>'`, see `file_transfer`). The older apps still
   use global URL names (`'dashboard'`, `'login-page'`, ...).

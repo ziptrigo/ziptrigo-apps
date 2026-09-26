@@ -113,9 +113,7 @@
         const data = await response.json();
 
         if (response.ok) {
-          // Store tokens
-          Auth.setTokens(data.access_token, data.refresh_token);
-          // Redirect to account page
+          // The login endpoint also started a Django session, which is what the pages use.
           window.location.href = '{% url 'account-page' %}';
         } else {
           const userMsg = data.detail || data.message || 'Could not sign in. Check your credentials.';

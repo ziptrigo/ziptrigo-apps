@@ -17,44 +17,7 @@
     <section class="mb-8">
       <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Profile Information</h2>
       
-      <form id="profile-form"
-            hx-put="/api/account"
-            hx-trigger="submit"
-            hx-swap="none"
-            x-data="{ loading: false }">
-        {% csrf_token %}
-
-        <!-- Email (read-only / username) -->
-        <label class="block mb-4">
-          <span class="block mb-1 text-sm font-medium">Email</span>
-          <input type="text" 
-                 value="{{ request.user.email }}" 
-                 disabled
-                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 text-gray-500 dark:text-gray-400 cursor-not-allowed">
-          <span class="text-xs text-gray-500 dark:text-gray-400 mt-1 block">Email cannot be changed</span>
-        </label>
-
-        <!-- Name -->
-        <label class="block mb-4">
-          <span class="block mb-1 text-sm font-medium">Name</span>
-          <input type="text" 
-                 name="name" 
-                 id="profile-name"
-                 value="{{ request.user.name }}"
-                 required
-                 maxlength="255"
-                 class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sage-300">
-        </label>
-
-        <button type="submit"
-                :disabled="loading"
-                class="inline-flex justify-center items-center rounded bg-sage-300 text-gray-900 font-medium px-4 py-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
-          <span x-show="!loading">Save Profile</span>
-          <span x-show="loading" class="flex items-center">
-            <i class="fas fa-spinner fa-spin mr-2"></i>Saving...
-          </span>
-        </button>
-      </form>
+      {% include 'accounts/partials/profile_form.html' %}
     </section>
 
     <!-- Credits Section -->
@@ -165,43 +128,7 @@
 
 <script>
   (function(){
-    const profileForm = document.getElementById('profile-form');
     const msg = document.getElementById('account-msg');
-
-    // Profile form validation
-    profileForm.addEventListener('submit', function(ev){
-      const name = document.getElementById('profile-name').value.trim();
-      
-      if (!name) {
-        ev.preventDefault();
-        showMessage('Please fill in your name.', 'error');
-        return;
-      }
-      
-      clearMessage();
-    });
-
-    // Handle profile form response
-    document.body.addEventListener('htmx:afterRequest', function(e){
-      if (e.target !== profileForm) return;
-      
-      const status = e.detail.xhr.status;
-      try {
-        const data = JSON.parse(e.detail.xhr.responseText || '{}');
-        if (status >= 200 && status < 300) {
-          showMessage(data.message || 'Profile updated successfully!', 'success');
-          // Update displayed values
-          if (data.user) {
-            document.getElementById('profile-name').value = data.user.name;
-          }
-        } else {
-          handleErrorResponse(data);
-        }
-      } catch (err) {
-        showMessage('An unexpected error occurred.', 'error');
-        console.error('Profile update error:', e.detail.xhr.responseText);
-      }
-    });
 
     // Coming soon message for password change
     window.showComingSoon = function() {
@@ -222,36 +149,6 @@
       msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    function clearMessage() {
-      msg.textContent = '';
-      msg.className = 'mb-4 text-sm';
-    }
-
-    function handleErrorResponse(data) {
-      let errorMsg = '';
-      
-      if (typeof data === 'string') {
-        errorMsg = data;
-      } else if (data.detail || data.message) {
-        errorMsg = data.detail || data.message;
-      } else if (typeof data === 'object') {
-        // Handle field-specific errors
-        const errors = [];
-        for (const [field, messages] of Object.entries(data)) {
-          if (Array.isArray(messages)) {
-            errors.push(...messages);
-          } else if (typeof messages === 'string') {
-            errors.push(messages);
-          }
-        }
-        errorMsg = errors.join('\n') || 'Validation error occurred.';
-      } else {
-        errorMsg = 'An error occurred.';
-      }
-      
-      showMessage(errorMsg, 'error');
-      console.error('Error details:', data);
-    }
   })();
 </script>
 {% endblock %}
