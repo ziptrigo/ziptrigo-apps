@@ -98,7 +98,7 @@ def email_send(
     """
     from botocore.exceptions import ClientError, NoCredentialsError
 
-    set_environment(environment, None)
+    set_environment(environment)
 
     try:
         _send_email(

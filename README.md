@@ -1,47 +1,93 @@
 # ZipTrigo Apps
 
-A monorepo containing multiple Django-based microservices for the Ziptrigo platform.
-Services are developed independently but share common code and infrastructure.
+One website made of several independent products — QR codes today, file transfer next — that share
+one account, one credit balance and one look. Built with Django and HTMX.
 
 ## Architecture
 
-This repository contains multiple services and shared components:
+A single Django project (a "modular monolith") with one Django app per concern:
 
-- **user-service** - Central user authentication, authorization, and profile management service.
-- **qr_code** - QR code generation and management service (consumes `user-service` for auth).
-- **shared/auth_client** - A shared Python package for services to easily integrate with `user-service`.
-- **shared/utils** - Common utilities, models, and settings shared across services.
-- **admin** - Project-level administration and maintenance scripts.
+- **core** — the site shell: base layout, navigation and landing page, design-system static files,
+  the admin site, email sending.
+- **accounts** — the user model, sign-up/login/password reset, account pages.
+- **billing** — credits: balances, the transaction ledger, the credits history page.
+- **qr_code** — QR code generation, the dashboard/editor and the `/go/<code>` short links.
+- **file_transfer** — file transfers (skeleton for now).
 
-### Key Features
+`core`, `accounts` and `billing` are shared by every product. Products never import each other, so
+each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
 
-- **Service-Oriented Architecture**: Decoupled services that communicate via well-defined APIs and shared authentication.
-- **Shared Packages**: Common logic is encapsulated in installable Python packages in the `shared/` directory.
-- **Unified Auth**: `user-service` is the single source of truth for users; other services use `auth_client` to verify identity.
-- **Independent Deployment**: Each service has its own Dockerfile and can be scaled or deployed separately.
-- **Docker Compose**: Orchestration for local development of all services and the database.
+Why one project rather than a service per product: the products share a login, a credit balance
+and a page layout, and HTMX works best with server-rendered pages on one origin with one session
+cookie. Separate services would each need their own copy of the templates and a single-sign-on
+layer before a page could render. A product that later needs its own scaling can still run as a
+separate process of the same codebase, routed by URL prefix.
 
 ## Project Structure
 
 ```
 ziptrigo-apps/
-├── admin/               # Project administration scripts (lint, test, etc.)
-├── shared/              # Shared Python packages
-│   ├── auth_client/     # User-service integration client
-│   └── utils/           # Shared utilities and base settings
-├── user-service/        # Authentication & User service
-│   ├── config/          # Django configuration
-│   ├── users/           # Application logic
-│   ├── tests/           # Service-specific tests
-│   └── Dockerfile       # Container configuration
-├── qr_code/             # QR Code service
-│   ├── config/          # Django configuration
-│   ├── qr_code/         # Application logic
-│   ├── tests/           # Service-specific tests
-│   └── Dockerfile       # Container configuration
-├── docker-compose.yml   # Local development orchestration
-└── WARP.md              # AI agent context
+├── manage.py
+├── config/                  # The Django project
+│   ├── settings.py
+│   ├── environment.py       # `.env.<environment>` selection (Django-free)
+│   ├── urls.py              # Mounts each app under its prefix
+│   └── api.py               # One Django Ninja API; each app adds a router
+├── apps/
+│   ├── core/
+│   ├── accounts/
+│   ├── billing/
+│   ├── qr_code/
+│   └── file_transfer/
+├── admin/                   # Project CLIs (lint, test, server, pip, ...), run via `inv`
+├── tests_e2e/               # Playwright end-to-end tests
+├── conftest.py              # Fixtures shared by every app's tests
+├── Dockerfile
+└── docker-compose.yml
 ```
+
+Each app has the same shape:
+
+```
+apps/<app>/
+├── apps.py                  # AppConfig; products register themselves with `core` here
+├── models/  services/  schemas/  views/  api/     # packages, one domain per file
+├── urls.py
+├── admin.py                 # registers on `apps.core.admin_site.custom_admin_site`
+├── migrations/
+├── templates/<app>/         # namespaced
+├── static/<app>/            # namespaced
+└── tests/
+```
+
+### URL map
+
+| Prefix | App |
+|---|---|
+| `/` | core landing page |
+| `/account/…` | accounts (login, register, logout, password reset, email confirmation, settings) |
+| `/billing/…` | billing (credits history) |
+| `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
+| `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
+| `/transfer/…` | file_transfer |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…` |
+| `/admin/` | Django admin (Jazzmin) |
+
+### Dependency rules
+
+```
+qr_code, file_transfer   (products: may not import each other)
+        ↓
+     billing
+        ↓
+     accounts
+        ↓
+       core
+```
+
+An app may only import from the layers below it. Products use `billing.services` (e.g.
+`spend_credits(user, 5, source='qr_code')`) and never touch another product. `import-linter`
+enforces this (`inv lint imports`, contract in `pyproject.toml`).
 
 ## Getting Started
 
@@ -50,219 +96,85 @@ ziptrigo-apps/
 - Python 3.14+
 - `uv`
 - Docker and Docker Compose (for containerized development)
-- Git
 
-### Local Development (with Docker)
-
-The easiest way to get started is using Docker Compose:
+### Local Development
 
 ```bash
-docker-compose up --build
-```
-
-### Local Development (without Docker)
-
-Create and activate the shared development environment at the repo root, then sync the locked
-dependencies using the administrative tools:
-
-```bash
-# Create a virtual environment (one-time setup)
 uv venv --python 3.14
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Sync all dependencies (dev + all apps)
-python3 -m admin.pip sync
+source .venv/bin/activate
+inv pip sync
+cp .env.example .env.dev          # then fill in the placeholders
+python manage.py migrate
+inv server run                    # http://localhost:8000
 ```
 
-Alternatively, you can sync only the dependencies needed for a specific app:
+### Docker
 
 ```bash
-# Sync dev tools + users service dependencies
-python3 -m admin.pip sync dev -a users
+cp .env.example .env.dev
+docker compose up --build         # http://localhost:8000
 ```
 
-#### Users Service
-
-```bash
-python user-service/manage.py migrate
-python user-service/manage.py runserver 8010
-```
-
-#### QR Code Service
-
-```bash
-python qr_code/manage.py migrate
-python qr_code/manage.py runserver 8020
-```
-
-You can also use the shared admin commands:
-
-```bash
-python3 -m admin.server run users
-python3 -m admin.server run qr_code
-python3 -m admin.test unit users
-python3 -m admin.test unit qr_code
-```
-
-### Docker Development
-
-Build and run both services:
-
-```
-docker-compose up --build
-```
-
-Run individual services:
-
-```
-# Users service only
-docker-compose up users
-
-# QR Code service only
-docker-compose up qr_code
-```
-
-### Accessing Services
-
-- **User Service**: http://localhost:8010
-  - Admin: http://localhost:8010/admin/
-  - API: http://localhost:8010/api/
-  - API Docs: http://localhost:8010/api/docs
-
-- **QR Code Service**: http://localhost:8020
-  - Admin: http://localhost:8020/admin/
-  - API: http://localhost:8020/api/
-  - API Docs: http://localhost:8020/api/docs
+- Site: http://localhost:8000
+- Admin: http://localhost:8000/admin/
+- API docs: http://localhost:8000/api/docs
 
 ## Configuration
 
-### Environment Variables
+Environment variables are loaded from `.env.<environment>` at the repo root (`dev` or `prod`); see
+`.env.example` for the full list. If `ENVIRONMENT` is set, that file is used; otherwise there must
+be exactly one `.env.*` file.
 
-Each service requires its own environment configuration:
-
-#### User Service (.env.dev)
-- `DEBUG` - Debug mode (True/False)
-- `SECRET_KEY` - Django secret key
-- `ALLOWED_HOSTS` - Comma-separated list of allowed hosts
-- `DATABASE_URL` - Database connection string
-- `JWT_SECRET` - JWT signing secret
-- `JWT_ALGORITHM` - JWT algorithm (default: HS256)
-- `JWT_EXP_DELTA_SECONDS` - JWT expiration time in seconds
-
-#### QR Code Service (.env.dev)
-- `DEBUG` - Debug mode (True/False)
-- `SECRET_KEY` - Django secret key
-- `ENVIRONMENT` - Environment name (dev/prod)
-- `DATABASE_URL` - Database connection string
-- `BASE_URL` - Base URL for QR code redirects
-- `EMAIL_BACKENDS` - Email backend configuration
-- `AWS_SES_SENDER` - SES sender email address
-
-### Databases
-
-Both services use external databases. Configure via `DATABASE_URL` environment variable or update
-`DATABASES` in the respective `config/settings.py` files.
+The database is SQLite (`db.sqlite3`) for now.
 
 ## Development Workflow
 
-### Running Tests
-
 ```bash
-python3 -m admin.test unit users
-python3 -m admin.test unit qr_code
-python3 -m admin.test e2e
-```
-
-### Linting and Type Checking
-
-Shared repo tooling lives under `admin/` and uses `ruff` plus `ty`:
-
-```bash
-python3 -m admin.lint all
-python3 -m admin.lint ruff --check .
-python3 -m admin.lint ty
+inv test unit                     # all apps
+inv test unit qr_code billing     # some apps
+inv test e2e
+inv lint all                      # ruff + ty + import-linter
+inv lint all --check              # CI mode
 ```
 
 ### Package Management
 
-The project uses `uv` for dependency management. A custom administrative tool `admin.pip` is provided
-to manage the shared `uv.lock` file and synchronize the local environment for different apps.
-
-#### Basic Commands
+`uv` with one `uv.lock`, wrapped by `inv pip`:
 
 ```bash
-# Sync the local environment with all dependency groups (dev + all apps)
-python3 -m admin.pip sync
-
-# Sync for a specific app (includes main dependencies by default)
-python3 -m admin.pip sync -a users
-
-# Sync for a specific app including dev tools
-python3 -m admin.pip sync dev -a qr_code
-
-# Refresh the lockfile (updates all dependencies to latest versions allowed)
-python3 -m admin.pip upgrade
-
-# Refresh the lockfile from scratch (deletes uv.lock and regenerates it)
-python3 -m admin.pip compile --clean
+inv pip sync                      # everything
+inv pip sync dev                  # main + dev tools
+inv pip package dev -p django     # upgrade one package
+inv pip compile --clean           # re-lock from scratch
 ```
 
-#### Updating Specific Packages
+Scopes: `main` (runtime, `[project.dependencies]`) and `dev` (tooling, `[dependency-groups].dev`).
 
-To update a specific package to its latest version:
+### Adding an App
 
-```bash
-# Upgrade 'django' package in the shared lockfile
-python3 -m admin.pip package dev -p django
-```
-
-#### Available Scopes and Apps
-
-- **Scopes**: `main` (core dependencies), `dev` (development tools)
-- **Apps** (`--app` or `-a`): `users`, `qr_code`
-
-### Adding Shared Code
-
-Place shared utilities, models, or helpers in the `shared/utils/utils/` directory. Both services can import
-from the `utils` package:
-
-```python
-from utils.settings.base import COMMON_MIDDLEWARE
-```
+1. Create `apps/<name>/` with the layout above; set `name = 'apps.<name>'` and `label = '<name>'`
+   in its `AppConfig`.
+2. For a product, register a `ProductApp` in `AppConfig.ready()` (see `apps/qr_code/apps.py`) so it
+   shows up in the navigation and on the landing page.
+3. Add it to `INSTALLED_APPS`, mount its URLs in `config/urls.py` (use `app_name` to namespace
+   them) and, if it has an API, add its router in `config/api.py`.
+4. Add it to the products layer of the import-linter contract in `pyproject.toml`.
 
 ## Deployment
 
-### Production Considerations
-
 1. **Environment Variables**: Use production-ready secrets and configurations
-2. **Database**: Connect to production databases (external to Docker)
-3. **Static Files**: Configure proper static file serving (WhiteNoise, S3, etc.)
+2. **Database**: Move off SQLite
+3. **Static Files**: WhiteNoise serves them; run `collectstatic`
 4. **Media Files**: Configure media file storage (S3, cloud storage, etc.)
-5. **Migrations**: Run migrations during deployment process
-6. **WSGI Server**: Replace `runserver` with gunicorn or uwsgi
-
-### API Gateway Integration
-
-When deploying behind an API gateway (nginx, Traefik, etc.):
-
-1. Update `user-service/config/urls.py` - uncomment the prefixed urlpatterns
-2. Update `qr_code/config/urls.py` - uncomment the prefixed urlpatterns
-3. Configure gateway to route:
-   - `/users/*` → User service
-   - `/qr-code/*` → QR Code service
-
-## Future Plans
-
-- **Service Communication**: Implement more robust inter-service communication patterns.
-- **Shared Authentication**: Enhance `auth_client` for more granular permission checks.
-- **Additional Services**: More microservices can be added following the same pattern.
-- **API Gateway**: Implement unified entry point for all services.
+5. **Migrations**: Run migrations during deployment
+6. **WSGI Server**: Replace `runserver` with gunicorn or uvicorn
 
 ## Design System
 
 ### Color Palette
 
-The Ziptrigo brand uses a sage green color palette derived from the service logos. Use these colors when building web pages and interfaces for consistency across all services.
+The ZipTrigo brand uses a sage green color palette derived from the logos. Use these colors when
+building web pages and interfaces.
 
 #### Primary Colors
 - **Sage Green**: `#8FA89E` - Main brand color (mid-tone green-gray)
@@ -301,22 +213,11 @@ colors: {
 }
 ```
 
-## Contributing
-
-When making changes:
-
-1. Follow existing code patterns and structure
-2. Update tests for your changes
-3. Run linting and type checking before committing
-4. Update documentation as needed
-
 ## Git History
 
-This repository was created by merging two separate repositories using git subtree, preserving the
-commit history from both:
-- Users service original repository
-- QR Code service original repository
+This repository was created by merging two separate repositories (a users service and a QR code
+service) using git subtree, then consolidated into a single Django project.
 
 ## License
 
-See LICENSE file in each service directory for details
+MIT — see [LICENSE](LICENSE).

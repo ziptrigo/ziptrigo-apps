@@ -26,7 +26,7 @@ app = typer.Typer(
 
 
 # Configuration
-API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8010')
+API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
 TOKEN_FILE = Path.home() / '.qrcode_token'
 
 
@@ -53,12 +53,12 @@ def get_headers() -> dict:
 
 
 @app.command(name='login')
-def qrcode_login(environment: EnvironmentAnnotation, username: str, password: str):
+def qrcode_login(environment: EnvironmentAnnotation, email: str, password: str):
     """
     Authenticate with the API and store the token.
 
     Example:
-        qrcode login myuser mypassword
+        qrcode login dev me@example.com mypassword
     """
     import requests
 
@@ -66,10 +66,10 @@ def qrcode_login(environment: EnvironmentAnnotation, username: str, password: st
 
     try:
         response = requests.post(
-            f'{API_BASE_URL}/api/token/', json={'username': username, 'password': password}
+            f'{API_BASE_URL}/api/auth/login', json={'email': email, 'password': password}
         )
         response.raise_for_status()
-        token = response.json()['access']
+        token = response.json()['access_token']
         save_token(token)
         logger.info('Successfully authenticated!')
     except requests.exceptions.RequestException as e:
@@ -123,9 +123,7 @@ def qrcode_create(
         payload['data'] = data
 
     try:
-        response = requests.post(
-            f'{API_BASE_URL}/api/qrcodes/', json=payload, headers=get_headers()
-        )
+        response = requests.post(f'{API_BASE_URL}/api/qr/', json=payload, headers=get_headers())
         response.raise_for_status()
         result = response.json()
 
@@ -156,7 +154,7 @@ def qrcode_list(
     set_environment(environment)
 
     try:
-        response = requests.get(f'{API_BASE_URL}/api/qrcodes/', headers=get_headers())
+        response = requests.get(f'{API_BASE_URL}/api/qr/', headers=get_headers())
         response.raise_for_status()
         qrcodes = response.json()
 
@@ -202,7 +200,7 @@ def qrcode_get(environment: EnvironmentAnnotation, qr_id: str):
     set_environment(environment)
 
     try:
-        response = requests.get(f'{API_BASE_URL}/api/qrcodes/{qr_id}/', headers=get_headers())
+        response = requests.get(f'{API_BASE_URL}/api/qr/{qr_id}', headers=get_headers())
         response.raise_for_status()
         qr = response.json()
 
@@ -235,7 +233,7 @@ def qrcode_delete(environment: EnvironmentAnnotation, qr_id: str):
     set_environment(environment)
 
     try:
-        response = requests.delete(f'{API_BASE_URL}/api/qrcodes/{qr_id}/', headers=get_headers())
+        response = requests.delete(f'{API_BASE_URL}/api/qr/{qr_id}', headers=get_headers())
         response.raise_for_status()
         logger.info(f'QR code {qr_id} deleted successfully')
 

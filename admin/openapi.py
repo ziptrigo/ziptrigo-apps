@@ -5,7 +5,6 @@ Generate OpenAPI specification.
 
 import json
 import os
-import sys
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -13,7 +12,6 @@ from typing import Annotated
 import typer
 from django.utils.functional import Promise
 
-from . import PROJECT_ROOT
 from .utils import logger
 
 app = typer.Typer(
@@ -58,11 +56,6 @@ def setup_django():
     import django
     from django.apps import apps
 
-    # `config` and `qr_code` (the app package) live inside the `qr_code/` service directory, not
-    # the repo root -- same layout `qr_code/manage.py` relies on by running with that directory as
-    # `cwd`. `config.settings`'s own prologue inserts the repo root and shared packages once it
-    # runs, so inserting the service directory here is enough to resolve both imports.
-    sys.path.insert(0, str((PROJECT_ROOT / 'qr_code').resolve()))
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
     if not apps.ready:
@@ -94,7 +87,7 @@ def generate_openapi(
     """
     setup_django()
 
-    from qr_code.api.router import api
+    from config.api import api
 
     try:
         logger.info(f'Generating OpenAPI schema in {format.value} format...')

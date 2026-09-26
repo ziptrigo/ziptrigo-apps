@@ -13,30 +13,28 @@ dependencies = [
     'django-ses>=4.0,<5.0',
     'django>=6.0,<6.1',
     'jinja2>=3.1,<4.0',
+    'pillow>=12.0,<13.0',
     'pydantic[email]>=2.12,<3.0',
     'pyjwt[crypto]>=2.10,<3.0',
     'python-dotenv>=1.0,<2.0',
+    'segno>=1.6,<2.0',
     'whitenoise>=6.11,<7.0',
 ]
 
 [dependency-groups]
-users = []
-qr_code = [
-    'pillow>=12.0,<13.0',
-    'segno>=1.6,<2.0',
-]
 dev = [
     # Dev-only type stubs for `mypy_boto3_ses`, needed for `ty` to resolve the `SESClient`
-    # annotation in both services' `email_service.py` and in `admin/email.py`. The import of
+    # annotation in `apps/core/services/email.py` and in `admin/email.py`. The import of
     # `mypy_boto3_ses` itself never runs outside of type checking: it's behind `if TYPE_CHECKING:`
-    # in both `email_service.py` modules, and function-local (so lazily deferred) in
-    # `admin/email.py`. That's deliberate, not incidental -- Docker builds run
-    # `uv sync --group <app>` without the dev group, so an unguarded top-level import in either
-    # `email_service.py` would raise `ImportError` as soon as production code imported that module.
+    # in `apps/core/services/email.py`, and function-local (so lazily deferred) in
+    # `admin/email.py`. That's deliberate, not incidental -- Docker builds run `uv sync` without
+    # the dev group, so an unguarded top-level import in `apps/core/services/email.py` would raise
+    # `ImportError` as soon as production code imported that module.
     # Don't drop this dependency without also checking those guards.
     'boto3-stubs[s3,ses]',
     'factory-boy',
     'faker',
+    'import-linter',
     'playwright',
     'pytest',
     'pytest-asyncio',
@@ -46,8 +44,6 @@ dev = [
     'pyyaml',
     'requests',
     'ruff',
-    'segno>=1.6,<2.0',
-    'pillow>=12.0,<13.0',
     'textual-searchable-selectionlist',
     'ty',
     'typer',
@@ -70,12 +66,6 @@ exclude = [
 select = ['E', 'F', 'W', 'I']
 extend-ignore = ['E266', 'E501', 'E701', 'F811']
 
-[tool.ruff.lint.per-file-ignores]
-# These modules bind `User = get_user_model()` partway down the import block: it can only run once
-# the app registry is populated, so the imports below it are unavoidably "not at top of file".
-'qr_code/qr_code/services/email_confirmation.py' = ['E402']
-'qr_code/qr_code/services/password_reset.py' = ['E402']
-
 [tool.ruff.format]
 quote-style = 'single'
 
@@ -84,7 +74,7 @@ DJANGO_SETTINGS_MODULE = 'config.settings'
 python_files = ['tests.py', 'test_*.py', '*_tests.py', '*_test.py']
 python_classes = ['Test*']
 python_functions = ['test_*']
-testpaths = ['tests']
+testpaths = ['apps']
 addopts = [
   '--strict-markers',
   '--reuse-db',
@@ -109,7 +99,7 @@ skip_empty = true
 directory = 'htmlcov'
 
 # `ty` anchors patterns that don't start with `**` to the project root, unlike ruff's `exclude`,
-# so these need the `**/` prefix to match nested directories (e.g. `qr_code/qr_code/migrations`)
+# so these need the `**/` prefix to match nested directories (e.g. `apps/qr_code/migrations`)
 # rather than only a top-level one.
 #
 # Dropped from `[tool.mypy]` with no `ty` equivalent: `check_untyped_defs` / `disallow_untyped_defs`
@@ -132,4 +122,23 @@ modules = [
     'admin.qrcode',
     'admin.server',
     'admin.test',
+]
+
+# Dependency rules between apps (`inv lint imports`). Each app may only import from the layers
+# below it; apps in the same layer (the products) may not import each other at all. Tests are
+# exempt: they may set up data through any app.
+[tool.importlinter]
+root_packages = ['apps']
+
+[[tool.importlinter.contracts]]
+name = 'Products -> billing -> accounts -> core'
+type = 'layers'
+layers = [
+    'apps.qr_code | apps.file_transfer',
+    'apps.billing',
+    'apps.accounts',
+    'apps.core',
+]
+ignore_imports = [
+    'apps.*.tests.** -> apps.**',
 ]
