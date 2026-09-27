@@ -171,6 +171,22 @@ Environment variables are loaded from `.env.<environment>` at the repo root (`de
 `.env.example` for the full list. If `ENVIRONMENT` is set, that file is used; otherwise there must
 be exactly one `.env.*` file.
 
+The deployments' env files live in `deploy/` (gitignored like the rest), where env selection never
+looks, so a local run can't pick them up:
+
+| File | Deployment | Uploaded to (on `caia`) |
+|---|---|---|
+| `deploy/.env.prod` | `app.ziptrigo.com` | `/opt/docker/ziptrigo-apps/prod/.env` |
+| `deploy/.env.staging` | `app-staging.ziptrigo.com` | `/opt/docker/ziptrigo-apps/staging/.env` |
+
+```bash
+scp deploy/.env.prod caia:/opt/docker/ziptrigo-apps/prod/.env
+```
+
+The server runs both with `ENVIRONMENT=prod`, mounting the file at `/app/.env.prod`. How the rest
+of the deployment works (compose services, nginx, the file transfer bucket and its credentials) is
+in the `infra` repo, `apps/ziptrigo-apps/README.md`; nothing there holds a copy of these files.
+
 With `ENVIRONMENT=prod`, the site refuses to start unless `SECRET_KEY`, `JWT_SECRET` and the file
 transfer storage credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`,
 `FILE_TRANSFER_AWS_SECRET_ACCESS_KEY`) are set to real values.

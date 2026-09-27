@@ -110,6 +110,11 @@ The convention: `.env.<environment>` at the repo root where `<environment>` ∈ 
 `.env.example`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
 re-validates env selection and `EMAIL_BACKENDS` at `runserver` startup.
 
+The deployments' env files are `deploy/.env.prod` and `deploy/.env.staging` (gitignored, outside
+the repo root so env selection never sees them), scp'd to `/opt/docker/ziptrigo-apps/<env>/.env`
+on the VPS. This repo is their only home; the `infra` repo holds none. Both deployments run with
+`ENVIRONMENT=prod`.
+
 With `ENVIRONMENT=prod`, settings raise `ImproperlyConfigured` if `SECRET_KEY`, `JWT_SECRET` or
 the file transfer S3 credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`) are
 missing or still placeholders (`config/secret_checks.py`, also Django-free).
