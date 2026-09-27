@@ -85,6 +85,8 @@ INSTALLED_APPS = [
     # Products
     'apps.qr_code',
     'apps.file_transfer',
+    # Task queue: an ORM-backed store for `django.tasks` (Django 6's built-in task queue API).
+    'django_tasks_db',
 ]
 
 MIDDLEWARE = [
@@ -299,6 +301,26 @@ if os.getenv('ENVIRONMENT') == 'prod':
         )
 
 
+# Task queue: Django 6's built-in `django.tasks`, backed by `django_tasks_db` (an ORM-based
+# backend; Django core only ships the Immediate/Dummy backends). One `worker` container runs
+# `./manage.py db_worker` to execute queued tasks (emails, zip building, deleting a transfer's
+# objects). Tests run everything inline via `ImmediateBackend` so they don't depend on a worker.
+TASKS = {
+    'default': {
+        'BACKEND': (
+            'django.tasks.backends.immediate.ImmediateBackend'
+            if _RUNNING_TOOLING
+            else 'django_tasks_db.DatabaseBackend'
+        ),
+        'QUEUES': ['default'],
+    }
+}
+
+# apps.core.scheduler: how often (seconds) the `run_scheduler` management command's runner thread
+# checks for due jobs. Each job's own interval (in `JobSpec`) controls how often it actually runs.
+SCHEDULER_TICK_SECONDS = int(os.getenv('SCHEDULER_TICK_SECONDS', '30'))
+
+
 # QR code settings
 QR_CODE_REDIRECT_PATH = '/go/'
 
@@ -328,6 +350,10 @@ JAZZMIN_SETTINGS = {
         'billing.CreditTransaction': 'fas fa-coins',
         'billing.CreditAccount': 'fas fa-wallet',
         'qr_code.QRCode': 'fas fa-qrcode',
+        'core.ScheduledJob': 'fas fa-clock',
+        'file_transfer.Transfer': 'fas fa-paper-plane',
+        'file_transfer.DownloadEvent': 'fas fa-download',
+        'file_transfer.FileTransferSettings': 'fas fa-sliders-h',
     },
     'topmenu_links': [
         {'name': 'Site', 'url': 'core:home'},

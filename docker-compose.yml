@@ -1,4 +1,26 @@
 services:
+  db:
+    # This stack's own Postgres, distinct from the shared cross-repo `docker-compose.postgres.yml`
+    # (see that file's header): that one is for local dev tooling shared with sibling repos, this
+    # one is part of the deployable `web` + `worker` + `db` stack, matching production (both use
+    # `DATABASE_URL`, see `config/settings.py`). Same major version as `docker-compose.postgres.yml`
+    # for consistency.
+    image: postgres:18-alpine
+    container_name: ziptrigo-db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ziptrigo}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ziptrigo}
+      - POSTGRES_DB=${POSTGRES_DB:-ziptrigo}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ziptrigo}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   web:
     build:
       context: .
@@ -13,11 +35,12 @@ services:
       - SECRET_KEY=${SECRET_KEY:-django-insecure-change-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-dev}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=${DATABASE_URL:-postgres://ziptrigo:ziptrigo@db:5432/ziptrigo}
       - BASE_URL=${BASE_URL:-http://localhost:8000}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - EMAIL_BACKENDS=${EMAIL_BACKENDS:-console}
       - AWS_SES_SENDER=${AWS_SES_SENDER:-no-reply@ziptrigo.com}
+      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-1}
     env_file:
       - .env.dev
     volumes:
@@ -26,8 +49,57 @@ services:
       - ./.env.dev:/app/.env.dev:ro
       - media:/app/media
       - staticfiles:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    # Runs both background-job mechanisms from spec section 10, in one container:
+    #   - `db_worker`: the `django_tasks_db` queue worker (emails, deleting a transfer's objects).
+    #   - `run_scheduler`: apps.core.scheduler's runner (the four file_transfer jobs).
+    # One container, two processes (backgrounded with `&`, `wait` keeps the container alive and
+    # exits it if either dies) rather than two services: they're both lightweight, always deployed
+    # together, and this avoids a second image build/deploy step. Split them into separate services
+    # if either ever needs to scale or restart independently.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ziptrigo-worker
+    # Keep the image's own ENTRYPOINT (docker-entrypoint.sh): it applies migrations first when
+    # RUN_MIGRATIONS=1, same as `web`, which matters here since `web` and `worker` start
+    # concurrently and this container must not assume `web` has already migrated.
+    command:
+      - /bin/sh
+      - -c
+      - |
+        python manage.py run_scheduler &
+        python manage.py db_worker &
+        wait -n
+    environment:
+      - DEBUG=${DEBUG:-False}
+      - SECRET_KEY=${SECRET_KEY:-django-insecure-change-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - DATABASE_URL=${DATABASE_URL:-postgres://ziptrigo:ziptrigo@db:5432/ziptrigo}
+      - BASE_URL=${BASE_URL:-http://localhost:8000}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - EMAIL_BACKENDS=${EMAIL_BACKENDS:-console}
+      - AWS_SES_SENDER=${AWS_SES_SENDER:-no-reply@ziptrigo.com}
+      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-1}
+    env_file:
+      - .env.dev
+    volumes:
+      - ./apps:/app/apps
+      - ./config:/app/config
+      - ./.env.dev:/app/.env.dev:ro
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   media:
   staticfiles:
+  postgres_data:
