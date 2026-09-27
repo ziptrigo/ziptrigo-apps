@@ -191,6 +191,12 @@ and one `web` service in `docker-compose.yml` on port 8000. The build runs `coll
 WhiteNoise can serve static files with `DEBUG=False`. `.env.dev` is mounted into the container
 because settings require an env file.
 
+The image runs gunicorn (`config.wsgi`); local compose overrides it with `runserver`.
+`docker-entrypoint.sh` runs `migrate` first when `RUN_MIGRATIONS=1`. The database is `DATABASE_URL`
+(Postgres, via `dj-database-url`) when set, SQLite otherwise; `ENVIRONMENT=prod` refuses to start
+without it. Behind nginx, `SECURE_PROXY_SSL_HEADER` and `CSRF_TRUSTED_ORIGINS` (from `BASE_URL`)
+keep HTTPS form posts passing the CSRF check.
+
 ## State of the test suites
 
 Run everything with `inv test unit`. 161 pass, 31 fail, 1 skipped. The failures are **not** layout
@@ -220,7 +226,6 @@ token?) or a real port of a DRF-era module.
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` has no models yet. Expected shape: `Transfer`/`TransferFile`, direct-to-S3
   presigned uploads, expiry and notification jobs on a task worker, credits through `billing`.
-- Settings hardcode SQLite; `DATABASE_URL` is passed by compose but not read.
 
 ## Conventions
 

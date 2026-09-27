@@ -16,7 +16,9 @@ import os
 import sys
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
+import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -122,12 +124,27 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': PROJECT_ROOT / 'db.sqlite3',
+# `DATABASE_URL` (e.g. `postgres://user:pass@host:5432/name`) when set; SQLite in the project root
+# otherwise, for local development and tests. Production must set it (checked below): inside the
+# container, `db.sqlite3` would be lost on every redeploy.
+DATABASE_URL = os.getenv('DATABASE_URL', '')
+
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600, conn_health_checks=True)
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': PROJECT_ROOT / 'db.sqlite3',
+        }
+    }
+
+if os.getenv('ENVIRONMENT') == 'prod' and not DATABASE_URL:
+    raise ImproperlyConfigured(
+        'Set DATABASE_URL in production; the SQLite fallback would be lost on every redeploy.'
+    )
 
 
 # Password validation
@@ -187,6 +204,16 @@ LOGIN_URL = 'accounts:login'
 
 # Base URL used to build absolute links (emails, QR code redirects).
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
+
+# Deployed behind nginx, which terminates TLS and always sets `X-Forwarded-Proto`. Without this,
+# Django sees every request as plain HTTP, and the CSRF check rejects HTTPS form posts because their
+# `Origin` (`https://...`) doesn't match. The site's own origin is trusted explicitly as well.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+_base_url = urlsplit(BASE_URL)
+CSRF_TRUSTED_ORIGINS = [f'{_base_url.scheme}://{_base_url.netloc}']
+
+# Only send the session and CSRF cookies over HTTPS when the site is served over HTTPS.
+SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _base_url.scheme == 'https'
 
 # Email confirmation and password reset settings
 EMAIL_CONFIRMATION_TOKEN_TTL_HOURS = int(os.getenv('EMAIL_CONFIRMATION_TOKEN_TTL_HOURS', '48'))
