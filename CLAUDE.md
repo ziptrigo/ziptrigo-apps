@@ -110,8 +110,13 @@ The convention: `.env.<environment>` at the repo root where `<environment>` ∈ 
 `.env.example`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
 re-validates env selection and `EMAIL_BACKENDS` at `runserver` startup.
 
-With `ENVIRONMENT=prod`, settings raise `ImproperlyConfigured` if `SECRET_KEY` or `JWT_SECRET` is
-missing or still a placeholder (`config/secret_checks.py`, also Django-free).
+With `ENVIRONMENT=prod`, settings raise `ImproperlyConfigured` if `SECRET_KEY`, `JWT_SECRET` or
+the file transfer S3 credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`) are
+missing or still placeholders (`config/secret_checks.py`, also Django-free).
+
+File transfer storage is one private S3 bucket per environment (`FILE_TRANSFER_S3_BUCKET`, keys
+under `transfers/`), defined with its CORS, lifecycle rule and IAM user in the `infra` repo's
+`apps/ziptrigo` (see its README); dev points `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci.
 
 ### Auth
 

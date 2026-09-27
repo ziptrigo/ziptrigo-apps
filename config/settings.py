@@ -245,6 +245,33 @@ AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@ziptrigo.com')
 
 
+# File transfer storage: a private S3 bucket per environment, with its own IAM user (both in the
+# `infra` repo, `apps/ziptrigo`). Separate from the SES credentials above because presigned URLs
+# need long-lived keys, not the temporary ones from assuming `AWS_ROLE`. In dev, point
+# `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci (`docker-compose.floci.yml`).
+FILE_TRANSFER_S3_BUCKET = os.getenv('FILE_TRANSFER_S3_BUCKET', '')
+FILE_TRANSFER_S3_REGION = os.getenv('FILE_TRANSFER_S3_REGION', AWS_REGION)
+FILE_TRANSFER_S3_ENDPOINT_URL = os.getenv('FILE_TRANSFER_S3_ENDPOINT_URL') or None
+FILE_TRANSFER_AWS_ACCESS_KEY_ID = os.getenv('FILE_TRANSFER_AWS_ACCESS_KEY_ID', '')
+FILE_TRANSFER_AWS_SECRET_ACCESS_KEY = os.getenv('FILE_TRANSFER_AWS_SECRET_ACCESS_KEY', '')
+
+
+# Like `SECRET_KEY` and `JWT_SECRET` above: production must not start without real storage
+# credentials, or every upload would fail.
+if os.getenv('ENVIRONMENT') == 'prod':
+    _insecure = insecure_secrets(
+        {
+            'FILE_TRANSFER_AWS_ACCESS_KEY_ID': FILE_TRANSFER_AWS_ACCESS_KEY_ID,
+            'FILE_TRANSFER_AWS_SECRET_ACCESS_KEY': FILE_TRANSFER_AWS_SECRET_ACCESS_KEY,
+        }
+    )
+    if _insecure:
+        raise ImproperlyConfigured(
+            f'Set real values for {", ".join(_insecure)} in production; '
+            'they are missing or still placeholders.'
+        )
+
+
 # QR code settings
 QR_CODE_REDIRECT_PATH = '/go/'
 
