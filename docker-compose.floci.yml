@@ -10,7 +10,7 @@
 # The top-level `name` below is `floci`, not this repo's directory name (`ziptrigo-apps`), and on
 # purpose: two sibling repos on the same dev machine — `wsa` (/Users/joao/code/wsa) and `pfo`
 # (/Users/joao/code/agroserv/pfo) — already run Floci this same way, each with its own
-# docker-compose.yml declaring the identical `floci` service under the identical project name
+# docker-compose.floci.yml declaring the identical `floci` service under the identical project name
 # `floci`. Compose identifies a container by project name + service name, so all three repos
 # address the *same* container and the *same* volume rather than each starting their own. That
 # matters because Floci binds a fixed host port (127.0.0.1:4566) and persists to a named volume;
@@ -33,8 +33,8 @@
 #        docker inspect --format '{{index .RepoDigests 0}}' floci/floci:<new-tag>
 #      Verify all three still agree before/after with:
 #        docker compose -f docker-compose.floci.yml config --hash floci     # here
-#        cd /Users/joao/code/wsa && docker compose config --hash floci
-#        cd /Users/joao/code/agroserv/pfo && docker compose config --hash floci
+#        cd /Users/joao/code/wsa && docker compose -f docker-compose.floci.yml config --hash floci
+#        cd /Users/joao/code/agroserv/pfo && docker compose -f docker-compose.floci.yml config --hash floci
 #      All three hex strings must match.
 #
 #   2. This file must declare nothing but the `floci` service (and its volume). Compose treats any
