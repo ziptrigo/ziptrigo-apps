@@ -1,0 +1,3 @@
+# Env files hold real secrets (.env.prod, .env.staging) and never belong in the image: deployments
+# provide theirs at runtime. Keep them out of the build context altogether.
+.env*

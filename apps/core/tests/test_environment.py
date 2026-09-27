@@ -74,6 +74,15 @@ class TestSelectEnv:
         assert selection.errors
         assert selection.warnings == []
 
+    def test_env_staging_is_ignored(self, tmp_path) -> None:
+        (tmp_path / '.env.dev').touch()
+        (tmp_path / '.env.staging').touch()
+        selection = select_env(tmp_path, environment='')
+        assert selection.environment == 'dev'
+        assert selection.env_path == tmp_path / '.env.dev'
+        assert selection.errors == []
+        assert selection.warnings == []
+
     def test_defaults_to_os_environ_when_environment_not_provided(
         self, tmp_path, monkeypatch
     ) -> None:

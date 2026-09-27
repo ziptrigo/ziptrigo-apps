@@ -107,14 +107,15 @@ binding over it for the CLIs.
 
 The convention: `.env.<environment>` at the repo root where `<environment>` ∈ {`dev`, `prod`}; if
 `ENVIRONMENT` is set, use it; otherwise require exactly one `.env.*` file (ignoring
-`.env.example`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
+`.env.example` and `.env.staging`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
 re-validates env selection and `EMAIL_BACKENDS` at `runserver` startup.
 
-The deployments' env files are `deploy/.env.prod` and `deploy/.env.staging` (gitignored, outside
-the repo root so env selection never sees them), scp'd to `/opt/docker/ziptrigo-apps/<env>/.env`
-on the VPS. This repo is their only home; the `infra` repo holds none. Both deployments run with
-`ENVIRONMENT=prod`. They and `.env.dev` are listed in `admin/secrets_files.txt` for
-`inv secrets backup` / `restore`.
+The deployments' env files are `.env.prod` and `.env.staging` at the repo root, next to `.env.dev`,
+scp'd to `/opt/docker/ziptrigo-apps/<env>/.env` on the VPS. This repo is their only home; the
+`infra` repo holds none. Both deployments run with `ENVIRONMENT=prod` (staging mounts its own file
+as `.env.prod`), which is why `.env.staging` is in `IGNORED_ENV_FILE_SUFFIXES`. With `.env.dev` and
+`.env.prod` both present, local runs need `ENVIRONMENT` set. All three are listed in
+`admin/secrets_files.txt` for `inv secrets backup` / `restore`.
 
 With `ENVIRONMENT=prod`, settings raise `ImproperlyConfigured` if `SECRET_KEY`, `JWT_SECRET` or
 the file transfer S3 credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`) are

@@ -170,21 +170,24 @@ then set `DATABASE_URL=postgres://ziptrigo:...@127.0.0.1:5432/ziptrigo` in `.env
 
 Environment variables are loaded from `.env.<environment>` at the repo root (`dev` or `prod`); see
 `.env.example` for the full list. If `ENVIRONMENT` is set, that file is used; otherwise there must
-be exactly one `.env.*` file.
+be exactly one `.env.*` file. `.env.example` and `.env.staging` never count as environments.
 
-The deployments' env files live in `deploy/` (gitignored like the rest), where env selection never
-looks, so a local run can't pick them up. They and `.env.dev` are listed in
-`admin/secrets_files.txt`; back them up (encrypted, to S3) with `inv secrets backup` and get them
-back with `inv secrets restore`:
+All env files live at the repo root and are gitignored:
 
-| File | Deployment | Uploaded to (on `caia`) |
+| File | Used by | Uploaded to (on `caia`) |
 |---|---|---|
-| `deploy/.env.prod` | `app.ziptrigo.com` | `/opt/docker/ziptrigo-apps/prod/.env` |
-| `deploy/.env.staging` | `app-staging.ziptrigo.com` | `/opt/docker/ziptrigo-apps/staging/.env` |
+| `.env.dev` | local runs | |
+| `.env.prod` | `app.ziptrigo.com` | `/opt/docker/ziptrigo-apps/prod/.env` |
+| `.env.staging` | `app-staging.ziptrigo.com` | `/opt/docker/ziptrigo-apps/staging/.env` |
 
 ```bash
-scp deploy/.env.prod caia:/opt/docker/ziptrigo-apps/prod/.env
+scp .env.prod caia:/opt/docker/ziptrigo-apps/prod/.env
 ```
+
+With both `.env.dev` and `.env.prod` present, set `ENVIRONMENT` to run anything directly
+(`inv server run` and `inv test` already do). All three are listed in `admin/secrets_files.txt`;
+back them up (encrypted, to S3) with `inv secrets backup` and get them back with
+`inv secrets restore`.
 
 The server runs both with `ENVIRONMENT=prod`, mounting the file at `/app/.env.prod`. How the rest
 of the deployment works (compose services, nginx, the file transfer bucket and its credentials) is
@@ -236,7 +239,7 @@ Scopes: `main` (runtime, `[project.dependencies]`) and `dev` (tooling, `[depende
 The Docker image runs gunicorn (`config.wsgi`, `WEB_CONCURRENCY` workers, 3 by default) behind
 nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrigo-apps`).
 
-- **Environment**: `deploy/.env.<env>`, see [Configuration](#configuration). Needs `DATABASE_URL`.
+- **Environment**: `.env.prod` / `.env.staging`, see [Configuration](#configuration). Needs `DATABASE_URL`.
 - **Migrations**: with `RUN_MIGRATIONS=1` (set by the deployment), `docker-entrypoint.sh` runs
   `migrate` before starting gunicorn.
 - **Static files**: collected at build time, served by WhiteNoise.
