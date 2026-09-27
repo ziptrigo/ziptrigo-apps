@@ -1,0 +1,10 @@
+{% if form.non_field_errors or form.errors %}
+<div class="rounded px-4 py-2 mb-4 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm">
+    <ul class="list-disc list-inside">
+        {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+        {% for field in form %}
+            {% for error in field.errors %}<li>{{ field.label }}: {{ error }}</li>{% endfor %}
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}

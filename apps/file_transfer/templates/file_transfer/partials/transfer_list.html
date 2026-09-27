@@ -1,5 +1,17 @@
-{% for transfer in transfers %}
-    <div class="py-2 border-b border-sage-100 dark:border-sage-700">{{ transfer }}</div>
-{% empty %}
-    <p class="text-gray-500 dark:text-gray-400">No transfers yet.</p>
-{% endfor %}
+{% if error %}
+<div class="mb-4 rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100">
+    {{ error }}
+</div>
+{% endif %}
+
+<div class="space-y-4">
+    {% for transfer in transfers %}
+        {% include 'file_transfer/partials/transfer_row.html' %}
+    {% empty %}
+    <div class="bg-white dark:bg-gray-800 shadow rounded-md px-4 py-12 text-center">
+        <p class="text-sm text-gray-500 dark:text-gray-400">
+            {% if filter == 'ended' %}No ended transfers.{% else %}No transfers yet.{% endif %}
+        </p>
+    </div>
+    {% endfor %}
+</div>
