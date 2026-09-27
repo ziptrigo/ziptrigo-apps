@@ -107,14 +107,15 @@ binding over it for the CLIs.
 
 The convention: `.env.<environment>` at the repo root where `<environment>` ∈ {`dev`, `prod`}; if
 `ENVIRONMENT` is set, use it; otherwise require exactly one `.env.*` file (ignoring
-`.env.example`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
+`.env.example` and `.env.staging`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
 re-validates env selection and `EMAIL_BACKENDS` at `runserver` startup.
 
-The deployments' env files are `deploy/.env.prod` and `deploy/.env.staging` (gitignored, outside
-the repo root so env selection never sees them), scp'd to `/opt/docker/ziptrigo-apps/<env>/.env`
-on the VPS. This repo is their only home; the `infra` repo holds none. Both deployments run with
-`ENVIRONMENT=prod`. They and `.env.dev` are listed in `admin/secrets_files.txt` for
-`inv secrets backup` / `restore`.
+The deployments' env files are `.env.prod` and `.env.staging` at the repo root, next to `.env.dev`,
+scp'd to `/opt/docker/ziptrigo-apps/<env>/.env` on the VPS. This repo is their only home; the
+`infra` repo holds none. Both deployments run with `ENVIRONMENT=prod` (staging mounts its own file
+as `.env.prod`), which is why `.env.staging` is in `IGNORED_ENV_FILE_SUFFIXES`. With `.env.dev` and
+`.env.prod` both present, local runs need `ENVIRONMENT` set. All three are listed in
+`admin/secrets_files.txt` for `inv secrets backup` / `restore`.
 
 With `ENVIRONMENT=prod`, settings raise `ImproperlyConfigured` if `SECRET_KEY`, `JWT_SECRET` or
 the file transfer S3 credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`) are
@@ -191,6 +192,12 @@ and one `web` service in `docker-compose.yml` on port 8000. The build runs `coll
 WhiteNoise can serve static files with `DEBUG=False`. `.env.dev` is mounted into the container
 because settings require an env file.
 
+The image runs gunicorn (`config.wsgi`); local compose overrides it with `runserver`.
+`docker-entrypoint.sh` runs `migrate` first when `RUN_MIGRATIONS=1`. The database is `DATABASE_URL`
+(Postgres, via `dj-database-url`) when set, SQLite otherwise; `ENVIRONMENT=prod` refuses to start
+without it. Behind nginx, `SECURE_PROXY_SSL_HEADER` and `CSRF_TRUSTED_ORIGINS` (from `BASE_URL`)
+keep HTTPS form posts passing the CSRF check.
+
 ## State of the test suites
 
 Run everything with `inv test unit`. 161 pass, 31 fail, 1 skipped. The failures are **not** layout
@@ -220,7 +227,6 @@ token?) or a real port of a DRF-era module.
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` has no models yet. Expected shape: `Transfer`/`TransferFile`, direct-to-S3
   presigned uploads, expiry and notification jobs on a task worker, credits through `billing`.
-- Settings hardcode SQLite; `DATABASE_URL` is passed by compose but not read.
 
 ## Conventions
 

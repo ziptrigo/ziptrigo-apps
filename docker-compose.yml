@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: ziptrigo-web
+    # The image runs gunicorn; locally, use the auto-reloading development server instead.
+    command: ['python', 'manage.py', 'runserver', '0.0.0.0:8000']
     ports:
       - "8000:8000"
     environment:

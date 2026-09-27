@@ -140,8 +140,9 @@ version-bump procedure.
 
 ### Shared local Postgres
 
-This app uses SQLite (see [Configuration](#configuration)) and isn't wired to Postgres yet, but a
-shared local Postgres server is available for when it is. It lives in its own compose file,
+The app uses Postgres when `DATABASE_URL` is set and SQLite otherwise (see
+[Configuration](#configuration)). A shared local Postgres server is available for trying it
+locally. It lives in its own compose file,
 `docker-compose.postgres.yml`, rather than `docker-compose.yml`, because the same container is
 shared with the `wsa` and `pfo` repos (see the file's header comment for why and how).
 
@@ -153,37 +154,40 @@ docker compose -f docker-compose.postgres.yml down           # stop
 
 Stopping it also stops it for `wsa`/`pfo` if either has it running — it's the same container.
 
-Whenever this app does move off SQLite, the one-time setup is to create its role and database on
-the shared server:
+To use it, create a role and database on the shared server once (two commands: `CREATE DATABASE`
+can't run in the same transaction as `CREATE ROLE`):
 
 ```bash
-psql postgresql://postgres:postgres@127.0.0.1:5432/postgres \
-  -c "CREATE ROLE ziptrigo LOGIN PASSWORD '...'; CREATE DATABASE ziptrigo OWNER ziptrigo;"
+PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
+psql "$PG" -c "CREATE ROLE ziptrigo LOGIN PASSWORD '...';"
+psql "$PG" -c "CREATE DATABASE ziptrigo OWNER ziptrigo;"
 ```
 
-then pointing Django's `DATABASE_URL`/`DATABASES` at
-`postgresql://ziptrigo:...@127.0.0.1:5432/ziptrigo`. Not done in this PR — this section only adds
-the container as available infrastructure.
+then set `DATABASE_URL=postgres://ziptrigo:...@127.0.0.1:5432/ziptrigo` in `.env.dev` and run
+`python manage.py migrate`.
 
 ## Configuration
 
 Environment variables are loaded from `.env.<environment>` at the repo root (`dev` or `prod`); see
 `.env.example` for the full list. If `ENVIRONMENT` is set, that file is used; otherwise there must
-be exactly one `.env.*` file.
+be exactly one `.env.*` file. `.env.example` and `.env.staging` never count as environments.
 
-The deployments' env files live in `deploy/` (gitignored like the rest), where env selection never
-looks, so a local run can't pick them up. They and `.env.dev` are listed in
-`admin/secrets_files.txt`; back them up (encrypted, to S3) with `inv secrets backup` and get them
-back with `inv secrets restore`:
+All env files live at the repo root and are gitignored:
 
-| File | Deployment | Uploaded to (on `caia`) |
+| File | Used by | Uploaded to (on `caia`) |
 |---|---|---|
-| `deploy/.env.prod` | `app.ziptrigo.com` | `/opt/docker/ziptrigo-apps/prod/.env` |
-| `deploy/.env.staging` | `app-staging.ziptrigo.com` | `/opt/docker/ziptrigo-apps/staging/.env` |
+| `.env.dev` | local runs | |
+| `.env.prod` | `app.ziptrigo.com` | `/opt/docker/ziptrigo-apps/prod/.env` |
+| `.env.staging` | `app-staging.ziptrigo.com` | `/opt/docker/ziptrigo-apps/staging/.env` |
 
 ```bash
-scp deploy/.env.prod caia:/opt/docker/ziptrigo-apps/prod/.env
+scp .env.prod caia:/opt/docker/ziptrigo-apps/prod/.env
 ```
+
+With both `.env.dev` and `.env.prod` present, set `ENVIRONMENT` to run anything directly
+(`inv server run` and `inv test` already do). All three are listed in `admin/secrets_files.txt`;
+back them up (encrypted, to S3) with `inv secrets backup` and get them back with
+`inv secrets restore`.
 
 The server runs both with `ENVIRONMENT=prod`, mounting the file at `/app/.env.prod`. How the rest
 of the deployment works (compose services, nginx, the file transfer bucket and its credentials) is
@@ -193,7 +197,9 @@ With `ENVIRONMENT=prod`, the site refuses to start unless `SECRET_KEY`, `JWT_SEC
 transfer storage credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`,
 `FILE_TRANSFER_AWS_SECRET_ACCESS_KEY`) are set to real values.
 
-The database is SQLite (`db.sqlite3`) for now.
+The database is Postgres when `DATABASE_URL` is set (`postgres://user:pass@host:5432/name`), and
+SQLite (`db.sqlite3`) otherwise, for local development and tests. Production requires
+`DATABASE_URL`: in a container, the SQLite file would be lost on every redeploy.
 
 ## Development Workflow
 
@@ -230,12 +236,17 @@ Scopes: `main` (runtime, `[project.dependencies]`) and `dev` (tooling, `[depende
 
 ## Deployment
 
-1. **Environment Variables**: Use production-ready secrets and configurations
-2. **Database**: Move off SQLite
-3. **Static Files**: WhiteNoise serves them; run `collectstatic`
-4. **Media Files**: Configure media file storage (S3, cloud storage, etc.)
-5. **Migrations**: Run migrations during deployment
-6. **WSGI Server**: Replace `runserver` with gunicorn or uvicorn
+The Docker image runs gunicorn (`config.wsgi`, `WEB_CONCURRENCY` workers, 3 by default) behind
+nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrigo-apps`).
+
+- **Environment**: `.env.prod` / `.env.staging`, see [Configuration](#configuration). Needs `DATABASE_URL`.
+- **Migrations**: with `RUN_MIGRATIONS=1` (set by the deployment), `docker-entrypoint.sh` runs
+  `migrate` before starting gunicorn.
+- **Static files**: collected at build time, served by WhiteNoise.
+- **HTTPS**: nginx terminates TLS and sets `X-Forwarded-Proto`, which `SECURE_PROXY_SSL_HEADER`
+  trusts; `BASE_URL`'s origin is in `CSRF_TRUSTED_ORIGINS`, and cookies are `Secure` when
+  `BASE_URL` is `https://`.
+- **Media files**: a host volume for now.
 
 ## Design System
 

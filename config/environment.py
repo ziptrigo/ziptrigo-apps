@@ -18,7 +18,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-IGNORED_ENV_FILE_SUFFIXES = {'example'}
+# `.env.<suffix>` files that are never an environment of their own: the template, and the staging
+# deployment's file (staging runs as `prod` on the server, with this file mounted as `.env.prod`).
+IGNORED_ENV_FILE_SUFFIXES = {'example', 'staging'}
 
 
 class Environment(StrEnum):

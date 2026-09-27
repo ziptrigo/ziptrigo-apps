@@ -31,7 +31,7 @@ COPY --from=builder /app/.venv /app/.venv
 ENV PATH=/app/.venv/bin:$PATH
 
 # Copy the project
-COPY manage.py /app/
+COPY manage.py docker-entrypoint.sh /app/
 COPY config/ /app/config/
 COPY apps/ /app/apps/
 
@@ -44,6 +44,10 @@ RUN mkdir -p /app/media && \
 
 EXPOSE 8000
 
-# Run migrations and start server
-# Note: In production, run migrations separately during deployment
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# gunicorn reads its worker count from WEB_CONCURRENCY; override it per deployment if needed.
+ENV WEB_CONCURRENCY=3
+
+# The entrypoint applies migrations first when RUN_MIGRATIONS=1 (see docker-entrypoint.sh).
+# docker-compose.yml overrides the command with `runserver` for local development.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-"]
