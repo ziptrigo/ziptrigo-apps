@@ -246,8 +246,8 @@ AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@ziptrigo.com')
 
 
 # File transfer storage: a private S3 bucket per environment, with its own IAM user (both in the
-# `infra` repo, `apps/ziptrigo`). Separate from the SES credentials above because presigned URLs
-# need long-lived keys, not the temporary ones from assuming `AWS_ROLE`. In dev, point
+# `infra` repo, `apps/ziptrigo-apps`). Separate from the SES credentials above because presigned
+# URLs need long-lived keys, not the temporary ones from assuming `AWS_ROLE`. In dev, point
 # `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci (`docker-compose.floci.yml`).
 FILE_TRANSFER_S3_BUCKET = os.getenv('FILE_TRANSFER_S3_BUCKET', '')
 FILE_TRANSFER_S3_REGION = os.getenv('FILE_TRANSFER_S3_REGION', AWS_REGION)

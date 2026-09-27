@@ -116,7 +116,7 @@ missing or still placeholders (`config/secret_checks.py`, also Django-free).
 
 File transfer storage is one private S3 bucket per environment (`FILE_TRANSFER_S3_BUCKET`, keys
 under `transfers/`), defined with its CORS, lifecycle rule and IAM user in the `infra` repo's
-`apps/ziptrigo` (see its README); dev points `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci.
+`apps/ziptrigo-apps` (see its README); dev points `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci.
 
 ### Auth
 
