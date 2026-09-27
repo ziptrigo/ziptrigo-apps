@@ -1,18 +1,20 @@
 # ZipTrigo Apps
 
-One website made of several independent products — QR codes today, file transfer next — that share
-one account, one credit balance and one look. Built with Django and HTMX.
+One website made of several independent products — QR codes and WeTransfer-style file transfer —
+that share one account, one credit balance and one look. Built with Django and HTMX.
 
 ## Architecture
 
 A single Django project (a "modular monolith") with one Django app per concern:
 
 - **core** — the site shell: base layout, navigation and landing page, design-system static files,
-  the admin site, email sending.
+  the admin site, email sending, the background job scheduler (`apps.core.scheduler`).
 - **accounts** — the user model, sign-up/login/password reset, account pages.
 - **billing** — credits: balances, the transaction ledger, the credits history page.
 - **qr_code** — QR code generation, the dashboard/editor and the `/go/<code>` short links.
-- **file_transfer** — file transfers (skeleton for now).
+- **file_transfer** — WeTransfer-style file transfer: send large files via a direct-to-S3 upload,
+  an expiring download link, a dashboard, and credit-metered storage. Logged-in senders only for
+  now (phase 1 of #55); anonymous sending, "download all" and a few other features are phase 2/3.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -69,7 +71,8 @@ apps/<app>/
 | `/billing/…` | billing (credits history) |
 | `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
-| `/transfer/…` | file_transfer |
+| `/transfer/…` | file_transfer: send page, dashboard, upload endpoints |
+| `/t/<slug>/` | file_transfer public download links — at the root, same reason as `/go/<code>` |
 | `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…` |
 | `/admin/` | Django admin (Jazzmin) |
 
@@ -108,6 +111,14 @@ python manage.py migrate
 inv server run                    # http://localhost:8000
 ```
 
+The web process alone is enough to browse the site, but file transfer's background jobs (metering,
+expiry, cleanup) and queued emails need the worker processes too, in separate terminals:
+
+```bash
+python manage.py run_scheduler    # apps.core.scheduler: the four file_transfer jobs
+python manage.py db_worker        # django_tasks_db: queued emails, deleting a transfer's objects
+```
+
 ### Docker
 
 ```bash
@@ -115,18 +126,23 @@ cp .env.example .env.dev
 docker compose up --build         # http://localhost:8000
 ```
 
+Brings up all three services: `web` (the site), `worker` (`run_scheduler` + `db_worker`, see
+[Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) and `db` (this stack's own
+Postgres). `web`'s `DATABASE_URL` defaults to that `db` service; override it in `.env.dev` to point
+elsewhere.
+
 - Site: http://localhost:8000
 - Admin: http://localhost:8000/admin/
 - API docs: http://localhost:8000/api/docs
 
 ### Local AWS/S3 emulation (Floci)
 
-No app code here uses S3 yet, but file transfer will (settings `FILE_TRANSFER_S3_*`, see
-`.env.example`; `admin/aws.py` is unrelated — it's SSO login for the AWS CLI). In dev it'll run
-against [Floci](https://github.com/floci/floci), a local, MIT-licensed LocalStack replacement,
-instead of a real AWS account. It lives in its own compose file, `docker-compose.floci.yml`, rather
-than `docker-compose.yml`, because the same container is shared with the `wsa` and `pfo` repos
-(see the file's header comment for why and how).
+File transfer stores uploaded files in S3 (settings `FILE_TRANSFER_S3_*`, see `.env.example`;
+`admin/aws.py` is unrelated — it's SSO login for the AWS CLI). In dev it runs against
+[Floci](https://github.com/floci/floci), a local, MIT-licensed LocalStack replacement, instead of a
+real AWS account. It lives in its own compose file, `docker-compose.floci.yml`, rather than
+`docker-compose.yml`, because the same container is shared with the `wsa` and `pfo` repos (see the
+file's header comment for why and how).
 
 ```bash
 docker compose -f docker-compose.floci.yml up -d --wait   # start
@@ -141,8 +157,10 @@ version-bump procedure.
 ### Shared local Postgres
 
 The app uses Postgres when `DATABASE_URL` is set and SQLite otherwise (see
-[Configuration](#configuration)). A shared local Postgres server is available for trying it
-locally. It lives in its own compose file,
+[Configuration](#configuration)). Running via `docker compose up` already gets its own Postgres for
+free (the `db` service, above) — this section is for running the Django dev server directly on the
+host (`inv server run`) against Postgres instead of SQLite. A shared local Postgres server is
+available for that. It lives in its own compose file,
 `docker-compose.postgres.yml`, rather than `docker-compose.yml`, because the same container is
 shared with the `wsa` and `pfo` repos (see the file's header comment for why and how).
 
@@ -247,6 +265,10 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   trusts; `BASE_URL`'s origin is in `CSRF_TRUSTED_ORIGINS`, and cookies are `Secure` when
   `BASE_URL` is `https://`.
 - **Media files**: a host volume for now.
+- **Background jobs**: the `worker` service (`run_scheduler` + `db_worker`, see
+  [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) needs its own compose service
+  in the `infra` repo, alongside `web`; without it, file transfer's metering, expiry and cleanup
+  jobs and its queued emails never run.
 
 ## Design System
 

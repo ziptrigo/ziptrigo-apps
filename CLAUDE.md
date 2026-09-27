@@ -16,7 +16,7 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
-apps/file_transfer/   Skeleton product: one page + one HTMX partial, no models yet.
+apps/file_transfer/   File transfer: send/dashboard/download pages, S3 uploads, metering, jobs.
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
@@ -94,8 +94,15 @@ Each app may import only from layers below it. Enforced by the import-linter con
   through `apps.billing.services` (`add_credits`, `spend_credits`, `apply_credits`,
   `get_balance`), passing `source='<app label>'` from a product. Templates get the balance as
   `credits_balance` from `apps.billing.context_processors.credits`.
-- Cross-app links in templates (`{% url 'credits-history-page' %}` in an accounts template) are
-  fine; they aren't imports.
+- `billing` can't import a product either, so it exposes a `credits_added` signal
+  (`apps.billing.signals`, sent from `add_credits` after commit) for a product to react to a top-up
+  without `billing` knowing it exists. `file_transfer` listens for it to re-enable a user's
+  suspended transfers (`apps/file_transfer/apps.py`).
+- The same shape covers background jobs: `core` can't import a product to discover its jobs, so
+  `apps.core.scheduler` is a registry (like `apps.core.products`) that a product fills from its own
+  `AppConfig.ready()`. See "Queue and scheduler" below.
+- Cross-app links in templates (`{% url 'billing:credits-history' %}` in a file_transfer template)
+  are fine; they aren't imports.
 
 ### Settings and environment
 
@@ -179,6 +186,40 @@ QR code specifics: previews are returned as PNG `data:` URIs and never written t
 for tracked QR codes are issued by the server (`qr_code:short-code`) and kept in the session until
 the save, so users can't choose their own; a code taken in the meantime is replaced.
 
+File transfer specifics: the send page's file upload endpoints
+(`apps/file_transfer/views/uploads.py`) are a deliberate exception to "form-encoded" above -- the
+browser uploads directly to S3 with presigned multipart URLs and only coordinates with Django over
+JSON, so those views speak JSON in and out. The options form (recipients, message, expiry, max
+downloads, password) that finishes the send *is* a normal HTMX form and follows the 422 convention.
+The public download page (`/t/<slug>/`, `apps/file_transfer/download_urls.py`) needs no login and
+never explains *why* a transfer isn't available (expired, disabled, suspended, deleted, or its
+download limit reached all render the same neutral page). A password gates the download links, not
+the file list itself.
+
+### Queue and scheduler
+
+Two background-work mechanisms, both used by `file_transfer` (spec issue #55) and available to any
+future app:
+
+- **Queue**: Django 6's built-in `django.tasks`, backed by `django_tasks_db` (an ORM-based backend
+  -- Django core only ships Immediate/Dummy backends). `TASKS` in `config/settings.py` selects
+  `django_tasks_db.DatabaseBackend` normally and `ImmediateBackend` under pytest, so tests never
+  need a worker. A function decorated `@task` (see `apps/file_transfer/services/emails.py`) is
+  queued with `.enqueue(...)`, never called directly, and its arguments must be plain
+  strings/ids/etc (never model instances) since the backend serializes them. The `worker` compose
+  service runs `./manage.py db_worker`.
+- **Scheduler**: `apps.core.scheduler` -- a `JobSpec` registry (name, callable, interval, lease)
+  filled by each app's `AppConfig.ready()` (`core` can't import a product, so it never discovers
+  jobs itself), a `ScheduledJob` row per job whose claim is one conditional `UPDATE` guarded by the
+  database's own clock (`try_claim` in `apps/core/scheduler/runner.py`), and a `SchedulerRunner`
+  that ticks every `SCHEDULER_TICK_SECONDS` running whatever's due. At-least-once, so every job
+  must be idempotent. `./manage.py run_scheduler` runs it forever; job status is a read-only
+  `ScheduledJob` admin. The `worker` compose service also runs this, alongside `db_worker`.
+
+`file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges,
+suspends, re-enables as a fallback, deletes files past the suspension grace period),
+`expire_transfers` (every 5 min), `cleanup_drafts` (hourly), `purge_download_ips` (daily).
+
 ### Templates and static files
 
 Always namespaced: `apps/<app>/templates/<app>/…` and `apps/<app>/static/<app>/…`. Every page
@@ -187,20 +228,32 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 
 ### Docker
 
-One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`)
-and one `web` service in `docker-compose.yml` on port 8000. The build runs `collectstatic` so
-WhiteNoise can serve static files with `DEBUG=False`. `.env.dev` is mounted into the container
-because settings require an env file.
+One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`),
+shared by every service in `docker-compose.yml`: `web`, `worker` and `db`. The build runs
+`collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.dev` is mounted into
+`web` and `worker` because settings require an env file.
 
-The image runs gunicorn (`config.wsgi`); local compose overrides it with `runserver`.
-`docker-entrypoint.sh` runs `migrate` first when `RUN_MIGRATIONS=1`. The database is `DATABASE_URL`
-(Postgres, via `dj-database-url`) when set, SQLite otherwise; `ENVIRONMENT=prod` refuses to start
-without it. Behind nginx, `SECURE_PROXY_SSL_HEADER` and `CSRF_TRUSTED_ORIGINS` (from `BASE_URL`)
-keep HTTPS form posts passing the CSRF check.
+- `web` runs gunicorn (`config.wsgi`) in the image; local compose overrides it with `runserver`.
+- `worker` runs the two background-work mechanisms (see "Queue and scheduler" above) as two
+  processes in one container: `./manage.py run_scheduler` and `./manage.py db_worker`, backgrounded
+  with `&` and kept alive with `wait -n` so the container exits if either dies. One container for
+  both since they're always deployed together and neither needs to scale independently; split them
+  into their own services if that changes.
+- `db` is this stack's own Postgres (`postgres:18-alpine`), separate from the shared
+  `docker-compose.postgres.yml` used across repos for local dev tooling (see that file's header) --
+  `db` is part of the deployable stack the other two services depend on.
+
+Both `web` and `worker` run `docker-entrypoint.sh`, which applies `migrate` first when
+`RUN_MIGRATIONS=1` (both set it, since they start concurrently and neither can assume the other has
+migrated yet; migrations are idempotent). The database is `DATABASE_URL` (Postgres, via
+`dj-database-url`; compose points it at `db`) when set, SQLite otherwise; `ENVIRONMENT=prod` refuses
+to start without it -- a separate `worker` container can't share a SQLite file with `web`, which is
+why Postgres was a prerequisite for this issue. Behind nginx, `SECURE_PROXY_SSL_HEADER` and
+`CSRF_TRUSTED_ORIGINS` (from `BASE_URL`) keep HTTPS form posts passing the CSRF check.
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 161 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 285 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -222,11 +275,16 @@ token?) or a real port of a DRF-era module.
 
 - Register and password-reset pages still post JSON to `/api/auth/…` (they work, but aren't
   session form views yet).
-- No rate limiting anywhere (login, previews, API).
+- No rate limiting anywhere (login, previews, API, file transfer send/download/password attempts --
+  file transfer's is tracked as #53).
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
-- `file_transfer` has no models yet. Expected shape: `Transfer`/`TransferFile`, direct-to-S3
-  presigned uploads, expiry and notification jobs on a task worker, credits through `billing`.
+- `file_transfer` phase 1 (logged-in sending, S3 uploads, download page, dashboard, metering,
+  emails, queue/scheduler) is built (issue #55); phase 2 is not: anonymous sending and its email
+  confirmation codes, the anonymous manage link, claiming a transfer on login, "download all" as a
+  zip, and the per-download log UI (the underlying `DownloadEvent` rows and IP purge job exist
+  already). Phase 3 (resumable uploads, a JWT `/api/ft/` router, `admin/filetransfer.py`, takedown
+  tooling) is not either.
 
 ## Conventions
 
