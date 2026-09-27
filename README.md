@@ -119,6 +119,24 @@ docker compose up --build         # http://localhost:8000
 - Admin: http://localhost:8000/admin/
 - API docs: http://localhost:8000/api/docs
 
+### Local AWS/S3 emulation (Floci)
+
+No app code here uses S3 yet, but when it does (`admin/aws.py` is unrelated — it's SSO login for
+the AWS CLI), it'll run against [Floci](https://github.com/floci/floci), a local, MIT-licensed
+LocalStack replacement, instead of a real AWS account. It lives in its own compose file,
+`docker-compose.floci.yml`, rather than `docker-compose.yml`, because the same container is shared
+with the `wsa` and `pfo` repos (see the file's header comment for why and how).
+
+```bash
+docker compose -f docker-compose.floci.yml up -d --wait   # start
+docker compose -f docker-compose.floci.yml ps             # check
+docker compose -f docker-compose.floci.yml down           # stop
+```
+
+Stopping it also stops it for `wsa`/`pfo` if either has it running — it's the same container. See
+wsa's `docs/playbooks/backend/LOCAL_AWS.md` for the fuller rationale, troubleshooting and
+version-bump procedure.
+
 ### Shared local Postgres
 
 This app uses SQLite (see [Configuration](#configuration)) and isn't wired to Postgres yet, but a
