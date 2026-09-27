@@ -67,7 +67,6 @@ env/
 ENV/
 env.bak/
 venv.bak/
-!.env.example
 
 # mkdocs documentation
 /site
@@ -102,3 +101,10 @@ static_root/
 .DS_Store
 release-notes.md
 release_notes.md
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+!.env.deploy.example
+.mcp.json
