@@ -172,7 +172,9 @@ Environment variables are loaded from `.env.<environment>` at the repo root (`de
 be exactly one `.env.*` file.
 
 The deployments' env files live in `deploy/` (gitignored like the rest), where env selection never
-looks, so a local run can't pick them up:
+looks, so a local run can't pick them up. They and `.env.dev` are listed in
+`admin/secrets_files.txt`; back them up (encrypted, to S3) with `inv secrets backup` and get them
+back with `inv secrets restore`:
 
 | File | Deployment | Uploaded to (on `caia`) |
 |---|---|---|
