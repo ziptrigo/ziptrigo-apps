@@ -11,6 +11,7 @@ from django.db.models import F
 from apps.accounts.models import User
 
 from ..models import CreditAccount, CreditTransaction, CreditTransactionType
+from ..signals import credits_added
 
 
 class InsufficientCreditsError(Exception):
@@ -46,13 +47,17 @@ def add_credits(
     with transaction.atomic():
         CreditAccount.objects.get_or_create(user=user)
         CreditAccount.objects.filter(user=user).update(balance=F('balance') + amount)
-        return CreditTransaction.objects.create(
+        tx = CreditTransaction.objects.create(
             user=user,
             amount=amount,
             type=tx_type,
             description=description,
             source=source,
         )
+        # Deferred to commit: a receiver (e.g. file_transfer re-enabling suspended transfers) that
+        # reads the balance must see this change, and a rolled-back transaction must not fire it.
+        transaction.on_commit(lambda: credits_added.send(sender=None, user=user, amount=amount))
+        return tx
 
 
 def spend_credits(
