@@ -119,6 +119,33 @@ docker compose up --build         # http://localhost:8000
 - Admin: http://localhost:8000/admin/
 - API docs: http://localhost:8000/api/docs
 
+### Shared local Postgres
+
+This app uses SQLite (see [Configuration](#configuration)) and isn't wired to Postgres yet, but a
+shared local Postgres server is available for when it is. It lives in its own compose file,
+`docker-compose.postgres.yml`, rather than `docker-compose.yml`, because the same container is
+shared with the `wsa` and `pfo` repos (see the file's header comment for why and how).
+
+```bash
+docker compose -f docker-compose.postgres.yml up -d --wait   # start
+docker compose -f docker-compose.postgres.yml ps             # check
+docker compose -f docker-compose.postgres.yml down           # stop
+```
+
+Stopping it also stops it for `wsa`/`pfo` if either has it running — it's the same container.
+
+Whenever this app does move off SQLite, the one-time setup is to create its role and database on
+the shared server:
+
+```bash
+psql postgresql://postgres:postgres@127.0.0.1:5432/postgres \
+  -c "CREATE ROLE ziptrigo LOGIN PASSWORD '...'; CREATE DATABASE ziptrigo OWNER ziptrigo;"
+```
+
+then pointing Django's `DATABASE_URL`/`DATABASES` at
+`postgresql://ziptrigo:...@127.0.0.1:5432/ziptrigo`. Not done in this PR — this section only adds
+the container as available infrastructure.
+
 ## Configuration
 
 Environment variables are loaded from `.env.<environment>` at the repo root (`dev` or `prod`); see
