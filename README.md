@@ -121,11 +121,12 @@ docker compose up --build         # http://localhost:8000
 
 ### Local AWS/S3 emulation (Floci)
 
-No app code here uses S3 yet, but when it does (`admin/aws.py` is unrelated — it's SSO login for
-the AWS CLI), it'll run against [Floci](https://github.com/floci/floci), a local, MIT-licensed
-LocalStack replacement, instead of a real AWS account. It lives in its own compose file,
-`docker-compose.floci.yml`, rather than `docker-compose.yml`, because the same container is shared
-with the `wsa` and `pfo` repos (see the file's header comment for why and how).
+No app code here uses S3 yet, but file transfer will (settings `FILE_TRANSFER_S3_*`, see
+`.env.example`; `admin/aws.py` is unrelated — it's SSO login for the AWS CLI). In dev it'll run
+against [Floci](https://github.com/floci/floci), a local, MIT-licensed LocalStack replacement,
+instead of a real AWS account. It lives in its own compose file, `docker-compose.floci.yml`, rather
+than `docker-compose.yml`, because the same container is shared with the `wsa` and `pfo` repos
+(see the file's header comment for why and how).
 
 ```bash
 docker compose -f docker-compose.floci.yml up -d --wait   # start
@@ -170,8 +171,9 @@ Environment variables are loaded from `.env.<environment>` at the repo root (`de
 `.env.example` for the full list. If `ENVIRONMENT` is set, that file is used; otherwise there must
 be exactly one `.env.*` file.
 
-With `ENVIRONMENT=prod`, the site refuses to start unless `SECRET_KEY` and `JWT_SECRET` are set to
-real values.
+With `ENVIRONMENT=prod`, the site refuses to start unless `SECRET_KEY`, `JWT_SECRET` and the file
+transfer storage credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`,
+`FILE_TRANSFER_AWS_SECRET_ACCESS_KEY`) are set to real values.
 
 The database is SQLite (`db.sqlite3`) for now.
 
