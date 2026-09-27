@@ -120,6 +120,7 @@ modules = [
     'admin.openapi',
     'admin.pip',
     'admin.qrcode',
+    'admin.secrets',
     'admin.server',
     'admin.test',
 ]
