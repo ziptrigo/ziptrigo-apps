@@ -1,0 +1,72 @@
+# Local Postgres via a shared container — a separate Compose file, deliberately not part of
+# docker-compose.yml.
+#
+# This repo's app code does not use Postgres yet (see README.md — `config/settings.py` still uses
+# `django.db.backends.sqlite3`, and that stays as-is). This file just makes a local Postgres server
+# available for whenever this app moves off SQLite.
+#
+# The image is `pgvector/pgvector:pg18` — pgvector's Postgres image, pinned to major version 18 —
+# to match the Postgres running in production on `caia`, the shared VPS: a single Postgres SERVER
+# there hosts one database + role per app (see `infra` repo's `apps/pfo/README.md`). Local dev
+# mirrors that shape: one shared local Postgres SERVER, not one container per app, with each app
+# getting its own database and role inside it once it's wired up.
+#
+# SHARED COMPOSE PROJECT — read before editing. Same mechanism as this repo's
+# docker-compose.floci.yml (read that file's header first if you haven't).
+# The top-level `name` below is `postgres`, not this repo's directory name (`ziptrigo-apps`), and
+# on purpose: two sibling repos on the same dev machine — `wsa` (/Users/joao/code/wsa) and `pfo`
+# (/Users/joao/code/agroserv/pfo) — run Postgres this same way, each with its own
+# docker-compose.postgres.yml declaring the identical `postgres` service under the identical
+# project name `postgres`. Compose identifies a container by project name + service name, so all
+# three repos address the *same* container and the *same* volume rather than each starting their
+# own. That matters because Postgres binds the standard host port (127.0.0.1:5432) and persists to
+# a named volume; running more than one instance at once on this machine would collide on the port
+# and split the persisted data across instances. With a shared project, whichever repo runs
+# `docker compose up` first starts the container, and the other two just reuse it.
+#
+# Two invariants keep that working:
+#
+#   1. The `postgres` service's *values* — image, environment, ports, volumes, healthcheck — must
+#      stay byte-identical across all three repos' copies of this file. Compose only recreates a
+#      container when its `com.docker.compose.config-hash` label (computed purely from the
+#      service's values, not from comments, key order or the project directory) no longer matches
+#      the desired config. If one repo's copy drifts, the next `up` from any repo would recreate
+#      the container with the drifted config, silently changing what the other repos are using.
+#      Bump the pinned image deliberately, in lockstep, across all three repos in the same change.
+#      Verify all three still agree with:
+#        docker compose -f docker-compose.postgres.yml config --hash postgres   # here
+#        cd /Users/joao/code/wsa && docker compose -f docker-compose.postgres.yml config --hash postgres
+#        cd /Users/joao/code/agroserv/pfo && docker compose -f docker-compose.postgres.yml config --hash postgres
+#      All three hex strings must match.
+#
+#   2. This file must declare nothing but the `postgres` service (and its volume). Compose treats
+#      any container in the `postgres` project that isn't in the current file as an "orphan"; a
+#      `--remove-orphans` run from wsa or pfo would then delete a service this file added on top of
+#      `postgres`, and vice versa. If this repo ever needs its own local infra alongside Postgres,
+#      it goes in docker-compose.yml (see the `web` service there), never in here.
+#
+# Consequence worth knowing: `docker compose -f docker-compose.postgres.yml down` stops (and
+# `down -v` deletes) the container/volume that wsa and pfo may also be relying on, since it's the
+# same one.
+name: postgres
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres:
