@@ -1,3 +1,4 @@
+import base64
 import json
 
 import pytest
@@ -6,6 +7,8 @@ from django.urls import reverse
 from apps.accounts.tests.factories import UserFactory
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+
+_CHECKSUM = base64.b64encode(b'\x00' * 32).decode()
 
 
 def _post_json(client, url, payload):
@@ -56,7 +59,9 @@ def test_part_urls_and_complete_and_remove_flow(client, draft_transfer, fake_sto
     file_id = added['file_id']
 
     parts_url = reverse('file_transfer:send-part-urls', args=[draft_transfer.id, file_id])
-    parts_response = _post_json(client, parts_url, {'part_numbers': [1]})
+    parts_response = _post_json(
+        client, parts_url, {'parts': [{'part_number': 1, 'checksum_sha256': _CHECKSUM}]}
+    )
     assert parts_response.status_code == 200
     assert '1' in parts_response.json()['urls']
 
@@ -77,6 +82,17 @@ def test_part_urls_and_complete_and_remove_flow(client, draft_transfer, fake_sto
     remove_response = client.post(remove_url)
     assert remove_response.status_code == 200
     assert not TransferFile.objects.filter(id=file_id).exists()
+
+
+def test_part_urls_rejects_malformed_parts_payload(client, draft_transfer, fake_storage):
+    client.force_login(draft_transfer.owner)
+    add_url = reverse('file_transfer:send-add-file', args=[draft_transfer.id])
+    added = _post_json(client, add_url, {'name': 'a.bin', 'size': 10}).json()
+
+    parts_url = reverse('file_transfer:send-part-urls', args=[draft_transfer.id, added['file_id']])
+    response = _post_json(client, parts_url, {'parts': [{'part_number': 'nope'}]})
+
+    assert response.status_code == 422
 
 
 def test_complete_file_rejects_size_mismatch(client, draft_transfer, fake_storage):

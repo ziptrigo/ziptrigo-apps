@@ -26,9 +26,10 @@ from ..services.storage import PART_SIZE_BYTES
 @login_required
 @require_GET
 def send_page(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """Render the send page. A fresh draft transfer backs it, so the file picker has somewhere
-    to attach uploads to right away."""
-    draft = services.create_draft(request.user)
+    """Render the send page. A draft transfer backs it, so the file picker has somewhere to
+    attach uploads to right away -- reusing the owner's existing empty draft, if there is one,
+    rather than creating a fresh row on every visit (see `services.get_or_create_draft`)."""
+    draft = services.get_or_create_draft(request.user)
     context = {
         'draft_id': str(draft.id),
         'settings': FileTransferSettings.load(),

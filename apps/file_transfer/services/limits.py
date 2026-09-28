@@ -3,6 +3,10 @@ singleton. Shared by the send-page form and the upload views, so both enforce th
 (see the HTMX form-view conventions in `CLAUDE.md`).
 """
 
+import base64
+import binascii
+import unicodedata
+
 from django.core.exceptions import ValidationError
 
 from ..models import FileTransferSettings, Transfer, TransferFile
@@ -10,10 +14,37 @@ from ..models import FileTransferSettings, Transfer, TransferFile
 #: Message body (spec section 2 defaults): plain text, no title field.
 MAX_MESSAGE_LENGTH = 2000
 
+#: A base64-encoded SHA-256 digest is always 32 raw bytes.
+_SHA256_DIGEST_SIZE = 32
+
 
 def validate_message(message: str) -> None:
     if len(message) > MAX_MESSAGE_LENGTH:
         raise ValidationError(f'Message must be at most {MAX_MESSAGE_LENGTH} characters.')
+
+
+def validate_filename(name: str) -> str:
+    """Strip control characters (including CR/LF) from a file name before it's stored or ever
+    reaches an S3 key or a `Content-Disposition` header, then require something non-empty to be
+    left. Names aren't otherwise restricted -- non-ASCII is fine (`storage.presigned_get_url`
+    encodes it correctly) -- since the storage key is keyed by file id, not by this name (see
+    `apps.file_transfer.services.storage.storage_key`)."""
+    cleaned = ''.join(ch for ch in name if unicodedata.category(ch) != 'Cc').strip()
+    if not cleaned:
+        raise ValidationError('File name is required.')
+    return cleaned[:255]
+
+
+def validate_checksum_sha256(value: str) -> str:
+    """Validate that `value` is a well-formed base64-encoded SHA-256 digest (what the browser
+    sends as `x-amz-checksum-sha256`, spec section 11), returning it unchanged."""
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValidationError('Invalid checksum.') from exc
+    if len(raw) != _SHA256_DIGEST_SIZE:
+        raise ValidationError('Invalid checksum.')
+    return value
 
 
 def validate_new_file(transfer: Transfer, size: int, settings: FileTransferSettings) -> None:

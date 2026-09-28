@@ -20,6 +20,35 @@ def test_send_page_creates_a_draft(client, funded_user):
     assert Transfer.objects.filter(owner=funded_user, status=TransferStatus.DRAFT).exists()
 
 
+def test_send_page_reuses_existing_empty_draft_across_visits(client, funded_user):
+    """Regression test: `send_page` used to call `create_draft` unconditionally, so reloading it
+    (or just leaving the tab open and coming back) left a new "Untitled transfer" row on the
+    dashboard every time (`_transfers_for` filters those out too, but only after `cleanup_drafts`
+    finally deletes the stale ones up to 24h later)."""
+    client.force_login(funded_user)
+
+    client.get(reverse('file_transfer:send'))
+    client.get(reverse('file_transfer:send'))
+
+    assert Transfer.objects.filter(owner=funded_user, status=TransferStatus.DRAFT).count() == 1
+
+
+def test_send_page_leaves_a_draft_with_files_alone_and_starts_a_new_one(
+    client, draft_transfer, uploaded_file
+):
+    """A draft that already has files (the sender started uploading, then came back to the send
+    page) isn't reused -- the page's own file list is only tracked client-side, so silently
+    reusing it would attach new uploads to files the page has no record of."""
+    client.force_login(draft_transfer.owner)
+
+    client.get(reverse('file_transfer:send'))
+
+    assert (
+        Transfer.objects.filter(owner=draft_transfer.owner, status=TransferStatus.DRAFT).count()
+        == 2
+    )
+
+
 def test_send_submit_validation_error_returns_422(client, draft_transfer, uploaded_file):
     client.force_login(draft_transfer.owner)
     url = reverse('file_transfer:send-submit', args=[draft_transfer.id])

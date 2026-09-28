@@ -33,10 +33,20 @@ class FakeS3Storage:
         return upload_id
 
     def presign_part_url(
-        self, key: str, upload_id: str, part_number: int, expires_in: int = 3600
+        self,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        expires_in: int = 3600,
+        *,
+        content_length: int | None = None,
+        checksum_sha256: str | None = None,
     ) -> str:
         self.presign_calls.append((upload_id, part_number))
-        return f'https://fake-s3.test/{key}?uploadId={upload_id}&partNumber={part_number}'
+        url = f'https://fake-s3.test/{key}?uploadId={upload_id}&partNumber={part_number}'
+        if checksum_sha256 is not None:
+            url += f'&checksum={checksum_sha256}'
+        return url
 
     def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]) -> None:
         self.active_uploads.discard(upload_id)

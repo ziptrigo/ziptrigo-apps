@@ -94,6 +94,21 @@ document.addEventListener('DOMContentLoaded', function () {
         submitBtn.disabled = !anyUploaded;
     }
 
+    // Base64-encode a SHA-256 digest of `blob`, for the S3 per-part integrity check (spec
+    // section 11): the multipart upload was created with `ChecksumAlgorithm='SHA256'`
+    // (`services.storage.S3Storage.create_multipart_upload`), so S3 requires every part to carry
+    // its own checksum. Computed here, client-side, *before* asking Django for that part's
+    // presigned URL -- the checksum has to be known before the URL is signed, since it becomes
+    // part of the signature (`ChecksumSHA256` in `services.uploads.presign_parts`), and a
+    // presigned URL can only bind to a value the signer already has.
+    async function sha256Base64(blob) {
+        const buffer = await blob.arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256', buffer);
+        let binary = '';
+        new Uint8Array(digest).forEach(function (byte) { binary += String.fromCharCode(byte); });
+        return btoa(binary);
+    }
+
     function renderRow(fileId, entry) {
         let li = document.getElementById('file-row-' + fileId);
         if (!li) {
@@ -102,13 +117,34 @@ document.addEventListener('DOMContentLoaded', function () {
             li.className = 'flex items-center justify-between text-sm gap-2';
             fileListEl.appendChild(li);
         }
+        // Built with DOM APIs (not `innerHTML`) so a file name is never parsed as markup --
+        // `entry.name` comes straight from the browser's own File objects, but a folder upload
+        // can carry names the user didn't type themselves.
+        li.textContent = '';
         const pct = entry.progress || 0;
-        li.innerHTML = (
-            '<span class="truncate flex-1">' + entry.name + ' (' + Math.round(entry.size / 1024 / 1024) + ' MB)</span>' +
-            '<span class="w-32 bg-gray-200 dark:bg-gray-700 rounded h-2 overflow-hidden"><span style="width:' + pct + '%" class="block h-2 bg-brand-primary"></span></span>' +
-            '<span class="w-16 text-right">' + (entry.uploaded ? 'Done' : pct + '%') + '</span>' +
-            '<button type="button" data-remove="' + fileId + '" class="text-red-500 hover:underline">Remove</button>'
-        );
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'truncate flex-1';
+        nameSpan.textContent = entry.name + ' (' + Math.round(entry.size / 1024 / 1024) + ' MB)';
+
+        const barOuter = document.createElement('span');
+        barOuter.className = 'w-32 bg-gray-200 dark:bg-gray-700 rounded h-2 overflow-hidden';
+        const barInner = document.createElement('span');
+        barInner.className = 'block h-2 bg-brand-primary';
+        barInner.style.width = pct + '%';
+        barOuter.appendChild(barInner);
+
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'w-16 text-right';
+        statusSpan.textContent = entry.uploaded ? 'Done' : pct + '%';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.setAttribute('data-remove', fileId);
+        removeBtn.className = 'text-red-500 hover:underline';
+        removeBtn.textContent = 'Remove';
+
+        li.append(nameSpan, barOuter, statusSpan, removeBtn);
     }
 
     async function uploadFile(file) {
@@ -130,26 +166,50 @@ document.addEventListener('DOMContentLoaded', function () {
         files.set(fileId, { name: file.name, size: file.size, uploaded: false, progress: 0 });
         renderRow(fileId, files.get(fileId));
 
-        const partNumbers = [];
-        for (let i = 1; i <= partCount; i++) partNumbers.push(i);
-
-        const urlsResp = await fetch('/transfer/send/' + draftId + '/files/' + fileId + '/parts/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({ part_numbers: partNumbers }),
-        });
-        const urlsData = await urlsResp.json();
-        const parts = [];
-
+        // Slice every part and hash it up front, so each request for a presigned URL can carry
+        // that part's checksum (see `sha256Base64` above).
+        const blobs = [];
+        const requestParts = [];
         for (let i = 0; i < partCount; i++) {
             const partNumber = i + 1;
             const start = i * partSize;
             const end = Math.min(start + partSize, file.size);
             const blob = file.slice(start, end);
+            blobs.push(blob);
+            requestParts.push({
+                part_number: partNumber,
+                checksum_sha256: await sha256Base64(blob),
+            });
+        }
+
+        const urlsResp = await fetch('/transfer/send/' + draftId + '/files/' + fileId + '/parts/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ parts: requestParts }),
+        });
+        if (!urlsResp.ok) {
+            const err = await urlsResp.json().catch(function () { return {}; });
+            alert('Could not start uploading ' + file.name + ': ' + (err.error || urlsResp.status));
+            return;
+        }
+        const urlsData = await urlsResp.json();
+        const parts = [];
+
+        for (let i = 0; i < partCount; i++) {
+            const partNumber = i + 1;
+            const checksum = requestParts[i].checksum_sha256;
             const url = urlsData.urls[String(partNumber)];
-            const putResp = await fetch(url, { method: 'PUT', body: blob });
+            const putResp = await fetch(url, {
+                method: 'PUT',
+                headers: { 'x-amz-checksum-sha256': checksum },
+                body: blobs[i],
+            });
+            if (!putResp.ok) {
+                alert('Uploading part ' + partNumber + ' of ' + file.name + ' failed: ' + putResp.status);
+                return;
+            }
             const etag = putResp.headers.get('ETag');
-            parts.push({ PartNumber: partNumber, ETag: etag });
+            parts.push({ PartNumber: partNumber, ETag: etag, ChecksumSHA256: checksum });
 
             const entry = files.get(fileId);
             entry.progress = Math.round((partNumber / partCount) * 100);

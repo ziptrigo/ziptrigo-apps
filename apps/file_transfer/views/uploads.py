@@ -69,18 +69,31 @@ def add_file(request: AuthenticatedHttpRequest, draft_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def part_urls(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) -> HttpResponse:
+    """Presigned PUT URLs for a batch of parts.
+
+    Body: `{"parts": [{"part_number": n, "checksum_sha256": "<base64 SHA-256 of that part>"},
+    ...]}` -- the browser computes each part's checksum with `crypto.subtle` before calling this,
+    so the checksum can be bound into the presigned URL's signature (see
+    `services.uploads.presign_parts`).
+    """
     file = _file(request, draft_id, file_id)
     body = _json_body(request)
+    raw_parts = body.get('parts', [])
     try:
-        part_numbers = [int(n) for n in body.get('part_numbers', [])]
-    except TypeError, ValueError:
-        return JsonResponse({'error': 'part_numbers must be a list of integers.'}, status=422)
+        parts = [
+            {'part_number': int(p['part_number']), 'checksum_sha256': str(p['checksum_sha256'])}
+            for p in raw_parts
+        ]
+    except TypeError, ValueError, KeyError:
+        return JsonResponse(
+            {'error': 'parts must be a list of {part_number, checksum_sha256}.'}, status=422
+        )
 
-    if not part_numbers:
-        return JsonResponse({'error': 'part_numbers must not be empty.'}, status=422)
+    if not parts:
+        return JsonResponse({'error': 'parts must not be empty.'}, status=422)
 
     try:
-        urls = services.presign_parts(file, part_numbers)
+        urls = services.presign_parts(file, parts)
     except ValidationError as exc:
         return JsonResponse({'error': exc.messages[0]}, status=422)
 

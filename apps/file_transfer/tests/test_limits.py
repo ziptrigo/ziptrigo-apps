@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 from django.core.exceptions import ValidationError
 
@@ -70,3 +72,33 @@ def test_validate_has_files_requires_an_uploaded_file(draft_transfer):
         transfer=draft_transfer, name='b', size=1, storage_key='k2', uploaded=True
     )
     limits.validate_has_files(draft_transfer)
+
+
+def test_validate_filename_strips_control_characters():
+    assert limits.validate_filename('re\r\nport\x00.pdf') == 'report.pdf'
+
+
+def test_validate_filename_keeps_non_ascii():
+    assert limits.validate_filename('résumé.pdf') == 'résumé.pdf'
+
+
+def test_validate_filename_rejects_empty_after_stripping():
+    with pytest.raises(ValidationError):
+        limits.validate_filename('\x00\x00')
+    with pytest.raises(ValidationError):
+        limits.validate_filename('   ')
+
+
+def test_validate_checksum_sha256_accepts_well_formed_digest():
+    value = base64.b64encode(b'\x00' * 32).decode()
+    assert limits.validate_checksum_sha256(value) == value
+
+
+def test_validate_checksum_sha256_rejects_wrong_length():
+    with pytest.raises(ValidationError):
+        limits.validate_checksum_sha256(base64.b64encode(b'\x00' * 16).decode())
+
+
+def test_validate_checksum_sha256_rejects_non_base64():
+    with pytest.raises(ValidationError):
+        limits.validate_checksum_sha256('not base64!!')

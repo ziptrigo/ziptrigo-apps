@@ -1,9 +1,17 @@
 """Thin wrapper around boto3 S3 for transfer file storage (spec section 11).
 
-Keys: `transfers/<transfer_id>/<file_id>/<filename>`. One private bucket per environment
-(`FILE_TRANSFER_S3_*` settings, provisioned in the `infra` repo -- see `CLAUDE.md`), CORS'd for
-direct browser multipart PUTs; a bucket lifecycle rule aborts incomplete multipart uploads after a
-day as a backstop (`cleanup_drafts` is the primary mechanism, spec section 10).
+Keys: `transfers/<transfer_id>/<file_id>` -- deliberately *not* `.../<filename>` (a deviation from
+the spec's literal key shape, noted in `CLAUDE.md`): a user-supplied name can contain `/`, `..`,
+quotes or other characters that would either add spurious key segments, get mangled by a
+presigned URL's path normalization (breaking its signature), or need escaping to be safe inside
+it. The display name lives only on `TransferFile.name` and is rendered into `Content-Disposition`
+by `presigned_get_url` instead. One private bucket per environment (`FILE_TRANSFER_S3_*`
+settings, provisioned in the `infra` repo -- see `CLAUDE.md`), CORS'd for direct browser
+multipart PUTs -- which, since parts are uploaded with a per-part SHA-256 checksum (see
+`presign_part_url`), must allow the `x-amz-checksum-sha256` request header and expose the
+`ETag` response header for the browser to read back; a bucket lifecycle rule aborts incomplete
+multipart uploads after a day as a backstop (`cleanup_drafts` is the primary mechanism, spec
+section 10).
 
 Everything that talks to S3 goes through `S3Storage`, built from a boto3 client. Callers get an
 instance via `get_storage()`; tests construct `S3Storage(client=<a stub/mock>)` directly (or
@@ -11,8 +19,10 @@ monkeypatch `get_storage`) so nothing here ever needs the network in tests.
 """
 
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -39,14 +49,29 @@ PUT_URL_EXPIRES_SECONDS = 60 * 60
 _DELETE_BATCH_SIZE = 1000
 
 
-def storage_key(transfer_id: object, file_id: object, filename: str) -> str:
-    """The S3 key for one transfer file."""
-    return f'transfers/{transfer_id}/{file_id}/{filename}'
+def storage_key(transfer_id: object, file_id: object) -> str:
+    """The S3 key for one transfer file, keyed by id only -- see the module docstring."""
+    return f'transfers/{transfer_id}/{file_id}'
 
 
 def transfer_prefix(transfer_id: object) -> str:
     """The S3 key prefix covering every object that belongs to a transfer."""
     return f'transfers/{transfer_id}/'
+
+
+def _content_disposition(filename: str) -> str:
+    """RFC 6266 `Content-Disposition: attachment`, with an ASCII-safe `filename` fallback (for
+    clients that don't understand `filename*`) alongside a percent-encoded UTF-8 `filename*` (for
+    the ones that do, so non-ASCII names still come through correctly). Guards against header
+    injection from a stored name containing quotes, backslashes or control characters -- those
+    shouldn't be possible any more given `services.limits.validate_filename` at add-file time, but
+    this is the last line of defense before the value reaches an HTTP header.
+    """
+    stripped = ''.join(ch for ch in filename if unicodedata.category(ch) != 'Cc')
+    ascii_fallback = ''.join(ch if ch.isascii() else '_' for ch in stripped)
+    ascii_fallback = ascii_fallback.replace('\\', '_').replace('"', "'") or 'download'
+    encoded = quote(stripped.encode('utf-8'), safe='')
+    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
 
 
 @dataclass(slots=True)
@@ -85,18 +110,38 @@ class S3Storage:
         return response['UploadId']
 
     def presign_part_url(
-        self, key: str, upload_id: str, part_number: int, expires_in: int = PUT_URL_EXPIRES_SECONDS
+        self,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        expires_in: int = PUT_URL_EXPIRES_SECONDS,
+        *,
+        content_length: int | None = None,
+        checksum_sha256: str | None = None,
     ) -> str:
-        """A presigned URL the browser PUTs one part's bytes to directly."""
+        """A presigned URL the browser PUTs one part's bytes to directly.
+
+        `content_length` and `checksum_sha256`, when given, are baked into the URL's signature
+        (`generate_presigned_url` maps them to the `Content-Length` and `x-amz-checksum-sha256`
+        request headers respectively) -- the PUT is then only valid for a body of exactly that
+        size and that checksum, which is what actually enforces the declared file size and
+        verifies the part's integrity server-side (S3 rejects the request outright if the header
+        the browser sends doesn't match). `checksum_sha256` must be supplied by the caller (the
+        browser computes it before requesting the URL, via `crypto.subtle`) -- it can't be
+        computed here, since presigning happens before the bytes exist on this end at all.
+        """
+        params: dict = {
+            'Bucket': self.bucket,
+            'Key': key,
+            'UploadId': upload_id,
+            'PartNumber': part_number,
+        }
+        if content_length is not None:
+            params['ContentLength'] = content_length
+        if checksum_sha256 is not None:
+            params['ChecksumSHA256'] = checksum_sha256
         return self.client.generate_presigned_url(
-            'upload_part',
-            Params={
-                'Bucket': self.bucket,
-                'Key': key,
-                'UploadId': upload_id,
-                'PartNumber': part_number,
-            },
-            ExpiresIn=expires_in,
+            'upload_part', Params=params, ExpiresIn=expires_in
         )
 
     def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]) -> None:
@@ -143,7 +188,7 @@ class S3Storage:
             Params={
                 'Bucket': self.bucket,
                 'Key': key,
-                'ResponseContentDisposition': f'attachment; filename="{filename}"',
+                'ResponseContentDisposition': _content_disposition(filename),
             },
             ExpiresIn=expires_in,
         )
