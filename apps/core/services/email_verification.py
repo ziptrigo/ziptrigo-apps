@@ -60,6 +60,11 @@ Settings (code length, validity, max attempts, resend cooldown) come from the ad
 validity, which `start`'s caller may override per call (`validity: timedelta`) when a purpose
 needs a window the shared default shouldn't dictate (e.g. `accounts` keeping signup
 confirmation's historical 48-hour lifetime independent of the shared default other purposes use).
+
+Rate limiting (issue #53): `start` also enforces a per-email-address-per-day cap
+(`settings.RATELIMIT_RULES['EMAIL_VERIFICATION_START_EMAIL']`, via `apps.core.ratelimit`) across
+every purpose, raising `EmailVerificationRateLimited` -- see that exception's docstring for why
+this lives here rather than in each caller.
 """
 
 from __future__ import annotations
@@ -79,6 +84,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from ..models import CoreSettings, EmailVerification
+from ..ratelimit import hit_value
 from .email import EmailBackendClass, get_email_backend, send_email
 
 _DIGITS = '0123456789'
@@ -136,6 +142,16 @@ class ResendTooSoon(EmailVerificationError):
     def __init__(self, retry_after_seconds: int):
         self.retry_after_seconds = retry_after_seconds
         super().__init__(f'Resend too soon; retry after {retry_after_seconds}s.')
+
+
+class EmailVerificationRateLimited(EmailVerificationError):
+    """This `email` has had `settings.RATELIMIT_RULES['EMAIL_VERIFICATION_START_EMAIL']` starts
+    already today, across every purpose and every caller (issue #53; see the module docstring's
+    "Rate limiting" section). Carries the wait left, like `ResendTooSoon`."""
+
+    def __init__(self, retry_after_seconds: int):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(f'Too many verification emails sent; retry after {retry_after_seconds}s.')
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +223,17 @@ def start(
     Otherwise, invalidates any previous still-pending verification for the same `email`/`purpose`
     first -- only the newest one is ever valid.
 
+    Raises `EmailVerificationRateLimited` if `email` has already had
+    `settings.RATELIMIT_RULES['EMAIL_VERIFICATION_START_EMAIL']` starts today, counting across
+    *every* purpose (issue #53): the resend cooldown above only limits how *fast* a fresh code
+    can be requested, not how many times in a day, and it's scoped per `(email, purpose)` -- a
+    caller whose `purpose` varies per object (`file_transfer`'s anonymous sender, one purpose per
+    transfer) gets no cross-object cooldown at all from that alone. Checked *after* the cooldown
+    above, and only once a resend actually would generate a new code/link -- a call rejected by
+    the cooldown never reaches this check, so hammering the same still-cooling-down `(email,
+    purpose)` can't burn through the daily quota without ever producing a usable code. Skipped
+    entirely (like every other rate limit) when `RATELIMIT_ENABLE` is `False`.
+
     Raises `EmailVerificationSendFailed` if every configured email backend fails to deliver the
     new verification -- and rolls back everything this call would otherwise have changed (the new
     row, and the invalidation of the previous one), so a total send failure never silently
@@ -237,6 +264,10 @@ def start(
             if elapsed < cooldown:
                 retry_after = cooldown - elapsed
                 raise ResendTooSoon(retry_after_seconds=int(retry_after.total_seconds()) + 1)
+
+        limit_result = hit_value(email.lower(), 'EMAIL_VERIFICATION_START_EMAIL')
+        if not limit_result.allowed:
+            raise EmailVerificationRateLimited(retry_after_seconds=limit_result.retry_after)
 
         code = _generate_code(settings_row.email_verification_code_length)
         token = secrets.token_urlsafe(32)

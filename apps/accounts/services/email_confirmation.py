@@ -43,6 +43,7 @@ from apps.core.services.email import EmailBackendClass, get_email_backend
 from apps.core.services.email_verification import (
     EmailVerificationContext,
     EmailVerificationError,
+    EmailVerificationRateLimited,
     EmailVerificationSendFailed,
     ResendTooSoon,
     confirm_by_token,
@@ -82,6 +83,9 @@ class EmailConfirmationService:
         docstring) -- strictly an improvement, not a user-visible change.
 
         - `ResendTooSoon`: a resend was requested before the shared cooldown elapsed.
+        - `EmailVerificationRateLimited`: this address has hit its per-day cap on verification
+          sends (issue #53) -- swallowed the same way, so a caller hammering resend can't turn
+          this into a 500; the address simply stops getting new emails until the window resets.
         - `EmailVerificationSendFailed`: every configured email backend failed to deliver the
           new verification (already logged in detail by `apps.core.services.email.send_email`,
           one line per failed backend); logged here too, once, for this specific call's context.
@@ -104,6 +108,8 @@ class EmailConfirmationService:
             )
         except ResendTooSoon:
             pass
+        except EmailVerificationRateLimited:
+            logger.warning('Verification email rate limit hit for %s', user.email)
         except EmailVerificationSendFailed:
             logger.warning('Confirmation email could not be delivered to %s', user.email)
 
