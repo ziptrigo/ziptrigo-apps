@@ -35,3 +35,11 @@ class CoreConfig(AppConfig):
                 lease=timedelta(hours=1),
             )
         )
+        register_job(
+            JobSpec(
+                name='core.purge_expired_rate_limit_counters',
+                func=jobs.purge_expired_rate_limit_counters,
+                interval=timedelta(hours=1),
+                lease=timedelta(minutes=30),
+            )
+        )

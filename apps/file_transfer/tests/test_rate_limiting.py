@@ -259,6 +259,8 @@ class TestUnlockRateLimit:
     def test_429_after_per_transfer_limit_even_from_different_ips(
         self, client, draft_transfer, settings
     ):
+        """`FT_UNLOCK_TRANSFER` (issue #53 code review: looser, counts only wrong passwords) --
+        brute-forcing one transfer's password from many different IPs still trips it."""
         _active(draft_transfer, password_hash=password_service.hash_password('sekret'))
         _enable(settings, 'FT_UNLOCK_TRANSFER', limit=1)
         settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'FT_UNLOCK_IP': (1000, 60)}
@@ -278,6 +280,40 @@ class TestUnlockRateLimit:
         )
 
         assert response.status_code == 302
+
+    def test_per_transfer_ceiling_ignores_correct_password_attempts(
+        self, client, draft_transfer, settings
+    ):
+        """Issue #53 code review: `FT_UNLOCK_TRANSFER` must count only *wrong* passwords -- a
+        third party who merely knows (or guesses) a transfer's slug must not be able to lock the
+        real recipient out of a transfer whose password *they* actually have, just by submitting
+        the correct one repeatedly (this also proves entering the right password on the first try
+        doesn't itself burn the budget)."""
+        _active(draft_transfer, password_hash=password_service.hash_password('sekret'))
+        _enable(settings, 'FT_UNLOCK_TRANSFER', limit=1)
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'FT_UNLOCK_IP': (1000, 60)}
+
+        url = reverse('t:unlock', args=[draft_transfer.slug])
+        for _ in range(3):
+            response = client.post(url, {'password': 'sekret'}, REMOTE_ADDR='10.0.0.1')
+            assert response.status_code == 302
+
+    def test_per_transfer_ceiling_still_blocks_after_enough_wrong_passwords(
+        self, client, draft_transfer, settings
+    ):
+        _active(draft_transfer, password_hash=password_service.hash_password('sekret'))
+        _enable(settings, 'FT_UNLOCK_TRANSFER', limit=1)
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'FT_UNLOCK_IP': (1000, 60)}
+
+        url = reverse('t:unlock', args=[draft_transfer.slug])
+        client.post(url, {'password': 'wrong'}, REMOTE_ADDR='10.0.0.1')
+
+        # The one wrong attempt used up the budget; even the *correct* password is now refused
+        # until the window resets (the accepted trade-off of a looser, shared-across-IPs ceiling
+        # -- see `apps.accounts.services.login_throttle`'s module docstring for the same idea
+        # applied to login).
+        response = client.post(url, {'password': 'sekret'}, REMOTE_ADDR='10.0.0.1')
+        assert response.status_code == 429
 
 
 class TestManageLinkRateLimit:

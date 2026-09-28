@@ -76,12 +76,14 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
     if transfer is None or not services.is_available(transfer):
         return _unavailable(request)
 
-    # Both per-IP and per-transfer (issue #53): brute-forcing one transfer's password must be
-    # throttled even from many IPs, and one IP must not be able to brute-force many transfers
-    # unchecked by either limit alone.
+    # Per-IP (strict, every attempt counts) and per-transfer (looser, counts only wrong
+    # passwords -- issue #53 code review) so brute-forcing one transfer's password is throttled
+    # even from many IPs, one IP can't brute-force many transfers unchecked, and a third party who
+    # merely knows (or guesses) this transfer's slug can't lock the real recipient out of a
+    # transfer whose password *they* actually have just by submitting wrong guesses.
     limited = ratelimit.hit_ip(request, 'FT_UNLOCK_IP')
     if limited.allowed:
-        limited = ratelimit.hit_value(transfer.slug, 'FT_UNLOCK_TRANSFER')
+        limited = ratelimit.peek_value(transfer.slug, 'FT_UNLOCK_TRANSFER')
     if not limited.allowed:
         # Deliberately unbound (no `data=`): `add_error` needs `cleaned_data` to exist, which an
         # unbound form only gets by priming it directly here rather than binding (and thereby
@@ -103,6 +105,9 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
         services.unlock_in_session(request.session, transfer.id, transfer.password_hash)
         return redirect(reverse('t:download', args=[slug]))
 
+    # Record this as a failed attempt against the looser per-transfer ceiling *after* the check
+    # above -- never before it, and never for a right password (see the comment above `hit_ip`).
+    ratelimit.hit_value(transfer.slug, 'FT_UNLOCK_TRANSFER')
     form.add_error('password', 'Incorrect password.')
     return render(
         request, 'file_transfer/download.html', _context(request, transfer, form), status=422

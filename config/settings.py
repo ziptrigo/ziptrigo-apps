@@ -149,20 +149,25 @@ if os.getenv('ENVIRONMENT') == 'prod' and not DATABASE_URL:
     )
 
 
-# Cache: backs `apps.core.ratelimit` (issue #53) on a dedicated `'ratelimit'` alias, so it can be
-# pointed at its own store later without touching `'default'`. Three tiers:
+# Cache: general-purpose caching on `'default'`, plus (only when `CACHE_URL` is set) a dedicated
+# `'ratelimit'` alias `apps.core.ratelimit` can use instead of its DB-backed default -- see
+# `RATELIMIT_STORAGE` below.
 # - Tests (`_RUNNING_TOOLING`): `LocMemCache` on both aliases -- no shared service to depend on,
-#   and each test process gets its own isolated dict (fine: rate limiting defaults to disabled
-#   under pytest anyway, see `RATELIMIT_ENABLE` below; tests that enable it clear the cache
-#   themselves, see `conftest.py`).
-# - `CACHE_URL` set (any environment): `RedisCache` -- for when there's a shared Redis worth
-#   pointing rate limiting (or the site's general cache) at. A full cache URL, e.g.
-#   `redis://host:6379/0`; requires the `redis` package to actually be installed at runtime (not a
-#   hard dependency of this project, since it's opt-in).
-# - Otherwise (dev/prod default): `DatabaseCache`, shared through the same Postgres every gunicorn
-#   worker, the task worker and the scheduler already use -- no new service to run. Its table is
-#   created by a migration (`apps/core/migrations/0002_ratelimit_cache_table.py`), so `migrate`
-#   (already run on every deploy, see `docker-entrypoint.sh`) is all `createcachetable` needs.
+#   and each test process gets its own isolated dict. Rate limiting defaults to disabled under
+#   pytest anyway (see `RATELIMIT_ENABLE` below); tests that enable it either exercise the DB
+#   storage path directly (`RATELIMIT_STORAGE` also defaults to `'db'` under pytest, same as
+#   dev/prod without `CACHE_URL` -- "runs on the test DB naturally") or opt into this `'ratelimit'`
+#   LocMem alias with `override_settings(RATELIMIT_STORAGE='cache')` to exercise that path's logic
+#   instead (see `apps/core/tests/test_ratelimit.py`).
+# - `CACHE_URL` set (any environment): `RedisCache` on both aliases, and `RATELIMIT_STORAGE`
+#   becomes `'cache'` -- for when there's a shared Redis worth pointing rate limiting (or the
+#   site's general cache) at. A full cache URL, e.g. `redis://host:6379/0`; requires the `redis`
+#   package to actually be installed at runtime (not a hard dependency of this project, since it's
+#   opt-in).
+# - Otherwise (dev/prod default): just `'default'` (`LocMemCache`, per-process -- fine for the
+#   site's own incidental caching needs). No `'ratelimit'` alias at all: `RATELIMIT_STORAGE` is
+#   `'db'`, which doesn't use a cache backend (see `apps.core.ratelimit.limiter`'s docstring for
+#   why not `DatabaseCache`, which this replaced -- issue #53 code review).
 CACHE_URL = os.getenv('CACHE_URL', '')
 
 if _RUNNING_TOOLING:
@@ -184,21 +189,44 @@ elif CACHE_URL:
 else:
     CACHES = {
         'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'},
-        'ratelimit': {
-            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
-            'LOCATION': 'ratelimit_cache',
-        },
     }
 
 
-# Rate limiting (issue #53): `apps.core.ratelimit` enforces every entry in `RATELIMIT_RULES`
-# against the `'ratelimit'` cache above. `RATELIMIT_ENABLE` is the project-wide kill switch --
-# off by default under pytest so unrelated tests can't become flaky by incidentally tripping a
-# limit; tests that specifically exercise a limit turn it on with `override_settings` and clear
-# the cache first (see `conftest.py`'s `clear_ratelimit_cache` fixture).
+# Rate limiting (issue #53): `apps.core.ratelimit` enforces every entry in `RATELIMIT_RULES`.
+# `RATELIMIT_ENABLE` is the project-wide kill switch -- off by default under pytest so unrelated
+# tests can't become flaky by incidentally tripping a limit; tests that specifically exercise a
+# limit turn it on with the `settings`/`override_settings` fixture.
 RATELIMIT_ENABLE = os.getenv(
     'RATELIMIT_ENABLE', 'False' if _RUNNING_TOOLING else 'True'
 ).lower() in ('true', '1')
+
+# Which storage backend `apps.core.ratelimit` counts hits against (issue #53 code review):
+# `'cache'` (the `'ratelimit'` alias above -- `RedisCache` in practice, since that's the only case
+# that sets `CACHE_URL`) when one's configured, `'db'` otherwise (`apps.core.models.RateLimitCounter`,
+# an atomic upsert against whichever database `DATABASES['default']` already is -- Postgres in
+# prod, SQLite under pytest). `'db'` is also what dev/prod get with no `CACHE_URL`, and what pytest
+# gets by default with no `CACHE_URL` set for test runs either -- see `apps/core/ratelimit/limiter.py`'s
+# docstring for both backends' semantics and why `DatabaseCache` (this setting's predecessor) was
+# replaced rather than fixed in place.
+RATELIMIT_STORAGE = 'cache' if CACHE_URL else 'db'
+
+# Trusted proxies for `apps.core.services.client_ip.client_ip` (issue #53 code review): a
+# comma-separated list of IPs and/or CIDRs. `X-Real-IP` is only honoured when `REMOTE_ADDR` (the
+# actual TCP peer, which a client can't spoof) matches one of these -- otherwise `REMOTE_ADDR`
+# itself is used, so a client that can reach this app directly can never forge its own IP for
+# rate limiting or `DownloadEvent.ip`/`Transfer.sender_ip` just by setting the header. The default
+# covers loopback + RFC 1918 + unique-local IPv6 (`fc00::/7`): this project's own nginx reaches
+# gunicorn over a private Docker bridge address, never a public one -- **gunicorn itself must only
+# ever be published on an internal interface in production** (never bound to a public one
+# directly), since anything that can open a TCP connection straight to gunicorn can set
+# `X-Real-IP` to whatever it likes and this setting is the only thing standing between that and a
+# forged client IP.
+_DEFAULT_TRUSTED_PROXIES = '127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7'
+TRUSTED_PROXIES = [
+    entry.strip()
+    for entry in os.getenv('TRUSTED_PROXIES', _DEFAULT_TRUSTED_PROXIES).split(',')
+    if entry.strip()
+]
 
 # name -> (max hits, window in seconds). Every limit is deliberately generous headroom against
 # abuse (scripted brute force, storage/SES cost, CPU-bound rendering), not a precise per-user
@@ -210,21 +238,39 @@ RATELIMIT_ENABLE = os.getenv(
 # accounts/addresses, without either rule alone having to be uncomfortably strict.
 RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # -- accounts: login, signup, password reset, email confirmation --
-    # Login: per-IP throttles scripted credential stuffing; per-account (submitted email, whether
-    # or not it exists) throttles targeted attacks on one victim without a hard lockout a third
-    # party could trigger just by submitting a known email with wrong passwords (CLAUDE.md /
-    # issue #27: throttling over lockout). Shared between the session view
-    # (`POST /account/login/`) and the JWT endpoint (`POST /api/auth/login`) -- same key, same
-    # budget, so one surface can't be used to double the other's allowance.
+    # Login (issue #53 code review: no rule here is a lockout -- see
+    # `apps.accounts.services.login_throttle`'s module docstring for the full reasoning):
+    # - `LOGIN_IP`: per-IP, throttles scripted credential stuffing regardless of which account(s)
+    #   it targets.
+    # - `LOGIN_ACCOUNT_IP`: strict, per submitted-email-*and*-IP, counts every attempt regardless
+    #   of outcome. Throttles one attacking IP hammering one target account hard, without needing
+    #   to know whether the password was right, and -- because it's scoped to *that* IP -- never
+    #   affects the real owner's own login from their own IP.
+    # - `LOGIN_ACCOUNT`: looser, per submitted email alone, but counts only *failed* attempts
+    #   (checked with `peek` before `authenticate()`, only recorded once `authenticate()` actually
+    #   returns `None`). A backstop against the same account being brute-forced from many
+    #   different IPs (each with its own `LOGIN_ACCOUNT_IP` budget) -- and, because only failures
+    #   count, submitting a victim's email with *wrong* passwords can never by itself lock the
+    #   real owner out of their own, correct one.
+    # Shared between the session view (`POST /account/login/`) and the JWT endpoint
+    # (`POST /api/auth/login`) -- same keys, same budgets, so one surface can't double the other's
+    # allowance.
     'LOGIN_IP': (20, 5 * 60),
-    'LOGIN_ACCOUNT': (10, 15 * 60),
+    'LOGIN_ACCOUNT_IP': (10, 5 * 60),
+    'LOGIN_ACCOUNT': (30, 15 * 60),
     # Signup sends a confirmation email (SES cost); no per-account rule makes sense pre-signup.
     'SIGNUP_IP': (5, 60 * 60),
-    # Forgot-password: response is identical whether or not the account exists either way, so a
-    # 429 here reveals nothing a normal response wouldn't already hide (CLAUDE.md: must not leak
-    # existence).
+    # Forgot-password: the response is identical whether or not the account exists either way, so
+    # a 429 here reveals nothing a normal response wouldn't already hide (CLAUDE.md: must not leak
+    # existence) -- but there's no "authenticate()" here to gate a failed-only counter on (every
+    # submission has the same, single outcome), so the per-email protection is a flat cap instead,
+    # same idea as login's split: `FORGOT_PASSWORD_EMAIL_IP` is the strict per-(email, IP) budget,
+    # `FORGOT_PASSWORD_EMAIL` a looser one across every IP -- a third party who merely knows a
+    # victim's address needs many different IPs to exhaust the looser cap and actually block their
+    # reset, rather than the handful of same-IP requests the old single per-email rule allowed.
     'FORGOT_PASSWORD_IP': (10, 60 * 60),
-    'FORGOT_PASSWORD_EMAIL': (3, 60 * 60),
+    'FORGOT_PASSWORD_EMAIL_IP': (3, 60 * 60),
+    'FORGOT_PASSWORD_EMAIL': (15, 60 * 60),
     # Resend-confirmation: per-IP here; the per-*email*-per-day cap is enforced once, centrally,
     # by `EMAIL_VERIFICATION_START_EMAIL` below (every caller of
     # `apps.core.services.email_verification.start` shares it, including this endpoint).
@@ -232,10 +278,12 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # -- core: shared email verification (`apps.core.services.email_verification.start`) --
     # The per-email-address-per-day cap on verification *starts* (CLAUDE.md Known gaps: a resend
     # every 60s cooldown alone still allows ~1,440 sends/day, each with fresh guess attempts).
-    # Applies across every purpose and every caller (accounts' signup confirmation, file_transfer's
-    # per-transfer anonymous confirmation) since it's enforced once inside `start()` itself, keyed
-    # only on the email -- which is exactly what closes the cross-transfer version of the gap
-    # (each anonymous transfer has its own purpose, so a per-purpose cap wouldn't).
+    # Applies within each caller-supplied `rate_limit_group` (`start`'s parameter -- default the
+    # `purpose`), across every purpose *within* that group -- so `accounts`' account-lifecycle
+    # emails and `file_transfer`'s anonymous-send emails (a single shared group across every
+    # transfer's own per-transfer purpose) draw from separate budgets and can't starve each other,
+    # while still closing the cross-transfer version of the gap within file_transfer's own group
+    # (issue #53 code review; see `start`'s docstring).
     'EMAIL_VERIFICATION_START_EMAIL': (20, 24 * 60 * 60),
     # -- qr_code: preview (CPU-bound rendering) and create (writes to media) --
     # Both require login on every surface (web + `/api/qr/`), so keyed per user rather than IP.
@@ -243,7 +291,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'QR_CREATE_USER': (20, 60),
     # `/go/<code>` short-link redirects: public, high-traffic by design (that's the point of a QR
     # code), so deliberately generous. See `apps/qr_code/views/redirect.py` for what happens when
-    # this is exceeded (redirect anyway, skip the scan-count write -- not a 429).
+    # this is exceeded: redirect anyway (a real visitor behind a busy shared IP/NAT must never see
+    # an error just because someone else scanned the same code), but skip the scan-count write --
+    # this rule exists to protect `QRCode.scan_count`'s *accuracy* under that kind of shared-IP
+    # burst, not to shed load (an increment is already one cheap `UPDATE`; the redirect itself is
+    # the expensive-if-anything part, and that never gets skipped).
     'QR_REDIRECT_IP': (120, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
@@ -256,10 +308,13 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'FT_UPLOAD_USER': (120, 60),
     # -- file_transfer: public download page (`/t/<slug>/`) --
     'FT_DOWNLOAD_IP': (120, 60),
-    # Password attempts: both per-IP and per-transfer, so brute-forcing one transfer's password
-    # is throttled even from many IPs, and one IP can't brute-force many transfers unchecked.
+    # Password attempts (issue #53 code review, same split as login): `FT_UNLOCK_IP` stays a
+    # strict, every-attempt-counts per-IP limit; `FT_UNLOCK_TRANSFER` becomes a looser per-transfer
+    # ceiling that counts only *wrong* passwords, so a third party who merely knows (or guesses) a
+    # transfer's slug can no longer lock the real recipient out of a transfer whose password they
+    # actually have.
     'FT_UNLOCK_IP': (15, 10 * 60),
-    'FT_UNLOCK_TRANSFER': (10, 10 * 60),
+    'FT_UNLOCK_TRANSFER': (30, 10 * 60),
     # Anonymous sender's manage link (`/t/<slug>/manage/<token>/`): low legitimate traffic.
     'FT_MANAGE_IP': (30, 60 * 60),
 }

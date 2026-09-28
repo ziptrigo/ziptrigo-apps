@@ -14,6 +14,14 @@ class LoginForm(forms.Form):
     def __init__(self, request: HttpRequest | None = None, *args, **kwargs):
         self.request = request
         self.user_cache: User | None = None
+        #: Set `True` only when `authenticate()` itself returned `None` (unknown email or wrong
+        #: password) -- as opposed to a known user blocked by `status`/`email_confirmed`, or the
+        #: form never reaching `authenticate()` at all (a missing/malformed field). Read by
+        #: `apps.accounts.views.login.login_page` to decide whether this submission counts as a
+        #: *failed* login attempt against the looser `LOGIN_ACCOUNT` rate limit (issue #53 code
+        #: review: that rule counts only failed attempts, never a status/confirmation block that
+        #: had nothing to do with the password) -- see `apps.accounts.services.login_throttle`.
+        self.credentials_invalid = False
         super().__init__(*args, **kwargs)
 
     def clean(self):
@@ -25,6 +33,7 @@ class LoginForm(forms.Form):
 
         user: User | None = authenticate(self.request, email=email, password=password)
         if user is None:
+            self.credentials_invalid = True
             raise forms.ValidationError('Invalid credentials')
         if user.status != User.STATUS_ACTIVE:
             raise forms.ValidationError('User not active')

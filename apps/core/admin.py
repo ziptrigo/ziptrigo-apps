@@ -1,6 +1,7 @@
 """Admin registrations for `core`'s own models: the scheduler's job status, the singleton
 `CoreSettings` page (issue #58, mirrors `apps.file_transfer.admin.FileTransferSettingsAdmin`),
-and a read-only `EmailVerification` admin for support.
+a read-only `EmailVerification` admin for support, and a read-only `RateLimitCounter` admin
+(issue #53 code review) for debugging which rules are actually tripping.
 """
 
 from django.contrib import admin
@@ -8,7 +9,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect
 
 from .admin_site import AuthenticatedHttpRequest, custom_admin_site
-from .models import CoreSettings, EmailVerification, ScheduledJob
+from .models import CoreSettings, EmailVerification, RateLimitCounter, ScheduledJob
 
 #: Every field on `EmailVerification` except its code/token hashes -- spelled out rather than
 #: introspected from `EmailVerification._meta` (`ty` has no insight into that metaclass-populated
@@ -121,6 +122,28 @@ class EmailVerificationAdmin(admin.ModelAdmin):
         return False
 
 
+class RateLimitCounterAdmin(admin.ModelAdmin):
+    """Read-only: rows are written only by `apps.core.ratelimit`'s atomic upsert and cleaned up
+    only by the `purge_expired_rate_limit_counters` scheduler job. `key` is already a hash (see
+    the model docstring) -- nothing here identifies which account, email, IP or transfer a row
+    belongs to, only which *rule* and roughly how close to its limit it is."""
+
+    list_display = ['key', 'count', 'expires_at']
+    list_filter = ['expires_at']
+    search_fields = ['key']
+    readonly_fields = ['key', 'count', 'expires_at']
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+
 custom_admin_site.register(ScheduledJob, ScheduledJobAdmin)
 custom_admin_site.register(CoreSettings, CoreSettingsAdmin)
 custom_admin_site.register(EmailVerification, EmailVerificationAdmin)
+custom_admin_site.register(RateLimitCounter, RateLimitCounterAdmin)

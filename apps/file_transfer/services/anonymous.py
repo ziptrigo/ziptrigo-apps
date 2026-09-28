@@ -29,7 +29,12 @@ from apps.core.services.email_verification import start as start_verification
 
 from ..models import FileTransferSettings, Transfer, TransferRecipient, TransferStatus
 from . import anon_limits, anon_session, limits
-from .anon_emails import build_confirmation_email, send_anonymous_sender_copy, verification_purpose
+from .anon_emails import (
+    PURPOSE,
+    build_confirmation_email,
+    send_anonymous_sender_copy,
+    verification_purpose,
+)
 from .emails import send_transfer_notification
 from .expiry_choices import resolve_expiry_anonymous
 from .lifecycle import end_transfer
@@ -152,6 +157,11 @@ def start_confirmation(
             options.sender_email,
             verification_purpose(locked.id),
             build_email=build_confirmation_email(locked),
+            # Shared across every transfer (not the per-transfer `purpose` above): issue #53 code
+            # review -- otherwise the per-email-per-day cap on verification starts would reset for
+            # every new transfer, defeating the whole point of it being per-address rather than
+            # per-purpose (see `EMAIL_VERIFICATION_START_EMAIL` in `config/settings.py`).
+            rate_limit_group=PURPOSE,
         )
 
         locked.sender_email = options.sender_email
@@ -181,6 +191,7 @@ def resend_confirmation(transfer: Transfer) -> Transfer:
         transfer.sender_email,
         verification_purpose(transfer.id),
         build_email=build_confirmation_email(transfer),
+        rate_limit_group=PURPOSE,
     )
     Transfer.objects.filter(pk=transfer.pk).update(email_verification_id=verification_id)
     transfer.email_verification_id = verification_id

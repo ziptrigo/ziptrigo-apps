@@ -10,6 +10,7 @@ from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import LoginForm
+from ..services import login_throttle
 
 
 def _redirect_target(request: HttpRequest, next_url: str | None) -> str:
@@ -31,15 +32,15 @@ def login_page(request: HttpRequest) -> HttpResponse:
     next_url = request.POST.get('next') or request.GET.get('next')
 
     if request.method == 'POST':
-        # Per-IP and per-account (issue #53): throttles both scripted credential stuffing from
-        # one IP and a targeted attack on one victim's email from many -- see
-        # `settings.RATELIMIT_RULES['LOGIN_IP']`/`['LOGIN_ACCOUNT']` for why it's throttling
-        # rather than a hard lockout (a lockout a third party could trigger just by submitting a
-        # known email would be a denial-of-service against the real owner).
+        # Per-IP, strict per-(account, IP), and a looser failed-attempts-only per-account ceiling
+        # (issue #53 code review; see `apps.accounts.services.login_throttle`'s module docstring
+        # for the full reasoning) -- none of these are a hard lockout: a third party who merely
+        # knows a victim's email can never lock them out of logging in with their own, correct
+        # password just by submitting it.
+        submitted_email = (request.POST.get('email') or '').strip().lower()
         limited = ratelimit.hit_ip(request, 'LOGIN_IP')
         if limited.allowed:
-            submitted_email = (request.POST.get('email') or '').strip().lower()
-            limited = ratelimit.hit_value(submitted_email, 'LOGIN_ACCOUNT')
+            limited = login_throttle.check_before_authenticate(request, submitted_email)
         if not limited.allowed:
             # Deliberately *unbound* (`initial=`, not `data=`) -- a rate-limited request must
             # never still run `LoginForm.clean()`/`authenticate()`, only redisplay what was
@@ -62,6 +63,8 @@ def login_page(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             auth_login(request, form.get_user())
             return hx_redirect(request, _redirect_target(request, next_url))
+        if form.credentials_invalid and submitted_email:
+            login_throttle.record_failed_attempt(submitted_email)
         status = 422
     else:
         form = LoginForm(request)

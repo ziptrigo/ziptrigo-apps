@@ -116,11 +116,13 @@ def test_download_file_ignores_client_supplied_forwarded_for_header(
     assert event.ip != '9.9.9.9'
 
 
-def test_download_file_stores_none_ip_for_a_malformed_x_real_ip(
+def test_download_file_falls_back_to_remote_addr_for_a_malformed_x_real_ip(
     client, draft_transfer, uploaded_file, fake_storage
 ):
-    """A bogus value must not reach `GenericIPAddressField` and crash the request with a
-    Postgres `DataError`."""
+    """A bogus `X-Real-IP` must not reach `GenericIPAddressField` and crash the request with a
+    Postgres `DataError` -- nor should it become "no IP at all" (issue #53 code review: that
+    would make every per-IP rate limit on this request unlimited). It falls back to the trusted
+    `REMOTE_ADDR` instead -- the test client's default, `127.0.0.1`."""
     _active(draft_transfer)
     response = client.get(
         reverse('t:download-file', args=[draft_transfer.slug, uploaded_file.id]),
@@ -128,7 +130,7 @@ def test_download_file_stores_none_ip_for_a_malformed_x_real_ip(
     )
     assert response.status_code == 302
     event = DownloadEvent.objects.get(transfer=draft_transfer, file=uploaded_file)
-    assert event.ip is None
+    assert event.ip == '127.0.0.1'
 
 
 def test_zip_status_builds_then_becomes_ready(
