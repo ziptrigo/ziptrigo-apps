@@ -1,0 +1,37 @@
+<div id="confirm-box">
+    {% if error %}
+    <div class="mb-4 rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    {% if confirm_form.non_field_errors %}
+    <div class="mb-4 rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm">
+        {% for message in confirm_form.non_field_errors %}<p>{{ message }}</p>{% endfor %}
+    </div>
+    {% endif %}
+
+    <form id="confirm-form"
+          hx-post="{% url 'file_transfer:anon-send-confirm-code' transfer.id %}"
+          hx-target="#confirm-box" hx-swap="outerHTML" class="space-y-3">
+        {% csrf_token %}
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Enter the 6-digit code we emailed to {{ transfer.sender_email }}
+        </label>
+        {{ confirm_form.code }}
+        {% for message in confirm_form.code.errors %}
+        <p class="text-sm text-red-600 dark:text-red-400">{{ message }}</p>
+        {% endfor %}
+        <div class="flex items-center gap-3">
+            <button type="submit" class="px-4 py-2 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90">
+                Confirm
+            </button>
+            <button type="button"
+                    hx-post="{% url 'file_transfer:anon-send-confirm-resend' transfer.id %}"
+                    hx-target="#confirm-box" hx-swap="outerHTML"
+                    class="text-sm text-brand-primary hover:underline">
+                Resend code
+            </button>
+        </div>
+    </form>
+</div>

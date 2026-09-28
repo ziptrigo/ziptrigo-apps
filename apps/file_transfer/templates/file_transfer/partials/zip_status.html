@@ -1,0 +1,19 @@
+<div id="zip-area">
+    {% if transfer.zip_status == 'ready' %}
+    <a href="{% url 't:download-zip' transfer.slug %}"
+       class="px-3 py-1.5 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90 whitespace-nowrap">
+        <i class="fas fa-file-zipper mr-1"></i>Download all (.zip)
+    </a>
+    {% elif transfer.zip_status == 'failed' %}
+    <div class="flex items-center gap-2 text-sm">
+        <span class="text-red-600 dark:text-red-400">Could not prepare the zip.</span>
+        <button type="button" hx-get="{% url 't:zip-status' transfer.slug %}" hx-target="#zip-area" hx-swap="outerHTML"
+                class="text-brand-primary hover:underline">Try again</button>
+    </div>
+    {% else %}
+    <div hx-get="{% url 't:zip-status' transfer.slug %}" hx-trigger="every 2s" hx-target="#zip-area" hx-swap="outerHTML"
+         class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+        <i class="fas fa-spinner fa-spin"></i>Preparing the zip...
+    </div>
+    {% endif %}
+</div>
