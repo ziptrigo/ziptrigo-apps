@@ -3,8 +3,6 @@ link recipients get by email. Never reveals *why* a transfer isn't available (ex
 suspended, deleted, or its limit reached all render the same neutral page).
 """
 
-import ipaddress
-
 from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
@@ -14,7 +12,9 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .. import services
 from ..forms import DownloadPasswordForm
-from ..models import Transfer, TransferFile
+from ..models import Transfer, TransferFile, ZipStatus
+from ..services.client_ip import client_ip as _client_ip
+from ..services.zip import ensure_zip_build_started
 
 
 class PublicHttpRequest(HttpRequest):
@@ -25,30 +25,22 @@ class PublicHttpRequest(HttpRequest):
     session: SessionBase
 
 
-def _client_ip(request: HttpRequest) -> str | None:
-    """The real client IP for `DownloadEvent.ip` (phase 1 only; the per-IP anonymous limits in
-    spec section 13 are phase 2).
-
-    Reads `X-Real-IP`, which **must** be set by our own nginx from the actual TCP peer (never
-    passed through from the client) -- unlike `X-Forwarded-For`, which the client fully controls
-    and which nginx here does not sanitize, so it isn't trustworthy on its own. Falls back to
-    `REMOTE_ADDR` for direct/local access (dev, tests, or nginx misconfigured to not set it).
-    Returns `None` for anything that doesn't parse as a valid IP address, rather than letting a
-    bogus value reach `GenericIPAddressField` and crash the request with a `DataError` on
-    Postgres.
-    """
-    candidate = request.META.get('HTTP_X_REAL_IP') or request.META.get('REMOTE_ADDR')
-    if not candidate:
-        return None
-    try:
-        ipaddress.ip_address(candidate)
-    except ValueError:
-        return None
-    return candidate
-
-
 def _unavailable(request: HttpRequest) -> HttpResponse:
     return render(request, 'file_transfer/unavailable.html', status=404)
+
+
+def _password_gated_transfer(request: PublicHttpRequest, slug: str) -> Transfer | HttpResponse:
+    """Shared prelude for every public per-file/zip download endpoint: look the transfer up,
+    check availability, and check the password gate (spec section 3: gates the download buttons,
+    not the file list). Returns either the `Transfer` or the response to return instead."""
+    transfer = Transfer.objects.filter(slug=slug).first()
+    if transfer is None or not services.is_available(transfer):
+        return _unavailable(request)
+    if services.requires_password(transfer) and not services.is_unlocked_in_session(
+        request.session, transfer.id, transfer.password_hash
+    ):
+        return redirect(reverse('t:download', args=[slug]))
+    return transfer
 
 
 def _context(request: PublicHttpRequest, transfer: Transfer, password_form: DownloadPasswordForm):
@@ -91,18 +83,47 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
 
 @require_GET
 def download_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpResponse:
-    transfer = Transfer.objects.filter(slug=slug).first()
-    if transfer is None or not services.is_available(transfer):
-        return _unavailable(request)
-
-    if services.requires_password(transfer) and not services.is_unlocked_in_session(
-        request.session, transfer.id, transfer.password_hash
-    ):
-        return redirect(reverse('t:download', args=[slug]))
+    transfer = _password_gated_transfer(request, slug)
+    if isinstance(transfer, HttpResponse):
+        return transfer
 
     file = get_object_or_404(TransferFile, id=file_id, transfer=transfer, uploaded=True)
     try:
         url = services.record_download(transfer, file, _client_ip(request))
+    except ValidationError:
+        return _unavailable(request)
+    return redirect(url)
+
+
+@require_GET
+def zip_status(request: PublicHttpRequest, slug: str) -> HttpResponse:
+    """HTMX partial (spec section 5): kick the lazy zip build off the first time it's asked for,
+    then report the current status -- "preparing" (`BUILDING`/`NONE` just claimed),
+    "ready" (a download link), or "failed" (with a retry). The template polls this until it stops
+    being `BUILDING`."""
+    transfer = _password_gated_transfer(request, slug)
+    if isinstance(transfer, HttpResponse):
+        return transfer
+
+    if transfer.zip_status in (ZipStatus.NONE, ZipStatus.FAILED):
+        ensure_zip_build_started(transfer)
+        transfer.refresh_from_db(fields=['zip_status'])
+    return render(request, 'file_transfer/partials/zip_status.html', {'transfer': transfer})
+
+
+@require_GET
+def download_zip(request: PublicHttpRequest, slug: str) -> HttpResponse:
+    """The actual zip download, once `zip_status` is `READY` -- otherwise back to the status
+    partial's polling view rather than erroring."""
+    transfer = _password_gated_transfer(request, slug)
+    if isinstance(transfer, HttpResponse):
+        return transfer
+
+    if transfer.zip_status != ZipStatus.READY:
+        return redirect(reverse('t:zip-status', args=[slug]))
+
+    try:
+        url = services.record_download(transfer, None, _client_ip(request))
     except ValidationError:
         return _unavailable(request)
     return redirect(url)

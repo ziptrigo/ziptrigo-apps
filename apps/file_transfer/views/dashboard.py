@@ -42,7 +42,7 @@ def _transfers_for(user, filter_value: str):
         # instead of annotated since the row template needs the objects themselves, not just a
         # count, and `display_name` relies on `files` being prefetched too (see its docstring).
         .annotate(download_events_count=Count('download_events', distinct=True))
-        .prefetch_related('files', 'recipients')
+        .prefetch_related('files', 'recipients', 'download_events')
         .order_by('-created_at')
     )
     if filter_value == ENDED_FILTER:

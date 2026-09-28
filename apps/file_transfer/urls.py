@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from .views import anonymous as anon_views
 
 app_name = 'file_transfer'
 
@@ -39,4 +40,45 @@ urlpatterns = [
         views.resend_recipient,
         name='resend-recipient',
     ),
+    # Anonymous send flow (spec section 2 phase 2): session-owned, not login-owned -- see
+    # views/anonymous.py. One page (anon-send) renders whichever step the session's current
+    # anonymous transfer is in.
+    path('send/anon/', anon_views.send_page, name='anon-send'),
+    path('send/anon/<uuid:draft_id>/files/', anon_views.add_file, name='anon-send-add-file'),
+    path(
+        'send/anon/<uuid:draft_id>/files/<uuid:file_id>/parts/',
+        anon_views.part_urls,
+        name='anon-send-part-urls',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/files/<uuid:file_id>/complete/',
+        anon_views.complete_file,
+        name='anon-send-complete-file',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/files/<uuid:file_id>/remove/',
+        anon_views.remove_file,
+        name='anon-send-remove-file',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/confirm/',
+        anon_views.start_confirmation,
+        name='anon-send-confirm',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/confirm/code/',
+        anon_views.confirm_code,
+        name='anon-send-confirm-code',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/confirm/resend/',
+        anon_views.resend_confirmation,
+        name='anon-send-confirm-resend',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/confirm/link/<str:token>/',
+        anon_views.confirm_link,
+        name='anon-send-confirm-link',
+    ),
+    path('sent/anon/<uuid:transfer_id>/', anon_views.sent_page, name='anon-sent'),
 ]

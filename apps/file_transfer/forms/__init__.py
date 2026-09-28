@@ -1,3 +1,5 @@
+from .anonymous_send import AnonymousSendOptionsForm
+from .confirm import ConfirmCodeForm
 from .dashboard_actions import (
     AddRecipientsForm,
     ExpiryActionForm,
@@ -10,6 +12,8 @@ from .send import SendOptionsForm
 
 __all__ = [
     'AddRecipientsForm',
+    'AnonymousSendOptionsForm',
+    'ConfirmCodeForm',
     'DownloadPasswordForm',
     'ExpiryActionForm',
     'MaxDownloadsActionForm',
