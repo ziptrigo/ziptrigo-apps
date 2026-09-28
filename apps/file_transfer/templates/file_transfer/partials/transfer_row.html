@@ -17,6 +17,15 @@
                 &middot; sent {{ transfer.completed_at|date:"Y-m-d H:i" }}
                 &middot; <span class="uppercase font-semibold">{{ transfer.get_status_display }}</span>
             </p>
+            {% if transfer.status == 'taken_down' %}
+            <p class="text-xs text-red-600 dark:text-red-400 mt-1">
+                This transfer was taken down{% if transfer.takedown_reason %}: {{ transfer.takedown_reason }}{% endif %}
+            </p>
+            {% elif transfer.held_for_review_at %}
+            <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                This transfer is on hold pending review and is temporarily unavailable.
+            </p>
+            {% endif %}
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Expires: {% if transfer.expires_at %}{{ transfer.expires_at|date:"Y-m-d H:i" }} UTC{% else %}Never{% endif %}
                 &middot; Downloads: {{ transfer.download_count }}{% if transfer.max_downloads %} / {{ transfer.max_downloads }}

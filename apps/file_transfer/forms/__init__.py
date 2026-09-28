@@ -8,9 +8,11 @@ from .dashboard_actions import (
     TransferSettingsActionForm,
 )
 from .download import DownloadPasswordForm
+from .report import AbuseReportForm
 from .send import SendOptionsForm
 
 __all__ = [
+    'AbuseReportForm',
     'AddRecipientsForm',
     'AnonymousSendOptionsForm',
     'ConfirmCodeForm',

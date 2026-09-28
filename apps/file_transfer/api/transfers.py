@@ -19,6 +19,7 @@ from ninja.errors import HttpError
 from apps.accounts.auth import JWTAuth
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
+from apps.core.services.client_ip import client_ip
 
 from .. import services
 from ..models import ENDED_STATUSES, Transfer, TransferRecipient, TransferStatus
@@ -29,6 +30,7 @@ from ..schemas import (
     TransferSchema,
     TransferUpdateSchema,
 )
+from ..services.blocklist import BLOCKED_MESSAGE, BlockedSenderError, is_blocked
 from .router import router
 
 auth = JWTAuth()
@@ -69,6 +71,8 @@ def create_transfer(request):
     Rate-limited on top of that for the same reason every other upload-side endpoint here is.
     """
     ratelimit.enforce(ratelimit.hit_user(request.auth, 'FT_UPLOAD_USER'))
+    if is_blocked(email=request.auth.email, ip=client_ip(request)):
+        raise HttpError(403, BLOCKED_MESSAGE)
     transfer = services.get_or_create_draft(request.auth)
     return 201, transfer
 
@@ -139,6 +143,8 @@ def finalize_transfer(request, transfer_id: UUID, payload: FinalizeTransferSchem
     )
     try:
         services.finalize_send(transfer, options)
+    except BlockedSenderError as exc:
+        raise HttpError(403, exc.messages[0])
     except ValidationError as exc:
         raise HttpError(400, exc.messages[0])
     except InsufficientCreditsError as exc:

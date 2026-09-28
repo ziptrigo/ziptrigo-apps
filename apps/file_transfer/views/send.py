@@ -16,10 +16,12 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import InsufficientCreditsError, get_balance
 from apps.core.htmx import hx_redirect
+from apps.core.services.client_ip import client_ip
 
 from .. import services
 from ..forms import SendOptionsForm
 from ..models import FileTransferSettings, Transfer, TransferStatus
+from ..services.blocklist import is_blocked
 from ..services.storage import PART_SIZE_BYTES
 
 
@@ -53,6 +55,12 @@ def send_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     the draft's existing files are then serialized into the page for that JS to rebuild its file
     list and offer to resume whichever ones haven't finished uploading yet.
     """
+    if is_blocked(email=request.user.email, ip=client_ip(request)):
+        # Block list (issue #59): checked at draft creation, before anything else on this page
+        # even runs. Never says why -- just that sending isn't available right now, same neutral
+        # wording as any other blocked checkpoint (`services.blocklist.BLOCKED_MESSAGE`).
+        return render(request, 'file_transfer/blocked.html', status=403)
+
     resume_id = request.GET.get('resume')
     draft = None
     if resume_id:

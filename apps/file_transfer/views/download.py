@@ -14,7 +14,7 @@ from apps.core import ratelimit
 from apps.core.services.client_ip import client_ip as _client_ip
 
 from .. import services
-from ..forms import DownloadPasswordForm
+from ..forms import AbuseReportForm, DownloadPasswordForm
 from ..models import Transfer, TransferFile, ZipStatus
 from ..services.zip import ensure_zip_build_started
 
@@ -52,6 +52,7 @@ def _context(request: PublicHttpRequest, transfer: Transfer, password_form: Down
         'unlocked': not services.requires_password(transfer)
         or services.is_unlocked_in_session(request.session, transfer.id, transfer.password_hash),
         'password_form': password_form,
+        'report_form': AbuseReportForm(),
     }
 
 
@@ -193,3 +194,42 @@ def download_zip(request: PublicHttpRequest, slug: str) -> HttpResponse:
     except ValidationError:
         return _unavailable(request)
     return redirect(url)
+
+
+@require_POST
+def report_transfer(request: PublicHttpRequest, slug: str) -> HttpResponse:
+    """ "Report this transfer" (issue #59): an htmx partial on the download page, no login and no
+    password required -- anyone who merely has the link can report it. Only for a transfer that's
+    currently *available*: an already-unavailable transfer shows the same neutral "no longer
+    available" page every other endpoint here does, and there's nothing to report a link to that
+    already doesn't work.
+    """
+    limited = ratelimit.hit_ip(request, 'FT_REPORT_IP')
+    if limited.allowed:
+        limited = ratelimit.hit_value(slug, 'FT_REPORT_TRANSFER')
+    if not limited.allowed:
+        return ratelimit.htmx_response(request, limited, retarget='#report-box')
+
+    transfer = Transfer.objects.filter(slug=slug).first()
+    if transfer is None or not services.is_available(transfer):
+        return _unavailable(request)
+
+    form = AbuseReportForm(request.POST)
+    if form.is_valid():
+        try:
+            services.create_report(
+                transfer,
+                reason=form.cleaned_data['reason'],
+                details=form.cleaned_data['details'],
+                reporter_email=form.cleaned_data['reporter_email'],
+                reporter_ip=_client_ip(request),
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc.messages[0])
+
+    if form.errors:
+        context = {'transfer': transfer, 'report_form': form}
+        return render(request, 'file_transfer/partials/report_box.html', context, status=422)
+
+    context = {'transfer': transfer, 'reported': True}
+    return render(request, 'file_transfer/partials/report_box.html', context)

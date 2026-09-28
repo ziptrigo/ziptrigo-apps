@@ -1,0 +1,46 @@
+<div id="report-box">
+    {% if reported %}
+    <div class="rounded px-4 py-2 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 text-sm">
+        Thank you, your report has been submitted.
+    </div>
+    {% else %}
+    <form hx-post="{% url 't:report' transfer.slug %}" hx-target="#report-box" hx-swap="outerHTML" class="space-y-3">
+        {% csrf_token %}
+
+        {% if report_form.non_field_errors %}
+        <div class="rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm">
+            {% for message in report_form.non_field_errors %}<p>{{ message }}</p>{% endfor %}
+        </div>
+        {% endif %}
+
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Reason
+            {{ report_form.reason }}
+            {% for message in report_form.reason.errors %}
+            <p class="text-sm text-red-600 dark:text-red-400">{{ message }}</p>
+            {% endfor %}
+        </label>
+
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ report_form.details.label }}
+            {{ report_form.details }}
+            {% for message in report_form.details.errors %}
+            <p class="text-sm text-red-600 dark:text-red-400">{{ message }}</p>
+            {% endfor %}
+        </label>
+
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ report_form.reporter_email.label }}
+            {{ report_form.reporter_email }}
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ report_form.reporter_email.help_text }}</span>
+            {% for message in report_form.reporter_email.errors %}
+            <p class="text-sm text-red-600 dark:text-red-400">{{ message }}</p>
+            {% endfor %}
+        </label>
+
+        <button type="submit" class="px-4 py-2 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">
+            Submit report
+        </button>
+    </form>
+    {% endif %}
+</div>
