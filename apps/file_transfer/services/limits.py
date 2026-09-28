@@ -47,28 +47,57 @@ def validate_checksum_sha256(value: str) -> str:
     return value
 
 
-def validate_new_file(transfer: Transfer, size: int, settings: FileTransferSettings) -> None:
-    """Validate that adding one more file of `size` bytes to `transfer` stays within the
-    logged-in limits. Call before creating the `TransferFile` / multipart upload."""
+def _validate_new_file(
+    transfer: Transfer,
+    size: int,
+    *,
+    max_file_size_bytes: int,
+    max_files: int,
+    max_total_size_bytes: int,
+) -> None:
     if size <= 0:
         raise ValidationError('File is empty.')
-    if size > settings.logged_in_max_file_size_bytes:
-        limit_gb = settings.logged_in_max_file_size_bytes / 1024**3
+    if size > max_file_size_bytes:
+        limit_gb = max_file_size_bytes / 1024**3
         raise ValidationError(f'File is larger than the {limit_gb:.1f} GB limit per file.')
 
     existing = transfer.files.all()
-    if existing.count() >= settings.logged_in_max_files:
-        raise ValidationError(f'A transfer can have at most {settings.logged_in_max_files} files.')
+    if existing.count() >= max_files:
+        raise ValidationError(f'A transfer can have at most {max_files} files.')
 
     total = sum(f.size for f in existing) + size
-    if total > settings.logged_in_max_total_size_bytes:
-        limit_gb = settings.logged_in_max_total_size_bytes / 1024**3
+    if total > max_total_size_bytes:
+        limit_gb = max_total_size_bytes / 1024**3
         raise ValidationError(f'Transfer would exceed the {limit_gb:.1f} GB total size limit.')
 
 
-def validate_recipients(emails: list[str], settings: FileTransferSettings) -> list[str]:
-    """Deduplicate (case-insensitively) and validate a recipient list against the max-recipients
-    limit. Returns the deduplicated list, preserving first-seen order and casing."""
+def validate_new_file(transfer: Transfer, size: int, settings: FileTransferSettings) -> None:
+    """Validate that adding one more file of `size` bytes to `transfer` stays within the
+    logged-in limits. Call before creating the `TransferFile` / multipart upload."""
+    _validate_new_file(
+        transfer,
+        size,
+        max_file_size_bytes=settings.logged_in_max_file_size_bytes,
+        max_files=settings.logged_in_max_files,
+        max_total_size_bytes=settings.logged_in_max_total_size_bytes,
+    )
+
+
+def validate_new_file_anonymous(
+    transfer: Transfer, size: int, settings: FileTransferSettings
+) -> None:
+    """Same as `validate_new_file`, against the separate (smaller) anonymous-sender limits (spec
+    section 1)."""
+    _validate_new_file(
+        transfer,
+        size,
+        max_file_size_bytes=settings.anonymous_max_file_size_bytes,
+        max_files=settings.anonymous_max_files,
+        max_total_size_bytes=settings.anonymous_max_total_size_bytes,
+    )
+
+
+def _validate_recipients(emails: list[str], *, max_recipients: int) -> list[str]:
     seen: set[str] = set()
     deduped: list[str] = []
     for email in emails:
@@ -78,11 +107,20 @@ def validate_recipients(emails: list[str], settings: FileTransferSettings) -> li
         seen.add(key)
         deduped.append(email.strip())
 
-    if len(deduped) > settings.logged_in_max_recipients:
-        raise ValidationError(
-            f'A transfer can have at most {settings.logged_in_max_recipients} recipients.'
-        )
+    if len(deduped) > max_recipients:
+        raise ValidationError(f'A transfer can have at most {max_recipients} recipients.')
     return deduped
+
+
+def validate_recipients(emails: list[str], settings: FileTransferSettings) -> list[str]:
+    """Deduplicate (case-insensitively) and validate a recipient list against the logged-in
+    max-recipients limit. Returns the deduplicated list, preserving first-seen order and casing."""
+    return _validate_recipients(emails, max_recipients=settings.logged_in_max_recipients)
+
+
+def validate_recipients_anonymous(emails: list[str], settings: FileTransferSettings) -> list[str]:
+    """Same as `validate_recipients`, against the separate (smaller) anonymous-sender limit."""
+    return _validate_recipients(emails, max_recipients=settings.anonymous_max_recipients)
 
 
 def validate_has_files(transfer: Transfer) -> None:

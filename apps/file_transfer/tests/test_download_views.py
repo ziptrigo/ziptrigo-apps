@@ -131,6 +131,61 @@ def test_download_file_stores_none_ip_for_a_malformed_x_real_ip(
     assert event.ip is None
 
 
+def test_zip_status_builds_then_becomes_ready(
+    client, draft_transfer, uploaded_file, fake_storage, django_capture_on_commit_callbacks
+):
+    """The build is enqueued from `transaction.on_commit`, which only actually runs once the
+    request's transaction commits -- i.e. strictly after this first response is rendered, so it
+    still shows "preparing". The task queue runs inline in tests (`ImmediateBackend`), so by the
+    time a second request (the page's htmx poll) comes in, the build has already finished."""
+    _active(draft_transfer)
+    with django_capture_on_commit_callbacks(execute=True):
+        first = client.get(reverse('t:zip-status', args=[draft_transfer.slug]))
+    assert first.status_code == 200
+    assert b'Preparing' in first.content
+
+    draft_transfer.refresh_from_db()
+    from ..models import ZipStatus
+
+    assert draft_transfer.zip_status == ZipStatus.READY
+
+    second = client.get(reverse('t:zip-status', args=[draft_transfer.slug]))
+    assert b'Download all' in second.content
+
+
+def test_download_zip_before_ready_redirects_to_download_page(
+    client, draft_transfer, uploaded_file
+):
+    """Redirects to the download page itself (whose zip widget shows the "preparing"/polling
+    state), not `t:zip-status` -- that's a bare HTMX fragment with no `core/base.html` chrome, so
+    landing on it directly (e.g. a bookmarked or shared zip link) would show a broken-looking
+    page."""
+    _active(draft_transfer)
+    response = client.get(reverse('t:download-zip', args=[draft_transfer.slug]))
+    assert response.status_code == 302
+    assert response['Location'] == reverse('t:download', args=[draft_transfer.slug])
+
+
+def test_download_zip_requires_password_when_locked(client, draft_transfer, uploaded_file):
+    _active(draft_transfer, password_hash=password_service.hash_password('sekret'))
+    response = client.get(reverse('t:zip-status', args=[draft_transfer.slug]))
+    assert response.status_code == 302
+    assert response['Location'] == reverse('t:download', args=[draft_transfer.slug])
+
+
+def test_download_zip_once_ready_counts_as_one_download(
+    client, draft_transfer, uploaded_file, fake_storage, django_capture_on_commit_callbacks
+):
+    _active(draft_transfer)
+    with django_capture_on_commit_callbacks(execute=True):
+        client.get(reverse('t:zip-status', args=[draft_transfer.slug]))
+
+    response = client.get(reverse('t:download-zip', args=[draft_transfer.slug]))
+    assert response.status_code == 302
+    event = DownloadEvent.objects.get(transfer=draft_transfer, file=None)
+    assert event is not None
+
+
 def test_max_downloads_enforced(client, draft_transfer, uploaded_file, fake_storage):
     _active(draft_transfer, max_downloads=1)
 

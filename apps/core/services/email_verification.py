@@ -150,6 +150,22 @@ class EmailVerificationContext:
     validity_minutes: int
 
 
+@dataclass(frozen=True, slots=True)
+class EmailVerificationResult:
+    """What `confirm_by_token_verbose` returns: the verified email *and* which row confirmed it.
+
+    A caller that hands out a link from a URL that itself names some other object (e.g.
+    `file_transfer`'s `/send/anon/<draft_id>/confirm/link/<token>/`) needs the second part: `email`
+    alone only proves *an* address was confirmed, not that this particular token was ever minted
+    for *that* object -- matching emails is not enough to rule out a token swapped in from a
+    different but same-addressed object's own confirmation link. Comparing `verification_id`
+    against whatever id the caller stored when it called `start` closes that gap.
+    """
+
+    email: str
+    verification_id: uuid.UUID
+
+
 type BuildEmail = Callable[[EmailVerificationContext], tuple[str, str, str]]
 
 
@@ -385,8 +401,16 @@ def confirm_by_code(verification_id: uuid.UUID | str, code: str, purpose: str) -
 
 
 def confirm_by_token(token: str, purpose: str) -> str:
+    """Thin, string-returning wrapper around `confirm_by_token_verbose` for callers (`accounts`)
+    that only ever need the email back -- see that function for the full contract and every
+    exception this can raise."""
+    return confirm_by_token_verbose(token, purpose).email
+
+
+def confirm_by_token_verbose(token: str, purpose: str) -> EmailVerificationResult:
     """Confirm a pending verification by the token from its link and the `purpose` it was
-    started for. Returns the verified email, or raises one of this module's exceptions.
+    started for. Returns the verified email *and* the row's own id (see
+    `EmailVerificationResult`), or raises one of this module's exceptions.
 
     `purpose` must match the row's own `purpose` -- checked as part of the lookup itself, so a
     mismatch raises the same `EmailVerificationNotFound` as an unknown token.
@@ -413,7 +437,7 @@ def confirm_by_token(token: str, purpose: str) -> str:
     *correct* token submissions are supposed to both "succeed" from the caller's point of view,
     since a token isn't single-use by design.
     """
-    result: str | None = None
+    result: EmailVerificationResult | None = None
     error: EmailVerificationError | None = None
 
     with transaction.atomic():
@@ -426,7 +450,9 @@ def confirm_by_token(token: str, purpose: str) -> str:
         else:
             if verification.confirmed_at is not None:
                 if timezone.now() < verification.expires_at:
-                    result = verification.email
+                    result = EmailVerificationResult(
+                        email=verification.email, verification_id=verification.pk
+                    )
                 else:
                     error = EmailVerificationExpired()
             elif verification.invalidated_at is not None:
@@ -443,7 +469,9 @@ def confirm_by_token(token: str, purpose: str) -> str:
                     # one already confirmed the row first, the outcome here is identical: report
                     # success -- that's exactly the idempotent case this function is designed to
                     # tolerate.
-                    result = verification.email
+                    result = EmailVerificationResult(
+                        email=verification.email, verification_id=verification.pk
+                    )
 
     if error is not None:
         raise error

@@ -66,11 +66,17 @@ class FileTransferConfig(AppConfig):
         )
 
     def _connect_signals(self):
+        import logging
+
+        from django.contrib.auth.signals import user_logged_in
         from django.dispatch import receiver
 
         from apps.billing.signals import credits_added
 
+        from .services.claim import claim_transfers_for_user
         from .services.metering import reenable_suspended_transfers_for_user
+
+        logger = logging.getLogger(__name__)
 
         # `weak=False`: `Signal.connect()` defaults to a *weak* reference, and this receiver is a
         # local closure with nothing else keeping it alive once `_connect_signals` returns -- so
@@ -83,3 +89,17 @@ class FileTransferConfig(AppConfig):
         @receiver(credits_added, dispatch_uid='file_transfer.reenable_on_credits_added', weak=False)
         def _reenable_on_credits_added(sender, user, amount, **kwargs):
             reenable_suspended_transfers_for_user(user)
+
+        # Same `weak=False` reasoning as above. Claim-on-login (spec section 6): a confirmed
+        # anonymous transfer with no owner becomes this user's the moment they log in with a
+        # matching, confirmed email. Only the session login page (`apps.accounts.views.login`)
+        # ever fires `user_logged_in` -- signup is API-only and never starts a session (see
+        # CLAUDE.md's Auth section) -- so this is the one place claiming can happen; an account
+        # created with a matching but not-yet-confirmed email claims on whatever its first login
+        # is *after* that email gets confirmed. Never let a bug here break someone's login.
+        @receiver(user_logged_in, dispatch_uid='file_transfer.claim_on_login', weak=False)
+        def _claim_on_login(sender, request, user, **kwargs):
+            try:
+                claim_transfers_for_user(user)
+            except Exception:
+                logger.exception('claim_transfers_for_user failed for user %s', user.pk)

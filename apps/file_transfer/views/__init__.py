@@ -8,7 +8,7 @@ from .dashboard import (
     transfer_list,
     update_settings,
 )
-from .download import download_file, download_page, unlock
+from .download import download_file, download_page, download_zip, unlock, zip_status
 from .send import send_page, send_submit, sent_page
 from .uploads import add_file, complete_file, part_urls, remove_file
 
@@ -21,6 +21,7 @@ __all__ = [
     'disable',
     'download_file',
     'download_page',
+    'download_zip',
     'part_urls',
     'reenable',
     'remove_file',
@@ -31,4 +32,5 @@ __all__ = [
     'transfer_list',
     'unlock',
     'update_settings',
+    'zip_status',
 ]

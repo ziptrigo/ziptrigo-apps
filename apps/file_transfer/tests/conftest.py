@@ -26,6 +26,15 @@ def ft_settings(db) -> FileTransferSettings:
 
 
 @pytest.fixture
+def anon_enabled(ft_settings) -> FileTransferSettings:
+    """`FileTransferSettings` with anonymous sending switched on -- off by default (spec section
+    9 / CLAUDE.md: #53 rate limiting must land before this is opened to the public)."""
+    ft_settings.anonymous_enabled = True
+    ft_settings.save()
+    return ft_settings
+
+
+@pytest.fixture
 def funded_user(user):
     """`user`, topped up with credits to send/re-enable transfers."""
     add_credits(user, 100, description='Test top-up', source='test')

@@ -21,7 +21,7 @@ monkeypatch `get_storage`) so nothing here ever needs the network in tests.
 import logging
 import unicodedata
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, cast
 from urllib.parse import quote
 
 import boto3
@@ -143,6 +143,23 @@ class S3Storage:
         return self.client.generate_presigned_url(
             'upload_part', Params=params, ExpiresIn=expires_in
         )
+
+    def upload_part(self, key: str, upload_id: str, part_number: int, body: bytes) -> str:
+        """Upload one part's bytes directly, server-side -- unlike `presign_part_url`, this part
+        never goes through the browser. Used by the zip builder's streaming multipart writer
+        (`apps.file_transfer.services.zip`, spec section 5). Returns the part's `ETag`."""
+        response = self.client.upload_part(
+            Bucket=self.bucket, Key=key, UploadId=upload_id, PartNumber=part_number, Body=body
+        )
+        return response['ETag']
+
+    def get_object_stream(self, key: str) -> IO[bytes]:
+        """A readable, streaming file-like object (`.read(n)`) for `key`'s bytes, for building
+        the zip without ever loading a whole source file into memory. The real return value is
+        botocore's `StreamingBody`, which satisfies `IO[bytes]` at runtime (`.read(amt)`) but
+        isn't declared as one in `mypy_boto3_s3`'s stubs -- hence the `cast`."""
+        body = self.client.get_object(Bucket=self.bucket, Key=key)['Body']
+        return cast('IO[bytes]', body)
 
     def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]) -> None:
         """Finish the upload. `parts` is `[{'PartNumber': n, 'ETag': etag}, ...]`, in order."""

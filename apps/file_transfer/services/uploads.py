@@ -13,7 +13,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
-from . import limits
+from . import anon_limits, limits
 from .storage import PART_SIZE_BYTES, S3Storage, get_storage, storage_key, transfer_prefix
 
 
@@ -46,21 +46,35 @@ def add_file(
     name: str,
     size: int,
     *,
+    ip: str | None = None,
+    cookie_id: str = '',
     storage: S3Storage | None = None,
 ) -> TransferFile:
     """Register a new file on a draft transfer and start its multipart upload.
 
     Returns the `TransferFile`; the caller still needs `presign_parts` to get upload URLs.
 
+    `ip`/`cookie_id` only matter for an anonymous transfer (`transfer.owner_id is None`): they're
+    checked against the per-IP-per-day byte cap (spec section 13) so a sender can't blow past it
+    by uploading without ever confirming -- the caller (`views.anonymous`) always passes them for
+    an anonymous draft; a logged-in upload has no caller-supplied IP/cookie to check against and
+    doesn't need one, since logged-in senders are billed, not capped.
+
     Raises:
-        ValidationError: the transfer isn't a draft, or the file would break a logged-in limit
-            (spec section 1: max file size, max files, max total size).
+        ValidationError: the transfer isn't a draft, or the file would break a tier limit (spec
+            section 1: max file size, max files, max total size -- logged-in or anonymous,
+            whichever `transfer.owner_id` selects) or the anonymous per-IP-per-day byte cap.
     """
     if transfer.status != TransferStatus.DRAFT:
         raise ValidationError('Files can only be added to a draft transfer.')
 
     name = limits.validate_filename(name)
-    limits.validate_new_file(transfer, size, FileTransferSettings.load())
+    settings_row = FileTransferSettings.load()
+    if transfer.owner_id is None:
+        limits.validate_new_file_anonymous(transfer, size, settings_row)
+        anon_limits.check_upload_bytes_cap(transfer, size, ip, cookie_id, settings_row)
+    else:
+        limits.validate_new_file(transfer, size, settings_row)
 
     storage = storage or get_storage()
     file = TransferFile(transfer=transfer, name=name, size=size)

@@ -1,12 +1,12 @@
 """Public download page logic (spec sections 3-4): availability, password gating, and per-file
-download counting.
+(or, for "download all", per-zip) download counting.
 """
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from ..models import DownloadEvent, Transfer, TransferFile, TransferStatus
+from ..models import DownloadEvent, Transfer, TransferFile, TransferStatus, ZipStatus
 from .emails import send_download_notification
 from .lifecycle import end_transfer
 from .password import verify_password
@@ -47,30 +47,41 @@ def check_password(transfer: Transfer, raw_password: str) -> bool:
 
 def record_download(
     transfer: Transfer,
-    file: TransferFile,
+    file: TransferFile | None,
     ip: str | None,
     *,
     storage: S3Storage | None = None,
 ) -> str:
     """Record a download of `file` and return a short-lived presigned URL for it.
 
+    `file=None` means "download all" (spec section 5): the zip built at `transfer.zip_key`,
+    which must already be `ZipStatus.READY`. Either way this counts as exactly one download
+    against `max_downloads` (spec section 4) -- the zip is otherwise handled identically to a
+    regular file download, including the password gate (checked by the view before this is ever
+    called) and the sender's "file downloaded" notification.
+
     Locks the transfer row for the duration of the check-count-record sequence, so N concurrent
     requests against a transfer with one download remaining can't all slip through before any of
     them is counted. The presigned URL itself is only built after the transaction commits.
 
     Raises:
-        ValidationError: the transfer isn't available, or `file` doesn't belong to it.
+        ValidationError: the transfer isn't available, `file` doesn't belong to it, or (for the
+            zip) the zip isn't ready.
     """
     with transaction.atomic():
         locked_transfer = Transfer.objects.select_for_update().get(pk=transfer.pk)
         if not is_available(locked_transfer):
             raise ValidationError('This transfer is no longer available.')
-        if file.transfer_id != locked_transfer.id:
+        if file is not None and file.transfer_id != locked_transfer.id:
             raise ValidationError('File does not belong to this transfer.')
+        if file is None and locked_transfer.zip_status != ZipStatus.READY:
+            raise ValidationError('The zip is not ready yet.')
 
         DownloadEvent.objects.create(transfer=locked_transfer, file=file, ip=ip)
         transaction.on_commit(
-            lambda: send_download_notification.enqueue(str(locked_transfer.id), str(file.id))
+            lambda: send_download_notification.enqueue(
+                str(locked_transfer.id), str(file.id) if file else None
+            )
         )
 
         # End the transfer the moment the limit is *reached*, rather than waiting for the next
@@ -84,4 +95,6 @@ def record_download(
             end_transfer(locked_transfer, TransferStatus.EXPIRED, delete_files=False)
 
     storage = storage or get_storage()
+    if file is None:
+        return storage.presigned_get_url(locked_transfer.zip_key, 'all.zip')
     return storage.presigned_get_url(file.storage_key, file.name)

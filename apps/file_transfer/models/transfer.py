@@ -98,7 +98,53 @@ class Transfer(models.Model):
     # Django adds this `_id` companion attribute automatically for every `ForeignKey`; see the
     # matching comment in `apps/billing/models/credit_account.py`.
     owner_id: UUID | None
-    sender_email = models.EmailField(blank=True, default='', help_text='Set for anonymous senders.')
+    sender_email = cast(
+        str,
+        models.EmailField(blank=True, default='', help_text='Set for anonymous senders.'),
+    )
+
+    # Anonymous-sender bookkeeping (phase 2). All blank/null for a logged-in transfer.
+    draft_token_hash = cast(
+        str,
+        models.CharField(
+            max_length=64,
+            blank=True,
+            default='',
+            help_text='HMAC-SHA256 digest of a random per-draft token kept in the session that '
+            'created this draft, so only that browser session may upload to or finalize it '
+            "before it's confirmed. Deliberately not the session's own key (which "
+            'django.contrib.auth.login() rotates, and which would otherwise leak a real, '
+            'authenticated session key into this read-only admin list) -- see '
+            'apps.file_transfer.services.anon_session.',
+        ),
+    )
+    sender_ip = cast(
+        'str | None',
+        models.GenericIPAddressField(
+            null=True,
+            blank=True,
+            help_text='Client IP that created the transfer (anonymous only).',
+        ),
+    )
+    anon_cookie_id = cast(
+        str,
+        models.CharField(
+            max_length=64,
+            blank=True,
+            default='',
+            help_text='Opaque id from the signed anonymous-sender cookie, used alongside '
+            'sender_ip for the per-day caps (spec section 13).',
+        ),
+    )
+    email_verification_id = cast(
+        'UUID | None',
+        models.UUIDField(
+            null=True,
+            blank=True,
+            help_text="The apps.core EmailVerification row backing this transfer's pending "
+            'anonymous-sender confirmation.',
+        ),
+    )
 
     slug = cast(
         str,
@@ -163,7 +209,18 @@ class Transfer(models.Model):
     zip_status = cast(
         str, models.CharField(max_length=16, choices=ZipStatus.choices, default=ZipStatus.NONE)
     )
-    zip_key = models.CharField(max_length=512, blank=True, default='')
+    zip_key = cast(str, models.CharField(max_length=512, blank=True, default=''))
+    zip_build_started_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='When the current (or most recent) zip build claimed `zip_status='
+            'BUILDING`. Lets a build that never finished (a worker restart mid-build) be '
+            "re-claimed once it is older than `services.zip`'s lease, instead of leaving the "
+            'download page polling `BUILDING` forever.',
+        ),
+    )
 
     created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
     deleted_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
@@ -196,6 +253,9 @@ class Transfer(models.Model):
             models.Index(fields=['slug']),
             models.Index(fields=['owner', 'status']),
             models.Index(fields=['status', 'expires_at']),
+            # Looked up by services.anon_limits when checking the per-IP-per-day caps.
+            models.Index(fields=['sender_ip', 'created_at']),
+            models.Index(fields=['anon_cookie_id', 'created_at']),
         ]
 
     def __str__(self) -> str:

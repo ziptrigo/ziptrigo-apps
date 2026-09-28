@@ -33,7 +33,7 @@ class FileTransferSettings(models.Model):
     logged_in_max_recipients = cast(int, models.PositiveIntegerField(default=20))
 
     # Anonymous limits (phase 2).
-    anonymous_enabled = models.BooleanField(default=False)
+    anonymous_enabled = cast(bool, models.BooleanField(default=False))
     anonymous_max_file_size_bytes = cast(int, models.PositiveBigIntegerField(default=2 * _GB))
     anonymous_max_files = cast(int, models.PositiveIntegerField(default=20))
     anonymous_max_total_size_bytes = cast(int, models.PositiveBigIntegerField(default=5 * _GB))

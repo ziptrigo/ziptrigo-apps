@@ -38,6 +38,16 @@
             {% endfor %}
         </ul>
 
+        {% if unlocked and files|length > 1 %}
+        <div class="mb-6">
+            <button type="button" id="zip-area"
+                    hx-get="{% url 't:zip-status' transfer.slug %}" hx-target="#zip-area" hx-swap="outerHTML"
+                    class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                <i class="fas fa-file-zipper mr-1"></i>Download all (.zip)
+            </button>
+        </div>
+        {% endif %}
+
         {% if not unlocked %}
         <form method="post" action="{% url 't:unlock' transfer.slug %}" class="space-y-3 border-t border-gray-200 dark:border-gray-700 pt-4">
             {% csrf_token %}

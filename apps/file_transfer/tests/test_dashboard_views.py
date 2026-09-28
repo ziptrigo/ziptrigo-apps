@@ -233,3 +233,26 @@ def test_add_recipients_and_resend(client, draft_transfer):
     assert resend_response.status_code == 200
     recipient.refresh_from_db()
     assert recipient.last_sent_at is not None
+
+
+def test_download_log_is_bounded_and_does_not_n_plus_one(
+    client, draft_transfer, uploaded_file, django_assert_max_num_queries
+):
+    """The dashboard list's `download_events` prefetch (`views.dashboard._transfers_for`) selects
+    each event's `file` up front and caps the log at `_DOWNLOAD_LOG_LIMIT` -- otherwise the row
+    partial's `event.file.name` would fire one query per shown event, and a heavily-downloaded
+    transfer would drag its entire history into memory just to render a handful of rows."""
+    from ..models import DownloadEvent
+
+    _active(draft_transfer)
+    client.force_login(draft_transfer.owner)
+
+    for _ in range(25):
+        DownloadEvent.objects.create(transfer=draft_transfer, file=uploaded_file, ip='1.2.3.4')
+
+    with django_assert_max_num_queries(10):
+        response = client.get(reverse('file_transfer:dashboard'))
+
+    assert response.status_code == 200
+    transfer = response.context['transfers'][0]
+    assert len(transfer.recent_download_events) == 20

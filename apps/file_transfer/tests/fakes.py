@@ -8,11 +8,12 @@ no-op here) and then `head_object` to verify the size, so tests register the "up
 never actually receives.
 """
 
+import io
 from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
 
-from ..services.storage import ObjectInfo
+from ..services.storage import S3_MIN_PART_SIZE_BYTES, ObjectInfo
 
 
 @dataclass
@@ -22,6 +23,12 @@ class FakeS3Storage:
     aborted_uploads: set[str] = field(default_factory=set)
     checksum: str = 'ZmFrZWNoZWNrc3Vt'
     presign_calls: list[tuple[str, int]] = field(default_factory=list)
+    #: Parts recorded through `upload_part` (the zip builder's server-side path), keyed by upload
+    #: id then part number -- assembled into `objects[key]` on `complete_multipart_upload`. The
+    #: browser-PUT path (`presign_part_url`) never populates this: those tests simulate the
+    #: uploaded bytes with `put_object` instead, so `complete_multipart_upload` leaves `objects`
+    #: alone when there's nothing recorded here for the upload id.
+    multipart_parts: dict[str, dict[int, bytes]] = field(default_factory=dict)
 
     def put_object(self, key: str, size: int) -> None:
         """Test helper: pretend `size` bytes were already PUT to `key`."""
@@ -48,12 +55,43 @@ class FakeS3Storage:
             url += f'&checksum={checksum_sha256}'
         return url
 
+    def upload_part(self, key: str, upload_id: str, part_number: int, body: bytes) -> str:
+        self.multipart_parts.setdefault(upload_id, {})[part_number] = bytes(body)
+        return f'etag-{upload_id}-{part_number}'
+
+    def get_object_stream(self, key: str) -> io.BytesIO:
+        if key not in self.objects:
+            raise ClientError({'Error': {'Code': '404', 'Message': 'Not Found'}}, 'GetObject')
+        return io.BytesIO(self.objects[key])
+
     def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]) -> None:
         self.active_uploads.discard(upload_id)
+        recorded = self.multipart_parts.pop(upload_id, None)
+        if recorded:
+            ordered = sorted(recorded)
+            # Mirrors real S3: every part except the last must meet the service minimum, or the
+            # whole multipart upload is rejected at completion time (see
+            # `apps.file_transfer.services.zip`'s `_S3MultipartWriter`, which this enforcement
+            # exists to keep honest -- a part-size regression there should fail a test, not pass
+            # silently against a fake that accepts parts of any size).
+            for part_number in ordered[:-1]:
+                if len(recorded[part_number]) < S3_MIN_PART_SIZE_BYTES:
+                    raise ClientError(
+                        {
+                            'Error': {
+                                'Code': 'EntityTooSmall',
+                                'Message': 'Your proposed upload is smaller than the minimum '
+                                'allowed object size.',
+                            }
+                        },
+                        'CompleteMultipartUpload',
+                    )
+            self.objects[key] = b''.join(recorded[number] for number in ordered)
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
         self.active_uploads.discard(upload_id)
         self.aborted_uploads.add(upload_id)
+        self.multipart_parts.pop(upload_id, None)
 
     def head_object(self, key: str) -> ObjectInfo:
         if key not in self.objects:

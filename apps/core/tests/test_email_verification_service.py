@@ -23,6 +23,7 @@ from apps.core.services.email_verification import (
     ResendTooSoon,
     confirm_by_code,
     confirm_by_token,
+    confirm_by_token_verbose,
     invalidate,
     purge_old,
     start,
@@ -596,6 +597,39 @@ class TestConfirmByToken:
         outer = confirm_by_token(token, PURPOSE)
 
         assert results['inner'] == outer == 'someone@example.com'
+
+
+class TestConfirmByTokenVerbose:
+    """`confirm_by_token_verbose` is what `confirm_by_token` itself is now built on -- the same
+    behaviour, plus the row's own id, which lets a caller whose token comes from a URL that names
+    some other object (`file_transfer`'s anonymous-sender confirmation link) require that id to
+    match what it stored when it called `start`, closing a token-swap between two objects sharing
+    the same email+purpose (see `apps.file_transfer.services.anonymous`)."""
+
+    def test_returns_the_email_and_the_row_id(self):
+        captured = {}
+
+        def build_email(context: EmailVerificationContext) -> tuple[str, str, str]:
+            captured['token'] = context.token
+            return 'subject', 'text', 'html'
+
+        verification_id = start('someone@example.com', PURPOSE, build_email=build_email)
+
+        result = confirm_by_token_verbose(captured['token'], PURPOSE)
+
+        assert result.email == 'someone@example.com'
+        assert result.verification_id == verification_id
+
+    def test_confirm_by_token_is_a_thin_wrapper_around_it(self):
+        captured = {}
+
+        def build_email(context: EmailVerificationContext) -> tuple[str, str, str]:
+            captured['token'] = context.token
+            return 'subject', 'text', 'html'
+
+        start('someone@example.com', PURPOSE, build_email=build_email)
+
+        assert confirm_by_token(captured['token'], PURPOSE) == 'someone@example.com'
 
 
 class TestPurgeOld:

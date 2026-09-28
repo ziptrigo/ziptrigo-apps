@@ -70,8 +70,10 @@ def send_sender_copy(transfer_id: str) -> None:
 
 
 @task
-def send_download_notification(transfer_id: str, file_id: str) -> None:
-    """ "File downloaded" -- to the sender, on each download, if `notify_on_download`."""
+def send_download_notification(transfer_id: str, file_id: str | None) -> None:
+    """ "File downloaded" -- to the sender, on each download, if `notify_on_download`.
+
+    `file_id=None` means the zip ("download all", spec section 5)."""
     try:
         transfer = Transfer.objects.select_related('owner').get(id=transfer_id)
     except Transfer.DoesNotExist:
@@ -79,11 +81,14 @@ def send_download_notification(transfer_id: str, file_id: str) -> None:
     if not transfer.notify_on_download or not transfer.owner or not transfer.owner.email:
         return
 
-    try:
-        file = TransferFile.objects.get(id=file_id)
-        file_name = file.name
-    except TransferFile.DoesNotExist:
-        file_name = 'a file'
+    if file_id is None:
+        file_name = 'all files'
+    else:
+        try:
+            file = TransferFile.objects.get(id=file_id)
+            file_name = file.name
+        except TransferFile.DoesNotExist:
+            file_name = 'a file'
 
     name = transfer_display_name(transfer)
     send_email(

@@ -136,6 +136,23 @@
                 </label>
                 <button type="submit" class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">Add</button>
             </form>
+
+            {% with events=transfer.recent_download_events %}
+            {% if events %}
+            <div>
+                <p class="text-sm font-semibold text-gray-700 dark:text-gray-300 mt-4">Download log</p>
+                <ul class="text-xs space-y-1 mt-1 max-h-40 overflow-y-auto">
+                    {% for event in events %}
+                    <li class="flex items-center justify-between gap-2 text-gray-500 dark:text-gray-400">
+                        <span>{{ event.created_at|date:"Y-m-d H:i" }}</span>
+                        <span class="truncate">{% if event.file %}{{ event.file.name }}{% else %}All files (zip){% endif %}</span>
+                        <span>{{ event.ip|default:"-" }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            {% endwith %}
         </div>
     </div>
     {% endif %}
