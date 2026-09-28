@@ -93,7 +93,13 @@ class _S3MultipartWriter:
         self._storage = storage
         self._key = key
         self._part_size = part_size
-        self._upload_id = storage.create_multipart_upload(key)
+        # No `ChecksumAlgorithm`, unlike a browser/CLI-driven upload (`services.uploads.add_file`):
+        # this writer's parts never cross an untrusted network hop -- they're written server-side,
+        # straight from `S3Storage.get_object_stream`'s reads of other objects in the same bucket
+        # -- so there's nothing for a client-computed checksum to verify, and requesting one would
+        # only obligate `_upload_part`/`finish` to compute and carry one for no benefit (see
+        # `S3Storage.create_multipart_upload`'s docstring).
+        self._upload_id = storage.create_multipart_upload(key, checksum_algorithm=None)
         self._buffer = bytearray()
         self._parts: list[dict] = []
         self._part_number = 1

@@ -125,6 +125,23 @@ def test_set_and_remove_password(draft_transfer):
     assert draft_transfer.password_hash == ''
 
 
+def test_set_notify_on_download_toggles(draft_transfer):
+    _active(draft_transfer, notify_on_download=True)
+
+    actions.set_notify_on_download(draft_transfer, False)
+    assert draft_transfer.notify_on_download is False
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.notify_on_download is False
+
+    actions.set_notify_on_download(draft_transfer, True)
+    assert draft_transfer.notify_on_download is True
+
+
+def test_set_notify_on_download_rejects_ended_transfer(draft_transfer):
+    with pytest.raises(ValidationError):
+        actions.set_notify_on_download(draft_transfer, False)
+
+
 def test_add_recipients_dedupes_against_existing(draft_transfer):
     _active(draft_transfer)
     TransferRecipient.objects.create(transfer=draft_transfer, email='a@example.com')

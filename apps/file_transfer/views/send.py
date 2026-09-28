@@ -23,13 +23,49 @@ from ..models import FileTransferSettings, Transfer, TransferStatus
 from ..services.storage import PART_SIZE_BYTES
 
 
+def _files_for_hydration(transfer: Transfer) -> list[dict]:
+    """Every file already on `transfer`, serialized for the send page's upload JS to rebuild its
+    file list after a reload (spec: resumable uploads) -- see `send.html`."""
+    return [
+        {
+            'id': str(file.id),
+            'name': file.name,
+            'size': file.size,
+            'uploaded': file.uploaded,
+            'client_last_modified': file.client_last_modified,
+        }
+        for file in transfer.files.all()
+    ]
+
+
 @login_required
 @require_GET
 def send_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render the send page. A draft transfer backs it, so the file picker has somewhere to
     attach uploads to right away -- reusing the owner's existing empty draft, if there is one,
-    rather than creating a fresh row on every visit (see `services.get_or_create_draft`)."""
-    draft = services.get_or_create_draft(request.user)
+    rather than creating a fresh row on every visit (see `services.get_or_create_draft`).
+
+    Resuming (spec section 2, "resumable after a page reload"): a `?resume=<draft id>` query
+    string picks up that specific draft instead -- including one that already has files, which
+    `get_or_create_draft` deliberately never reuses on its own (see its docstring). The upload JS
+    adds this parameter to the URL (`history.replaceState`, no navigation) the moment the first
+    file lands on a fresh draft, so an ordinary page reload lands back here with it already set;
+    the draft's existing files are then serialized into the page for that JS to rebuild its file
+    list and offer to resume whichever ones haven't finished uploading yet.
+    """
+    resume_id = request.GET.get('resume')
+    draft = None
+    if resume_id:
+        try:
+            draft = Transfer.objects.filter(
+                id=resume_id, owner=request.user, status=TransferStatus.DRAFT
+            ).first()
+        except ValueError, ValidationError:
+            # Not a well-formed UUID (a stale/tampered query string) -- fall back below rather
+            # than 404, same as if `resume` had simply been omitted.
+            draft = None
+    if draft is None:
+        draft = services.get_or_create_draft(request.user)
     context = {
         'draft_id': str(draft.id),
         'settings': FileTransferSettings.load(),
@@ -37,6 +73,7 @@ def send_page(request: AuthenticatedHttpRequest) -> HttpResponse:
         'part_size_bytes': PART_SIZE_BYTES,
         'balance': get_balance(request.user),
         'min_balance_to_send': services.MIN_BALANCE_TO_SEND,
+        'existing_files': _files_for_hydration(draft),
     }
     return render(request, 'file_transfer/send.html', context)
 

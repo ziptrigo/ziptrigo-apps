@@ -48,6 +48,7 @@ def add_file(
     *,
     ip: str | None = None,
     cookie_id: str = '',
+    client_last_modified: int | None = None,
     storage: S3Storage | None = None,
 ) -> TransferFile:
     """Register a new file on a draft transfer and start its multipart upload.
@@ -59,6 +60,11 @@ def add_file(
     by uploading without ever confirming -- the caller (`views.anonymous`) always passes them for
     an anonymous draft; a logged-in upload has no caller-supplied IP/cookie to check against and
     doesn't need one, since logged-in senders are billed, not capped.
+
+    `client_last_modified` is the browser `File` object's `lastModified` (ms since epoch), when the
+    caller has one -- stored so a later `list_uploaded_parts` caller (the send page's upload JS,
+    after a reload) can match a re-selected file back to this row by name + size + `lastModified`
+    rather than name + size alone (spec: resumable uploads).
 
     Raises:
         ValidationError: the transfer isn't a draft, or the file would break a tier limit (spec
@@ -77,7 +83,16 @@ def add_file(
         limits.validate_new_file(transfer, size, settings_row)
 
     storage = storage or get_storage()
-    file = TransferFile(transfer=transfer, name=name, size=size)
+    file = TransferFile(
+        transfer=transfer,
+        name=name,
+        size=size,
+        client_last_modified=client_last_modified,
+        # Pinned at add-file time rather than read live off `PART_SIZE_BYTES` wherever a part
+        # count/size is needed later (`presign_parts`, `resume_file`'s response) -- see the
+        # field's own docstring for why that matters for an upload that spans a config change.
+        part_size_bytes=PART_SIZE_BYTES,
+    )
     # Keyed by file id only (not the filename): see `storage_key`'s docstring for why.
     key = storage_key(transfer.id, file.id)
     file.storage_key = key
@@ -86,15 +101,24 @@ def add_file(
     return file
 
 
-def _max_part_number(file_size: int) -> int:
-    return max(1, math.ceil(file_size / PART_SIZE_BYTES))
+def _max_part_number(file_size: int, part_size_bytes: int) -> int:
+    return max(1, math.ceil(file_size / part_size_bytes))
 
 
-def _expected_part_content_length(file_size: int, part_number: int, part_count: int) -> int:
-    """Every part is `PART_SIZE_BYTES` except the last, which is whatever's left over."""
+def _expected_part_content_length(
+    file_size: int, part_number: int, part_count: int, part_size_bytes: int
+) -> int:
+    """Every part is `part_size_bytes` except the last, which is whatever's left over."""
     if part_number < part_count:
-        return PART_SIZE_BYTES
-    return file_size - PART_SIZE_BYTES * (part_count - 1)
+        return part_size_bytes
+    return file_size - part_size_bytes * (part_count - 1)
+
+
+def part_count_for(file: TransferFile) -> int:
+    """How many parts `file`'s upload has, at the part size it was started with -- used by every
+    caller (add-file/part-urls/resume responses) that needs to tell a client the shape of the
+    upload without duplicating this arithmetic."""
+    return _max_part_number(file.size, file.part_size_bytes)
 
 
 def presign_parts(
@@ -114,14 +138,14 @@ def presign_parts(
 
     Raises:
         ValidationError: the upload isn't in progress, a part number is outside the valid
-            `1..ceil(size / PART_SIZE_BYTES)` range for this file's declared size (which would
+            `1..ceil(size / file.part_size_bytes)` range for this file's declared size (which would
             otherwise let a sender request far more parts -- and so upload far more bytes -- than
             the size it declared), or a checksum isn't a well-formed base64-encoded SHA-256.
     """
     if not file.upload_id:
         raise ValidationError('File has no upload in progress.')
 
-    part_count = _max_part_number(file.size)
+    part_count = part_count_for(file)
     storage = storage or get_storage()
     urls: dict[int, str] = {}
     for part in parts:
@@ -129,7 +153,9 @@ def presign_parts(
         if part_number < 1 or part_number > part_count:
             raise ValidationError(f'Invalid part number {part_number} for this file.')
         checksum = limits.validate_checksum_sha256(part['checksum_sha256'])
-        content_length = _expected_part_content_length(file.size, part_number, part_count)
+        content_length = _expected_part_content_length(
+            file.size, part_number, part_count, file.part_size_bytes
+        )
         urls[part_number] = storage.presign_part_url(
             file.storage_key,
             file.upload_id,
@@ -177,6 +203,80 @@ def complete_file_upload(
     file.uploaded = True
     file.upload_id = ''
     file.save(update_fields=['checksum', 'uploaded', 'upload_id'])
+    return file
+
+
+class UploadExpired(Exception):
+    """Raised by `list_uploaded_parts` when S3 no longer recognizes `file`'s upload id (the
+    bucket's lifecycle rule aborted an incomplete multipart upload after a day, or a previous run
+    of `cleanup_drafts` beat this request to it). The caller should call `restart_upload` and have
+    the browser re-upload the file from scratch under the fresh upload id it returns.
+    """
+
+
+def list_uploaded_parts(file: TransferFile, *, storage: S3Storage | None = None) -> list[dict]:
+    """List the parts of `file`'s in-progress multipart upload already sitting in S3 (spec:
+    resumable uploads) -- `[{'PartNumber': n, 'ETag': etag, 'Size': size, 'ChecksumSHA256': sum},
+    ...]` -- so the browser can skip re-uploading (and re-hashing) the ones it already sent in an
+    earlier page load and only PUT what's missing. The checksum must be carried back into the part
+    list the caller eventually completes the upload with (see `S3Storage.list_parts`'s docstring).
+
+    Raises:
+        ValidationError: the file has no upload in progress (already completed, or never
+            started), or S3 refused the request for a reason other than the upload having expired
+            (e.g. `AccessDenied`) -- surfaced as a plain validation error rather than an unhandled
+            500, same as every other S3 failure this service layer can turn into one.
+        UploadExpired: S3 no longer knows about the upload id; see `restart_upload`.
+    """
+    if not file.upload_id:
+        raise ValidationError('File has no upload in progress.')
+
+    storage = storage or get_storage()
+    try:
+        return storage.list_parts(file.storage_key, file.upload_id)
+    except ClientError as exc:
+        code = exc.response.get('Error', {}).get('Code', '')
+        if code == 'NoSuchUpload':
+            raise UploadExpired() from exc
+        raise ValidationError(f"Could not list the upload's parts: {exc}") from exc
+
+
+def restart_upload(file: TransferFile, *, storage: S3Storage | None = None) -> TransferFile:
+    """Abandon `file`'s expired/aborted multipart upload and start a fresh one at the same storage
+    key, so the browser can resume uploading every part from scratch under a new upload id (spec:
+    resumable uploads, "handle an expired/aborted multipart upload gracefully"). `file.size` and
+    `file.name` are unchanged -- only the S3-side upload identity resets.
+
+    The DB update is conditional on `file` still holding the exact `upload_id`/`uploaded=False`
+    state it was read in (a compare-and-swap, not a blind `save()`): two tabs open on the same
+    draft can both call this for the same file at nearly the same time -- e.g. tab A's `.../parts/`
+    PUTs finish and it completes the upload (`upload_id=''`, `uploaded=True`) right as tab B's
+    stale `list_uploaded_parts` call (still holding the old upload id) gets `NoSuchUpload` and
+    calls this. Without the guard, tab B's write would land after tab A's and silently flip the
+    now-completed file back to an empty, `uploaded=False` upload, orphaning the object tab A just
+    finished uploading (spec: resumable uploads, issue #55 phase 3 review)."""
+    storage = storage or get_storage()
+    old_upload_id = file.upload_id
+    if old_upload_id:
+        # Already gone as far as S3 is concerned (that's the whole reason this is being called),
+        # but harmless to ask again -- same reasoning as `abort_multipart_upload`'s own docstring.
+        storage.abort_multipart_upload(file.storage_key, old_upload_id)
+    new_upload_id = storage.create_multipart_upload(file.storage_key)
+
+    updated = TransferFile.objects.filter(
+        pk=file.pk, upload_id=old_upload_id, uploaded=False
+    ).update(upload_id=new_upload_id, uploaded=False)
+    if not updated:
+        # Lost the race: something else (a completion, a remove, another restart) already changed
+        # this file's upload since `file` was read. The just-created upload is never going to be
+        # used, so abandon it and hand back the file's current, authoritative state instead of
+        # overwriting whatever that something else just did.
+        storage.abort_multipart_upload(file.storage_key, new_upload_id)
+        file.refresh_from_db()
+        return file
+
+    file.upload_id = new_upload_id
+    file.uploaded = False
     return file
 
 

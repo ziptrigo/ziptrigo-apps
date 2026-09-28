@@ -89,6 +89,16 @@ def remove_password(transfer: Transfer) -> Transfer:
     return set_password(transfer, '')
 
 
+def set_notify_on_download(transfer: Transfer, notify_on_download: bool) -> Transfer:
+    """Toggle the per-transfer "email me when a file is downloaded" setting (spec section 8) --
+    set once at send time (`SendOptionsForm`), and changeable afterwards through the JWT API's
+    update endpoint (spec section 14); not currently exposed as its own dashboard control."""
+    _require_actionable(transfer)
+    Transfer.objects.filter(pk=transfer.pk).update(notify_on_download=notify_on_download)
+    transfer.notify_on_download = notify_on_download
+    return transfer
+
+
 def add_recipients(transfer: Transfer, emails: list[str]) -> list[TransferRecipient]:
     """Add recipients to an existing transfer, subject to the same per-transfer cap as sending
     (spec section 6). Emails already on the transfer are left alone (not re-added, not re-sent

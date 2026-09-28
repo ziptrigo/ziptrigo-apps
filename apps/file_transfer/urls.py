@@ -27,6 +27,11 @@ urlpatterns = [
         views.remove_file,
         name='send-remove-file',
     ),
+    path(
+        'send/<uuid:draft_id>/files/<uuid:file_id>/resume/',
+        views.resume_file,
+        name='send-resume-file',
+    ),
     path('send/<uuid:draft_id>/submit/', views.send_submit, name='send-submit'),
     path('sent/<uuid:transfer_id>/', views.sent_page, name='sent'),
     # Dashboard actions.
@@ -59,6 +64,11 @@ urlpatterns = [
         'send/anon/<uuid:draft_id>/files/<uuid:file_id>/remove/',
         anon_views.remove_file,
         name='anon-send-remove-file',
+    ),
+    path(
+        'send/anon/<uuid:draft_id>/files/<uuid:file_id>/resume/',
+        anon_views.resume_file,
+        name='anon-send-resume-file',
     ),
     path(
         'send/anon/<uuid:draft_id>/confirm/',
