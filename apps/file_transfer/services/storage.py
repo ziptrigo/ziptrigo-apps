@@ -102,11 +102,38 @@ class S3Storage:
     def bucket(self) -> str:
         return settings.FILE_TRANSFER_S3_BUCKET
 
-    def create_multipart_upload(self, key: str) -> str:
-        """Start a multipart upload with SHA-256 checksums and return its upload id."""
-        response = self.client.create_multipart_upload(
-            Bucket=self.bucket, Key=key, ChecksumAlgorithm='SHA256'
-        )
+    def create_multipart_upload(
+        self, key: str, *, checksum_algorithm: str | None = 'SHA256'
+    ) -> str:
+        """Start a multipart upload and return its upload id.
+
+        `checksum_algorithm` defaults to `'SHA256'` for the browser/CLI-driven uploads this class
+        exists for (spec section 11: a client-computed per-part checksum, verified by S3, proves
+        the bytes made it over the network intact). Once a multipart upload is created with a
+        checksum algorithm, S3 requires a matching checksum on every `UploadPart` *and* on every
+        entry of `CompleteMultipartUpload`'s part list (see `list_parts` and
+        `complete_multipart_upload`'s docstrings) -- passing `checksum_algorithm=None` opts out of
+        that requirement for a caller that uploads parts itself, server-side, over a connection S3
+        already authenticates and encrypts (`apps.file_transfer.services.zip`'s
+        `_S3MultipartWriter`), where a second, client-side integrity check buys nothing.
+        """
+        # Two explicit calls rather than building a `dict` and spreading it in: unlike
+        # `presign_part_url`'s `Params: dict`, `create_multipart_upload`'s keyword arguments are
+        # individually typed by `mypy_boto3_s3`'s stubs, so spreading an untyped `dict` into them
+        # would need the same kind of ignore-and-explain escape hatch `complete_multipart_upload`
+        # already needs below for its own (genuinely unavoidable) untyped `Parts` list.
+        if checksum_algorithm is not None:
+            response = self.client.create_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                # This method's own signature only accepts `str`, not the narrower
+                # `mypy_boto3_s3`-stubs `Literal` `create_multipart_upload` wants -- callers pass a
+                # plain string (`'SHA256'` by every caller so far), so there's nothing narrower to
+                # type this parameter as without importing that stub's own literal type here.
+                ChecksumAlgorithm=checksum_algorithm,  # ty: ignore[invalid-argument-type]
+            )
+        else:
+            response = self.client.create_multipart_upload(Bucket=self.bucket, Key=key)
         return response['UploadId']
 
     def presign_part_url(
@@ -182,13 +209,25 @@ class S3Storage:
         care about that case (`apps.file_transfer.services.uploads.list_uploaded_parts`) catch it
         there rather than here, so this method stays a thin, faithful wrapper like every other one
         in this class.
+
+        Each part's `ChecksumSHA256` (empty when the part somehow has none) is included alongside
+        `PartNumber`/`ETag`/`Size` -- the upload was created with `ChecksumAlgorithm='SHA256'`
+        (`create_multipart_upload`), so `CompleteMultipartUpload` later requires that checksum for
+        *every* part, including ones a resumed upload skips re-sending (issue #55 phase 3 review:
+        completing a resumed upload without it fails with `InvalidRequest`). Callers must round-trip
+        it back into the part list they eventually complete with.
         """
         parts: list[dict] = []
         paginator = self.client.get_paginator('list_parts')
         for page in paginator.paginate(Bucket=self.bucket, Key=key, UploadId=upload_id):
             for part in page.get('Parts', []):
                 parts.append(
-                    {'PartNumber': part['PartNumber'], 'ETag': part['ETag'], 'Size': part['Size']}
+                    {
+                        'PartNumber': part['PartNumber'],
+                        'ETag': part['ETag'],
+                        'Size': part['Size'],
+                        'ChecksumSHA256': part.get('ChecksumSHA256', ''),
+                    }
                 )
         return parts
 

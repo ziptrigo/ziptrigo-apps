@@ -9,6 +9,7 @@ state rather than the just-submitted one.
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Count, Prefetch
 from django.forms import Form
 from django.http import HttpResponse
@@ -78,11 +79,31 @@ def _form_error_text(form: Form) -> str:
     return ' '.join(message for field_errors in form.errors.values() for message in field_errors)
 
 
+def _resumable_draft(user) -> Transfer | None:
+    """The owner's most recent draft that already has at least one file on it, if any -- surfaced
+    on the dashboard as a "resume your unfinished upload" link, since drafts are otherwise never
+    shown here (`_UNLISTED_STATUSES`) and opening the send page from the nav (rather than a literal
+    page reload, which carries its own `?resume=`) would otherwise just start a fresh, empty one
+    (`services.get_or_create_draft`), stranding the in-progress one until `cleanup_drafts` reaps
+    it."""
+    return (
+        Transfer.objects.filter(owner=user, status=TransferStatus.DRAFT)
+        .annotate(_file_count=Count('files'))
+        .filter(_file_count__gt=0)
+        .order_by('-created_at')
+        .first()
+    )
+
+
 @login_required
 @require_GET
 def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
     filter_value = request.GET.get('filter', ACTIVE_FILTER)
-    context = {'transfers': _transfers_for(request.user, filter_value), 'filter': filter_value}
+    context = {
+        'transfers': _transfers_for(request.user, filter_value),
+        'filter': filter_value,
+        'resumable_draft': _resumable_draft(request.user),
+    }
     return render(request, 'file_transfer/dashboard.html', context)
 
 
@@ -168,17 +189,22 @@ def update_settings(request: AuthenticatedHttpRequest, transfer_id: str) -> Http
         return _respond(request, transfer, error=_form_error_text(form), status=422)
 
     try:
-        services.set_expiry(
-            transfer, form.cleaned_data['expiry_choice'], form.cleaned_data.get('expiry_date')
-        )
-        services.set_max_downloads(transfer, form.cleaned_data.get('max_downloads'))
-        # A blank password field means "leave it unchanged" -- the hash can't be pre-filled into
-        # the input, so there's no way to tell "the owner cleared it" from "the owner didn't
-        # touch it" other than a separate, explicit checkbox (see `TransferSettingsActionForm`).
-        if form.cleaned_data.get('remove_password'):
-            services.remove_password(transfer)
-        elif form.cleaned_data.get('password'):
-            services.set_password(transfer, form.cleaned_data['password'])
+        # Atomic for the same reason the JWT API's `update_transfer` is: several separate
+        # `UPDATE`s from one submit, and a later one failing must not leave the earlier ones
+        # committed as a silent partial update.
+        with transaction.atomic():
+            services.set_expiry(
+                transfer, form.cleaned_data['expiry_choice'], form.cleaned_data.get('expiry_date')
+            )
+            services.set_max_downloads(transfer, form.cleaned_data.get('max_downloads'))
+            # A blank password field means "leave it unchanged" -- the hash can't be pre-filled
+            # into the input, so there's no way to tell "the owner cleared it" from "the owner
+            # didn't touch it" other than a separate, explicit checkbox (see
+            # `TransferSettingsActionForm`).
+            if form.cleaned_data.get('remove_password'):
+                services.remove_password(transfer)
+            elif form.cleaned_data.get('password'):
+                services.set_password(transfer, form.cleaned_data['password'])
     except ValidationError as exc:
         return _respond(request, transfer, error=exc.messages[0], status=422)
 

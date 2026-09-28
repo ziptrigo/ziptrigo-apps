@@ -12,6 +12,15 @@
         </a>
     </div>
 
+    {% if resumable_draft %}
+    <div class="mb-6 rounded px-4 py-2 bg-sage-100 text-sage-800 dark:bg-sage-800 dark:text-sage-100 flex items-center justify-between">
+        <span><i class="fas fa-circle-pause mr-2"></i>You have an unfinished upload.</span>
+        <a href="{% url 'file_transfer:send' %}?resume={{ resumable_draft.id }}" class="font-medium underline">
+            Resume it
+        </a>
+    </div>
+    {% endif %}
+
     <div class="mb-6 flex gap-2" role="tablist">
         <a href="?filter=active"
            hx-get="{% url 'file_transfer:transfer-list' %}?filter=active"

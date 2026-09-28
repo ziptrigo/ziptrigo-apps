@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 
 import pytest
@@ -9,6 +10,12 @@ from apps.accounts.tests.factories import UserFactory
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 _CHECKSUM = base64.b64encode(b'\x00' * 32).decode()
+
+
+def _part_checksum(data: bytes) -> str:
+    """What `FakeS3Storage.list_parts` reports for a part recorded with these bytes -- see its
+    docstring."""
+    return base64.b64encode(hashlib.sha256(data).digest()).decode()
 
 
 def _post_json(client, url, payload):
@@ -160,7 +167,12 @@ class TestResumeFile:
         body = response.json()
         assert body['restarted'] is False
         assert body['uploaded_parts'] == [
-            {'part_number': 1, 'etag': f'etag-{file.upload_id}-1', 'size': 10}
+            {
+                'part_number': 1,
+                'etag': f'etag-{file.upload_id}-1',
+                'size': 10,
+                'checksum_sha256': _part_checksum(b'\0' * 10),
+            }
         ]
         assert body['part_count'] == added['part_count']
 
@@ -192,3 +204,44 @@ class TestResumeFile:
         response = client.post(url)
 
         assert response.status_code == 404
+
+    def test_resume_then_complete_round_trips_the_checksum(
+        self, client, draft_transfer, fake_storage
+    ):
+        """End-to-end through the web JSON endpoints (issue #55 phase 3 review's critical fix): a
+        part already landed in S3 is reported by `.../resume/` with its checksum, and completing
+        the upload with that checksum carried straight through (exactly what `resumable_upload.js`
+        now does) succeeds."""
+        client.force_login(draft_transfer.owner)
+        add_url = reverse('file_transfer:send-add-file', args=[draft_transfer.id])
+        added = _post_json(client, add_url, {'name': 'a.bin', 'size': 10}).json()
+        from ..models import TransferFile
+
+        file = TransferFile.objects.get(id=added['file_id'])
+        fake_storage.upload_part(file.storage_key, file.upload_id, 1, b'\0' * 10)
+
+        resume_url = reverse('file_transfer:send-resume-file', args=[draft_transfer.id, file.id])
+        resumed = client.post(resume_url).json()
+        part = resumed['uploaded_parts'][0]
+        assert part['checksum_sha256']
+
+        complete_url = reverse(
+            'file_transfer:send-complete-file', args=[draft_transfer.id, file.id]
+        )
+        complete_response = _post_json(
+            client,
+            complete_url,
+            {
+                'parts': [
+                    {
+                        'PartNumber': part['part_number'],
+                        'ETag': part['etag'],
+                        'ChecksumSHA256': part['checksum_sha256'],
+                    }
+                ]
+            },
+        )
+
+        assert complete_response.status_code == 200
+        file.refresh_from_db()
+        assert file.uploaded is True

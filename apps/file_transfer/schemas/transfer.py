@@ -10,6 +10,15 @@ from ninja import Schema
 from ..services.expiry_choices import NO_EXPIRATION_CHOICE
 
 
+class RecipientSchema(Schema):
+    """One recipient on a sent transfer -- enough for a client (the CLI's `resend`) to resend that
+    recipient's email without needing a separate lookup endpoint just to learn their id."""
+
+    id: UUID
+    email: str
+    last_sent_at: datetime | None
+
+
 class TransferFileSchema(Schema):
     """One file on a transfer -- enough for a client (the CLI's `send --draft-id` resume, or
     `filetransfer show`) to tell which of its local files are already uploaded, and by how much,
@@ -30,7 +39,7 @@ class TransferSchema(Schema):
     status: str
     display_name: str
     message: str
-    recipients: list[str]
+    recipients: list[RecipientSchema]
     files: list[TransferFileSchema]
     expires_at: datetime | None
     max_downloads: int | None
@@ -44,8 +53,8 @@ class TransferSchema(Schema):
     created_at: datetime | None
 
     @staticmethod
-    def resolve_recipients(obj) -> list[str]:
-        return [recipient.email for recipient in obj.recipients.all()]
+    def resolve_recipients(obj) -> list:
+        return list(obj.recipients.all())
 
     @staticmethod
     def resolve_files(obj) -> list:

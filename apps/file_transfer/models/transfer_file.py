@@ -38,6 +38,20 @@ class TransferFile(models.Model):
     )
     upload_id = cast(str, models.CharField(max_length=255, blank=True, default=''))
     uploaded = cast(bool, models.BooleanField(default=False))
+    #: The client-side multipart part size in effect when this file's upload was started
+    #: (`apps.file_transfer.services.storage.PART_SIZE_BYTES` at `add_file` time), pinned per file
+    #: rather than always read live off that module-level constant -- otherwise, if the constant
+    #: were ever changed while an upload was mid-flight, a resumed upload would slice the
+    #: remaining bytes at the new size while S3 still has earlier parts at the old size, and the
+    #: two would no longer line up into a valid part sequence.
+    part_size_bytes = cast(
+        int,
+        models.PositiveIntegerField(
+            default=67_108_864,  # 64 MiB -- must match `services.storage.PART_SIZE_BYTES`'s value.
+            help_text='The multipart part size in effect when this upload was started; see '
+            'apps.file_transfer.services.storage.PART_SIZE_BYTES.',
+        ),
+    )
     client_last_modified = cast(
         'int | None',
         models.BigIntegerField(

@@ -5,6 +5,7 @@ Exercises the same services the web send/dashboard flow does, just through
 """
 
 import base64
+import hashlib
 import json
 
 import pytest
@@ -18,6 +19,12 @@ from ..models import TransferFile, TransferStatus
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 _CHECKSUM = base64.b64encode(b'\x00' * 32).decode()
+
+
+def _part_checksum(data: bytes) -> str:
+    """What `FakeS3Storage.list_parts` reports for a part recorded with these bytes -- see its
+    docstring."""
+    return base64.b64encode(hashlib.sha256(data).digest()).decode()
 
 
 @pytest.fixture
@@ -101,7 +108,7 @@ def test_full_send_flow(client, funded_user, auth_headers, fake_storage):
     assert send_resp.status_code == 200
     body = send_resp.json()
     assert body['status'] == 'active'
-    assert body['recipients'] == ['friend@example.com']
+    assert [r['email'] for r in body['recipients']] == ['friend@example.com']
     assert body['display_name'] == 'report.pdf'
 
     get_resp = client.get(f'/api/ft/transfers/{transfer_id}', **auth_headers)
@@ -186,8 +193,55 @@ def test_resume_reports_uploaded_parts(client, draft_transfer, auth_headers, fak
     body = response.json()
     assert body['restarted'] is False
     assert body['uploaded_parts'] == [
-        {'part_number': 1, 'etag': f'etag-{file.upload_id}-1', 'size': 10}
+        {
+            'part_number': 1,
+            'etag': f'etag-{file.upload_id}-1',
+            'size': 10,
+            'checksum_sha256': _part_checksum(b'\0' * 10),
+        }
     ]
+
+
+def test_resume_then_complete_round_trips_the_checksum(
+    client, draft_transfer, auth_headers, fake_storage
+):
+    """End-to-end through `/api/ft/` (issue #55 phase 3 review's critical fix): a part already
+    landed in S3 is reported by `.../resume/` with its checksum, and completing the upload with
+    that checksum carried straight through (exactly what `admin/filetransfer.py`'s `_upload_file`
+    now does) succeeds."""
+    added = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/files/',
+        {'name': 'a.bin', 'size': 10},
+        auth_headers,
+    ).json()
+    file = TransferFile.objects.get(id=added['file_id'])
+    fake_storage.upload_part(file.storage_key, file.upload_id, 1, b'\0' * 10)
+
+    resumed = _post(
+        client, f'/api/ft/transfers/{draft_transfer.id}/files/{file.id}/resume/', {}, auth_headers
+    ).json()
+    part = resumed['uploaded_parts'][0]
+    assert part['checksum_sha256']
+
+    complete_resp = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/files/{file.id}/complete/',
+        {
+            'parts': [
+                {
+                    'part_number': part['part_number'],
+                    'etag': part['etag'],
+                    'checksum_sha256': part['checksum_sha256'],
+                }
+            ]
+        },
+        auth_headers,
+    )
+
+    assert complete_resp.status_code == 200
+    file.refresh_from_db()
+    assert file.uploaded is True
 
 
 def test_resume_restarts_an_expired_upload(client, draft_transfer, auth_headers, fake_storage):
@@ -271,6 +325,21 @@ def test_list_filters_active_vs_ended(client, draft_transfer, uploaded_file, aut
 def test_list_excludes_drafts_by_default(client, draft_transfer, auth_headers):
     response = client.get('/api/ft/transfers/', **auth_headers)
     assert response.json()['count'] == 0
+
+
+def test_list_unknown_filter_returns_400(client, draft_transfer, auth_headers):
+    response = client.get('/api/ft/transfers/?filter=bogus', **auth_headers)
+    assert response.status_code == 400
+
+
+def test_create_transfer_reuses_an_existing_empty_draft(client, funded_user, auth_headers):
+    """Mirrors the web send page (`services.get_or_create_draft`): calling this more than once
+    without adding a file must not litter the account with empty draft rows (issue #55 phase 3
+    review)."""
+    first = _post(client, '/api/ft/transfers/', {}, auth_headers)
+    second = _post(client, '/api/ft/transfers/', {}, auth_headers)
+
+    assert first.json()['id'] == second.json()['id']
 
 
 def test_list_pagination(client, funded_user, auth_headers, fake_storage):
@@ -370,6 +439,46 @@ def test_update_validation_error_returns_400(client, draft_transfer, uploaded_fi
     assert response.status_code == 400
 
 
+def test_update_is_atomic_a_later_field_failing_rolls_back_an_earlier_one(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    """`expiry_choice` (applied first) would otherwise succeed and commit even though the same
+    request's `max_downloads` (applied after) is invalid -- a partial update from one PATCH call
+    is worse than rejecting it outright."""
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    original_expires_at = draft_transfer.expires_at
+
+    response = _patch(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}',
+        {'expiry_choice': '5', 'max_downloads': 0},
+        auth_headers,
+    )
+
+    assert response.status_code == 400
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == original_expires_at
+
+
+def test_update_expiry_date_without_expiry_choice_returns_400(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+
+    response = _patch(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}',
+        {'expiry_date': '2026-12-31T00:00:00Z'},
+        auth_headers,
+    )
+
+    assert response.status_code == 400
+
+
 def test_update_omitted_fields_are_left_unchanged(
     client, draft_transfer, uploaded_file, auth_headers
 ):
@@ -403,7 +512,8 @@ def test_add_recipients_and_resend(client, draft_transfer, uploaded_file, auth_h
         auth_headers,
     )
     assert add_resp.status_code == 200
-    assert sorted(add_resp.json()['recipients']) == ['a@example.com', 'b@example.com']
+    emails = [r['email'] for r in add_resp.json()['recipients']]
+    assert sorted(emails) == ['a@example.com', 'b@example.com']
 
     from ..models import TransferRecipient
 

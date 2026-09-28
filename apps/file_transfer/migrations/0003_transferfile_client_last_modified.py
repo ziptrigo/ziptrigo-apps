@@ -15,4 +15,9 @@ class Migration(migrations.Migration):
             name='client_last_modified',
             field=models.BigIntegerField(blank=True, help_text="The browser File object's `lastModified` (ms since epoch) at the time this file was added, if the client supplied one. Used together with name and size to match a file the sender re-selects after a page reload back to this row, so its upload can resume instead of restarting (spec: resumable uploads) -- see apps.file_transfer.services.uploads.", null=True),
         ),
+        migrations.AddField(
+            model_name='transferfile',
+            name='part_size_bytes',
+            field=models.PositiveIntegerField(default=67108864, help_text='The multipart part size in effect when this upload was started; see apps.file_transfer.services.storage.PART_SIZE_BYTES.'),
+        ),
     ]

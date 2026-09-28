@@ -1,17 +1,25 @@
 import base64
+import hashlib
 
 import pytest
+from botocore.exceptions import ClientError
 from django.core.exceptions import ValidationError
 
 from ..models import TransferFile, TransferStatus
 from ..services import uploads
-from ..services.storage import PART_SIZE_BYTES
+from ..services.storage import PART_SIZE_BYTES, S3_MIN_PART_SIZE_BYTES
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 #: A well-formed (but meaningless) base64-encoded SHA-256 digest, for tests that don't care about
 #: the actual checksum value -- only that it's the right shape.
 _CHECKSUM = base64.b64encode(b'\x00' * 32).decode()
+
+
+def _part_checksum(data: bytes) -> str:
+    """What `FakeS3Storage.list_parts` reports for a part recorded with these bytes -- see its
+    docstring."""
+    return base64.b64encode(hashlib.sha256(data).digest()).decode()
 
 
 def _parts(*part_numbers: int) -> list[dict]:
@@ -184,7 +192,14 @@ def test_list_uploaded_parts_returns_parts_already_in_s3(draft_transfer, fake_st
 
     parts = uploads.list_uploaded_parts(file, storage=fake_storage)
 
-    assert parts == [{'PartNumber': 1, 'ETag': f'etag-{file.upload_id}-1', 'Size': 100}]
+    assert parts == [
+        {
+            'PartNumber': 1,
+            'ETag': f'etag-{file.upload_id}-1',
+            'Size': 100,
+            'ChecksumSHA256': _part_checksum(b'\0' * 100),
+        }
+    ]
 
 
 def test_list_uploaded_parts_empty_when_nothing_uploaded_yet(draft_transfer, fake_storage):
@@ -212,6 +227,20 @@ def test_list_uploaded_parts_raises_upload_expired_when_s3_forgot_it(draft_trans
         uploads.list_uploaded_parts(file, storage=fake_storage)
 
 
+def test_list_uploaded_parts_maps_other_client_errors_to_validation_error(
+    draft_transfer, fake_storage
+):
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+
+    def raise_access_denied(key, upload_id):
+        raise ClientError({'Error': {'Code': 'AccessDenied', 'Message': 'nope'}}, 'ListParts')
+
+    fake_storage.list_parts = raise_access_denied
+
+    with pytest.raises(ValidationError):
+        uploads.list_uploaded_parts(file, storage=fake_storage)
+
+
 def test_restart_upload_gets_a_fresh_upload_id(draft_transfer, fake_storage):
     file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
     old_upload_id = file.upload_id
@@ -223,6 +252,117 @@ def test_restart_upload_gets_a_fresh_upload_id(draft_transfer, fake_storage):
     assert restarted.upload_id in fake_storage.active_uploads
     assert restarted.uploaded is False
     assert uploads.list_uploaded_parts(restarted, storage=fake_storage) == []
+
+
+def test_restart_upload_does_not_clobber_a_concurrent_completion(draft_transfer, fake_storage):
+    """Two tabs open on the same draft (issue #55 phase 3 review): tab A completes the file while
+    tab B's stale `file` object -- still holding the old, now-completed upload id -- calls
+    `restart_upload` after its own `list_uploaded_parts` got `UploadExpired`. The completed state
+    must survive: `restart_upload` must not blindly overwrite it."""
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    stale = TransferFile.objects.get(pk=file.pk)  # tab B's copy, read before tab A completes
+
+    # Tab A: completes the upload.
+    fake_storage.put_object(file.storage_key, 10)
+    uploads.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e1'}], storage=fake_storage)
+    assert file.uploaded is True
+
+    # Tab B: its `list_uploaded_parts` would now raise `UploadExpired` (the old upload id is gone
+    # -- completed, not merely aborted), so it calls `restart_upload` on its stale copy.
+    result = uploads.restart_upload(stale, storage=fake_storage)
+
+    file.refresh_from_db()
+    assert file.uploaded is True
+    assert file.upload_id == ''
+    # `restart_upload` hands back the current, authoritative state rather than its own stale write.
+    assert result.uploaded is True
+    assert result.upload_id == ''
+    # The upload it speculatively created (before losing the race) must not be left dangling.
+    assert result.pk == file.pk
+
+
+def test_add_file_pins_the_current_part_size(draft_transfer, fake_storage):
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    assert file.part_size_bytes == PART_SIZE_BYTES
+
+
+def test_part_count_uses_the_file_s_pinned_part_size_not_the_live_constant(
+    draft_transfer, fake_storage, monkeypatch
+):
+    """If the global part size changed after an upload started, a resumed upload must still slice
+    (and be told to slice) at the size it was actually started with, or its parts would no longer
+    line up with what S3 already has (see `TransferFile.part_size_bytes`'s docstring)."""
+    size = PART_SIZE_BYTES + 100  # two parts at the current size
+    file = uploads.add_file(draft_transfer, 'a.bin', size, storage=fake_storage)
+    assert uploads.part_count_for(file) == 2
+
+    from ..services import uploads as uploads_module
+
+    monkeypatch.setattr(uploads_module, 'PART_SIZE_BYTES', PART_SIZE_BYTES * 10)
+
+    # The live module constant changed, but this file's own pinned value -- and so its part
+    # count -- must not.
+    assert file.part_size_bytes == PART_SIZE_BYTES
+    assert uploads.part_count_for(file) == 2
+
+
+def test_resume_through_complete_round_trips_checksums(draft_transfer, fake_storage):
+    """End-to-end (service layer): a part landed via an earlier page load, `list_uploaded_parts`
+    reports its checksum, and completing the upload -- with that part's checksum carried through
+    unchanged, alongside a freshly-uploaded second part -- succeeds. This is the resumed-upload
+    path the critical fix is about (issue #55 phase 3 review): a completion that dropped the first
+    part's checksum used to be accepted by the fake (and, for real, rejected by S3)."""
+    part_bytes = b'\0' * S3_MIN_PART_SIZE_BYTES
+    file = uploads.add_file(
+        draft_transfer, 'a.bin', 2 * S3_MIN_PART_SIZE_BYTES, storage=fake_storage
+    )
+    # Part 1 "already landed" in an earlier page load. Sized at S3's own per-part minimum: the
+    # fake (like real S3) rejects a non-last part smaller than that at completion time.
+    fake_storage.upload_part(file.storage_key, file.upload_id, 1, part_bytes)
+    resumed = uploads.list_uploaded_parts(file, storage=fake_storage)
+    assert resumed == [
+        {
+            'PartNumber': 1,
+            'ETag': f'etag-{file.upload_id}-1',
+            'Size': S3_MIN_PART_SIZE_BYTES,
+            'ChecksumSHA256': _part_checksum(part_bytes),
+        }
+    ]
+    # Part 2 is the one this call actually PUTs.
+    fake_storage.upload_part(file.storage_key, file.upload_id, 2, part_bytes)
+
+    completed_parts = [
+        {
+            'PartNumber': resumed[0]['PartNumber'],
+            'ETag': resumed[0]['ETag'],
+            'ChecksumSHA256': resumed[0]['ChecksumSHA256'],
+        },
+        {
+            'PartNumber': 2,
+            'ETag': f'etag-{file.upload_id}-2',
+            'ChecksumSHA256': _part_checksum(part_bytes),
+        },
+    ]
+
+    completed = uploads.complete_file_upload(file, completed_parts, storage=fake_storage)
+
+    assert completed.uploaded is True
+
+
+def test_complete_without_a_checksum_for_an_already_landed_part_is_rejected(
+    draft_transfer, fake_storage
+):
+    """`FakeS3Storage` itself, in isolation: mirrors real S3 refusing to complete a
+    checksum-enabled multipart upload when a part it already has on record isn't repeated with its
+    checksum -- exactly the bug the critical fix closes (a resumed upload's JS/CLI used to build
+    this payload without one for parts it didn't re-PUT)."""
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    fake_storage.upload_part(file.storage_key, file.upload_id, 1, b'\0' * 10)
+
+    with pytest.raises(ValidationError):
+        uploads.complete_file_upload(
+            file, [{'PartNumber': 1, 'ETag': f'etag-{file.upload_id}-1'}], storage=fake_storage
+        )
 
 
 def test_abort_draft_cleans_up_everything(draft_transfer, fake_storage):

@@ -15,6 +15,7 @@ from .file import (
 from .transfer import (
     AddRecipientsSchema,
     FinalizeTransferSchema,
+    RecipientSchema,
     TransferFileSchema,
     TransferListSchema,
     TransferSchema,
@@ -32,6 +33,7 @@ __all__ = [
     'PartRequestSchema',
     'PartUrlsRequestSchema',
     'PartUrlsResponseSchema',
+    'RecipientSchema',
     'ResumeResponseSchema',
     'TransferFileSchema',
     'TransferListSchema',

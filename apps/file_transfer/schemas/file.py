@@ -51,6 +51,11 @@ class UploadedPartSchema(Schema):
     part_number: int
     etag: str
     size: int
+    #: S3 requires this checksum on every part when the upload was completed (see
+    #: `apps.file_transfer.services.storage.S3Storage.complete_multipart_upload`'s docstring) --
+    #: round-trip it back into `CompleteFileSchema`'s part list for a part the caller resumes
+    #: without re-uploading (issue #55 phase 3 review's critical finding).
+    checksum_sha256: str = ''
 
 
 class OkSchema(Schema):

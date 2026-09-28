@@ -21,6 +21,12 @@ function getCookie(name) {
     if (parts.length === 2) return parts.pop().split(';').shift();
 }
 
+// How many parts' presigned PUT URLs to request at once, rather than every part of the whole file
+// up front: a presigned URL is only valid for `PUT_URL_EXPIRES_SECONDS` (1h,
+// `services.storage.PUT_URL_EXPIRES_SECONDS`), so on a slow connection a large file's later parts
+// could easily still be waiting when their URL expires if every URL were requested at time zero.
+const PART_URL_BATCH_SIZE = 8;
+
 function initFileTransferUpload(options) {
     const base = options.base;
     const fileListEl = options.fileListEl;
@@ -31,8 +37,13 @@ function initFileTransferUpload(options) {
     const files = new Map();
     // Existing, not-yet-uploaded files from a previous page load, available to be matched against
     // a re-selected `File` (see `findResumeMatch`). `matched` guards against matching the same row
-    // twice within one file-picker batch.
+    // twice within one file-picker batch, and is reset if the resume attempt it triggered fails,
+    // so the same file can be re-selected and tried again.
     const resumeCandidates = [];
+
+    function hasPausedFiles() {
+        return Array.from(files.values()).some(function (f) { return f.resumable && !f.uploaded; });
+    }
 
     function updateSubmitState() {
         const anyUploaded = Array.from(files.values()).some(function (f) { return f.uploaded; });
@@ -105,33 +116,41 @@ function initFileTransferUpload(options) {
                 continue;
             }
             candidate.matched = true;
-            return candidate.fileId;
+            return candidate;
         }
         return null;
     }
 
     // Shared by a from-scratch upload and a resumed one: PUTs every part not already accounted
-    // for in `alreadyUploaded` (part number -> ETag), in order, then completes the file.
+    // for in `alreadyUploaded` (part number -> {etag, checksum}), in order, then completes the
+    // file. Requests presigned URLs (and PUTs them) a batch at a time rather than all up front --
+    // see `PART_URL_BATCH_SIZE`. Returns whether the file finished uploading successfully.
     async function uploadParts(fileId, fileName, partCount, requestParts, blobs, alreadyUploaded) {
         const finalParts = new Array(partCount);
-        alreadyUploaded.forEach(function (etag, partNumber) {
-            finalParts[partNumber - 1] = { PartNumber: partNumber, ETag: etag };
+        let completedCount = alreadyUploaded.size;
+        alreadyUploaded.forEach(function (part, partNumber) {
+            finalParts[partNumber - 1] = {
+                PartNumber: partNumber,
+                ETag: part.etag,
+                ChecksumSHA256: part.checksum,
+            };
         });
 
-        if (requestParts.length) {
+        for (let batchStart = 0; batchStart < requestParts.length; batchStart += PART_URL_BATCH_SIZE) {
+            const batch = requestParts.slice(batchStart, batchStart + PART_URL_BATCH_SIZE);
             const urlsResp = await fetch(base + '/files/' + fileId + '/parts/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-                body: JSON.stringify({ parts: requestParts }),
+                body: JSON.stringify({ parts: batch }),
             });
             if (!urlsResp.ok) {
                 const err = await urlsResp.json().catch(function () { return {}; });
                 alert('Could not upload ' + fileName + ': ' + (err.error || urlsResp.status));
-                return;
+                return false;
             }
             const urlsData = await urlsResp.json();
 
-            for (const requestPart of requestParts) {
+            for (const requestPart of batch) {
                 const partNumber = requestPart.part_number;
                 const blob = blobs[partNumber - 1];
                 const url = urlsData.urls[String(partNumber)];
@@ -145,15 +164,16 @@ function initFileTransferUpload(options) {
                         'Uploading part ' + partNumber + ' of ' + fileName + ' failed: '
                         + putResp.status
                     );
-                    return;
+                    return false;
                 }
                 finalParts[partNumber - 1] = {
                     PartNumber: partNumber,
                     ETag: putResp.headers.get('ETag'),
                     ChecksumSHA256: requestPart.checksum_sha256,
                 };
+                completedCount += 1;
                 const entry = files.get(fileId);
-                entry.progress = Math.round((partNumber / partCount) * 100);
+                entry.progress = Math.round((completedCount / partCount) * 100);
                 renderRow(fileId, entry);
             }
         }
@@ -170,10 +190,11 @@ function initFileTransferUpload(options) {
             entry.progress = 100;
             renderRow(fileId, entry);
             updateSubmitState();
-        } else {
-            const err = await completeResp.json().catch(function () { return {}; });
-            alert('Upload of ' + fileName + ' failed: ' + (err.error || completeResp.status));
+            return true;
         }
+        const err = await completeResp.json().catch(function () { return {}; });
+        alert('Upload of ' + fileName + ' failed: ' + (err.error || completeResp.status));
+        return false;
     }
 
     async function uploadFile(file) {
@@ -208,8 +229,9 @@ function initFileTransferUpload(options) {
         renderRow(fileId, files.get(fileId));
         if (isFirstFile && typeof onFirstFileAdded === 'function') onFirstFileAdded();
 
-        // Slice every part and hash it up front, so each request for a presigned URL can carry
-        // that part's checksum (see `sha256Base64` above).
+        // Slice every part and hash it up front (`Blob.slice` is a cheap, lazy view -- it doesn't
+        // copy the underlying bytes), so each request for a presigned URL can carry that part's
+        // checksum (see `sha256Base64` above).
         const blobs = [];
         const requestParts = [];
         for (let i = 0; i < partCount; i++) {
@@ -227,7 +249,7 @@ function initFileTransferUpload(options) {
         await uploadParts(fileId, file.name, partCount, requestParts, blobs, new Map());
     }
 
-    async function resumeFile(fileId, file) {
+    async function resumeFile(fileId, file, candidate) {
         const entry = files.get(fileId);
         const resumeResp = await fetch(base + '/files/' + fileId + '/resume/', {
             method: 'POST',
@@ -236,6 +258,7 @@ function initFileTransferUpload(options) {
         if (!resumeResp.ok) {
             const err = await resumeResp.json().catch(function () { return {}; });
             alert('Could not resume ' + file.name + ': ' + (err.error || resumeResp.status));
+            if (candidate) candidate.matched = false;
             return;
         }
         const resumeData = await resumeResp.json();
@@ -243,9 +266,13 @@ function initFileTransferUpload(options) {
         const partCount = resumeData.part_count;
         // Empty when the upload had expired and the server restarted it from scratch
         // (`resumeData.restarted`) -- handled the same way as a resume with nothing done yet.
+        // Each already-uploaded part's checksum (`checksum_sha256`) must be carried through to the
+        // eventual `.../complete/` call: S3 requires it for every part once the upload was created
+        // with a checksum algorithm, including ones this resume isn't re-uploading (issue #55
+        // phase 3 review).
         const alreadyUploaded = new Map();
         resumeData.uploaded_parts.forEach(function (part) {
-            alreadyUploaded.set(part.part_number, part.etag);
+            alreadyUploaded.set(part.part_number, { etag: part.etag, checksum: part.checksum_sha256 });
         });
 
         const blobs = [];
@@ -265,17 +292,18 @@ function initFileTransferUpload(options) {
 
         entry.uploaded = false;
         entry.resumable = false;
-        entry.progress = Math.round(((partCount - requestParts.length) / partCount) * 100);
+        entry.progress = Math.round((alreadyUploaded.size / partCount) * 100);
         renderRow(fileId, entry);
 
-        await uploadParts(fileId, file.name, partCount, requestParts, blobs, alreadyUploaded);
+        const ok = await uploadParts(fileId, file.name, partCount, requestParts, blobs, alreadyUploaded);
+        if (!ok && candidate) candidate.matched = false;
     }
 
     function handleFileSelection(fileList) {
         Array.from(fileList).forEach(function (file) {
-            const matchId = findResumeMatch(file);
-            if (matchId) {
-                resumeFile(matchId, file);
+            const candidate = findResumeMatch(file);
+            if (candidate) {
+                resumeFile(candidate.fileId, file, candidate);
             } else {
                 uploadFile(file);
             }
@@ -319,5 +347,24 @@ function initFileTransferUpload(options) {
         updateSubmitState();
     });
 
-    return { handleFileSelection: handleFileSelection };
+    // Both send pages' options form posts through htmx (`#send-form`, `hx-post`). A paused
+    // (not-yet-finished) file is silently left out of the transfer at send time
+    // (`services.send.finalize_send`/`start_confirmation` only count `uploaded=True` files), so
+    // ask for confirmation before letting the request through if any row is still paused --
+    // `htmx:confirm` is htmx's own extensibility point for exactly this (see its docs), fired
+    // before every request that element makes.
+    const formEl = document.getElementById('send-form');
+    if (formEl) {
+        formEl.addEventListener('htmx:confirm', function (e) {
+            if (!hasPausedFiles()) return;
+            e.preventDefault();
+            const proceed = window.confirm(
+                "Some files haven't finished uploading and will be left out of this transfer. "
+                + 'Send anyway?'
+            );
+            if (proceed) e.detail.issueRequest(true);
+        });
+    }
+
+    return { handleFileSelection: handleFileSelection, hasPausedFiles: hasPausedFiles };
 }

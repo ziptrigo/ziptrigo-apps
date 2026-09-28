@@ -10,7 +10,6 @@ separate endpoints, mirroring `views.uploads`/`views.send`, just session- rather
 """
 
 import json
-import math
 
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.base import SessionBase
@@ -405,8 +404,8 @@ def add_file(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     response = JsonResponse(
         {
             'file_id': str(file.id),
-            'part_size_bytes': PART_SIZE_BYTES,
-            'part_count': max(1, math.ceil(size / PART_SIZE_BYTES)),
+            'part_size_bytes': file.part_size_bytes,
+            'part_count': services.part_count_for(file),
         },
         status=201,
     )
@@ -502,10 +501,15 @@ def resume_file(request: AnonymousHttpRequest, draft_id: str, file_id: str) -> H
     response = JsonResponse(
         {
             'restarted': restarted,
-            'part_size_bytes': PART_SIZE_BYTES,
-            'part_count': max(1, math.ceil(file.size / PART_SIZE_BYTES)),
+            'part_size_bytes': file.part_size_bytes,
+            'part_count': services.part_count_for(file),
             'uploaded_parts': [
-                {'part_number': p['PartNumber'], 'etag': p['ETag'], 'size': p['Size']}
+                {
+                    'part_number': p['PartNumber'],
+                    'etag': p['ETag'],
+                    'size': p['Size'],
+                    'checksum_sha256': p.get('ChecksumSHA256', ''),
+                }
                 for p in parts
             ],
         }

@@ -6,7 +6,6 @@ the natural fit (`CLAUDE.md`'s HTMX conventions are for actual form submissions)
 """
 
 import json
-import math
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -19,7 +18,6 @@ from apps.core import ratelimit
 
 from .. import services
 from ..models import Transfer, TransferFile, TransferStatus
-from ..services.storage import PART_SIZE_BYTES
 
 
 def _json_body(request: HttpRequest) -> dict:
@@ -71,8 +69,8 @@ def add_file(request: AuthenticatedHttpRequest, draft_id: str) -> HttpResponse:
     return JsonResponse(
         {
             'file_id': str(file.id),
-            'part_size_bytes': PART_SIZE_BYTES,
-            'part_count': max(1, math.ceil(size / PART_SIZE_BYTES)),
+            'part_size_bytes': file.part_size_bytes,
+            'part_count': services.part_count_for(file),
         },
         status=201,
     )
@@ -167,10 +165,15 @@ def resume_file(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) 
     return JsonResponse(
         {
             'restarted': restarted,
-            'part_size_bytes': PART_SIZE_BYTES,
-            'part_count': max(1, math.ceil(file.size / PART_SIZE_BYTES)),
+            'part_size_bytes': file.part_size_bytes,
+            'part_count': services.part_count_for(file),
             'uploaded_parts': [
-                {'part_number': p['PartNumber'], 'etag': p['ETag'], 'size': p['Size']}
+                {
+                    'part_number': p['PartNumber'],
+                    'etag': p['ETag'],
+                    'size': p['Size'],
+                    'checksum_sha256': p.get('ChecksumSHA256', ''),
+                }
                 for p in parts
             ],
         }

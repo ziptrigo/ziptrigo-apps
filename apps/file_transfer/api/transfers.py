@@ -11,6 +11,7 @@ Only logged-in users get here (`auth=JWTAuth()`): anonymous sending is web-only 
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
@@ -41,6 +42,7 @@ _UNLISTED_STATUSES = (TransferStatus.DRAFT, TransferStatus.PENDING_CONFIRMATION)
 ACTIVE_FILTER = 'active'
 ENDED_FILTER = 'ended'
 ALL_FILTER = 'all'
+_VALID_FILTERS = (ACTIVE_FILTER, ENDED_FILTER, ALL_FILTER)
 
 
 def _owned_transfer(request, transfer_id: UUID, *, include_drafts: bool = False) -> Transfer:
@@ -55,12 +57,19 @@ def _owned_transfer(request, transfer_id: UUID, *, include_drafts: bool = False)
 
 @router.post('/transfers/', response={201: TransferSchema}, auth=auth)
 def create_transfer(request):
-    """Start a new transfer: an empty draft, exactly like visiting the web send page
-    (`services.create_draft`) -- files are then added one at a time through the endpoints in
-    `api/files.py`, and `POST /transfers/{id}/send` applies the recipients/expiry/etc. options and
-    finalizes it, mirroring the web flow's own two-step shape (upload first, options at send time).
+    """Start a new transfer: an empty draft, exactly like visiting the web send page -- files are
+    then added one at a time through the endpoints in `api/files.py`, and
+    `POST /transfers/{id}/send` applies the recipients/expiry/etc. options and finalizes it,
+    mirroring the web flow's own two-step shape (upload first, options at send time).
+
+    Reuses the caller's existing empty draft rather than creating a fresh one on every call
+    (`services.get_or_create_draft`, same as `views.send.send_page`) -- unlike the web page, this
+    is a plain API call a script could retry or call in a loop, and without this, each call left
+    another "Untitled transfer" draft row behind for the 24h `cleanup_drafts` grace period.
+    Rate-limited on top of that for the same reason every other upload-side endpoint here is.
     """
-    transfer = services.create_draft(request.auth)
+    ratelimit.enforce(ratelimit.hit_user(request.auth, 'FT_UPLOAD_USER'))
+    transfer = services.get_or_create_draft(request.auth)
     return 201, transfer
 
 
@@ -79,6 +88,8 @@ def list_transfers(
     -- unlike mypy, which special-cases it away -- takes at face value and flags as
     `call-non-callable`) clamped by hand instead.
     """
+    if filter not in _VALID_FILTERS:
+        raise HttpError(400, f'filter must be one of: {", ".join(_VALID_FILTERS)}.')
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     qs = (
@@ -146,23 +157,30 @@ def update_transfer(request, transfer_id: UUID, payload: TransferUpdateSchema):
     (`views.dashboard.update_settings`)."""
     transfer = _owned_transfer(request, transfer_id)
     data = payload.dict(exclude_unset=True)
+    if 'expiry_date' in data and 'expiry_choice' not in data:
+        raise HttpError(400, 'expiry_date requires expiry_choice.')
 
     try:
-        if 'disabled' in data:
-            if data['disabled']:
-                services.disable_transfer(transfer)
-            else:
-                services.reenable_transfer_action(transfer)
-        if 'expiry_choice' in data:
-            services.set_expiry(transfer, data['expiry_choice'], data.get('expiry_date'))
-        if 'max_downloads' in data:
-            services.set_max_downloads(transfer, data['max_downloads'])
-        if data.get('remove_password'):
-            services.remove_password(transfer)
-        elif data.get('password'):
-            services.set_password(transfer, data['password'])
-        if 'notify_on_download' in data:
-            services.set_notify_on_download(transfer, data['notify_on_download'])
+        # Atomic: several of these are separate `UPDATE`s (one service call per field, mirroring
+        # `views.dashboard.update_settings`'s own combined form), so a later field failing (e.g.
+        # `max_downloads` after `expiry_choice` already applied) must not leave the earlier ones
+        # committed -- a partial update from one PATCH call is worse than rejecting it outright.
+        with transaction.atomic():
+            if 'disabled' in data:
+                if data['disabled']:
+                    services.disable_transfer(transfer)
+                else:
+                    services.reenable_transfer_action(transfer)
+            if 'expiry_choice' in data:
+                services.set_expiry(transfer, data['expiry_choice'], data.get('expiry_date'))
+            if 'max_downloads' in data:
+                services.set_max_downloads(transfer, data['max_downloads'])
+            if data.get('remove_password'):
+                services.remove_password(transfer)
+            elif data.get('password'):
+                services.set_password(transfer, data['password'])
+            if 'notify_on_download' in data:
+                services.set_notify_on_download(transfer, data['notify_on_download'])
     except ValidationError as exc:
         raise HttpError(400, exc.messages[0])
     except InsufficientCreditsError as exc:

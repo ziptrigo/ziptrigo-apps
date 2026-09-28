@@ -39,6 +39,33 @@ def test_dashboard_lists_only_own_transfers(client, draft_transfer):
     assert draft_transfer.display_name not in response.content.decode()
 
 
+def test_dashboard_offers_to_resume_a_draft_with_files(client, draft_transfer, fake_storage):
+    """A draft is never listed as a transfer (`_UNLISTED_STATUSES`), so without this banner an
+    unfinished upload started from the nav (no `?resume=` in the URL) would be stranded until
+    `cleanup_drafts` reaps it -- see `_resumable_draft`'s docstring."""
+    from .. import services
+
+    services.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    client.force_login(draft_transfer.owner)
+
+    response = client.get(reverse('file_transfer:dashboard'))
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert 'unfinished upload' in content
+    assert f'resume={draft_transfer.id}' in content
+
+
+def test_dashboard_does_not_offer_to_resume_an_empty_draft(client, draft_transfer):
+    """An empty draft is the ordinary one every visit to the send page creates/reuses
+    (`services.get_or_create_draft`) -- not something to surface as "unfinished"."""
+    client.force_login(draft_transfer.owner)
+
+    response = client.get(reverse('file_transfer:dashboard'))
+
+    assert 'unfinished upload' not in response.content.decode()
+
+
 def test_transfer_list_partial_filters_active_vs_ended(client, draft_transfer):
     _active(draft_transfer)
     client.force_login(draft_transfer.owner)
@@ -184,6 +211,38 @@ def test_update_settings_new_password_replaces_old_one(draft_transfer, client):
     assert response.status_code == 200
     draft_transfer.refresh_from_db()
     assert verify_password('new-one', draft_transfer.password_hash)
+
+
+def test_update_settings_is_atomic_a_later_service_failure_rolls_back_an_earlier_change(
+    client, draft_transfer, monkeypatch
+):
+    """`update_settings` applies expiry, then max-downloads, then password, as separate service
+    calls from one submit. Nothing in today's validation can make a later one fail after an
+    earlier one already succeeded, but the `transaction.atomic()` wrap exists precisely so that,
+    if it ever does (or under the JWT API's equivalent race), the whole submit rolls back rather
+    than leaving a silent partial update -- proven here by forcing exactly that failure."""
+    from django.core.exceptions import ValidationError
+
+    from .. import services as ft_services
+
+    _active(draft_transfer)
+    client.force_login(draft_transfer.owner)
+    original_expires_at = draft_transfer.expires_at
+
+    def boom(transfer, max_downloads):
+        raise ValidationError('boom')
+
+    monkeypatch.setattr(ft_services, 'set_max_downloads', boom)
+
+    response = client.post(
+        reverse('file_transfer:update-settings', args=[draft_transfer.id]),
+        data={'expiry_choice': '5', 'max_downloads': '3', 'password': ''},
+        **HX_HEADERS,
+    )
+
+    assert response.status_code == 422
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == original_expires_at
 
 
 def test_update_settings_validation_error(client, draft_transfer):

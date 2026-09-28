@@ -383,45 +383,88 @@ with the send options (`POST /transfers/{id}/send`), list (`?filter=active|ended
 `limit`/`offset` pagination), get, update (`PATCH`, partial -- only fields present in the body are
 applied, via `payload.dict(exclude_unset=True)`), delete, add recipients and resend one's email.
 `GET /transfers/{id}` (unlike the list endpoint) also returns a still-in-progress draft, since a
-caller that already knows a specific id needs that to resume an interrupted upload. Two of its two
+caller that already knows a specific id needs that to resume an interrupted upload. Its two
 endpoint modules (`transfers.py`, `files.py`) share one `Router` instance from `router.py` rather
 than nesting sub-routers, since `Router.add_router` only takes a static prefix and can't express a
-nested path parameter like `/transfers/{id}/files/...`. Status codes: 400 for a service
-`ValidationError`, **402** for `InsufficientCreditsError` (a documented choice over 400 -- the
-request is well-formed, the account just can't cover it right now), 404 for another user's transfer
-(never 403, so it doesn't confirm the id exists), 429 via the site-wide rate-limit handler
-(`FT_UPLOAD_USER`, same rule and budget as the web upload endpoints, applied per user).
+nested path parameter like `/transfers/{id}/files/...`. `TransferSchema.recipients` is a list of
+`{id, email, last_sent_at}` objects (not bare email strings), so a caller can resend to one without
+a separate lookup (`POST /transfers/{id}/recipients/{recipient_id}/resend`, `admin/filetransfer.py
+resend`). Status codes: 400 for a service `ValidationError` (including a malformed `PATCH` --
+`expiry_date` without `expiry_choice`, or `?filter=` outside `active`/`ended`/`all`), **402** for
+`InsufficientCreditsError` (a documented choice over 400 -- the request is well-formed, the account
+just can't cover it right now), 404 for another user's transfer (never 403, so it doesn't confirm
+the id exists), 429 via the site-wide rate-limit handler (`FT_UPLOAD_USER`, same rule and budget as
+the web upload endpoints, applied per user -- including `POST /transfers/`, which also reuses the
+caller's existing empty draft rather than creating a fresh one per call, same as
+`get_or_create_draft`). `PATCH /transfers/{id}` applies its one-service-call-per-field updates
+inside `transaction.atomic()` (as does the dashboard's own combined settings form,
+`views.dashboard.update_settings`), so a later field failing can't leave an earlier one committed.
 
 **Resumable uploads** (spec section 2, issue #55 phase 3): `TransferFile.client_last_modified`
 (nullable, the browser/CLI's `lastModified`, ms since epoch) plus its name and size let a client
 match a file it's re-uploading back to an existing, not-yet-finished `TransferFile` row after a
 break. `S3Storage.list_parts` (`ListParts`) reports which parts of that file's multipart upload S3
-already has; `services.uploads.list_uploaded_parts` wraps it and raises `UploadExpired` when S3 no
-longer recognizes the upload id (the bucket's lifecycle rule aborted it, or `cleanup_drafts` beat
-the client to it), and `restart_upload` then abandons it and starts a fresh one at the same storage
-key. Both the web JSON endpoints (`views.uploads.resume_file` / `views.anonymous.resume_file`) and
-the JWT API (`api/files.py::resume_file`) expose this as one `.../files/{id}/resume/` endpoint that
+already has; `services.uploads.list_uploaded_parts` wraps it, maps any other `ClientError` (e.g.
+`AccessDenied`) to a plain `ValidationError` rather than letting it escape as a 500, and raises
+`UploadExpired` when S3 no longer recognizes the upload id (the bucket's lifecycle rule aborted it,
+or `cleanup_drafts` beat the client to it); `restart_upload` then abandons it and starts a fresh one
+at the same storage key -- its DB write is conditional on the file still holding the exact
+`upload_id`/`uploaded=False` state it was read in (a compare-and-swap), so a `resume` racing a
+concurrent `complete` in another tab can't un-complete a file that just finished. Both the web JSON
+endpoints (`views.uploads.resume_file` / `views.anonymous.resume_file`) and the JWT API
+(`api/files.py::resume_file`) expose this as one `.../files/{id}/resume/` endpoint that
 transparently restarts an expired upload rather than erroring, returning `{restarted,
-part_size_bytes, part_count, uploaded_parts}` either way.
+part_size_bytes, part_count, uploaded_parts}` either way -- `part_size_bytes` is
+`TransferFile.part_size_bytes`, pinned at `add_file` time rather than read live off
+`services.storage.PART_SIZE_BYTES`, so a resumed upload's parts still line up even if that constant
+changes while it's in flight.
+
+Every part in `uploaded_parts` also carries its `checksum_sha256` (from S3's `ListParts`, since
+every upload here is created with `ChecksumAlgorithm='SHA256'`): S3 requires that checksum again on
+*every* part -- including ones a resume isn't re-uploading -- when completing the multipart upload,
+or `CompleteMultipartUpload` fails outright. A resumed part's checksum must therefore round-trip
+unchanged from `.../resume/`'s response into the eventual `.../complete/` call; `FakeS3Storage`
+enforces this the same way S3 does, for any part it recorded through `upload_part` (see its
+docstring). The server-side multipart write `services.zip._S3MultipartWriter` uses for the
+"download all" zip opts out of this (`create_multipart_upload(key, checksum_algorithm=None)`) --
+its parts never cross an untrusted network hop, so there's nothing for a checksum to verify.
 
 - **Web**: `send.html`/`anon_send.html` share one script,
   `apps/file_transfer/static/file_transfer/js/resumable_upload.js`, since both pages upload the
-  same way and need the same resume-matching logic. The logged-in send page additionally has to
-  solve identifying the *same draft* again across a reload -- `get_or_create_draft` deliberately
-  never reuses a draft that already has files (see its own docstring: that behaviour predates
-  hydration and stays as the default for a fresh, un-parameterized visit), so the moment a draft's
-  first file lands, the page adds `?resume=<draft id>` to its own URL with `history.replaceState`
-  (no navigation); `send_page` picks that query param up and fetches that specific draft, files and
+  same way and need the same resume-matching logic. Presigned part URLs are requested a small batch
+  at a time (`PART_URL_BATCH_SIZE`) rather than for the whole file up front, so a later part's URL
+  on a slow connection doesn't sit long enough to expire before it's used; the same batching (plus
+  streaming the file a part at a time rather than holding it all in memory) applies to the CLI's
+  upload, below. A "paused" (not-yet-finished) row is silently left out of the transfer at send
+  time (`services.send.finalize_send`/`start_confirmation` only count `uploaded=True` files), so
+  the script asks for confirmation before letting the options form's htmx submit through
+  (`htmx:confirm`) whenever one exists. The logged-in send page additionally has to solve
+  identifying the *same draft* again across a reload -- `get_or_create_draft` deliberately never
+  reuses a draft that already has files (see its own docstring: that behaviour predates hydration
+  and stays as the default for a fresh, un-parameterized visit), so the moment a draft's first file
+  lands, the page adds `?resume=<draft id>` to its own URL with `history.replaceState` (no
+  navigation); `send_page` picks that query param up and fetches that specific draft, files and
   all, serialized into the page (`{% ... |json_script %}`) for the script to rebuild its file list
   and offer to resume whichever rows aren't uploaded yet -- the sender re-selects the same file (a
   browser can't reopen one on its own) and it's matched by name + size (+ `client_last_modified`
-  when the row has one). The anonymous flow needs none of this bookkeeping:
-  `current_anonymous_transfer` already resumes the session's current draft (files included) on
-  every reload regardless of file count.
+  when the row has one). The dashboard also links to the most recent draft that already has a file
+  on it (`views.dashboard._resumable_draft`), since opening the send page from the nav rather than
+  a literal reload otherwise starts a fresh, empty draft and strands the in-progress one. The
+  anonymous flow needs none of this bookkeeping: `current_anonymous_transfer` already resumes the
+  session's current draft (files included) on every reload regardless of file count.
 - **CLI**: `admin/filetransfer.py send --draft-id <id>` re-fetches that draft
-  (`GET /transfers/{id}`, which is why that endpoint returns drafts) and does the same
-  name-plus-size matching against its `files` list before re-uploading anything, so re-running a
-  `send` that was interrupted partway through only uploads what's missing.
+  (`GET /transfers/{id}`, which is why that endpoint returns drafts) and matches its local files
+  against its `files` list by name, size *and* `client_last_modified` (tracking which draft rows
+  it's already matched this run, so two distinct local files can't both claim the same one) before
+  re-uploading anything, so re-running a `send` that was interrupted partway through only uploads
+  what's missing. `_collect_files` names a file found inside an expanded folder by its path
+  relative to that folder (not just its own name), and skips an empty one with a warning rather
+  than aborting the whole send. Every request goes through `_request`, which applies a default
+  timeout and a bounded retry on 429 honouring `Retry-After` (an ordinary multi-file folder send
+  can otherwise hit `FT_UPLOAD_USER` easily); any failure once a draft exists prints the
+  `--draft-id` hint. `login`/`set-password` accept their password as an optional positional
+  argument -- omit it to be prompted with echo hidden, or set `FILETRANSFER_PASSWORD` for
+  non-interactive use -- rather than always taking it in the clear on the command line.
 
 ### Admin
 

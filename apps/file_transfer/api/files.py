@@ -6,7 +6,6 @@ page's JSON endpoints (`apps.file_transfer.views.uploads`) -- same services, sam
 session-authenticated.
 """
 
-import math
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
@@ -27,14 +26,9 @@ from ..schemas import (
     PartUrlsResponseSchema,
     ResumeResponseSchema,
 )
-from ..services.storage import PART_SIZE_BYTES
 from .router import router
 
 auth = JWTAuth()
-
-
-def _part_count(size: int) -> int:
-    return max(1, math.ceil(size / PART_SIZE_BYTES))
 
 
 def _draft(request, transfer_id: UUID) -> Transfer:
@@ -64,8 +58,8 @@ def add_file(request, transfer_id: UUID, payload: AddFileSchema):
 
     return 201, {
         'file_id': file.id,
-        'part_size_bytes': PART_SIZE_BYTES,
-        'part_count': _part_count(payload.size),
+        'part_size_bytes': file.part_size_bytes,
+        'part_count': services.part_count_for(file),
     }
 
 
@@ -118,10 +112,16 @@ def resume_file(request, transfer_id: UUID, file_id: UUID):
 
     return {
         'restarted': restarted,
-        'part_size_bytes': PART_SIZE_BYTES,
-        'part_count': _part_count(file.size),
+        'part_size_bytes': file.part_size_bytes,
+        'part_count': services.part_count_for(file),
         'uploaded_parts': [
-            {'part_number': p['PartNumber'], 'etag': p['ETag'], 'size': p['Size']} for p in parts
+            {
+                'part_number': p['PartNumber'],
+                'etag': p['ETag'],
+                'size': p['Size'],
+                'checksum_sha256': p.get('ChecksumSHA256', ''),
+            }
+            for p in parts
         ],
     }
 
