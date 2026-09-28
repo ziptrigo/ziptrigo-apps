@@ -221,20 +221,37 @@ class TestPasswordResetFlow:
 
 @pytest.mark.django_db
 class TestEmailConfirmation:
-    """Tests for email confirmation endpoints."""
+    """Tests for email confirmation endpoints, ported onto `core.services.email_verification`
+    (issue #58): confirmation is now by a DB-backed token rather than a JWT, so tests capture the
+    real link from the sent email instead of minting a token directly."""
 
-    def test_confirm_email_valid_token(self, api_client, db):
+    def _send_and_extract_token(self, monkeypatch, user) -> str:
+        import re
+
+        from apps.accounts.services.email_confirmation import get_email_confirmation_service
+
+        sent = []
+        monkeypatch.setattr(
+            'apps.core.services.email_verification.send_email',
+            lambda **kwargs: sent.append(kwargs) or (1, 0),
+        )
+        get_email_confirmation_service().send_confirmation_email(user)
+
+        assert sent, 'confirmation email was not sent'
+        match = re.search(r'confirm-email/([^/\s]+)/', sent[-1]['text_body'])
+        assert match is not None, 'confirmation link not found in email body'
+        return match.group(1)
+
+    def test_confirm_email_valid_token(self, api_client, db, monkeypatch):
         """Test email confirmation with valid token."""
-        from apps.accounts.tokens import EmailConfirmationToken
-
         user = User.objects.create_user(
             email='confirm@example.com',
             password='password123',
             name='Confirm User',
         )
 
-        token = EmailConfirmationToken.for_user(user)
-        data = {'token': str(token)}
+        token = self._send_and_extract_token(monkeypatch, user)
+        data = {'token': token}
 
         response = api_client.post('/auth/confirm-email', json=data)
 
@@ -251,3 +268,78 @@ class TestEmailConfirmation:
         response = api_client.post('/auth/confirm-email', json=data)
 
         assert response.status_code == 400
+
+    def test_confirmation_link_keeps_its_historical_48_hour_validity(self, db, monkeypatch):
+        """Signup confirmation must keep behaving the way it always did for users: a 48-hour
+        link, not the shared `core.services.email_verification` default of 30 minutes (issue
+        #58 -- `accounts` passes `EMAIL_CONFIRMATION_TOKEN_TTL_HOURS` as `start()`'s per-call
+        `validity` override)."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.core.models import CoreSettings, EmailVerification
+
+        # Sanity check: the shared default really is different from accounts' 48h, so this test
+        # would actually catch a regression back to the shared default.
+        settings_row = CoreSettings.load()
+        assert settings_row.email_verification_validity_minutes != 48 * 60
+
+        user = User.objects.create_user(
+            email='validity@example.com',
+            password='password123',
+            name='Validity User',
+        )
+        self._send_and_extract_token(monkeypatch, user)
+
+        row = EmailVerification.objects.get(email=user.email, purpose='accounts.email_confirmation')
+        expected_expiry = timezone.now() + timedelta(hours=48)
+        assert abs((row.expires_at - expected_expiry).total_seconds()) < 5
+
+    def test_confirm_email_twice_is_idempotent(self, api_client, db, monkeypatch):
+        """Clicking the same confirmation link twice (e.g. an email client's own link
+        prefetching) must keep succeeding, matching the old JWT-based link's behaviour."""
+        user = User.objects.create_user(
+            email='confirm-twice@example.com',
+            password='password123',
+            name='Confirm Twice',
+        )
+        token = self._send_and_extract_token(monkeypatch, user)
+
+        first = api_client.post('/auth/confirm-email', json={'token': token})
+        second = api_client.post('/auth/confirm-email', json={'token': token})
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+    def test_resend_confirmation_invalidates_previous_link(self, api_client, db, monkeypatch):
+        """A resent confirmation email supersedes the previous one -- only the latest link
+        works (issue #58: "only the latest is valid")."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        user = User.objects.create_user(
+            email='resend@example.com',
+            password='password123',
+            name='Resend User',
+        )
+
+        old_token = self._send_and_extract_token(monkeypatch, user)
+
+        # Move the first verification's `created_at` back so the resend cooldown doesn't block
+        # the second send.
+        from apps.core.models import EmailVerification
+
+        EmailVerification.objects.filter(email=user.email).update(
+            created_at=timezone.now() - timedelta(minutes=5)
+        )
+
+        new_token = self._send_and_extract_token(monkeypatch, user)
+        assert new_token != old_token
+
+        old_response = api_client.post('/auth/confirm-email', json={'token': old_token})
+        assert old_response.status_code == 400
+
+        new_response = api_client.post('/auth/confirm-email', json={'token': new_token})
+        assert new_response.status_code == 200

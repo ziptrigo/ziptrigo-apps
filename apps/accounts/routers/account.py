@@ -28,6 +28,7 @@ def update_account(request, payload: AccountUpdateRequest):
     # Update email if provided and different. The new address must be confirmed again, so a user
     # can't claim an address they don't own.
     email_changed = bool(payload.email and payload.email != user.email)
+    previous_email = user.email
     if email_changed:
         # Check if email already exists
         if User.objects.filter(email=payload.email).exclude(id=user.id).exists():
@@ -39,10 +40,19 @@ def update_account(request, payload: AccountUpdateRequest):
     user.save()
 
     if email_changed:
-        get_email_confirmation_service().send_confirmation_email(user)
+        service = get_email_confirmation_service()
+        # Invalidate any still-pending confirmation for the address being left behind first
+        # (issue #58 follow-up), so a link already sent to it can't later confirm whatever
+        # account claims that address next.
+        service.invalidate_pending_for_email(previous_email)
+        service.send_confirmation_email(user)
 
     return AccountUpdateResponse(
         message=(
+            # Shown even if the cooldown silently skipped the send (`send_confirmation_email`
+            # swallows `ResendTooSoon`) or every backend failed to deliver it
+            # (`EmailVerificationSendFailed`) -- matches the old JWT-based flow, which never
+            # surfaced a send failure here either (see `send_confirmation_email`'s docstring).
             'Profile updated. Check your inbox to confirm your new email address.'
             if email_changed
             else 'Profile updated successfully'

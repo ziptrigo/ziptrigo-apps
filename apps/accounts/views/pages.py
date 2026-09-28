@@ -1,10 +1,11 @@
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 
 from ..forms import ProfileForm
 from ..http import AuthenticatedHttpRequest
-from ..services.email_confirmation import get_email_confirmation_service
+from ..services.email_confirmation import format_validity_minutes, get_email_confirmation_service
 from ..services.password_reset import get_password_reset_service
 
 
@@ -21,7 +22,12 @@ def register_page(request: HttpRequest) -> HttpResponse:
 
 def account_created_page(request: HttpRequest) -> HttpResponse:
     """Render the account created confirmation page."""
-    return render(request, 'accounts/account_created.html')
+    validity_minutes = settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS * 60
+    return render(
+        request,
+        'accounts/account_created.html',
+        {'confirmation_validity': format_validity_minutes(validity_minutes)},
+    )
 
 
 def forgot_password_page(request: HttpRequest) -> HttpResponse:
@@ -43,13 +49,11 @@ def reset_password_page(request: HttpRequest, token: str) -> HttpResponse:
 def confirm_email_page(request: HttpRequest, token: str) -> HttpResponse:
     """Validate email confirmation token and redirect accordingly."""
     service = get_email_confirmation_service()
-    user = service.validate_token(token)
+    user = service.confirm_token(token)
 
     if user is None:
         return render(request, 'accounts/email_confirmation_expired.html')
 
-    # Confirm the email
-    service.confirm_email(user)
     return redirect('accounts:email-confirmed')
 
 

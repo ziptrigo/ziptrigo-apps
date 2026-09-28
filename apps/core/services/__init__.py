@@ -1,3 +1,39 @@
 from .email import asend_email, get_email_backend, send_email
+from .email_verification import (
+    EmailVerificationAlreadyConfirmed,
+    EmailVerificationBurned,
+    EmailVerificationContext,
+    EmailVerificationError,
+    EmailVerificationExpired,
+    EmailVerificationNotFound,
+    EmailVerificationSendFailed,
+    EmailVerificationSuperseded,
+    IncorrectCode,
+    ResendTooSoon,
+    confirm_by_code,
+    confirm_by_token,
+    invalidate,
+    purge_old,
+    start,
+)
 
-__all__ = ['asend_email', 'get_email_backend', 'send_email']
+__all__ = [
+    'EmailVerificationAlreadyConfirmed',
+    'EmailVerificationBurned',
+    'EmailVerificationContext',
+    'EmailVerificationError',
+    'EmailVerificationExpired',
+    'EmailVerificationNotFound',
+    'EmailVerificationSendFailed',
+    'EmailVerificationSuperseded',
+    'IncorrectCode',
+    'ResendTooSoon',
+    'asend_email',
+    'confirm_by_code',
+    'confirm_by_token',
+    'get_email_backend',
+    'invalidate',
+    'purge_old',
+    'send_email',
+    'start',
+]

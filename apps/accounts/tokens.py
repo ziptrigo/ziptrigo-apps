@@ -68,13 +68,6 @@ class CustomRefreshToken(Token):
         return cast(CustomRefreshToken, token)
 
 
-class EmailConfirmationToken(Token):
-    """JWT token for email confirmation links."""
-
-    token_type = 'email_confirmation'
-    lifetime = timedelta(hours=settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS)
-
-
 class PasswordResetToken(Token):
     """JWT token for password reset links."""
 
