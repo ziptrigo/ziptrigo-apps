@@ -15,6 +15,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core import ratelimit
 
 from .. import services
 from ..models import Transfer, TransferFile, TransferStatus
@@ -40,6 +41,9 @@ def _file(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) -> Tra
 @login_required
 @require_POST
 def add_file(request: AuthenticatedHttpRequest, draft_id: str) -> HttpResponse:
+    limited = ratelimit.hit_user(request.user, 'FT_UPLOAD_USER')
+    if not limited.allowed:
+        return ratelimit.json_response(limited)
     transfer = _draft(request, draft_id)
     body = _json_body(request)
     name = str(body.get('name', ''))[:255].strip()
@@ -76,6 +80,9 @@ def part_urls(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) ->
     so the checksum can be bound into the presigned URL's signature (see
     `services.uploads.presign_parts`).
     """
+    limited = ratelimit.hit_user(request.user, 'FT_UPLOAD_USER')
+    if not limited.allowed:
+        return ratelimit.json_response(limited)
     file = _file(request, draft_id, file_id)
     body = _json_body(request)
     raw_parts = body.get('parts', [])

@@ -21,9 +21,12 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.accounts.models import User
+from apps.core import ratelimit
 from apps.core.htmx import hx_redirect
+from apps.core.services.client_ip import client_ip
 from apps.core.services.email_verification import (
     EmailVerificationError,
+    EmailVerificationRateLimited,
     EmailVerificationSendFailed,
     ResendTooSoon,
 )
@@ -31,7 +34,6 @@ from apps.core.services.email_verification import (
 from .. import services
 from ..forms import AnonymousSendOptionsForm, ConfirmCodeForm
 from ..models import FileTransferSettings, Transfer, TransferStatus
-from ..services.client_ip import client_ip
 from ..services.storage import PART_SIZE_BYTES
 
 
@@ -149,6 +151,12 @@ def start_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpResp
         # complete a free send through it.
         return HttpResponse(status=403)
 
+    limited = ratelimit.hit_ip(request, 'FT_ANON_CONFIRM_START_IP')
+    if not limited.allowed:
+        cookie_id = _cookie_id(request)
+        response = ratelimit.web_response(request, limited, retarget='#send-errors')
+        return _finish(request, response, cookie_id)
+
     cookie_id = _cookie_id(request)
     transfer = _owned_draft(request, draft_id)
     settings_row = FileTransferSettings.load()
@@ -166,6 +174,11 @@ def start_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpResp
     except ResendTooSoon as exc:
         form.add_error(None, f'Please wait {exc.retry_after_seconds}s before trying again.')
         return _finish(request, _upload_errors(request, form), cookie_id)
+    except EmailVerificationRateLimited:
+        form.add_error(
+            None, 'Too many confirmation emails sent to this address today. Try again tomorrow.'
+        )
+        return _finish(request, _upload_errors(request, form), cookie_id)
     except EmailVerificationSendFailed:
         form.add_error(None, 'Could not send the confirmation email. Please try again shortly.')
         return _finish(request, _upload_errors(request, form), cookie_id)
@@ -177,7 +190,20 @@ def start_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpResp
 @require_POST
 def resend_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     cookie_id = _cookie_id(request)
+    limited = ratelimit.hit_ip(request, 'FT_ANON_CONFIRM_RESEND_IP')
     transfer = _owned_pending(request, draft_id)
+    if not limited.allowed:
+        context = {
+            'transfer': transfer,
+            'confirm_form': ConfirmCodeForm(),
+            'error': 'Too many requests. Please wait a moment and try again.',
+        }
+        response = render(
+            request, 'file_transfer/partials/anon_confirm_box.html', context, status=429
+        )
+        response['Retry-After'] = str(limited.retry_after)
+        return _finish(request, response, cookie_id)
+
     form = ConfirmCodeForm()
     error = ''
     try:
@@ -186,6 +212,8 @@ def resend_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpRes
         error = exc.messages[0]
     except ResendTooSoon as exc:
         error = f'Please wait {exc.retry_after_seconds}s before requesting another code.'
+    except EmailVerificationRateLimited:
+        error = 'Too many confirmation emails sent to this address today. Try again tomorrow.'
     except EmailVerificationSendFailed:
         error = 'Could not send the confirmation email. Please try again shortly.'
 
@@ -197,7 +225,20 @@ def resend_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpRes
 @require_POST
 def confirm_code(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     cookie_id = _cookie_id(request)
+    limited = ratelimit.hit_ip(request, 'FT_ANON_CONFIRM_CODE_IP')
     transfer = _owned_pending(request, draft_id)
+    if not limited.allowed:
+        context = {
+            'transfer': transfer,
+            'confirm_form': ConfirmCodeForm(),
+            'error': 'Too many attempts. Please wait a moment and try again.',
+        }
+        response = render(
+            request, 'file_transfer/partials/anon_confirm_box.html', context, status=429
+        )
+        response['Retry-After'] = str(limited.retry_after)
+        return _finish(request, response, cookie_id)
+
     form = ConfirmCodeForm(request.POST)
     ip = client_ip(request)
 
@@ -238,12 +279,24 @@ def confirm_link(request: AnonymousHttpRequest, draft_id: str, token: str) -> Ht
     victim never sent, with no click at all.
     """
     cookie_id = _cookie_id(request)
+    limited = ratelimit.hit_ip(request, 'FT_ANON_CONFIRM_LINK_IP')
     transfer = get_object_or_404(Transfer, id=draft_id, owner__isnull=True)
 
     if transfer.status == TransferStatus.ACTIVE:
         return _finish(
             request, redirect('file_transfer:anon-sent', transfer_id=transfer.id), cookie_id
         )
+
+    if not limited.allowed:
+        context = {
+            'transfer': transfer,
+            'token': token,
+            'confirm_form': ConfirmCodeForm(),
+            'error': 'Too many attempts. Please wait a moment and try again.',
+        }
+        response = render(request, 'file_transfer/anon_confirm_link.html', context, status=429)
+        response['Retry-After'] = str(limited.retry_after)
+        return _finish(request, response, cookie_id)
 
     error = ''
     if transfer.status != TransferStatus.PENDING_CONFIRMATION:
@@ -299,6 +352,9 @@ def sent_page(request: AnonymousHttpRequest, transfer_id: str) -> HttpResponse:
 @require_POST
 def add_file(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     cookie_id = _cookie_id(request)
+    limited = ratelimit.hit_ip(request, 'FT_ANON_UPLOAD_IP')
+    if not limited.allowed:
+        return _finish(request, ratelimit.json_response(limited), cookie_id)
     transfer = _owned_draft(request, draft_id)
     body = _json_body(request)
     name = str(body.get('name', ''))[:255].strip()
@@ -331,6 +387,9 @@ def add_file(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
 @require_POST
 def part_urls(request: AnonymousHttpRequest, draft_id: str, file_id: str) -> HttpResponse:
     cookie_id = _cookie_id(request)
+    limited = ratelimit.hit_ip(request, 'FT_ANON_UPLOAD_IP')
+    if not limited.allowed:
+        return _finish(request, ratelimit.json_response(limited), cookie_id)
     transfer = _owned_draft(request, draft_id)
     file = get_object_or_404(transfer.files, id=file_id)
     body = _json_body(request)
