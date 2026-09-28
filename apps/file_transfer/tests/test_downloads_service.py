@@ -86,8 +86,42 @@ def test_record_download_ends_transfer_once_limit_reached(
 
     draft_transfer.refresh_from_db()
     assert draft_transfer.status == TransferStatus.EXPIRED
-    # Files were deleted as part of ending the transfer.
-    assert uploaded_file.storage_key not in fake_storage.objects
+    assert draft_transfer.ended_at is not None
+    # Deletion is deferred: `expire_transfers` removes the objects later, once any presigned URL
+    # already handed out for this download has had time to expire (see
+    # `apps.file_transfer.jobs.expire_transfers` and `Transfer.files_deleted_at`).
+    assert draft_transfer.files_deleted_at is None
+    assert uploaded_file.storage_key in fake_storage.objects
+
+
+def test_record_download_returned_url_still_resolves_once_limit_reached(
+    draft_transfer, uploaded_file, fake_storage
+):
+    """The critical regression this guards against: with `max_downloads=1`, the download that
+    reaches the limit must still get a *usable* link -- not a redirect to an object that was
+    already deleted out from under it."""
+    _activate(draft_transfer, max_downloads=1)
+
+    url = downloads.record_download(draft_transfer, uploaded_file, None, storage=fake_storage)
+
+    assert uploaded_file.storage_key in url
+    assert fake_storage.object_exists(uploaded_file.storage_key)
+
+
+def test_record_download_second_call_after_limit_reached_is_rejected(
+    draft_transfer, uploaded_file, fake_storage
+):
+    """Not a true concurrency test (SQLite/the Django test transaction don't lend themselves to
+    one), but it does exercise the same lock-check-record sequence `record_download` now runs
+    inside `transaction.atomic()` + `select_for_update()`: once the first call has ended the
+    transfer, a second attempt against the same (now unavailable) transfer must be rejected
+    rather than slipping through."""
+    _activate(draft_transfer, max_downloads=1)
+
+    downloads.record_download(draft_transfer, uploaded_file, None, storage=fake_storage)
+
+    with pytest.raises(ValidationError):
+        downloads.record_download(draft_transfer, uploaded_file, None, storage=fake_storage)
 
 
 def test_session_unlock_helpers(rf: RequestFactory, draft_transfer):
@@ -95,7 +129,27 @@ def test_session_unlock_helpers(rf: RequestFactory, draft_transfer):
     from django.contrib.sessions.backends.db import SessionStore
 
     request.session = SessionStore()
+    password_hash = password.hash_password('sekret')
 
-    assert password.is_unlocked_in_session(request.session, draft_transfer.id) is False
-    password.unlock_in_session(request.session, draft_transfer.id)
-    assert password.is_unlocked_in_session(request.session, draft_transfer.id) is True
+    assert (
+        password.is_unlocked_in_session(request.session, draft_transfer.id, password_hash) is False
+    )
+    password.unlock_in_session(request.session, draft_transfer.id, password_hash)
+    assert (
+        password.is_unlocked_in_session(request.session, draft_transfer.id, password_hash) is True
+    )
+
+
+def test_session_unlock_is_tied_to_the_current_password_hash(rf: RequestFactory, draft_transfer):
+    """Changing the password must invalidate sessions that unlocked the old one -- the session
+    stores a fingerprint of the hash it was unlocked with, not a bare flag."""
+    request = rf.get('/')
+    from django.contrib.sessions.backends.db import SessionStore
+
+    request.session = SessionStore()
+    old_hash = password.hash_password('old-one')
+    new_hash = password.hash_password('new-one')
+
+    password.unlock_in_session(request.session, draft_transfer.id, old_hash)
+    assert password.is_unlocked_in_session(request.session, draft_transfer.id, old_hash) is True
+    assert password.is_unlocked_in_session(request.session, draft_transfer.id, new_hash) is False

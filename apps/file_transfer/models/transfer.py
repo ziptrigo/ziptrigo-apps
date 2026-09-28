@@ -167,6 +167,28 @@ class Transfer(models.Model):
 
     created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
     deleted_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    ended_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='When the transfer first became unavailable (expired, deleted, or its '
+            'download limit reached). Set once, even if file deletion is deferred -- see '
+            '`files_deleted_at` -- so `expire_transfers` knows when the grace window is up.',
+        ),
+    )
+    files_deleted_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='When the S3 objects were actually removed. Usually set alongside '
+            '`ended_at`, except when ending the transfer would invalidate a presigned download '
+            'URL still being handed out (the last download reaching `max_downloads`): then '
+            'deletion is deferred until that URL has expired (see '
+            '`apps.file_transfer.jobs.expire_transfers`).',
+        ),
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -192,13 +214,27 @@ class Transfer(models.Model):
     def display_name(self) -> str:
         """The dashboard/email name for a transfer: its first file's name (spec section 2 -- there's
         no title field). A plain model property (rather than only a service function) so templates
-        can use it directly."""
-        first = self.files.order_by('created_at', 'id').first()
+        can use it directly.
+
+        Deliberately `self.files.first()` rather than `self.files.order_by(...).first()`:
+        `TransferFile.Meta.ordering` already sorts by `('created_at', 'id')`, and an explicit
+        `.order_by()` call would clone the queryset, bypassing any `prefetch_related('files')`
+        cache the caller set up (e.g. the dashboard list, `apps.file_transfer.views.dashboard`)
+        and re-querying per transfer.
+        """
+        first = self.files.first()
         return first.name if first else 'Untitled transfer'
 
     @property
     def download_count(self) -> int:
-        """Total files downloaded so far (spec section 4: each file download counts one)."""
+        """Total files downloaded so far (spec section 4: each file download counts one).
+
+        Uses the `download_events_count` annotation when the caller provided one (the dashboard
+        list does, to avoid a `COUNT` query per row); falls back to a direct count otherwise.
+        """
+        annotated = getattr(self, 'download_events_count', None)
+        if annotated is not None:
+            return annotated
         return self.download_events.count()
 
     @property

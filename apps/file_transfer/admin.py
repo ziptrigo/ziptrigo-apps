@@ -38,6 +38,8 @@ _TRANSFER_FIELDS = [
     'zip_key',
     'created_at',
     'deleted_at',
+    'ended_at',
+    'files_deleted_at',
 ]
 
 

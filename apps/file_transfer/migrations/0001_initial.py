@@ -66,6 +66,8 @@ class Migration(migrations.Migration):
                 ('zip_key', models.CharField(blank=True, default='', max_length=512)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('deleted_at', models.DateTimeField(blank=True, null=True)),
+                ('ended_at', models.DateTimeField(blank=True, help_text='When the transfer first became unavailable (expired, deleted, or its download limit reached). Set once, even if file deletion is deferred -- see `files_deleted_at` -- so `expire_transfers` knows when the grace window is up.', null=True)),
+                ('files_deleted_at', models.DateTimeField(blank=True, help_text='When the S3 objects were actually removed. Usually set alongside `ended_at`, except when ending the transfer would invalidate a presigned download URL still being handed out (the last download reaching `max_downloads`): then deletion is deferred until that URL has expired (see `apps.file_transfer.jobs.expire_transfers`).', null=True)),
                 ('owner', models.ForeignKey(blank=True, help_text='Null for an anonymous transfer (phase 2).', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='transfers', to=settings.AUTH_USER_MODEL)),
             ],
             options={

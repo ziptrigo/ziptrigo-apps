@@ -19,7 +19,7 @@ from .downloads import (
     requires_password,
 )
 from .expiry_choices import EXPIRY_CHOICES, resolve_expiry
-from .lifecycle import delete_transfer_files, end_transfer
+from .lifecycle import delete_transfer_files, end_transfer, finish_deferred_deletion
 from .metering import (
     MIN_BALANCE_TO_REENABLE,
     delete_files_past_grace_period,
@@ -35,6 +35,7 @@ from .uploads import (
     add_file,
     complete_file_upload,
     create_draft,
+    get_or_create_draft,
     presign_parts,
     remove_file,
 )
@@ -58,6 +59,8 @@ __all__ = [
     'downloads_remaining',
     'end_transfer',
     'finalize_send',
+    'finish_deferred_deletion',
+    'get_or_create_draft',
     'is_available',
     'is_unlocked_in_session',
     'limits',

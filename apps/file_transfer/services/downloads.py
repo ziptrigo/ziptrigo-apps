@@ -3,6 +3,7 @@ download counting.
 """
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
 
 from ..models import DownloadEvent, Transfer, TransferFile, TransferStatus
@@ -53,23 +54,34 @@ def record_download(
 ) -> str:
     """Record a download of `file` and return a short-lived presigned URL for it.
 
+    Locks the transfer row for the duration of the check-count-record sequence, so N concurrent
+    requests against a transfer with one download remaining can't all slip through before any of
+    them is counted. The presigned URL itself is only built after the transaction commits.
+
     Raises:
         ValidationError: the transfer isn't available, or `file` doesn't belong to it.
     """
-    if not is_available(transfer):
-        raise ValidationError('This transfer is no longer available.')
-    if file.transfer_id != transfer.id:
-        raise ValidationError('File does not belong to this transfer.')
+    with transaction.atomic():
+        locked_transfer = Transfer.objects.select_for_update().get(pk=transfer.pk)
+        if not is_available(locked_transfer):
+            raise ValidationError('This transfer is no longer available.')
+        if file.transfer_id != locked_transfer.id:
+            raise ValidationError('File does not belong to this transfer.')
 
-    DownloadEvent.objects.create(transfer=transfer, file=file, ip=ip)
-    send_download_notification.enqueue(str(transfer.id), str(file.id))
+        DownloadEvent.objects.create(transfer=locked_transfer, file=file, ip=ip)
+        transaction.on_commit(
+            lambda: send_download_notification.enqueue(str(locked_transfer.id), str(file.id))
+        )
 
-    # End the transfer the moment the limit is *reached*, rather than waiting for the next
-    # `expire_transfers` tick, so the same link can't be reused past its limit in the meantime.
-    # `expire_transfers` still re-checks this as a fallback in case the process dies right here.
-    remaining = downloads_remaining(transfer)
-    if remaining is not None and remaining <= 0:
-        end_transfer(transfer, TransferStatus.EXPIRED, delete_files=True)
+        # End the transfer the moment the limit is *reached*, rather than waiting for the next
+        # `expire_transfers` tick, so the same link can't be reused past its limit in the
+        # meantime. Deletion of the files themselves is deferred (`delete_files=False`): the
+        # presigned URL this call is about to hand back must still resolve, so
+        # `expire_transfers` removes the objects once it's had time to expire instead. That job
+        # also re-checks this ending as a fallback in case the process dies right here.
+        remaining = downloads_remaining(locked_transfer)
+        if remaining is not None and remaining <= 0:
+            end_transfer(locked_transfer, TransferStatus.EXPIRED, delete_files=False)
 
     storage = storage or get_storage()
     return storage.presigned_get_url(file.storage_key, file.name)
