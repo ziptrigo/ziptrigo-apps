@@ -52,31 +52,28 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      # A plain TCP check (no extra tooling needed in the runtime image): once something answers
+      # on 8000, `docker-entrypoint.sh` must already have finished `migrate`, since that runs
+      # before `runserver`/gunicorn ever binds the port. `worker` and `scheduler` wait on this
+      # (`service_healthy`) rather than `service_started` so they can't race `web`'s migration.
+      test: ['CMD', 'python', '-c', "import socket; socket.create_connection(('localhost', 8000), 2).close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     restart: unless-stopped
 
   worker:
-    # Runs both background-job mechanisms from spec section 10, in one container:
-    #   - `db_worker`: the `django_tasks_db` queue worker (emails, deleting a transfer's objects).
-    #   - `run_scheduler`: apps.core.scheduler's runner (the four file_transfer jobs).
-    # One container, two processes (backgrounded with `&`, `wait` keeps the container alive and
-    # exits it if either dies) rather than two services: they're both lightweight, always deployed
-    # together, and this avoids a second image build/deploy step. Split them into separate services
-    # if either ever needs to scale or restart independently.
+    # `django_tasks_db`'s queue worker (emails, deleting a transfer's objects). Its own service --
+    # see `scheduler` below for why not one container running both, and `docker-entrypoint.sh` for
+    # why it doesn't run migrations.
     build:
       context: .
       dockerfile: Dockerfile
     container_name: ziptrigo-worker
-    # Keep the image's own ENTRYPOINT (docker-entrypoint.sh): it applies migrations first when
-    # RUN_MIGRATIONS=1, same as `web`, which matters here since `web` and `worker` start
-    # concurrently and this container must not assume `web` has already migrated.
-    command:
-      - /bin/sh
-      - -c
-      - |
-        python manage.py run_scheduler &
-        python manage.py db_worker &
-        wait -n
-    environment:
+    command: ['python', 'manage.py', 'db_worker']
+    environment: &worker_environment
       - DEBUG=${DEBUG:-False}
       - SECRET_KEY=${SECRET_KEY:-django-insecure-change-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-dev}
@@ -86,16 +83,47 @@ services:
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - EMAIL_BACKENDS=${EMAIL_BACKENDS:-console}
       - AWS_SES_SENDER=${AWS_SES_SENDER:-no-reply@ziptrigo.com}
-      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-1}
+      # Only `web` migrates: two containers racing `migrate` concurrently is exactly the bug this
+      # fixes (see git history) -- `web` being healthy already implies migrations are applied
+      # (see its healthcheck above), and `depends_on` below waits for that before starting.
+      - RUN_MIGRATIONS=0
     env_file:
       - .env.dev
-    volumes:
+    volumes: &worker_volumes
       - ./apps:/app/apps
       - ./config:/app/config
       - ./.env.dev:/app/.env.dev:ro
       - media:/app/media
     depends_on:
       db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    # `apps.core.scheduler`'s runner (the four file_transfer jobs, spec section 10). A separate
+    # service from `worker` rather than the two of them backgrounded in one container with `&` +
+    # `wait`: `/bin/sh` in the `python:3.14-slim` runtime is dash, which doesn't support `wait -n`
+    # (`wait: Illegal option -n`) -- that made the previous single container exit right after
+    # backgrounding both processes, so neither ever actually ran, and even a working supervisor
+    # script leaves `sh` as PID 1, which doesn't forward SIGTERM to its children, so a graceful
+    # stop wouldn't reach `run_scheduler`'s own stop handling either way. Two plain services each
+    # run their one process as PID 1, so `docker compose stop` / SIGTERM reaches it directly, and
+    # each restarts independently of the other.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ziptrigo-scheduler
+    command: ['python', 'manage.py', 'run_scheduler']
+    environment: *worker_environment
+    env_file:
+      - .env.dev
+    volumes: *worker_volumes
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
         condition: service_healthy
     restart: unless-stopped
 
