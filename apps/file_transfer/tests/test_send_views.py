@@ -49,6 +49,48 @@ def test_send_page_leaves_a_draft_with_files_alone_and_starts_a_new_one(
     )
 
 
+def test_send_page_resume_param_reuses_a_draft_with_files(client, draft_transfer, uploaded_file):
+    """`?resume=<draft id>` (spec section 2: resumable uploads) is how the send page's upload JS
+    picks the same draft back up after a reload -- unlike a plain visit, it must find a draft that
+    already has files rather than starting a new one (see the "leaves a draft with files alone"
+    test above for the plain-visit behavior this deliberately differs from)."""
+    client.force_login(draft_transfer.owner)
+
+    response = client.get(reverse('file_transfer:send') + f'?resume={draft_transfer.id}')
+
+    assert response.status_code == 200
+    assert (
+        Transfer.objects.filter(owner=draft_transfer.owner, status=TransferStatus.DRAFT).count()
+        == 1
+    )
+    assert response.context['draft_id'] == str(draft_transfer.id)
+    existing = response.context['existing_files']
+    assert len(existing) == 1
+    assert existing[0]['id'] == str(uploaded_file.id)
+    assert existing[0]['uploaded'] is True
+
+
+def test_send_page_resume_param_ignores_other_users_draft(client, draft_transfer, uploaded_file):
+    from apps.accounts.tests.factories import UserFactory
+
+    other = UserFactory()
+    client.force_login(other)
+
+    response = client.get(reverse('file_transfer:send') + f'?resume={draft_transfer.id}')
+
+    assert response.status_code == 200
+    # Falls back to `get_or_create_draft` for `other` rather than 404ing or leaking the transfer.
+    assert response.context['draft_id'] != str(draft_transfer.id)
+
+
+def test_send_page_resume_param_ignores_malformed_value(client, funded_user):
+    client.force_login(funded_user)
+
+    response = client.get(reverse('file_transfer:send') + '?resume=not-a-uuid')
+
+    assert response.status_code == 200
+
+
 def test_send_submit_validation_error_returns_422(client, draft_transfer, uploaded_file):
     client.force_login(draft_transfer.owner)
     url = reverse('file_transfer:send-submit', args=[draft_transfer.id])

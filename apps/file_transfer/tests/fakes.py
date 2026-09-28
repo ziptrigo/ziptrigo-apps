@@ -88,6 +88,25 @@ class FakeS3Storage:
                     )
             self.objects[key] = b''.join(recorded[number] for number in ordered)
 
+    def list_parts(self, key: str, upload_id: str) -> list[dict]:
+        if upload_id not in self.active_uploads:
+            # Mirrors real S3: `ListParts` on an upload id it no longer knows about (aborted, or
+            # never existed) fails with this error code -- see `services.uploads.UploadExpired`.
+            raise ClientError(
+                {
+                    'Error': {
+                        'Code': 'NoSuchUpload',
+                        'Message': 'The specified upload does not exist.',
+                    }
+                },
+                'ListParts',
+            )
+        recorded = self.multipart_parts.get(upload_id, {})
+        return [
+            {'PartNumber': number, 'ETag': f'etag-{upload_id}-{number}', 'Size': len(data)}
+            for number, data in sorted(recorded.items())
+        ]
+
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
         self.active_uploads.discard(upload_id)
         self.aborted_uploads.add(upload_id)

@@ -10,7 +10,7 @@ from .dashboard import (
 )
 from .download import download_file, download_page, download_zip, unlock, zip_status
 from .send import send_page, send_submit, sent_page
-from .uploads import add_file, complete_file, part_urls, remove_file
+from .uploads import add_file, complete_file, part_urls, remove_file, resume_file
 
 __all__ = [
     'add_file',
@@ -26,6 +26,7 @@ __all__ = [
     'reenable',
     'remove_file',
     'resend_recipient',
+    'resume_file',
     'send_page',
     'send_submit',
     'sent_page',

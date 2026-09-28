@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load static %}
 
 {% block title %}Send files - ZipTrigo{% endblock %}
 
@@ -66,175 +67,34 @@
     </form>
 </div>
 
+{{ existing_files|json_script:"existing-files-data" }}
+<script src="{% static 'file_transfer/js/resumable_upload.js' %}"></script>
 <script>
-function getCookie(name) {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(';').shift();
-}
-
 document.addEventListener('DOMContentLoaded', function () {
     const draftId = "{{ draft_id }}";
     const fileInput = document.getElementById('file-input');
     const fileListEl = document.getElementById('file-list');
     const submitBtn = document.getElementById('send-submit-btn');
-    const files = new Map();
     const csrftoken = getCookie('csrftoken');
-    const base = '/transfer/send/anon/' + draftId;
+    const existingFiles = JSON.parse(document.getElementById('existing-files-data').textContent);
 
-    function updateSubmitState() {
-        const anyUploaded = Array.from(files.values()).some(function (f) { return f.uploaded; });
-        submitBtn.disabled = !anyUploaded;
-    }
-
-    async function sha256Base64(blob) {
-        const buffer = await blob.arrayBuffer();
-        const digest = await crypto.subtle.digest('SHA-256', buffer);
-        let binary = '';
-        new Uint8Array(digest).forEach(function (byte) { binary += String.fromCharCode(byte); });
-        return btoa(binary);
-    }
-
-    function renderRow(fileId, entry) {
-        let li = document.getElementById('file-row-' + fileId);
-        if (!li) {
-            li = document.createElement('li');
-            li.id = 'file-row-' + fileId;
-            li.className = 'flex items-center justify-between text-sm gap-2';
-            fileListEl.appendChild(li);
-        }
-        li.textContent = '';
-        const pct = entry.progress || 0;
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'truncate flex-1';
-        nameSpan.textContent = entry.name + ' (' + Math.round(entry.size / 1024 / 1024) + ' MB)';
-
-        const barOuter = document.createElement('span');
-        barOuter.className = 'w-32 bg-gray-200 dark:bg-gray-700 rounded h-2 overflow-hidden';
-        const barInner = document.createElement('span');
-        barInner.className = 'block h-2 bg-brand-primary';
-        barInner.style.width = pct + '%';
-        barOuter.appendChild(barInner);
-
-        const statusSpan = document.createElement('span');
-        statusSpan.className = 'w-16 text-right';
-        statusSpan.textContent = entry.uploaded ? 'Done' : pct + '%';
-
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.setAttribute('data-remove', fileId);
-        removeBtn.className = 'text-red-500 hover:underline';
-        removeBtn.textContent = 'Remove';
-
-        li.append(nameSpan, barOuter, statusSpan, removeBtn);
-    }
-
-    async function uploadFile(file) {
-        const addResp = await fetch(base + '/files/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({ name: file.name, size: file.size }),
-        });
-        if (!addResp.ok) {
-            const err = await addResp.json().catch(function () { return {}; });
-            alert('Could not add ' + file.name + ': ' + (err.error || addResp.status));
-            return;
-        }
-        const added = await addResp.json();
-        const fileId = added.file_id;
-        const partSize = added.part_size_bytes;
-        const partCount = added.part_count;
-
-        files.set(fileId, { name: file.name, size: file.size, uploaded: false, progress: 0 });
-        renderRow(fileId, files.get(fileId));
-
-        const blobs = [];
-        const requestParts = [];
-        for (let i = 0; i < partCount; i++) {
-            const partNumber = i + 1;
-            const start = i * partSize;
-            const end = Math.min(start + partSize, file.size);
-            const blob = file.slice(start, end);
-            blobs.push(blob);
-            requestParts.push({
-                part_number: partNumber,
-                checksum_sha256: await sha256Base64(blob),
-            });
-        }
-
-        const urlsResp = await fetch(base + '/files/' + fileId + '/parts/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({ parts: requestParts }),
-        });
-        if (!urlsResp.ok) {
-            const err = await urlsResp.json().catch(function () { return {}; });
-            alert('Could not start uploading ' + file.name + ': ' + (err.error || urlsResp.status));
-            return;
-        }
-        const urlsData = await urlsResp.json();
-        const parts = [];
-
-        for (let i = 0; i < partCount; i++) {
-            const partNumber = i + 1;
-            const checksum = requestParts[i].checksum_sha256;
-            const url = urlsData.urls[String(partNumber)];
-            const putResp = await fetch(url, {
-                method: 'PUT',
-                headers: { 'x-amz-checksum-sha256': checksum },
-                body: blobs[i],
-            });
-            if (!putResp.ok) {
-                alert('Uploading part ' + partNumber + ' of ' + file.name + ' failed: ' + putResp.status);
-                return;
-            }
-            const etag = putResp.headers.get('ETag');
-            parts.push({ PartNumber: partNumber, ETag: etag, ChecksumSHA256: checksum });
-
-            const entry = files.get(fileId);
-            entry.progress = Math.round((partNumber / partCount) * 100);
-            renderRow(fileId, entry);
-        }
-
-        const completeResp = await fetch(base + '/files/' + fileId + '/complete/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({ parts: parts }),
-        });
-        if (completeResp.ok) {
-            const entry = files.get(fileId);
-            entry.uploaded = true;
-            entry.progress = 100;
-            renderRow(fileId, entry);
-            updateSubmitState();
-        } else {
-            const err = await completeResp.json().catch(function () { return {}; });
-            alert('Upload of ' + file.name + ' failed: ' + (err.error || completeResp.status));
-        }
-    }
+    // No `onFirstFileAdded`/URL bookkeeping needed here: the anonymous flow already resumes the
+    // same session-owned draft across a reload on its own (`current_anonymous_transfer`), files
+    // and all -- see `views.anonymous.send_page`.
+    const upload = initFileTransferUpload({
+        base: '/transfer/send/anon/' + draftId,
+        fileListEl: fileListEl,
+        submitBtn: submitBtn,
+        csrftoken: csrftoken,
+        existingFiles: existingFiles,
+    });
 
     if (fileInput) {
         fileInput.addEventListener('change', function () {
-            Array.from(fileInput.files).forEach(function (file) {
-                uploadFile(file);
-            });
+            upload.handleFileSelection(fileInput.files);
             fileInput.value = '';
         });
     }
-
-    fileListEl.addEventListener('click', async function (e) {
-        const btn = e.target.closest('button[data-remove]');
-        if (!btn) return;
-        const fileId = btn.getAttribute('data-remove');
-        await fetch(base + '/files/' + fileId + '/remove/', {
-            method: 'POST',
-            headers: { 'X-CSRFToken': csrftoken },
-        });
-        files.delete(fileId);
-        document.getElementById('file-row-' + fileId).remove();
-        updateSubmitState();
-    });
 });
 </script>
 {% endblock %}

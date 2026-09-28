@@ -55,8 +55,16 @@ def add_file(request: AuthenticatedHttpRequest, draft_id: str) -> HttpResponse:
     if not name:
         return JsonResponse({'error': 'name is required.'}, status=422)
 
+    client_last_modified = body.get('client_last_modified')
     try:
-        file = services.add_file(transfer, name, size)
+        client_last_modified = (
+            int(client_last_modified) if client_last_modified is not None else None
+        )
+    except TypeError, ValueError:
+        client_last_modified = None
+
+    try:
+        file = services.add_file(transfer, name, size, client_last_modified=client_last_modified)
     except ValidationError as exc:
         return JsonResponse({'error': exc.messages[0]}, status=422)
 
@@ -130,3 +138,40 @@ def remove_file(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) 
     file = _file(request, draft_id, file_id)
     services.remove_file(file)
     return JsonResponse({'ok': True})
+
+
+@login_required
+@require_POST
+def resume_file(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) -> HttpResponse:
+    """Resumable uploads (spec section 2): tell the browser which parts of this file's multipart
+    upload S3 already has, after a page reload, so it only PUTs what's missing. Transparently
+    restarts the upload (a fresh upload id, no parts) if S3 no longer recognizes the old one --
+    the bucket's lifecycle rule aborts an incomplete multipart upload after a day, so a sender who
+    comes back later than that would otherwise get a permanent, unrecoverable error here.
+    """
+    limited = ratelimit.hit_user(request.user, 'FT_UPLOAD_USER')
+    if not limited.allowed:
+        return ratelimit.json_response(limited)
+    file = _file(request, draft_id, file_id)
+
+    try:
+        parts = services.list_uploaded_parts(file)
+        restarted = False
+    except services.UploadExpired:
+        file = services.restart_upload(file)
+        parts = []
+        restarted = True
+    except ValidationError as exc:
+        return JsonResponse({'error': exc.messages[0]}, status=422)
+
+    return JsonResponse(
+        {
+            'restarted': restarted,
+            'part_size_bytes': PART_SIZE_BYTES,
+            'part_count': max(1, math.ceil(file.size / PART_SIZE_BYTES)),
+            'uploaded_parts': [
+                {'part_number': p['PartNumber'], 'etag': p['ETag'], 'size': p['Size']}
+                for p in parts
+            ],
+        }
+    )

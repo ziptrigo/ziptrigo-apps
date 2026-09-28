@@ -38,6 +38,18 @@ class TransferFile(models.Model):
     )
     upload_id = cast(str, models.CharField(max_length=255, blank=True, default=''))
     uploaded = cast(bool, models.BooleanField(default=False))
+    client_last_modified = cast(
+        'int | None',
+        models.BigIntegerField(
+            null=True,
+            blank=True,
+            help_text="The browser File object's `lastModified` (ms since epoch) at the time "
+            'this file was added, if the client supplied one. Used together with name and size '
+            'to match a file the sender re-selects after a page reload back to this row, so its '
+            'upload can resume instead of restarting (spec: resumable uploads) -- see '
+            'apps.file_transfer.services.uploads.',
+        ),
+    )
 
     created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
 

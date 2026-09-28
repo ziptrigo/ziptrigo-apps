@@ -166,6 +166,65 @@ def test_remove_file_deletes_uploaded_object(draft_transfer, fake_storage):
     assert not TransferFile.objects.filter(pk=file.pk).exists()
 
 
+def test_add_file_stores_client_last_modified(draft_transfer, fake_storage):
+    file = uploads.add_file(
+        draft_transfer, 'a.bin', 10, client_last_modified=1234567890, storage=fake_storage
+    )
+    assert file.client_last_modified == 1234567890
+
+
+def test_add_file_client_last_modified_defaults_to_none(draft_transfer, fake_storage):
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    assert file.client_last_modified is None
+
+
+def test_list_uploaded_parts_returns_parts_already_in_s3(draft_transfer, fake_storage):
+    file = uploads.add_file(draft_transfer, 'a.bin', 200, storage=fake_storage)
+    fake_storage.upload_part(file.storage_key, file.upload_id, 1, b'\0' * 100)
+
+    parts = uploads.list_uploaded_parts(file, storage=fake_storage)
+
+    assert parts == [{'PartNumber': 1, 'ETag': f'etag-{file.upload_id}-1', 'Size': 100}]
+
+
+def test_list_uploaded_parts_empty_when_nothing_uploaded_yet(draft_transfer, fake_storage):
+    file = uploads.add_file(draft_transfer, 'a.bin', 200, storage=fake_storage)
+
+    assert uploads.list_uploaded_parts(file, storage=fake_storage) == []
+
+
+def test_list_uploaded_parts_requires_upload_in_progress(draft_transfer, fake_storage):
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    fake_storage.put_object(file.storage_key, 10)
+    uploads.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e1'}], storage=fake_storage)
+
+    with pytest.raises(ValidationError):
+        uploads.list_uploaded_parts(file, storage=fake_storage)
+
+
+def test_list_uploaded_parts_raises_upload_expired_when_s3_forgot_it(draft_transfer, fake_storage):
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    # Simulates the bucket's lifecycle rule (or a previous `cleanup_drafts` run) aborting the
+    # multipart upload out from under this session.
+    fake_storage.abort_multipart_upload(file.storage_key, file.upload_id)
+
+    with pytest.raises(uploads.UploadExpired):
+        uploads.list_uploaded_parts(file, storage=fake_storage)
+
+
+def test_restart_upload_gets_a_fresh_upload_id(draft_transfer, fake_storage):
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    old_upload_id = file.upload_id
+    fake_storage.abort_multipart_upload(file.storage_key, old_upload_id)
+
+    restarted = uploads.restart_upload(file, storage=fake_storage)
+
+    assert restarted.upload_id != old_upload_id
+    assert restarted.upload_id in fake_storage.active_uploads
+    assert restarted.uploaded is False
+    assert uploads.list_uploaded_parts(restarted, storage=fake_storage) == []
+
+
 def test_abort_draft_cleans_up_everything(draft_transfer, fake_storage):
     in_progress = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
     done = uploads.add_file(draft_transfer, 'b.bin', 10, storage=fake_storage)

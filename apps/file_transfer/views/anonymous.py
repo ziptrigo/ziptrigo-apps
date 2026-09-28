@@ -126,6 +126,20 @@ def send_page(request: AnonymousHttpRequest) -> HttpResponse:
         'settings': settings_row,
         'form': AnonymousSendOptionsForm(settings_row=settings_row),
         'part_size_bytes': PART_SIZE_BYTES,
+        # Resumable uploads (spec section 2): the session already resumes the same draft across a
+        # reload on its own (`current_anonymous_transfer`, above), so its existing files just need
+        # serializing for the page's upload JS to rebuild its file list -- see `send.html`'s
+        # (shared) hydration logic and `views.uploads.resume_file`'s docstring.
+        'existing_files': [
+            {
+                'id': str(file.id),
+                'name': file.name,
+                'size': file.size,
+                'uploaded': file.uploaded,
+                'client_last_modified': file.client_last_modified,
+            }
+            for file in transfer.files.all()
+        ],
     }
     response = render(request, 'file_transfer/anon_send.html', context)
     return _finish(request, response, cookie_id)
@@ -368,8 +382,23 @@ def add_file(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     if not name:
         return _finish(request, JsonResponse({'error': 'name is required.'}, status=422), cookie_id)
 
+    client_last_modified = body.get('client_last_modified')
     try:
-        file = services.add_file(transfer, name, size, ip=client_ip(request), cookie_id=cookie_id)
+        client_last_modified = (
+            int(client_last_modified) if client_last_modified is not None else None
+        )
+    except TypeError, ValueError:
+        client_last_modified = None
+
+    try:
+        file = services.add_file(
+            transfer,
+            name,
+            size,
+            ip=client_ip(request),
+            cookie_id=cookie_id,
+            client_last_modified=client_last_modified,
+        )
     except ValidationError as exc:
         return _finish(request, JsonResponse({'error': exc.messages[0]}, status=422), cookie_id)
 
@@ -445,3 +474,40 @@ def remove_file(request: AnonymousHttpRequest, draft_id: str, file_id: str) -> H
     file = get_object_or_404(transfer.files, id=file_id)
     services.remove_file(file)
     return _finish(request, JsonResponse({'ok': True}), cookie_id)
+
+
+@require_POST
+def resume_file(request: AnonymousHttpRequest, draft_id: str, file_id: str) -> HttpResponse:
+    """Resumable uploads (spec section 2), mirroring `views.uploads.resume_file` -- see its
+    docstring. The anonymous send page already resumes the same session-owned draft across a
+    reload on its own (`current_anonymous_transfer`), so this only needs to handle the per-file
+    part bookkeeping, same as the logged-in flow."""
+    cookie_id = _cookie_id(request)
+    limited = ratelimit.hit_ip(request, 'FT_ANON_UPLOAD_IP')
+    if not limited.allowed:
+        return _finish(request, ratelimit.json_response(limited), cookie_id)
+    transfer = _owned_draft(request, draft_id)
+    file = get_object_or_404(transfer.files, id=file_id)
+
+    try:
+        parts = services.list_uploaded_parts(file)
+        restarted = False
+    except services.UploadExpired:
+        file = services.restart_upload(file)
+        parts = []
+        restarted = True
+    except ValidationError as exc:
+        return _finish(request, JsonResponse({'error': exc.messages[0]}, status=422), cookie_id)
+
+    response = JsonResponse(
+        {
+            'restarted': restarted,
+            'part_size_bytes': PART_SIZE_BYTES,
+            'part_count': max(1, math.ceil(file.size / PART_SIZE_BYTES)),
+            'uploaded_parts': [
+                {'part_number': p['PartNumber'], 'etag': p['ETag'], 'size': p['Size']}
+                for p in parts
+            ],
+        }
+    )
+    return _finish(request, response, cookie_id)

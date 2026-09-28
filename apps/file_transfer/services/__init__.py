@@ -8,6 +8,7 @@ from .actions import (
     resend_recipient_email,
     set_expiry,
     set_max_downloads,
+    set_notify_on_download,
     set_password,
 )
 from .anon_cookie import new_cookie_id, read_cookie_id, set_cookie
@@ -48,13 +49,16 @@ from .naming import transfer_display_name
 from .password import is_unlocked_in_session, unlock_in_session
 from .send import MIN_BALANCE_TO_SEND, SendOptions, finalize_send, validate_send_options
 from .uploads import (
+    UploadExpired,
     abort_draft,
     add_file,
     complete_file_upload,
     create_draft,
     get_or_create_draft,
+    list_uploaded_parts,
     presign_parts,
     remove_file,
+    restart_upload,
 )
 from .zip import ensure_zip_build_started
 
@@ -64,6 +68,7 @@ __all__ = [
     'MIN_BALANCE_TO_SEND',
     'AnonymousSendOptions',
     'SendOptions',
+    'UploadExpired',
     'abort_draft',
     'add_file',
     'add_recipients',
@@ -92,6 +97,7 @@ __all__ = [
     'is_available',
     'is_unlocked_in_session',
     'limits',
+    'list_uploaded_parts',
     'mark_confirmed_via_link',
     'meter_transfer',
     'new_cookie_id',
@@ -107,9 +113,11 @@ __all__ = [
     'resend_confirmation',
     'resend_recipient_email',
     'resolve_expiry',
+    'restart_upload',
     'set_cookie',
     'set_expiry',
     'set_max_downloads',
+    'set_notify_on_download',
     'set_password',
     'start_confirmation',
     'suspend_transfer',

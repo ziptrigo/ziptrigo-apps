@@ -173,6 +173,25 @@ class S3Storage:
             MultipartUpload={'Parts': parts},  # ty: ignore[invalid-argument-type]
         )
 
+    def list_parts(self, key: str, upload_id: str) -> list[dict]:
+        """List the parts already landed in S3 for an in-progress multipart upload (spec:
+        resumable uploads) -- so a browser that reloaded mid-upload can ask what it already sent
+        and only PUT the parts still missing, instead of starting the file over. Raises
+        `ClientError` with code `NoSuchUpload` (via botocore) when S3 no longer knows the upload
+        id at all (aborted by the bucket's lifecycle rule, or by `cleanup_drafts`); callers that
+        care about that case (`apps.file_transfer.services.uploads.list_uploaded_parts`) catch it
+        there rather than here, so this method stays a thin, faithful wrapper like every other one
+        in this class.
+        """
+        parts: list[dict] = []
+        paginator = self.client.get_paginator('list_parts')
+        for page in paginator.paginate(Bucket=self.bucket, Key=key, UploadId=upload_id):
+            for part in page.get('Parts', []):
+                parts.append(
+                    {'PartNumber': part['PartNumber'], 'ETag': part['ETag'], 'Size': part['Size']}
+                )
+        return parts
+
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
         """Abort an in-progress multipart upload. Safe to call on one already gone (the bucket's
         lifecycle rule, or a previous retry of the same cleanup job, may have beaten us to it)."""

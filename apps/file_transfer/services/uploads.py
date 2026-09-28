@@ -48,6 +48,7 @@ def add_file(
     *,
     ip: str | None = None,
     cookie_id: str = '',
+    client_last_modified: int | None = None,
     storage: S3Storage | None = None,
 ) -> TransferFile:
     """Register a new file on a draft transfer and start its multipart upload.
@@ -59,6 +60,11 @@ def add_file(
     by uploading without ever confirming -- the caller (`views.anonymous`) always passes them for
     an anonymous draft; a logged-in upload has no caller-supplied IP/cookie to check against and
     doesn't need one, since logged-in senders are billed, not capped.
+
+    `client_last_modified` is the browser `File` object's `lastModified` (ms since epoch), when the
+    caller has one -- stored so a later `list_uploaded_parts` caller (the send page's upload JS,
+    after a reload) can match a re-selected file back to this row by name + size + `lastModified`
+    rather than name + size alone (spec: resumable uploads).
 
     Raises:
         ValidationError: the transfer isn't a draft, or the file would break a tier limit (spec
@@ -77,7 +83,9 @@ def add_file(
         limits.validate_new_file(transfer, size, settings_row)
 
     storage = storage or get_storage()
-    file = TransferFile(transfer=transfer, name=name, size=size)
+    file = TransferFile(
+        transfer=transfer, name=name, size=size, client_last_modified=client_last_modified
+    )
     # Keyed by file id only (not the filename): see `storage_key`'s docstring for why.
     key = storage_key(transfer.id, file.id)
     file.storage_key = key
@@ -177,6 +185,54 @@ def complete_file_upload(
     file.uploaded = True
     file.upload_id = ''
     file.save(update_fields=['checksum', 'uploaded', 'upload_id'])
+    return file
+
+
+class UploadExpired(Exception):
+    """Raised by `list_uploaded_parts` when S3 no longer recognizes `file`'s upload id (the
+    bucket's lifecycle rule aborted an incomplete multipart upload after a day, or a previous run
+    of `cleanup_drafts` beat this request to it). The caller should call `restart_upload` and have
+    the browser re-upload the file from scratch under the fresh upload id it returns.
+    """
+
+
+def list_uploaded_parts(file: TransferFile, *, storage: S3Storage | None = None) -> list[dict]:
+    """List the parts of `file`'s in-progress multipart upload already sitting in S3 (spec:
+    resumable uploads) -- `[{'PartNumber': n, 'ETag': etag, 'Size': size}, ...]` -- so the browser
+    can skip re-uploading (and re-hashing) the ones it already sent in an earlier page load and
+    only PUT what's missing.
+
+    Raises:
+        ValidationError: the file has no upload in progress (already completed, or never
+            started).
+        UploadExpired: S3 no longer knows about the upload id; see `restart_upload`.
+    """
+    if not file.upload_id:
+        raise ValidationError('File has no upload in progress.')
+
+    storage = storage or get_storage()
+    try:
+        return storage.list_parts(file.storage_key, file.upload_id)
+    except ClientError as exc:
+        code = exc.response.get('Error', {}).get('Code', '')
+        if code == 'NoSuchUpload':
+            raise UploadExpired() from exc
+        raise
+
+
+def restart_upload(file: TransferFile, *, storage: S3Storage | None = None) -> TransferFile:
+    """Abandon `file`'s expired/aborted multipart upload and start a fresh one at the same storage
+    key, so the browser can resume uploading every part from scratch under a new upload id (spec:
+    resumable uploads, "handle an expired/aborted multipart upload gracefully"). `file.size` and
+    `file.name` are unchanged -- only the S3-side upload identity resets."""
+    storage = storage or get_storage()
+    if file.upload_id:
+        # Already gone as far as S3 is concerned (that's the whole reason this is being called),
+        # but harmless to ask again -- same reasoning as `abort_multipart_upload`'s own docstring.
+        storage.abort_multipart_upload(file.storage_key, file.upload_id)
+    file.upload_id = storage.create_multipart_upload(file.storage_key)
+    file.uploaded = False
+    file.save(update_fields=['upload_id', 'uploaded'])
     return file
 
 
