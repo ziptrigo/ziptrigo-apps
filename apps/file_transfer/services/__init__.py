@@ -11,7 +11,7 @@ from .actions import (
     set_password,
 )
 from .anon_cookie import new_cookie_id, read_cookie_id, set_cookie
-from .anon_session import ensure_session_key, owns_draft
+from .anon_session import can_view_sent_page, mark_confirmed_via_link, owns_draft
 from .anonymous import (
     AnonymousSendOptions,
     current_anonymous_transfer,
@@ -69,6 +69,7 @@ __all__ = [
     'add_recipients',
     'anon_limits',
     'anonymous_expiry_choices',
+    'can_view_sent_page',
     'check_password',
     'claim_transfers_for_user',
     'complete_file_upload',
@@ -83,7 +84,6 @@ __all__ = [
     'download_count',
     'downloads_remaining',
     'end_transfer',
-    'ensure_session_key',
     'ensure_zip_build_started',
     'finalize_send',
     'finish_deferred_deletion',
@@ -92,6 +92,7 @@ __all__ = [
     'is_available',
     'is_unlocked_in_session',
     'limits',
+    'mark_confirmed_via_link',
     'meter_transfer',
     'new_cookie_id',
     'owns_draft',

@@ -95,12 +95,20 @@ def download_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpRe
     return redirect(url)
 
 
+#: How many times the "preparing the zip" partial polls itself automatically before giving up and
+#: asking for a manual click instead (spec section 5's polling loop, capped): a build that's still
+#: not done after this many ticks is either stuck (see `services.zip`'s stale-`BUILDING` lease) or
+#: unusually large, and either way an unattended tab shouldn't keep hammering this endpoint
+#: forever.
+_MAX_AUTO_ZIP_POLLS = 30
+
+
 @require_GET
 def zip_status(request: PublicHttpRequest, slug: str) -> HttpResponse:
     """HTMX partial (spec section 5): kick the lazy zip build off the first time it's asked for,
     then report the current status -- "preparing" (`BUILDING`/`NONE` just claimed),
     "ready" (a download link), or "failed" (with a retry). The template polls this until it stops
-    being `BUILDING`."""
+    being `BUILDING`, up to `_MAX_AUTO_ZIP_POLLS` times."""
     transfer = _password_gated_transfer(request, slug)
     if isinstance(transfer, HttpResponse):
         return transfer
@@ -108,19 +116,32 @@ def zip_status(request: PublicHttpRequest, slug: str) -> HttpResponse:
     if transfer.zip_status in (ZipStatus.NONE, ZipStatus.FAILED):
         ensure_zip_build_started(transfer)
         transfer.refresh_from_db(fields=['zip_status'])
-    return render(request, 'file_transfer/partials/zip_status.html', {'transfer': transfer})
+
+    try:
+        polls = int(request.GET.get('polls', '0'))
+    except ValueError:
+        polls = 0
+
+    context = {
+        'transfer': transfer,
+        'next_poll': polls + 1,
+        'poll_cap_reached': (
+            transfer.zip_status == ZipStatus.BUILDING and polls >= _MAX_AUTO_ZIP_POLLS
+        ),
+    }
+    return render(request, 'file_transfer/partials/zip_status.html', context)
 
 
 @require_GET
 def download_zip(request: PublicHttpRequest, slug: str) -> HttpResponse:
-    """The actual zip download, once `zip_status` is `READY` -- otherwise back to the status
-    partial's polling view rather than erroring."""
+    """The actual zip download, once `zip_status` is `READY` -- otherwise back to the download
+    page (whose zip widget shows the "preparing"/polling state) rather than erroring."""
     transfer = _password_gated_transfer(request, slug)
     if isinstance(transfer, HttpResponse):
         return transfer
 
     if transfer.zip_status != ZipStatus.READY:
-        return redirect(reverse('t:zip-status', args=[slug]))
+        return redirect(reverse('t:download', args=[slug]))
 
     try:
         url = services.record_download(transfer, None, _client_ip(request))

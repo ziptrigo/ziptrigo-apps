@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
 
-from ..services.storage import ObjectInfo
+from ..services.storage import S3_MIN_PART_SIZE_BYTES, ObjectInfo
 
 
 @dataclass
@@ -68,7 +68,25 @@ class FakeS3Storage:
         self.active_uploads.discard(upload_id)
         recorded = self.multipart_parts.pop(upload_id, None)
         if recorded:
-            self.objects[key] = b''.join(recorded[number] for number in sorted(recorded))
+            ordered = sorted(recorded)
+            # Mirrors real S3: every part except the last must meet the service minimum, or the
+            # whole multipart upload is rejected at completion time (see
+            # `apps.file_transfer.services.zip`'s `_S3MultipartWriter`, which this enforcement
+            # exists to keep honest -- a part-size regression there should fail a test, not pass
+            # silently against a fake that accepts parts of any size).
+            for part_number in ordered[:-1]:
+                if len(recorded[part_number]) < S3_MIN_PART_SIZE_BYTES:
+                    raise ClientError(
+                        {
+                            'Error': {
+                                'Code': 'EntityTooSmall',
+                                'Message': 'Your proposed upload is smaller than the minimum '
+                                'allowed object size.',
+                            }
+                        },
+                        'CompleteMultipartUpload',
+                    )
+            self.objects[key] = b''.join(recorded[number] for number in ordered)
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
         self.active_uploads.discard(upload_id)

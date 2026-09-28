@@ -5,16 +5,18 @@ confirmation (by code and by link), activation, and the per-IP-per-day caps.
 import re
 
 import pytest
+from django.contrib.sessions.backends.db import SessionStore
 from django.core.exceptions import ValidationError
 
 from apps.core.services.email_verification import (
+    EmailVerificationError,
     EmailVerificationExpired,
     IncorrectCode,
     ResendTooSoon,
 )
 
-from ..models import FileTransferSettings, Transfer, TransferStatus
-from ..services import anon_limits
+from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
+from ..services import anon_limits, anon_session
 from ..services.anonymous import (
     AnonymousSendOptions,
     confirm_by_code,
@@ -29,9 +31,16 @@ from ..services.uploads import add_file, complete_file_upload
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
-SESSION_KEY = 'test-session-key-1234567890123456'
 IP = '203.0.113.7'
 COOKIE = 'cookie-id-1'
+
+
+def _session() -> SessionStore:
+    """A fresh, independent Django session for tests to pass to the session-based draft
+    functions -- ownership is tracked by a per-draft token kept *inside* the session's own data
+    (see `services.anon_session`), never by the session's own key, so a real `SessionStore` (not
+    just a string) is needed to exercise that."""
+    return SessionStore()
 
 
 def _options(
@@ -56,7 +65,7 @@ def _options(
 
 
 def _draft(anon_enabled) -> Transfer:
-    return get_or_create_anonymous_draft(SESSION_KEY, IP, COOKIE)
+    return get_or_create_anonymous_draft(_session(), IP, COOKIE)
 
 
 def _upload(transfer: Transfer, fake_storage, size: int = 1024, name: str = 'report.pdf'):
@@ -88,28 +97,36 @@ def _extract_link_token(body: str) -> str:
 
 
 def test_get_or_create_anonymous_draft_reuses_empty_draft(anon_enabled):
-    first = get_or_create_anonymous_draft(SESSION_KEY, IP, COOKIE)
-    second = get_or_create_anonymous_draft(SESSION_KEY, IP, COOKIE)
+    session = _session()
+    first = get_or_create_anonymous_draft(session, IP, COOKIE)
+    second = get_or_create_anonymous_draft(session, IP, COOKIE)
     assert first.pk == second.pk
     assert first.owner is None
-    assert first.session_key == SESSION_KEY
+    assert first.draft_token_hash
     assert first.sender_ip == IP
     assert first.anon_cookie_id == COOKIE
+    assert anon_session.owns_draft(session, first)
 
 
 def test_get_or_create_anonymous_draft_does_not_reuse_a_draft_with_files(
     anon_enabled, fake_storage
 ):
-    first = get_or_create_anonymous_draft(SESSION_KEY, IP, COOKIE)
+    session = _session()
+    first = get_or_create_anonymous_draft(session, IP, COOKIE)
     _upload(first, fake_storage)
-    second = get_or_create_anonymous_draft(SESSION_KEY, IP, COOKIE)
+    second = get_or_create_anonymous_draft(session, IP, COOKIE)
     assert second.pk != first.pk
 
 
 def test_current_anonymous_transfer_ignores_other_sessions(anon_enabled):
-    _draft(anon_enabled)
-    assert current_anonymous_transfer('someone-elses-session') is None
-    assert current_anonymous_transfer(SESSION_KEY) is not None
+    session = _session()
+    get_or_create_anonymous_draft(session, IP, COOKIE)
+    assert current_anonymous_transfer(_session()) is None
+    assert current_anonymous_transfer(session) is not None
+
+
+def test_current_anonymous_transfer_none_for_a_brand_new_session(anon_enabled):
+    assert current_anonymous_transfer(_session()) is None
 
 
 def test_validate_anonymous_send_options_rejects_non_allowed_expiry(anon_enabled):
@@ -348,17 +365,24 @@ class TestPerIpCaps:
             anon_limits.check_send_caps(new_transfer, IP, 'other', settings_row)
 
     def test_check_upload_bytes_cap_counts_in_flight_drafts(self, anon_enabled, fake_storage):
+        """A draft's `size_bytes` column stays `0` until it's actually confirmed/sent (see
+        `anon_limits.check_upload_bytes_cap`'s docstring) -- so the cap must sum the real,
+        already-uploaded `TransferFile.size` of every other in-flight transfer instead, or an
+        unconfirmed draft's uploads would never count against anyone's daily byte cap at all."""
         settings_row = FileTransferSettings.load()
         settings_row.anonymous_max_bytes_per_ip_per_day = 1000
         settings_row.save()
 
         other_draft = Transfer.objects.create(
-            owner=None,
-            status=TransferStatus.DRAFT,
-            sender_ip=IP,
-            anon_cookie_id='other-cookie',
-            size_bytes=900,
+            owner=None, status=TransferStatus.DRAFT, sender_ip=IP, anon_cookie_id='other-cookie'
         )
+        other_file = add_file(other_draft, 'a.bin', 900, ip=IP, cookie_id='other-cookie')
+        fake_storage.put_object(other_file.storage_key, 900)
+        complete_file_upload(
+            other_file, [{'PartNumber': 1, 'ETag': 'etag-1'}], storage=fake_storage
+        )
+        assert Transfer.objects.get(pk=other_draft.pk).size_bytes == 0  # still unconfirmed
+
         transfer = Transfer.objects.create(
             owner=None, status=TransferStatus.DRAFT, sender_ip=IP, anon_cookie_id=COOKIE
         )
@@ -367,4 +391,195 @@ class TestPerIpCaps:
 
         # A byte-cap check against a cookie/IP with no other usage should pass.
         anon_limits.check_upload_bytes_cap(transfer, 200, 'fresh-ip', 'fresh-cookie', settings_row)
-        assert other_draft.pk  # keep reference alive/used
+
+    def test_check_upload_bytes_cap_counts_files_not_yet_marked_uploaded(
+        self, anon_enabled, fake_storage
+    ):
+        """A file whose multipart upload hasn't completed yet (`uploaded=False`) still occupies
+        real S3 storage the moment it's created (`services.uploads.add_file` already started its
+        multipart upload) -- it must count too, not just fully-completed ones."""
+        settings_row = FileTransferSettings.load()
+        settings_row.anonymous_max_bytes_per_ip_per_day = 1000
+        settings_row.save()
+
+        other_draft = Transfer.objects.create(
+            owner=None, status=TransferStatus.DRAFT, sender_ip=IP, anon_cookie_id='other-cookie'
+        )
+        TransferFile.objects.create(
+            transfer=other_draft, name='a.bin', size=900, storage_key='k', uploaded=False
+        )
+
+        transfer = Transfer.objects.create(
+            owner=None, status=TransferStatus.DRAFT, sender_ip=IP, anon_cookie_id=COOKIE
+        )
+        with pytest.raises(ValidationError):
+            anon_limits.check_upload_bytes_cap(transfer, 200, IP, COOKIE, settings_row)
+
+    def test_check_send_caps_uses_the_transfers_own_recorded_ip_even_if_confirmed_elsewhere(
+        self, anon_enabled
+    ):
+        """The bug this closes: a sender could previously blow past the cap entirely by
+        confirming from a different network/browser with no history of its own -- `ip`/
+        `cookie_id` here are the *confirming* request's, deliberately unrelated to the transfer's
+        own recorded `sender_ip`/`anon_cookie_id` (`IP`/`COOKIE`), so if the check only looked at
+        the confirming request's identifiers it would see zero usage and let this through."""
+        settings_row = FileTransferSettings.load()
+        settings_row.anonymous_max_transfers_per_ip_per_day = 1
+        settings_row.save()
+
+        already_sent = Transfer.objects.create(
+            owner=None, status=TransferStatus.ACTIVE, sender_ip=IP, anon_cookie_id=COOKIE
+        )
+        Transfer.objects.filter(pk=already_sent.pk).update(completed_at=already_sent.created_at)
+
+        new_transfer = Transfer.objects.create(
+            owner=None,
+            status=TransferStatus.PENDING_CONFIRMATION,
+            sender_ip=IP,
+            anon_cookie_id=COOKIE,
+        )
+        with pytest.raises(ValidationError):
+            anon_limits.check_send_caps(
+                new_transfer, 'confirming-from-a-fresh-ip', 'fresh-cookie', settings_row
+            )
+
+    def test_check_send_caps_still_considers_the_confirming_requests_own_identifiers_too(
+        self, anon_enabled
+    ):
+        """The other half: a transfer drafted from one IP/cookie but confirmed from one that's
+        itself over the cap must still be rejected -- checking only the transfer's own recorded
+        identifiers would miss that."""
+        settings_row = FileTransferSettings.load()
+        settings_row.anonymous_max_transfers_per_ip_per_day = 1
+        settings_row.save()
+
+        confirming_ip = '198.51.100.9'
+        already_sent = Transfer.objects.create(
+            owner=None,
+            status=TransferStatus.ACTIVE,
+            sender_ip=confirming_ip,
+            anon_cookie_id='some-other-cookie',
+        )
+        Transfer.objects.filter(pk=already_sent.pk).update(completed_at=already_sent.created_at)
+
+        new_transfer = Transfer.objects.create(
+            owner=None,
+            status=TransferStatus.PENDING_CONFIRMATION,
+            sender_ip='203.0.113.99',
+            anon_cookie_id='drafting-cookie',
+        )
+        with pytest.raises(ValidationError):
+            anon_limits.check_send_caps(new_transfer, confirming_ip, 'fresh-cookie', settings_row)
+
+
+class TestCapsPreCheckedBeforeConfirmationIsSent:
+    def test_start_confirmation_rejects_when_already_over_the_transfer_count_cap(
+        self, anon_enabled, fake_storage, monkeypatch
+    ):
+        """Checking the caps only at confirmation (after the code/link is already sent) burns a
+        one-time code on a transfer that can never actually be confirmed; `start_confirmation`
+        pre-checks the same caps first so the sender gets a clear, immediate answer instead."""
+        sent = _capture_email(monkeypatch)
+        settings_row = FileTransferSettings.load()
+        settings_row.anonymous_max_transfers_per_ip_per_day = 1
+        settings_row.save()
+
+        already_sent = Transfer.objects.create(
+            owner=None, status=TransferStatus.ACTIVE, sender_ip=IP, anon_cookie_id=COOKIE
+        )
+        Transfer.objects.filter(pk=already_sent.pk).update(completed_at=already_sent.created_at)
+
+        transfer = get_or_create_anonymous_draft(_session(), IP, COOKIE)
+        _upload(transfer, fake_storage)
+
+        with pytest.raises(ValidationError):
+            start_confirmation(transfer, _options(), ip=IP, cookie_id=COOKIE)
+
+        assert not sent, 'no confirmation email should have been sent'
+        transfer.refresh_from_db()
+        assert transfer.status == TransferStatus.DRAFT
+
+
+class TestCapRejectionAtConfirmationLeavesATerminalState:
+    def test_confirm_ends_the_transfer_rather_than_leaving_it_pending_forever(
+        self, anon_enabled, fake_storage, monkeypatch
+    ):
+        """A cap rejection at actual confirmation time happens *after* the code/token was already
+        burned (single-use) -- the transfer must not be left stuck `PENDING_CONFIRMATION` with no
+        way for the sender to ever get a clear answer out of it."""
+        sent = _capture_email(monkeypatch)
+        transfer = _draft(anon_enabled)
+        _upload(transfer, fake_storage)
+        start_confirmation(transfer, _options())
+        code = _extract_code(sent[-1]['text_body'])
+
+        settings_row = FileTransferSettings.load()
+        settings_row.anonymous_max_transfers_per_ip_per_day = 0
+        settings_row.save()
+
+        with pytest.raises(ValidationError):
+            confirm_by_code(transfer, code, IP, COOKIE)
+
+        transfer.refresh_from_db()
+        assert transfer.status == TransferStatus.DELETED
+        assert transfer.deleted_at is not None
+        # The normal UI path (`views.anonymous._owned_pending`) only ever looks a transfer up by
+        # `status=PENDING_CONFIRMATION`, so a `DELETED` one now 404s there instead of offering a
+        # confirm box for a transfer that can never activate -- a clear, terminal answer rather
+        # than a transfer stuck "awaiting confirmation" forever.
+
+
+class TestConfirmationBoundToItsOwnTransfer:
+    def test_two_pending_transfers_with_the_same_email_do_not_supersede_each_other(
+        self, anon_enabled, fake_storage, monkeypatch
+    ):
+        sent = _capture_email(monkeypatch)
+
+        transfer_a = get_or_create_anonymous_draft(_session(), IP, COOKIE)
+        _upload(transfer_a, fake_storage, name='a.pdf')
+        start_confirmation(transfer_a, _options(sender_email='same@example.com'))
+        code_a = _extract_code(sent[-1]['text_body'])
+
+        transfer_b = get_or_create_anonymous_draft(_session(), IP, 'other-cookie')
+        _upload(transfer_b, fake_storage, name='b.pdf')
+        start_confirmation(transfer_b, _options(sender_email='same@example.com'))
+        code_b = _extract_code(sent[-1]['text_body'])
+
+        # Before the per-transfer purpose fix, starting transfer_b's confirmation would have
+        # invalidated transfer_a's still-pending verification (both shared one
+        # `(email, purpose)` row in `core`) -- confirming transfer_a would then raise
+        # `EmailVerificationSuperseded` instead of succeeding.
+        confirmed_a = confirm_by_code(transfer_a, code_a, IP, COOKIE)
+        assert confirmed_a.status == TransferStatus.ACTIVE
+
+        confirmed_b = confirm_by_code(transfer_b, code_b, IP, 'other-cookie')
+        assert confirmed_b.status == TransferStatus.ACTIVE
+
+    def test_confirm_by_link_cannot_be_replayed_against_a_different_transfer(
+        self, anon_enabled, fake_storage, monkeypatch
+    ):
+        """Swapping the transfer id in a confirmation link's URL while keeping the original
+        token must not activate the *other* transfer, even when both share a sender email (e.g.
+        an attacker sets a malicious transfer's `sender_email` to the victim's address, hoping the
+        victim's own confirmation link for their real transfer will activate the attacker's one
+        instead)."""
+        sent = _capture_email(monkeypatch)
+
+        victim_transfer = get_or_create_anonymous_draft(_session(), IP, COOKIE)
+        _upload(victim_transfer, fake_storage, name='real.pdf')
+        start_confirmation(victim_transfer, _options(sender_email='victim@example.com'))
+        token = _extract_link_token(sent[-1]['text_body'])
+
+        attacker_transfer = get_or_create_anonymous_draft(_session(), 'attacker-ip', 'attacker-c')
+        _upload(attacker_transfer, fake_storage, name='malicious.pdf')
+        start_confirmation(attacker_transfer, _options(sender_email='victim@example.com'))
+
+        with pytest.raises(EmailVerificationError):
+            confirm_by_link(attacker_transfer, token, 'attacker-ip', 'attacker-c')
+
+        attacker_transfer.refresh_from_db()
+        assert attacker_transfer.status == TransferStatus.PENDING_CONFIRMATION
+
+        # The real link still works against the transfer it was actually issued for.
+        confirmed = confirm_by_link(victim_transfer, token, IP, COOKIE)
+        assert confirmed.status == TransferStatus.ACTIVE

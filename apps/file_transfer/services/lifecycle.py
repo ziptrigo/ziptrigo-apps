@@ -5,7 +5,7 @@ dashboard delete-now, or an out-of-credits grace period running out (spec sectio
 from django.db import transaction
 from django.utils import timezone
 
-from ..models import Transfer, TransferStatus
+from ..models import Transfer, TransferStatus, ZipStatus
 from .emails import send_files_deleted_notification
 from .storage import S3Storage, get_storage, transfer_prefix
 
@@ -15,12 +15,23 @@ def delete_transfer_files(transfer: Transfer, *, storage: S3Storage | None = Non
 
     Idempotent: safe to call again on a transfer whose files are already gone (`delete_prefix`
     just finds nothing to delete).
+
+    Also resets `zip_status`/`zip_key` back to `NONE` -- the "download all" zip lives under this
+    same prefix and so is deleted along with everything else here; leaving `zip_status` at
+    `READY`/`BUILDING` afterwards would let the download page keep claiming a zip is available (or
+    still preparing) when there's nothing left to build it from at all (`services.zip.build_zip`
+    separately guards the still-in-flight case: a build racing this deletion re-checks after it
+    finishes and cleans up after itself either way).
     """
     storage = storage or get_storage()
     storage.delete_prefix(transfer_prefix(transfer.id))
     now = timezone.now()
-    Transfer.objects.filter(pk=transfer.pk).update(files_deleted_at=now)
+    Transfer.objects.filter(pk=transfer.pk).update(
+        files_deleted_at=now, zip_status=ZipStatus.NONE, zip_key=''
+    )
     transfer.files_deleted_at = now
+    transfer.zip_status = ZipStatus.NONE
+    transfer.zip_key = ''
 
 
 def _notify_files_deleted(transfer: Transfer) -> None:

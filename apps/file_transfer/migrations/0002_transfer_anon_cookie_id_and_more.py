@@ -29,8 +29,13 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='transfer',
-            name='session_key',
-            field=models.CharField(blank=True, default='', help_text="The Django session key that created this draft, so only that browser session may upload to or finalize it before it's confirmed. See apps.file_transfer.services.anonymous.", max_length=40),
+            name='draft_token_hash',
+            field=models.CharField(blank=True, default='', help_text="HMAC-SHA256 digest of a random per-draft token kept in the session that created this draft, so only that browser session may upload to or finalize it before it's confirmed. Deliberately not the session's own key (which django.contrib.auth.login() rotates, and which would otherwise leak a real, authenticated session key into this read-only admin list) -- see apps.file_transfer.services.anon_session.", max_length=64),
+        ),
+        migrations.AddField(
+            model_name='transfer',
+            name='zip_build_started_at',
+            field=models.DateTimeField(blank=True, help_text="When the current (or most recent) zip build claimed `zip_status=BUILDING`. Lets a build that never finished (a worker restart mid-build) be re-claimed once it is older than `services.zip`'s lease, instead of leaving the download page polling `BUILDING` forever.", null=True),
         ),
         migrations.AddIndex(
             model_name='transfer',

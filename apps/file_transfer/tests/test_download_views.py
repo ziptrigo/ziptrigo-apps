@@ -153,11 +153,17 @@ def test_zip_status_builds_then_becomes_ready(
     assert b'Download all' in second.content
 
 
-def test_download_zip_before_ready_redirects_to_status(client, draft_transfer, uploaded_file):
+def test_download_zip_before_ready_redirects_to_download_page(
+    client, draft_transfer, uploaded_file
+):
+    """Redirects to the download page itself (whose zip widget shows the "preparing"/polling
+    state), not `t:zip-status` -- that's a bare HTMX fragment with no `core/base.html` chrome, so
+    landing on it directly (e.g. a bookmarked or shared zip link) would show a broken-looking
+    page."""
     _active(draft_transfer)
     response = client.get(reverse('t:download-zip', args=[draft_transfer.slug]))
     assert response.status_code == 302
-    assert response['Location'] == reverse('t:zip-status', args=[draft_transfer.slug])
+    assert response['Location'] == reverse('t:download', args=[draft_transfer.slug])
 
 
 def test_download_zip_requires_password_when_locked(client, draft_transfer, uploaded_file):

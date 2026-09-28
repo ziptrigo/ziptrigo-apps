@@ -137,7 +137,7 @@
                 <button type="submit" class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">Add</button>
             </form>
 
-            {% with events=transfer.download_events.all|slice:":20" %}
+            {% with events=transfer.recent_download_events %}
             {% if events %}
             <div>
                 <p class="text-sm font-semibold text-gray-700 dark:text-gray-300 mt-4">Download log</p>

@@ -299,50 +299,116 @@ GET URL must still resolve -- `expire_transfers` sweeps up the objects (and fire
 deleted" email) once `GET_URL_EXPIRES_SECONDS` has safely passed since `Transfer.ended_at`.
 
 **Anonymous sending** (`apps.file_transfer.services.anonymous`, spec section 2 phase 2): the same
-picker-then-options-then-send page a logged-in sender uses, session-owned instead of user-owned
-(`Transfer.session_key`, checked by `services.anon_session.owns_draft` -- the session is forced
-into existence with `ensure_session_key` on the very first visit, since Django only sends a
-session cookie once something is written to it), gated by
-`FileTransferSettings.anonymous_enabled`, and free within its own (smaller) limits
+picker-then-options-then-send page a logged-in sender uses, session-owned instead of user-owned,
+gated by `FileTransferSettings.anonymous_enabled`, and free within its own (smaller) limits
 (`services.limits.validate_new_file_anonymous` / `validate_recipients_anonymous`,
 `services.expiry_choices.resolve_expiry_anonymous` -- fixed day values only, from
 `anonymous_allowed_expiry_days`). **`anonymous_enabled` defaults to `False`** and must stay that
 way until #53 (rate limiting) ships -- the plan explicitly calls for rate limiting on the send/
 confirm/download/password endpoints before this is opened to the public; flipping it on today
-would expose an unmetered, unlimited-attempts send + confirmation-code surface.
+would expose an unmetered, unlimited-attempts send + confirmation-code surface. `send_page`
+redirects an already-authenticated visitor to the normal, metered send page instead (and
+`start_confirmation` refuses one directly, as a second guard) -- this flow is for senders without
+an account, not a free lane for one.
+
+Draft ownership (`services.anon_session`) is a random per-draft token generated on creation and
+kept only in the session's own data (`request.session[...]`) -- never the session's own key
+(`session.session_key`). Only an HMAC-SHA256 digest of the token is persisted, on
+`Transfer.draft_token_hash`, compared with `owns_draft`. Two things this avoids: storing the raw
+session key would put a real, authenticated session's own key -- session-takeover material -- into
+`TransferAdmin`'s read-only list the moment an authenticated user (however that happened) used this
+flow; and `django.contrib.auth.login()` rotates the session's own key (`cycle_key()`) but *keeps*
+its data, so a sender who logs into an unrelated account mid-flow keeps their draft/pending
+confirmation for free, with no special-casing needed. `get_or_create_anonymous_draft` /
+`current_anonymous_transfer` resolve straight from the session's own "current draft id" rather than
+a DB lookup keyed by session, so there's no longer a `session_key` column to index at all.
 
 A draft only becomes a real transfer once its sender's email is confirmed
 (`services.anonymous.start_confirmation` / `confirm_by_code` / `confirm_by_link` -- see the email
 verification section above): unconfirmed transfers sit in `PENDING_CONFIRMATION` and are cleaned
-up by the same `cleanup_drafts` job as plain drafts. Per-IP-per-day caps (spec section 13,
-`services.anon_limits`) are enforced twice, for different reasons: `check_upload_bytes_cap` at
-every file upload (so storage can't be exhausted by uploading without ever confirming) and the
-authoritative `check_send_caps` at confirmation (transfer count and bytes, only counting transfers
-that actually got confirmed). Both checks use a rolling 24h window and take the *higher* of two
-counts -- by the real client IP and by an opaque id from a long-lived signed cookie
-(`services.anon_cookie`) -- so neither clearing cookies nor a shared/rotating IP alone raises the
-effective limit.
+up by the same `cleanup_drafts` job as plain drafts. Each transfer confirms through its own
+`core.services.email_verification` "purpose" (`services.anon_emails.verification_purpose`,
+`'file_transfer.anonymous_send:<transfer id>'` rather than one shared purpose per app) -- otherwise
+two pending transfers from the same sender email would share one `(email, purpose)` row in `core`
+and invalidate each other's verification, and worse, a confirmation link minted for one transfer
+could `core`-side match *any* other transfer whose sender email happened to be the same (swap the
+transfer id in the link's URL). `confirm_by_link` also independently checks the confirmed row's own
+id (`core.services.email_verification.confirm_by_token_verbose`) against
+`transfer.email_verification_id`, a second, cheap guard against exactly that. The trade-off: the
+resend cooldown and guess-attempt limit are now per-transfer rather than per-sender-email -- see
+#53 below.
 
-An anonymous transfer's one-time manage link (`/t/<slug>/manage/<token>/`,
-`views/manage.py`) offers disable and the download count; looked up by `slug` (already public) and
-compared with `hmac.compare_digest`, not a separate hashed column -- the slug alone already makes
-the row unguessable to enumerate. **Claim on login** (`services.claim.claim_transfers_for_user`,
-wired to Django's `user_logged_in` signal in `apps/file_transfer/apps.py`, `weak=False` for the
-same reason as the `credits_added` receiver above) hands a confirmed, unowned anonymous transfer to
-whichever user logs in with a matching, *already-confirmed* email -- not merely matching, since an
-account that hasn't itself proven it controls that address shouldn't be able to grab someone
-else's transfer by signing up with their address first; claiming is simply deferred to that
-account's first login after its own email gets confirmed. Only the session login page fires
-`user_logged_in` (signup is API-only and never starts a session), so that's the one place claiming
-happens.
+The confirmation link (`GET /send/anon/<id>/confirm/link/<token>/`) only ever *shows* a
+CSRF-protected "Confirm this transfer" button; only the matching **POST** actually confirms.
+Mail scanners and link-previewers fetch a URL automatically before a recipient ever clicks it --
+if the bare GET confirmed, an attacker could upload files, enter a victim's address as
+`sender_email`, and have the victim's own mail provider confirm (and, eventually, claim-on-login
+meter) a transfer the victim never sent.
+
+Per-IP-per-day caps (spec section 13, `services.anon_limits`) are enforced three times:
+`check_upload_bytes_cap` at every file upload (summing the real `TransferFile.size` of every other
+in-flight transfer's files -- never that transfer's own `size_bytes`, which stays `0` until it's
+actually confirmed); a pre-check in `start_confirmation`, before a one-time code/link is even sent,
+so a transfer that's already over the cap doesn't burn one pointlessly; and the authoritative
+`check_send_caps` at actual confirmation (transfer count and bytes, only counting transfers that
+actually got confirmed). Every check takes the *higher* of two counts -- by IP and by an opaque id
+from a long-lived signed cookie (`services.anon_cookie`) -- so neither clearing cookies nor a
+shared/rotating IP alone raises the effective limit; `check_send_caps` specifically checks against
+*every* IP/cookie the transfer has ever presented -- the one recorded at draft creation
+(`transfer.sender_ip`/`.anon_cookie_id`) as well as the confirming request's own -- since
+confirming from a different network/browser than the one that uploaded is completely legitimate
+(the point of the link at all) and checking only the confirming request's identifiers would let
+that always see zero usage. If the authoritative check rejects at confirmation time -- the code/
+token having already been burned (single-use) by then -- the transfer is ended outright
+(`DELETED`) rather than left stuck `PENDING_CONFIRMATION` forever with no way to get a clear answer
+out of it.
+
+The anonymous sent page (`/transfer/sent/anon/<id>/`) and one-time manage link
+(`/t/<slug>/manage/<token>/`, `views/manage.py`) both avoid leaking `sender_email` and the
+download link to an arbitrary visitor who merely has (or guesses) the transfer's UUID. The manage
+link offers disable and the download count; looked up by `slug` (already public) and compared with
+`hmac.compare_digest` on **bytes** (not `str` -- a non-ASCII token would otherwise raise `TypeError`
+and 500 the page), not a separate hashed column -- the slug alone already makes the row unguessable
+to enumerate; disabling redirects back to the manage page (post/redirect/get) rather than
+re-rendering it. The sent page is gated by `services.anon_session.can_view_sent_page`: either the
+session that created the draft (`owns_draft`), or the session that clicked the confirmation link
+(`mark_confirmed_via_link`, set right when that link's POST activates the transfer) -- the latter
+is deliberately a *different* session than the one that drafted it (the sender opening their email
+on their phone), so it needs its own, separate proof.
+
+**Claim on login** (`services.claim.claim_transfers_for_user`, wired to Django's `user_logged_in`
+signal in `apps/file_transfer/apps.py`, `weak=False` for the same reason as the `credits_added`
+receiver above) hands a confirmed, unowned anonymous transfer to whichever user logs in with a
+matching, *already-confirmed* email -- not merely matching, since an account that hasn't itself
+proven it controls that address shouldn't be able to grab someone else's transfer by signing up
+with their address first; claiming is simply deferred to that account's first login after its own
+email gets confirmed. Only the session login page fires `user_logged_in` (signup is API-only and
+never starts a session), so that's the one place claiming happens. **User decision:** claiming is
+also deferred while the account's balance is below `services.send.MIN_BALANCE_TO_SEND` (1 credit,
+the same minimum required to start a logged-in transfer) -- claiming turns a free transfer into a
+metered one with no chance to opt out first, and at a near-zero balance the very next metering run
+would immediately suspend it. Such a transfer stays anonymous and free (still fully usable by its
+recipients) until a *later* login finds the balance topped up.
 
 "Download all" (`services.zip`, spec section 5) is a lazily-built, per-transfer zip at
 `transfers/<id>/all.zip`, not billed and not part of `size_bytes`. The first request claims the
-build with one conditional `UPDATE` (`zip_status` `NONE`/`FAILED` -> `BUILDING`, so concurrent
-requests only ever enqueue one `build_zip` task) and the download page polls a status partial
-(`hx-trigger="every 2s"`) until it's `READY` or `FAILED` (retriable). The build itself streams
-both ends -- `S3Storage.get_object_stream` reads each source file a chunk at a time, and
-`_S3MultipartWriter` turns `zipfile`'s output into an S3 multipart upload a part at a time -- so
+build with one conditional `UPDATE` (`zip_status` `NONE`/`FAILED`, or a `BUILDING` row whose
+`zip_build_started_at` is older than `services.zip.BUILD_LEASE` -- a build that never finished,
+say a worker died mid-build -- -> `BUILDING`, so concurrent requests only ever enqueue one
+`build_zip` task) and the download page polls a status partial (`hx-trigger="every 2s"`, capped at
+`_MAX_AUTO_ZIP_POLLS` automatic polls before it asks for a manual click instead) until it's `READY`
+or `FAILED` (retriable). The whole build -- including the writer's own constructor -- is wrapped so
+any failure reliably lands on `FAILED` rather than leaving `BUILDING` stuck; after a successful
+`finish()`, the transfer is re-read fresh and, if it ended (or its files were otherwise deleted)
+while the build was running, the just-written object is deleted and `zip_status` reset instead of
+being left an orphan (`services.lifecycle.delete_transfer_files` / `end_transfer` also reset
+`zip_status` themselves, for the ordinary case where deletion runs after the zip already exists).
+Zip entries de-duplicate a repeated `TransferFile.name` (`a (1).txt`), flatten `/`/`\` out of the
+name (a "zip slip" guard against a naive/vulnerable extractor -- `services.limits.validate_filename`
+only strips control characters, so a raw path stays in the stored name otherwise), and carry the
+file's own `created_at` instead of zipfile's default 1980-01-01. The build streams both ends --
+`S3Storage.get_object_stream` reads each source file a chunk at a time, and `_S3MultipartWriter`
+turns `zipfile`'s output into an S3 multipart upload `PART_SIZE_BYTES` (64 MB) at a time -- so
 neither a whole source file nor the whole zip is ever held in memory; this only works because
 `_S3MultipartWriter` deliberately has no `.tell()`, which makes `zipfile.ZipFile` fall back to its
 own non-seekable-stream support instead of assuming it can seek. A "download all" click counts as
@@ -423,7 +489,7 @@ above).
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 449 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 477 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -446,7 +512,16 @@ token?) or a real port of a DRF-era module.
 - Register and password-reset pages still post JSON to `/api/auth/…` (they work, but aren't
   session form views yet).
 - No rate limiting anywhere (login, previews, API, file transfer send/download/password attempts --
-  file transfer's is tracked as #53).
+  file transfer's is tracked as #53). Specific gaps #53 needs to close, found during the phase 2
+  review: a resend every 60s issues a fresh confirmation code with 5 more guess attempts (~7,200
+  guesses/address/day, since neither resends nor attempts are otherwise capped per day); anyone can
+  start a confirmation for an arbitrary email address with no relationship to it, emailing that
+  address and (before phase 2's per-transfer verification purpose fix) superseding a real sender's
+  own pending one -- since fixed to be per-transfer (`services.anon_emails.verification_purpose`),
+  which closes the superseding but also removes the *cross-transfer* cooldown that used to
+  (incidentally) throttle this: an attacker can now start independent confirmations against many
+  different transfers targeting the same victim address in parallel, one 60s bucket each, with no
+  per-address ceiling across transfers.
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` phases 1 and 2 (issue #55) are built: logged-in *and* anonymous sending (email

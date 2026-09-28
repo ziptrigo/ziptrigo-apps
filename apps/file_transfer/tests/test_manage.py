@@ -48,7 +48,10 @@ def test_manage_page_404s_for_an_owned_transfer(client, user):
 def test_manage_disable_stops_the_link_from_working(client):
     transfer = _transfer()
     response = client.post(f'/t/{transfer.slug}/manage/{transfer.manage_token}/disable/')
-    assert response.status_code == 200
+    # Post/redirect/get: success redirects back to the manage page rather than re-rendering it,
+    # so a reload never re-submits the disable.
+    assert response.status_code == 302
+    assert response['Location'] == f'/t/{transfer.slug}/manage/{transfer.manage_token}/'
 
     transfer.refresh_from_db()
     assert transfer.status == TransferStatus.DISABLED
@@ -59,6 +62,16 @@ def test_manage_disable_stops_the_link_from_working(client):
 
 def test_manage_disable_is_rejected_for_a_non_active_transfer(client):
     transfer = _transfer(status=TransferStatus.DISABLED)
-    response = client.post(f'/t/{transfer.slug}/manage/{transfer.manage_token}/disable/')
+    response = client.post(
+        f'/t/{transfer.slug}/manage/{transfer.manage_token}/disable/', follow=True
+    )
     assert response.status_code == 200
     assert b'Only an active transfer can be disabled' in response.content
+
+
+def test_manage_page_404s_for_a_non_ascii_token(client):
+    """`hmac.compare_digest` raises `TypeError` for a non-ASCII `str` argument -- this must not
+    500 the page, only fail to match (see `_matching_transfer`'s docstring)."""
+    transfer = _transfer()
+    response = client.get(f'/t/{transfer.slug}/manage/n%C3%B6t-the-token/')
+    assert response.status_code == 404

@@ -20,6 +20,26 @@ from .naming import transfer_display_name
 PURPOSE = 'file_transfer.anonymous_send'
 
 
+def verification_purpose(transfer_id: object) -> str:
+    """The actual `purpose` passed to every `core.services.email_verification` call for an
+    anonymous transfer's confirmation: `PURPOSE` scoped to this one transfer.
+
+    Without the per-transfer suffix, two different pending anonymous transfers started with the
+    same sender email would share one `(email, purpose)` row in `core` -- so starting
+    confirmation for the second would invalidate the first's still-pending verification (`core`'s
+    "only the newest is ever valid" rule, see its module docstring), and worse, a confirmation
+    link for one transfer would `core`-side match *any* other transfer whose view code merely
+    passed the same bare `PURPOSE` -- letting a link meant for transfer A activate transfer B, as
+    long as both happened to share a sender email (see `services.anonymous.confirm_by_link`, which
+    also independently checks the confirmed row's own id against `transfer.email_verification_id`
+    as a second, belt-and-suspenders guard against exactly that). Scoping by transfer id closes
+    both at once, at the cost of the resend cooldown and guess-attempt limit also becoming
+    per-transfer rather than per-email -- see CLAUDE.md / issue #53 for why that's an accepted,
+    documented trade-off rather than a silent regression.
+    """
+    return f'{PURPOSE}:{transfer_id}'
+
+
 def build_confirmation_email(transfer: Transfer):
     """A `core.services.email_verification.start`-compatible `build_email` callback for `transfer`:
     a code to type on the send page, and a link to the same effect (spec section 2 step 4)."""

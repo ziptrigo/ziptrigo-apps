@@ -22,10 +22,10 @@ function's docstring for why one check alone isn't enough):
 from datetime import timedelta
 
 from django.core.exceptions import ValidationError
-from django.db.models import QuerySet
+from django.db.models import QuerySet, Sum
 from django.utils import timezone
 
-from ..models import FileTransferSettings, Transfer, TransferStatus
+from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
 
 #: Rolling window for both caps -- see the module docstring for why not a calendar day.
 _WINDOW = timedelta(hours=24)
@@ -61,6 +61,17 @@ def _by_ip_and_cookie(
     return by_ip, by_cookie
 
 
+def _candidate_values(*values: str | None) -> list[str]:
+    """Dedupe a handful of candidate IP/cookie values, dropping blanks and `None` -- shared by
+    `check_send_caps` to build its "own recorded identifier, plus whatever the confirming request
+    presents" candidate list (see that function's docstring)."""
+    seen: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.append(value)
+    return seen
+
+
 def check_upload_bytes_cap(
     transfer: Transfer,
     additional_bytes: int,
@@ -71,7 +82,15 @@ def check_upload_bytes_cap(
     """Reject a file upload that would push this connection's (still in-flight) daily byte usage
     over the cap -- checked in addition to the authoritative `check_send_caps` at confirmation, so
     storage can't be exhausted by uploading without ever confirming (spec section 13; the 24h
-    `cleanup_drafts` job is what eventually reclaims an abandoned draft's bytes)."""
+    `cleanup_drafts` job is what eventually reclaims an abandoned draft's bytes).
+
+    Sums the real `TransferFile.size` of every file attached to another in-flight transfer, rather
+    than trusting that transfer's own `size_bytes` column: `size_bytes` isn't populated until
+    `_activate`/`finalize_send` runs, so a draft or still-pending transfer always reports `0`
+    there regardless of how much it's actually uploaded -- reading it here would let a sender
+    upload arbitrarily many bytes across any number of never-confirmed drafts/sessions with no
+    real bound.
+    """
     settings_row = settings_row or FileTransferSettings.load()
     since = timezone.now() - _WINDOW
     by_ip, by_cookie = _by_ip_and_cookie(ip, cookie_id, transfer, since)
@@ -79,7 +98,13 @@ def check_upload_bytes_cap(
     this_transfer_so_far = sum(f.size for f in transfer.files.all())
 
     def total(qs: QuerySet) -> int:
-        other = sum(t.size_bytes for t in qs.filter(status__in=_OCCUPIES_STORAGE))
+        other_ids = qs.filter(status__in=_OCCUPIES_STORAGE).values_list('pk', flat=True)
+        other = (
+            TransferFile.objects.filter(transfer_id__in=other_ids).aggregate(total=Sum('size'))[
+                'total'
+            ]
+            or 0
+        )
         return other + this_transfer_so_far + additional_bytes
 
     if max(total(by_ip), total(by_cookie)) > settings_row.anonymous_max_bytes_per_ip_per_day:
@@ -92,26 +117,46 @@ def check_send_caps(
     cookie_id: str,
     settings_row: FileTransferSettings | None = None,
 ) -> None:
-    """The authoritative per-IP-per-day check, run once at confirmation (spec section 13): both
-    the transfer-count cap and the byte cap, against every other anonymous transfer from this
-    IP/cookie that was ever actually confirmed (`completed_at` set) in the last 24h.
+    """The authoritative per-IP-per-day check (spec section 13): both the transfer-count cap and
+    the byte cap, against every other anonymous transfer that was ever actually confirmed
+    (`completed_at` set) in the last 24h from any of this transfer's own candidate identifiers.
+
+    Checked against *every* IP/cookie this transfer has ever presented -- the one recorded when
+    its draft was created (`transfer.sender_ip`/`.anon_cookie_id`) as well as whatever the
+    confirming request itself presents (`ip`/`cookie_id`) -- taking whichever single one reports
+    the highest count/bytes. Confirming from a different network or browser than the one that
+    uploaded the files is completely legitimate (spec section 2: "the sender opens their email on
+    their phone"), so checking only the confirming request's own IP/cookie would let anyone
+    launder unlimited anonymous transfers through one connection by simply confirming each one
+    from a fresh network/browser with no history of its own -- the caps would then see zero usage
+    for every single confirmation.
 
     Call after `transfer.size_bytes` has been set to the real uploaded total (mirrors
-    `services.send.finalize_send`), and before flipping the transfer to `ACTIVE`.
+    `services.send.finalize_send`), and before flipping the transfer to `ACTIVE`. `start_confirmation`
+    also calls this, as a pre-check before a code/link is even sent -- but this call, at actual
+    confirmation, remains the authoritative one: the pre-check can go stale between the two.
     """
     settings_row = settings_row or FileTransferSettings.load()
     since = timezone.now() - _WINDOW
-    by_ip, by_cookie = _by_ip_and_cookie(ip, cookie_id, transfer, since)
-    sent_ip = by_ip.filter(completed_at__isnull=False)
-    sent_cookie = by_cookie.filter(completed_at__isnull=False)
+    base = Transfer.objects.filter(
+        owner__isnull=True, created_at__gte=since, completed_at__isnull=False
+    ).exclude(pk=transfer.pk)
 
-    if (
-        max(sent_ip.count(), sent_cookie.count())
-        >= settings_row.anonymous_max_transfers_per_ip_per_day
-    ):
+    ips = _candidate_values(ip, transfer.sender_ip)
+    cookies = _candidate_values(cookie_id, transfer.anon_cookie_id)
+
+    counts = [base.filter(sender_ip=value).count() for value in ips]
+    counts += [base.filter(anon_cookie_id=value).count() for value in cookies]
+    if counts and max(counts) >= settings_row.anonymous_max_transfers_per_ip_per_day:
         raise ValidationError(_LIMIT_MESSAGE)
 
-    bytes_ip = sum(t.size_bytes for t in sent_ip) + transfer.size_bytes
-    bytes_cookie = sum(t.size_bytes for t in sent_cookie) + transfer.size_bytes
-    if max(bytes_ip, bytes_cookie) > settings_row.anonymous_max_bytes_per_ip_per_day:
+    byte_totals = [
+        sum(t.size_bytes for t in base.filter(sender_ip=value)) + transfer.size_bytes
+        for value in ips
+    ]
+    byte_totals += [
+        sum(t.size_bytes for t in base.filter(anon_cookie_id=value)) + transfer.size_bytes
+        for value in cookies
+    ]
+    if byte_totals and max(byte_totals) > settings_row.anonymous_max_bytes_per_ip_per_day:
         raise ValidationError(_LIMIT_MESSAGE)

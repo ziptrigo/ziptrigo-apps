@@ -9,7 +9,7 @@ state rather than the just-submitted one.
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.db.models import Count
+from django.db.models import Count, Prefetch
 from django.forms import Form
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -21,7 +21,12 @@ from apps.core.htmx import is_htmx
 
 from .. import services
 from ..forms import AddRecipientsForm, TransferSettingsActionForm
-from ..models import ENDED_STATUSES, Transfer, TransferRecipient, TransferStatus
+from ..models import ENDED_STATUSES, DownloadEvent, Transfer, TransferRecipient, TransferStatus
+
+#: How many rows of a transfer's per-download log the row partial shows (spec section 6: "a
+#: per-download log is available per transfer") -- fetched via `Prefetch` below so a transfer with
+#: thousands of downloads never pulls its whole history into memory just to render a row.
+_DOWNLOAD_LOG_LIMIT = 20
 
 ACTIVE_FILTER = 'active'
 ENDED_FILTER = 'ended'
@@ -41,8 +46,27 @@ def _transfers_for(user, filter_value: str):
         # `download_count` and `downloads_remaining`); `files`/`recipients` are prefetched
         # instead of annotated since the row template needs the objects themselves, not just a
         # count, and `display_name` relies on `files` being prefetched too (see its docstring).
+        # `download_events` is prefetched separately, bounded to the log's own display limit and
+        # with its `file` selected up front -- otherwise the row template's `event.file.name`
+        # would fire one extra query per shown event (an N+1), and a heavily-downloaded transfer
+        # would prefetch its entire download history just to show the newest handful of rows.
         .annotate(download_events_count=Count('download_events', distinct=True))
-        .prefetch_related('files', 'recipients', 'download_events')
+        .prefetch_related(
+            'files',
+            'recipients',
+            # `to_attr` is required for a *sliced* `Prefetch` queryset: Django's own prefetch
+            # machinery needs to further filter this queryset by parent id, which a slice
+            # otherwise forbids ("Cannot filter a query once a slice has been taken") -- `to_attr`
+            # sidesteps that by populating a plain list attribute instead of the default related
+            # manager's cache.
+            Prefetch(
+                'download_events',
+                queryset=DownloadEvent.objects.select_related('file').order_by('-created_at')[
+                    :_DOWNLOAD_LOG_LIMIT
+                ],
+                to_attr='recent_download_events',
+            ),
+        )
         .order_by('-created_at')
     )
     if filter_value == ENDED_FILTER:

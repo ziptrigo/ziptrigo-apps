@@ -15,20 +15,24 @@ Two-step send, mirroring `services.send.finalize_send` split in two:
 
 from dataclasses import dataclass
 
+from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
 from apps.core.services.email_verification import confirm_by_code as _core_confirm_by_code
-from apps.core.services.email_verification import confirm_by_token as _core_confirm_by_token
+from apps.core.services.email_verification import (
+    confirm_by_token_verbose as _core_confirm_by_token_verbose,
+)
 from apps.core.services.email_verification import start as start_verification
 
 from ..models import FileTransferSettings, Transfer, TransferRecipient, TransferStatus
-from . import anon_limits, limits
-from .anon_emails import PURPOSE, build_confirmation_email, send_anonymous_sender_copy
+from . import anon_limits, anon_session, limits
+from .anon_emails import build_confirmation_email, send_anonymous_sender_copy, verification_purpose
 from .emails import send_transfer_notification
 from .expiry_choices import resolve_expiry_anonymous
+from .lifecycle import end_transfer
 from .password import hash_password
 
 
@@ -43,45 +47,51 @@ class AnonymousSendOptions:
     notify_on_download: bool = True
 
 
-def get_or_create_anonymous_draft(session_key: str, ip: str | None, cookie_id: str) -> Transfer:
+def get_or_create_anonymous_draft(session: SessionBase, ip: str | None, cookie_id: str) -> Transfer:
     """Like `services.uploads.get_or_create_draft`, but session- rather than user-owned: reuse
-    this session's existing empty draft if there is one, otherwise start a new one."""
-    existing = (
-        Transfer.objects.filter(
-            owner__isnull=True, session_key=session_key, status=TransferStatus.DRAFT
+    this session's current draft if it's still empty, otherwise start a new one (with its own
+    fresh per-draft token, remembered in `session` -- see `services.anon_session`)."""
+    current_id = anon_session.current_draft_id(session)
+    if current_id:
+        existing = (
+            Transfer.objects.filter(pk=current_id, owner__isnull=True, status=TransferStatus.DRAFT)
+            .annotate(_file_count=Count('files'))
+            .filter(_file_count=0)
+            .first()
         )
-        .annotate(_file_count=Count('files'))
-        .filter(_file_count=0)
-        .order_by('-created_at')
-        .first()
-    )
-    if existing:
-        return existing
-    return Transfer.objects.create(
+        if existing is not None and anon_session.owns_draft(session, existing):
+            return existing
+
+    token = anon_session.new_draft_token()
+    transfer = Transfer.objects.create(
         owner=None,
         status=TransferStatus.DRAFT,
-        session_key=session_key,
+        draft_token_hash=anon_session.hash_draft_token(token),
         sender_ip=ip,
         anon_cookie_id=cookie_id,
     )
+    anon_session.remember_draft(session, transfer.id, token)
+    return transfer
 
 
-def current_anonymous_transfer(session_key: str) -> Transfer | None:
+def current_anonymous_transfer(session: SessionBase) -> Transfer | None:
     """This session's most recent still-live anonymous transfer -- draft, pending confirmation, or
     just-activated -- so the send page can resume wherever it left off across reloads."""
-    return (
-        Transfer.objects.filter(
-            owner__isnull=True,
-            session_key=session_key,
-            status__in=[
-                TransferStatus.DRAFT,
-                TransferStatus.PENDING_CONFIRMATION,
-                TransferStatus.ACTIVE,
-            ],
-        )
-        .order_by('-created_at')
-        .first()
-    )
+    current_id = anon_session.current_draft_id(session)
+    if not current_id:
+        return None
+    transfer = Transfer.objects.filter(
+        pk=current_id,
+        owner__isnull=True,
+        status__in=[
+            TransferStatus.DRAFT,
+            TransferStatus.PENDING_CONFIRMATION,
+            TransferStatus.ACTIVE,
+        ],
+    ).first()
+    if transfer is None or not anon_session.owns_draft(session, transfer):
+        return None
+    return transfer
 
 
 def validate_anonymous_send_options(
@@ -101,15 +111,27 @@ def validate_anonymous_send_options(
     return recipients
 
 
-def start_confirmation(transfer: Transfer, options: AnonymousSendOptions) -> Transfer:
+def start_confirmation(
+    transfer: Transfer,
+    options: AnonymousSendOptions,
+    ip: str | None = None,
+    cookie_id: str = '',
+) -> Transfer:
     """Validate `options`, apply them to the draft, and start email confirmation (spec section 2
     step 4): moves `transfer` from `DRAFT` to `PENDING_CONFIRMATION` and emails a code and a link
     to `options.sender_email`. Nothing is sent to recipients yet -- that only happens once
     `confirm_by_code`/`confirm_by_link` succeeds.
 
+    `ip`/`cookie_id` are used for a *pre-check* of the per-IP-per-day caps (spec section 13),
+    against the size of the files already uploaded: there's no point spending a one-time code/link
+    on a transfer that's already over the day's cap and can never actually be confirmed. This is
+    purely an optimization -- `_activate`'s check, at actual confirmation, remains the
+    authoritative one, since usage can still change in the (usually short) window between starting
+    confirmation and completing it.
+
     Raises:
-        ValidationError: an option is invalid, no files have finished uploading, or `transfer`
-            isn't (still) a draft.
+        ValidationError: an option is invalid, no files have finished uploading, `transfer`
+            isn't (still) a draft, or the per-IP-per-day caps are already exceeded.
         core.services.email_verification.ResendTooSoon / EmailVerificationSendFailed: starting
             the verification itself failed; nothing here is changed either way (both happen
             inside the same transaction as the rest of this function).
@@ -123,8 +145,13 @@ def start_confirmation(transfer: Transfer, options: AnonymousSendOptions) -> Tra
             raise ValidationError('This transfer has already been sent.')
         limits.validate_has_files(locked)
 
+        locked.size_bytes = sum(f.size for f in locked.files.filter(uploaded=True))
+        anon_limits.check_send_caps(locked, ip, cookie_id, settings_row)
+
         verification_id = start_verification(
-            options.sender_email, PURPOSE, build_email=build_confirmation_email(locked)
+            options.sender_email,
+            verification_purpose(locked.id),
+            build_email=build_confirmation_email(locked),
         )
 
         locked.sender_email = options.sender_email
@@ -151,7 +178,9 @@ def resend_confirmation(transfer: Transfer) -> Transfer:
         raise ValidationError('This transfer is not awaiting confirmation.')
 
     verification_id = start_verification(
-        transfer.sender_email, PURPOSE, build_email=build_confirmation_email(transfer)
+        transfer.sender_email,
+        verification_purpose(transfer.id),
+        build_email=build_confirmation_email(transfer),
     )
     Transfer.objects.filter(pk=transfer.pk).update(email_verification_id=verification_id)
     transfer.email_verification_id = verification_id
@@ -162,6 +191,8 @@ def _activate(transfer: Transfer, confirmed_email: str, ip: str | None, cookie_i
     """Shared tail of `confirm_by_code`/`confirm_by_link`: check the per-IP-per-day caps and flip
     the transfer to `ACTIVE`, queuing the recipient + sender emails -- the anonymous equivalent of
     `services.send.finalize_send`'s second half."""
+    cap_error: ValidationError | None = None
+
     with transaction.atomic():
         locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
         if locked.status == TransferStatus.ACTIVE:
@@ -176,13 +207,32 @@ def _activate(transfer: Transfer, confirmed_email: str, ip: str | None, cookie_i
             raise ValidationError('This confirmation does not match this transfer.')
 
         locked.size_bytes = sum(f.size for f in locked.files.filter(uploaded=True))
-        anon_limits.check_send_caps(locked, ip, cookie_id)
+        try:
+            anon_limits.check_send_caps(locked, ip, cookie_id)
+        except ValidationError as exc:
+            # Caught, not raised, from *inside* this `atomic()` block on purpose: the
+            # confirmation code/token was already burned (single-use) by the caller before this
+            # ran, so the sender must not be left staring at a transfer that still looks "awaiting
+            # confirmation" forever with no way to ever get it out of that state -- but raising
+            # here would roll back this whole transaction, undoing the `end_transfer` cleanup
+            # below right along with it (a nested `atomic()`'s "commit" is only a savepoint; it's
+            # not durable unless the outer block it's nested in also exits normally). Recording the
+            # error and letting this block exit normally instead lets `end_transfer`, below, run
+            # (and actually persist) in its own transaction.
+            cap_error = exc
+        else:
+            now = timezone.now()
+            locked.status = TransferStatus.ACTIVE
+            locked.completed_at = now
+            locked.save()
+            locked.recipients.update(last_sent_at=now)
 
-        now = timezone.now()
-        locked.status = TransferStatus.ACTIVE
-        locked.completed_at = now
-        locked.save()
-        locked.recipients.update(last_sent_at=now)
+    if cap_error is not None:
+        # It can never be sent today (the cap is exceeded); end it outright, same as any other
+        # transfer that's never going anywhere, so a retry gets a clear, terminal answer rather
+        # than a transfer stuck `PENDING_CONFIRMATION` forever.
+        end_transfer(locked, TransferStatus.DELETED, delete_files=True)
+        raise cap_error
 
     transaction.on_commit(lambda: _queue_send_emails(transfer.id))
     transfer.refresh_from_db()
@@ -195,14 +245,27 @@ def confirm_by_code(transfer: Transfer, code: str, ip: str | None, cookie_id: st
     (`IncorrectCode`, `EmailVerificationBurned`, `EmailVerificationExpired`, ...) for a bad code."""
     if not transfer.email_verification_id:
         raise ValidationError('No confirmation is in progress for this transfer.')
-    email = _core_confirm_by_code(transfer.email_verification_id, code, PURPOSE)
+    email = _core_confirm_by_code(
+        transfer.email_verification_id, code, verification_purpose(transfer.id)
+    )
     return _activate(transfer, email, ip, cookie_id)
 
 
 def confirm_by_link(transfer: Transfer, token: str, ip: str | None, cookie_id: str) -> Transfer:
-    """Confirm by clicking the link in the confirmation email."""
-    email = _core_confirm_by_token(token, PURPOSE)
-    return _activate(transfer, email, ip, cookie_id)
+    """Confirm by clicking the link in the confirmation email.
+
+    Requires the confirmed row's own id (`core`'s `confirm_by_token_verbose`) to equal
+    `transfer.email_verification_id`: the purpose is already scoped to this one transfer
+    (`verification_purpose`), which alone rules out a token minted for a *different* transfer
+    being replayed against this one (by swapping the transfer id in the confirmation URL) -- this
+    is a second, cheap, belt-and-suspenders check against the same attack, and also against
+    `transfer.email_verification_id` having moved on (a resend since this link was sent) even
+    though the old token's own row might still separately validate on its own terms.
+    """
+    result = _core_confirm_by_token_verbose(token, verification_purpose(transfer.id))
+    if result.verification_id != transfer.email_verification_id:
+        raise ValidationError('This confirmation link does not match this transfer.')
+    return _activate(transfer, result.email, ip, cookie_id)
 
 
 def _queue_send_emails(transfer_id: object) -> None:

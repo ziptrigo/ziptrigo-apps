@@ -6,12 +6,6 @@
 <div class="container mx-auto px-4 py-8 max-w-xl">
     <h1 class="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">{{ transfer.display_name }}</h1>
 
-    {% if error %}
-    <div class="mb-4 rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm">
-        {{ error }}
-    </div>
-    {% endif %}
-
     <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6 space-y-3">
         <p class="text-sm text-gray-700 dark:text-gray-300">
             Status: <span class="uppercase font-semibold">{{ transfer.get_status_display }}</span>

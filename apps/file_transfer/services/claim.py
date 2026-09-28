@@ -9,8 +9,10 @@ import logging
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.billing.services import get_balance
 
 from ..models import ENDED_STATUSES, Transfer
+from .send import MIN_BALANCE_TO_SEND
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +27,22 @@ def claim_transfers_for_user(user: User) -> int:
     simply deferred: the next login after the account's own email gets confirmed picks it up (see
     `CLAUDE.md`).
 
+    **User decision:** also never claims while `user`'s credit balance is below
+    `MIN_BALANCE_TO_SEND` (the same 1-credit minimum required to *start* a logged-in transfer,
+    spec section 2). Claiming turns a free, anonymous transfer into a metered one with no chance
+    for the user to say no first; at a zero (or near-zero) balance, the very next metering run
+    would immediately suspend it. So a transfer that would otherwise be claimed here instead stays
+    anonymous and free -- still fully usable by its recipients -- until a *later* login finds the
+    balance topped up to at least `MIN_BALANCE_TO_SEND`. Confirming the account's own email is
+    still required regardless of balance, same as before.
+
     A `DISABLED` transfer is still claimable (the sender may have disabled it from the anonymous
     manage page and might want to re-enable it once they have an account); `EXPIRED`/`DELETED`
     ones (`ENDED_STATUSES`) are not -- there's nothing left to manage.
     """
     if not user.email or not user.email_confirmed:
+        return 0
+    if get_balance(user) < MIN_BALANCE_TO_SEND:
         return 0
 
     now = timezone.now()

@@ -12,13 +12,15 @@ separate endpoints, mirroring `views.uploads`/`views.send`, just session- rather
 import json
 import math
 
+from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from apps.accounts.models import User
 from apps.core.htmx import hx_redirect
 from apps.core.services.email_verification import (
     EmailVerificationError,
@@ -34,9 +36,13 @@ from ..services.storage import PART_SIZE_BYTES
 
 
 class AnonymousHttpRequest(HttpRequest):
-    """`HttpRequest` typed with `.session` -- these views never require login."""
+    """`HttpRequest` typed with `.session` and `.user` -- these views never *require* login (that's
+    the whole point of this flow), but `send_page` checks `.user.is_authenticated` itself to steer
+    an already-logged-in visitor to the normal, metered send page instead (spec: anonymous sending
+    is for senders without an account)."""
 
     session: SessionBase
+    user: User | AnonymousUser
 
 
 def _anonymous_enabled() -> bool:
@@ -85,12 +91,17 @@ def _json_body(request: HttpRequest) -> dict:
 
 @require_GET
 def send_page(request: AnonymousHttpRequest) -> HttpResponse:
+    if request.user.is_authenticated:
+        # Anonymous sending is for senders without an account (spec section 1); a logged-in
+        # visitor already has the normal, metered send page -- steer them there rather than let
+        # them send for free through this one (see CLAUDE.md).
+        return redirect('file_transfer:send')
+
     if not _anonymous_enabled():
         return _not_available(request)
 
     cookie_id = _cookie_id(request)
-    session_key = services.ensure_session_key(request.session)
-    transfer = services.current_anonymous_transfer(session_key)
+    transfer = services.current_anonymous_transfer(request.session)
 
     if transfer is not None and transfer.status == TransferStatus.ACTIVE:
         return _finish(
@@ -99,7 +110,7 @@ def send_page(request: AnonymousHttpRequest) -> HttpResponse:
 
     if transfer is None:
         transfer = services.get_or_create_anonymous_draft(
-            session_key, client_ip(request), cookie_id
+            request.session, client_ip(request), cookie_id
         )
 
     settings_row = FileTransferSettings.load()
@@ -132,6 +143,12 @@ def start_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpResp
     """Submitting the options form: validates everything, then starts email confirmation (spec
     section 2 step 4) -- moving the draft to `PENDING_CONFIRMATION` rather than sending anything
     yet."""
+    if request.user.is_authenticated:
+        # Belt-and-suspenders alongside `send_page`'s redirect: a logged-in visitor who somehow
+        # still has an anonymous draft's page open (or posts here directly) must not be able to
+        # complete a free send through it.
+        return HttpResponse(status=403)
+
     cookie_id = _cookie_id(request)
     transfer = _owned_draft(request, draft_id)
     settings_row = FileTransferSettings.load()
@@ -140,7 +157,9 @@ def start_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpResp
         return _finish(request, _upload_errors(request, form), cookie_id)
 
     try:
-        services.start_confirmation(transfer, form.to_anonymous_send_options())
+        services.start_confirmation(
+            transfer, form.to_anonymous_send_options(), ip=client_ip(request), cookie_id=cookie_id
+        )
     except ValidationError as exc:
         form.add_error(None, exc.messages[0])
         return _finish(request, _upload_errors(request, form), cookie_id)
@@ -204,15 +223,22 @@ def confirm_code(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     return _finish(request, response, cookie_id)
 
 
-@require_GET
-def confirm_link(request: HttpRequest, draft_id: str, token: str) -> HttpResponse:
+@require_http_methods(['GET', 'POST'])
+def confirm_link(request: AnonymousHttpRequest, draft_id: str, token: str) -> HttpResponse:
     """The link half of confirmation (spec section 2 step 4): no session/ownership check needed
     here -- the token itself, from `apps.core.services.email_verification`, is what proves this
     click is legitimate, and this must keep working from a different browser than the one that
-    started the send (e.g. the sender opens their email on their phone)."""
-    transfer = get_object_or_404(Transfer, id=draft_id, owner__isnull=True)
-    ip = client_ip(request)
+    started the send (e.g. the sender opens their email on their phone).
+
+    Confirms only on **POST**, from a CSRF-protected button on this same page's GET response --
+    never on the bare GET the emailed link itself lands on. Automated mail scanners/link-previewers
+    fetch a link's URL to check it before the recipient ever clicks it; if that GET alone
+    confirmed, an attacker could upload files, enter a victim's address as `sender_email`, and have
+    the victim's own mail provider confirm (and, eventually, claim-on-login meter) a transfer the
+    victim never sent, with no click at all.
+    """
     cookie_id = _cookie_id(request)
+    transfer = get_object_or_404(Transfer, id=draft_id, owner__isnull=True)
 
     if transfer.status == TransferStatus.ACTIVE:
         return _finish(
@@ -222,7 +248,8 @@ def confirm_link(request: HttpRequest, draft_id: str, token: str) -> HttpRespons
     error = ''
     if transfer.status != TransferStatus.PENDING_CONFIRMATION:
         error = 'This confirmation link is no longer valid.'
-    else:
+    elif request.method == 'POST':
+        ip = client_ip(request)
         try:
             transfer = services.confirm_anonymous_by_link(transfer, token, ip, cookie_id)
         except EmailVerificationError:
@@ -230,21 +257,37 @@ def confirm_link(request: HttpRequest, draft_id: str, token: str) -> HttpRespons
         except ValidationError as exc:
             error = exc.messages[0]
 
-    if transfer.status == TransferStatus.ACTIVE:
-        return _finish(
-            request, redirect('file_transfer:anon-sent', transfer_id=transfer.id), cookie_id
-        )
+        if transfer.status == TransferStatus.ACTIVE:
+            services.mark_confirmed_via_link(request.session, transfer.id)
+            return _finish(
+                request, redirect('file_transfer:anon-sent', transfer_id=transfer.id), cookie_id
+            )
 
-    context = {'transfer': transfer, 'confirm_form': ConfirmCodeForm(), 'error': error}
-    response = render(request, 'file_transfer/anon_confirm.html', context, status=422)
+    context = {
+        'transfer': transfer,
+        'token': token,
+        'confirm_form': ConfirmCodeForm(),
+        'error': error,
+    }
+    if request.method == 'GET':
+        status = 200 if not error else 404
+    else:
+        status = 422
+    response = render(request, 'file_transfer/anon_confirm_link.html', context, status=status)
     return _finish(request, response, cookie_id)
 
 
 @require_GET
-def sent_page(request: HttpRequest, transfer_id: str) -> HttpResponse:
+def sent_page(request: AnonymousHttpRequest, transfer_id: str) -> HttpResponse:
     transfer = get_object_or_404(
         Transfer, id=transfer_id, owner__isnull=True, status=TransferStatus.ACTIVE
     )
+    if not services.can_view_sent_page(request.session, transfer):
+        # Otherwise this page hands out `sender_email` plus the download link to anyone who
+        # merely has (or guesses) the transfer's UUID, which also appears in the confirm link and
+        # every presigned download URL. Only the browser that created the draft, or the one that
+        # clicked the confirmation link, gets to see it.
+        raise Http404
     context = {'transfer': transfer, 'download_url': transfer.absolute_download_url}
     return render(request, 'file_transfer/anon_sent.html', context)
 
