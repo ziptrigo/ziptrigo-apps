@@ -1,6 +1,18 @@
+from django.core.exceptions import ValidationError
 from pydantic import BaseModel, EmailStr, field_validator
 
 from ..validators import PasswordValidator
+
+
+def _validate_password(v: str) -> str:
+    """Validate password meets requirements, converting Django's `ValidationError` into pydantic's
+    `ValueError` so it surfaces as a 422 instead of an unhandled 500."""
+    validator = PasswordValidator()
+    try:
+        validator.validate(v)
+    except ValidationError as e:
+        raise ValueError('; '.join(e.messages)) from e
+    return v
 
 
 class LoginRequest(BaseModel):
@@ -16,10 +28,7 @@ class SignupRequest(BaseModel):
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
-        """Validate password meets requirements."""
-        validator = PasswordValidator()
-        validator.validate(v)
-        return v
+        return _validate_password(v)
 
 
 class EmailConfirmRequest(BaseModel):
@@ -42,10 +51,7 @@ class PasswordResetConfirm(BaseModel):
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
-        """Validate password meets requirements."""
-        validator = PasswordValidator()
-        validator.validate(v)
-        return v
+        return _validate_password(v)
 
     def validate_passwords_match(self) -> bool:
         """Check if passwords match."""
