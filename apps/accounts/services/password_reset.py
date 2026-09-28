@@ -30,7 +30,9 @@ class PasswordResetService:
         except User.DoesNotExist:
             return
 
-        token = PasswordResetToken.for_user(user)
+        # `Token.for_user` is mistyped upstream (see `apps.accounts.tokens.CustomAccessToken
+        # .for_user`'s comment); nothing on this side to fix.
+        token = PasswordResetToken.for_user(user)  # ty: ignore[invalid-argument-type]
         reset_url = self._build_reset_url(str(token))
         subject, text_body, html_body = render_password_reset_email(
             user=user,

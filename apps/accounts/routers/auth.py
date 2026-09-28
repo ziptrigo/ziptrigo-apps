@@ -1,6 +1,5 @@
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
@@ -21,6 +20,7 @@ from ..schemas import (
 from ..services import login_throttle
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.password_reset import get_password_reset_service
+from ..services.signup import EmailAlreadyRegistered, create_account
 from ..tokens import CustomAccessToken, CustomRefreshToken
 
 router = Router()
@@ -31,23 +31,10 @@ def signup(request: HttpRequest, payload: SignupRequest):
     """Create a new user account and send confirmation email."""
     ratelimit.enforce(ratelimit.hit_ip(request, 'SIGNUP_IP'))
 
-    # Check if user exists
-    if User.objects.filter(email=payload.email).exists():
-        raise HttpError(400, 'User with that email already exists.')
-
-    # Create user
     try:
-        user = User.objects.create_user(
-            email=payload.email,
-            password=payload.password,
-            name=payload.name,
-        )
-    except ValidationError as e:
-        raise HttpError(400, str(e))
-
-    # Send confirmation email
-    service = get_email_confirmation_service()
-    service.send_confirmation_email(user)
+        create_account(name=payload.name, email=payload.email, password=payload.password)
+    except EmailAlreadyRegistered:
+        raise HttpError(400, 'User with that email already exists.')
 
     return 201, {'message': 'Account created! Please check your email to confirm your address.'}
 
@@ -71,13 +58,7 @@ def resend_confirmation(request: HttpRequest, payload: ResendConfirmationRequest
     # The per-email-per-day cap is enforced centrally, for every caller of `start()` regardless of
     # purpose -- see `apps.core.services.email_verification.EmailVerificationRateLimited`.
 
-    try:
-        user = User.objects.get(email=payload.email)
-        if not user.email_confirmed:
-            service = get_email_confirmation_service()
-            service.send_confirmation_email(user)
-    except User.DoesNotExist:
-        pass  # Don't reveal whether the email exists
+    get_email_confirmation_service().resend_if_unconfirmed(payload.email)
 
     return 200, {
         'message': 'If the account exists and is not yet confirmed, '

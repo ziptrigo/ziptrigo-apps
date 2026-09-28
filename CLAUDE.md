@@ -23,6 +23,7 @@ admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrco
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
 pyproject.toml        Deps, ruff/ty/pytest/import-linter config, `inv` module registry.
+.github/workflows/    CI (`ci.yml`): `inv lint all --check` then `inv test unit` on every push/PR.
 ```
 
 `AGENTS.md` just redirects here.
@@ -157,8 +158,14 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE`
   users). Claim `sub`, signed with `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
 
-`POST /api/auth/login` only issues JWTs; it never starts a session. The other unauthenticated
-account pages (register, password reset, resend confirmation) still post JSON to `/api/auth/…`.
+`POST /api/auth/login` only issues JWTs; it never starts a session. Register, forgot-password,
+reset-password and resend-confirmation (issue #52) are session form views too, the same as login
+-- CSRF-protected, POST-only, following the "HTMX form views" convention below; the browser never
+sees a JWT on any of them. `/api/auth/…` still exposes the same operations (`signup`,
+`forgot-password`, `reset-password`, `resend-confirmation`) for non-browser clients; both surfaces
+share the same `apps.accounts.services` logic (`signup.create_account`,
+`password_reset.get_password_reset_service`, `email_confirmation.get_email_confirmation_service`)
+and the same `apps.core.ratelimit` rules, so validation and throttling can't drift between them.
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email.
 
@@ -313,8 +320,10 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   `Retry-After` header for every router. Plain/HTMX views call `ratelimit.web_response(request,
   result)` (or `.htmx_response`/`.page_response` directly) -- `core/base.html`'s `htmx-config` swaps
   429 like 422, so a partial actually renders into the page rather than htmx discarding it as an
-  error response. `register.html`/`forgot_password.html` both surface a 429's `data.detail` (or a
-  specific "try again later") instead of the generic "unexpected error" message.
+  error response. `register_page`/`forgot_password_page` (issue #52) both call
+  `ratelimit.web_response` directly, retargeting the 429 partial onto their own message element,
+  the same as every other rate-limited HTMX form view -- there's no client-side JS reading a
+  JSON `data.detail` on these pages anymore.
 - **Login and other password-style checks are throttled, never locked out** (issue #53 code
   review; see `apps.accounts.services.login_throttle`'s module docstring for the full reasoning):
   a single per-account rule that counts every attempt lets anyone who merely knows a victim's email
@@ -671,28 +680,25 @@ proxy"). A coarse `limit_req` in nginx itself is a recommended defense-in-depth 
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 647 pass, 31 fail, 1 skipped. The failures are **not** layout
-problems — they are drift between the suites and a codebase that migrated from DRF to
-django-ninja and from sync to async. Don't try to fix them by moving files around.
+Run everything with `inv test unit`: 0 failures, gated by CI (`.github/workflows/ci.yml`, `inv lint
+all --check` then `inv test unit`). Two contracts are worth knowing since they aren't obvious from
+the code alone:
 
-| file | n | cause |
-|---|---|---|
-| `billing/tests/test_credits_api.py` | 11 | calls DRF's `api_client.force_authenticate()`; the fixture is a ninja `TestClient`. Never ported off DRF |
-| `qr_code/tests/test_services.py` | 8 | `SynchronousOnlyOperation` — async tests touching the ORM without `sync_to_async` |
-| `accounts/tests/unit/test_authentication.py` | 4 | expects `JWTAuth.authenticate` to return `None` for a bad token; ninja_jwt raises `InvalidToken` before `authenticate` runs |
-| `qr_code/tests/test_setup_integration.py` | 3 | same `SynchronousOnlyOperation` |
-| `accounts/tests/test_auth.py` | 2 | signup lets a `ValidationError` escape as a 500 instead of returning 400 — a real app bug in the router |
-| `accounts/tests/api/test_auth_login_api.py` | 1 | same login/JWT surface |
-| `core/tests/test_admin_tools.py` | 1 | expects 403; Django admin redirects 302 to its login |
-| `qr_code/tests/test_setup_unit.py` | 1 | same `SynchronousOnlyOperation` |
+- `JWTAuth`/`AsyncJWTAuth` (`apps/accounts/auth.py`) catch ninja_jwt's `InvalidToken`/
+  `AuthenticationFailed` and return `None` rather than let it escape -- Django Ninja's own auth
+  contract is "`None` means 401"; letting the exception propagate instead is a 500 in production on
+  any malformed/expired/unknown-user `Authorization` header.
+- An async test that touches the ORM directly wraps each call in `sync_to_async` and runs under
+  `pytest.mark.django_db(transaction=True)` (see `apps/qr_code/tests/test_services.py`) --
+  `sync_to_async`'s executor runs on a different thread than the one pytest-django's default,
+  non-transactional `django_db` fixture opens its connection on, and a second SQLite connection
+  touching the same file while that transaction is open deadlocks.
 
-Each needs a product decision (what *should* signup return? should `JWTAuth` swallow an invalid
-token?) or a real port of a DRF-era module.
+See issue #51 for the history of how the rest of the suite (a stale DRF-era test client, an
+admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to green.
 
 ## Known gaps
 
-- Register and password-reset pages still post JSON to `/api/auth/…` (they work, but aren't
-  session form views yet).
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` phases 1 through 3 (issue #55) are built: logged-in *and* anonymous sending (email

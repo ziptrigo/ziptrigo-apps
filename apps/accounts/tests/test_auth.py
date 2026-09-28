@@ -62,7 +62,10 @@ class TestSignupEndpoint:
         response = api_client.post('/auth/signup', json=data)
 
         assert response.status_code == 422  # Validation error
-        assert 'password' in str(response.json())
+        assert (
+            response.json()['detail'][0]['ctx']['error']
+            == 'Password must be at least 6 characters long.'
+        )
 
     def test_signup_password_no_digit(self, api_client):
         """Test that signup rejects passwords without a digit."""
@@ -75,7 +78,10 @@ class TestSignupEndpoint:
         response = api_client.post('/auth/signup', json=data)
 
         assert response.status_code == 422  # Validation error
-        assert 'password' in str(response.json())
+        assert (
+            response.json()['detail'][0]['ctx']['error']
+            == 'Password must contain at least one digit.'
+        )
 
     def test_signup_duplicate_email(self, api_client, user):
         """Test that signup rejects duplicate email addresses."""
@@ -84,6 +90,25 @@ class TestSignupEndpoint:
             'email': user.email,
             'password': 'password123',
         }
+
+        response = api_client.post('/auth/signup', json=data)
+
+        assert response.status_code == 400
+        assert 'already exists' in response.json()['detail'].lower()
+
+    def test_signup_rejects_email_differing_only_by_domain_case(self, api_client, user):
+        """Issue #52 code review: `user.email` ('test@example.com') is already normalized by
+        `UserManager.create_user` (which lower-cases only the domain). `create_account` -- shared
+        with the web register view -- must normalize the submitted email the same way before its
+        pre-check, or this would sail through both that check and pydantic's own validation and
+        hit the model's unique constraint directly, 500ing the endpoint instead of returning the
+        normal 400 duplicate-email response."""
+        data = {
+            'name': 'Another User',
+            'email': 'test@EXAMPLE.COM',
+            'password': 'password123',
+        }
+        assert data['email'].lower() == user.email
 
         response = api_client.post('/auth/signup', json=data)
 
@@ -205,7 +230,9 @@ class TestPasswordResetFlow:
         """Test that reset password rejects mismatched passwords."""
         from apps.accounts.tokens import PasswordResetToken
 
-        token = PasswordResetToken.for_user(user)
+        # `Token.for_user` is mistyped upstream (see `apps.accounts.tokens.CustomAccessToken
+        # .for_user`'s comment); nothing on this side to fix.
+        token = PasswordResetToken.for_user(user)  # ty: ignore[invalid-argument-type]
 
         data = {
             'token': str(token),
@@ -217,6 +244,28 @@ class TestPasswordResetFlow:
 
         assert response.status_code == 400
         assert 'match' in response.json()['detail'].lower()
+
+    def test_reset_password_weak_password(self, api_client, user):
+        """Test that reset password rejects a password that's too short."""
+        from apps.accounts.tokens import PasswordResetToken
+
+        # `Token.for_user` is mistyped upstream (see `apps.accounts.tokens.CustomAccessToken
+        # .for_user`'s comment); nothing on this side to fix.
+        token = PasswordResetToken.for_user(user)  # ty: ignore[invalid-argument-type]
+
+        data = {
+            'token': str(token),
+            'password': 'abc',
+            'password_confirm': 'abc',
+        }
+
+        response = api_client.post('/auth/reset-password', json=data)
+
+        assert response.status_code == 422  # Validation error
+        assert (
+            response.json()['detail'][0]['ctx']['error']
+            == 'Password must be at least 6 characters long.'
+        )
 
 
 @pytest.mark.django_db

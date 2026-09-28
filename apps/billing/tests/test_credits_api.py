@@ -1,113 +1,128 @@
 import pytest
 
 from apps.accounts.models import User
+from apps.accounts.tokens import CustomAccessToken
 from apps.billing.models import CreditTransaction, CreditTransactionType
 from apps.billing.services import add_credits, get_balance
 
 pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 
-def test_admin_can_add_credits_to_user(api_client, admin_user, regular_user: User):
-    """Test that admin can add credits to a user account."""
-    api_client.force_authenticate(user=admin_user)
+def _auth_headers(user: User) -> dict[str, str]:
+    return {'HTTP_AUTHORIZATION': f'Bearer {CustomAccessToken.for_user(user)}'}
 
+
+def _post_credits(client, requester: User, user_id, payload):
+    return client.post(
+        f'/api/billing/users/{user_id}/credits',
+        payload,
+        content_type='application/json',
+        **_auth_headers(requester),
+    )
+
+
+def _get_credits(client, requester: User, user_id):
+    return client.get(f'/api/billing/users/{user_id}/credits', **_auth_headers(requester))
+
+
+def test_admin_can_add_credits_to_user(client, admin_user, regular_user: User):
+    """Test that admin can add credits to a user account."""
     assert get_balance(regular_user) == 0
 
-    response = api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    response = _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {
             'transaction_type': 'purchase',
             'amount': 100,
             'description': 'Initial purchase',
         },
-        format='json',
     )
 
     assert response.status_code == 201
-    assert response.data['amount'] == 100
-    assert response.data['type'] == 'purchase'
-    assert response.data['description'] == 'Initial purchase'
-    assert response.data['user_id'] == str(regular_user.id)
+    data = response.json()
+    assert data['amount'] == 100
+    assert data['type'] == 'purchase'
+    assert data['description'] == 'Initial purchase'
+    assert data['user_id'] == str(regular_user.id)
 
     assert get_balance(regular_user) == 100
 
 
-def test_admin_can_remove_credits_from_user(api_client, admin_user, regular_user: User):
+def test_admin_can_remove_credits_from_user(client, admin_user, regular_user: User):
     """Test that admin can remove credits from a user account."""
-    api_client.force_authenticate(user=admin_user)
-
     # Set initial credits
     add_credits(regular_user, 100)
 
-    response = api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    response = _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {
             'transaction_type': 'spend',
             'amount': -30,
             'description': 'Spent credits',
         },
-        format='json',
     )
 
     assert response.status_code == 201
-    assert response.data['amount'] == -30
-    assert response.data['type'] == 'spend'
+    data = response.json()
+    assert data['amount'] == -30
+    assert data['type'] == 'spend'
 
     assert get_balance(regular_user) == 70
 
 
-def test_admin_can_adjust_credits(api_client, admin_user, regular_user: User):
+def test_admin_can_adjust_credits(client, admin_user, regular_user: User):
     """Test that admin can adjust credits with adjustment type."""
-    api_client.force_authenticate(user=admin_user)
-
-    response = api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    response = _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {
             'transaction_type': 'adjustment',
             'amount': 50,
             'description': 'Manual adjustment',
         },
-        format='json',
     )
 
     assert response.status_code == 201
-    assert response.data['type'] == 'adjustment'
+    assert response.json()['type'] == 'adjustment'
 
     assert get_balance(regular_user) == 50
 
 
-def test_admin_can_refund_credits(api_client, admin_user, regular_user: User):
+def test_admin_can_refund_credits(client, admin_user, regular_user: User):
     """Test that admin can refund credits."""
-    api_client.force_authenticate(user=admin_user)
-
-    response = api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    response = _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {
             'transaction_type': 'refund',
             'amount': 25,
             'description': 'Refund for cancellation',
         },
-        format='json',
     )
 
     assert response.status_code == 201
-    assert response.data['type'] == 'refund'
+    assert response.json()['type'] == 'refund'
 
     assert get_balance(regular_user) == 25
 
 
-def test_credit_transaction_creates_audit_record(api_client, admin_user, regular_user: User):
+def test_credit_transaction_creates_audit_record(client, admin_user, regular_user: User):
     """Test that credit transactions create audit records."""
-    api_client.force_authenticate(user=admin_user)
-
-    response = api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    response = _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {
             'transaction_type': 'purchase',
             'amount': 100,
             'description': 'Test purchase',
         },
-        format='json',
     )
 
     assert response.status_code == 201
@@ -121,110 +136,119 @@ def test_credit_transaction_creates_audit_record(api_client, admin_user, regular
     assert transaction.description == 'Test purchase'
 
 
-def test_invalid_transaction_type_returns_400(api_client, admin_user, regular_user: User):
+def test_invalid_transaction_type_returns_400(client, admin_user, regular_user: User):
     """Test that invalid transaction type returns 400 error."""
-    api_client.force_authenticate(user=admin_user)
-
-    response = api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    response = _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {
             'transaction_type': 'invalid_type',
             'amount': 100,
             'description': 'Invalid transaction',
         },
-        format='json',
     )
 
     assert response.status_code == 400
-    assert 'Invalid transaction type' in response.data['detail']
+    assert 'Invalid transaction type' in response.json()['detail']
 
 
-def test_nonexistent_user_returns_404(api_client, admin_user):
-    """Test that credits endpoint returns 404 for nonexistent user."""
-    api_client.force_authenticate(user=admin_user)
-
+def test_nonexistent_user_returns_404(client, admin_user):
     fake_uuid = '00000000-0000-0000-0000-000000000000'
-    response = api_client.post(
-        f'/billing/users/{fake_uuid}/credits',
+    response = _post_credits(
+        client,
+        admin_user,
+        fake_uuid,
         {
             'transaction_type': 'purchase',
             'amount': 100,
             'description': 'Test',
         },
-        format='json',
     )
 
     assert response.status_code == 404
 
 
-def test_admin_can_get_user_credits_balance(api_client, admin_user, regular_user: User):
+def test_admin_can_get_user_credits_balance(client, admin_user, regular_user: User):
     """Test that admin can retrieve user's credit balance."""
-    api_client.force_authenticate(user=admin_user)
-
     add_credits(regular_user, 250)
 
-    response = api_client.get(f'/billing/users/{regular_user.id}/credits')
+    response = _get_credits(client, admin_user, regular_user.id)
 
     assert response.status_code == 200
-    assert response.data['user_id'] == str(regular_user.id)
-    assert response.data['credits'] == 250
+    data = response.json()
+    assert data['user_id'] == str(regular_user.id)
+    assert data['credits'] == 250
 
 
-def test_get_credits_nonexistent_user_returns_404(api_client, admin_user):
-    """Test that getting credits for nonexistent user returns 404."""
-    api_client.force_authenticate(user=admin_user)
-
+def test_get_credits_nonexistent_user_returns_404(client, admin_user):
     fake_uuid = '00000000-0000-0000-0000-000000000000'
-    response = api_client.get(f'/billing/users/{fake_uuid}/credits')
+    response = _get_credits(client, admin_user, fake_uuid)
 
     assert response.status_code == 404
 
 
-def test_non_admin_cannot_add_credits(api_client, regular_user):
+def test_non_admin_cannot_add_credits(client, regular_user):
     """Test that non-admin users cannot add credits."""
-    api_client.force_authenticate(user=regular_user)
-
     other_user = User.objects.create_user(email='other@example.com', password='password')
 
-    response = api_client.post(
-        f'/billing/users/{other_user.id}/credits',
+    response = _post_credits(
+        client,
+        regular_user,
+        other_user.id,
         {
             'transaction_type': 'purchase',
             'amount': 100,
             'description': 'Unauthorized attempt',
         },
-        format='json',
     )
 
     assert response.status_code == 401
 
 
-def test_multiple_transactions_update_balance_correctly(api_client, admin_user, regular_user: User):
+def test_multiple_transactions_update_balance_correctly(client, admin_user, regular_user: User):
     """Test that multiple transactions correctly update the balance."""
-    api_client.force_authenticate(user=admin_user)
-
     # Add 100 credits
-    api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {'transaction_type': 'purchase', 'amount': 100, 'description': 'Purchase 1'},
-        format='json',
     )
 
     # Add 50 more credits
-    api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {'transaction_type': 'purchase', 'amount': 50, 'description': 'Purchase 2'},
-        format='json',
     )
 
     # Spend 30 credits
-    api_client.post(
-        f'/billing/users/{regular_user.id}/credits',
+    _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
         {'transaction_type': 'spend', 'amount': -30, 'description': 'Spend 1'},
-        format='json',
     )
 
     assert get_balance(regular_user) == 120
 
     # Verify all transactions are recorded
     assert CreditTransaction.objects.filter(user=regular_user).count() == 3
+
+
+def test_admin_cannot_take_balance_below_zero(client, admin_user, regular_user: User):
+    """`CreditAccount.balance` is unsigned (see CLAUDE.md's "Known gaps"): spending more than a
+    user's balance is rejected with 400 rather than driving the balance negative."""
+    add_credits(regular_user, 20)
+
+    response = _post_credits(
+        client,
+        admin_user,
+        regular_user.id,
+        {'transaction_type': 'spend', 'amount': -30, 'description': 'Overspend'},
+    )
+
+    assert response.status_code == 400
+    assert get_balance(regular_user) == 20

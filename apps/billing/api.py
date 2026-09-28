@@ -20,7 +20,7 @@ admin_auth = AdminAuth()
 
 @router.post(
     '/users/{user_id}/credits',
-    response=CreditTransactionResponse,
+    response={201: CreditTransactionResponse},
     auth=admin_auth,
 )
 def create_credit_transaction(request, user_id: UUID, payload: CreditTransactionRequest):
@@ -52,7 +52,7 @@ def create_credit_transaction(request, user_id: UUID, payload: CreditTransaction
     except ValueError as e:
         raise HttpError(400, str(e))
 
-    return CreditTransactionResponse.model_validate(credit_transaction)
+    return 201, CreditTransactionResponse.model_validate(credit_transaction)
 
 
 @router.get('/users/{user_id}/credits', response=UserCreditsResponse, auth=admin_auth)

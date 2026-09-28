@@ -10,6 +10,7 @@ from .views import (
     logout_page,
     profile_update,
     register_page,
+    resend_confirmation_page,
     reset_password_page,
 )
 
@@ -25,5 +26,6 @@ urlpatterns = [
     path('forgot-password/', forgot_password_page, name='forgot-password'),
     path('reset-password/<str:token>/', reset_password_page, name='reset-password'),
     path('confirm-email/<str:token>/', confirm_email_page, name='confirm-email'),
+    path('resend-confirmation/', resend_confirmation_page, name='resend-confirmation'),
     path('email-confirmed/', email_confirmation_success, name='email-confirmed'),
 ]
