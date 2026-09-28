@@ -2,6 +2,8 @@
 Stored hashed with Django's own password hasher -- never in the clear, same as user passwords.
 """
 
+import hashlib
+
 from django.contrib.auth.hashers import check_password as _check_password
 from django.contrib.auth.hashers import make_password
 
@@ -22,9 +24,17 @@ def session_key(transfer_id: object) -> str:
     return f'{SESSION_KEY_PREFIX}{transfer_id}'
 
 
-def is_unlocked_in_session(session, transfer_id: object) -> bool:
-    return bool(session.get(session_key(transfer_id)))
+def _fingerprint(password_hash: str) -> str:
+    """A short digest of the *current* password hash, stored in the session instead of a bare
+    `True` so that changing the password invalidates sessions that unlocked the old one -- the
+    session value only matches `is_unlocked_in_session`'s check while `password_hash` is
+    unchanged from when it was unlocked."""
+    return hashlib.sha256(password_hash.encode()).hexdigest()
 
 
-def unlock_in_session(session, transfer_id: object) -> None:
-    session[session_key(transfer_id)] = True
+def is_unlocked_in_session(session, transfer_id: object, password_hash: str) -> bool:
+    return session.get(session_key(transfer_id)) == _fingerprint(password_hash)
+
+
+def unlock_in_session(session, transfer_id: object, password_hash: str) -> None:
+    session[session_key(transfer_id)] = _fingerprint(password_hash)

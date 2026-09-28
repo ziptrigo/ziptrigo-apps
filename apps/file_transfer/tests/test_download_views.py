@@ -88,16 +88,47 @@ def test_download_file_without_unlocking_redirects_to_page(client, draft_transfe
     assert not DownloadEvent.objects.filter(transfer=draft_transfer).exists()
 
 
-def test_download_file_records_ip_from_forwarded_header(
+def test_download_file_records_ip_from_x_real_ip_header(
     client, draft_transfer, uploaded_file, fake_storage
 ):
+    """`X-Real-IP` is trusted because it's nginx's own doing, not the client's -- see
+    `views.download._client_ip`."""
+    _active(draft_transfer)
+    client.get(
+        reverse('t:download-file', args=[draft_transfer.slug, uploaded_file.id]),
+        HTTP_X_REAL_IP='9.9.9.9',
+    )
+    event = DownloadEvent.objects.get(transfer=draft_transfer, file=uploaded_file)
+    assert event.ip == '9.9.9.9'
+
+
+def test_download_file_ignores_client_supplied_forwarded_for_header(
+    client, draft_transfer, uploaded_file, fake_storage
+):
+    """`X-Forwarded-For` is fully client-controlled here (nginx isn't configured to sanitize it),
+    so it must never be trusted for `DownloadEvent.ip` -- only `X-Real-IP` is."""
     _active(draft_transfer)
     client.get(
         reverse('t:download-file', args=[draft_transfer.slug, uploaded_file.id]),
         HTTP_X_FORWARDED_FOR='9.9.9.9, 10.0.0.1',
     )
     event = DownloadEvent.objects.get(transfer=draft_transfer, file=uploaded_file)
-    assert event.ip == '9.9.9.9'
+    assert event.ip != '9.9.9.9'
+
+
+def test_download_file_stores_none_ip_for_a_malformed_x_real_ip(
+    client, draft_transfer, uploaded_file, fake_storage
+):
+    """A bogus value must not reach `GenericIPAddressField` and crash the request with a
+    Postgres `DataError`."""
+    _active(draft_transfer)
+    response = client.get(
+        reverse('t:download-file', args=[draft_transfer.slug, uploaded_file.id]),
+        HTTP_X_REAL_IP='not-an-ip',
+    )
+    assert response.status_code == 302
+    event = DownloadEvent.objects.get(transfer=draft_transfer, file=uploaded_file)
+    assert event.ip is None
 
 
 def test_max_downloads_enforced(client, draft_transfer, uploaded_file, fake_storage):

@@ -3,6 +3,8 @@ link recipients get by email. Never reveals *why* a transfer isn't available (ex
 suspended, deleted, or its limit reached all render the same neutral page).
 """
 
+import ipaddress
+
 from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
@@ -24,13 +26,25 @@ class PublicHttpRequest(HttpRequest):
 
 
 def _client_ip(request: HttpRequest) -> str | None:
-    """The real client IP behind nginx (`X-Forwarded-For`'s first hop), falling back to
-    `REMOTE_ADDR` for direct/local access. Only used for `DownloadEvent.ip` in phase 1; the
-    per-IP anonymous limits in spec section 13 are phase 2."""
-    forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
-    if forwarded:
-        return forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR')
+    """The real client IP for `DownloadEvent.ip` (phase 1 only; the per-IP anonymous limits in
+    spec section 13 are phase 2).
+
+    Reads `X-Real-IP`, which **must** be set by our own nginx from the actual TCP peer (never
+    passed through from the client) -- unlike `X-Forwarded-For`, which the client fully controls
+    and which nginx here does not sanitize, so it isn't trustworthy on its own. Falls back to
+    `REMOTE_ADDR` for direct/local access (dev, tests, or nginx misconfigured to not set it).
+    Returns `None` for anything that doesn't parse as a valid IP address, rather than letting a
+    bogus value reach `GenericIPAddressField` and crash the request with a `DataError` on
+    Postgres.
+    """
+    candidate = request.META.get('HTTP_X_REAL_IP') or request.META.get('REMOTE_ADDR')
+    if not candidate:
+        return None
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return None
+    return candidate
 
 
 def _unavailable(request: HttpRequest) -> HttpResponse:
@@ -42,7 +56,7 @@ def _context(request: PublicHttpRequest, transfer: Transfer, password_form: Down
         'transfer': transfer,
         'files': transfer.files.filter(uploaded=True).order_by('name'),
         'unlocked': not services.requires_password(transfer)
-        or services.is_unlocked_in_session(request.session, transfer.id),
+        or services.is_unlocked_in_session(request.session, transfer.id, transfer.password_hash),
         'password_form': password_form,
     }
 
@@ -66,7 +80,7 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
 
     form = DownloadPasswordForm(request.POST)
     if form.is_valid() and services.check_password(transfer, form.cleaned_data['password']):
-        services.unlock_in_session(request.session, transfer.id)
+        services.unlock_in_session(request.session, transfer.id, transfer.password_hash)
         return redirect(reverse('t:download', args=[slug]))
 
     form.add_error('password', 'Incorrect password.')
@@ -82,7 +96,7 @@ def download_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpRe
         return _unavailable(request)
 
     if services.requires_password(transfer) and not services.is_unlocked_in_session(
-        request.session, transfer.id
+        request.session, transfer.id, transfer.password_hash
     ):
         return redirect(reverse('t:download', args=[slug]))
 
