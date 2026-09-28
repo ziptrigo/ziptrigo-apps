@@ -1,0 +1,11 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Too many requests - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-16 max-w-xl text-center">
+    <i class="fas fa-hourglass-half text-4xl text-gray-400 mb-4"></i>
+    <h1 class="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">Too many requests</h1>
+    <p class="text-gray-500 dark:text-gray-400">{{ message|default:'Please wait a moment and try again.' }}</p>
+</div>
+{% endblock %}

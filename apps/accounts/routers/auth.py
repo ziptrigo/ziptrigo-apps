@@ -5,6 +5,8 @@ from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
 
+from apps.core import ratelimit
+
 from ..models import User
 from ..schemas import (
     EmailConfirmRequest,
@@ -16,6 +18,7 @@ from ..schemas import (
     SignupRequest,
     TokenResponse,
 )
+from ..services import login_throttle
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.password_reset import get_password_reset_service
 from ..tokens import CustomAccessToken, CustomRefreshToken
@@ -26,6 +29,8 @@ router = Router()
 @router.post('/signup', response={201: dict}, auth=None)
 def signup(request: HttpRequest, payload: SignupRequest):
     """Create a new user account and send confirmation email."""
+    ratelimit.enforce(ratelimit.hit_ip(request, 'SIGNUP_IP'))
+
     # Check if user exists
     if User.objects.filter(email=payload.email).exists():
         raise HttpError(400, 'User with that email already exists.')
@@ -62,6 +67,10 @@ def confirm_email(request: HttpRequest, payload: EmailConfirmRequest):
 @router.post('/resend-confirmation', response={200: dict}, auth=None)
 def resend_confirmation(request: HttpRequest, payload: ResendConfirmationRequest):
     """Resend email confirmation link."""
+    ratelimit.enforce(ratelimit.hit_ip(request, 'RESEND_CONFIRMATION_IP'))
+    # The per-email-per-day cap is enforced centrally, for every caller of `start()` regardless of
+    # purpose -- see `apps.core.services.email_verification.EmailVerificationRateLimited`.
+
     try:
         user = User.objects.get(email=payload.email)
         if not user.email_confirmed:
@@ -79,6 +88,18 @@ def resend_confirmation(request: HttpRequest, payload: ResendConfirmationRequest
 @router.post('/forgot-password', response={200: dict}, auth=None)
 def forgot_password(request: HttpRequest, payload: PasswordResetRequest):
     """Start password reset flow for the given email."""
+    # None of these checks leak whether the account exists (the response is identical either
+    # way) -- see CLAUDE.md. Three rules, not a hard lockout (issue #53 code review): `_IP` throttles
+    # scripted abuse regardless of target; `_EMAIL_IP`, strict, stops one IP from burning through a
+    # specific victim's budget on its own; `_EMAIL`, looser but shared across every IP, is what
+    # actually protects a victim's own ability to request a reset -- a third party now needs many
+    # different IPs to exhaust it and block them, not just a handful of requests from one.
+    ratelimit.enforce(ratelimit.hit_ip(request, 'FORGOT_PASSWORD_IP'))
+    ratelimit.enforce(
+        ratelimit.hit_ip_and_value(request, payload.email.lower(), 'FORGOT_PASSWORD_EMAIL_IP')
+    )
+    ratelimit.enforce(ratelimit.hit_value(payload.email.lower(), 'FORGOT_PASSWORD_EMAIL'))
+
     service = get_password_reset_service()
     service.request_reset(email=payload.email)
 
@@ -108,9 +129,17 @@ def reset_password(request: HttpRequest, payload: PasswordResetConfirm):
 @router.post('/login', response=TokenResponse, auth=None)
 def login(request: HttpRequest, payload: LoginRequest) -> TokenResponse:
     """User login endpoint - returns JWT access and refresh tokens for valid credentials."""
+    # Same rules, and the same shared counters, as the session login view
+    # (`apps.accounts.views.login.login_page`) -- see `apps.accounts.services.login_throttle`'s
+    # module docstring for why these aren't a lockout.
+    email = payload.email.lower()
+    ratelimit.enforce(ratelimit.hit_ip(request, 'LOGIN_IP'))
+    ratelimit.enforce(login_throttle.check_before_authenticate(request, email))
+
     user: User | None = authenticate(request, email=payload.email, password=payload.password)
 
     if user is None:
+        login_throttle.record_failed_attempt(email)
         raise HttpError(400, 'Invalid credentials')
 
     if user.status != User.STATUS_ACTIVE:

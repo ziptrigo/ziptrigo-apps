@@ -13,7 +13,7 @@ an account, a credit balance and a layout. Django + HTMX. It started as two micr
 manage.py
 config/               The Django project: settings, urls, api (one NinjaAPI), environment.py.
 apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email,
-                      email verification.
+                      email verification, rate limiting (`apps.core.ratelimit`), client IP.
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
@@ -237,6 +237,124 @@ the same `_activate` step: check the per-IP-per-day caps (see "File transfer spe
 then flip the transfer `ACTIVE` and queue the recipient + sender emails, exactly like
 `services.send.finalize_send` does for a logged-in sender.
 
+### Rate limiting
+
+`apps.core.ratelimit` (issue #53) is a small, in-house fixed-window limiter, not
+`django-ratelimit`: this project's endpoints are a mix of plain sync Django views, async ninja
+routers (`apps/qr_code/api/qrcode.py`, the `/go/<code>` redirect), and ninja routers whose
+parameters are only resolved *inside* django-ninja's own request pipeline (so a decorator wrapping
+the registered view function never actually sees the parsed payload before django-ninja's own
+signature introspection runs) -- a plain function call at the top of a view composes with all
+three without fighting any of that, whereas a decorator-based library would need different
+integration paths for each. Also lives in `core` for the same reason `apps.core.services.email_verification`
+does: everyone can import it, and `apps.core.services.client_ip.client_ip` (the trusted client-IP
+reader every per-IP rule uses, moved here from `file_transfer` for this issue) needs the same reach.
+
+- **`hit(key, rule)`** counts one hit against `key` under a named rule in `settings.RATELIMIT_RULES`
+  (`{name: (limit, window_seconds)}`) and returns a `RateLimitResult` (`allowed`, `remaining`,
+  `retry_after`); **`peek(key, rule)`** reports the same thing *without* counting the call -- for a
+  caller that must decide whether to even attempt something sensitive (`authenticate()`) before
+  recording a hit for it (see "Login" below). Fixed-window, keyed by a per-`(rule, key,
+  time_bucket)` HMAC-SHA256 hash (`SECRET_KEY`-keyed, matching `email_verification`'s own digest)
+  -- never the raw key -- so a long value (an email) can't overflow a storage column and nothing
+  identifying ever sits in the cache/table in the clear. See `apps/core/ratelimit/limiter.py`'s
+  docstring for the counting scheme in full.
+- **Two storage backends** (`settings.RATELIMIT_STORAGE`, code review of the first version of this
+  issue): `'db'` (dev/prod's default, and pytest's, when `CACHE_URL` isn't set) -- a dedicated
+  model, `apps.core.models.RateLimitCounter`, one row per bucket, incremented with a single atomic
+  upsert (`INSERT ... ON CONFLICT ("key") DO UPDATE SET "count" = "count" + 1 RETURNING "count"`,
+  raw SQL through `connection.cursor()`; Postgres and SQLite >= 3.35 both support `RETURNING` on an
+  upsert). `apps.core.jobs.purge_expired_rate_limit_counters` (an hourly scheduler job, like
+  `purge_old_email_verifications`) deletes rows whose window has passed -- the DB path's stand-in
+  for a cache entry's own TTL expiring. `'cache'` (when `CACHE_URL` is set) -- the `'ratelimit'`
+  `RedisCache` alias, `cache.add` then `cache.incr`; `LocMemCache` under pytest when a test opts
+  into this path with `override_settings(RATELIMIT_STORAGE='cache')`, to keep it covered too. The
+  DB path replaced an original `DatabaseCache`-backed design with two bugs, both now covered by
+  `apps/core/tests/test_ratelimit.py`: `DatabaseCache.incr` falls back to a plain `get`-then-`set`
+  at the cache's *default* timeout once a bucket's second hit lands, silently shortening any window
+  over 5 minutes; and its `MAX_ENTRIES` culling could evict a live, unrelated counter under
+  ordinary traffic. `RedisCache`/`LocMemCache` never had either problem (`INCR`/`incr` are atomic
+  and preserve the key's TTL) -- only `DatabaseCache` needed replacing, and only for that reason.
+  `hit_ip(request, rule)` / `hit_user(user, rule)` / `hit_value(str, rule)` /
+  `hit_ip_and_value(request, str, rule)` are the key shapes call sites need (IP, authenticated
+  user, an arbitrary string like an email or a transfer slug, and the combination of the two);
+  `peek_value` is `hit_value`'s read-only counterpart; `ahit_ip` / `ahit_value` are the async
+  equivalents (thread the same `hit()` through `sync_to_async`, needed because the DB storage path
+  touches the DB connection, which Django forbids calling straight from an async context).
+- **Trusted proxy** (issue #53 code review): `apps.core.services.client_ip.client_ip` only honours
+  `X-Real-IP` when `REMOTE_ADDR` -- the real TCP peer -- is itself in `settings.TRUSTED_PROXIES`
+  (env var, IPs/CIDRs, default loopback + RFC 1918 + `fc00::/7`); otherwise, or when the header
+  fails to parse, it falls back to `REMOTE_ADDR` -- never `None` (which every per-IP rule would
+  read as *unlimited*). This is what makes trusting the header safe at all: our nginx reaches
+  gunicorn over a private Docker bridge address, so **gunicorn must only ever be published on an
+  internal interface in production**, never a public one directly.
+- **IPv6**: per-IP keys collapse a real IPv6 address to its /64 (the block size most ISPs hand one
+  customer) and unwrap an IPv4-mapped address to its plain IPv4 form first (`apps.core.ratelimit.keys`)
+  -- otherwise a host that merely rotates within its own /64, or presents its IPv4 address in
+  mapped form, would get a fresh budget for free.
+- **Fails open, explicitly**: a storage error (a Redis outage, or anything else unexpected from
+  either backend) is caught, logged with `logger.exception`, and treated as unlimited -- every
+  limit here is headroom against abuse, and an outage turning into a site-wide 500 on every
+  rate-limited view is a worse failure mode than letting requests through unmetered for a while.
+  Every over-limit result also logs `logger.info` with the rule name (never the key) so 429 rates
+  are visible in ordinary log monitoring.
+- **`RATELIMIT_ENABLE`** is the project-wide kill switch (env var, default on in dev/prod, off
+  under pytest) -- tests that exercise a limit turn it on with the `settings` fixture; the DB
+  storage path needs no special test cleanup (each test's own DB transaction rolls it back), and
+  `conftest.py`'s autouse `_clear_ratelimit_cache` fixture still clears the `'ratelimit'` cache
+  alias for tests that opt into the cache storage path.
+- **Responses**: ninja endpoints call `ratelimit.enforce(result)`, which raises `RateLimitExceeded`
+  -- one exception handler in `config/api.py` turns that into `{"detail": ...}` with a
+  `Retry-After` header for every router. Plain/HTMX views call `ratelimit.web_response(request,
+  result)` (or `.htmx_response`/`.page_response` directly) -- `core/base.html`'s `htmx-config` swaps
+  429 like 422, so a partial actually renders into the page rather than htmx discarding it as an
+  error response. `register.html`/`forgot_password.html` both surface a 429's `data.detail` (or a
+  specific "try again later") instead of the generic "unexpected error" message.
+- **Login and other password-style checks are throttled, never locked out** (issue #53 code
+  review; see `apps.accounts.services.login_throttle`'s module docstring for the full reasoning):
+  a single per-account rule that counts every attempt lets anyone who merely knows a victim's email
+  lock them out by submitting it with wrong passwords from anywhere. Login instead splits into
+  `LOGIN_ACCOUNT_IP` (strict, per (email, IP), every attempt) and `LOGIN_ACCOUNT` (looser, per
+  email across every IP, but counting only *failed* `authenticate()` calls -- checked with `peek`
+  before authenticating, recorded with `hit` only once it returns `None`) -- shared between the
+  session view and `POST /api/auth/login` so one surface can't double the other's budget.
+  `file_transfer`'s `FT_UNLOCK_TRANSFER` (a transfer's download password) gets the same
+  failed-attempts-only treatment (`FT_UNLOCK_IP` stays strict); `forgot-password` gets a strict
+  `FORGOT_PASSWORD_EMAIL_IP` paired with a looser, cross-IP `FORGOT_PASSWORD_EMAIL` (there's no
+  authenticate-style outcome there to gate a failed-only counter on, so it's a flat cap instead,
+  but still needs many different IPs to exhaust rather than a handful of requests from one).
+- **The rules** (`settings.RATELIMIT_RULES`, one dict, each entry commented with its reasoning):
+  login (as above), signup, forgot-password (as above, and its response shape never changes so
+  existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
+  the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP, generous -- over the limit it
+  still redirects, only the scan-count write is skipped, protecting `QRCode.scan_count`'s accuracy
+  under a shared-IP/NAT burst rather than shedding load, since a real visitor must never see an
+  error just because someone else scanned the same code), and every file_transfer surface called
+  out in issue #53 (anonymous upload/confirm endpoints, logged-in uploads, the download page,
+  password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
+  even from many IPs -- and the manage link). `LOGIN_IP` (20/5 min) and `SIGNUP_IP` (5/hour) can
+  still legitimately bite a shared NAT/CGNAT/office IP; the `logger.info` above is there so that's
+  visible if it becomes a real complaint, rather than tuned blind up front.
+- **The per-email-address-per-day cap** on email verification (`EMAIL_VERIFICATION_START_EMAIL`) is
+  enforced once, centrally, inside `apps.core.services.email_verification.start` itself (raising
+  `EmailVerificationRateLimited`) rather than by each caller, within a caller-supplied
+  `rate_limit_group` (`start`'s parameter, default: `purpose` itself -- issue #53 code review: a
+  single cap shared unconditionally across *every* purpose would let one app's flows starve
+  another's, e.g. an anonymous file_transfer send burning through a victim's budget and blocking
+  their own signup confirmation). `accounts` needs no override (its one purpose is already shared
+  across signup/resend/email-change). `file_transfer` gives every transfer's confirmation its own
+  `purpose` (so one transfer's resend cooldown/guess limit can't interfere with another's) but
+  passes one shared `rate_limit_group` (`anon_emails.PURPOSE`) across all of them, so the daily cap
+  still closes the cross-transfer gap this was built for -- see `start`'s docstring for why a
+  per-endpoint IP limit alone can't (issue #55 phase 2's per-transfer verification purpose means
+  `file_transfer` has no per-address cooldown across different transfers at all).
+  `accounts.services.email_confirmation.send_confirmation_email` and
+  `file_transfer.views.anonymous`'s confirm views both catch and swallow/surface it like the
+  existing `ResendTooSoon`.
+- **nginx**: a coarse `limit_req` in front of the whole site is still recommended (the `infra`
+  repo) as defense-in-depth below the application layer -- out of scope here, since `infra` is a
+  separate repo, but worth adding there.
+
 ### API
 
 `config/api.py` builds one `NinjaAPI`; each app exposes a `router` from its `api` module/package
@@ -285,11 +403,13 @@ a normal HTMX form and follows the 422 convention. The public download page (`/t
 `apps/file_transfer/download_urls.py`) needs no login and never explains *why* a transfer isn't
 available (expired, disabled, suspended, deleted, or its download limit reached all render the same
 neutral page). A password gates the download links (including "download all", below), not the
-file list itself. `DownloadEvent.ip` is read from `X-Real-IP` (`services.client_ip.client_ip`,
-shared by the download views and the anonymous send flow), never the client-controlled
-`X-Forwarded-For` -- **this requires nginx to set `X-Real-IP` from the real TCP peer** (stripping
-any client-supplied one) for the IP to be trustworthy at all; without that, it just falls back to
-`REMOTE_ADDR`.
+file list itself. `DownloadEvent.ip` is read from `X-Real-IP`
+(`apps.core.services.client_ip.client_ip`, shared by the download views, the anonymous send flow,
+and every per-IP rate limit -- see "Rate limiting" above's "Trusted proxy" for the full story),
+never the client-controlled `X-Forwarded-For` -- **this requires nginx to set `X-Real-IP` from the
+real TCP peer** (stripping any client-supplied one) *and* `REMOTE_ADDR` to be a trusted proxy
+address (`settings.TRUSTED_PROXIES`) for the header to be honoured at all; otherwise, or on a
+malformed value, it falls back to `REMOTE_ADDR`.
 
 Ending a transfer (natural expiry, the download that reaches `max_downloads`, disable, dashboard
 delete-now, or the suspension grace period running out) normally deletes its S3 objects
@@ -303,13 +423,13 @@ picker-then-options-then-send page a logged-in sender uses, session-owned instea
 gated by `FileTransferSettings.anonymous_enabled`, and free within its own (smaller) limits
 (`services.limits.validate_new_file_anonymous` / `validate_recipients_anonymous`,
 `services.expiry_choices.resolve_expiry_anonymous` -- fixed day values only, from
-`anonymous_allowed_expiry_days`). **`anonymous_enabled` defaults to `False`** and must stay that
-way until #53 (rate limiting) ships -- the plan explicitly calls for rate limiting on the send/
-confirm/download/password endpoints before this is opened to the public; flipping it on today
-would expose an unmetered, unlimited-attempts send + confirmation-code surface. `send_page`
-redirects an already-authenticated visitor to the normal, metered send page instead (and
-`start_confirmation` refuses one directly, as a second guard) -- this flow is for senders without
-an account, not a free lane for one.
+`anonymous_allowed_expiry_days`). **`anonymous_enabled` defaults to `False`.** The plan originally
+tied this to #53 (rate limiting) landing first -- it has (see "Rate limiting" above: the anonymous
+upload/confirm endpoints, the download page and password attempts are all covered), so the
+remaining `False` is now a plain product/rollout decision, not a known gap; flip it deliberately
+when ready. `send_page` redirects an already-authenticated visitor to the normal, metered send page
+instead (and `start_confirmation` refuses one directly, as a second guard) -- this flow is for
+senders without an account, not a free lane for one.
 
 Draft ownership (`services.anon_session`) is a random per-draft token generated on creation and
 kept only in the session's own data (`request.session[...]`) -- never the session's own key
@@ -335,8 +455,11 @@ could `core`-side match *any* other transfer whose sender email happened to be t
 transfer id in the link's URL). `confirm_by_link` also independently checks the confirmed row's own
 id (`core.services.email_verification.confirm_by_token_verbose`) against
 `transfer.email_verification_id`, a second, cheap guard against exactly that. The trade-off: the
-resend cooldown and guess-attempt limit are now per-transfer rather than per-sender-email -- see
-#53 below.
+resend cooldown and guess-attempt limit are now per-transfer rather than per-sender-email --
+closed at the `core` level instead by a per-email-address-per-day cap on verification starts
+across every purpose (`EMAIL_VERIFICATION_START_EMAIL`, issue #53; see "Rate limiting" above),
+since that's the one layer that sees every transfer's confirmation attempts against the same
+address regardless of which transfer's purpose they were started under.
 
 The confirmation link (`GET /send/anon/<id>/confirm/link/<token>/`) only ever *shows* a
 CSRF-protected "Confirm this transfer" button; only the matching **POST** actually confirms.
@@ -482,14 +605,20 @@ out the migration race two concurrently-starting containers would otherwise hit.
 `DATABASE_URL` (Postgres, via `dj-database-url`; compose points it at `db`) when set, SQLite
 otherwise; `ENVIRONMENT=prod` refuses to start without it -- a separate `worker`/`scheduler`
 container can't share a SQLite file with `web`, which is why Postgres was a prerequisite for this
-issue. Behind nginx, `SECURE_PROXY_SSL_HEADER` and `CSRF_TRUSTED_ORIGINS` (from `BASE_URL`) keep
-HTTPS form posts passing the CSRF check, and nginx must also set `X-Real-IP` from the real client
-address for `file_transfer`'s download-IP logging to be trustworthy (see "File transfer specifics"
-above).
+issue -- it's also what backs `apps.core.ratelimit`'s DB storage path by default (see "Rate
+limiting" above), so no extra compose service is needed for that either. Behind nginx,
+`SECURE_PROXY_SSL_HEADER` and `CSRF_TRUSTED_ORIGINS` (from `BASE_URL`) keep HTTPS form posts
+passing the CSRF check, and nginx must also set `X-Real-IP` from the real client address for
+`file_transfer`'s download-IP logging and every per-IP rate limit to be trustworthy -- **and
+gunicorn must only ever be reachable from nginx's own private Docker bridge address, never
+published on a public interface directly**, since `settings.TRUSTED_PROXIES`' default trust list is
+exactly that private range (see "File transfer specifics" and "Rate limiting" above's "Trusted
+proxy"). A coarse `limit_req` in nginx itself is a recommended defense-in-depth addition in the
+`infra` repo, not done here.
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 477 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 583 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -511,27 +640,20 @@ token?) or a real port of a DRF-era module.
 
 - Register and password-reset pages still post JSON to `/api/auth/…` (they work, but aren't
   session form views yet).
-- No rate limiting anywhere (login, previews, API, file transfer send/download/password attempts --
-  file transfer's is tracked as #53). Specific gaps #53 needs to close, found during the phase 2
-  review: a resend every 60s issues a fresh confirmation code with 5 more guess attempts (~7,200
-  guesses/address/day, since neither resends nor attempts are otherwise capped per day); anyone can
-  start a confirmation for an arbitrary email address with no relationship to it, emailing that
-  address and (before phase 2's per-transfer verification purpose fix) superseding a real sender's
-  own pending one -- since fixed to be per-transfer (`services.anon_emails.verification_purpose`),
-  which closes the superseding but also removes the *cross-transfer* cooldown that used to
-  (incidentally) throttle this: an attacker can now start independent confirmations against many
-  different transfers targeting the same victim address in parallel, one 60s bucket each, with no
-  per-address ceiling across transfers.
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` phases 1 and 2 (issue #55) are built: logged-in *and* anonymous sending (email
   confirmation, per-IP-per-day caps, the anonymous manage link, claim on login), the download page
   with per-file and "download all" (zip) downloads, dashboard with all actions and a per-download
   log, metering, all emails, settings, queue and scheduler. **Anonymous sending is gated off by
-  default** (`FileTransferSettings.anonymous_enabled = False`) and must stay off in production
-  until #53 (rate limiting) ships -- see "File transfer specifics" above for why. Phase 3
-  (resumable uploads, a JWT `/api/ft/` router, `admin/filetransfer.py`, takedown tooling) is not
-  built.
+  default** (`FileTransferSettings.anonymous_enabled = False`); rate limiting (#53) no longer blocks
+  turning it on, see "Rate limiting" above and "File transfer specifics"' anonymous-sending
+  paragraph -- flipping it on is now a rollout decision, not a known gap. Phase 3 (resumable
+  uploads, a JWT `/api/ft/` router, `admin/filetransfer.py`, takedown tooling) is not built.
+- Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
+  on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set), not a host-level guard: a
+  coarse nginx `limit_req` is still recommended as defense-in-depth, tracked in the separate
+  `infra` repo, not done here.
 
 ## Conventions
 

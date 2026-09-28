@@ -17,6 +17,7 @@ from apps.core.services.email_verification import (
     EmailVerificationContext,
     EmailVerificationExpired,
     EmailVerificationNotFound,
+    EmailVerificationRateLimited,
     EmailVerificationSendFailed,
     EmailVerificationSuperseded,
     IncorrectCode,
@@ -185,6 +186,102 @@ class TestStart:
         _start(email='MixedCase@Example.com')
         row = _latest_row(email='MixedCase@Example.com')
         assert row.email == 'MixedCase@Example.com'
+
+
+class TestStartRateLimit:
+    """The per-email-address-per-day cap (issue #53): CLAUDE.md's Known gaps entry this closes --
+    a resend every 60s cooldown alone still allows ~1,440 sends/day. `RATELIMIT_ENABLE` defaults
+    to `False` under pytest (`config/settings.py`), so every test here turns it on explicitly.
+
+    Issue #53 code review: the cap applies within `rate_limit_group` (a `start()` parameter,
+    default `purpose` itself) rather than unconditionally across every purpose -- so two apps (or
+    two unrelated purposes within the same app) don't silently draw from one shared budget and
+    starve each other, unless a caller deliberately opts in by passing the same group for several
+    of its own purposes (as `file_transfer` does across its one-purpose-per-transfer anonymous
+    sender -- see `apps.file_transfer.services.anonymous`).
+    """
+
+    def _enable(self, settings, limit: int = 2):
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'EMAIL_VERIFICATION_START_EMAIL': (limit, 24 * 60 * 60),
+        }
+
+    def _bypass_cooldown(self, verification_id):
+        """So a follow-up `_start()` for the *same* `(email, purpose)` hits the rate limit cap
+        under test, not the unrelated resend cooldown -- same pattern as
+        `test_invalidates_previous_pending_verification_for_same_email_and_purpose` above."""
+        EmailVerification.objects.filter(pk=verification_id).update(
+            created_at=timezone.now() - timedelta(hours=1)
+        )
+
+    def test_raises_once_the_cap_is_reached_for_the_same_purpose(self, settings):
+        self._enable(settings, limit=2)
+        self._bypass_cooldown(_start(purpose='purpose.a'))
+        self._bypass_cooldown(_start(purpose='purpose.a'))
+
+        with pytest.raises(EmailVerificationRateLimited) as excinfo:
+            _start(purpose='purpose.a')
+        assert excinfo.value.retry_after_seconds > 0
+
+    def test_default_group_is_the_purpose_itself_so_different_purposes_are_independent(
+        self, settings
+    ):
+        """Without an explicit `rate_limit_group`, each `purpose` gets its own budget -- e.g.
+        `accounts`' single, already-shared purpose isn't accidentally throttled by some other
+        app's unrelated one."""
+        self._enable(settings, limit=1)
+        self._bypass_cooldown(_start(purpose='purpose.a'))
+
+        with pytest.raises(EmailVerificationRateLimited):
+            _start(purpose='purpose.a')
+
+        # A different purpose, same email, same default (no explicit group): its own counter.
+        _start(purpose='purpose.b')
+
+    def test_explicit_rate_limit_group_is_shared_across_different_purposes(self, settings):
+        """The gap this option exists to close (issue #53 code review): `file_transfer` gives
+        every transfer's confirmation its own `purpose` (so one transfer's resend cooldown/guess
+        limit can't interfere with another's), but passes the *same* `rate_limit_group` for all of
+        them -- so the daily cap still applies across every transfer against the same victim
+        address, the way a single shared purpose would. Distinct purposes per call, same as
+        `file_transfer`'s real usage, so the resend cooldown never gets in the way here either."""
+        self._enable(settings, limit=2)
+        _start(purpose='transfer.1', rate_limit_group='shared-group')
+        _start(purpose='transfer.2', rate_limit_group='shared-group')
+
+        with pytest.raises(EmailVerificationRateLimited):
+            _start(purpose='transfer.3', rate_limit_group='shared-group')
+
+    def test_different_email_has_its_own_counter(self, settings):
+        self._enable(settings, limit=1)
+        self._bypass_cooldown(_start(email='victim@example.com', purpose='purpose.a'))
+
+        with pytest.raises(EmailVerificationRateLimited):
+            _start(email='victim@example.com', purpose='purpose.a')
+
+        # A different address is unaffected.
+        _start(email='someone-else@example.com', purpose='purpose.a')
+
+    def test_disabled_by_default_under_pytest(self):
+        """No `settings` override at all: the project-wide default (`RATELIMIT_ENABLE=False`
+        under pytest) must leave this cap inert, same as every other rate limit."""
+        for i in range(5):
+            _start(purpose=f'purpose.{i}')  # would raise on the 3rd call at the real 2/day cap
+
+    def test_does_not_count_a_call_rejected_by_the_resend_cooldown(self, settings):
+        """A `ResendTooSoon` rejection (same email+purpose, too soon) must not also burn a slot
+        of the daily cap -- the cap is meant to catch *successful* sends, not merely-attempted
+        ones for the same still-cooling-down purpose."""
+        self._enable(settings, limit=2)
+        _start(purpose='purpose.a')  # 1st slot used
+
+        with pytest.raises(ResendTooSoon):
+            _start(purpose='purpose.a')  # too soon; must not use the 2nd slot
+
+        # The 2nd slot is still available for a fresh (not on cooldown) purpose.
+        _start(purpose='purpose.b')
 
 
 class TestStartSendFailure:

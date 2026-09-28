@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 from apps.core.services.email_verification import (
     EmailVerificationError,
     EmailVerificationExpired,
+    EmailVerificationRateLimited,
     IncorrectCode,
     ResendTooSoon,
 )
@@ -583,3 +584,52 @@ class TestConfirmationBoundToItsOwnTransfer:
         # The real link still works against the transfer it was actually issued for.
         confirmed = confirm_by_link(victim_transfer, token, IP, COOKIE)
         assert confirmed.status == TransferStatus.ACTIVE
+
+
+class TestDailyEmailCapSharedAcrossTransfers:
+    """Issue #53 code review: `core.services.email_verification.start`'s per-email-per-day cap
+    now applies within a caller-supplied `rate_limit_group` rather than unconditionally across
+    every purpose (see `apps.core.tests.test_email_verification_service.TestStartRateLimit`) --
+    `file_transfer` closes the cross-transfer gap this could otherwise reopen by passing its one
+    shared `anon_emails.PURPOSE` as the group for every transfer's own per-transfer `purpose`
+    (`services.anonymous.start_confirmation`/`resend_confirmation`). These tests exercise that
+    wiring end to end, not just the underlying `core` mechanism.
+    """
+
+    def _enable(self, settings, limit: int = 2):
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'EMAIL_VERIFICATION_START_EMAIL': (limit, 24 * 60 * 60),
+        }
+
+    def test_cap_applies_across_different_transfers_for_the_same_sender_email(
+        self, anon_enabled, fake_storage, monkeypatch, settings
+    ):
+        _capture_email(monkeypatch)
+        self._enable(settings, limit=2)
+
+        for i in range(2):
+            transfer = get_or_create_anonymous_draft(_session(), IP, f'cookie-{i}')
+            _upload(transfer, fake_storage, name=f'{i}.pdf')
+            start_confirmation(transfer, _options(sender_email='victim@example.com'))
+
+        one_too_many = get_or_create_anonymous_draft(_session(), IP, 'cookie-2')
+        _upload(one_too_many, fake_storage, name='2.pdf')
+        with pytest.raises(EmailVerificationRateLimited):
+            start_confirmation(one_too_many, _options(sender_email='victim@example.com'))
+
+    def test_a_different_sender_email_has_its_own_budget(
+        self, anon_enabled, fake_storage, monkeypatch, settings
+    ):
+        _capture_email(monkeypatch)
+        self._enable(settings, limit=1)
+
+        first = get_or_create_anonymous_draft(_session(), IP, 'cookie-a')
+        _upload(first, fake_storage, name='a.pdf')
+        start_confirmation(first, _options(sender_email='victim@example.com'))
+
+        second = get_or_create_anonymous_draft(_session(), IP, 'cookie-b')
+        _upload(second, fake_storage, name='b.pdf')
+        # A different address is unaffected by `victim@example.com`'s exhausted budget.
+        start_confirmation(second, _options(sender_email='someone-else@example.com'))

@@ -10,10 +10,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.core import ratelimit
+from apps.core.services.client_ip import client_ip as _client_ip
+
 from .. import services
 from ..forms import DownloadPasswordForm
 from ..models import Transfer, TransferFile, ZipStatus
-from ..services.client_ip import client_ip as _client_ip
 from ..services.zip import ensure_zip_build_started
 
 
@@ -55,6 +57,10 @@ def _context(request: PublicHttpRequest, transfer: Transfer, password_form: Down
 
 @require_GET
 def download_page(request: PublicHttpRequest, slug: str) -> HttpResponse:
+    limited = ratelimit.hit_ip(request, 'FT_DOWNLOAD_IP')
+    if not limited.allowed:
+        return ratelimit.page_response(request, limited)
+
     transfer = Transfer.objects.filter(slug=slug).first()
     if transfer is None or not services.is_available(transfer):
         return _unavailable(request)
@@ -70,11 +76,38 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
     if transfer is None or not services.is_available(transfer):
         return _unavailable(request)
 
+    # Per-IP (strict, every attempt counts) and per-transfer (looser, counts only wrong
+    # passwords -- issue #53 code review) so brute-forcing one transfer's password is throttled
+    # even from many IPs, one IP can't brute-force many transfers unchecked, and a third party who
+    # merely knows (or guesses) this transfer's slug can't lock the real recipient out of a
+    # transfer whose password *they* actually have just by submitting wrong guesses.
+    limited = ratelimit.hit_ip(request, 'FT_UNLOCK_IP')
+    if limited.allowed:
+        limited = ratelimit.peek_value(transfer.slug, 'FT_UNLOCK_TRANSFER')
+    if not limited.allowed:
+        # Deliberately unbound (no `data=`): `add_error` needs `cleaned_data` to exist, which an
+        # unbound form only gets by priming it directly here rather than binding (and thereby
+        # validating) the submitted password -- see the same pattern and reasoning in
+        # `apps.accounts.views.login.login_page`. Attached to the `password` field specifically
+        # (not a non-field error) because `download.html` only ever renders that field's own
+        # errors here, the same slot "Incorrect password" already occupies.
+        form = DownloadPasswordForm()
+        form.cleaned_data = {}
+        form.add_error('password', 'Too many attempts. Please wait a moment and try again.')
+        response = render(
+            request, 'file_transfer/download.html', _context(request, transfer, form), status=429
+        )
+        response['Retry-After'] = str(limited.retry_after)
+        return response
+
     form = DownloadPasswordForm(request.POST)
     if form.is_valid() and services.check_password(transfer, form.cleaned_data['password']):
         services.unlock_in_session(request.session, transfer.id, transfer.password_hash)
         return redirect(reverse('t:download', args=[slug]))
 
+    # Record this as a failed attempt against the looser per-transfer ceiling *after* the check
+    # above -- never before it, and never for a right password (see the comment above `hit_ip`).
+    ratelimit.hit_value(transfer.slug, 'FT_UNLOCK_TRANSFER')
     form.add_error('password', 'Incorrect password.')
     return render(
         request, 'file_transfer/download.html', _context(request, transfer, form), status=422
@@ -83,6 +116,10 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
 
 @require_GET
 def download_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpResponse:
+    limited = ratelimit.hit_ip(request, 'FT_DOWNLOAD_IP')
+    if not limited.allowed:
+        return ratelimit.page_response(request, limited)
+
     transfer = _password_gated_transfer(request, slug)
     if isinstance(transfer, HttpResponse):
         return transfer
@@ -109,6 +146,10 @@ def zip_status(request: PublicHttpRequest, slug: str) -> HttpResponse:
     then report the current status -- "preparing" (`BUILDING`/`NONE` just claimed),
     "ready" (a download link), or "failed" (with a retry). The template polls this until it stops
     being `BUILDING`, up to `_MAX_AUTO_ZIP_POLLS` times."""
+    limited = ratelimit.hit_ip(request, 'FT_DOWNLOAD_IP')
+    if not limited.allowed:
+        return ratelimit.htmx_response(request, limited)
+
     transfer = _password_gated_transfer(request, slug)
     if isinstance(transfer, HttpResponse):
         return transfer
@@ -136,6 +177,10 @@ def zip_status(request: PublicHttpRequest, slug: str) -> HttpResponse:
 def download_zip(request: PublicHttpRequest, slug: str) -> HttpResponse:
     """The actual zip download, once `zip_status` is `READY` -- otherwise back to the download
     page (whose zip widget shows the "preparing"/polling state) rather than erroring."""
+    limited = ratelimit.hit_ip(request, 'FT_DOWNLOAD_IP')
+    if not limited.allowed:
+        return ratelimit.page_response(request, limited)
+
     transfer = _password_gated_transfer(request, slug)
     if isinstance(transfer, HttpResponse):
         return transfer

@@ -1,3 +1,4 @@
+from .client_ip import client_ip
 from .email import asend_email, get_email_backend, send_email
 from .email_verification import (
     EmailVerificationAlreadyConfirmed,
@@ -6,6 +7,7 @@ from .email_verification import (
     EmailVerificationError,
     EmailVerificationExpired,
     EmailVerificationNotFound,
+    EmailVerificationRateLimited,
     EmailVerificationResult,
     EmailVerificationSendFailed,
     EmailVerificationSuperseded,
@@ -26,12 +28,14 @@ __all__ = [
     'EmailVerificationError',
     'EmailVerificationExpired',
     'EmailVerificationNotFound',
+    'EmailVerificationRateLimited',
     'EmailVerificationResult',
     'EmailVerificationSendFailed',
     'EmailVerificationSuperseded',
     'IncorrectCode',
     'ResendTooSoon',
     'asend_email',
+    'client_ip',
     'confirm_by_code',
     'confirm_by_token',
     'confirm_by_token_verbose',

@@ -13,6 +13,8 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.core import ratelimit
+
 from .. import services
 from ..models import Transfer
 
@@ -42,6 +44,10 @@ def _matching_transfer(slug: str, token: str) -> Transfer | None:
 
 @require_GET
 def manage_page(request: HttpRequest, slug: str, token: str) -> HttpResponse:
+    limited = ratelimit.hit_ip(request, 'FT_MANAGE_IP')
+    if not limited.allowed:
+        return ratelimit.page_response(request, limited)
+
     transfer = _matching_transfer(slug, token)
     if transfer is None or transfer.is_ended:
         return _unavailable(request)
@@ -50,6 +56,10 @@ def manage_page(request: HttpRequest, slug: str, token: str) -> HttpResponse:
 
 @require_POST
 def manage_disable(request: HttpRequest, slug: str, token: str) -> HttpResponse:
+    limited = ratelimit.hit_ip(request, 'FT_MANAGE_IP')
+    if not limited.allowed:
+        return ratelimit.page_response(request, limited)
+
     transfer = _matching_transfer(slug, token)
     if transfer is None or transfer.is_ended:
         return _unavailable(request)

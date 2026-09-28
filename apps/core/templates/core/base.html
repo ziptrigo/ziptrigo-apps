@@ -67,8 +67,9 @@
       };
     </script>
 
-    <!-- htmx. Also swap 422 responses: form views re-render with errors using that status. -->
-    <meta name="htmx-config" content='{"responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "422", "swap": true}, {"code": "[45]..", "swap": false, "error": true}]}'>
+    <!-- htmx. Also swap 422 and 429 responses: form views re-render with errors using those
+         statuses (429: apps.core.ratelimit, issue #53). -->
+    <meta name="htmx-config" content='{"responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "422", "swap": true}, {"code": "429", "swap": true}, {"code": "[45]..", "swap": false, "error": true}]}'>
     <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 
     <!-- Alpine.js -->
