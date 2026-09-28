@@ -3,8 +3,22 @@
 from datetime import UTC, datetime
 
 import pytest
+from django.core.cache import caches
 
 from apps.accounts.tests.factories import UserFactory
+
+
+@pytest.fixture(autouse=True)
+def _clear_ratelimit_cache():
+    """`apps.core.ratelimit` counters live on their own cache alias (`settings.CACHES['ratelimit']`,
+    `LocMemCache` under pytest). Rate limiting itself defaults to disabled under pytest
+    (`RATELIMIT_ENABLE`), so this mostly matters for the tests that turn it on with
+    `override_settings`: without clearing between tests, a counter from an earlier test could
+    still be within the same fixed window (see `apps/core/ratelimit/limiter.py`) and make an
+    unrelated, later test see a hit that isn't its own."""
+    caches['ratelimit'].clear()
+    yield
+    caches['ratelimit'].clear()
 
 
 @pytest.fixture()

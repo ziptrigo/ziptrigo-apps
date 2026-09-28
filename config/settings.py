@@ -149,6 +149,122 @@ if os.getenv('ENVIRONMENT') == 'prod' and not DATABASE_URL:
     )
 
 
+# Cache: backs `apps.core.ratelimit` (issue #53) on a dedicated `'ratelimit'` alias, so it can be
+# pointed at its own store later without touching `'default'`. Three tiers:
+# - Tests (`_RUNNING_TOOLING`): `LocMemCache` on both aliases -- no shared service to depend on,
+#   and each test process gets its own isolated dict (fine: rate limiting defaults to disabled
+#   under pytest anyway, see `RATELIMIT_ENABLE` below; tests that enable it clear the cache
+#   themselves, see `conftest.py`).
+# - `CACHE_URL` set (any environment): `RedisCache` -- for when there's a shared Redis worth
+#   pointing rate limiting (or the site's general cache) at. A full cache URL, e.g.
+#   `redis://host:6379/0`; requires the `redis` package to actually be installed at runtime (not a
+#   hard dependency of this project, since it's opt-in).
+# - Otherwise (dev/prod default): `DatabaseCache`, shared through the same Postgres every gunicorn
+#   worker, the task worker and the scheduler already use -- no new service to run. Its table is
+#   created by a migration (`apps/core/migrations/0002_ratelimit_cache_table.py`), so `migrate`
+#   (already run on every deploy, see `docker-entrypoint.sh`) is all `createcachetable` needs.
+CACHE_URL = os.getenv('CACHE_URL', '')
+
+if _RUNNING_TOOLING:
+    CACHES = {
+        'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'},
+        'ratelimit': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'},
+    }
+elif CACHE_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': CACHE_URL,
+        },
+        'ratelimit': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': CACHE_URL,
+        },
+    }
+else:
+    CACHES = {
+        'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'},
+        'ratelimit': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'ratelimit_cache',
+        },
+    }
+
+
+# Rate limiting (issue #53): `apps.core.ratelimit` enforces every entry in `RATELIMIT_RULES`
+# against the `'ratelimit'` cache above. `RATELIMIT_ENABLE` is the project-wide kill switch --
+# off by default under pytest so unrelated tests can't become flaky by incidentally tripping a
+# limit; tests that specifically exercise a limit turn it on with `override_settings` and clear
+# the cache first (see `conftest.py`'s `clear_ratelimit_cache` fixture).
+RATELIMIT_ENABLE = os.getenv(
+    'RATELIMIT_ENABLE', 'False' if _RUNNING_TOOLING else 'True'
+).lower() in ('true', '1')
+
+# name -> (max hits, window in seconds). Every limit is deliberately generous headroom against
+# abuse (scripted brute force, storage/SES cost, CPU-bound rendering), not a precise per-user
+# quota -- see `apps/core/ratelimit/limiter.py` for the counting scheme this reads into.
+#
+# Keyed per client IP (`apps.core.services.client_ip`) unless noted; "per account"/"per email"
+# rules run *in addition to* the matching per-IP rule, not instead of it, so a single victim
+# account/address can't be hammered from many IPs, and a single IP can't be used to hammer many
+# accounts/addresses, without either rule alone having to be uncomfortably strict.
+RATELIMIT_RULES: dict[str, tuple[int, int]] = {
+    # -- accounts: login, signup, password reset, email confirmation --
+    # Login: per-IP throttles scripted credential stuffing; per-account (submitted email, whether
+    # or not it exists) throttles targeted attacks on one victim without a hard lockout a third
+    # party could trigger just by submitting a known email with wrong passwords (CLAUDE.md /
+    # issue #27: throttling over lockout). Shared between the session view
+    # (`POST /account/login/`) and the JWT endpoint (`POST /api/auth/login`) -- same key, same
+    # budget, so one surface can't be used to double the other's allowance.
+    'LOGIN_IP': (20, 5 * 60),
+    'LOGIN_ACCOUNT': (10, 15 * 60),
+    # Signup sends a confirmation email (SES cost); no per-account rule makes sense pre-signup.
+    'SIGNUP_IP': (5, 60 * 60),
+    # Forgot-password: response is identical whether or not the account exists either way, so a
+    # 429 here reveals nothing a normal response wouldn't already hide (CLAUDE.md: must not leak
+    # existence).
+    'FORGOT_PASSWORD_IP': (10, 60 * 60),
+    'FORGOT_PASSWORD_EMAIL': (3, 60 * 60),
+    # Resend-confirmation: per-IP here; the per-*email*-per-day cap is enforced once, centrally,
+    # by `EMAIL_VERIFICATION_START_EMAIL` below (every caller of
+    # `apps.core.services.email_verification.start` shares it, including this endpoint).
+    'RESEND_CONFIRMATION_IP': (10, 60 * 60),
+    # -- core: shared email verification (`apps.core.services.email_verification.start`) --
+    # The per-email-address-per-day cap on verification *starts* (CLAUDE.md Known gaps: a resend
+    # every 60s cooldown alone still allows ~1,440 sends/day, each with fresh guess attempts).
+    # Applies across every purpose and every caller (accounts' signup confirmation, file_transfer's
+    # per-transfer anonymous confirmation) since it's enforced once inside `start()` itself, keyed
+    # only on the email -- which is exactly what closes the cross-transfer version of the gap
+    # (each anonymous transfer has its own purpose, so a per-purpose cap wouldn't).
+    'EMAIL_VERIFICATION_START_EMAIL': (20, 24 * 60 * 60),
+    # -- qr_code: preview (CPU-bound rendering) and create (writes to media) --
+    # Both require login on every surface (web + `/api/qr/`), so keyed per user rather than IP.
+    'QR_PREVIEW_USER': (30, 60),
+    'QR_CREATE_USER': (20, 60),
+    # `/go/<code>` short-link redirects: public, high-traffic by design (that's the point of a QR
+    # code), so deliberately generous. See `apps/qr_code/views/redirect.py` for what happens when
+    # this is exceeded (redirect anyway, skip the scan-count write -- not a 429).
+    'QR_REDIRECT_IP': (120, 60),
+    # -- file_transfer: anonymous sending (issue #55 phase 2) --
+    'FT_ANON_UPLOAD_IP': (90, 60),
+    'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
+    'FT_ANON_CONFIRM_RESEND_IP': (10, 60 * 60),
+    'FT_ANON_CONFIRM_CODE_IP': (20, 10 * 60),
+    'FT_ANON_CONFIRM_LINK_IP': (30, 10 * 60),
+    # -- file_transfer: logged-in sending --
+    # Generous: a real multi-file upload legitimately calls this often in a short span.
+    'FT_UPLOAD_USER': (120, 60),
+    # -- file_transfer: public download page (`/t/<slug>/`) --
+    'FT_DOWNLOAD_IP': (120, 60),
+    # Password attempts: both per-IP and per-transfer, so brute-forcing one transfer's password
+    # is throttled even from many IPs, and one IP can't brute-force many transfers unchecked.
+    'FT_UNLOCK_IP': (15, 10 * 60),
+    'FT_UNLOCK_TRANSFER': (10, 10 * 60),
+    # Anonymous sender's manage link (`/t/<slug>/manage/<token>/`): low legitimate traffic.
+    'FT_MANAGE_IP': (30, 60 * 60),
+}
+
+
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 AUTH_PASSWORD_VALIDATORS = [

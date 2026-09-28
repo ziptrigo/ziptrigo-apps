@@ -1,7 +1,10 @@
-"""The trusted client IP for this app's public, unauthenticated views (download page, and phase
-2's anonymous send flow): `DownloadEvent.ip`, `Transfer.sender_ip`, and the per-IP-per-day
-anonymous caps (spec section 13) all read this same value, so there is exactly one place that
-decides how to trust a proxy header.
+"""The trusted client IP for every public, unauthenticated (or rate-limited) view on the site:
+`file_transfer`'s `DownloadEvent.ip`/`Transfer.sender_ip` and per-IP-per-day anonymous caps,
+and every per-IP rate limit in `apps.core.ratelimit` (issue #53) all read this same value, so
+there is exactly one place that decides how to trust a proxy header.
+
+Originally lived in `apps.file_transfer.services.client_ip`; moved to `core` (issue #53) so
+`accounts` and `qr_code` can use it too without a cross-product import.
 """
 
 import ipaddress
