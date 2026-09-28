@@ -24,9 +24,13 @@ class MaxDownloadsActionForm(forms.Form):
 
 
 class PasswordActionForm(forms.Form):
-    """Blank means "remove the password" (`services.actions.set_password` treats it that way)."""
+    """A blank `password` means "leave it unchanged" -- the current hash can't be pre-filled into
+    the input, so there'd be no way to tell "the owner wants it gone" from "the owner didn't
+    touch this field" without the explicit `remove_password` checkbox, which the view (not this
+    form) treats as taking priority over a non-blank `password`."""
 
     password = forms.CharField(required=False, widget=forms.PasswordInput(render_value=True))
+    remove_password = forms.BooleanField(required=False)
 
 
 class TransferSettingsActionForm(ExpiryActionForm, MaxDownloadsActionForm, PasswordActionForm):
