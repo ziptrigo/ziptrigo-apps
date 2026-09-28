@@ -34,6 +34,19 @@ def test_disable_then_reenable_round_trip(draft_transfer):
     assert draft_transfer.status == TransferStatus.ACTIVE
 
 
+def test_reenable_disabled_also_requires_credit(draft_transfer):
+    """Spec section 7's 1-credit minimum applies to re-enabling *any* paused transfer, not just a
+    suspended one -- a disabled transfer resumes being metered the moment it's re-enabled, so an
+    owner with zero credits shouldn't be able to un-pause one only to have it immediately
+    suspended again on the next metering tick."""
+    _active(draft_transfer, status=TransferStatus.DISABLED)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    with pytest.raises(InsufficientCreditsError):
+        actions.reenable_transfer_action(draft_transfer)
+    assert draft_transfer.status == TransferStatus.DISABLED
+
+
 def test_reenable_suspended_requires_credit(draft_transfer):
     _active(draft_transfer, status=TransferStatus.SUSPENDED, suspended_at=timezone.now())
     spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')

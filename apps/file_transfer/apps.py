@@ -72,6 +72,14 @@ class FileTransferConfig(AppConfig):
 
         from .services.metering import reenable_suspended_transfers_for_user
 
-        @receiver(credits_added, dispatch_uid='file_transfer.reenable_on_credits_added')
+        # `weak=False`: `Signal.connect()` defaults to a *weak* reference, and this receiver is a
+        # local closure with nothing else keeping it alive once `_connect_signals` returns -- so
+        # with the default, CPython's refcounting collects it immediately after `ready()`
+        # finishes, silently turning it into a dead entry in `credits_added.receivers` that never
+        # fires again. `dispatch_uid` alone doesn't prevent that; it only dedupes repeat
+        # `connect()` calls. The daily `meter_transfers` job's fallback re-enable check meant this
+        # was masked rather than fatal (topped-up transfers still got re-enabled, just up to a day
+        # later instead of immediately), but the whole point of this signal is the fast path.
+        @receiver(credits_added, dispatch_uid='file_transfer.reenable_on_credits_added', weak=False)
         def _reenable_on_credits_added(sender, user, amount, **kwargs):
             reenable_suspended_transfers_for_user(user)

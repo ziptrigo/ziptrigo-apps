@@ -35,16 +35,14 @@ def disable_transfer(transfer: Transfer) -> Transfer:
 
 
 def reenable_transfer_action(transfer: Transfer) -> Transfer:
-    """Resume a disabled or suspended transfer. A disabled transfer needs no credit check (the
-    sender paused it themselves); a suspended one needs the same 1-credit minimum as starting a
-    transfer (spec section 7). Either way the billing clock resets to now."""
+    """Resume a disabled or suspended transfer. Either way needs the same 1-credit minimum as
+    starting a transfer (spec section 7: "Minimum balance to start a transfer or to re-enable
+    one: 1 credit") -- a disabled transfer resumes being metered the moment it's re-enabled, so
+    an owner with zero credits shouldn't be able to un-pause one just to have it immediately
+    suspended again on the next metering tick. The billing clock resets to now either way."""
     if transfer.status not in (TransferStatus.DISABLED, TransferStatus.SUSPENDED):
         raise ValidationError('Only a disabled or suspended transfer can be re-enabled.')
-    if (
-        transfer.status == TransferStatus.SUSPENDED
-        and transfer.owner is not None
-        and get_balance(transfer.owner) < MIN_BALANCE_TO_REENABLE
-    ):
+    if transfer.owner is not None and get_balance(transfer.owner) < MIN_BALANCE_TO_REENABLE:
         raise InsufficientCreditsError(
             f'You need at least {MIN_BALANCE_TO_REENABLE} credit to re-enable this transfer.'
         )
