@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.core.ratelimit import normalize_ip_for_key
 
 from ..models import MAX_DETAILS_LENGTH, AbuseReport, AbuseReportReason, AbuseReportStatus, Transfer
 from .hold import maybe_hold_for_reports, release_hold
@@ -41,11 +42,19 @@ def create_report(
         raise ValidationError(f'Details must be at most {MAX_DETAILS_LENGTH} characters.')
 
     if reporter_ip:
+        # Compares *normalized* keys (an IPv6 address collapsed to its /64, an IPv4-mapped IPv6
+        # address unwrapped to plain IPv4 -- `apps.core.ratelimit.normalize_ip_for_key`, shared
+        # with rate limiting) rather than the exact stored addresses: otherwise the same visitor
+        # reloading the page over IPv6 privacy-extension address rotation, or hitting an IPv4 vs.
+        # `::ffff:`-mapped path, would dodge the dedupe window entirely. Done in Python rather than
+        # in the query -- the window is only 10 minutes, so there are at most a handful of rows to
+        # check, the same "stays small" trade-off `services.blocklist` makes for its own IP scan.
         cutoff = timezone.now() - _DEDUPE_WINDOW
-        already_reported = AbuseReport.objects.filter(
-            transfer=transfer, reporter_ip=reporter_ip, created_at__gte=cutoff
-        ).exists()
-        if already_reported:
+        normalized = normalize_ip_for_key(reporter_ip)
+        recent_ips = AbuseReport.objects.filter(
+            transfer=transfer, reporter_ip__isnull=False, created_at__gte=cutoff
+        ).values_list('reporter_ip', flat=True)
+        if any(normalize_ip_for_key(ip) == normalized for ip in recent_ips):
             raise ValidationError('You already reported this transfer recently. Thank you.')
 
     report = AbuseReport.objects.create(

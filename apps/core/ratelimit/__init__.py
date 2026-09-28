@@ -31,7 +31,16 @@ and the reasoning behind each limit. `settings.RATELIMIT_ENABLE` is the project-
 """
 
 from .exceptions import RateLimitExceeded, enforce
-from .keys import ahit_ip, ahit_value, hit_ip, hit_ip_and_value, hit_user, hit_value, peek_value
+from .keys import (
+    ahit_ip,
+    ahit_value,
+    hit_ip,
+    hit_ip_and_value,
+    hit_user,
+    hit_value,
+    normalize_ip_for_key,
+    peek_value,
+)
 from .limiter import CACHE_ALIAS, RateLimitResult, hit, peek, purge_expired
 from .responses import htmx_response, json_response, page_response, web_response
 
@@ -49,6 +58,7 @@ __all__ = [
     'hit_value',
     'htmx_response',
     'json_response',
+    'normalize_ip_for_key',
     'page_response',
     'peek',
     'peek_value',

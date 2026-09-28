@@ -24,15 +24,18 @@ class _HasPk(Protocol):
     pk: object
 
 
-def _normalize_ip_for_key(ip: str) -> str:
-    """Normalise a client IP for use as a *rate-limit key* (issue #53 code review) -- never for
-    storage or display elsewhere, where the exact address still matters (e.g.
-    `file_transfer.models.DownloadEvent.ip`): an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) is
-    unwrapped to its plain IPv4 form, and a genuine IPv6 address is collapsed to its /64 network --
-    the block size most residential/mobile ISPs hand a single customer/device, so a host that
-    rotates its address within its own /64 (routine for IPv6 privacy extensions) can't dodge a
-    per-IP limit just by doing so. IPv4 addresses, and anything that doesn't parse as an IP at
-    all, pass through unchanged (the latter can't happen in practice -- `client_ip` itself only
+def normalize_ip_for_key(ip: str) -> str:
+    """Normalise a client IP for use as a *grouping key* -- rate limiting (issue #53 code review),
+    and, publicly, anywhere else that wants "the same real host" without an exact address match
+    (issue #59's abuse-report dedupe/auto-hold counting, `apps.file_transfer.services.reports`/
+    `hold`, share this instead of duplicating it) -- never for storage or display, where the exact
+    address still matters (e.g. `file_transfer.models.DownloadEvent.ip`,
+    `AbuseReport.reporter_ip`): an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) is unwrapped to its
+    plain IPv4 form, and a genuine IPv6 address is collapsed to its /64 network -- the block size
+    most residential/mobile ISPs hand a single customer/device, so a host that rotates its address
+    within its own /64 (routine for IPv6 privacy extensions) can't dodge a per-IP limit, or a
+    per-IP dedupe/count, just by doing so. IPv4 addresses, and anything that doesn't parse as an IP
+    at all, pass through unchanged (the latter can't happen in practice -- `client_ip` itself only
     ever returns a value that already parsed -- but this stays a plain no-op rather than raising,
     consistent with every other helper in this module).
     """
@@ -51,13 +54,13 @@ def _normalize_ip_for_key(ip: str) -> str:
 
 def hit_ip(request: HttpRequest, rule: str) -> RateLimitResult:
     """Count against the request's trusted client IP (`apps.core.services.client_ip`), normalised
-    for IPv6 (see `_normalize_ip_for_key`)."""
+    for IPv6 (see `normalize_ip_for_key`)."""
     from apps.core.services.client_ip import client_ip
 
     ip = client_ip(request)
     if ip is None:
         return RateLimitResult.unlimited()
-    return hit(_normalize_ip_for_key(ip), rule)
+    return hit(normalize_ip_for_key(ip), rule)
 
 
 def hit_user(user: _HasPk, rule: str) -> RateLimitResult:
@@ -98,7 +101,7 @@ def hit_ip_and_value(request: HttpRequest, value: str | None, rule: str) -> Rate
     ip = client_ip(request)
     if ip is None or not value:
         return RateLimitResult.unlimited()
-    return hit(f'{_normalize_ip_for_key(ip)}:{value}', rule)
+    return hit(f'{normalize_ip_for_key(ip)}:{value}', rule)
 
 
 # -- Async variants, for the qr_code API's async ninja endpoints and the async `/go/<code>`
@@ -114,7 +117,7 @@ async def ahit_ip(request: HttpRequest, rule: str) -> RateLimitResult:
     ip = client_ip(request)
     if ip is None:
         return RateLimitResult.unlimited()
-    return await sync_to_async(hit)(_normalize_ip_for_key(ip), rule)
+    return await sync_to_async(hit)(normalize_ip_for_key(ip), rule)
 
 
 async def ahit_value(value: str | None, rule: str) -> RateLimitResult:

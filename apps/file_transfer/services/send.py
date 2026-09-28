@@ -49,21 +49,25 @@ def validate_send_options(options: SendOptions, settings_row: FileTransferSettin
     return recipients
 
 
-def finalize_send(transfer: Transfer, options: SendOptions) -> Transfer:
+def finalize_send(transfer: Transfer, options: SendOptions, *, ip: str | None = None) -> Transfer:
     """Complete a draft transfer: verify files and balance, apply the sender's options, mark it
     `ACTIVE`, and queue the recipient + sender emails.
 
     Raises:
         ValidationError: an option is invalid, no files have finished uploading, or the owner's
             balance is below the 1-credit minimum.
-        blocklist.BlockedSenderError: the owner's email is on the block list (issue #59) -- a
-            belt-and-suspenders re-check alongside `views.send.send_page`'s own check at draft
-            creation, in case the owner was blocked in the meantime.
+        blocklist.BlockedSenderError: the owner's email (or, if the caller passes `ip`, the
+            client IP) is on the block list (issue #59) -- a belt-and-suspenders re-check
+            alongside `views.send.send_page`'s own check at draft creation, in case the owner was
+            blocked in the meantime. `ip` is optional (and checked here, not just at draft
+            creation) for consistency with every other send-path checkpoint
+            (`services.blocklist`'s own docstring): the caller (`views.send.send_submit`,
+            `api.transfers.finalize_transfer`) passes the request's client IP when it has one.
     """
     settings_row = FileTransferSettings.load()
     recipients = validate_send_options(options, settings_row)
     if transfer.owner is not None:
-        check_not_blocked(email=transfer.owner.email)
+        check_not_blocked(email=transfer.owner.email, ip=ip)
 
     now = timezone.now()
     with transaction.atomic():

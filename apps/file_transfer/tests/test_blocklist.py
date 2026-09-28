@@ -119,6 +119,113 @@ def test_block_transfer_sender_does_not_duplicate(draft_transfer, admin_user):
     assert BlockedSender.objects.filter(kind=BlockedSenderKind.EMAIL).count() == 1
 
 
+def test_block_transfer_sender_reblocks_after_expiry(draft_transfer, admin_user):
+    """Issue #59 code review: `get_or_create` matched an *expired* row too, so re-blocking
+    someone whose earlier block had lapsed created nothing ("Added 0 entries") and left them
+    unblocked. Now it reactivates the lapsed row instead."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    email = draft_transfer.owner.email.lower()
+    expired = BlockedSender.objects.create(
+        kind=BlockedSenderKind.EMAIL,
+        value=email,
+        reason='first offense',
+        expires_at=timezone.now() - timedelta(days=1),
+    )
+    assert blocklist.is_blocked(email=email) is False
+
+    created = blocklist.block_transfer_sender(
+        draft_transfer, created_by=admin_user, reason='second offense', block_ip=False
+    )
+
+    assert len(created) == 1
+    assert created[0].pk == expired.pk  # reactivated, not a new row
+    assert blocklist.is_blocked(email=email) is True
+    expired.refresh_from_db()
+    assert expired.expires_at is None
+    assert expired.reason == 'second offense'
+    assert BlockedSender.objects.filter(kind=BlockedSenderKind.EMAIL, value=email).count() == 1
+
+
+def test_block_transfer_sender_does_not_touch_an_unrelated_active_block(draft_transfer, admin_user):
+    """Two identical *active* rows would make a plain `get_or_create` raise
+    `MultipleObjectsReturned` (issue #59 code review) -- `_block` never creates a second active
+    row while one already exists, so this can no longer happen through this path."""
+    email = draft_transfer.owner.email.lower()
+    first = BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=email)
+
+    created = blocklist.block_transfer_sender(draft_transfer, created_by=admin_user)
+
+    assert created == []
+    assert BlockedSender.objects.get(kind=BlockedSenderKind.EMAIL, value=email).pk == first.pk
+
+
+def test_active_transfers_for_sender_excludes_ended_transfers(funded_user):
+    from ..models import Transfer
+
+    active = Transfer.objects.create(owner=funded_user, status=TransferStatus.ACTIVE)
+    Transfer.objects.create(owner=funded_user, status=TransferStatus.DELETED)
+
+    result = blocklist.active_transfers_for_sender(active)
+
+    assert list(result) == [active]
+
+
+# -- `BlockedSender.clean()` validation (issue #59 code review) --
+
+
+def test_blocked_sender_clean_rejects_invalid_email():
+    entry = BlockedSender(kind=BlockedSenderKind.EMAIL, value='not-an-email')
+    with pytest.raises(ValidationError):
+        entry.full_clean()
+
+
+def test_blocked_sender_clean_rejects_email_missing_wildcard_prefix():
+    """`example.com` (missing the `*@` prefix) would otherwise silently never match anything."""
+    entry = BlockedSender(kind=BlockedSenderKind.EMAIL, value='example.com')
+    with pytest.raises(ValidationError):
+        entry.full_clean()
+
+
+def test_blocked_sender_clean_accepts_valid_wildcard():
+    entry = BlockedSender(kind=BlockedSenderKind.EMAIL, value='*@spam.example')
+    entry.full_clean()  # does not raise
+
+
+def test_blocked_sender_clean_rejects_invalid_cidr():
+    entry = BlockedSender(kind=BlockedSenderKind.IP, value='not-an-ip')
+    with pytest.raises(ValidationError):
+        entry.full_clean()
+
+
+def test_blocked_sender_clean_accepts_valid_cidr():
+    entry = BlockedSender(kind=BlockedSenderKind.IP, value='203.0.113.0/24')
+    entry.full_clean()  # does not raise
+
+
+def test_blocked_sender_clean_rejects_second_active_duplicate():
+    BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value='dup@example.com')
+    entry = BlockedSender(kind=BlockedSenderKind.EMAIL, value='dup@example.com')
+    with pytest.raises(ValidationError):
+        entry.full_clean()
+
+
+def test_blocked_sender_clean_allows_duplicate_of_an_expired_entry():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    BlockedSender.objects.create(
+        kind=BlockedSenderKind.EMAIL,
+        value='dup@example.com',
+        expires_at=timezone.now() - timedelta(days=1),
+    )
+    entry = BlockedSender(kind=BlockedSenderKind.EMAIL, value='dup@example.com')
+    entry.full_clean()  # does not raise -- history, not a conflict
+
+
 # -- Checkpoint: logged-in web send page (draft creation) --
 
 
@@ -150,6 +257,37 @@ def test_finalize_send_blocked_by_email(draft_transfer, uploaded_file):
 
     draft_transfer.refresh_from_db()
     assert draft_transfer.status == TransferStatus.DRAFT
+
+
+def test_finalize_send_blocked_by_ip(draft_transfer, uploaded_file):
+    """Issue #59 code review: `finalize_send` used to check only the owner's email -- `ip` is now
+    threaded through from the web send page and the JWT API's finalize endpoint, for consistency
+    with every other send-path checkpoint."""
+    BlockedSender.objects.create(kind=BlockedSenderKind.IP, value='203.0.113.9')
+    options = SendOptions(recipients=['recipient@example.com'])
+
+    with pytest.raises(blocklist.BlockedSenderError):
+        finalize_send(draft_transfer, options, ip='203.0.113.9')
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DRAFT
+
+
+def test_finalize_send_web_checkpoint_blocked_by_ip(client, funded_user, uploaded_file):
+    """The web send page's own submit (`views.send.send_submit`) passes the client IP through to
+    `finalize_send`."""
+    BlockedSender.objects.create(kind=BlockedSenderKind.IP, value='127.0.0.1')
+    client.force_login(funded_user)
+    draft = uploaded_file.transfer
+
+    response = client.post(
+        reverse('file_transfer:send-submit', args=[draft.id]),
+        data={'recipients': 'recipient@example.com', 'expiry_choice': 'none'},
+    )
+
+    assert response.status_code == 422
+    draft.refresh_from_db()
+    assert draft.status == TransferStatus.DRAFT
 
 
 # -- Checkpoint: JWT API create --

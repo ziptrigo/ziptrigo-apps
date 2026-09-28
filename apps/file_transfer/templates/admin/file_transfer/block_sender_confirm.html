@@ -20,12 +20,30 @@
             </div>
             <div style="margin-top: 5px;">
                 <label>{{ form.block_ip }} {{ form.block_ip.label }}</label>
+                {% if form.block_ip.help_text %}
+                <div style="font-size: 0.9em; color: #666;">{{ form.block_ip.help_text }}</div>
+                {% endif %}
             </div>
 
             <div style="margin-top: 10px;">
                 {{ form.reason.errors }}
                 <label for="id_reason" style="display: block; font-weight: bold;">{{ form.reason.label }}:</label>
                 {{ form.reason }}
+            </div>
+
+            <div style="margin-top: 10px;">
+                {{ form.take_down_active_transfers.errors }}
+                <label>{{ form.take_down_active_transfers }} {{ form.take_down_active_transfers.label }}</label>
+                {% if form.take_down_active_transfers.help_text %}
+                <div style="font-size: 0.9em; color: #666;">{{ form.take_down_active_transfers.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label>{{ form.deactivate_account }} {{ form.deactivate_account.label }}</label>
+                {% if form.deactivate_account.help_text %}
+                <div style="font-size: 0.9em; color: #666;">{{ form.deactivate_account.help_text }}</div>
+                {% endif %}
             </div>
 
             <input type="hidden" name="action" value="{{ action_name }}">

@@ -106,7 +106,7 @@ def send_submit(request: AuthenticatedHttpRequest, draft_id: str) -> HttpRespons
         return _errors(request, form)
 
     try:
-        services.finalize_send(transfer, form.to_send_options())
+        services.finalize_send(transfer, form.to_send_options(), ip=client_ip(request))
     except ValidationError as exc:
         form.add_error(None, exc.messages[0])
         return _errors(request, form)

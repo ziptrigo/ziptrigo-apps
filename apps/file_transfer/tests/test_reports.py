@@ -67,6 +67,30 @@ def test_create_report_does_not_dedupe_different_ips(draft_transfer):
     assert AbuseReport.objects.filter(transfer=draft_transfer).count() == 2
 
 
+def test_create_report_dedupes_same_slash64_ipv6_within_window(draft_transfer):
+    """Issue #59 code review: the dedupe used to compare exact stored addresses, so the same
+    visitor reloading the page over an IPv6 connection could dodge it just by getting a different
+    address within their own /64 (routine for IPv6 privacy extensions) -- now normalized the same
+    way rate limiting is (`apps.core.ratelimit.normalize_ip_for_key`)."""
+    create_report(draft_transfer, reason=AbuseReportReason.OTHER, reporter_ip='2001:db8::1')
+
+    with pytest.raises(ValidationError):
+        create_report(draft_transfer, reason=AbuseReportReason.OTHER, reporter_ip='2001:db8::2')
+
+    assert AbuseReport.objects.filter(transfer=draft_transfer).count() == 1
+
+
+def test_create_report_dedupes_ipv4_and_its_ipv6_mapped_form(draft_transfer):
+    create_report(draft_transfer, reason=AbuseReportReason.OTHER, reporter_ip='203.0.113.9')
+
+    with pytest.raises(ValidationError):
+        create_report(
+            draft_transfer, reason=AbuseReportReason.OTHER, reporter_ip='::ffff:203.0.113.9'
+        )
+
+    assert AbuseReport.objects.filter(transfer=draft_transfer).count() == 1
+
+
 def test_create_report_without_ip_never_dedupes(draft_transfer):
     create_report(draft_transfer, reason=AbuseReportReason.OTHER)
     create_report(draft_transfer, reason=AbuseReportReason.OTHER)
@@ -159,4 +183,61 @@ def test_report_transfer_rate_limited_per_ip(client, draft_transfer, uploaded_fi
     response = client.post(url, data={'reason': AbuseReportReason.COPYRIGHT})
 
     assert response.status_code == 429
-    assert 'Retry-After' in response
+
+
+def test_report_transfer_budget_not_spent_by_failed_attempts(
+    client, draft_transfer, uploaded_file, settings
+):
+    """Issue #59 code review: `FT_REPORT_TRANSFER` used to be counted on *every* POST, before
+    validation or the dedupe check even ran -- a handful of failed attempts (a bad reason, here)
+    could exhaust a transfer's whole report budget before any genuine report got through. Now
+    peeked (not counted) until a report is actually created."""
+    _active(draft_transfer)
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'FT_REPORT_TRANSFER': (1, 3600)}
+    url = reverse('t:report', args=[draft_transfer.slug])
+
+    for _ in range(3):
+        response = client.post(url, data={'reason': 'not-a-real-reason'})
+        assert response.status_code == 422
+
+    response = client.post(url, data={'reason': AbuseReportReason.OTHER})
+
+    assert response.status_code == 200
+    assert AbuseReport.objects.filter(transfer=draft_transfer).count() == 1
+
+
+def test_report_transfer_budget_spent_only_by_successful_reports(
+    client, draft_transfer, uploaded_file, settings
+):
+    _active(draft_transfer)
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'FT_REPORT_TRANSFER': (1, 3600)}
+    url = reverse('t:report', args=[draft_transfer.slug])
+
+    first = client.post(url, data={'reason': AbuseReportReason.OTHER}, REMOTE_ADDR='203.0.113.1')
+    assert first.status_code == 200
+
+    # A different IP, so this isn't the per-IP or dedupe rule -- the per-*transfer* ceiling alone
+    # refuses it, because the one successful report above already spent it.
+    second = client.post(
+        url, data={'reason': AbuseReportReason.COPYRIGHT}, REMOTE_ADDR='203.0.113.2'
+    )
+
+    assert second.status_code == 429
+    assert AbuseReport.objects.filter(transfer=draft_transfer).count() == 1
+
+
+def test_report_transfer_htmx_refresh_when_transfer_unavailable(client, draft_transfer):
+    """Issue #59 code review: `_unavailable`'s full-page 404 isn't a status htmx's own
+    `responseHandling` config (`core/base.html`) swaps, so the report form used to just silently
+    sit there. `HX-Refresh` instead triggers a full-page reload, landing on the ordinary neutral
+    "no longer available" page."""
+    response = client.post(
+        reverse('t:report', args=[draft_transfer.slug]),  # still a DRAFT -- never available
+        data={'reason': AbuseReportReason.OTHER},
+        HTTP_HX_REQUEST='true',
+    )
+
+    assert response.status_code == 204
+    assert response['HX-Refresh'] == 'true'

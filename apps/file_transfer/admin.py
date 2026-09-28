@@ -15,6 +15,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.accounts.models import User
 from apps.core.admin_site import custom_admin_site
 
 from . import services
@@ -67,6 +68,8 @@ _TRANSFER_FIELDS = [
     'taken_down_by',
     'taken_down_at',
     'takedown_reason',
+    'takedown_internal_note',
+    'takedown_notify',
 ]
 
 
@@ -94,18 +97,30 @@ class TransferRecipientInline(admin.TabularInline):
 
 class TakedownForm(forms.Form):
     """Intermediate confirmation form for the "take down" bulk action (issue #59): a reason
-    (recorded either way) and an opt-in toggle to notify the sender -- default off, so a takedown
-    never emails a sender unless staff explicitly choose to."""
+    (recorded either way, and *always* shown to the sender -- see its own help text) and an opt-in
+    toggle to notify the sender -- default off, so a takedown never emails a sender unless staff
+    explicitly choose to. `internal_note` is a second, staff-only field for anything that must
+    never reach the sender (issue #59 code review: the old single `reason` field's help text
+    claimed it was shown "if you notify them", when the dashboard in fact always displays it
+    regardless of the notify toggle)."""
 
     reason: forms.CharField = forms.CharField(
         label='Reason',
         required=True,
         widget=forms.Textarea(attrs={'rows': 3}),
-        help_text='Recorded on the transfer, and shown to the sender if you notify them below. '
-        'Never reveals who reported it -- keep it about the content, not the reporter.',
+        help_text='Recorded on the transfer, and always shown to the sender on their dashboard '
+        '(and in the notification email, if you notify them below). Never reveals who reported '
+        'it -- keep it about the content, not the reporter. For anything staff-only, use the '
+        'internal note field instead.',
+    )
+    internal_note: forms.CharField = forms.CharField(
+        label='Internal note (staff only)',
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 2}),
+        help_text='Never shown to the sender, on the dashboard or in any email.',
     )
     notify_sender: forms.BooleanField = forms.BooleanField(
-        label='Notify sender by email ("your files have been deleted")',
+        label='Notify sender by email ("your transfer was removed")',
         required=False,
         initial=False,
     )
@@ -118,10 +133,31 @@ class BlockSenderForm(forms.Form):
         label='Block sender email', required=False, initial=True
     )
     block_ip: forms.BooleanField = forms.BooleanField(
-        label='Block sender IP', required=False, initial=True
+        label='Block sender IP',
+        required=False,
+        initial=False,
+        help_text='Off by default (issue #59 code review): a shared/CGNAT or office IP can put '
+        'other, unrelated senders behind the same address too.',
     )
     reason: forms.CharField = forms.CharField(
         label='Reason', required=False, widget=forms.Textarea(attrs={'rows': 2})
+    )
+    take_down_active_transfers: forms.BooleanField = forms.BooleanField(
+        label="Also take down this sender's other active transfers",
+        required=False,
+        initial=False,
+        help_text='Blocking only stops *future* sending -- off by default, so anything this '
+        'sender already has live is left running unless you opt in here. Requires the "take '
+        'down" permission.',
+    )
+    deactivate_account: forms.BooleanField = forms.BooleanField(
+        label="Also deactivate the sender's account (owned transfers only, no effect on "
+        'anonymous ones)',
+        required=False,
+        initial=False,
+        help_text="Sets the account's status to Inactive, which already blocks both session "
+        'login and the JWT API on its own -- belt-and-suspenders alongside the email block, '
+        "since a logged-in sender could otherwise dodge it by changing their account's email.",
     )
 
 
@@ -150,6 +186,7 @@ def _takedown_confirm_response(
                     transfer,
                     by=request.user,
                     reason=form.cleaned_data['reason'],
+                    internal_note=form.cleaned_data['internal_note'],
                     notify=form.cleaned_data['notify_sender'],
                 )
             messages.success(request, f'Took down {len(live_transfers)} transfer(s).')
@@ -183,6 +220,19 @@ def _block_sender_confirm_response(
     `_takedown_confirm_response`."""
     if request.POST.get('apply') == 'yes':
         form = BlockSenderForm(request.POST)
+        # The "also take down" checkbox needs its own permission check, independent of
+        # `block_sender_action`'s own `add_blockedsender` requirement (issue #59 code review):
+        # without this, a staff user who can only add block-list entries could use the checkbox to
+        # take transfers down too, bypassing the dedicated `takedown_transfer` permission entirely.
+        if (
+            form.is_valid()
+            and form.cleaned_data['take_down_active_transfers']
+            and not request.user.has_perm('file_transfer.takedown_transfer')
+        ):
+            form.add_error(
+                'take_down_active_transfers',
+                "You don't have permission to take down transfers.",
+            )
         if form.is_valid():
             created = []
             for transfer in transfers:
@@ -193,7 +243,37 @@ def _block_sender_confirm_response(
                     block_email=form.cleaned_data['block_email'],
                     block_ip=form.cleaned_data['block_ip'],
                 )
-            messages.success(request, f'Added {len(created)} block-list entry/entries.')
+
+            taken_down_count = 0
+            if form.cleaned_data['take_down_active_transfers']:
+                targets: dict = {}
+                for transfer in transfers:
+                    for other in services.blocklist.active_transfers_for_sender(transfer):
+                        targets[other.pk] = other
+                for other in targets.values():
+                    services.take_down_transfer(
+                        other,
+                        by=request.user,
+                        reason=form.cleaned_data['reason'] or 'Sender blocked.',
+                        notify=False,
+                    )
+                    taken_down_count += 1
+
+            deactivated_count = 0
+            if form.cleaned_data['deactivate_account']:
+                owners = {t.owner for t in transfers if t.owner is not None}
+                for owner in owners:
+                    User.objects.filter(pk=owner.pk).exclude(status=User.STATUS_INACTIVE).update(
+                        status=User.STATUS_INACTIVE
+                    )
+                    deactivated_count += 1
+
+            message = f'Added {len(created)} block-list entry/entries.'
+            if form.cleaned_data['take_down_active_transfers']:
+                message += f' Took down {taken_down_count} active transfer(s).'
+            if form.cleaned_data['deactivate_account']:
+                message += f' Deactivated {deactivated_count} account(s).'
+            messages.success(request, message)
             return redirect(request.path)
     else:
         form = BlockSenderForm()
@@ -211,7 +291,27 @@ def _block_sender_confirm_response(
     return render(request, 'admin/file_transfer/block_sender_confirm.html', context)
 
 
-class TransferAdmin(admin.ModelAdmin):
+class _AbuseActionPermissionMixin:
+    """Permission checks shared by `TransferAdmin` and `AbuseReportAdmin`'s abuse-tooling actions
+    (issue #59 code review): plain admin actions are independent of `has_change_permission` (same
+    as Django's own built-in `delete_selected`), so without this, *any* staff user who can merely
+    view the transfer or report list could take a transfer down (permanently deleting its S3
+    objects), release a hold, dismiss a report, or create block-list entries. `has_perm` already
+    passes a superuser through implicitly, same as every other permission check in this project.
+
+    Each `has_<name>_permission` method name is matched to a `permissions=[...]` entry on the
+    corresponding `@admin.action` below -- see `ModelAdmin.get_action`'s use of
+    `has_<permission>_permission` for actions that aren't the standard add/change/delete/view set.
+    """
+
+    def has_takedown_transfer_permission(self, request: AuthenticatedHttpRequest) -> bool:
+        return request.user.has_perm('file_transfer.takedown_transfer')
+
+    def has_block_sender_permission(self, request: AuthenticatedHttpRequest) -> bool:
+        return request.user.has_perm('file_transfer.add_blockedsender')
+
+
+class TransferAdmin(_AbuseActionPermissionMixin, admin.ModelAdmin):
     """Read-only in the ordinary sense: support can look transfers up, but the services layer
     (`apps.file_transfer.services`) is the only sanctioned way to change one directly. The bulk
     actions below (issue #59) are the one exception -- same as Django's own built-in
@@ -244,7 +344,7 @@ class TransferAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
         return False
 
-    @admin.action(description='Take down selected transfer(s)')
+    @admin.action(description='Take down selected transfer(s)', permissions=['takedown_transfer'])
     def take_down_action(self, request: AuthenticatedHttpRequest, queryset):
         return _takedown_confirm_response(
             request,
@@ -254,7 +354,10 @@ class TransferAdmin(admin.ModelAdmin):
             action_name='take_down_action',
         )
 
-    @admin.action(description='Release abuse-review hold (dismisses its pending reports)')
+    @admin.action(
+        description='Release abuse-review hold (dismisses its pending reports)',
+        permissions=['takedown_transfer'],
+    )
     def release_hold_action(self, request: AuthenticatedHttpRequest, queryset) -> None:
         now = timezone.now()
         count = 0
@@ -269,7 +372,7 @@ class TransferAdmin(admin.ModelAdmin):
             count += 1
         messages.success(request, f'Released the hold on {count} transfer(s).')
 
-    @admin.action(description='Block sender of selected transfer(s)')
+    @admin.action(description='Block sender of selected transfer(s)', permissions=['block_sender'])
     def block_sender_action(self, request: AuthenticatedHttpRequest, queryset):
         return _block_sender_confirm_response(
             request,
@@ -344,7 +447,7 @@ _REPORT_FIELDS = [
 ]
 
 
-class AbuseReportAdmin(admin.ModelAdmin):
+class AbuseReportAdmin(_AbuseActionPermissionMixin, admin.ModelAdmin):
     """Report list for support/moderation (issue #59): filter by status/reason/date, jump to the
     reported transfer, and dismiss or take down straight from here."""
 
@@ -377,7 +480,7 @@ class AbuseReportAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
         return False
 
-    @admin.action(description='Dismiss selected report(s)')
+    @admin.action(description='Dismiss selected report(s)', permissions=['takedown_transfer'])
     def dismiss_action(self, request: AuthenticatedHttpRequest, queryset) -> None:
         count = 0
         for report in queryset.filter(status=AbuseReportStatus.PENDING):
@@ -385,7 +488,9 @@ class AbuseReportAdmin(admin.ModelAdmin):
             count += 1
         messages.success(request, f'Dismissed {count} report(s).')
 
-    @admin.action(description='Take down the reported transfer(s)')
+    @admin.action(
+        description='Take down the reported transfer(s)', permissions=['takedown_transfer']
+    )
     def take_down_action(self, request: AuthenticatedHttpRequest, queryset):
         transfer_ids = queryset.values_list('transfer_id', flat=True).distinct()
         transfers = list(Transfer.objects.filter(pk__in=transfer_ids))
@@ -397,7 +502,9 @@ class AbuseReportAdmin(admin.ModelAdmin):
             action_name='take_down_action',
         )
 
-    @admin.action(description="Block the reported transfer(s)'s sender(s)")
+    @admin.action(
+        description="Block the reported transfer(s)'s sender(s)", permissions=['block_sender']
+    )
     def block_sender_action(self, request: AuthenticatedHttpRequest, queryset):
         transfer_ids = queryset.values_list('transfer_id', flat=True).distinct()
         transfers = list(Transfer.objects.filter(pk__in=transfer_ids))

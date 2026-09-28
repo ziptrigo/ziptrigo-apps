@@ -527,6 +527,87 @@ def test_add_recipients_and_resend(client, draft_transfer, uploaded_file, auth_h
     assert resend_resp.status_code == 200
 
 
+# -- Send-path checks on an *existing* transfer (issue #59 code review): adding recipients,
+# resending, and re-enabling are send paths too, so a hold refuses them (409) and a blocked
+# sender is turned away (403) exactly like starting a new transfer would be. --
+
+
+def test_add_recipients_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
+    from django.utils import timezone
+
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    draft_transfer.held_for_review_at = timezone.now()
+    draft_transfer.save()
+
+    response = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/recipients',
+        {'recipients': ['b@example.com']},
+        auth_headers,
+    )
+
+    assert response.status_code == 409
+
+
+def test_resend_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
+    from django.utils import timezone
+
+    from ..models import TransferRecipient
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    recipient = TransferRecipient.objects.get(transfer=draft_transfer, email='a@example.com')
+    draft_transfer.held_for_review_at = timezone.now()
+    draft_transfer.save()
+
+    response = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/recipients/{recipient.id}/resend',
+        {},
+        auth_headers,
+    )
+
+    assert response.status_code == 409
+
+
+def test_update_reenable_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
+    from django.utils import timezone
+
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    draft_transfer.status = TransferStatus.DISABLED
+    draft_transfer.held_for_review_at = timezone.now()
+    draft_transfer.save()
+
+    response = _patch(
+        client, f'/api/ft/transfers/{draft_transfer.id}', {'disabled': False}, auth_headers
+    )
+
+    assert response.status_code == 409
+
+
+def test_add_recipients_returns_403_when_owner_blocked(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    from ..models import BlockedSender, BlockedSenderKind
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email)
+
+    response = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/recipients',
+        {'recipients': ['b@example.com']},
+        auth_headers,
+    )
+
+    assert response.status_code == 403
+
+
 # -- Delete --
 
 
@@ -548,6 +629,22 @@ def test_delete_active_transfer(client, draft_transfer, uploaded_file, auth_head
     assert response.status_code == 204
     draft_transfer.refresh_from_db()
     assert draft_transfer.status == TransferStatus.DELETED
+
+
+def test_delete_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
+    from django.utils import timezone
+
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    draft_transfer.held_for_review_at = timezone.now()
+    draft_transfer.save()
+
+    response = client.delete(f'/api/ft/transfers/{draft_transfer.id}', **auth_headers)
+
+    assert response.status_code == 409
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.ACTIVE
 
 
 # -- Rate limiting (issue #53): same rule as the web upload endpoints, per user --

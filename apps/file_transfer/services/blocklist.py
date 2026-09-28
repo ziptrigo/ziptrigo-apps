@@ -23,7 +23,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 
-from ..models import BlockedSender, BlockedSenderKind, Transfer
+from ..models import ACTIONABLE_STATUSES, BlockedSender, BlockedSenderKind, Transfer
 
 BLOCKED_MESSAGE = "Sorry, you can't send transfers at this time."
 
@@ -89,6 +89,36 @@ def check_not_blocked(*, email: str | None = None, ip: str | None = None) -> Non
         raise BlockedSenderError(BLOCKED_MESSAGE)
 
 
+def _block(kind: str, value: str, *, reason: str, created_by: User) -> BlockedSender | None:
+    """Add `value` to the block list under `kind`, or `None` if it's already actively blocked.
+
+    Looks only among *active* entries (issue #59 code review): a plain `get_or_create` matched an
+    expired row too (since it doesn't filter on `expires_at` at all), so re-blocking someone whose
+    earlier block had lapsed silently created nothing ("Added 0 entries") instead of actually
+    blocking them again -- and, separately, two identical active rows added by hand through the
+    admin's own CRUD (nothing stops that; there's no uniqueness constraint, see `BlockedSender`'s
+    docstring) made `get_or_create` raise `MultipleObjectsReturned` instead of just picking one.
+    Reactivates (clears `expires_at` on) the most recent matching *inactive* row instead of
+    creating a fresh one, so the history of who blocked this value and when isn't lost each time
+    it lapses and gets re-blocked.
+    """
+    active = _active_entries(kind).filter(value=value).first()
+    if active is not None:
+        return None
+
+    inactive = BlockedSender.objects.filter(kind=kind, value=value).order_by('-created_at').first()
+    if inactive is not None:
+        inactive.expires_at = None
+        inactive.reason = reason
+        inactive.created_by = created_by
+        inactive.save(update_fields=['expires_at', 'reason', 'created_by'])
+        return inactive
+
+    return BlockedSender.objects.create(
+        kind=kind, value=value, reason=reason, created_by=created_by
+    )
+
+
 def block_transfer_sender(
     transfer: Transfer,
     *,
@@ -98,24 +128,39 @@ def block_transfer_sender(
     block_ip: bool = True,
 ) -> list[BlockedSender]:
     """Admin convenience: block the sender of `transfer` (its `sender_email`/owner's email and/or
-    its `sender_ip`), from the transfer or abuse-report admin. Returns the entries created (existing
-    matching entries are left as they are, not duplicated)."""
+    its `sender_ip`), from the transfer or abuse-report admin. Returns the entries created or
+    reactivated (an already actively-blocked value is left as it is, not duplicated -- see
+    `_block`)."""
     created: list[BlockedSender] = []
     email = transfer.sender_email or (transfer.owner.email if transfer.owner else '')
     if block_email and email:
-        entry, was_created = BlockedSender.objects.get_or_create(
-            kind=BlockedSenderKind.EMAIL,
-            value=email.strip().lower(),
-            defaults={'reason': reason, 'created_by': created_by},
+        entry = _block(
+            BlockedSenderKind.EMAIL, email.strip().lower(), reason=reason, created_by=created_by
         )
-        if was_created:
+        if entry is not None:
             created.append(entry)
     if block_ip and transfer.sender_ip:
-        entry, was_created = BlockedSender.objects.get_or_create(
-            kind=BlockedSenderKind.IP,
-            value=transfer.sender_ip,
-            defaults={'reason': reason, 'created_by': created_by},
+        entry = _block(
+            BlockedSenderKind.IP, transfer.sender_ip, reason=reason, created_by=created_by
         )
-        if was_created:
+        if entry is not None:
             created.append(entry)
     return created
+
+
+def active_transfers_for_sender(transfer: Transfer):
+    """Every still-actionable transfer (including `transfer` itself) from the same sender as
+    `transfer` -- its owner (every transfer they own), or, for an anonymous one, its
+    `sender_email`/`sender_ip`. Backs the block-sender confirmation form's optional "also take
+    down this sender's active transfers" checkbox (issue #59 code review): blocking a sender stops
+    *future* sending, but by default leaves whatever they already have live untouched."""
+    query = Q()
+    if transfer.owner is not None:
+        query |= Q(owner=transfer.owner)
+    elif transfer.sender_email:
+        query |= Q(owner__isnull=True, sender_email__iexact=transfer.sender_email)
+    if transfer.sender_ip:
+        query |= Q(sender_ip=transfer.sender_ip)
+    if not query:
+        return Transfer.objects.none()
+    return Transfer.objects.filter(query, status__in=ACTIONABLE_STATUSES)

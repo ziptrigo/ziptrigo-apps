@@ -27,7 +27,17 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='transfer',
             name='takedown_reason',
-            field=models.TextField(blank=True, default='', help_text="Staff-authored reason, shown on the sender's dashboard -- never the identity of whoever reported it."),
+            field=models.TextField(blank=True, default='', help_text="Staff-authored reason. Always shown on the sender's dashboard, and included in the takedown email if the sender is notified -- never the identity of whoever reported it. For anything that should stay internal, use the staff-only note field instead."),
+        ),
+        migrations.AddField(
+            model_name='transfer',
+            name='takedown_internal_note',
+            field=models.TextField(blank=True, default='', help_text='Staff-only note about this takedown -- never shown to the sender, on the dashboard or in any email.'),
+        ),
+        migrations.AddField(
+            model_name='transfer',
+            name='takedown_notify',
+            field=models.BooleanField(default=False, help_text="Whether staff chose to email the sender when this transfer was taken down. Recorded on the transfer (rather than only passed to `services.takedown.take_down_transfer`'s own `notify` argument) so `jobs.expire_transfers`'s deferred-deletion sweep -- which finishes the S3 delete, and only then fires the notification, for any transfer whose deletion was deferred -- honours the choice staff actually made for a takedown, rather than defaulting to every other ended transfer's always-notify behaviour."),
         ),
         migrations.AddField(
             model_name='transfer',
@@ -43,6 +53,10 @@ class Migration(migrations.Migration):
             model_name='transfer',
             name='status',
             field=models.CharField(choices=[('draft', 'Draft'), ('pending_confirmation', 'Pending confirmation'), ('active', 'Active'), ('disabled', 'Disabled'), ('suspended', 'Suspended'), ('expired', 'Expired'), ('deleted', 'Deleted'), ('taken_down', 'Taken down')], default='draft', max_length=24),
+        ),
+        migrations.AlterModelOptions(
+            name='transfer',
+            options={'ordering': ['-created_at'], 'permissions': [('takedown_transfer', 'Can take down a transfer, release an abuse-review hold, or dismiss a report (issue #59)')]},
         ),
         migrations.CreateModel(
             name='AbuseReport',
@@ -69,7 +83,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('kind', models.CharField(choices=[('email', 'Email'), ('ip', 'IP / CIDR')], max_length=8)),
-                ('value', models.CharField(help_text='An exact email or "*@domain" wildcard (kind=Email), or an IP address or CIDR range (kind=IP/CIDR).', max_length=255)),
+                ('value', models.CharField(help_text='An exact email or "*@domain" wildcard (kind=Email; matches only that exact domain, not its subdomains -- \'*@example.com\' does not match \'someone@mail.example.com\'), or an IP address or CIDR range (kind=IP/CIDR).', max_length=255)),
                 ('reason', models.TextField(blank=True, default='')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('expires_at', models.DateTimeField(blank=True, help_text='Blank means this block never expires.', null=True)),

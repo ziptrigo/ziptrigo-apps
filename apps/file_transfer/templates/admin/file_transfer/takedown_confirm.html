@@ -27,6 +27,15 @@
             </div>
 
             <div style="margin-top: 10px;">
+                {{ form.internal_note.errors }}
+                <label for="id_internal_note" style="display: block; font-weight: bold;">{{ form.internal_note.label }}:</label>
+                {{ form.internal_note }}
+                {% if form.internal_note.help_text %}
+                <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ form.internal_note.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
                 <label>{{ form.notify_sender }} {{ form.notify_sender.label }}</label>
             </div>
 

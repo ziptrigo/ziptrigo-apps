@@ -140,7 +140,10 @@ def test_take_down_transfer_notifies_when_toggled(
         take_down_transfer(draft_transfer, by=admin_user, reason='confirmed', notify=True)
 
     assert len(sent) == 1
-    assert 'deleted' in sent[0]['subject'].lower()
+    # Distinct wording from an ordinary expiry/deletion (issue #59 code review): "deleted and no
+    # longer available" reads like the link simply ran its course, not like content was removed.
+    assert 'removed' in sent[0]['subject'].lower()
+    assert 'confirmed' in sent[0]['text_body']
 
 
 def test_public_page_neutral_after_takedown(client, draft_transfer, uploaded_file, admin_user):
@@ -183,3 +186,134 @@ def test_api_get_transfer_reports_taken_down_status(
 
     assert response.status_code == 200
     assert response.json()['status'] == 'taken_down'
+
+
+# -- S3 failure during takedown (issue #59 code review): the status change and the pending
+# reports' actioning must survive a failed delete, not get rolled back with it. --
+
+
+def test_take_down_transfer_s3_failure_still_commits_status_and_reports(
+    draft_transfer, uploaded_file, admin_user, fake_storage, monkeypatch
+):
+    _active(draft_transfer)
+    report = create_report(
+        draft_transfer, reason=AbuseReportReason.MALWARE, reporter_ip='203.0.113.1'
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError('S3 is down')
+
+    monkeypatch.setattr(fake_storage, 'delete_prefix', _boom)
+
+    with pytest.raises(RuntimeError):
+        take_down_transfer(draft_transfer, by=admin_user, reason='confirmed malware')
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.TAKEN_DOWN
+    assert draft_transfer.taken_down_by_id == admin_user.id
+    assert draft_transfer.files_deleted_at is None  # the delete really did fail
+
+    report.refresh_from_db()
+    assert report.status == AbuseReportStatus.ACTIONED
+
+
+def test_take_down_transfer_s3_failure_records_notify_choice_for_a_later_retry(
+    draft_transfer, uploaded_file, admin_user, fake_storage, monkeypatch
+):
+    """`takedown_notify` survives the failed call so a later retry (or `jobs.expire_transfers`'s
+    deferred-deletion sweep, if this transfer ends up finishing deletion there instead) can honour
+    the choice staff actually made, instead of the sweep's own always-notify default."""
+    _active(draft_transfer)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError('S3 is down')
+
+    monkeypatch.setattr(fake_storage, 'delete_prefix', _boom)
+
+    with pytest.raises(RuntimeError):
+        take_down_transfer(draft_transfer, by=admin_user, reason='confirmed', notify=False)
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.takedown_notify is False
+
+
+# -- Takedown reason vs. internal note visibility (issue #59 code review) --
+
+
+def test_takedown_internal_note_is_recorded_but_never_shown_on_dashboard(
+    client, draft_transfer, uploaded_file, admin_user
+):
+    _active(draft_transfer)
+
+    take_down_transfer(
+        draft_transfer,
+        by=admin_user,
+        reason='confirmed malware',
+        internal_note='reported by a known repeat abuser account, see ticket #1234',
+    )
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.takedown_internal_note == (
+        'reported by a known repeat abuser account, see ticket #1234'
+    )
+    client.force_login(draft_transfer.owner)
+
+    response = client.get(reverse('file_transfer:dashboard') + '?filter=ended')
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert 'confirmed malware' in content
+    assert 'ticket #1234' not in content
+
+
+def test_takedown_email_includes_reason_with_distinct_wording_from_expiry(
+    draft_transfer, uploaded_file, admin_user, django_capture_on_commit_callbacks, monkeypatch
+):
+    sent = []
+    monkeypatch.setattr(
+        'apps.file_transfer.services.emails.send_email',
+        lambda **kwargs: sent.append(kwargs) or (1, 0),
+    )
+    _active(draft_transfer)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        take_down_transfer(
+            draft_transfer,
+            by=admin_user,
+            reason='confirmed malware',
+            internal_note='internal only',
+            notify=True,
+        )
+
+    assert len(sent) == 1
+    assert 'removed' in sent[0]['subject'].lower()
+    assert 'confirmed malware' in sent[0]['text_body']
+    assert 'internal only' not in sent[0]['text_body']
+    assert 'internal only' not in sent[0]['subject']
+
+
+# -- Anonymous notify (issue #59 code review): `send_files_deleted_notification` used to bail out
+# entirely when a transfer has no `owner`, silently doing nothing even with notify on. --
+
+
+def test_takedown_notifies_anonymous_sender_by_sender_email(
+    admin_user, fake_storage, django_capture_on_commit_callbacks, monkeypatch
+):
+    from ..models import Transfer
+
+    sent = []
+    monkeypatch.setattr(
+        'apps.file_transfer.services.emails.send_email',
+        lambda **kwargs: sent.append(kwargs) or (1, 0),
+    )
+    transfer = Transfer.objects.create(
+        owner=None,
+        sender_email='anon-sender@example.com',
+        status=TransferStatus.ACTIVE,
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        take_down_transfer(transfer, by=admin_user, reason='confirmed', notify=True)
+
+    assert len(sent) == 1
+    assert sent[0]['to'] == 'anon-sender@example.com'

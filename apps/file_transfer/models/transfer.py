@@ -274,8 +274,32 @@ class Transfer(models.Model):
         models.TextField(
             blank=True,
             default='',
-            help_text="Staff-authored reason, shown on the sender's "
-            'dashboard -- never the identity of whoever reported it.',
+            help_text="Staff-authored reason. Always shown on the sender's dashboard, and "
+            'included in the takedown email if the sender is notified -- never the identity of '
+            'whoever reported it. For anything that should stay internal, use the staff-only '
+            'note field instead.',
+        ),
+    )
+    takedown_internal_note = cast(
+        str,
+        models.TextField(
+            blank=True,
+            default='',
+            help_text='Staff-only note about this takedown -- never shown to the sender, on the '
+            'dashboard or in any email.',
+        ),
+    )
+    takedown_notify = cast(
+        bool,
+        models.BooleanField(
+            default=False,
+            help_text='Whether staff chose to email the sender when this transfer was taken '
+            'down. Recorded on the transfer (rather than only passed to '
+            "`services.takedown.take_down_transfer`'s own `notify` argument) so "
+            "`jobs.expire_transfers`'s deferred-deletion sweep -- which finishes the S3 delete, "
+            'and only then fires the notification, for any transfer whose deletion was deferred '
+            '-- honours the choice staff actually made for a takedown, rather than defaulting to '
+            "every other ended transfer's always-notify behaviour.",
         ),
     )
 
@@ -299,6 +323,13 @@ class Transfer(models.Model):
             # Looked up by services.anon_limits when checking the per-IP-per-day caps.
             models.Index(fields=['sender_ip', 'created_at']),
             models.Index(fields=['anon_cookie_id', 'created_at']),
+        ]
+        permissions = [
+            (
+                'takedown_transfer',
+                'Can take down a transfer, release an abuse-review hold, or dismiss a report '
+                '(issue #59)',
+            ),
         ]
 
     def __str__(self) -> str:
