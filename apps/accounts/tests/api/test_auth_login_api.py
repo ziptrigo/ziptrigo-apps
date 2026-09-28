@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from apps.accounts.models import User
@@ -7,6 +9,12 @@ pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 
 def test_login_returns_jwt_for_active_user(api_client, regular_user: User):
+    # Login also requires a confirmed email (see the `login` view); `regular_user` doesn't confirm
+    # one by default since most callers don't care.
+    regular_user.email_confirmed = True
+    regular_user.email_confirmed_at = datetime.now(UTC)
+    regular_user.save(update_fields=['email_confirmed', 'email_confirmed_at'])
+
     response = api_client.post(
         '/auth/login',
         json={'email': regular_user.email, 'password': 'password123'},

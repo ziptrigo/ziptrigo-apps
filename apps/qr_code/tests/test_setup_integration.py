@@ -3,7 +3,9 @@ Integration tests to verify setup and end-to-end functionality.
 """
 
 import pytest
+from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 
 from apps.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat
 from apps.qr_code.services import QRCodeGenerator
@@ -11,7 +13,7 @@ from apps.qr_code.services import QRCodeGenerator
 User = get_user_model()
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.integration
 class TestSetupIntegration:
     """Test end-to-end setup and functionality."""
@@ -20,14 +22,14 @@ class TestSetupIntegration:
     async def test_complete_qr_generation_workflow(self):
         """Test the complete workflow of QR code generation."""
         # Create user
-        user = User.objects.create_user(
+        user = await sync_to_async(User.objects.create_user)(
             email='setup@example.com',
             password='testpass123',
             name='Setup Test',
         )
 
         # Create QR code
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.PNG,
@@ -45,7 +47,7 @@ class TestSetupIntegration:
         # Generate QR code image
         image_path = await QRCodeGenerator.generate_qr_code(qr)
         qr.image_file = image_path
-        qr.save()
+        await sync_to_async(qr.save)()
 
         assert qr.image_file is not None
         assert '.png' in qr.image_file
@@ -54,14 +56,14 @@ class TestSetupIntegration:
     async def test_url_shortening_workflow(self):
         """Test URL shortening end-to-end."""
         # Create user
-        user = User.objects.create_user(
+        user = await sync_to_async(User.objects.create_user)(
             email='short@example.com',
             password='testpass123',
             name='Short Test',
         )
 
         # Create QR code with URL shortening
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com/very-long-url',
             original_url='https://example.com/very-long-url',
             use_url_shortening=True,
@@ -81,7 +83,7 @@ class TestSetupIntegration:
         qr.content = redirect_url
         image_path = await QRCodeGenerator.generate_qr_code(qr)
         qr.image_file = image_path
-        qr.save()
+        await sync_to_async(qr.save)()
 
         assert qr.image_file is not None
         assert '.svg' in qr.image_file
@@ -126,9 +128,9 @@ class TestSetupIntegration:
         )
 
         # Log the user in
-        assert client.login(username=user.username, password='testpass123') is True
+        client.force_login(user)
 
-        response = client.get('/dashboard/')
+        response = client.get(reverse('qr_code:dashboard'))
 
         assert response.status_code == 200
         content = response.content.decode('utf-8')

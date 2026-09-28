@@ -23,6 +23,7 @@ admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrco
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
 pyproject.toml        Deps, ruff/ty/pytest/import-linter config, `inv` module registry.
+.github/workflows/    CI (`ci.yml`): `inv lint all --check` then `inv test unit` on every push/PR.
 ```
 
 `AGENTS.md` just redirects here.
@@ -618,22 +619,22 @@ proxy"). A coarse `limit_req` in nginx itself is a recommended defense-in-depth 
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 586 pass, 29 fail, 1 skipped. The failures are **not** layout
-problems — they are drift between the suites and a codebase that migrated from DRF to
-django-ninja and from sync to async. Don't try to fix them by moving files around.
+Run everything with `inv test unit`: 0 failures, gated by CI (`.github/workflows/ci.yml`, `inv lint
+all --check` then `inv test unit`). Two contracts are worth knowing since they aren't obvious from
+the code alone:
 
-| file | n | cause |
-|---|---|---|
-| `billing/tests/test_credits_api.py` | 11 | calls DRF's `api_client.force_authenticate()`; the fixture is a ninja `TestClient`. Never ported off DRF |
-| `qr_code/tests/test_services.py` | 8 | `SynchronousOnlyOperation` — async tests touching the ORM without `sync_to_async` |
-| `accounts/tests/unit/test_authentication.py` | 4 | expects `JWTAuth.authenticate` to return `None` for a bad token; ninja_jwt raises `InvalidToken` before `authenticate` runs |
-| `qr_code/tests/test_setup_integration.py` | 3 | same `SynchronousOnlyOperation` |
-| `accounts/tests/api/test_auth_login_api.py` | 1 | same login/JWT surface |
-| `core/tests/test_admin_tools.py` | 1 | expects 403; Django admin redirects 302 to its login |
-| `qr_code/tests/test_setup_unit.py` | 1 | same `SynchronousOnlyOperation` |
+- `JWTAuth`/`AsyncJWTAuth` (`apps/accounts/auth.py`) catch ninja_jwt's `InvalidToken`/
+  `AuthenticationFailed` and return `None` rather than let it escape -- Django Ninja's own auth
+  contract is "`None` means 401"; letting the exception propagate instead is a 500 in production on
+  any malformed/expired/unknown-user `Authorization` header.
+- An async test that touches the ORM directly wraps each call in `sync_to_async` and runs under
+  `pytest.mark.django_db(transaction=True)` (see `apps/qr_code/tests/test_services.py`) --
+  `sync_to_async`'s executor runs on a different thread than the one pytest-django's default,
+  non-transactional `django_db` fixture opens its connection on, and a second SQLite connection
+  touching the same file while that transaction is open deadlocks.
 
-Each needs a product decision (what *should* signup return? should `JWTAuth` swallow an invalid
-token?) or a real port of a DRF-era module.
+See issue #51 for the history of how the rest of the suite (a stale DRF-era test client, an
+admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to green.
 
 ## Known gaps
 

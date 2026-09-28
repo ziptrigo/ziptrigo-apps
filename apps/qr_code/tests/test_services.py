@@ -5,20 +5,21 @@ Unit tests for QR code generation services.
 from pathlib import Path
 
 import pytest
+from asgiref.sync import sync_to_async
 from django.conf import settings
 
 from apps.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat
 from apps.qr_code.services import QRCodeGenerator
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 class TestQRCodeGenerator:
     """Test cases for the QRCodeGenerator service."""
 
     @pytest.mark.asyncio
     async def test_generate_png_qrcode(self, user, tmp_path):
         """Test generating a PNG QR code."""
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.PNG,
@@ -38,7 +39,7 @@ class TestQRCodeGenerator:
     @pytest.mark.asyncio
     async def test_generate_svg_qrcode(self, user):
         """Test generating an SVG QR code."""
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.SVG,
@@ -57,7 +58,7 @@ class TestQRCodeGenerator:
     @pytest.mark.asyncio
     async def test_generate_pdf_qrcode(self, user):
         """Test generating a PDF QR code."""
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.PDF,
@@ -76,7 +77,7 @@ class TestQRCodeGenerator:
     @pytest.mark.asyncio
     async def test_generate_with_custom_colors(self, user):
         """Test generating QR code with custom colors."""
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.PNG,
@@ -94,7 +95,7 @@ class TestQRCodeGenerator:
     @pytest.mark.asyncio
     async def test_generate_with_transparent_background(self, user):
         """Test generating QR code with transparent background."""
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.PNG,
@@ -112,7 +113,7 @@ class TestQRCodeGenerator:
     @pytest.mark.asyncio
     async def test_generate_with_custom_size(self, user):
         """Test generating QR code with custom size."""
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.PNG,
@@ -129,7 +130,7 @@ class TestQRCodeGenerator:
     @pytest.mark.asyncio
     async def test_generate_with_custom_border(self, user):
         """Test generating QR code with custom border."""
-        qr = QRCode.objects.create(
+        qr = await sync_to_async(QRCode.objects.create)(
             content='https://example.com',
             created_by=user,
             qr_format=QRCodeFormat.PNG,
@@ -154,7 +155,7 @@ class TestQRCodeGenerator:
         ]
 
         for level in levels:
-            qr = QRCode.objects.create(
+            qr = await sync_to_async(QRCode.objects.create)(
                 content=f'https://example.com/{level.value}',
                 created_by=user,
                 qr_format=QRCodeFormat.PNG,
