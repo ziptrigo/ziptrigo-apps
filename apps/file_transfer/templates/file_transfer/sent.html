@@ -1,0 +1,29 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Transfer sent - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-2xl text-center">
+    <i class="fas fa-check-circle text-5xl text-brand-primary mb-4"></i>
+    <h1 class="text-3xl font-bold mb-4 text-gray-900 dark:text-gray-100">Your transfer is on its way</h1>
+    <p class="text-gray-600 dark:text-gray-400 mb-6">
+        We emailed the recipients and sent you a copy. Here's the link too:
+    </p>
+    <div class="bg-white dark:bg-gray-800 shadow rounded-md p-4 flex items-center gap-2 mb-6">
+        <input type="text" readonly value="{{ download_url }}" id="download-url-input"
+               class="flex-1 text-sm bg-transparent text-gray-900 dark:text-gray-100 border-none focus:ring-0">
+        <button type="button" id="copy-link-btn"
+                class="px-3 py-1.5 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90">
+            <i class="fas fa-copy mr-1"></i>Copy
+        </button>
+    </div>
+    <a href="{% url 'file_transfer:dashboard' %}" class="text-brand-primary hover:underline">Back to your transfers</a>
+</div>
+<script>
+document.getElementById('copy-link-btn').addEventListener('click', function () {
+    const input = document.getElementById('download-url-input');
+    input.select();
+    navigator.clipboard.writeText(input.value).catch(function () { document.execCommand('copy'); });
+});
+</script>
+{% endblock %}

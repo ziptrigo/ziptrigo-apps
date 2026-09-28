@@ -1,4 +1,26 @@
 services:
+  db:
+    # This stack's own Postgres, distinct from the shared cross-repo `docker-compose.postgres.yml`
+    # (see that file's header): that one is for local dev tooling shared with sibling repos, this
+    # one is part of the deployable `web` + `worker` + `db` stack, matching production (both use
+    # `DATABASE_URL`, see `config/settings.py`). Same major version as `docker-compose.postgres.yml`
+    # for consistency.
+    image: postgres:18-alpine
+    container_name: ziptrigo-db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ziptrigo}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ziptrigo}
+      - POSTGRES_DB=${POSTGRES_DB:-ziptrigo}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ziptrigo}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   web:
     build:
       context: .
@@ -13,11 +35,12 @@ services:
       - SECRET_KEY=${SECRET_KEY:-django-insecure-change-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-dev}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=${DATABASE_URL:-postgres://ziptrigo:ziptrigo@db:5432/ziptrigo}
       - BASE_URL=${BASE_URL:-http://localhost:8000}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - EMAIL_BACKENDS=${EMAIL_BACKENDS:-console}
       - AWS_SES_SENDER=${AWS_SES_SENDER:-no-reply@ziptrigo.com}
+      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-1}
     env_file:
       - .env.dev
     volumes:
@@ -26,8 +49,85 @@ services:
       - ./.env.dev:/app/.env.dev:ro
       - media:/app/media
       - staticfiles:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # A plain TCP check (no extra tooling needed in the runtime image): once something answers
+      # on 8000, `docker-entrypoint.sh` must already have finished `migrate`, since that runs
+      # before `runserver`/gunicorn ever binds the port. `worker` and `scheduler` wait on this
+      # (`service_healthy`) rather than `service_started` so they can't race `web`'s migration.
+      test: ['CMD', 'python', '-c', "import socket; socket.create_connection(('localhost', 8000), 2).close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    # `django_tasks_db`'s queue worker (emails, deleting a transfer's objects). Its own service --
+    # see `scheduler` below for why not one container running both, and `docker-entrypoint.sh` for
+    # why it doesn't run migrations.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ziptrigo-worker
+    command: ['python', 'manage.py', 'db_worker']
+    environment: &worker_environment
+      - DEBUG=${DEBUG:-False}
+      - SECRET_KEY=${SECRET_KEY:-django-insecure-change-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - DATABASE_URL=${DATABASE_URL:-postgres://ziptrigo:ziptrigo@db:5432/ziptrigo}
+      - BASE_URL=${BASE_URL:-http://localhost:8000}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - EMAIL_BACKENDS=${EMAIL_BACKENDS:-console}
+      - AWS_SES_SENDER=${AWS_SES_SENDER:-no-reply@ziptrigo.com}
+      # Only `web` migrates: two containers racing `migrate` concurrently is exactly the bug this
+      # fixes (see git history) -- `web` being healthy already implies migrations are applied
+      # (see its healthcheck above), and `depends_on` below waits for that before starting.
+      - RUN_MIGRATIONS=0
+    env_file:
+      - .env.dev
+    volumes: &worker_volumes
+      - ./apps:/app/apps
+      - ./config:/app/config
+      - ./.env.dev:/app/.env.dev:ro
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    # `apps.core.scheduler`'s runner (the four file_transfer jobs, spec section 10). A separate
+    # service from `worker` rather than the two of them backgrounded in one container with `&` +
+    # `wait`: `/bin/sh` in the `python:3.14-slim` runtime is dash, which doesn't support `wait -n`
+    # (`wait: Illegal option -n`) -- that made the previous single container exit right after
+    # backgrounding both processes, so neither ever actually ran, and even a working supervisor
+    # script leaves `sh` as PID 1, which doesn't forward SIGTERM to its children, so a graceful
+    # stop wouldn't reach `run_scheduler`'s own stop handling either way. Two plain services each
+    # run their one process as PID 1, so `docker compose stop` / SIGTERM reaches it directly, and
+    # each restarts independently of the other.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ziptrigo-scheduler
+    command: ['python', 'manage.py', 'run_scheduler']
+    environment: *worker_environment
+    env_file:
+      - .env.dev
+    volumes: *worker_volumes
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   media:
   staticfiles:
+  postgres_data:

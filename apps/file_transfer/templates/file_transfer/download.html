@@ -1,0 +1,56 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ transfer.display_name }} - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-2xl">
+    <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6">
+        <h1 class="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">{{ transfer.display_name }}</h1>
+
+        {% if transfer.message %}
+        <p class="text-gray-700 dark:text-gray-300 whitespace-pre-line mb-6">{{ transfer.message }}</p>
+        {% endif %}
+
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            {% if transfer.expires_at %}Available until {{ transfer.expires_at|date:"Y-m-d H:i" }} UTC{% else %}No expiration{% endif %}
+        </p>
+
+        {# The file list (names and sizes) is always shown -- only the download itself is
+           password-gated (spec section 3). #}
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700 mb-6">
+            {% for file in files %}
+            <li class="py-3 flex items-center justify-between">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ file.name }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ file.size|filesizeformat }}</p>
+                </div>
+                {% if unlocked %}
+                <a href="{% url 't:download-file' transfer.slug file.id %}"
+                   class="px-3 py-1.5 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90 whitespace-nowrap">
+                    <i class="fas fa-download mr-1"></i>Download
+                </a>
+                {% else %}
+                <span class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 text-gray-400 whitespace-nowrap">
+                    <i class="fas fa-lock mr-1"></i>Locked
+                </span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+
+        {% if not unlocked %}
+        <form method="post" action="{% url 't:unlock' transfer.slug %}" class="space-y-3 border-t border-gray-200 dark:border-gray-700 pt-4">
+            {% csrf_token %}
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                This transfer is password protected. Enter the password to download.
+            </label>
+            {{ password_form.password }}
+            {% for error in password_form.password.errors %}
+            <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+            {% endfor %}
+            <button type="submit" class="px-4 py-2 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90">Unlock</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

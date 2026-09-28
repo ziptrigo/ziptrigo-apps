@@ -1,0 +1,268 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Send files - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+    <h1 class="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">Send files</h1>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+        Your balance: {{ balance }} credit{{ balance|pluralize }}. Sending needs at least
+        {{ min_balance_to_send }}.
+        {% if balance < min_balance_to_send %}
+        <a href="{% url 'billing:credits-history' %}" class="text-brand-primary hover:underline">Buy credits</a>.
+        {% endif %}
+    </p>
+
+    <div id="send-errors"></div>
+
+    <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6 mb-6">
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Files</label>
+        <div class="flex items-center gap-4">
+            <input type="file" id="file-input" multiple
+                   class="block w-full text-sm text-gray-700 dark:text-gray-300">
+            <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
+            <button type="button" id="pick-folder-btn"
+                    class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                <i class="fas fa-folder-open mr-1"></i>Add folder
+            </button>
+        </div>
+        <ul id="file-list" class="mt-4 space-y-2"></ul>
+    </div>
+
+    <form id="send-form" hx-post="{% url 'file_transfer:send-submit' draft_id %}" hx-target="#send-errors"
+          hx-swap="innerHTML" class="bg-white dark:bg-gray-800 shadow rounded-md p-6 space-y-4">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.recipients.label }}</label>
+            {{ form.recipients }}
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ form.recipients.help_text }}</p>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Message</label>
+            {{ form.message }}
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Expiry</label>
+                {{ form.expiry_choice }}
+                {{ form.expiry_date }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Max downloads</label>
+                {{ form.max_downloads }}
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password (optional)</label>
+                {{ form.password }}
+            </div>
+            <div class="flex items-center mt-6">
+                <label class="text-sm text-gray-700 dark:text-gray-300">
+                    {{ form.notify_on_download }} Email me when a file is downloaded
+                </label>
+            </div>
+        </div>
+
+        <button type="submit" id="send-submit-btn" disabled
+                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+            <i class="fas fa-paper-plane mr-2"></i>Send
+        </button>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Add at least one file that has finished uploading.</p>
+    </form>
+</div>
+
+<script>
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    const draftId = "{{ draft_id }}";
+    const fileInput = document.getElementById('file-input');
+    const folderInput = document.getElementById('folder-input');
+    const pickFolderBtn = document.getElementById('pick-folder-btn');
+    const fileListEl = document.getElementById('file-list');
+    const submitBtn = document.getElementById('send-submit-btn');
+    const files = new Map(); // file_id -> { name, size, uploaded }
+    const csrftoken = getCookie('csrftoken');
+
+    function updateSubmitState() {
+        const anyUploaded = Array.from(files.values()).some(function (f) { return f.uploaded; });
+        submitBtn.disabled = !anyUploaded;
+    }
+
+    // Base64-encode a SHA-256 digest of `blob`, for the S3 per-part integrity check (spec
+    // section 11): the multipart upload was created with `ChecksumAlgorithm='SHA256'`
+    // (`services.storage.S3Storage.create_multipart_upload`), so S3 requires every part to carry
+    // its own checksum. Computed here, client-side, *before* asking Django for that part's
+    // presigned URL -- the checksum has to be known before the URL is signed, since it becomes
+    // part of the signature (`ChecksumSHA256` in `services.uploads.presign_parts`), and a
+    // presigned URL can only bind to a value the signer already has.
+    async function sha256Base64(blob) {
+        const buffer = await blob.arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256', buffer);
+        let binary = '';
+        new Uint8Array(digest).forEach(function (byte) { binary += String.fromCharCode(byte); });
+        return btoa(binary);
+    }
+
+    function renderRow(fileId, entry) {
+        let li = document.getElementById('file-row-' + fileId);
+        if (!li) {
+            li = document.createElement('li');
+            li.id = 'file-row-' + fileId;
+            li.className = 'flex items-center justify-between text-sm gap-2';
+            fileListEl.appendChild(li);
+        }
+        // Built with DOM APIs (not `innerHTML`) so a file name is never parsed as markup --
+        // `entry.name` comes straight from the browser's own File objects, but a folder upload
+        // can carry names the user didn't type themselves.
+        li.textContent = '';
+        const pct = entry.progress || 0;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'truncate flex-1';
+        nameSpan.textContent = entry.name + ' (' + Math.round(entry.size / 1024 / 1024) + ' MB)';
+
+        const barOuter = document.createElement('span');
+        barOuter.className = 'w-32 bg-gray-200 dark:bg-gray-700 rounded h-2 overflow-hidden';
+        const barInner = document.createElement('span');
+        barInner.className = 'block h-2 bg-brand-primary';
+        barInner.style.width = pct + '%';
+        barOuter.appendChild(barInner);
+
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'w-16 text-right';
+        statusSpan.textContent = entry.uploaded ? 'Done' : pct + '%';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.setAttribute('data-remove', fileId);
+        removeBtn.className = 'text-red-500 hover:underline';
+        removeBtn.textContent = 'Remove';
+
+        li.append(nameSpan, barOuter, statusSpan, removeBtn);
+    }
+
+    async function uploadFile(file) {
+        const addResp = await fetch('/transfer/send/' + draftId + '/files/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ name: file.name, size: file.size }),
+        });
+        if (!addResp.ok) {
+            const err = await addResp.json().catch(function () { return {}; });
+            alert('Could not add ' + file.name + ': ' + (err.error || addResp.status));
+            return;
+        }
+        const added = await addResp.json();
+        const fileId = added.file_id;
+        const partSize = added.part_size_bytes;
+        const partCount = added.part_count;
+
+        files.set(fileId, { name: file.name, size: file.size, uploaded: false, progress: 0 });
+        renderRow(fileId, files.get(fileId));
+
+        // Slice every part and hash it up front, so each request for a presigned URL can carry
+        // that part's checksum (see `sha256Base64` above).
+        const blobs = [];
+        const requestParts = [];
+        for (let i = 0; i < partCount; i++) {
+            const partNumber = i + 1;
+            const start = i * partSize;
+            const end = Math.min(start + partSize, file.size);
+            const blob = file.slice(start, end);
+            blobs.push(blob);
+            requestParts.push({
+                part_number: partNumber,
+                checksum_sha256: await sha256Base64(blob),
+            });
+        }
+
+        const urlsResp = await fetch('/transfer/send/' + draftId + '/files/' + fileId + '/parts/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ parts: requestParts }),
+        });
+        if (!urlsResp.ok) {
+            const err = await urlsResp.json().catch(function () { return {}; });
+            alert('Could not start uploading ' + file.name + ': ' + (err.error || urlsResp.status));
+            return;
+        }
+        const urlsData = await urlsResp.json();
+        const parts = [];
+
+        for (let i = 0; i < partCount; i++) {
+            const partNumber = i + 1;
+            const checksum = requestParts[i].checksum_sha256;
+            const url = urlsData.urls[String(partNumber)];
+            const putResp = await fetch(url, {
+                method: 'PUT',
+                headers: { 'x-amz-checksum-sha256': checksum },
+                body: blobs[i],
+            });
+            if (!putResp.ok) {
+                alert('Uploading part ' + partNumber + ' of ' + file.name + ' failed: ' + putResp.status);
+                return;
+            }
+            const etag = putResp.headers.get('ETag');
+            parts.push({ PartNumber: partNumber, ETag: etag, ChecksumSHA256: checksum });
+
+            const entry = files.get(fileId);
+            entry.progress = Math.round((partNumber / partCount) * 100);
+            renderRow(fileId, entry);
+        }
+
+        const completeResp = await fetch('/transfer/send/' + draftId + '/files/' + fileId + '/complete/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ parts: parts }),
+        });
+        if (completeResp.ok) {
+            const entry = files.get(fileId);
+            entry.uploaded = true;
+            entry.progress = 100;
+            renderRow(fileId, entry);
+            updateSubmitState();
+        } else {
+            const err = await completeResp.json().catch(function () { return {}; });
+            alert('Upload of ' + file.name + ' failed: ' + (err.error || completeResp.status));
+        }
+    }
+
+    if (fileInput) {
+        fileInput.addEventListener('change', function () {
+            Array.from(fileInput.files).forEach(function (file) {
+                uploadFile(file);
+            });
+            fileInput.value = '';
+        });
+    }
+    if (pickFolderBtn && folderInput) {
+        pickFolderBtn.addEventListener('click', function () { folderInput.click(); });
+        folderInput.addEventListener('change', function () {
+            Array.from(folderInput.files).forEach(function (file) {
+                uploadFile(file);
+            });
+            folderInput.value = '';
+        });
+    }
+
+    fileListEl.addEventListener('click', async function (e) {
+        const btn = e.target.closest('button[data-remove]');
+        if (!btn) return;
+        const fileId = btn.getAttribute('data-remove');
+        await fetch('/transfer/send/' + draftId + '/files/' + fileId + '/remove/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrftoken },
+        });
+        files.delete(fileId);
+        document.getElementById('file-row-' + fileId).remove();
+        updateSubmitState();
+    });
+});
+</script>
+{% endblock %}

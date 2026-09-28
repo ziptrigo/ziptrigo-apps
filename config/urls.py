@@ -23,6 +23,9 @@ urlpatterns = [
     # QR code short links live at the root (`/go/<code>`), outside the `qr/` prefix: they're
     # printed on physical QR codes, so they must stay short and never move.
     path('', include('apps.qr_code.redirect_urls')),
+    # File transfer download links live at the root (`/t/<slug>/`) for the same reason: they go
+    # out in emails and must stay short.
+    path('', include('apps.file_transfer.download_urls')),
     path('', include('apps.core.urls')),
 ]
 
