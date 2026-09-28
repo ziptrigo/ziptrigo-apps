@@ -69,6 +69,40 @@ def test_meter_transfer_rounds_down_and_charges_every_third_day(draft_transfer, 
     assert draft_transfer.display_name in tx.description or 'Untitled transfer' in tx.description
 
 
+def test_meter_transfer_advances_last_billed_at_by_exactly_one_period(draft_transfer, ft_settings):
+    """Advancing to `last_billed_at + 24h` rather than to `now` matters at the margins: a tick
+    that lands a little early each day would otherwise never quite reach the 24h mark and skip a
+    day's charge (see the docstring on `meter_transfer`)."""
+    start = timezone.now() - timedelta(hours=25)
+    _make_active(draft_transfer, size_bytes=_ONE_GB, last_billed_at=start)
+
+    metering.meter_transfer(draft_transfer, ft_settings)
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.last_billed_at == start + timedelta(hours=24)
+
+
+def test_meter_transfer_is_idempotent_when_rerun_for_the_same_due_period(
+    draft_transfer, ft_settings
+):
+    """The scheduler is at-least-once: if the process died right after this committed but before
+    the job's lease was released, the same tick could run `meter_transfer` on this transfer
+    again. A rerun right away must not charge a second time -- `last_billed_at` has already
+    advanced past the 24h due threshold from the first call."""
+    ft_settings.price_per_gb_per_day = Decimal('1.0')
+    ft_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    balance_before = get_balance(draft_transfer.owner)
+
+    metering.meter_transfer(draft_transfer, ft_settings)
+    metering.meter_transfer(draft_transfer, ft_settings)
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.billed_days == 1
+    assert draft_transfer.credits_charged == 1
+    assert get_balance(draft_transfer.owner) == balance_before - 1
+
+
 def test_meter_transfer_suspends_when_insufficient_credits(draft_transfer, ft_settings):
     ft_settings.price_per_gb_per_day = Decimal('1.0')
     ft_settings.save()

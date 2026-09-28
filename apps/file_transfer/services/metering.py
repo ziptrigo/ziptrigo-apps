@@ -10,6 +10,8 @@ and by the `credits_added` signal receiver in `apps/file_transfer/apps.py` (the 
 from datetime import timedelta
 from decimal import ROUND_FLOOR, Decimal
 
+from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -38,50 +40,65 @@ def meter_transfer(transfer: Transfer, settings_row: FileTransferSettings | None
     only the floor of that -- whenever it's at least 1 -- is actually spent, keeping the
     remainder. Suspends the transfer (and emails the owner) if the owner can't cover a whole
     credit. Never charges a suspended, disabled, expired or deleted transfer.
+
+    Locks the transfer row for the duration of the charge, re-checking due-ness once the lock is
+    held (a concurrent run of the same at-least-once job must not double-charge the same day), and
+    advances `last_billed_at` by exactly one billing period rather than to "now": jumping to "now"
+    would let a tick that lands a few seconds early each day never quite reach the 24h mark,
+    silently skipping a day's charge (and, for a transfer that's several days overdue -- the
+    process was down, say -- charging one day per run still lets it catch up one period at a time
+    without ever billing for days it shouldn't). A transfer that stops being metered (disabled,
+    suspended) simply stops advancing `last_billed_at` until `reenable_transfer` resets it to
+    "now", so no backlog ever accumulates across a disabled or suspended stretch.
     """
-    if transfer.status != TransferStatus.ACTIVE or transfer.owner is None:
-        return
-
-    now = timezone.now()
-    if transfer.last_billed_at and now - transfer.last_billed_at < _BILLING_PERIOD:
-        return
-
     settings_row = settings_row or FileTransferSettings.load()
-    accrued = transfer.accrued + settings_row.price_per_gb_per_day * _size_in_gb(
-        transfer.size_bytes
-    )
-    whole_credits = int(accrued.to_integral_value(rounding=ROUND_FLOOR))
-    billed_days = transfer.billed_days + 1
+    now = timezone.now()
 
-    if whole_credits < 1:
-        Transfer.objects.filter(pk=transfer.pk).update(
-            accrued=accrued, last_billed_at=now, billed_days=billed_days
+    with transaction.atomic():
+        locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
+        if locked.status != TransferStatus.ACTIVE or locked.owner is None:
+            return
+        if locked.last_billed_at and now - locked.last_billed_at < _BILLING_PERIOD:
+            return
+
+        next_billed_at = (locked.last_billed_at or now) + _BILLING_PERIOD
+        accrued = locked.accrued + settings_row.price_per_gb_per_day * _size_in_gb(
+            locked.size_bytes
         )
-        transfer.accrued = accrued
-        transfer.last_billed_at = now
+        whole_credits = int(accrued.to_integral_value(rounding=ROUND_FLOOR))
+        billed_days = locked.billed_days + 1
+
+        if whole_credits < 1:
+            Transfer.objects.filter(pk=locked.pk).update(
+                accrued=accrued, last_billed_at=next_billed_at, billed_days=F('billed_days') + 1
+            )
+            transfer.accrued = accrued
+            transfer.last_billed_at = next_billed_at
+            transfer.billed_days = billed_days
+            return
+
+        description = f'Transfer "{transfer_display_name(locked)}", day {billed_days}'
+        try:
+            spend_credits(
+                locked.owner, whole_credits, description=description, source='file_transfer'
+            )
+        except InsufficientCreditsError:
+            suspend_transfer(locked)
+            transfer.status = locked.status
+            transfer.suspended_at = locked.suspended_at
+            return
+
+        remainder = accrued - whole_credits
+        Transfer.objects.filter(pk=locked.pk).update(
+            accrued=remainder,
+            last_billed_at=next_billed_at,
+            billed_days=F('billed_days') + 1,
+            credits_charged=F('credits_charged') + whole_credits,
+        )
+        transfer.accrued = remainder
+        transfer.last_billed_at = next_billed_at
         transfer.billed_days = billed_days
-        return
-
-    description = f'Transfer "{transfer_display_name(transfer)}", day {billed_days}'
-    try:
-        spend_credits(
-            transfer.owner, whole_credits, description=description, source='file_transfer'
-        )
-    except InsufficientCreditsError:
-        suspend_transfer(transfer)
-        return
-
-    remainder = accrued - whole_credits
-    Transfer.objects.filter(pk=transfer.pk).update(
-        accrued=remainder,
-        last_billed_at=now,
-        billed_days=billed_days,
-        credits_charged=transfer.credits_charged + whole_credits,
-    )
-    transfer.accrued = remainder
-    transfer.last_billed_at = now
-    transfer.billed_days = billed_days
-    transfer.credits_charged += whole_credits
+        transfer.credits_charged += whole_credits
 
 
 def suspend_transfer(transfer: Transfer) -> None:

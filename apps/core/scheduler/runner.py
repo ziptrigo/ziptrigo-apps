@@ -12,7 +12,6 @@ import traceback
 
 from django.db.models import DateTimeField, ExpressionWrapper, F, Q
 from django.db.models.functions import Now
-from django.utils import timezone
 
 from ..models import ScheduledJob
 from .registry import JobSpec, get_jobs
@@ -32,9 +31,11 @@ def try_claim(job: JobSpec) -> bool:
 
     Succeeds only when the row's lease isn't currently held (`locked_until` unset or in the past,
     per the database clock) and the job is due (`last_started_at` unset or older than its
-    interval). Claiming sets `locked_until` to now + the job's lease and `last_started_at` to now.
+    interval, also per the database clock -- using the calling process's own clock here instead
+    would let two runners whose clocks disagree, even slightly, disagree about whether the job is
+    due). Claiming sets `locked_until` to now + the job's lease and `last_started_at` to now.
     """
-    due_before = timezone.now() - job.interval
+    due_before = ExpressionWrapper(Now() - job.interval, output_field=DateTimeField())
     lease_until = ExpressionWrapper(Now() + job.lease, output_field=DateTimeField())
 
     updated = (
