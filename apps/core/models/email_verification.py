@@ -28,7 +28,12 @@ class EmailVerification(models.Model):
     # Hashed, never the raw code/token -- see `apps.core.services.email_verification` for how and
     # why (HMAC-SHA256, keyed with `SECRET_KEY`, compared in constant time).
     code_hash = cast(str, models.CharField(max_length=64))
-    token_hash = cast(str, models.CharField(max_length=64, db_index=True))
+    # `unique=True` (not just `db_index=True`): `confirm_by_token` looks a row up by this alone,
+    # so two rows sharing a hash would make that lookup ambiguous. A collision would need either
+    # a second `secrets.token_urlsafe(32)` draw landing on the same 32 bytes, or a HMAC-SHA256
+    # collision -- vanishingly unlikely, but the constraint costs nothing and removes the
+    # possibility outright rather than relying on luck.
+    token_hash = cast(str, models.CharField(max_length=64, unique=True))
 
     expires_at = cast(datetime, models.DateTimeField())
     attempts = cast(int, models.PositiveSmallIntegerField(default=0))

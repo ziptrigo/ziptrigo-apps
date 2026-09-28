@@ -1,7 +1,16 @@
 from typing import ClassVar, cast
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+#: Bounds for the email verification knobs below (issue #58 follow-up): wide enough to allow real
+#: retuning from the admin, narrow enough that no admin-set value can break the service outright
+#: (a 0-digit code always matches, 0 attempts burns every row on arrival, 0 minutes' validity
+#: expires a link before it can ever be used).
+_CODE_LENGTH_MIN, _CODE_LENGTH_MAX = 6, 10
+_MAX_ATTEMPTS_MIN, _MAX_ATTEMPTS_MAX = 1, 10
+_VALIDITY_MINUTES_MIN = 1
 
 
 class CoreSettings(models.Model):
@@ -22,6 +31,10 @@ class CoreSettings(models.Model):
             default=6,
             verbose_name='Verification code length',
             help_text='Number of digits in a generated email verification code.',
+            validators=[
+                MinValueValidator(_CODE_LENGTH_MIN),
+                MaxValueValidator(_CODE_LENGTH_MAX),
+            ],
         ),
     )
     email_verification_validity_minutes = cast(
@@ -30,6 +43,7 @@ class CoreSettings(models.Model):
             default=30,
             verbose_name='Verification validity (minutes)',
             help_text='How long an email verification code/link stays valid after it is sent.',
+            validators=[MinValueValidator(_VALIDITY_MINUTES_MIN)],
         ),
     )
     email_verification_max_attempts = cast(
@@ -40,6 +54,10 @@ class CoreSettings(models.Model):
             help_text=(
                 'Wrong codes allowed before a verification is burned and a resend is required.'
             ),
+            validators=[
+                MinValueValidator(_MAX_ATTEMPTS_MIN),
+                MaxValueValidator(_MAX_ATTEMPTS_MAX),
+            ],
         ),
     )
     email_verification_resend_cooldown_seconds = cast(
@@ -48,6 +66,7 @@ class CoreSettings(models.Model):
             default=60,
             verbose_name='Verification resend cooldown (seconds)',
             help_text='Minimum time between two verification sends for the same email+purpose.',
+            validators=[MinValueValidator(0)],
         ),
     )
 

@@ -166,33 +166,66 @@ a code and a link -- for any app that needs to prove someone controls an email a
 necessarily having a user for it yet (`core` can't import `accounts`, and an anonymous
 `file_transfer` sender, planned for a later phase, isn't a user at all). It's keyed on
 `(email, purpose)`, where `purpose` is a free string the caller picks (e.g.
-`'accounts.email_confirmation'`) that `core` never interprets. `start(email, purpose,
+`'accounts.email_confirmation'`) that `core` never interprets beyond scoping rows to it --
+`confirm_by_code(id, code, purpose)` / `confirm_by_token(token, purpose)` both require it and
+filter on it, so a code or token minted for one purpose can never confirm a row belonging to
+another (indistinguishable from `NotFound` if it doesn't match). `start(email, purpose,
 build_email=...)` generates a code and a token (via `secrets`, stored only as HMAC-SHA256 digests
 keyed with `SECRET_KEY`, compared with `hmac.compare_digest`), emails them through the caller's
 `build_email` callback (which builds the subject/body and any confirmation link from
 `context.token` -- `core` doesn't know a caller's URL names) and `apps.core.services.email`, and
-returns the new row's id; `confirm_by_code(id, code)` / `confirm_by_token(token)` return the
-verified email or raise a typed `EmailVerificationError` subclass (`Expired`, `Burned` after too
-many wrong codes, `Superseded` by a resend, `NotFound`, `AlreadyConfirmed`, or `IncorrectCode`/
-`ResendTooSoon` carrying attempts-left/retry-after). Starting a new verification invalidates any
-previous pending one for the same `email`/`purpose` -- only the latest is ever valid.
-`confirm_by_token` is deliberately idempotent for a row its own token already confirmed (unlike
-`confirm_by_code`, which is strictly single-use); see the module docstring for why. Code length,
-max attempts and the resend cooldown come from the admin-editable `CoreSettings` singleton
-(`CoreSettings.load()`, defaults: 6 digits, 5 attempts, 60s cooldown). Validity normally comes
-from there too (default 30 minutes) but `start(..., validity=timedelta(...))` lets a caller
+returns the new row's id; the two confirm functions return the verified email or raise a typed
+`EmailVerificationError` subclass (`Expired`, `Burned` after too many wrong codes, `Superseded` by
+a resend, `NotFound`, `AlreadyConfirmed`, `SendFailed`, or `IncorrectCode`/`ResendTooSoon` carrying
+attempts-left/retry-after). Starting a new verification invalidates any previous pending one for
+the same `email`/`purpose` -- only the latest is ever valid; `invalidate(email, purpose)` does the
+same on demand, for a caller that needs to retire pending rows for a reason other than a resend
+(`accounts` calls it for a user's *old* address right when it changes, so a link already sent
+there can't later confirm whatever account claims that address next). `confirm_by_token` is
+deliberately idempotent for a row its own token already confirmed, but only while that row is
+still within its validity window -- past `expires_at` it raises `Expired` like any other stale
+link, rather than succeeding forever (unlike `confirm_by_code`, which is strictly single-use from
+the start); see the module docstring for why. Code length, max attempts and the resend cooldown
+come from the admin-editable `CoreSettings` singleton (`CoreSettings.load()`, defaults: 6 digits,
+5 attempts, 60s cooldown; each field is bounded with `Min`/`MaxValueValidator`s enforced by the
+admin form, e.g. code length 6-10, max attempts 1-10, validity >= 1 minute). Validity normally
+comes from there too (default 30 minutes) but `start(..., validity=timedelta(...))` lets a caller
 override it per call -- `core` stays generic and doesn't know or care why; it just means one
-purpose's needs don't force every other purpose onto the same window.
+purpose's needs don't force every other purpose onto the same window. Email matching (the resend
+cooldown, "only the newest is valid", `invalidate`) is case-insensitive, but the stored/returned
+`email` value is always exactly what the caller passed in -- never normalised -- so it round-trips
+safely into `accounts`' own case-sensitive `User.objects.get(email=...)`.
+
+Concurrency: `start`, `confirm_by_code` and `confirm_by_token` each run inside
+`transaction.atomic()` with `select_for_update()` on the row(s) touched, which serialises
+concurrent callers for real on Postgres (prod) and degrades to a harmless no-op on SQLite (dev/
+test). Independently of that lock, the writes that matter under a race -- the attempt counter and
+`confirmed_at` -- only ever go through a conditional `UPDATE` keyed on the value just read, never
+a blind `instance.save()`, so a stale-snapshot request fails closed (`Burned` / `AlreadyConfirmed`)
+instead of silently succeeding or undercounting guesses. Neither function ever raises from inside
+its `atomic()` block -- every outcome is decided first as plain local variables, then acted on
+once the block has exited normally -- so a business-rule rejection can never trigger a spurious
+rollback of a concurrent request's already-committed work. A failed `start` (every email backend
+failing) rolls back the whole call (the new row and the previous row's invalidation) and raises
+`EmailVerificationSendFailed` rather than leaving a dangling, undelivered row or a cooldown for an
+email nobody received.
 
 `accounts`' signup/email-change confirmation (`apps.accounts.services.email_confirmation`) is
 built on this instead of its own JWT (the now-removed `EmailConfirmationToken`); it only ever
 calls `confirm_by_token` since today's flow is link-only, and it passes `validity` explicitly
 from `EMAIL_CONFIRMATION_TOKEN_TTL_HOURS` (default 48h) to keep the historical signup-link
-lifetime unchanged rather than adopting the shared 30-minute default. One migration-time
-consequence: any confirmation email sent before this shipped used the old JWT and can no longer
-be validated at all, so those users need to hit "resend confirmation" once (judged low-impact --
-see the port's module docstring). `file_transfer`'s anonymous-sender confirmation (spec section
-2, not yet built) is expected to consume `confirm_by_code` for its code-entry page.
+lifetime unchanged rather than adopting the shared 30-minute default. `send_confirmation_email`
+catches `ResendTooSoon` and `EmailVerificationSendFailed` specifically (not the whole
+`EmailVerificationError` base) and swallows both, matching the old JWT-based flow's behaviour: a
+send failure was already silent from the caller's perspective before this port, since
+`send_email` itself never raised on a total failure. `PUT /api/account` invalidates any pending
+verification for the address a user is leaving (via `invalidate_pending_for_email`) before
+sending a new one to the new address, so a stale link to the old address can't later confirm
+whatever account claims it next. One migration-time consequence: any confirmation email sent
+before this shipped used the old JWT and can no longer be validated at all, so those users need
+to hit "resend confirmation" once (judged low-impact -- see the port's module docstring).
+`file_transfer`'s anonymous-sender confirmation (spec section 2, not yet built) is expected to
+consume `confirm_by_code` for its code-entry page.
 
 ### API
 
@@ -328,7 +361,7 @@ above).
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 363 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 394 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 

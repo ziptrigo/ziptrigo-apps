@@ -56,3 +56,25 @@ def test_email_in_use_is_rejected(client, user, sent_confirmations):
     user.refresh_from_db()
     assert user.email == 'testuser@example.com'
     assert user.email_confirmed
+
+
+def test_email_change_invalidates_a_still_pending_confirmation_for_the_old_address(
+    client, user, sent_confirmations
+):
+    """Issue #58 follow-up: a confirmation link already sent to the address a user is leaving
+    must stop working once they move away from it -- otherwise, if that address is later freed
+    and claimed by someone else, the original owner's stale link could confirm the *new*
+    account."""
+    from apps.core.models import EmailVerification
+    from apps.core.services.email_verification import EmailVerificationContext, start
+
+    def build_email(context: EmailVerificationContext) -> tuple[str, str, str]:
+        return 'subject', 'text', 'html'
+
+    pending_id = start(user.email, 'accounts.email_confirmation', build_email=build_email)
+
+    response = _put(client, user, {'email': 'new@example.com'})
+
+    assert response.status_code == 200
+    pending = EmailVerification.objects.get(pk=pending_id)
+    assert pending.invalidated_at is not None

@@ -32,6 +32,7 @@ explicitly, keeping the signup confirmation window exactly what it always was, i
 whatever `CoreSettings` says for other purposes.
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -42,11 +43,16 @@ from apps.core.services.email import EmailBackendClass, get_email_backend
 from apps.core.services.email_verification import (
     EmailVerificationContext,
     EmailVerificationError,
+    EmailVerificationSendFailed,
+    ResendTooSoon,
     confirm_by_token,
+    invalidate,
     start,
 )
 
 from ..models import User
+
+logger = logging.getLogger(__name__)
 
 #: `core.services.email_verification` scopes "only the latest verification is valid" and the
 #: resend cooldown to `(email, purpose)` -- this string is accounts' own namespace within that, so
@@ -64,9 +70,21 @@ class EmailConfirmationService:
         """Start a new verification for `user.email` and send the confirmation email.
 
         Called from three places (signup, `PUT /api/account` changing the email, and the
-        `resend-confirmation` endpoint) -- none of which should turn the shared service's resend
-        cooldown into a hard failure, so a too-soon resend is silently skipped rather than
-        raised.
+        `resend-confirmation` endpoint) -- none of which should turn either of the two expected,
+        non-fatal outcomes below into a hard failure for the caller, so both are silently
+        swallowed (after logging, for `EmailVerificationSendFailed`) rather than raised. This
+        matches what the old JWT-based version did for a send failure: it called `send_email`
+        directly and never checked the result, so a total delivery failure was already silent
+        from the caller's perspective (signup, the email-change response and resend-confirmation
+        all reported their usual success message regardless). The only behavioural difference
+        `core.services.email_verification` introduces is that a *failed* send no longer
+        invalidates whatever link was working before it (see `EmailVerificationSendFailed`'s
+        docstring) -- strictly an improvement, not a user-visible change.
+
+        - `ResendTooSoon`: a resend was requested before the shared cooldown elapsed.
+        - `EmailVerificationSendFailed`: every configured email backend failed to deliver the
+          new verification (already logged in detail by `apps.core.services.email.send_email`,
+          one line per failed backend); logged here too, once, for this specific call's context.
         """
 
         def build_email(context: EmailVerificationContext) -> tuple[str, str, str]:
@@ -84,9 +102,18 @@ class EmailConfirmationService:
                 email_backend_classes=self.email_backend_classes,
                 validity=timedelta(hours=settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS),
             )
-        except EmailVerificationError:
-            # In practice always `ResendTooSoon` -- see docstring above.
+        except ResendTooSoon:
             pass
+        except EmailVerificationSendFailed:
+            logger.warning('Confirmation email could not be delivered to %s', user.email)
+
+    def invalidate_pending_for_email(self, email: str) -> None:
+        """Invalidate any still-pending confirmation for `email` (issue #58 follow-up): called
+        right before a user's email changes away from it, so a still-valid confirmation link
+        already sent to the address they're leaving can't later be used to confirm whatever
+        account claims that address next -- see `apps.core.services.email_verification.invalidate`.
+        """
+        invalidate(email, PURPOSE)
 
     def _build_confirmation_url(self, token: str) -> str:
         base = settings.BASE_URL.rstrip('/')
@@ -98,11 +125,11 @@ class EmailConfirmationService:
         """Confirm the email address the token's verification was started for, and return the
         matching user -- or `None` if the token doesn't (or no longer) resolve to one. Callers
         treat that the same as an expired link, matching the old JWT behaviour (see module
-        docstring): the token might be expired, superseded by a resend, or simply unrecognised
-        (e.g. a pre-migration JWT link).
+        docstring): the token might be expired, superseded by a resend, unrecognised (e.g. a
+        pre-migration JWT link), or -- new in issue #58 -- for a different purpose entirely.
         """
         try:
-            email = confirm_by_token(token)
+            email = confirm_by_token(token, PURPOSE)
         except EmailVerificationError:
             return None
 
