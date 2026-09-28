@@ -8,6 +8,7 @@ no-op here) and then `head_object` to verify the size, so tests register the "up
 never actually receives.
 """
 
+import io
 from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
@@ -22,6 +23,12 @@ class FakeS3Storage:
     aborted_uploads: set[str] = field(default_factory=set)
     checksum: str = 'ZmFrZWNoZWNrc3Vt'
     presign_calls: list[tuple[str, int]] = field(default_factory=list)
+    #: Parts recorded through `upload_part` (the zip builder's server-side path), keyed by upload
+    #: id then part number -- assembled into `objects[key]` on `complete_multipart_upload`. The
+    #: browser-PUT path (`presign_part_url`) never populates this: those tests simulate the
+    #: uploaded bytes with `put_object` instead, so `complete_multipart_upload` leaves `objects`
+    #: alone when there's nothing recorded here for the upload id.
+    multipart_parts: dict[str, dict[int, bytes]] = field(default_factory=dict)
 
     def put_object(self, key: str, size: int) -> None:
         """Test helper: pretend `size` bytes were already PUT to `key`."""
@@ -48,12 +55,25 @@ class FakeS3Storage:
             url += f'&checksum={checksum_sha256}'
         return url
 
+    def upload_part(self, key: str, upload_id: str, part_number: int, body: bytes) -> str:
+        self.multipart_parts.setdefault(upload_id, {})[part_number] = bytes(body)
+        return f'etag-{upload_id}-{part_number}'
+
+    def get_object_stream(self, key: str) -> io.BytesIO:
+        if key not in self.objects:
+            raise ClientError({'Error': {'Code': '404', 'Message': 'Not Found'}}, 'GetObject')
+        return io.BytesIO(self.objects[key])
+
     def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]) -> None:
         self.active_uploads.discard(upload_id)
+        recorded = self.multipart_parts.pop(upload_id, None)
+        if recorded:
+            self.objects[key] = b''.join(recorded[number] for number in sorted(recorded))
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
         self.active_uploads.discard(upload_id)
         self.aborted_uploads.add(upload_id)
+        self.multipart_parts.pop(upload_id, None)
 
     def head_object(self, key: str) -> ObjectInfo:
         if key not in self.objects:
