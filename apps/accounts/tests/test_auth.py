@@ -96,6 +96,25 @@ class TestSignupEndpoint:
         assert response.status_code == 400
         assert 'already exists' in response.json()['detail'].lower()
 
+    def test_signup_rejects_email_differing_only_by_domain_case(self, api_client, user):
+        """Issue #52 code review: `user.email` ('test@example.com') is already normalized by
+        `UserManager.create_user` (which lower-cases only the domain). `create_account` -- shared
+        with the web register view -- must normalize the submitted email the same way before its
+        pre-check, or this would sail through both that check and pydantic's own validation and
+        hit the model's unique constraint directly, 500ing the endpoint instead of returning the
+        normal 400 duplicate-email response."""
+        data = {
+            'name': 'Another User',
+            'email': 'test@EXAMPLE.COM',
+            'password': 'password123',
+        }
+        assert data['email'].lower() == user.email
+
+        response = api_client.post('/auth/signup', json=data)
+
+        assert response.status_code == 400
+        assert 'already exists' in response.json()['detail'].lower()
+
     def test_signup_user_not_confirmed(self, api_client):
         """Test that newly created user has email_confirmed = False."""
         data = {

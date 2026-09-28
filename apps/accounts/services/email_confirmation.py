@@ -113,6 +113,19 @@ class EmailConfirmationService:
         except EmailVerificationSendFailed:
             logger.warning('Confirmation email could not be delivered to %s', user.email)
 
+    def resend_if_unconfirmed(self, email: str) -> None:
+        """Resend the confirmation email for `email` if it belongs to an unconfirmed account;
+        otherwise do nothing -- including when no account has that address at all. Shared (issue
+        #52) by the web `resend-confirmation` view and `POST /api/auth/resend-confirmation`,
+        neither of which may reveal whether the address is registered (CLAUDE.md).
+        """
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return
+        if not user.email_confirmed:
+            self.send_confirmation_email(user)
+
     def invalidate_pending_for_email(self, email: str) -> None:
         """Invalidate any still-pending confirmation for `email` (issue #58 follow-up): called
         right before a user's email changes away from it, so a still-valid confirmation link

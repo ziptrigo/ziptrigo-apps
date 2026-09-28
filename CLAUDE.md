@@ -153,8 +153,14 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE` users). Claim `sub`, signed with
   `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
 
-`POST /api/auth/login` only issues JWTs; it never starts a session. The other unauthenticated
-account pages (register, password reset, resend confirmation) still post JSON to `/api/auth/…`.
+`POST /api/auth/login` only issues JWTs; it never starts a session. Register, forgot-password,
+reset-password and resend-confirmation (issue #52) are session form views too, the same as login
+-- CSRF-protected, POST-only, following the "HTMX form views" convention below; the browser never
+sees a JWT on any of them. `/api/auth/…` still exposes the same operations (`signup`,
+`forgot-password`, `reset-password`, `resend-confirmation`) for non-browser clients; both surfaces
+share the same `apps.accounts.services` logic (`signup.create_account`,
+`password_reset.get_password_reset_service`, `email_confirmation.get_email_confirmation_service`)
+and the same `apps.core.ratelimit` rules, so validation and throttling can't drift between them.
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email.
 
@@ -309,8 +315,10 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   `Retry-After` header for every router. Plain/HTMX views call `ratelimit.web_response(request,
   result)` (or `.htmx_response`/`.page_response` directly) -- `core/base.html`'s `htmx-config` swaps
   429 like 422, so a partial actually renders into the page rather than htmx discarding it as an
-  error response. `register.html`/`forgot_password.html` both surface a 429's `data.detail` (or a
-  specific "try again later") instead of the generic "unexpected error" message.
+  error response. `register_page`/`forgot_password_page` (issue #52) both call
+  `ratelimit.web_response` directly, retargeting the 429 partial onto their own message element,
+  the same as every other rate-limited HTMX form view -- there's no client-side JS reading a
+  JSON `data.detail` on these pages anymore.
 - **Login and other password-style checks are throttled, never locked out** (issue #53 code
   review; see `apps.accounts.services.login_throttle`'s module docstring for the full reasoning):
   a single per-account rule that counts every attempt lets anyone who merely knows a victim's email
@@ -638,8 +646,6 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
 
 ## Known gaps
 
-- Register and password-reset pages still post JSON to `/api/auth/…` (they work, but aren't
-  session form views yet).
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` phases 1 and 2 (issue #55) are built: logged-in *and* anonymous sending (email
