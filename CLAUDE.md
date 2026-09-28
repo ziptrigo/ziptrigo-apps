@@ -19,7 +19,7 @@ apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), cred
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs.
-admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode. Via `inv`.
+admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
 pyproject.toml        Deps, ruff/ty/pytest/import-linter config, `inv` module registry.
@@ -44,6 +44,8 @@ inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
 inv server run [dev|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv openapi generate --format json --file <path>
+inv qrcode login dev <email> <password>       # JWT CLIs over /api/qr/ and /api/ft/
+inv filetransfer send dev report.pdf --to a@example.com
 ```
 
 Every command accepts `--dry` to print the shell command without running it. The app names `inv`
@@ -55,8 +57,11 @@ when the module is run directly (`python3 -m admin.server`) but which `inv` pres
 
 ### Running tests directly
 
-Run pytest from the repo root; `DJANGO_SETTINGS_MODULE=config.settings` and `testpaths = ['apps']`
-are set in `pyproject.toml`, and default addopts include `--reuse-db --no-migrations`:
+Run pytest from the repo root; `DJANGO_SETTINGS_MODULE=config.settings` and
+`testpaths = ['apps', 'admin']` are set in `pyproject.toml`, and default addopts include
+`--reuse-db --no-migrations`. `admin` is there for `admin/tests/` (currently
+`admin/filetransfer.py`'s unit tests) -- plain HTTP-client CLI logic with no Django/database
+dependency of its own, picked up by the same `pytest`/`inv test unit` run as every app's tests:
 
 ```bash
 ENVIRONMENT=dev pytest apps/accounts/tests/unit/test_jwt.py::test_access_token
@@ -148,9 +153,9 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   (`LOGIN_URL='accounts:login'`). The login page is a session form view
   (`apps/accounts/views/login.py`, CSRF-protected, honours a same-site `next`); logout is
   POST-only. The browser never holds a JWT.
-- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py` (`apps.accounts.auth.JWTAuth` /
-  `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE` users). Claim `sub`, signed with
-  `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
+- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py` and `admin/filetransfer.py`
+  (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE`
+  users). Claim `sub`, signed with `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
 
 `POST /api/auth/login` only issues JWTs; it never starts a session. The other unauthenticated
 account pages (register, password reset, resend confirmation) still post JSON to `/api/auth/…`.
@@ -358,8 +363,56 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
 ### API
 
 `config/api.py` builds one `NinjaAPI`; each app exposes a `router` from its `api` module/package
-and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr/`). Docs at
-`/api/docs`.
+and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr/`, `/api/ft/` for
+file_transfer). Docs at `/api/docs`.
+
+`apps/file_transfer/api/` (issue #55 phase 3) is JWT-only (logged-in users; anonymous sending stays
+web-only) and mirrors the web send/dashboard flow endpoint-for-endpoint, calling the exact same
+`apps.file_transfer.services` functions the views do: create a draft (`POST /transfers/`), add/
+presign/resume/complete/remove a file (`.../files/...`, see "Resumable uploads" below), finalize
+with the send options (`POST /transfers/{id}/send`), list (`?filter=active|ended|all` +
+`limit`/`offset` pagination), get, update (`PATCH`, partial -- only fields present in the body are
+applied, via `payload.dict(exclude_unset=True)`), delete, add recipients and resend one's email.
+`GET /transfers/{id}` (unlike the list endpoint) also returns a still-in-progress draft, since a
+caller that already knows a specific id needs that to resume an interrupted upload. Two of its two
+endpoint modules (`transfers.py`, `files.py`) share one `Router` instance from `router.py` rather
+than nesting sub-routers, since `Router.add_router` only takes a static prefix and can't express a
+nested path parameter like `/transfers/{id}/files/...`. Status codes: 400 for a service
+`ValidationError`, **402** for `InsufficientCreditsError` (a documented choice over 400 -- the
+request is well-formed, the account just can't cover it right now), 404 for another user's transfer
+(never 403, so it doesn't confirm the id exists), 429 via the site-wide rate-limit handler
+(`FT_UPLOAD_USER`, same rule and budget as the web upload endpoints, applied per user).
+
+**Resumable uploads** (spec section 2, issue #55 phase 3): `TransferFile.client_last_modified`
+(nullable, the browser/CLI's `lastModified`, ms since epoch) plus its name and size let a client
+match a file it's re-uploading back to an existing, not-yet-finished `TransferFile` row after a
+break. `S3Storage.list_parts` (`ListParts`) reports which parts of that file's multipart upload S3
+already has; `services.uploads.list_uploaded_parts` wraps it and raises `UploadExpired` when S3 no
+longer recognizes the upload id (the bucket's lifecycle rule aborted it, or `cleanup_drafts` beat
+the client to it), and `restart_upload` then abandons it and starts a fresh one at the same storage
+key. Both the web JSON endpoints (`views.uploads.resume_file` / `views.anonymous.resume_file`) and
+the JWT API (`api/files.py::resume_file`) expose this as one `.../files/{id}/resume/` endpoint that
+transparently restarts an expired upload rather than erroring, returning `{restarted,
+part_size_bytes, part_count, uploaded_parts}` either way.
+
+- **Web**: `send.html`/`anon_send.html` share one script,
+  `apps/file_transfer/static/file_transfer/js/resumable_upload.js`, since both pages upload the
+  same way and need the same resume-matching logic. The logged-in send page additionally has to
+  solve identifying the *same draft* again across a reload -- `get_or_create_draft` deliberately
+  never reuses a draft that already has files (see its own docstring: that behaviour predates
+  hydration and stays as the default for a fresh, un-parameterized visit), so the moment a draft's
+  first file lands, the page adds `?resume=<draft id>` to its own URL with `history.replaceState`
+  (no navigation); `send_page` picks that query param up and fetches that specific draft, files and
+  all, serialized into the page (`{% ... |json_script %}`) for the script to rebuild its file list
+  and offer to resume whichever rows aren't uploaded yet -- the sender re-selects the same file (a
+  browser can't reopen one on its own) and it's matched by name + size (+ `client_last_modified`
+  when the row has one). The anonymous flow needs none of this bookkeeping:
+  `current_anonymous_transfer` already resumes the session's current draft (files included) on
+  every reload regardless of file count.
+- **CLI**: `admin/filetransfer.py send --draft-id <id>` re-fetches that draft
+  (`GET /transfers/{id}`, which is why that endpoint returns drafts) and does the same
+  name-plus-size matching against its `files` list before re-uploading anything, so re-running a
+  `send` that was interrupted partway through only uploads what's missing.
 
 ### Admin
 
@@ -618,7 +671,7 @@ proxy"). A coarse `limit_req` in nginx itself is a recommended defense-in-depth 
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 583 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 647 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -642,14 +695,15 @@ token?) or a real port of a DRF-era module.
   session form views yet).
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
-- `file_transfer` phases 1 and 2 (issue #55) are built: logged-in *and* anonymous sending (email
+- `file_transfer` phases 1 through 3 (issue #55) are built: logged-in *and* anonymous sending (email
   confirmation, per-IP-per-day caps, the anonymous manage link, claim on login), the download page
   with per-file and "download all" (zip) downloads, dashboard with all actions and a per-download
-  log, metering, all emails, settings, queue and scheduler. **Anonymous sending is gated off by
-  default** (`FileTransferSettings.anonymous_enabled = False`); rate limiting (#53) no longer blocks
-  turning it on, see "Rate limiting" above and "File transfer specifics"' anonymous-sending
-  paragraph -- flipping it on is now a rollout decision, not a known gap. Phase 3 (resumable
-  uploads, a JWT `/api/ft/` router, `admin/filetransfer.py`, takedown tooling) is not built.
+  log, metering, all emails, settings, queue and scheduler, resumable uploads, a JWT `/api/ft/`
+  router and `admin/filetransfer.py` (see "API" above for all three). **Anonymous sending is gated
+  off by default** (`FileTransferSettings.anonymous_enabled = False`); rate limiting (#53) no longer
+  blocks turning it on, see "Rate limiting" above and "File transfer specifics"' anonymous-sending
+  paragraph -- flipping it on is now a rollout decision, not a known gap. Takedown tooling
+  (originally phase 3, spec section 16) is tracked separately as issue #59, not built here.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set), not a host-level guard: a
   coarse nginx `limit_req` is still recommended as defense-in-depth, tracked in the separate

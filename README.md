@@ -14,8 +14,8 @@ A single Django project (a "modular monolith") with one Django app per concern:
 - **qr_code** — QR code generation, the dashboard/editor and the `/go/<code>` short links.
 - **file_transfer** — WeTransfer-style file transfer: send large files via a direct-to-S3 upload,
   an expiring download link, a dashboard, and credit-metered storage. Logged-in and anonymous
-  (email-confirmed, per-IP-capped, gated off by default) senders alike (#55 phases 1-2); resumable
-  uploads, an API and takedown tooling are phase 3.
+  (email-confirmed, per-IP-capped, gated off by default) senders alike, resumable uploads, a JWT
+  API (`/api/ft/`) and `admin/filetransfer.py` CLI (#55 phases 1-3); takedown tooling is #59.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -42,7 +42,7 @@ ziptrigo-apps/
 │   ├── billing/
 │   ├── qr_code/
 │   └── file_transfer/
-├── admin/                   # Project CLIs (lint, test, server, pip, ...), run via `inv`
+├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, ...), run via `inv`
 ├── tests_e2e/               # Playwright end-to-end tests
 ├── conftest.py              # Fixtures shared by every app's tests
 ├── Dockerfile
@@ -74,7 +74,7 @@ apps/<app>/
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
-| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…` |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…` |
 | `/admin/` | Django admin (Jazzmin) |
 
 ### Dependency rules
