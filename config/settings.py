@@ -217,8 +217,8 @@ CSRF_TRUSTED_ORIGINS = [f'{_base_url.scheme}://{_base_url.netloc}']
 # Only send the session and CSRF cookies over HTTPS when the site is served over HTTPS.
 SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _base_url.scheme == 'https'
 
-# Email confirmation and password reset settings
-EMAIL_CONFIRMATION_TOKEN_TTL_HOURS = int(os.getenv('EMAIL_CONFIRMATION_TOKEN_TTL_HOURS', '48'))
+# Password reset token lifetime. Email confirmation moved onto the admin-editable `CoreSettings`
+# singleton instead (issue #58) -- see `apps.core.services.email_verification`.
 PASSWORD_RESET_TOKEN_TTL_HOURS = int(os.getenv('PASSWORD_RESET_TOKEN_TTL_HOURS', '4'))
 
 # JWT signing for the `/api/` endpoints. Separate from `SECRET_KEY` so it can be rotated on its own.

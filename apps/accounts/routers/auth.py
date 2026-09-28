@@ -51,12 +51,11 @@ def signup(request: HttpRequest, payload: SignupRequest):
 def confirm_email(request: HttpRequest, payload: EmailConfirmRequest):
     """Confirm email using a valid token."""
     service = get_email_confirmation_service()
-    user = service.validate_token(payload.token)
+    user = service.confirm_token(payload.token)
 
     if user is None:
         raise HttpError(400, 'Invalid or expired token.')
 
-    service.confirm_email(user)
     return 200, {'message': 'Email has been confirmed.'}
 
 

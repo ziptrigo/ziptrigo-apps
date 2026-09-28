@@ -12,7 +12,8 @@ an account, a credit balance and a layout. Django + HTMX. It started as two micr
 ```
 manage.py
 config/               The Django project: settings, urls, api (one NinjaAPI), environment.py.
-apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email.
+apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email,
+                      email verification.
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
@@ -158,6 +159,36 @@ confirmation email.
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.
 
+### Email verification
+
+`apps.core.services.email_verification` (issue #58) is generic email-address confirmation --
+a code and a link -- for any app that needs to prove someone controls an email address without
+necessarily having a user for it yet (`core` can't import `accounts`, and an anonymous
+`file_transfer` sender, planned for a later phase, isn't a user at all). It's keyed on
+`(email, purpose)`, where `purpose` is a free string the caller picks (e.g.
+`'accounts.email_confirmation'`) that `core` never interprets. `start(email, purpose,
+build_email=...)` generates a code and a token (via `secrets`, stored only as HMAC-SHA256 digests
+keyed with `SECRET_KEY`, compared with `hmac.compare_digest`), emails them through the caller's
+`build_email` callback (which builds the subject/body and any confirmation link from
+`context.token` -- `core` doesn't know a caller's URL names) and `apps.core.services.email`, and
+returns the new row's id; `confirm_by_code(id, code)` / `confirm_by_token(token)` return the
+verified email or raise a typed `EmailVerificationError` subclass (`Expired`, `Burned` after too
+many wrong codes, `Superseded` by a resend, `NotFound`, `AlreadyConfirmed`, or `IncorrectCode`/
+`ResendTooSoon` carrying attempts-left/retry-after). Starting a new verification invalidates any
+previous pending one for the same `email`/`purpose` -- only the latest is ever valid.
+`confirm_by_token` is deliberately idempotent for a row its own token already confirmed (unlike
+`confirm_by_code`, which is strictly single-use); see the module docstring for why. Code length,
+validity, max attempts and the resend cooldown come from the admin-editable `CoreSettings`
+singleton (`CoreSettings.load()`, defaults: 6 digits, 30 minutes, 5 attempts, 60s cooldown).
+
+`accounts`' signup/email-change confirmation (`apps.accounts.services.email_confirmation`) is
+built on this instead of its own JWT (the now-removed `EmailConfirmationToken`); it only ever
+calls `confirm_by_token` since today's flow is link-only. One migration-time consequence: any
+confirmation email sent before this shipped used the old JWT and can no longer be validated at
+all, so those users need to hit "resend confirmation" once (judged low-impact -- see the port's
+module docstring). `file_transfer`'s anonymous-sender confirmation (spec section 2, not yet
+built) is expected to consume `confirm_by_code` for its code-entry page.
+
 ### API
 
 `config/api.py` builds one `NinjaAPI`; each app exposes a `router` from its `api` module/package
@@ -172,6 +203,11 @@ The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/bil
 The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
 so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
 and to the admin tools page.
+
+Singleton settings pages (superusers only, one row, `changelist_view` redirects straight to the
+change form): `CoreSettingsAdmin` (`/admin/core/coresettings/`, email verification knobs -- issue
+#58) and `FileTransferSettingsAdmin` (`/admin/file_transfer/filetransfersettings/`, spec section
+9). Both load their row with the model's own `.load()` classmethod rather than a fixture.
 
 ### HTMX form views
 
@@ -287,7 +323,7 @@ above).
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 326 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 361 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -314,11 +350,13 @@ token?) or a real port of a DRF-era module.
 - The admin credits API (`POST /api/billing/users/{id}/credits`) now refuses to take a balance
   below zero (`CreditAccount.balance` is unsigned); it used to allow it.
 - `file_transfer` phase 1 (logged-in sending, S3 uploads, download page, dashboard, metering,
-  emails, queue/scheduler) is built (issue #55); phase 2 is not: anonymous sending and its email
-  confirmation codes, the anonymous manage link, claiming a transfer on login, "download all" as a
-  zip, and the per-download log UI (the underlying `DownloadEvent` rows and IP purge job exist
-  already). Phase 3 (resumable uploads, a JWT `/api/ft/` router, `admin/filetransfer.py`, takedown
-  tooling) is not either.
+  emails, queue/scheduler) is built (issue #55); phase 2 is not: anonymous sending, the anonymous
+  manage link, claiming a transfer on login, "download all" as a zip, and the per-download log UI
+  (the underlying `DownloadEvent` rows and IP purge job exist already). The shared foundation
+  anonymous sending needs -- generic email confirmation (`apps.core.services.email_verification`,
+  issue #58) -- is built, `accounts`' own signup confirmation is ported onto it, but
+  `file_transfer` doesn't consume it yet. Phase 3 (resumable uploads, a JWT `/api/ft/` router,
+  `admin/filetransfer.py`, takedown tooling) is not either.
 
 ## Conventions
 
