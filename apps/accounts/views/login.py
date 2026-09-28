@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
 
+from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import LoginForm
@@ -30,6 +31,33 @@ def login_page(request: HttpRequest) -> HttpResponse:
     next_url = request.POST.get('next') or request.GET.get('next')
 
     if request.method == 'POST':
+        # Per-IP and per-account (issue #53): throttles both scripted credential stuffing from
+        # one IP and a targeted attack on one victim's email from many -- see
+        # `settings.RATELIMIT_RULES['LOGIN_IP']`/`['LOGIN_ACCOUNT']` for why it's throttling
+        # rather than a hard lockout (a lockout a third party could trigger just by submitting a
+        # known email would be a denial-of-service against the real owner).
+        limited = ratelimit.hit_ip(request, 'LOGIN_IP')
+        if limited.allowed:
+            submitted_email = (request.POST.get('email') or '').strip().lower()
+            limited = ratelimit.hit_value(submitted_email, 'LOGIN_ACCOUNT')
+        if not limited.allowed:
+            # Deliberately *unbound* (`initial=`, not `data=`) -- a rate-limited request must
+            # never still run `LoginForm.clean()`/`authenticate()`, only redisplay what was
+            # typed. `add_error(None, ...)` needs `self.cleaned_data` to exist, which unbound
+            # forms normally only get from a full `full_clean()`; primed here directly instead of
+            # binding real POST data through the form (which would also invite a stray "this
+            # field is required" on `password` from validating fields we don't actually care
+            # about for this response).
+            form = LoginForm(request, initial={'email': request.POST.get('email', '')})
+            form.cleaned_data = {}
+            form.add_error(None, 'Too many login attempts. Please wait a moment and try again.')
+            template = (
+                'accounts/partials/login_form.html' if is_htmx(request) else 'accounts/login.html'
+            )
+            response = render(request, template, {'form': form, 'next': next_url}, status=429)
+            response['Retry-After'] = str(limited.retry_after)
+            return response
+
         form = LoginForm(request, data=request.POST)
         if form.is_valid():
             auth_login(request, form.get_user())
