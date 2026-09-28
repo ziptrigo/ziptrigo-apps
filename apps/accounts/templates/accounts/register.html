@@ -53,6 +53,14 @@
 
 <script>
   (function(){
+    function extractErrorMessage(data, fallback) {
+      const detail = data.detail;
+      if (Array.isArray(detail)) {
+        return detail.map(function(e){ return (e.ctx && e.ctx.error) || e.msg; }).join(' ') || fallback;
+      }
+      return detail || data.message || fallback;
+    }
+
     const form = document.getElementById('reg-form');
     const msg = document.getElementById('reg-msg');
     const nameInput = form.querySelector('input[name="name"]');
@@ -96,8 +104,7 @@
         if (response.ok) {
           window.location.href = '{% url 'accounts:created' %}';
         } else {
-          const userMsg = data.detail || data.message || 'Could not create account.';
-          msg.textContent = userMsg;
+          msg.textContent = extractErrorMessage(data, 'Could not create account.');
           msg.className = 'mb-4 text-sm text-red-600';
         }
       } catch (error) {
