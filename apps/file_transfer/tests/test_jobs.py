@@ -243,6 +243,26 @@ def test_cleanup_drafts_leaves_recent_drafts_alone(draft_transfer):
     assert draft_transfer.status == TransferStatus.DRAFT
 
 
+def test_cleanup_drafts_removes_stale_unconfirmed_anonymous_transfers(fake_storage):
+    """An anonymous transfer stuck in `PENDING_CONFIRMATION` (the sender never confirmed) is
+    cleaned up the same way a plain draft is (spec section 2 defaults)."""
+    from ..services import uploads
+
+    transfer = Transfer.objects.create(owner=None, status=TransferStatus.DRAFT)
+    file = uploads.add_file(transfer, 'a.bin', 10, storage=fake_storage)
+    Transfer.objects.filter(pk=transfer.pk).update(
+        status=TransferStatus.PENDING_CONFIRMATION,
+        sender_email='sender@example.com',
+        created_at=timezone.now() - timedelta(hours=25),
+    )
+
+    jobs.cleanup_drafts()
+
+    transfer.refresh_from_db()
+    assert transfer.status == TransferStatus.DELETED
+    assert file.upload_id in fake_storage.aborted_uploads
+
+
 def test_purge_download_ips_nulls_old_ips(draft_transfer, uploaded_file):
     old_event = DownloadEvent.objects.create(
         transfer=draft_transfer, file=uploaded_file, ip='1.1.1.1'
