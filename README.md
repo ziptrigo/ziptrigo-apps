@@ -13,8 +13,9 @@ A single Django project (a "modular monolith") with one Django app per concern:
 - **billing** — credits: balances, the transaction ledger, the credits history page.
 - **qr_code** — QR code generation, the dashboard/editor and the `/go/<code>` short links.
 - **file_transfer** — WeTransfer-style file transfer: send large files via a direct-to-S3 upload,
-  an expiring download link, a dashboard, and credit-metered storage. Logged-in senders only for
-  now (phase 1 of #55); anonymous sending, "download all" and a few other features are phase 2/3.
+  an expiring download link, a dashboard, and credit-metered storage. Logged-in and anonymous
+  (email-confirmed, per-IP-capped, gated off by default) senders alike (#55 phases 1-2); resumable
+  uploads, an API and takedown tooling are phase 3.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -71,8 +72,8 @@ apps/<app>/
 | `/billing/…` | billing (credits history) |
 | `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
-| `/transfer/…` | file_transfer: send page, dashboard, upload endpoints |
-| `/t/<slug>/` | file_transfer public download links — at the root, same reason as `/go/<code>` |
+| `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
+| `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
 | `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…` |
 | `/admin/` | Django admin (Jazzmin) |
 
