@@ -2,14 +2,32 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import User
+from apps.accounts.tests.factories import UserFactory
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 
-def test_tools_view_requires_superuser(client, regular_user: User):
-    """Non-superusers should be denied access to the tools view."""
+def test_tools_view_redirects_non_staff_to_admin_login(client, regular_user: User):
+    """A non-staff user never reaches the view at all: `admin_view()` (wrapping every custom admin
+    URL, including this one) redirects straight to the admin login page, the same as it would for
+    any other admin URL -- Django's own gate, not this view's own logic."""
 
     client.force_login(regular_user)
+    url = reverse('custom_admin:admin_tools')
+
+    response = client.get(url)
+
+    assert response.status_code == 302
+    assert response.url.startswith(reverse('custom_admin:login'))
+
+
+def test_tools_view_requires_superuser_not_just_staff(client):
+    """Staff-but-non-superuser users clear `admin_view()`'s staff gate and reach the view itself,
+    which then denies them with its own 403 -- the tools page is superuser-only, not merely
+    staff-only."""
+
+    staff_user = UserFactory(is_staff=True, is_superuser=False)
+    client.force_login(staff_user)
     url = reverse('custom_admin:admin_tools')
 
     response = client.get(url)

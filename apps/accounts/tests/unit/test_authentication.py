@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import Mock
 
 import pytest
@@ -27,9 +28,12 @@ def test_jwt_auth_accepts_valid_token(regular_user: User):
     assert result.id == regular_user.id
 
 
-def test_jwt_auth_returns_none_for_expired_token(regular_user: User, settings):
-    # Create a token with very short lifetime
-    settings.NINJA_JWT['ACCESS_TOKEN_LIFETIME'] = __import__('datetime').timedelta(seconds=-1)
+def test_jwt_auth_returns_none_for_expired_token(regular_user: User, monkeypatch):
+    # `CustomAccessToken.lifetime` is read from `ninja_jwt`'s settings once, at class-definition
+    # time (`apps/accounts/tokens.py`), so mutating `settings.NINJA_JWT` at test time wouldn't
+    # change what a newly created token expires at -- patch the class attribute actually consulted
+    # by `for_user` (via `Token.set_exp`) instead.
+    monkeypatch.setattr(CustomAccessToken, 'lifetime', timedelta(seconds=-1))
     token = CustomAccessToken.for_user(regular_user)
 
     request = Mock()

@@ -211,7 +211,9 @@ class TestPasswordResetFlow:
         """Test that reset password rejects mismatched passwords."""
         from apps.accounts.tokens import PasswordResetToken
 
-        token = PasswordResetToken.for_user(user)
+        # `Token.for_user` is mistyped upstream (see `apps.accounts.tokens.CustomAccessToken
+        # .for_user`'s comment); nothing on this side to fix.
+        token = PasswordResetToken.for_user(user)  # ty: ignore[invalid-argument-type]
 
         data = {
             'token': str(token),
@@ -228,7 +230,9 @@ class TestPasswordResetFlow:
         """Test that reset password rejects a password that's too short."""
         from apps.accounts.tokens import PasswordResetToken
 
-        token = PasswordResetToken.for_user(user)
+        # `Token.for_user` is mistyped upstream (see `apps.accounts.tokens.CustomAccessToken
+        # .for_user`'s comment); nothing on this side to fix.
+        token = PasswordResetToken.for_user(user)  # ty: ignore[invalid-argument-type]
 
         data = {
             'token': str(token),

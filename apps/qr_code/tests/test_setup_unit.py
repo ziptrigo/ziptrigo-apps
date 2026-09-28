@@ -5,6 +5,7 @@ simple unit-style checks.
 """
 
 import pytest
+from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 
 from apps.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat
@@ -42,11 +43,11 @@ def test_model_creation():
     assert qr.created_by == user_obj
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 async def test_qr_generation(user):
     """QR code image can be generated without errors."""
-    qr = QRCode.objects.create(
+    qr = await sync_to_async(QRCode.objects.create)(
         content='https://example.com',
         created_by=user,
         qr_format=QRCodeFormat.PNG,
@@ -60,7 +61,7 @@ async def test_qr_generation(user):
 
     image_path = await QRCodeGenerator.generate_qr_code(qr)
     qr.image_file = image_path
-    qr.save()
+    await sync_to_async(qr.save)()
 
     assert image_path
     assert str(qr.id) in image_path
