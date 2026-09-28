@@ -3,7 +3,7 @@
 {% block title %}{{ transfer.display_name }} - ZipTrigo{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8 max-w-2xl">
+<div class="container mx-auto px-4 py-8 max-w-2xl" x-data="{ reportOpen: false }">
     <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6">
         <h1 class="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">{{ transfer.display_name }}</h1>
 
@@ -61,6 +61,16 @@
             <button type="submit" class="px-4 py-2 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90">Unlock</button>
         </form>
         {% endif %}
+
+        <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <button type="button" @click="reportOpen = !reportOpen"
+                    class="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <i class="fas fa-flag mr-1"></i>Report this transfer
+            </button>
+            <div x-show="reportOpen" x-cloak class="mt-3">
+                {% include 'file_transfer/partials/report_box.html' %}
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

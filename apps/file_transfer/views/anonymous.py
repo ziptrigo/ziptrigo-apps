@@ -33,6 +33,7 @@ from apps.core.services.email_verification import (
 from .. import services
 from ..forms import AnonymousSendOptionsForm, ConfirmCodeForm
 from ..models import FileTransferSettings, Transfer, TransferStatus
+from ..services.blocklist import is_blocked
 from ..services.storage import PART_SIZE_BYTES
 
 
@@ -102,6 +103,11 @@ def send_page(request: AnonymousHttpRequest) -> HttpResponse:
         return _not_available(request)
 
     cookie_id = _cookie_id(request)
+    if is_blocked(ip=client_ip(request)):
+        # Block list (issue #59), IP only: no sender email is known yet at draft creation for an
+        # anonymous send -- that's checked again once one is (`services.anonymous.start_confirmation`
+        # /`_activate`). Same neutral wording as every other blocked checkpoint.
+        return render(request, 'file_transfer/blocked.html', status=403)
     transfer = services.current_anonymous_transfer(request.session)
 
     if transfer is not None and transfer.status == TransferStatus.ACTIVE:

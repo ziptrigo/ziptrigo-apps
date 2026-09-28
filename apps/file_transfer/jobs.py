@@ -53,7 +53,14 @@ def meter_transfers() -> None:
     path), and delete files for transfers past their suspension grace period."""
     settings_row = FileTransferSettings.load()
 
-    for transfer in Transfer.objects.filter(status=TransferStatus.ACTIVE, owner__isnull=False):
+    # `held_for_review_at__isnull=True`: a transfer on hold pending abuse review (issue #59) is
+    # never billed for the days it spends held -- `meter_transfer` re-checks this itself too
+    # (belt-and-suspenders against a hold starting between this query and that row's lock), but
+    # filtering it out here means a busy day of holds doesn't even bother taking a row lock for
+    # transfers this job is going to skip anyway.
+    for transfer in Transfer.objects.filter(
+        status=TransferStatus.ACTIVE, owner__isnull=False, held_for_review_at__isnull=True
+    ):
         try:
             meter_transfer(transfer, settings_row)
         except Exception:
@@ -113,6 +120,12 @@ def expire_transfers() -> None:
         expires_at__gt=now,
         expires_at__lte=reminder_cutoff,
         expiry_notified_at__isnull=True,
+        # Not a transfer currently on hold pending abuse review (issue #59 code review): its
+        # download link doesn't work right now, so telling the sender it "expires tomorrow" would
+        # be misleading -- and staff might release the hold before it actually expires anyway.
+        # Natural expiry itself still happens on schedule regardless (the `expired` query above
+        # isn't filtered this way) -- only this reminder is skipped.
+        held_for_review_at__isnull=True,
     )
     for transfer in due_reminders:
         if (
@@ -134,8 +147,15 @@ def expire_transfers() -> None:
         status__in=ENDED_STATUSES, files_deleted_at__isnull=True, ended_at__lte=deletion_cutoff
     )
     for transfer in pending_deletion:
+        # A `TAKEN_DOWN` transfer honours the notify choice staff actually made
+        # (`Transfer.takedown_notify`) rather than this sweep's own default -- otherwise a staff
+        # member who left "notify sender" off would still get the sender emailed once this sweep
+        # (rather than `take_down_transfer` itself) ends up being the one to finish the delete,
+        # e.g. because the S3 call inside `take_down_transfer` failed the first time around (issue
+        # #59 code review).
+        notify = transfer.takedown_notify if transfer.status == TransferStatus.TAKEN_DOWN else True
         try:
-            finish_deferred_deletion(transfer, notify=True)
+            finish_deferred_deletion(transfer, notify=notify)
         except Exception:
             logger.exception('Failed to finish deferred deletion for transfer %s', transfer.pk)
 

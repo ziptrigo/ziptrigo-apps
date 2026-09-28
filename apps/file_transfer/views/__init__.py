@@ -8,7 +8,14 @@ from .dashboard import (
     transfer_list,
     update_settings,
 )
-from .download import download_file, download_page, download_zip, unlock, zip_status
+from .download import (
+    download_file,
+    download_page,
+    download_zip,
+    report_transfer,
+    unlock,
+    zip_status,
+)
 from .send import send_page, send_submit, sent_page
 from .uploads import add_file, complete_file, part_urls, remove_file, resume_file
 
@@ -25,6 +32,7 @@ __all__ = [
     'part_urls',
     'reenable',
     'remove_file',
+    'report_transfer',
     'resend_recipient',
     'resume_file',
     'send_page',

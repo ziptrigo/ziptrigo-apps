@@ -35,6 +35,7 @@ from .anon_emails import (
     send_anonymous_sender_copy,
     verification_purpose,
 )
+from .blocklist import check_not_blocked
 from .emails import send_transfer_notification
 from .expiry_choices import resolve_expiry_anonymous
 from .lifecycle import end_transfer
@@ -137,12 +138,16 @@ def start_confirmation(
     Raises:
         ValidationError: an option is invalid, no files have finished uploading, `transfer`
             isn't (still) a draft, or the per-IP-per-day caps are already exceeded.
+        blocklist.BlockedSenderError: `options.sender_email` or `ip` is on the block list (issue
+            #59) -- checked again at actual confirmation (`_activate`), since usage/identity can
+            still change in the window between the two, same as the per-IP-per-day caps.
         core.services.email_verification.ResendTooSoon / EmailVerificationSendFailed: starting
             the verification itself failed; nothing here is changed either way (both happen
             inside the same transaction as the rest of this function).
     """
     settings_row = FileTransferSettings.load()
     recipients = validate_anonymous_send_options(options, settings_row)
+    check_not_blocked(email=options.sender_email, ip=ip)
 
     with transaction.atomic():
         locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
@@ -199,10 +204,10 @@ def resend_confirmation(transfer: Transfer) -> Transfer:
 
 
 def _activate(transfer: Transfer, confirmed_email: str, ip: str | None, cookie_id: str) -> Transfer:
-    """Shared tail of `confirm_by_code`/`confirm_by_link`: check the per-IP-per-day caps and flip
-    the transfer to `ACTIVE`, queuing the recipient + sender emails -- the anonymous equivalent of
-    `services.send.finalize_send`'s second half."""
-    cap_error: ValidationError | None = None
+    """Shared tail of `confirm_by_code`/`confirm_by_link`: check the per-IP-per-day caps and the
+    block list, then flip the transfer to `ACTIVE`, queuing the recipient + sender emails -- the
+    anonymous equivalent of `services.send.finalize_send`'s second half."""
+    activation_error: ValidationError | None = None
 
     with transaction.atomic():
         locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
@@ -220,6 +225,11 @@ def _activate(transfer: Transfer, confirmed_email: str, ip: str | None, cookie_i
         locked.size_bytes = sum(f.size for f in locked.files.filter(uploaded=True))
         try:
             anon_limits.check_send_caps(locked, ip, cookie_id)
+            # The block list (issue #59) is re-checked here, not just at `start_confirmation`:
+            # the confirming IP can differ from the one that started confirmation (a different
+            # device/network opened the emailed link), and the sender could have been blocked in
+            # the meantime either way.
+            check_not_blocked(email=confirmed_email, ip=ip)
         except ValidationError as exc:
             # Caught, not raised, from *inside* this `atomic()` block on purpose: the
             # confirmation code/token was already burned (single-use) by the caller before this
@@ -230,7 +240,7 @@ def _activate(transfer: Transfer, confirmed_email: str, ip: str | None, cookie_i
             # not durable unless the outer block it's nested in also exits normally). Recording the
             # error and letting this block exit normally instead lets `end_transfer`, below, run
             # (and actually persist) in its own transaction.
-            cap_error = exc
+            activation_error = exc
         else:
             now = timezone.now()
             locked.status = TransferStatus.ACTIVE
@@ -238,12 +248,12 @@ def _activate(transfer: Transfer, confirmed_email: str, ip: str | None, cookie_i
             locked.save()
             locked.recipients.update(last_sent_at=now)
 
-    if cap_error is not None:
-        # It can never be sent today (the cap is exceeded); end it outright, same as any other
-        # transfer that's never going anywhere, so a retry gets a clear, terminal answer rather
-        # than a transfer stuck `PENDING_CONFIRMATION` forever.
+    if activation_error is not None:
+        # It can never be sent today (the cap is exceeded, or the sender is blocked); end it
+        # outright, same as any other transfer that's never going anywhere, so a retry gets a
+        # clear, terminal answer rather than a transfer stuck `PENDING_CONFIRMATION` forever.
         end_transfer(locked, TransferStatus.DELETED, delete_files=True)
-        raise cap_error
+        raise activation_error
 
     transaction.on_commit(lambda: _queue_send_emails(transfer.id))
     transfer.refresh_from_db()

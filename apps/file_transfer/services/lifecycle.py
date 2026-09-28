@@ -2,6 +2,8 @@
 dashboard delete-now, or an out-of-credits grace period running out (spec sections 3, 7 and 12).
 """
 
+from collections.abc import Callable
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -46,13 +48,22 @@ def end_transfer(
     delete_files: bool = True,
     notify: bool = False,
     storage: S3Storage | None = None,
+    before_delete: Callable[[], None] | None = None,
 ) -> Transfer:
     """Move `transfer` to a terminal availability status, optionally deleting its files and
     notifying the owner.
 
-    `status` is `TransferStatus.EXPIRED` (natural expiry, or max downloads reached) or
+    `status` is `TransferStatus.EXPIRED` (natural expiry, or max downloads reached),
     `TransferStatus.DELETED` (dashboard delete-now, or an out-of-credits grace period running
-    out). Idempotent other than harmlessly re-issuing the S3 delete and, if `notify`, the email.
+    out), or `TransferStatus.TAKEN_DOWN` (admin takedown, `services.takedown.take_down_transfer`).
+    Idempotent other than harmlessly re-issuing the S3 delete and, if `notify`, the email.
+
+    `before_delete`, if given, runs inside the *same* atomic transaction as the status change,
+    before the S3 delete is even attempted (issue #59 code review: a takedown must mark its
+    pending reports actioned in that same transaction, not after a S3 call that might raise --
+    `take_down_transfer` is the one caller that uses this). Anything a caller needs committed
+    atomically alongside the status flip, and *not* rolled back by a storage failure, belongs here
+    rather than after this call returns.
 
     `delete_files=False` defers the actual S3 deletion: the transfer is immediately marked
     unavailable (`is_available()` already checks `status`), but its objects are left alone so a
@@ -69,6 +80,8 @@ def end_transfer(
         if status == TransferStatus.DELETED and not transfer.deleted_at:
             transfer.deleted_at = now
         transfer.save(update_fields=['status', 'ended_at', 'deleted_at'])
+        if before_delete is not None:
+            before_delete()
 
     if delete_files:
         delete_transfer_files(transfer, storage=storage)

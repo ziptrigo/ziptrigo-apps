@@ -346,7 +346,9 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   error just because someone else scanned the same code), and every file_transfer surface called
   out in issue #53 (anonymous upload/confirm endpoints, logged-in uploads, the download page,
   password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
-  even from many IPs -- and the manage link). `LOGIN_IP` (20/5 min) and `SIGNUP_IP` (5/hour) can
+  even from many IPs -- and the manage link), plus abuse reports (issue #59: `FT_REPORT_IP` strict
+  per IP, `FT_REPORT_TRANSFER` a looser per-transfer ceiling, same split reasoning as the download
+  password). `LOGIN_IP` (20/5 min) and `SIGNUP_IP` (5/hour) can
   still legitimately bite a shared NAT/CGNAT/office IP; the `logger.info` above is there so that's
   visible if it becomes a real complaint, rather than tuned blind up front.
 - **The per-email-address-per-day cap** on email verification (`EMAIL_VERIFICATION_START_EMAIL`) is
@@ -478,7 +480,20 @@ and to the admin tools page.
 Singleton settings pages (superusers only, one row, `changelist_view` redirects straight to the
 change form): `CoreSettingsAdmin` (`/admin/core/coresettings/`, email verification knobs -- issue
 #58) and `FileTransferSettingsAdmin` (`/admin/file_transfer/filetransfersettings/`, spec section
-9). Both load their row with the model's own `.load()` classmethod rather than a fixture.
+9, plus the issue #59 `auto_hold_report_threshold`). Both load their row with the model's own
+`.load()` classmethod rather than a fixture.
+
+`AbuseReportAdmin` (`/admin/file_transfer/abusereport/`, issue #59) is a read-only report list --
+filter by status/reason/date, a link to the reported transfer -- with three bulk actions: "Dismiss",
+and "Take down"/"Block sender" (both two-step, an intermediate confirmation page collecting a
+reason, same shape as `CreditTransactionAdmin`'s adjustment tool). `TransferAdmin`
+(`/admin/file_transfer/transfer/`) stays read-only in the ordinary sense (its change form still has
+no save button) but gets the same "Take down"/"Block sender" bulk actions plus "Release abuse-review
+hold" -- an admin *action* is independent of `has_change_permission`, the same way Django's own
+built-in `delete_selected` needs only `has_delete_permission`, so these work without loosening the
+model's read-only-ness at all. `BlockedSenderAdmin` (`/admin/file_transfer/blockedsender/`) is plain
+CRUD; `save_model` stamps `created_by` from `request.user` on creation. See "File transfer
+specifics" below for the takedown/block-list/auto-hold mechanics these actions drive.
 
 ### HTMX form views
 
@@ -642,6 +657,164 @@ neither a whole source file nor the whole zip is ever held in memory; this only 
 own non-seekable-stream support instead of assuming it can seek. A "download all" click counts as
 one `DownloadEvent` (`file=None`) toward the same `max_downloads` limit as any other download.
 
+**Abuse reports, takedown and the block list** (issue #59, deferred from #55's phase 3 spec
+section 16): the download page has a "Report this transfer" link (an htmx-collapsed
+`AbuseReportForm`, `views.download.report_transfer`, `POST /t/<slug>/report/`) -- reason, optional
+free-text details (2,000 chars) and an optional reporter email, no login and **no password**
+(reporting must work for anyone who merely has the link, not just someone who could unlock it).
+Only for a transfer that's currently *available*: an already-unavailable one returns `HX-Refresh`
+(this endpoint is only ever posted to via htmx, so `_unavailable`'s full 404 page -- a status
+outside this app's `htmx-config` swap list -- would otherwise just sit there doing nothing; a
+full-page reload lands on the ordinary neutral "no longer available" page instead). Rate limited
+per IP (`FT_REPORT_IP`, strict) and per transfer (`FT_REPORT_TRANSFER`, looser -- many different
+IPs genuinely reporting the same transfer shouldn't be throttled by the IP rule alone); the
+per-transfer rule is *peeked* before validation/creation and only actually counted (`hit_value`)
+once `services.reports.create_report` succeeds, so a run of failed attempts (bad reason, the
+dedupe window) can't exhaust a transfer's whole budget before a genuine report gets through, and
+the slug is looked up before this key is ever touched so a made-up slug can't create one either.
+`create_report` also dedupes an obvious repeat (same *normalized* IP, same transfer, within a
+10-minute window) as a `ValidationError`, shown as a form error rather than a second row --
+normalized with `apps.core.ratelimit.normalize_ip_for_key` (an IPv6 address collapsed to its /64,
+an IPv4-mapped IPv6 address unwrapped to plain IPv4), the same helper rate limiting itself uses,
+so the same visitor can't dodge the window just by reporting from a different address in their own
+/64.
+
+**Takedown** is a distinct terminal status, `TransferStatus.TAKEN_DOWN`, not a reuse of `DELETED`
+-- so the dashboard, the API and any future reporting can always tell an admin takedown apart from
+the sender's own delete-now, even though both end the transfer and delete its files (including the
+"download all" zip) the same way (`services.lifecycle.end_transfer`). `services.takedown.take_down_transfer`
+records `taken_down_by`/`taken_down_at`/`takedown_reason` and marks every pending report against
+the transfer `ACTIONED` -- **inside the same transaction as the status change**, via
+`end_transfer`'s `before_delete` hook, and *before* the S3 delete is even attempted: if that call
+raises (an S3 outage), the admin still sees an error, but the transfer isn't left stuck `ACTIVE`
+with its reports still `PENDING` -- `files_deleted_at` simply stays null until a retry (or the
+deferred-deletion sweep, see below) succeeds. It's reached only from the admin
+(`apps.file_transfer.admin`), never a dashboard or API action a sender can trigger:
+`TransferAdmin`'s bulk "Take down selected transfer(s)" action and `AbuseReportAdmin`'s "Take down
+the reported transfer(s)" action (which dedupes the selected reports down to their distinct
+transfers first) both go through the same two-step confirmation flow as `CreditTransactionAdmin`'s
+credit adjustment tool -- an intermediate page (`admin/file_transfer/takedown_confirm.html`)
+collects a `reason` (**always** shown to the sender, on the dashboard and in the email if
+notified -- never who reported it), a separate `internal_note` (staff-only, never shown to the
+sender anywhere), and a "notify sender" toggle, **default off**: the notification email only goes
+out when staff explicitly opt in. That choice is recorded on the transfer itself
+(`Transfer.takedown_notify`) rather than only passed as an argument, so if the S3 delete above
+fails and `jobs.expire_transfers`'s deferred-deletion sweep is the one that eventually finishes it,
+the sweep honours the choice staff actually made for a `TAKEN_DOWN` transfer instead of its own
+always-notify default (every other ended transfer still gets the sweep's normal behaviour). The
+notification email itself (`services.emails.send_files_deleted_notification`) uses wording distinct
+from an ordinary expiry/deletion ("your transfer was removed", optionally including the reason --
+already visible on the dashboard either way) since "deleted and no longer available" reads like the
+link simply ran its course; it's sent to `sender_email` when the transfer has no `owner`
+(anonymous), rather than silently doing nothing. The public page shows the same neutral "no longer
+available" message as any other unavailable transfer; the owner's dashboard shows `TAKEN DOWN` plus
+`takedown_reason` (never `takedown_internal_note`, never the reporter's identity); the API reports
+`status: "taken_down"` like any other terminal status, no schema change needed.
+
+**The block list** (`BlockedSender`: `kind` `EMAIL`/`IP`, an exact email or a `*@domain` wildcard
+(matches only that exact domain, not its subdomains) or an IP address/CIDR -- IPv4 and IPv6 both,
+`services.blocklist`) is checked at every point a transfer's sender identity is established,
+confirmed, or used to send again: logged-in draft creation (`views.send.send_page`, on the owner's
+email + client IP) and `POST /api/ft/transfers/`; logged-in finalize/send
+(`services.send.finalize_send`, now on the owner's email *and*, when the caller has one, the
+client IP -- threaded through from both the web send page and the JWT API's finalize endpoint);
+anonymous draft creation (`views.anonymous.send_page`, IP only -- no sender email exists yet);
+anonymous email confirmation, both when it starts (`services.anonymous.start_confirmation`, the
+address just typed in) and when it completes (`services.anonymous._activate`, the confirmed
+address plus the confirming IP); and, on an *existing* transfer, adding recipients
+(`services.actions.add_recipients`), resending a recipient's email
+(`resend_recipient_email`), and re-enabling (`reenable_transfer_action`) -- all three are send
+paths too (a blocked spammer could otherwise keep emailing new addresses, or re-enable a disabled
+transfer, from anything they already had running), checked against the owner's email plus `ip`
+when the caller has it. **Decision**: blocking a sender otherwise leaves their *existing* transfers
+running -- it only stops these send paths and starting a new one. The block-sender confirmation
+form has two opt-in (default off) extras: "also take down this sender's other active transfers"
+(`services.blocklist.active_transfers_for_sender` + `services.take_down_transfer` per match;
+requires the `takedown_transfer` permission even for a staff user who otherwise only has
+`add_blockedsender`, checked separately so the checkbox can't be used to bypass that permission),
+and, for an owned transfer, "also deactivate the sender's account" (sets `User.status` to
+`STATUS_INACTIVE`, which `JWTAuth` and session login already reject on their own -- belt-and-
+suspenders alongside the email block, since a logged-in sender could otherwise dodge it via
+`PUT /api/account`). `block_ip` itself defaults **off** on this form (a shared/CGNAT or office IP
+can put unrelated senders behind the same address). A block never says *why* --
+`blocklist.BLOCKED_MESSAGE`, "Sorry, you can't send transfers at this time" -- rendered as a plain
+403 page for the two draft-creation checkpoints (nothing to submit yet) and surfaced through the
+existing `ValidationError`/422 machinery everywhere else (`blocklist.BlockedSenderError` is a
+`ValidationError` subclass, so every existing `except ValidationError` already handles it
+correctly, and a new `services.actions.TransferHeldError` -- see auto-hold below -- follows the
+same pattern); the JWT API instead maps `BlockedSenderError` to 403 specifically (catching it
+before the generic `ValidationError`-to-400 mapping), per the issue's decision that a block is
+worth its own status there. Re-blocking a value whose earlier block had lapsed *reactivates* that
+row (clears `expires_at`) rather than silently creating nothing, which is what a plain
+`get_or_create` used to do since it matched an expired row without checking `expires_at` at all;
+looking only among *active* rows also means two identical active rows (nothing stops that through
+the admin's own CRUD) can no longer make that lookup raise `MultipleObjectsReturned`.
+`BlockedSender.clean()` validates `value` against `kind` (a real email or `*@domain` wildcard; a
+parseable IP/CIDR) and refuses a second *active* duplicate -- an *expired* duplicate is fine, since
+that's just the value's block history and a `UniqueConstraint` can't distinguish the two without a
+condition awkward enough (`expires_at IS NULL OR expires_at > NOW()`, not something either SQLite
+or Postgres can index portably as a fixed condition) that it wasn't judged worth adding; the
+application-level check in `clean()` plus `services.blocklist`'s own "look only among active
+entries" logic cover the same ground without it. `TransferAdmin` and `AbuseReportAdmin` both offer
+a "Block sender of this transfer" convenience action (`services.blocklist.block_transfer_sender`,
+same two-step confirmation shape as takedown); `BlockedSenderAdmin` itself is plain CRUD for staff,
+with `expires_at` for a temporary block.
+
+**Auto-hold** (optional, `FileTransferSettings.auto_hold_report_threshold`, `0`/default = off) puts
+a transfer on hold once it has that many *pending* reports from *distinct, normalized* IPs
+(`services.hold.maybe_hold_for_reports`, called from `create_report`) -- counting normalized keys
+(`apps.core.ratelimit.normalize_ip_for_key`, same as the report dedupe above and rate limiting
+itself) rather than raw report rows or exact stored addresses, so one visitor mashing "report"
+can't hold a transfer alone, and one host can't reach the threshold alone just by rotating its
+address within its own /64. **Caveat, worth documenting because it's easy to assume otherwise**:
+this only raises the bar, it doesn't remove it -- anyone genuinely controlling N distinct real IPs
+(N distinct /64s, for IPv6) can still trigger a hold alone, so pick `auto_hold_report_threshold`
+with that in mind rather than as a hard guarantee of N distinct reporters. **Decision:** the hold
+itself is a plain flag, `Transfer.held_for_review_at`, never `TransferStatus.SUSPENDED` -- that
+status is owned by `services.metering` (out-of-credits) and is undone by the `credits_added` signal
+and deleted by that status's own grace-period job (`delete_files_past_grace_period`); an abuse hold
+must survive both untouched, so it needed a mechanism neither of those two look at. A held transfer
+keeps whatever status it already had (normally `ACTIVE`) underneath: `services.downloads.is_available`
+treats a non-null `held_for_review_at` as unavailable (same neutral page, so every public download
+endpoint -- the page itself, per-file/zip download, zip status -- already refuses it for free), and
+`services.metering.meter_transfer` skips billing while it's set (re-checked under the row lock, and
+`jobs.meter_transfers`'s own query also excludes held rows up front) -- no backlog accumulates, the
+same way none does across a disabled/suspended stretch. `jobs.expire_transfers` also skips the
+"expires tomorrow" reminder for a held transfer (misleading when the link doesn't work right now)
+but still lets it expire naturally on schedule if its `expires_at` passes -- the retention promise
+holds regardless of an ongoing review.
+
+**A hold freezes the transfer** (`services.actions._require_not_held`, `TransferHeldError`): while
+`held_for_review_at` is set, every owner action on it is refused except *disabling* it outright --
+add recipients, resend, extend/shorten expiry, change max downloads/password, delete now, and
+re-enable are all blocked, web-side with a plain error in the dashboard row (422, same as any other
+`ValidationError`) and API-side with **409** (`TransferHeldError` mapped before the generic
+`ValidationError`-to-400 mapping, the same pattern `BlockedSenderError`/403 uses -- 409 was picked
+over 400 as a better fit for "the resource is in a conflicting state", and is documented here since
+the issue left the choice open). Disabling stays available regardless: taking the link down
+entirely is never something a hold should prevent.
+
+Staff release a hold from `TransferAdmin`'s "Release abuse-review hold" action (dismisses its
+pending reports at the same time, so the very next report doesn't immediately re-trigger it, and
+resets the billing clock -- `last_billed_at = now`, same as `services.metering.reenable_transfer`
+does for a suspended transfer coming back, so a held stretch is never billed for after the fact) or
+take the transfer down instead; dismissing the *last* pending report against a held transfer through
+`AbuseReportAdmin`'s "Dismiss" action releases the hold too (`services.reports._release_hold_if_clear`).
+No staff-notification email on a hold -- there's no `ADMINS`/admin-email setting in this project to
+send one to, so this was skipped rather than invented (see Known gaps).
+
+**Admin permissions** (issue #59 code review): a plain `ModelAdmin` action is independent of
+`has_change_permission` (same as Django's own built-in `delete_selected`), so without an explicit
+check, any staff user who could merely *view* the transfer or report list could take a transfer
+down (permanently deleting its S3 objects), release a hold, dismiss a report, or add block-list
+entries. `take_down_action`, `release_hold_action` (both on `TransferAdmin`) and `dismiss_action`
+(on `AbuseReportAdmin`) all require a new custom permission, `file_transfer.takedown_transfer`
+(`Transfer.Meta.permissions`); `block_sender_action` on both admins requires the model-default
+`file_transfer.add_blockedsender`. Superusers pass implicitly, same as every other permission
+check in this project. `take_down_action` and `block_sender_action` go through an intermediate
+confirmation page before applying; `release_hold_action` and `dismiss_action` apply immediately
+from the changelist, same as Django's own built-in actions.
+
 ### Queue and scheduler
 
 Two background-work mechanisms, both used by `file_transfer` (spec issue #55) and available to any
@@ -751,8 +924,11 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   router and `admin/filetransfer.py` (see "API" above for all three). **Anonymous sending is gated
   off by default** (`FileTransferSettings.anonymous_enabled = False`); rate limiting (#53) no longer
   blocks turning it on, see "Rate limiting" above and "File transfer specifics"' anonymous-sending
-  paragraph -- flipping it on is now a rollout decision, not a known gap. Takedown tooling
-  (originally phase 3, spec section 16) is tracked separately as issue #59, not built here.
+  paragraph -- flipping it on is now a rollout decision, not a known gap. Abuse reports, admin
+  takedown, a sender block list and an optional per-transfer auto-hold (originally phase 3, spec
+  section 16, deferred to issue #59) are built -- see "File transfer specifics" above. No
+  staff-notification email on an auto-hold: skipped rather than invented, since this project has no
+  `ADMINS`/admin-email setting to send one to.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set), not a host-level guard: a
   coarse nginx `limit_req` is still recommended as defense-in-depth, tracked in the separate

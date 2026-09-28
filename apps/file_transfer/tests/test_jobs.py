@@ -131,6 +131,77 @@ def test_expire_transfers_leaves_recently_ended_transfers_files_alone(
     assert uploaded_file.storage_key in fake_storage.objects
 
 
+def test_expire_transfers_deferred_taken_down_sweep_honours_notify_off(
+    draft_transfer, uploaded_file, fake_storage, django_capture_on_commit_callbacks, monkeypatch
+):
+    """Issue #59 code review: the deferred-deletion sweep used to always pass `notify=True`,
+    emailing the sender even when staff explicitly left "notify sender" off for a takedown whose
+    S3 delete failed the first time around. Now it honours `Transfer.takedown_notify`."""
+    from ..services.storage import GET_URL_EXPIRES_SECONDS
+
+    sent = []
+    monkeypatch.setattr(
+        'apps.file_transfer.services.emails.send_email',
+        lambda **kwargs: sent.append(kwargs) or (1, 0),
+    )
+    draft_transfer.status = TransferStatus.TAKEN_DOWN
+    draft_transfer.takedown_notify = False
+    draft_transfer.ended_at = timezone.now() - timedelta(seconds=GET_URL_EXPIRES_SECONDS + 60)
+    draft_transfer.save()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        jobs.expire_transfers()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.files_deleted_at is not None
+    assert sent == []
+
+
+def test_expire_transfers_deferred_taken_down_sweep_honours_notify_on(
+    draft_transfer, uploaded_file, fake_storage, django_capture_on_commit_callbacks, monkeypatch
+):
+    from ..services.storage import GET_URL_EXPIRES_SECONDS
+
+    sent = []
+    monkeypatch.setattr(
+        'apps.file_transfer.services.emails.send_email',
+        lambda **kwargs: sent.append(kwargs) or (1, 0),
+    )
+    draft_transfer.status = TransferStatus.TAKEN_DOWN
+    draft_transfer.takedown_notify = True
+    draft_transfer.ended_at = timezone.now() - timedelta(seconds=GET_URL_EXPIRES_SECONDS + 60)
+    draft_transfer.save()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        jobs.expire_transfers()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.files_deleted_at is not None
+    assert len(sent) == 1
+
+
+def test_expire_transfers_deferred_sweep_still_notifies_for_ordinary_expiry(
+    draft_transfer, uploaded_file, fake_storage, django_capture_on_commit_callbacks, monkeypatch
+):
+    """Only a `TAKEN_DOWN` transfer's deferred sweep looks at `takedown_notify` -- every other
+    ended transfer keeps the sweep's own always-notify default."""
+    from ..services.storage import GET_URL_EXPIRES_SECONDS
+
+    sent = []
+    monkeypatch.setattr(
+        'apps.file_transfer.services.emails.send_email',
+        lambda **kwargs: sent.append(kwargs) or (1, 0),
+    )
+    draft_transfer.status = TransferStatus.EXPIRED
+    draft_transfer.ended_at = timezone.now() - timedelta(seconds=GET_URL_EXPIRES_SECONDS + 60)
+    draft_transfer.save()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        jobs.expire_transfers()
+
+    assert len(sent) == 1
+
+
 def test_expire_transfers_sends_reminder_once(draft_transfer):
     draft_transfer.status = TransferStatus.ACTIVE
     draft_transfer.expires_at = timezone.now() + timedelta(hours=12)
@@ -145,6 +216,36 @@ def test_expire_transfers_sends_reminder_once(draft_transfer):
     jobs.expire_transfers()
     draft_transfer.refresh_from_db()
     assert draft_transfer.expiry_notified_at == first_notified_at
+
+
+def test_expire_transfers_does_not_remind_a_held_transfer(draft_transfer):
+    """Issue #59 code review: a transfer on hold pending abuse review doesn't work right now, so
+    telling the sender it "expires tomorrow" would be misleading."""
+    draft_transfer.status = TransferStatus.ACTIVE
+    draft_transfer.expires_at = timezone.now() + timedelta(hours=12)
+    draft_transfer.held_for_review_at = timezone.now()
+    draft_transfer.save()
+
+    jobs.expire_transfers()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expiry_notified_at is None
+
+
+def test_expire_transfers_still_expires_a_held_transfer_past_its_expiry(
+    draft_transfer, uploaded_file, fake_storage
+):
+    """Natural expiry still happens on a held transfer (the retention promise) -- only the
+    reminder is skipped, not the expiry itself."""
+    draft_transfer.status = TransferStatus.ACTIVE
+    draft_transfer.expires_at = timezone.now() - timedelta(minutes=1)
+    draft_transfer.held_for_review_at = timezone.now()
+    draft_transfer.save()
+
+    jobs.expire_transfers()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.EXPIRED
 
 
 def test_expire_transfers_does_not_remind_far_future_expiry(draft_transfer):

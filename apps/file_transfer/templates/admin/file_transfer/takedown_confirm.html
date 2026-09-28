@@ -1,0 +1,54 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <h1>{{ title }}</h1>
+
+    <div class="module">
+        <p>You are about to take down the following transfer(s). Their files (including any
+           "download all" zip) will be deleted immediately, and their public link will stop
+           working.</p>
+        <ul>
+            {% for transfer in transfers %}
+            <li>{{ transfer.id }} -- {{ transfer.display_name }} ({{ transfer.get_status_display }})</li>
+            {% endfor %}
+        </ul>
+
+        <form method="post" style="margin-top: 15px;">
+            {% csrf_token %}
+
+            <div>
+                {{ form.reason.errors }}
+                <label for="id_reason" style="display: block; font-weight: bold;">{{ form.reason.label }}:</label>
+                {{ form.reason }}
+                {% if form.reason.help_text %}
+                <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ form.reason.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
+                {{ form.internal_note.errors }}
+                <label for="id_internal_note" style="display: block; font-weight: bold;">{{ form.internal_note.label }}:</label>
+                {{ form.internal_note }}
+                {% if form.internal_note.help_text %}
+                <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ form.internal_note.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label>{{ form.notify_sender }} {{ form.notify_sender.label }}</label>
+            </div>
+
+            <input type="hidden" name="action" value="{{ action_name }}">
+            <input type="hidden" name="apply" value="yes">
+            {% for obj in objects %}
+            <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}">
+            {% endfor %}
+
+            <div style="margin-top: 15px;">
+                <input type="submit" value="Take down" class="button">
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

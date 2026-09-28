@@ -294,6 +294,100 @@ def test_add_recipients_and_resend(client, draft_transfer):
     assert recipient.last_sent_at is not None
 
 
+def test_add_recipients_refused_while_held(client, draft_transfer):
+    """Issue #59 code review: a hold freezes the transfer -- adding recipients (a send path) is
+    refused, with a neutral error message in the row rather than a raw 500 or a silent no-op."""
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    client.force_login(draft_transfer.owner)
+
+    response = client.post(
+        reverse('file_transfer:add-recipients', args=[draft_transfer.id]),
+        data={'recipients': 'friend@example.com'},
+        **HX_HEADERS,
+    )
+
+    assert response.status_code == 422
+    assert 'hold' in response.content.decode().lower()
+    assert not TransferRecipient.objects.filter(
+        transfer=draft_transfer, email='friend@example.com'
+    ).exists()
+
+
+def test_resend_recipient_refused_while_held(client, draft_transfer):
+    _active(draft_transfer)
+    recipient = TransferRecipient.objects.create(transfer=draft_transfer, email='a@example.com')
+    draft_transfer.held_for_review_at = timezone.now()
+    draft_transfer.save()
+    client.force_login(draft_transfer.owner)
+
+    response = client.post(
+        reverse('file_transfer:resend-recipient', args=[draft_transfer.id, recipient.id]),
+        **HX_HEADERS,
+    )
+
+    assert response.status_code == 422
+    recipient.refresh_from_db()
+    assert recipient.last_sent_at is None
+
+
+def test_delete_refused_while_held(client, draft_transfer):
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    client.force_login(draft_transfer.owner)
+
+    response = client.post(reverse('file_transfer:delete', args=[draft_transfer.id]), **HX_HEADERS)
+
+    assert response.status_code == 422
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.ACTIVE
+
+
+def test_disable_still_works_while_held(client, draft_transfer):
+    """The one dashboard action a hold does not freeze."""
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    client.force_login(draft_transfer.owner)
+
+    response = client.post(reverse('file_transfer:disable', args=[draft_transfer.id]), **HX_HEADERS)
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DISABLED
+
+
+def test_add_recipients_refused_when_owner_blocked(client, draft_transfer):
+    from ..models import BlockedSender, BlockedSenderKind
+
+    _active(draft_transfer)
+    BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email)
+    client.force_login(draft_transfer.owner)
+
+    response = client.post(
+        reverse('file_transfer:add-recipients', args=[draft_transfer.id]),
+        data={'recipients': 'friend@example.com'},
+        **HX_HEADERS,
+    )
+
+    assert response.status_code == 422
+    assert not TransferRecipient.objects.filter(
+        transfer=draft_transfer, email='friend@example.com'
+    ).exists()
+
+
+def test_reenable_refused_when_owner_blocked(client, draft_transfer):
+    from ..models import BlockedSender, BlockedSenderKind
+
+    _active(draft_transfer, status=TransferStatus.DISABLED)
+    BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email)
+    client.force_login(draft_transfer.owner)
+
+    response = client.post(
+        reverse('file_transfer:reenable', args=[draft_transfer.id]), **HX_HEADERS
+    )
+
+    assert response.status_code == 422
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DISABLED
+
+
 def test_download_log_is_bounded_and_does_not_n_plus_one(
     client, draft_transfer, uploaded_file, django_assert_max_num_queries
 ):

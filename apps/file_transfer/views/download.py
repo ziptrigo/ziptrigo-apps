@@ -11,10 +11,11 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.core import ratelimit
+from apps.core.htmx import is_htmx
 from apps.core.services.client_ip import client_ip as _client_ip
 
 from .. import services
-from ..forms import DownloadPasswordForm
+from ..forms import AbuseReportForm, DownloadPasswordForm
 from ..models import Transfer, TransferFile, ZipStatus
 from ..services.zip import ensure_zip_build_started
 
@@ -29,6 +30,25 @@ class PublicHttpRequest(HttpRequest):
 
 def _unavailable(request: HttpRequest) -> HttpResponse:
     return render(request, 'file_transfer/unavailable.html', status=404)
+
+
+def _became_unavailable(request: HttpRequest) -> HttpResponse:
+    """Like `_unavailable`, but for `report_transfer`'s own `hx-post` (issue #59 code review): the
+    full "no longer available" page's markup is what `_unavailable` renders, and htmx only ever
+    swaps that into `#report-box` on a status this app's `htmx-config` lists as swappable (see
+    `core/base.html`) -- a bare 404 isn't one of them, so the form used to just silently sit there
+    looking like nothing happened. `HX-Refresh` tells htmx to do a full-page reload instead, which
+    lands the visitor on this same URL's own GET (`download_page`) -- the ordinary, already-neutral
+    "no longer available" page -- rather than trying to render a whole page's worth of markup into
+    a swap target sized for a small report form. Non-htmx callers (there shouldn't be any, since
+    the report form is only ever submitted via `hx-post`, but this stays a safe fallback) still get
+    the plain 404 page.
+    """
+    if not is_htmx(request):
+        return _unavailable(request)
+    response = HttpResponse(status=204)
+    response['HX-Refresh'] = 'true'
+    return response
 
 
 def _password_gated_transfer(request: PublicHttpRequest, slug: str) -> Transfer | HttpResponse:
@@ -52,6 +72,7 @@ def _context(request: PublicHttpRequest, transfer: Transfer, password_form: Down
         'unlocked': not services.requires_password(transfer)
         or services.is_unlocked_in_session(request.session, transfer.id, transfer.password_hash),
         'password_form': password_form,
+        'report_form': AbuseReportForm(),
     }
 
 
@@ -193,3 +214,57 @@ def download_zip(request: PublicHttpRequest, slug: str) -> HttpResponse:
     except ValidationError:
         return _unavailable(request)
     return redirect(url)
+
+
+@require_POST
+def report_transfer(request: PublicHttpRequest, slug: str) -> HttpResponse:
+    """ "Report this transfer" (issue #59): an htmx partial on the download page, no login and no
+    password required -- anyone who merely has the link can report it. Only for a transfer that's
+    currently *available*: an already-unavailable transfer shows a small htmx-friendly notice
+    (`_became_unavailable`) rather than the full "no longer available" page every other endpoint
+    here returns -- this endpoint is only ever reached via the report form's own `hx-post`, and a
+    full page's markup swapped into `#report-box` would just be visual garbage, not a message.
+
+    `FT_REPORT_TRANSFER` (issue #59 code review) is counted only *after* a report is actually
+    created -- peeked first, then hit once `services.create_report` succeeds -- rather than on
+    every POST: counting it up front let a handful of IPs exhaust a transfer's whole report budget
+    with attempts that never even become a report (a bad reason, the dedupe window, ...), locking
+    out every genuine reporter behind them. The slug is looked up before this per-transfer key is
+    touched at all, so a made-up slug can't be used to create rate-limit keys for transfers that
+    don't exist.
+    """
+    limited = ratelimit.hit_ip(request, 'FT_REPORT_IP')
+    if not limited.allowed:
+        return ratelimit.htmx_response(request, limited, retarget='#report-box')
+
+    transfer = Transfer.objects.filter(slug=slug).first()
+    if transfer is None or not services.is_available(transfer):
+        return _became_unavailable(request)
+
+    limited = ratelimit.peek_value(transfer.slug, 'FT_REPORT_TRANSFER')
+    if not limited.allowed:
+        return ratelimit.htmx_response(request, limited, retarget='#report-box')
+
+    form = AbuseReportForm(request.POST)
+    if form.is_valid():
+        try:
+            services.create_report(
+                transfer,
+                reason=form.cleaned_data['reason'],
+                details=form.cleaned_data['details'],
+                reporter_email=form.cleaned_data['reporter_email'],
+                reporter_ip=_client_ip(request),
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc.messages[0])
+        else:
+            # Only a report that was actually created counts against the per-transfer ceiling --
+            # see this view's own docstring.
+            ratelimit.hit_value(transfer.slug, 'FT_REPORT_TRANSFER')
+
+    if form.errors:
+        context = {'transfer': transfer, 'report_form': form}
+        return render(request, 'file_transfer/partials/report_box.html', context, status=422)
+
+    context = {'transfer': transfer, 'reported': True}
+    return render(request, 'file_transfer/partials/report_box.html', context)

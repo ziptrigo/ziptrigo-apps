@@ -15,7 +15,8 @@ A single Django project (a "modular monolith") with one Django app per concern:
 - **file_transfer** — WeTransfer-style file transfer: send large files via a direct-to-S3 upload,
   an expiring download link, a dashboard, and credit-metered storage. Logged-in and anonymous
   (email-confirmed, per-IP-capped, gated off by default) senders alike, resumable uploads, a JWT
-  API (`/api/ft/`) and `admin/filetransfer.py` CLI (#55 phases 1-3); takedown tooling is #59.
+  API (`/api/ft/`) and `admin/filetransfer.py` CLI (#55 phases 1-3); abuse reports, admin takedown,
+  a sender block list and an optional auto-hold on repeated reports (#59).
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).

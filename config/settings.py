@@ -317,6 +317,14 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'FT_UNLOCK_TRANSFER': (30, 10 * 60),
     # Anonymous sender's manage link (`/t/<slug>/manage/<token>/`): low legitimate traffic.
     'FT_MANAGE_IP': (30, 60 * 60),
+    # -- file_transfer: abuse reports (issue #59) --
+    # `FT_REPORT_IP`: strict, every submission counts -- a real visitor reports at most a
+    # handful of transfers, ever. `FT_REPORT_TRANSFER`: looser, per-transfer ceiling so many
+    # different IPs genuinely reporting the same abusive transfer don't get throttled by the IP
+    # rule alone, while still bounding how many reports (and so admin noise / auto-hold triggers)
+    # one transfer can accumulate per hour.
+    'FT_REPORT_IP': (5, 60 * 60),
+    'FT_REPORT_TRANSFER': (20, 60 * 60),
 }
 
 

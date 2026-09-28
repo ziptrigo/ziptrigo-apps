@@ -19,6 +19,7 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import InsufficientCreditsError
 from apps.core.htmx import is_htmx
+from apps.core.services.client_ip import client_ip
 
 from .. import services
 from ..forms import AddRecipientsForm, TransferSettingsActionForm
@@ -162,7 +163,7 @@ def disable(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpResponse
 def reenable(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpResponse:
     transfer = _owned_transfer(request, transfer_id)
     try:
-        services.reenable_transfer_action(transfer)
+        services.reenable_transfer_action(transfer, ip=client_ip(request))
     except (ValidationError, InsufficientCreditsError) as exc:
         message = exc.messages[0] if isinstance(exc, ValidationError) else str(exc)
         return _respond(request, transfer, error=message, status=422)
@@ -220,7 +221,7 @@ def add_recipients(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpR
         return _respond(request, transfer, error=_form_error_text(form), status=422)
 
     try:
-        services.add_recipients(transfer, form.cleaned_data['recipients'])
+        services.add_recipients(transfer, form.cleaned_data['recipients'], ip=client_ip(request))
     except ValidationError as exc:
         return _respond(request, transfer, error=exc.messages[0], status=422)
 
@@ -235,7 +236,7 @@ def resend_recipient(
     transfer = _owned_transfer(request, transfer_id)
     recipient = get_object_or_404(TransferRecipient, id=recipient_id, transfer=transfer)
     try:
-        services.resend_recipient_email(recipient)
+        services.resend_recipient_email(recipient, ip=client_ip(request))
     except ValidationError as exc:
         return _respond(request, transfer, error=exc.messages[0], status=422)
     return _respond(request, transfer)

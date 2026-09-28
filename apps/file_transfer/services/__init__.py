@@ -1,4 +1,4 @@
-from . import anon_limits, limits
+from . import anon_limits, blocklist, limits
 from .actions import (
     add_recipients,
     delete_transfer_now,
@@ -37,6 +37,7 @@ from .downloads import (
     requires_password,
 )
 from .expiry_choices import EXPIRY_CHOICES, anonymous_expiry_choices, resolve_expiry
+from .hold import maybe_hold_for_reports, release_hold
 from .lifecycle import delete_transfer_files, end_transfer, finish_deferred_deletion
 from .metering import (
     MIN_BALANCE_TO_REENABLE,
@@ -47,7 +48,9 @@ from .metering import (
 )
 from .naming import transfer_display_name
 from .password import is_unlocked_in_session, unlock_in_session
+from .reports import create_report, dismiss_report
 from .send import MIN_BALANCE_TO_SEND, SendOptions, finalize_send, validate_send_options
+from .takedown import take_down_transfer
 from .uploads import (
     UploadExpired,
     abort_draft,
@@ -75,6 +78,7 @@ __all__ = [
     'add_recipients',
     'anon_limits',
     'anonymous_expiry_choices',
+    'blocklist',
     'can_view_sent_page',
     'check_password',
     'claim_transfers_for_user',
@@ -82,11 +86,13 @@ __all__ = [
     'confirm_anonymous_by_code',
     'confirm_anonymous_by_link',
     'create_draft',
+    'create_report',
     'current_anonymous_transfer',
     'delete_files_past_grace_period',
     'delete_transfer_files',
     'delete_transfer_now',
     'disable_transfer',
+    'dismiss_report',
     'download_count',
     'downloads_remaining',
     'end_transfer',
@@ -100,6 +106,7 @@ __all__ = [
     'limits',
     'list_uploaded_parts',
     'mark_confirmed_via_link',
+    'maybe_hold_for_reports',
     'meter_transfer',
     'new_cookie_id',
     'owns_draft',
@@ -108,6 +115,7 @@ __all__ = [
     'read_cookie_id',
     'reenable_suspended_transfers_for_user',
     'reenable_transfer_action',
+    'release_hold',
     'remove_file',
     'remove_password',
     'requires_password',
@@ -123,6 +131,7 @@ __all__ = [
     'set_password',
     'start_confirmation',
     'suspend_transfer',
+    'take_down_transfer',
     'transfer_display_name',
     'unlock_in_session',
     'validate_anonymous_send_options',

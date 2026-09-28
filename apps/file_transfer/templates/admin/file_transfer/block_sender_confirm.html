@@ -1,0 +1,61 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <h1>{{ title }}</h1>
+
+    <div class="module">
+        <p>Block the sender of the following transfer(s) from sending any further transfers.</p>
+        <ul>
+            {% for transfer in transfers %}
+            <li>{{ transfer.id }} -- {{ transfer.display_name }} ({{ transfer.sender_email|default:transfer.owner.email }}{% if transfer.sender_ip %}, {{ transfer.sender_ip }}{% endif %})</li>
+            {% endfor %}
+        </ul>
+
+        <form method="post" style="margin-top: 15px;">
+            {% csrf_token %}
+
+            <div>
+                <label>{{ form.block_email }} {{ form.block_email.label }}</label>
+            </div>
+            <div style="margin-top: 5px;">
+                <label>{{ form.block_ip }} {{ form.block_ip.label }}</label>
+                {% if form.block_ip.help_text %}
+                <div style="font-size: 0.9em; color: #666;">{{ form.block_ip.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
+                {{ form.reason.errors }}
+                <label for="id_reason" style="display: block; font-weight: bold;">{{ form.reason.label }}:</label>
+                {{ form.reason }}
+            </div>
+
+            <div style="margin-top: 10px;">
+                {{ form.take_down_active_transfers.errors }}
+                <label>{{ form.take_down_active_transfers }} {{ form.take_down_active_transfers.label }}</label>
+                {% if form.take_down_active_transfers.help_text %}
+                <div style="font-size: 0.9em; color: #666;">{{ form.take_down_active_transfers.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label>{{ form.deactivate_account }} {{ form.deactivate_account.label }}</label>
+                {% if form.deactivate_account.help_text %}
+                <div style="font-size: 0.9em; color: #666;">{{ form.deactivate_account.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <input type="hidden" name="action" value="{{ action_name }}">
+            <input type="hidden" name="apply" value="yes">
+            {% for obj in objects %}
+            <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}">
+            {% endfor %}
+
+            <div style="margin-top: 15px;">
+                <input type="submit" value="Block sender" class="button">
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

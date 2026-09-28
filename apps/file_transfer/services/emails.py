@@ -14,7 +14,7 @@ from django.urls import reverse
 
 from apps.core.services.email import send_email
 
-from ..models import FileTransferSettings, Transfer, TransferFile
+from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
 from .naming import transfer_display_name
 
 
@@ -150,17 +150,37 @@ def send_suspended_notification(transfer_id: str) -> None:
 
 @task
 def send_files_deleted_notification(transfer_id: str) -> None:
-    """ "Files deleted" -- to the sender, after suspension's grace period or natural expiry."""
+    """ "Files deleted" -- to the sender, after suspension's grace period, natural expiry, or an
+    admin takedown (`services.takedown.take_down_transfer`, `notify=True`).
+
+    Sent to `sender_email` when there's no `owner` (issue #59 code review: this used to bail out
+    entirely for an anonymous transfer, silently doing nothing even though a "notify sender"
+    toggle exists that a caller might expect to work regardless).
+
+    A takedown gets distinct wording from an ordinary expiry/deletion -- "deleted and no longer
+    available" reads like the link simply ran its course, not like content was actually removed --
+    and, since the reason is already shown on the sender's dashboard either way (`takedown_reason`
+    is never secret from the sender, only from anyone else), includes it here too rather than
+    making the sender go find it.
+    """
     try:
         transfer = Transfer.objects.select_related('owner').get(id=transfer_id)
     except Transfer.DoesNotExist:
         return
-    if not transfer.owner or not transfer.owner.email:
+    to_email = transfer.owner.email if transfer.owner else transfer.sender_email
+    if not to_email:
         return
 
     name = transfer_display_name(transfer)
-    send_email(
-        to=transfer.owner.email,
-        subject=f'Files for "{name}" have been deleted',
-        text_body=f'The files for your transfer "{name}" have been deleted and are no longer available.',
-    )
+    if transfer.status == TransferStatus.TAKEN_DOWN:
+        subject = f'Your transfer "{name}" was removed'
+        body_lines = [f'Your transfer "{name}" was removed and its files are no longer available.']
+        if transfer.takedown_reason:
+            body_lines += ['', f'Reason: {transfer.takedown_reason}']
+    else:
+        subject = f'Files for "{name}" have been deleted'
+        body_lines = [
+            f'The files for your transfer "{name}" have been deleted and are no longer available.'
+        ]
+
+    send_email(to=to_email, subject=subject, text_body='\n'.join(body_lines))

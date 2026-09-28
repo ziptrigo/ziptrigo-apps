@@ -19,6 +19,7 @@ from ninja.errors import HttpError
 from apps.accounts.auth import JWTAuth
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
+from apps.core.services.client_ip import client_ip
 
 from .. import services
 from ..models import ENDED_STATUSES, Transfer, TransferRecipient, TransferStatus
@@ -29,6 +30,8 @@ from ..schemas import (
     TransferSchema,
     TransferUpdateSchema,
 )
+from ..services.actions import TransferHeldError
+from ..services.blocklist import BLOCKED_MESSAGE, BlockedSenderError, is_blocked
 from .router import router
 
 auth = JWTAuth()
@@ -69,6 +72,8 @@ def create_transfer(request):
     Rate-limited on top of that for the same reason every other upload-side endpoint here is.
     """
     ratelimit.enforce(ratelimit.hit_user(request.auth, 'FT_UPLOAD_USER'))
+    if is_blocked(email=request.auth.email, ip=client_ip(request)):
+        raise HttpError(403, BLOCKED_MESSAGE)
     transfer = services.get_or_create_draft(request.auth)
     return 201, transfer
 
@@ -138,7 +143,9 @@ def finalize_transfer(request, transfer_id: UUID, payload: FinalizeTransferSchem
         notify_on_download=payload.notify_on_download,
     )
     try:
-        services.finalize_send(transfer, options)
+        services.finalize_send(transfer, options, ip=client_ip(request))
+    except BlockedSenderError as exc:
+        raise HttpError(403, exc.messages[0])
     except ValidationError as exc:
         raise HttpError(400, exc.messages[0])
     except InsufficientCreditsError as exc:
@@ -170,7 +177,7 @@ def update_transfer(request, transfer_id: UUID, payload: TransferUpdateSchema):
                 if data['disabled']:
                     services.disable_transfer(transfer)
                 else:
-                    services.reenable_transfer_action(transfer)
+                    services.reenable_transfer_action(transfer, ip=client_ip(request))
             if 'expiry_choice' in data:
                 services.set_expiry(transfer, data['expiry_choice'], data.get('expiry_date'))
             if 'max_downloads' in data:
@@ -181,6 +188,10 @@ def update_transfer(request, transfer_id: UUID, payload: TransferUpdateSchema):
                 services.set_password(transfer, data['password'])
             if 'notify_on_download' in data:
                 services.set_notify_on_download(transfer, data['notify_on_download'])
+    except TransferHeldError as exc:
+        raise HttpError(409, exc.messages[0])
+    except BlockedSenderError as exc:
+        raise HttpError(403, exc.messages[0])
     except ValidationError as exc:
         raise HttpError(400, exc.messages[0])
     except InsufficientCreditsError as exc:
@@ -202,6 +213,8 @@ def delete_transfer(request, transfer_id: UUID):
     else:
         try:
             services.delete_transfer_now(transfer)
+        except TransferHeldError as exc:
+            raise HttpError(409, exc.messages[0])
         except ValidationError as exc:
             raise HttpError(400, exc.messages[0])
     return 204, None
@@ -211,7 +224,11 @@ def delete_transfer(request, transfer_id: UUID):
 def add_recipients(request, transfer_id: UUID, payload: AddRecipientsSchema):
     transfer = _owned_transfer(request, transfer_id)
     try:
-        services.add_recipients(transfer, payload.recipients)
+        services.add_recipients(transfer, payload.recipients, ip=client_ip(request))
+    except TransferHeldError as exc:
+        raise HttpError(409, exc.messages[0])
+    except BlockedSenderError as exc:
+        raise HttpError(403, exc.messages[0])
     except ValidationError as exc:
         raise HttpError(400, exc.messages[0])
     transfer.refresh_from_db()
@@ -227,7 +244,11 @@ def resend_recipient(request, transfer_id: UUID, recipient_id: UUID):
     transfer = _owned_transfer(request, transfer_id)
     recipient = get_object_or_404(TransferRecipient, id=recipient_id, transfer=transfer)
     try:
-        services.resend_recipient_email(recipient)
+        services.resend_recipient_email(recipient, ip=client_ip(request))
+    except TransferHeldError as exc:
+        raise HttpError(409, exc.messages[0])
+    except BlockedSenderError as exc:
+        raise HttpError(403, exc.messages[0])
     except ValidationError as exc:
         raise HttpError(400, exc.messages[0])
     return transfer

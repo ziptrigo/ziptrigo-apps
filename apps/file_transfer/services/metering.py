@@ -58,6 +58,12 @@ def meter_transfer(transfer: Transfer, settings_row: FileTransferSettings | None
         locked = Transfer.objects.select_for_update().get(pk=transfer.pk)
         if locked.status != TransferStatus.ACTIVE or locked.owner is None:
             return
+        if locked.held_for_review_at:
+            # On hold pending abuse review (issue #59): unavailable, and not billed for the days
+            # it spends held -- `last_billed_at` simply doesn't advance while this is set, the
+            # same way it doesn't advance while disabled/suspended, so no backlog accumulates
+            # across a held stretch either (see this function's own docstring).
+            return
         if locked.last_billed_at and now - locked.last_billed_at < _BILLING_PERIOD:
             return
 

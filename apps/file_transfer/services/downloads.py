@@ -23,8 +23,10 @@ def downloads_remaining(transfer: Transfer) -> int | None:
 
 def is_available(transfer: Transfer) -> bool:
     """Whether the transfer's public page should work at all. The page itself must never say
-    *why* it doesn't (spec section 3): expired, disabled, suspended, deleted and limit-reached
-    all render the same neutral message."""
+    *why* it doesn't (spec section 3): expired, disabled, suspended, deleted, taken down,
+    on hold pending abuse review, and limit-reached all render the same neutral message."""
+    if transfer.held_for_review_at:
+        return False
     if transfer.status != TransferStatus.ACTIVE:
         return False
     if transfer.expires_at and transfer.expires_at <= timezone.now():

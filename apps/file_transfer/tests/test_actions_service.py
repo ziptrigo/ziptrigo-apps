@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from apps.billing.services import InsufficientCreditsError, get_balance, spend_credits
 
-from ..models import TransferRecipient, TransferStatus
+from ..models import BlockedSender, BlockedSenderKind, TransferRecipient, TransferStatus
 from ..services import actions
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -179,3 +179,103 @@ def test_actions_reject_ended_transfer(draft_transfer):
         actions.set_max_downloads(draft_transfer, 1)
     with pytest.raises(ValidationError):
         actions.add_recipients(draft_transfer, ['a@example.com'])
+
+
+# -- Hold freezes the transfer (issue #59 code review): while `held_for_review_at` is set, every
+# owner action is refused except `disable_transfer`, which is deliberately left untouched. --
+
+
+def test_held_transfer_blocks_add_recipients(draft_transfer):
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    with pytest.raises(actions.TransferHeldError):
+        actions.add_recipients(draft_transfer, ['a@example.com'])
+
+
+def test_held_transfer_blocks_resend_recipient_email(draft_transfer):
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    recipient = TransferRecipient.objects.create(transfer=draft_transfer, email='a@example.com')
+    with pytest.raises(actions.TransferHeldError):
+        actions.resend_recipient_email(recipient)
+
+
+def test_held_transfer_blocks_set_expiry(draft_transfer):
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    with pytest.raises(actions.TransferHeldError):
+        actions.set_expiry(draft_transfer, '5')
+
+
+def test_held_transfer_blocks_set_max_downloads(draft_transfer):
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    with pytest.raises(actions.TransferHeldError):
+        actions.set_max_downloads(draft_transfer, 3)
+
+
+def test_held_transfer_blocks_set_password(draft_transfer):
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    with pytest.raises(actions.TransferHeldError):
+        actions.set_password(draft_transfer, 'sekret')
+
+
+def test_held_transfer_blocks_delete_now(draft_transfer):
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    with pytest.raises(actions.TransferHeldError):
+        actions.delete_transfer_now(draft_transfer)
+
+
+def test_held_transfer_blocks_reenable(draft_transfer):
+    _active(draft_transfer, status=TransferStatus.DISABLED, held_for_review_at=timezone.now())
+    with pytest.raises(actions.TransferHeldError):
+        actions.reenable_transfer_action(draft_transfer)
+
+
+def test_held_transfer_still_allows_disable(draft_transfer):
+    """The one action a hold does *not* freeze -- taking the link down entirely stays available
+    regardless."""
+    _active(draft_transfer, held_for_review_at=timezone.now())
+    actions.disable_transfer(draft_transfer)
+    assert draft_transfer.status == TransferStatus.DISABLED
+
+
+def test_transfer_held_error_is_a_validation_error():
+    """So every existing `except ValidationError` call site (web dashboard views) already handles
+    it correctly, same pattern as `blocklist.BlockedSenderError`."""
+    assert issubclass(actions.TransferHeldError, ValidationError)
+
+
+# -- Adding recipients, resending, and re-enabling are send paths too (issue #59 code review):
+# blocked the same way starting a new transfer is. --
+
+
+def test_add_recipients_blocked_by_owner_email(draft_transfer):
+    _active(draft_transfer)
+    BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email)
+    with pytest.raises(ValidationError):
+        actions.add_recipients(draft_transfer, ['a@example.com'])
+
+
+def test_add_recipients_blocked_by_ip(draft_transfer):
+    _active(draft_transfer)
+    BlockedSender.objects.create(kind=BlockedSenderKind.IP, value='203.0.113.9')
+    with pytest.raises(ValidationError):
+        actions.add_recipients(draft_transfer, ['a@example.com'], ip='203.0.113.9')
+
+
+def test_resend_recipient_email_blocked_by_owner_email(draft_transfer):
+    _active(draft_transfer)
+    recipient = TransferRecipient.objects.create(transfer=draft_transfer, email='a@example.com')
+    BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email)
+    with pytest.raises(ValidationError):
+        actions.resend_recipient_email(recipient)
+
+
+def test_reenable_blocked_by_owner_email(draft_transfer):
+    _active(draft_transfer, status=TransferStatus.DISABLED)
+    BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email)
+    with pytest.raises(ValidationError):
+        actions.reenable_transfer_action(draft_transfer)
+
+
+def test_add_recipients_not_blocked_when_sender_is_clean(draft_transfer):
+    _active(draft_transfer)
+    created = actions.add_recipients(draft_transfer, ['a@example.com'], ip='203.0.113.1')
+    assert [r.email for r in created] == ['a@example.com']
