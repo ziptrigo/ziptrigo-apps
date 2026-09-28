@@ -8,6 +8,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from apps.accounts.auth import AsyncJWTAuth
+from apps.core import ratelimit
 
 from .. import services
 from ..models import QRCode
@@ -43,6 +44,7 @@ async def list_qrcodes(request):
 async def create_qrcode(request, payload: QRCodeCreateSchema):
     """Create a new QR code."""
     user = request.auth
+    ratelimit.enforce(await ratelimit.ahit_value(str(user.pk), 'QR_CREATE_USER'))
 
     # Extract write-only fields
     url = getattr(payload, 'url', None)
@@ -132,6 +134,8 @@ async def delete_qrcode(request, qr_id: uuid.UUID):
 @router.post('/preview', response=QRCodePreviewSchema, auth=AsyncJWTAuth())
 async def preview_qrcode(request, payload: QRCodeCreateSchema):
     """Generate a QR code image for preview without saving to DB."""
+    ratelimit.enforce(await ratelimit.ahit_value(str(request.auth.pk), 'QR_PREVIEW_USER'))
+
     url = getattr(payload, 'url', None)
     data = getattr(payload, 'data', None)
     fields = payload.dict(exclude={'url', 'data'})

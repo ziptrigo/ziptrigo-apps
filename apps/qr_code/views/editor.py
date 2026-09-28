@@ -14,6 +14,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core import ratelimit
 from apps.core.htmx import hx_redirect
 
 from .. import services
@@ -52,6 +53,10 @@ def qrcode_short_code(request: AuthenticatedHttpRequest) -> HttpResponse:
 @require_POST
 def qrcode_create_submit(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Create a QR code from the editor, then go to the dashboard."""
+    limited = ratelimit.hit_user(request.user, 'QR_CREATE_USER')
+    if not limited.allowed:
+        return ratelimit.web_response(request, limited, retarget='#qrcode-msg')
+
     form = QRCodeCreateForm(request.POST)
     if not form.is_valid():
         return _errors(request, form)
@@ -85,6 +90,10 @@ def qrcode_edit_submit(request: AuthenticatedHttpRequest, qr_id: str) -> HttpRes
 @require_POST
 def qrcode_preview(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render a preview of the QR code in the editor, without saving anything."""
+    limited = ratelimit.hit_user(request.user, 'QR_PREVIEW_USER')
+    if not limited.allowed:
+        return ratelimit.web_response(request, limited, retarget='#qrcode-msg')
+
     form = QRCodeCreateForm(request.POST)
     if not form.is_valid():
         return _errors(request, form)
