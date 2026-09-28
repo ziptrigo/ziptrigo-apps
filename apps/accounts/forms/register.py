@@ -15,7 +15,11 @@ class RegisterForm(forms.Form):
     password = forms.CharField(strip=False, widget=forms.PasswordInput)
 
     def clean_email(self) -> str:
-        email = self.cleaned_data['email']
+        # Normalized the same way `apps.accounts.services.signup.create_account` (and
+        # `UserManager.create_user`) normalize it, so this check can't be fooled by a domain-case
+        # variant of an email that's already registered (e.g. `user@Example.COM` vs.
+        # `user@example.com`) -- see that module's docstring for the full story.
+        email = User.objects.normalize_email(self.cleaned_data['email'])
         if User.objects.filter(email=email).exists():
             raise forms.ValidationError('An account with this email already exists.')
         return email

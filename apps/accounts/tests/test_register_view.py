@@ -56,6 +56,22 @@ def test_duplicate_email_returns_422(client, user):
     assert User.objects.filter(email=user.email).count() == 1
 
 
+def test_duplicate_email_differing_only_by_domain_case_returns_422(client, user):
+    """Issue #52 code review: `UserManager.create_user` normalizes email (lower-casing only the
+    domain) before saving, so `user.email` ('testuser@example.com') is already normalized. A
+    signup for the same address with an upper-case domain must be caught by
+    `RegisterForm.clean_email`'s now-normalized comparison, rather than sailing through both the
+    form's and `create_account`'s pre-checks and hitting the model's unique constraint as a 500."""
+    mixed_case_domain = 'testuser@EXAMPLE.COM'
+    assert mixed_case_domain.lower() == user.email
+
+    response = _register(client, email=mixed_case_domain)
+
+    assert response.status_code == 422
+    assert 'already exists' in response.content.decode()
+    assert User.objects.filter(email=user.email).count() == 1
+
+
 def test_weak_password_too_short_returns_422(client):
     response = _register(client, password='pass1')
 
@@ -107,3 +123,23 @@ def test_signup_ip_rate_limit_is_shared_with_the_api_endpoint(client, settings):
     assert response.status_code == 429
     assert 'Retry-After' in response
     assert not User.objects.filter(email='b@example.com').exists()
+
+
+def test_invalid_submissions_do_not_consume_signup_ip_rate_limit(client, settings):
+    """Issue #52 code review: rejecting a submission (bad password, blank name, a duplicate
+    email caught by `RegisterForm.clean_email`, ...) must not burn the `SIGNUP_IP` budget --
+    only a submission that actually reaches `create_account` does, mirroring how
+    `POST /api/auth/signup` never even reaches its own `ratelimit.enforce` call for a request
+    django-ninja's pydantic validation rejects first."""
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'SIGNUP_IP': (1, 60 * 60)}
+
+    for _ in range(3):
+        response = _register(client, password='pass1')
+        assert response.status_code == 422
+
+    response = _register(client)
+
+    assert response.status_code == 200
+    assert response['HX-Redirect'] == reverse('accounts:created')
+    assert User.objects.filter(email='newuser@example.com').exists()

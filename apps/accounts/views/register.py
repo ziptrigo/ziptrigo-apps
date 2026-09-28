@@ -19,20 +19,24 @@ from ..services.signup import EmailAlreadyRegistered, create_account
 def register_page(request: HttpRequest) -> HttpResponse:
     """Show the registration form, and create the account with it.
 
-    Same `SIGNUP_IP` rate limit as `POST /api/auth/signup` (issue #53), checked before the form
-    even validates -- like that endpoint's own `ratelimit.enforce` call -- so a rate-limited
-    request never touches the database. On success, redirects to the "account created" page,
-    matching what the old fetch-based flow did; invalid submissions re-render the form with status
-    422.
+    Same `SIGNUP_IP` rate limit as `POST /api/auth/signup` (issue #53), checked only once the
+    form has validated -- on the API side, django-ninja's own pydantic validation of `SignupRequest`
+    (format, password strength) always runs before the view body's `ratelimit.enforce` call, so a
+    request that was never going to succeed doesn't burn the budget; checking here right before
+    `create_account` instead of up front mirrors that (issue #52 code review -- checking it before
+    `form.is_valid()` meant every rejected submission, e.g. a bad password, cost one of only 5
+    signups/hour per IP). Invalid submissions re-render the form with status 422 without touching
+    the rate limit at all. On success, redirects to the "account created" page, matching what the
+    old fetch-based flow did.
     """
     if request.method == 'POST':
-        limited = ratelimit.hit_ip(request, 'SIGNUP_IP')
-        if not limited.allowed:
-            return ratelimit.web_response(request, limited, retarget='#register-msg')
-
         form = RegisterForm(request.POST)
         status = 422
         if form.is_valid():
+            limited = ratelimit.hit_ip(request, 'SIGNUP_IP')
+            if not limited.allowed:
+                return ratelimit.web_response(request, limited, retarget='#register-msg')
+
             try:
                 create_account(
                     name=form.cleaned_data['name'],
