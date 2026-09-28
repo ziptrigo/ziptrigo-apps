@@ -53,7 +53,14 @@ def meter_transfers() -> None:
     path), and delete files for transfers past their suspension grace period."""
     settings_row = FileTransferSettings.load()
 
-    for transfer in Transfer.objects.filter(status=TransferStatus.ACTIVE, owner__isnull=False):
+    # `held_for_review_at__isnull=True`: a transfer on hold pending abuse review (issue #59) is
+    # never billed for the days it spends held -- `meter_transfer` re-checks this itself too
+    # (belt-and-suspenders against a hold starting between this query and that row's lock), but
+    # filtering it out here means a busy day of holds doesn't even bother taking a row lock for
+    # transfers this job is going to skip anyway.
+    for transfer in Transfer.objects.filter(
+        status=TransferStatus.ACTIVE, owner__isnull=False, held_for_review_at__isnull=True
+    ):
         try:
             meter_transfer(transfer, settings_row)
         except Exception:

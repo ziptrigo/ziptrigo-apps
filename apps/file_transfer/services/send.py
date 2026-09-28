@@ -13,6 +13,7 @@ from apps.billing.services import InsufficientCreditsError, get_balance
 
 from ..models import FileTransferSettings, Transfer, TransferRecipient, TransferStatus
 from . import limits
+from .blocklist import check_not_blocked
 from .emails import send_sender_copy, send_transfer_notification
 from .expiry_choices import resolve_expiry
 from .password import hash_password
@@ -55,9 +56,14 @@ def finalize_send(transfer: Transfer, options: SendOptions) -> Transfer:
     Raises:
         ValidationError: an option is invalid, no files have finished uploading, or the owner's
             balance is below the 1-credit minimum.
+        blocklist.BlockedSenderError: the owner's email is on the block list (issue #59) -- a
+            belt-and-suspenders re-check alongside `views.send.send_page`'s own check at draft
+            creation, in case the owner was blocked in the meantime.
     """
     settings_row = FileTransferSettings.load()
     recipients = validate_send_options(options, settings_row)
+    if transfer.owner is not None:
+        check_not_blocked(email=transfer.owner.email)
 
     now = timezone.now()
     with transaction.atomic():
