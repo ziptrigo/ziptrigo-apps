@@ -81,7 +81,7 @@ DJANGO_SETTINGS_MODULE = 'config.settings'
 python_files = ['tests.py', 'test_*.py', '*_tests.py', '*_test.py']
 python_classes = ['Test*']
 python_functions = ['test_*']
-testpaths = ['apps']
+testpaths = ['apps', 'admin']
 addopts = [
   '--strict-markers',
   '--reuse-db',
@@ -123,6 +123,7 @@ exclude = [
 modules = [
     'admin.aws',
     'admin.email',
+    'admin.filetransfer',
     'admin.lint',
     'admin.openapi',
     'admin.pip',
