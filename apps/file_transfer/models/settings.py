@@ -69,6 +69,17 @@ class FileTransferSettings(models.Model):
         ),
     )
 
+    # Abuse (issue #59).
+    auto_hold_report_threshold = cast(
+        int,
+        models.PositiveIntegerField(
+            default=0,
+            help_text='Put a transfer on hold (see Transfer.held_for_review_at) once it has this '
+            'many pending abuse reports from distinct IPs. 0 (the default) turns this off -- '
+            'every transfer still needs an admin to look at its reports either way.',
+        ),
+    )
+
     class Meta:
         verbose_name = 'File transfer settings'
         verbose_name_plural = 'File transfer settings'

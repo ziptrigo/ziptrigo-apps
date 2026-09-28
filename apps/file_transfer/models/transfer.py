@@ -37,7 +37,13 @@ class TransferStatus(models.TextChoices):
 
     `DRAFT` -> (`PENDING_CONFIRMATION` for anonymous, phase 2) -> `ACTIVE` -> `DISABLED` (by the
     sender, reversible) / `SUSPENDED` (no credits, reversible within the grace period) ->
-    `EXPIRED` / `DELETED` (terminal).
+    `EXPIRED` / `DELETED` / `TAKEN_DOWN` (terminal).
+
+    `TAKEN_DOWN` (issue #59) is a distinct terminal status from `DELETED` rather than reusing it:
+    an admin takedown is never confused with the sender's own "delete now", and it stays
+    programmatically distinguishable in the dashboard, the API and any future reporting. A
+    transfer *on hold* pending abuse review (issue #59's optional auto-suspend) is **not** a
+    status at all -- see `Transfer.held_for_review_at`.
     """
 
     DRAFT = 'draft', 'Draft'
@@ -47,10 +53,11 @@ class TransferStatus(models.TextChoices):
     SUSPENDED = 'suspended', 'Suspended'
     EXPIRED = 'expired', 'Expired'
     DELETED = 'deleted', 'Deleted'
+    TAKEN_DOWN = 'taken_down', 'Taken down'
 
 
 #: Terminal statuses: a transfer here never becomes available again.
-ENDED_STATUSES = (TransferStatus.EXPIRED, TransferStatus.DELETED)
+ENDED_STATUSES = (TransferStatus.EXPIRED, TransferStatus.DELETED, TransferStatus.TAKEN_DOWN)
 
 #: Statuses a dashboard action (disable, extend, etc.) may still apply to.
 ACTIONABLE_STATUSES = (TransferStatus.ACTIVE, TransferStatus.DISABLED, TransferStatus.SUSPENDED)
@@ -82,6 +89,7 @@ class Transfer(models.Model):
     files: ClassVar['Manager']
     recipients: ClassVar['Manager']
     download_events: ClassVar['Manager']
+    reports: ClassVar['Manager']
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = cast(
@@ -247,6 +255,41 @@ class Transfer(models.Model):
         ),
     )
 
+    # Admin takedown (issue #59). All blank/null unless `status == TAKEN_DOWN`.
+    taken_down_by = cast(
+        'User | None',
+        models.ForeignKey(
+            settings.AUTH_USER_MODEL,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='+',
+            help_text='The staff user who took this transfer down, via apps.file_transfer.admin.',
+        ),
+    )
+    taken_down_by_id: UUID | None
+    taken_down_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    takedown_reason = cast(
+        str,
+        models.TextField(
+            blank=True,
+            default='',
+            help_text="Staff-authored reason, shown on the sender's "
+            'dashboard -- never the identity of whoever reported it.',
+        ),
+    )
+
+    # Abuse-report auto-hold (issue #59, spec section 13's "later" -- optional auto-suspend after
+    # N pending reports from distinct IPs). Deliberately **not** a status: `TransferStatus.SUSPENDED`
+    # is owned by `apps.file_transfer.services.metering` (out-of-credits) and is undone by the
+    # `credits_added` signal and deleted by that status's own grace-period job -- an abuse hold
+    # must survive both untouched. A held transfer keeps whatever status it already had (normally
+    # `ACTIVE`); `services.downloads.is_available` treats a non-null value here as unavailable, and
+    # `services.metering.meter_transfer` skips billing while it's set. Staff release the hold
+    # (dismissing the reports that caused it) or take the transfer down instead -- see
+    # `apps.file_transfer.services.hold`.
+    held_for_review_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
@@ -269,6 +312,12 @@ class Transfer(models.Model):
     def is_actionable(self) -> bool:
         """Whether dashboard actions (disable, extend, etc.) still apply."""
         return self.status in ACTIONABLE_STATUSES
+
+    @property
+    def is_held_for_review(self) -> bool:
+        """Whether an abuse-report auto-hold (issue #59) currently makes this transfer
+        unavailable, regardless of its own `status` -- see `held_for_review_at`'s docstring."""
+        return self.held_for_review_at is not None
 
     @property
     def display_name(self) -> str:
