@@ -12,10 +12,10 @@ from apps.qr_code.models import QRCode, QRCodeErrorCorrection, QRCodeFormat
 from apps.qr_code.services import QRCodeGenerator
 
 
-@pytest.mark.django_db(transaction=True)
 class TestQRCodeGenerator:
     """Test cases for the QRCodeGenerator service."""
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_png_qrcode(self, user, tmp_path):
         """Test generating a PNG QR code."""
@@ -36,6 +36,7 @@ class TestQRCodeGenerator:
         full_path = Path(settings.MEDIA_ROOT) / image_path
         assert full_path.exists()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_svg_qrcode(self, user):
         """Test generating an SVG QR code."""
@@ -55,6 +56,7 @@ class TestQRCodeGenerator:
         full_path = Path(settings.MEDIA_ROOT) / image_path
         assert full_path.exists()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_pdf_qrcode(self, user):
         """Test generating a PDF QR code."""
@@ -74,6 +76,7 @@ class TestQRCodeGenerator:
         full_path = Path(settings.MEDIA_ROOT) / image_path
         assert full_path.exists()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_with_custom_colors(self, user):
         """Test generating QR code with custom colors."""
@@ -92,6 +95,7 @@ class TestQRCodeGenerator:
         full_path = Path(settings.MEDIA_ROOT) / image_path
         assert full_path.exists()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_with_transparent_background(self, user):
         """Test generating QR code with transparent background."""
@@ -110,6 +114,7 @@ class TestQRCodeGenerator:
         full_path = Path(settings.MEDIA_ROOT) / image_path
         assert full_path.exists()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_with_custom_size(self, user):
         """Test generating QR code with custom size."""
@@ -127,6 +132,7 @@ class TestQRCodeGenerator:
         full_path = Path(settings.MEDIA_ROOT) / image_path
         assert full_path.exists()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_with_custom_border(self, user):
         """Test generating QR code with custom border."""
@@ -144,6 +150,7 @@ class TestQRCodeGenerator:
         full_path = Path(settings.MEDIA_ROOT) / image_path
         assert full_path.exists()
 
+    @pytest.mark.django_db(transaction=True)
     @pytest.mark.asyncio
     async def test_generate_with_all_error_correction_levels(self, user):
         """Test generating QR codes with different error correction levels."""

@@ -5,9 +5,21 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # `uv sync` above is already `--frozen`; this keeps every later `uv run` frozen too, so a
+      # drifted lockfile fails loudly instead of `uv run` silently re-resolving/syncing.
+      UV_FROZEN: '1'
     steps:
       - uses: actions/checkout@v4
 

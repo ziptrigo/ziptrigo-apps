@@ -7,7 +7,7 @@ from apps.accounts.tests.factories import UserFactory
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 
-def test_tools_view_requires_superuser(client, regular_user: User):
+def test_tools_view_redirects_non_staff_to_admin_login(client, regular_user: User):
     """A non-staff user never reaches the view at all: `admin_view()` (wrapping every custom admin
     URL, including this one) redirects straight to the admin login page, the same as it would for
     any other admin URL -- Django's own gate, not this view's own logic."""
