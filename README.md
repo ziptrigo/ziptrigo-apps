@@ -126,10 +126,11 @@ cp .env.example .env.dev
 docker compose up --build         # http://localhost:8000
 ```
 
-Brings up all three services: `web` (the site), `worker` (`run_scheduler` + `db_worker`, see
-[Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) and `db` (this stack's own
-Postgres). `web`'s `DATABASE_URL` defaults to that `db` service; override it in `.env.dev` to point
-elsewhere.
+Brings up all four services: `web` (the site), `worker` (`db_worker`), `scheduler`
+(`run_scheduler`, see [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) and `db`
+(this stack's own Postgres). `worker` and `scheduler` wait for `web`'s healthcheck before starting,
+since only `web` applies migrations. `web`'s `DATABASE_URL` defaults to that `db` service; override
+it in `.env.dev` to point elsewhere.
 
 - Site: http://localhost:8000
 - Admin: http://localhost:8000/admin/
@@ -265,10 +266,13 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   trusts; `BASE_URL`'s origin is in `CSRF_TRUSTED_ORIGINS`, and cookies are `Secure` when
   `BASE_URL` is `https://`.
 - **Media files**: a host volume for now.
-- **Background jobs**: the `worker` service (`run_scheduler` + `db_worker`, see
-  [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) needs its own compose service
-  in the `infra` repo, alongside `web`; without it, file transfer's metering, expiry and cleanup
-  jobs and its queued emails never run.
+- **Background jobs**: the `worker` (`db_worker`) and `scheduler` (`run_scheduler`, see
+  [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) services need their own
+  compose services in the `infra` repo, alongside `web`; without them, file transfer's metering,
+  expiry and cleanup jobs and its queued emails never run.
+- **nginx**: must set `X-Real-IP` from the real client address (not passed through from a
+  client-supplied header) -- `file_transfer`'s download-IP logging trusts it and falls back to
+  `REMOTE_ADDR` otherwise.
 
 ## Design System
 
