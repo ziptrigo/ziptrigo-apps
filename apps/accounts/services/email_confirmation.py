@@ -24,10 +24,16 @@ Today's flow is link-only (no code-entry page exists), so this only ever calls `
 -- `confirm_by_code` exists on the shared service for a future caller (`file_transfer`'s anonymous
 sender, phase 2) that needs a code a user can type in without following a link. The confirmation
 email doesn't mention a code either, to avoid advertising a feature this flow doesn't support.
+
+Behaviour for existing users must not change, so link *validity* doesn't move onto the shared
+`CoreSettings.email_verification_validity_minutes` default (30 minutes) either: this module passes
+its historical `EMAIL_CONFIRMATION_TOKEN_TTL_HOURS` (48 hours) to `start(..., validity=...)`
+explicitly, keeping the signup confirmation window exactly what it always was, independent of
+whatever `CoreSettings` says for other purposes.
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from django.conf import settings
 from django.urls import reverse
@@ -76,6 +82,7 @@ class EmailConfirmationService:
                 PURPOSE,
                 build_email=build_email,
                 email_backend_classes=self.email_backend_classes,
+                validity=timedelta(hours=settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS),
             )
         except EmailVerificationError:
             # In practice always `ResendTooSoon` -- see docstring above.
@@ -117,9 +124,9 @@ def get_email_confirmation_service() -> EmailConfirmationService:
 
 
 def format_validity_minutes(minutes: int) -> str:
-    """Render a `CoreSettings.email_verification_validity_minutes` value as friendly text, e.g.
-    `'30 minutes'` or `'48 hours'`. Shared between the confirmation email and the "account
-    created" page so both describe the same window the same way.
+    """Render a validity window (in minutes) as friendly text, e.g. `'30 minutes'` or
+    `'48 hours'`. Shared between the confirmation email and the "account created" page so both
+    describe the same `EMAIL_CONFIRMATION_TOKEN_TTL_HOURS`-derived window the same way.
     """
     if minutes >= 60 and minutes % 60 == 0:
         hours = minutes // 60

@@ -178,16 +178,21 @@ many wrong codes, `Superseded` by a resend, `NotFound`, `AlreadyConfirmed`, or `
 previous pending one for the same `email`/`purpose` -- only the latest is ever valid.
 `confirm_by_token` is deliberately idempotent for a row its own token already confirmed (unlike
 `confirm_by_code`, which is strictly single-use); see the module docstring for why. Code length,
-validity, max attempts and the resend cooldown come from the admin-editable `CoreSettings`
-singleton (`CoreSettings.load()`, defaults: 6 digits, 30 minutes, 5 attempts, 60s cooldown).
+max attempts and the resend cooldown come from the admin-editable `CoreSettings` singleton
+(`CoreSettings.load()`, defaults: 6 digits, 5 attempts, 60s cooldown). Validity normally comes
+from there too (default 30 minutes) but `start(..., validity=timedelta(...))` lets a caller
+override it per call -- `core` stays generic and doesn't know or care why; it just means one
+purpose's needs don't force every other purpose onto the same window.
 
 `accounts`' signup/email-change confirmation (`apps.accounts.services.email_confirmation`) is
 built on this instead of its own JWT (the now-removed `EmailConfirmationToken`); it only ever
-calls `confirm_by_token` since today's flow is link-only. One migration-time consequence: any
-confirmation email sent before this shipped used the old JWT and can no longer be validated at
-all, so those users need to hit "resend confirmation" once (judged low-impact -- see the port's
-module docstring). `file_transfer`'s anonymous-sender confirmation (spec section 2, not yet
-built) is expected to consume `confirm_by_code` for its code-entry page.
+calls `confirm_by_token` since today's flow is link-only, and it passes `validity` explicitly
+from `EMAIL_CONFIRMATION_TOKEN_TTL_HOURS` (default 48h) to keep the historical signup-link
+lifetime unchanged rather than adopting the shared 30-minute default. One migration-time
+consequence: any confirmation email sent before this shipped used the old JWT and can no longer
+be validated at all, so those users need to hit "resend confirmation" once (judged low-impact --
+see the port's module docstring). `file_transfer`'s anonymous-sender confirmation (spec section
+2, not yet built) is expected to consume `confirm_by_code` for its code-entry page.
 
 ### API
 
@@ -323,7 +328,7 @@ above).
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 361 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 363 pass, 31 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 

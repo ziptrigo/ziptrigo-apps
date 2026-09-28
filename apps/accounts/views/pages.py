@@ -1,8 +1,7 @@
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
-
-from apps.core.models import CoreSettings
 
 from ..forms import ProfileForm
 from ..http import AuthenticatedHttpRequest
@@ -23,7 +22,7 @@ def register_page(request: HttpRequest) -> HttpResponse:
 
 def account_created_page(request: HttpRequest) -> HttpResponse:
     """Render the account created confirmation page."""
-    validity_minutes = CoreSettings.load().email_verification_validity_minutes
+    validity_minutes = settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS * 60
     return render(
         request,
         'accounts/account_created.html',

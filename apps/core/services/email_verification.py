@@ -28,7 +28,10 @@ Security:
   (`EmailVerificationSuperseded` if an old one is used later).
 
 Settings (code length, validity, max attempts, resend cooldown) come from the admin-editable
-`CoreSettings` singleton (`/admin/core/coresettings/`), read fresh on every call.
+`CoreSettings` singleton (`/admin/core/coresettings/`), read fresh on every call -- except
+validity, which `start`'s caller may override per call (`validity: timedelta`) when a purpose
+needs a window the shared default shouldn't dictate (e.g. `accounts` keeping signup
+confirmation's historical 48-hour lifetime independent of the shared default other purposes use).
 """
 
 from __future__ import annotations
@@ -128,11 +131,18 @@ def start(
     *,
     build_email: BuildEmail,
     email_backend_classes: list[EmailBackendClass] | None = None,
+    validity: timedelta | None = None,
 ) -> uuid.UUID:
     """Start a new verification for `email`/`purpose`: generate a code and a token, email them
     (`build_email` builds the subject/text/html -- and any confirmation link, from
     `context.token` -- which is then sent via `apps.core.services.email.send_email`), and return
     the new row's id.
+
+    `validity` overrides `CoreSettings.email_verification_validity_minutes` for this call only.
+    Core stays generic -- it doesn't know or care why a caller wants a different window, only
+    that one purpose's needs shouldn't force every other purpose onto the same number. (Used by
+    `accounts`: signup confirmation keeps its historical 48-hour link lifetime,
+    `EMAIL_CONFIRMATION_TOKEN_TTL_HOURS`, independent of the shared default other purposes use.)
 
     Raises `ResendTooSoon` (carrying the remaining wait, in seconds) if a verification for this
     `email`/`purpose` was already started within `CoreSettings.email_verification_resend_cooldown_seconds`.
@@ -156,8 +166,13 @@ def start(
 
     code = _generate_code(settings_row.email_verification_code_length)
     token = secrets.token_urlsafe(32)
-    validity_minutes = settings_row.email_verification_validity_minutes
-    expires_at = now + timedelta(minutes=validity_minutes)
+    effective_validity = (
+        validity
+        if validity is not None
+        else timedelta(minutes=settings_row.email_verification_validity_minutes)
+    )
+    validity_minutes = int(effective_validity.total_seconds() // 60)
+    expires_at = now + effective_validity
 
     with transaction.atomic():
         EmailVerification.objects.filter(

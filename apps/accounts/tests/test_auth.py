@@ -269,6 +269,33 @@ class TestEmailConfirmation:
 
         assert response.status_code == 400
 
+    def test_confirmation_link_keeps_its_historical_48_hour_validity(self, db, monkeypatch):
+        """Signup confirmation must keep behaving the way it always did for users: a 48-hour
+        link, not the shared `core.services.email_verification` default of 30 minutes (issue
+        #58 -- `accounts` passes `EMAIL_CONFIRMATION_TOKEN_TTL_HOURS` as `start()`'s per-call
+        `validity` override)."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.core.models import CoreSettings, EmailVerification
+
+        # Sanity check: the shared default really is different from accounts' 48h, so this test
+        # would actually catch a regression back to the shared default.
+        settings_row = CoreSettings.load()
+        assert settings_row.email_verification_validity_minutes != 48 * 60
+
+        user = User.objects.create_user(
+            email='validity@example.com',
+            password='password123',
+            name='Validity User',
+        )
+        self._send_and_extract_token(monkeypatch, user)
+
+        row = EmailVerification.objects.get(email=user.email, purpose='accounts.email_confirmation')
+        expected_expiry = timezone.now() + timedelta(hours=48)
+        assert abs((row.expires_at - expected_expiry).total_seconds()) < 5
+
     def test_confirm_email_twice_is_idempotent(self, api_client, db, monkeypatch):
         """Clicking the same confirmation link twice (e.g. an email client's own link
         prefetching) must keep succeeding, matching the old JWT-based link's behaviour."""

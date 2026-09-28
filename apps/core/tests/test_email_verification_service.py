@@ -83,6 +83,31 @@ class TestStart:
         expected_expiry = timezone.now() + timedelta(minutes=10)
         assert abs((row.expires_at - expected_expiry).total_seconds()) < 5
 
+    def test_validity_override_takes_precedence_over_settings(self):
+        settings_row = CoreSettings.load()
+        settings_row.email_verification_validity_minutes = 30
+        settings_row.save()
+
+        captured = {}
+
+        def build_email(context: EmailVerificationContext) -> tuple[str, str, str]:
+            captured['validity_minutes'] = context.validity_minutes
+            return 'subject', 'text', 'html'
+
+        start(
+            'someone@example.com',
+            PURPOSE,
+            build_email=build_email,
+            validity=timedelta(hours=48),
+        )
+
+        # The 48h override wins over the 30-minute setting.
+        assert captured['validity_minutes'] == 48 * 60
+
+        row = _latest_row()
+        expected_expiry = timezone.now() + timedelta(hours=48)
+        assert abs((row.expires_at - expected_expiry).total_seconds()) < 5
+
     def test_invalidates_previous_pending_verification_for_same_email_and_purpose(self):
         first_id = _start()
         # Move the cooldown out of the way so the second `start()` isn't rejected.
