@@ -62,7 +62,10 @@ class TestSignupEndpoint:
         response = api_client.post('/auth/signup', json=data)
 
         assert response.status_code == 422  # Validation error
-        assert 'password' in str(response.json())
+        assert (
+            response.json()['detail'][0]['ctx']['error']
+            == 'Password must be at least 6 characters long.'
+        )
 
     def test_signup_password_no_digit(self, api_client):
         """Test that signup rejects passwords without a digit."""
@@ -75,7 +78,10 @@ class TestSignupEndpoint:
         response = api_client.post('/auth/signup', json=data)
 
         assert response.status_code == 422  # Validation error
-        assert 'password' in str(response.json())
+        assert (
+            response.json()['detail'][0]['ctx']['error']
+            == 'Password must contain at least one digit.'
+        )
 
     def test_signup_duplicate_email(self, api_client, user):
         """Test that signup rejects duplicate email addresses."""
@@ -217,6 +223,26 @@ class TestPasswordResetFlow:
 
         assert response.status_code == 400
         assert 'match' in response.json()['detail'].lower()
+
+    def test_reset_password_weak_password(self, api_client, user):
+        """Test that reset password rejects a password that's too short."""
+        from apps.accounts.tokens import PasswordResetToken
+
+        token = PasswordResetToken.for_user(user)
+
+        data = {
+            'token': str(token),
+            'password': 'abc',
+            'password_confirm': 'abc',
+        }
+
+        response = api_client.post('/auth/reset-password', json=data)
+
+        assert response.status_code == 422  # Validation error
+        assert (
+            response.json()['detail'][0]['ctx']['error']
+            == 'Password must be at least 6 characters long.'
+        )
 
 
 @pytest.mark.django_db

@@ -618,7 +618,7 @@ proxy"). A coarse `limit_req` in nginx itself is a recommended defense-in-depth 
 
 ## State of the test suites
 
-Run everything with `inv test unit`. 583 pass, 31 fail, 1 skipped. The failures are **not** layout
+Run everything with `inv test unit`. 586 pass, 29 fail, 1 skipped. The failures are **not** layout
 problems — they are drift between the suites and a codebase that migrated from DRF to
 django-ninja and from sync to async. Don't try to fix them by moving files around.
 
@@ -628,7 +628,6 @@ django-ninja and from sync to async. Don't try to fix them by moving files aroun
 | `qr_code/tests/test_services.py` | 8 | `SynchronousOnlyOperation` — async tests touching the ORM without `sync_to_async` |
 | `accounts/tests/unit/test_authentication.py` | 4 | expects `JWTAuth.authenticate` to return `None` for a bad token; ninja_jwt raises `InvalidToken` before `authenticate` runs |
 | `qr_code/tests/test_setup_integration.py` | 3 | same `SynchronousOnlyOperation` |
-| `accounts/tests/test_auth.py` | 2 | signup lets a `ValidationError` escape as a 500 instead of returning 400 — a real app bug in the router |
 | `accounts/tests/api/test_auth_login_api.py` | 1 | same login/JWT surface |
 | `core/tests/test_admin_tools.py` | 1 | expects 403; Django admin redirects 302 to its login |
 | `qr_code/tests/test_setup_unit.py` | 1 | same `SynchronousOnlyOperation` |

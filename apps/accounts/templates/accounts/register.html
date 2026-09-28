@@ -51,6 +51,7 @@
   </div>
 </div>
 
+<script src="{% static 'accounts/js/error_utils.js' %}"></script>
 <script>
   (function(){
     const form = document.getElementById('reg-form');
@@ -96,8 +97,7 @@
         if (response.ok) {
           window.location.href = '{% url 'accounts:created' %}';
         } else {
-          const userMsg = data.detail || data.message || 'Could not create account.';
-          msg.textContent = userMsg;
+          msg.textContent = extractErrorMessage(data, 'Could not create account.');
           msg.className = 'mb-4 text-sm text-red-600';
         }
       } catch (error) {
