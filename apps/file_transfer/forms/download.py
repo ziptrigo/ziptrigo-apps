@@ -2,6 +2,8 @@
 
 from django import forms
 
+from ._styling import StyledFormMixin
 
-class DownloadPasswordForm(forms.Form):
+
+class DownloadPasswordForm(StyledFormMixin, forms.Form):
     password = forms.CharField(widget=forms.PasswordInput, label='Password')

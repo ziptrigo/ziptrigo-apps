@@ -2,6 +2,8 @@
 
 from django import forms
 
+from ._styling import StyledFormMixin
 
-class ConfirmCodeForm(forms.Form):
+
+class ConfirmCodeForm(StyledFormMixin, forms.Form):
     code = forms.CharField(label='Confirmation code', max_length=10)

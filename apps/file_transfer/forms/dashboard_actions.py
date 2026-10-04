@@ -6,9 +6,10 @@ from django import forms
 
 from ..services.expiry_choices import CUSTOM_CHOICE, EXPIRY_CHOICES, NO_EXPIRATION_CHOICE
 from ._emails import parse_email_list
+from ._styling import StyledFormMixin
 
 
-class ExpiryActionForm(forms.Form):
+class ExpiryActionForm(StyledFormMixin, forms.Form):
     expiry_choice = forms.ChoiceField(choices=EXPIRY_CHOICES, initial=NO_EXPIRATION_CHOICE)
     expiry_date = forms.DateTimeField(required=False)
 
@@ -19,11 +20,11 @@ class ExpiryActionForm(forms.Form):
         return cleaned
 
 
-class MaxDownloadsActionForm(forms.Form):
+class MaxDownloadsActionForm(StyledFormMixin, forms.Form):
     max_downloads = forms.IntegerField(required=False, min_value=1)
 
 
-class PasswordActionForm(forms.Form):
+class PasswordActionForm(StyledFormMixin, forms.Form):
     """A blank `password` means "leave it unchanged" -- the current hash can't be pre-filled into
     the input, so there'd be no way to tell "the owner wants it gone" from "the owner didn't
     touch this field" without the explicit `remove_password` checkbox, which the view (not this
@@ -38,7 +39,7 @@ class TransferSettingsActionForm(ExpiryActionForm, MaxDownloadsActionForm, Passw
     together, one submit. A blank password removes it (see `PasswordActionForm`)."""
 
 
-class AddRecipientsForm(forms.Form):
+class AddRecipientsForm(StyledFormMixin, forms.Form):
     recipients = forms.CharField(
         widget=forms.Textarea(attrs={'rows': 3}),
         help_text='One email address per line (or separated by commas).',

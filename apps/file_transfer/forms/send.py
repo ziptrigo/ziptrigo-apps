@@ -10,9 +10,10 @@ from ..services.expiry_choices import CUSTOM_CHOICE, EXPIRY_CHOICES, NO_EXPIRATI
 from ..services.limits import MAX_MESSAGE_LENGTH
 from ..services.send import SendOptions
 from ._emails import parse_email_list
+from ._styling import StyledFormMixin
 
 
-class SendOptionsForm(forms.Form):
+class SendOptionsForm(StyledFormMixin, forms.Form):
     recipients = forms.CharField(
         widget=forms.Textarea(attrs={'rows': 3}),
         help_text='One email address per line (or separated by commas).',

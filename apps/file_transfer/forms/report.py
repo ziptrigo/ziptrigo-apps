@@ -6,9 +6,10 @@ has the link, not just someone who could actually unlock it.
 from django import forms
 
 from ..models import MAX_DETAILS_LENGTH, AbuseReportReason
+from ._styling import StyledFormMixin
 
 
-class AbuseReportForm(forms.Form):
+class AbuseReportForm(StyledFormMixin, forms.Form):
     reason = forms.ChoiceField(choices=AbuseReportReason.choices, label='Reason')
     details = forms.CharField(
         label='Details (optional)',
