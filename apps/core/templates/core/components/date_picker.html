@@ -1,0 +1,53 @@
+{% comment %}
+Reusable date picker (date only). Include it with:
+  {% include 'core/components/date_picker.html' with name='due' value='2026-12-31' min='2026-01-01' %}
+`value`, `min`, `max` are optional YYYY-MM-DD strings; `id` goes on the button (for a <label for>).
+Submits a single hidden input `name` with a YYYY-MM-DD value ('' when nothing is chosen).
+Behaviour: static/core/js/date_picker.js (Alpine). Also used by core.forms.DatePickerWidget.
+{% endcomment %}
+<div x-data="datePicker" data-value="{{ value }}" data-min="{{ min }}" data-max="{{ max }}"
+     class="relative" @keydown.escape="open = false" @click.outside="open = false">
+  <input type="hidden" name="{{ name }}" :value="value">
+  <button type="button" {% if id %}id="{{ id }}"{% endif %} @click="toggle()"
+          :aria-expanded="open" aria-haspopup="dialog"
+          class="w-full flex items-center justify-between rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-sage-300">
+    <span x-text="display" :class="value ? '' : 'text-gray-500 dark:text-gray-400'"></span>
+    <i class="far fa-calendar text-sage-400" aria-hidden="true"></i>
+  </button>
+  <div x-show="open" style="display: none" role="dialog" aria-label="Choose a date"
+       class="absolute z-20 mt-1 w-72 rounded-md border border-sage-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
+    <div class="flex items-center justify-between mb-2">
+      <button type="button" @click="shiftMonth(-1)" aria-label="Previous month"
+              class="p-1.5 rounded text-sage-700 dark:text-sage-100 hover:bg-sage-100 dark:hover:bg-gray-700">
+        <i class="fas fa-chevron-left"></i>
+      </button>
+      <span class="text-sm font-semibold text-sage-800 dark:text-sage-100" x-text="monthLabel"></span>
+      <button type="button" @click="shiftMonth(1)" aria-label="Next month"
+              class="p-1.5 rounded text-sage-700 dark:text-sage-100 hover:bg-sage-100 dark:hover:bg-gray-700">
+        <i class="fas fa-chevron-right"></i>
+      </button>
+    </div>
+    <div class="grid grid-cols-7 text-center text-xs text-sage-500 dark:text-sage-300 mb-1">
+      <template x-for="d in weekdays" :key="d"><span x-text="d" class="py-1"></span></template>
+    </div>
+    <div class="grid grid-cols-7 gap-0.5 text-sm">
+      <template x-for="(cell, i) in cells" :key="i">
+        <span>
+          <button type="button" x-show="cell" x-text="cell && cell.day"
+                  :disabled="cell && cell.disabled" @click="pick(cell)"
+                  :class="{
+                    'bg-sage-300 text-gray-900 font-semibold': cell && cell.selected,
+                    'ring-1 ring-sage-400': cell && cell.today && !cell.selected,
+                    'text-sage-800 dark:text-sage-100 hover:bg-sage-100 dark:hover:bg-gray-700': cell && !cell.selected && !cell.disabled,
+                    'text-gray-300 dark:text-gray-600 cursor-not-allowed': cell && cell.disabled
+                  }"
+                  class="w-full aspect-square rounded"></button>
+        </span>
+      </template>
+    </div>
+    <div class="flex justify-between mt-2 pt-2 border-t border-sage-100 dark:border-gray-700 text-xs">
+      <button type="button" @click="clear()" class="text-sage-600 dark:text-sage-300 hover:underline">Clear</button>
+      <button type="button" @click="goToday()" class="text-sage-600 dark:text-sage-300 hover:underline">Today</button>
+    </div>
+  </div>
+</div>

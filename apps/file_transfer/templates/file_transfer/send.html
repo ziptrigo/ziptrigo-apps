@@ -43,10 +43,14 @@
             {{ form.message }}
         </div>
         <div class="grid grid-cols-2 gap-4">
-            <div>
+            <div x-data="{ choice: '{{ form.expiry_choice.value }}' }"
+                 @change="if ($event.target.name === 'expiry_choice') choice = $event.target.value">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Expiry</label>
                 {{ form.expiry_choice }}
-                {{ form.expiry_date }}
+                <div x-show="choice === 'custom'" style="display: none" class="mt-2">
+                    {{ form.expiry_date }}
+                    {% for error in form.expiry_date.errors %}<p class="text-xs text-red-600 dark:text-red-400 mt-1">{{ error }}</p>{% endfor %}
+                </div>
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Max downloads</label>

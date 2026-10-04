@@ -2,7 +2,7 @@
 expiration for logged-in senders. Anonymous senders only ever see the fixed day values, and which
 ones are offered is itself admin-configurable (`FileTransferSettings.anonymous_allowed_expiry_days`)."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -21,6 +21,12 @@ EXPIRY_CHOICES = [
     (CUSTOM_CHOICE, 'Set a date'),
     (NO_EXPIRATION_CHOICE, 'No expiration'),
 ]
+
+
+def end_of_day(day: date) -> datetime:
+    """The last moment of `day` in the current time zone: a date-only picker's "expire on this
+    date" means the link keeps working through that whole day."""
+    return timezone.make_aware(datetime.combine(day, time.max.replace(microsecond=0)))
 
 
 def resolve_expiry(choice: str, custom_date: datetime | None = None) -> datetime | None:

@@ -4,14 +4,25 @@ change max downloads, change/remove password, add recipients.
 
 from django import forms
 
-from ..services.expiry_choices import CUSTOM_CHOICE, EXPIRY_CHOICES, NO_EXPIRATION_CHOICE
+from apps.core.forms import DatePickerWidget
+
+from ..services.expiry_choices import (
+    CUSTOM_CHOICE,
+    EXPIRY_CHOICES,
+    NO_EXPIRATION_CHOICE,
+    end_of_day,
+)
 from ._emails import parse_email_list
 from ._styling import StyledFormMixin
 
 
 class ExpiryActionForm(StyledFormMixin, forms.Form):
     expiry_choice = forms.ChoiceField(choices=EXPIRY_CHOICES, initial=NO_EXPIRATION_CHOICE)
-    expiry_date = forms.DateTimeField(required=False)
+    expiry_date = forms.DateField(required=False, widget=DatePickerWidget(min_today=True))
+
+    def clean_expiry_date(self):
+        day = self.cleaned_data['expiry_date']
+        return end_of_day(day) if day else None
 
     def clean(self):
         cleaned = super().clean()
