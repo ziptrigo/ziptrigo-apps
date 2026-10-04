@@ -11,9 +11,10 @@ from ..services.anonymous import AnonymousSendOptions
 from ..services.expiry_choices import anonymous_expiry_choices
 from ..services.limits import MAX_MESSAGE_LENGTH
 from ._emails import parse_email_list
+from ._styling import StyledFormMixin
 
 
-class AnonymousSendOptionsForm(forms.Form):
+class AnonymousSendOptionsForm(StyledFormMixin, forms.Form):
     sender_email = forms.EmailField(label='Your email')
     recipients = forms.CharField(
         widget=forms.Textarea(attrs={'rows': 3}),
