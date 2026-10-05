@@ -2,10 +2,9 @@
 Stored hashed with Django's own password hasher -- never in the clear, same as user passwords.
 """
 
-import hashlib
-
 from django.contrib.auth.hashers import check_password as _check_password
 from django.contrib.auth.hashers import make_password
+from django.utils.crypto import salted_hmac
 
 #: Session key prefix remembering a transfer's password was entered correctly this browser
 #: session, so the visitor isn't asked again on every download from the same transfer.
@@ -29,7 +28,7 @@ def _fingerprint(password_hash: str) -> str:
     `True` so that changing the password invalidates sessions that unlocked the old one -- the
     session value only matches `is_unlocked_in_session`'s check while `password_hash` is
     unchanged from when it was unlocked."""
-    return hashlib.sha256(password_hash.encode()).hexdigest()
+    return salted_hmac('file_transfer.unlock', password_hash, algorithm='sha256').hexdigest()
 
 
 def is_unlocked_in_session(session, transfer_id: object, password_hash: str) -> bool:
