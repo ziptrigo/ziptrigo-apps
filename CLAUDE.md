@@ -841,11 +841,21 @@ future app:
   safe with N workers because the claim is atomic, so only one thread wins each job per interval;
   never start it from `AppConfig.ready()`, which also runs for `migrate`/`collectstatic`/shell.
   `gunicorn.conf.py` imports the scheduler inside the hook (gunicorn loads that file in the master
-  before Django is configured), and `settings.LOGGING` routes the `apps.core.scheduler` logger's
-  INFO lines to the console so "Scheduler thread started" shows in container logs.
-  Jobs therefore run inside web workers: a worker recycle can interrupt one, which is fine since
-  every job is idempotent and the lease expires. `SchedulerRunner.run_forever` calls
-  `close_old_connections()` every tick so the long-lived thread recovers from a database restart.
+  before Django is configured), and `settings.LOGGING` routes everything under the `apps` logger
+  (INFO, console, `propagate: False`) to the container logs, so "Scheduler thread started", the
+  file_transfer job logs and the ratelimit "over limit" lines all show up (`conftest.py` re-enables
+  propagation under pytest so `caplog` still works).
+  Jobs therefore run inside web workers, and **an interrupted job keeps its lease until the lease
+  expires**: a deploy, a SIGHUP reload or a worker timeout kill that lands mid-job leaves that
+  job's `locked_until` set, so no runner picks it up before then (up to the job's lease, e.g. 1 h
+  for the daily jobs), and a deploy can delay a daily job by up to that long. Correct, because
+  every job is idempotent and runs at-least-once; leases are deliberately not cleared on exit.
+  `gunicorn.conf.py`'s `worker_exit` stops the runner and joins `runner.thread` for up to 5 s, which
+  only covers a thread idle between jobs. `SchedulerRunner.run_forever` calls
+  `close_old_connections()` every tick; with `DATABASE_URL` (prod/staging: `conn_max_age=600`,
+  `conn_health_checks`) each scheduler thread keeps one health-checked persistent connection, which
+  is what recovers it from a database restart, and it means **each gunicorn worker holds one extra
+  Postgres connection** when the scheduler is enabled (3 by default).
   `./manage.py run_scheduler` remains for local development (the `scheduler` compose service) or a
   dedicated container; job status is a read-only `ScheduledJob` admin.
 
@@ -879,7 +889,19 @@ into `web`, `worker` and `scheduler` because settings require an env file.
   before SIGKILL, and exits as soon as either child exits (non-zero if one died on its own) so
   `restart: unless-stopped` recovers the whole container. This is how a deployment runs web,
   scheduler and queue worker in one container; the queue worker can't start before migrations
-  because the entrypoint finishes them first.
+  because the entrypoint finishes them first. Exit status: a child killed by a signal maps to
+  `128 + signum`, and a child that had to be SIGKILLed after the grace period makes it 137. With
+  `ENVIRONMENT=prod` and `SCHEDULER_ENABLED` unset it logs a prominent warning at start.
+- **Coupling, deliberately**: because the supervisor exits when *any* child exits, a `db_worker`
+  crash (an OOM kill, an `OperationalError` during a database restart) restarts the whole container,
+  i.e. web downtime and dropped in-flight requests, and a crash-looping queue worker is a
+  crash-looping site. This was chosen over restarting `db_worker` in place because it is simple and
+  leaves Docker's restart policy as the single recovery mechanism; revisit it if the queue worker
+  proves flaky.
+- **Shutdown timing**: three values must keep this order, each strictly below the next:
+  gunicorn's `graceful_timeout` (25 s, `gunicorn.conf.py`) < `supervise.py`'s grace (30 s, then
+  SIGKILL) < the container's stop grace period (40 s, `stop_grace_period` in the infra compose,
+  joaonc/infra#370). Docker's default is 10 s, which would cut all of it short.
 - Locally, `web` is overridden with `runserver` (so neither the scheduler thread nor the
   supervisor runs) and has a TCP healthcheck on port 8000 that the other two services key their
   startup off of.

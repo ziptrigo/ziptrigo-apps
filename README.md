@@ -273,7 +273,13 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   gunicorn, whose workers each run the scheduler as a thread, plus the `db_worker` queue worker
   (see [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)). Set
   `SCHEDULER_ENABLED=1` and leave `RUN_TASK_WORKER` at its default (`1`); without the scheduler
-  flag, file transfer's metering, expiry and cleanup jobs never run.
+  flag, file transfer's metering, expiry and cleanup jobs never run (`supervise.py` logs a
+  warning at start when `ENVIRONMENT=prod` and the flag is off).
+  Because the supervisor exits when either child exits, **a queue-worker crash restarts the whole
+  container, so it shows up as web downtime**; this was chosen on purpose (simple, Docker's restart
+  policy is the single recovery mechanism). The container's stop grace period must exceed 30 s
+  (40 s in the infra compose, joaonc/infra#370; Docker's default is 10 s): gunicorn's
+  `graceful_timeout` 25 s < the supervisor's 30 s < 40 s.
 - **nginx**: must set `X-Real-IP` from the real client address (not passed through from a
   client-supplied header) -- `file_transfer`'s download-IP logging trusts it and falls back to
   `REMOTE_ADDR` otherwise.

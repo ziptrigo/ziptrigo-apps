@@ -87,6 +87,8 @@ class SchedulerRunner:
     def __init__(self, tick_seconds: float, stop_event: threading.Event | None = None):
         self.tick_seconds = tick_seconds
         self._stop_event = stop_event or threading.Event()
+        # Set by `start_scheduler_thread()` so the owner can join it after `stop()`.
+        self.thread: threading.Thread | None = None
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -98,9 +100,11 @@ class SchedulerRunner:
             [job.name for job in get_jobs()],
         )
         while not self._stop_event.is_set():
-            # A long-lived thread outside the request cycle would otherwise hold one connection
-            # forever and never recover from a database restart; with CONN_MAX_AGE=0 this opens a
-            # fresh connection per tick.
+            # A long-lived thread outside the request cycle never gets the request-cycle cleanup.
+            # With `DATABASE_URL` (prod/staging) the connection is persistent (conn_max_age=600,
+            # conn_health_checks), so this thread keeps one health-checked connection (one extra
+            # Postgres connection per gunicorn worker); the check here is what recovers it after a
+            # database restart. With no max age (SQLite, dev) it opens a fresh one per tick.
             close_old_connections()
             try:
                 ran = run_due_jobs()

@@ -1,5 +1,6 @@
 """Fixtures shared by every app's tests."""
 
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -19,6 +20,13 @@ def _clear_ratelimit_cache():
     caches['ratelimit'].clear()
     yield
     caches['ratelimit'].clear()
+
+
+@pytest.fixture(autouse=True)
+def _apps_logs_reach_caplog(monkeypatch):
+    """`settings.LOGGING` sets `propagate=False` on the `apps` logger (console only, no duplicates
+    in production); `caplog` listens on the root logger, so let records through while testing."""
+    monkeypatch.setattr(logging.getLogger('apps'), 'propagate', True)
 
 
 @pytest.fixture()

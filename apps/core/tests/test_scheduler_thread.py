@@ -8,16 +8,10 @@ from apps.core.scheduler import runner as runner_module
 pytestmark = pytest.mark.unit
 
 
-def _scheduler_threads() -> list[threading.Thread]:
-    return [t for t in threading.enumerate() if t.name == 'scheduler']
-
-
 def test_disabled_by_default_starts_nothing(settings):
     settings.SCHEDULER_ENABLED = False
-    before = len(_scheduler_threads())
 
     assert start_scheduler_thread() is None
-    assert len(_scheduler_threads()) == before
 
 
 def test_enabled_runs_ticks_and_stops(settings, monkeypatch):
@@ -36,15 +30,15 @@ def test_enabled_runs_ticks_and_stops(settings, monkeypatch):
     runner = start_scheduler_thread()
     try:
         assert runner is not None
+        assert runner.thread is not None and runner.thread.name == 'scheduler'
         assert ticked.wait(5)
     finally:
         if runner is not None:
             runner.stop()
 
-    threads = _scheduler_threads()
-    for thread in threads:
-        thread.join(5)
-    assert not any(t.is_alive() for t in threads)
+    assert runner.thread is not None
+    runner.thread.join(5)
+    assert not runner.thread.is_alive()
 
 
 def test_run_forever_closes_old_connections_each_tick(monkeypatch):

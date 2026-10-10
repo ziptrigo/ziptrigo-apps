@@ -5,6 +5,10 @@ scheduler registry (filled from each app's `AppConfig.ready()`) is populated. De
 `preload_app`: each worker starts its own scheduler thread after the fork.
 """
 
+# Must stay below supervise.py's 30 s grace (then SIGKILL), which in turn must stay below the
+# container's stop grace period (40 s in the infra compose file, joaonc/infra#370).
+graceful_timeout = 25
+
 _runner = None
 
 
@@ -20,3 +24,7 @@ def post_worker_init(worker):
 def worker_exit(server, worker):
     if _runner is not None:
         _runner.stop()
+        # Give a tick that is between jobs time to see the stop event. A job still running after
+        # this keeps its lease until it expires (see CLAUDE.md, "Queue and scheduler").
+        if _runner.thread is not None:
+            _runner.thread.join(timeout=5)

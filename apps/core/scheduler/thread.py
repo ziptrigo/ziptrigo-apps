@@ -17,10 +17,12 @@ logger = logging.getLogger(__name__)
 
 def start_scheduler_thread() -> SchedulerRunner | None:
     """Start a daemon thread running a SchedulerRunner. No-op (returns None) unless
-    settings.SCHEDULER_ENABLED. Returns the runner so the caller can .stop() it."""
+    settings.SCHEDULER_ENABLED. Returns the runner so the caller can .stop() it and
+    `.thread.join()` it."""
     if not settings.SCHEDULER_ENABLED:
         return None
     runner = SchedulerRunner(tick_seconds=settings.SCHEDULER_TICK_SECONDS)
-    threading.Thread(target=runner.run_forever, name='scheduler', daemon=True).start()
+    runner.thread = threading.Thread(target=runner.run_forever, name='scheduler', daemon=True)
+    runner.thread.start()
     logger.info('Scheduler thread started in pid %s', os.getpid())
     return runner

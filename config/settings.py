@@ -507,13 +507,15 @@ SCHEDULER_TICK_SECONDS = int(os.getenv('SCHEDULER_TICK_SECONDS', '30'))
 # `gunicorn.conf.py`). Off by default so a local checkout, `runserver` and pytest never run jobs.
 SCHEDULER_ENABLED = os.getenv('SCHEDULER_ENABLED', 'False').lower() in ('true', '1')
 
-# Python's default logging drops INFO from our own loggers; the scheduler's start/run lines
-# ("Scheduler thread started in pid ...", "Scheduler ran: ...") need to reach the container logs.
+# Python's default logging drops INFO from our own loggers. Send everything under `apps` at INFO
+# to the console so the scheduler's start/run lines, file_transfer job logs and the rate limiter's
+# "over limit" lines reach the container logs. `propagate: False` avoids duplicates should a root
+# handler ever be added.
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'handlers': {'console': {'class': 'logging.StreamHandler'}},
-    'loggers': {'apps.core.scheduler': {'handlers': ['console'], 'level': 'INFO'}},
+    'loggers': {'apps': {'handlers': ['console'], 'level': 'INFO', 'propagate': False}},
 }
 
 
