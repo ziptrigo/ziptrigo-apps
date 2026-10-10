@@ -433,7 +433,7 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
 
 - **Web**: `send.html`/`anon_send.html` share one script,
   `apps/file_transfer/static/file_transfer/js/resumable_upload.js`, since both pages upload the
-  same way and need the same resume-matching logic. Presigned part URLs are requested a small batch
+  same way and need the same resume-matching logic. The same file's `initDropZone` makes each page's drop zone accept dropped files *and* folders (walked recursively, flat like the "Add folder" picker), feeding the same `handleFileSelection`. Presigned part URLs are requested a small batch
   at a time (`PART_URL_BATCH_SIZE`) rather than for the whole file up front, so a later part's URL
   on a slow connection doesn't sit long enough to expire before it's used; the same batching (plus
   streaming the file a part at a time rather than holding it all in memory) applies to the CLI's

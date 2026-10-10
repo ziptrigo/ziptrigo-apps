@@ -378,6 +378,10 @@ function initDropZone(zoneEl, onFiles) {
     const activeClasses = ['border-brand-primary', 'bg-gray-50', 'dark:bg-gray-700'];
     let depth = 0;
 
+    function hasFiles(e) {
+        return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') !== -1;
+    }
+
     function setActive(on) {
         activeClasses.forEach(function (c) { zoneEl.classList.toggle(c, on); });
     }
@@ -407,6 +411,8 @@ function initDropZone(zoneEl, onFiles) {
     }
 
     zoneEl.addEventListener('dragenter', function (e) {
+        // Dragging selected text or a link over the zone isn't something it can accept.
+        if (!hasFiles(e)) return;
         e.preventDefault();
         depth++;
         setActive(true);
@@ -438,15 +444,17 @@ function initDropZone(zoneEl, onFiles) {
         } else {
             out.push.apply(out, Array.from(dt.files));
         }
-        if (out.length) onFiles(out);
+        if (out.length) {
+            onFiles(out);
+        } else {
+            alert('No files found in what you dropped (an empty folder, or one that could not be read).');
+        }
     });
 
     // A file dropped just outside the zone would make the browser navigate to it and lose the page.
     ['dragover', 'drop'].forEach(function (type) {
         window.addEventListener(type, function (e) {
-            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') !== -1) {
-                e.preventDefault();
-            }
+            if (hasFiles(e)) e.preventDefault();
         });
     });
 }

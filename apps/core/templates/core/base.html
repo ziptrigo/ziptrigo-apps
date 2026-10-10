@@ -127,21 +127,21 @@
                 <div id="auth-nav">
                     {% if user.is_authenticated %}
                     <div class="relative" x-data="{ open: false }" @click.outside="open = false"
-                         @keydown.escape.window="open = false">
-                        <button type="button" @click="open = !open" aria-label="Account menu" title="Account"
-                                aria-haspopup="menu" :aria-expanded="open"
+                         @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
+                        <button type="button" x-ref="trigger" @click="open = !open"
+                                aria-label="Account menu" title="Account" :aria-expanded="open"
                                 class="p-1 rounded text-2xl leading-none hover:text-sage-300">
                             <i class="fas fa-user-circle"></i>
                         </button>
-                        <div x-show="open" x-cloak style="display: none" role="menu"
+                        <div x-show="open" style="display: none"
                              class="absolute right-0 mt-2 w-40 rounded-md shadow-lg bg-white dark:bg-gray-700 ring-1 ring-black/10 dark:ring-white/10 py-1 z-50">
-                            <a href="{% url 'accounts:account' %}" role="menuitem"
+                            <a href="{% url 'accounts:account' %}"
                                class="block px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-600">
                                 <i class="fas fa-cog mr-2 w-4 text-center"></i>Settings
                             </a>
                             <form method="post" action="{% url 'accounts:logout' %}">
                                 {% csrf_token %}
-                                <button type="submit" role="menuitem"
+                                <button type="submit"
                                         class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-600">
                                     <i class="fas fa-sign-out-alt mr-2 w-4 text-center"></i>Logout
                                 </button>
