@@ -1,5 +1,8 @@
 import pytest
+from django.contrib.auth.models import Permission
 from django.urls import reverse
+
+from apps.accounts.tests.factories import UserFactory
 
 from ..models import Feedback, FeedbackStatus
 
@@ -68,6 +71,43 @@ def test_bulk_actions_set_the_status(client, admin_user, items, action, status):
         assert feedback.updated_at > before[feedback.pk]
     items['in_process'].refresh_from_db()
     assert items['in_process'].status == FeedbackStatus.IN_PROCESS
+
+
+def _staff_with(*codenames: str):
+    staff = UserFactory(is_staff=True)
+    for codename in codenames:
+        # `user_permissions` is a many-to-many manager `ty` can't see through the field type.
+        staff.user_permissions.add(  # ty: ignore[unresolved-attribute]
+            Permission.objects.get(content_type__app_label='feedback', codename=codename)
+        )
+    return staff
+
+
+@pytest.mark.parametrize('action', ['mark_new', 'mark_in_process', 'mark_closed'])
+def test_view_only_staff_cannot_run_bulk_actions(client, items, action):
+    client.force_login(_staff_with('view_feedback'))
+    selected = items['new']
+
+    page = client.get(reverse(CHANGELIST))
+    client.post(
+        reverse(CHANGELIST),
+        {'action': action, '_selected_action': [str(selected.pk)]},
+        follow=True,
+    )
+
+    # No bulk action is offered at all, so there's no action form on the changelist.
+    assert page.context['action_form'] is None
+    selected.refresh_from_db()
+    assert selected.status == FeedbackStatus.NEW
+
+
+def test_staff_with_change_permission_is_offered_the_bulk_actions(client, items):
+    client.force_login(_staff_with('view_feedback', 'change_feedback'))
+
+    page = client.get(reverse(CHANGELIST))
+
+    choices = dict(page.context['action_form'].fields['action'].choices)
+    assert {'mark_new', 'mark_in_process', 'mark_closed'} <= set(choices)
 
 
 def test_add_is_disabled(client, admin_user):

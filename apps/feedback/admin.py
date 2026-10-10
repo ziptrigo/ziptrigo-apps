@@ -5,6 +5,7 @@ from django.db.models import QuerySet
 from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 
 from apps.core.admin_site import custom_admin_site
 
@@ -35,7 +36,7 @@ class FeedbackAdmin(admin.ModelAdmin):
         return text if len(text) <= PREVIEW_LENGTH else f'{text[:PREVIEW_LENGTH].rstrip()}…'
 
     @admin.display(description='Feedback')
-    def description_text(self, obj: Feedback):
+    def description_text(self, obj: Feedback) -> SafeString:
         return format_html('<div style="white-space: pre-wrap">{}</div>', obj.description)
 
     def has_add_permission(self, request: HttpRequest) -> bool:
@@ -48,15 +49,15 @@ class FeedbackAdmin(admin.ModelAdmin):
             request, f'Marked {count} feedback as {status.label}.', level=messages.SUCCESS
         )
 
-    @admin.action(description='Mark selected as New')
+    @admin.action(description='Mark selected as New', permissions=['change'])
     def mark_new(self, request: HttpRequest, queryset: QuerySet) -> None:
         self._mark(request, queryset, FeedbackStatus.NEW)
 
-    @admin.action(description='Mark selected as In process')
+    @admin.action(description='Mark selected as In process', permissions=['change'])
     def mark_in_process(self, request: HttpRequest, queryset: QuerySet) -> None:
         self._mark(request, queryset, FeedbackStatus.IN_PROCESS)
 
-    @admin.action(description='Mark selected as Closed')
+    @admin.action(description='Mark selected as Closed', permissions=['change'])
     def mark_closed(self, request: HttpRequest, queryset: QuerySet) -> None:
         self._mark(request, queryset, FeedbackStatus.CLOSED)
 

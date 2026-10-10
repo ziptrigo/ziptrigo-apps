@@ -839,9 +839,18 @@ superusers) and `core` can't import `accounts`; it sits in the same layer as `bi
   superuser logs a warning). Both pass an explicit autoescaped `html_body` -- without one
   `SesEmailBackend` wraps `text_body` in an unescaped `<pre>`, so feedback containing HTML would
   render as HTML in the admins' inboxes -- and no feedback text ever goes into a subject.
+  The receipt goes only to a user whose `email_confirmed` is true: `PUT /api/account` un-confirms
+  an account on an email change but leaves the session valid, so otherwise someone could aim a
+  receipt (their text and name) at a third party's address. Submitting is *not* blocked for an
+  unconfirmed user, and superusers are still notified; the form and thanks page just leave out the
+  "a copy will be emailed to ..." wording in that case.
+- **Thanks page** is reachable only right after a submission: `feedback_page` sets a one-shot
+  session flag and `thanks_page` pops it, redirecting to the form without it. A 422 response also
+  clears a leftover rate-limit message with an out-of-band `#feedback-msg` swap.
 - **Admin** (`FeedbackAdmin`): filter by status and date, search, everything read-only except
   `status`, no add permission, and bulk "Mark selected as New / In process / Closed" actions that
-  set `updated_at` explicitly (`QuerySet.update` skips `auto_now`).
+  set `updated_at` explicitly (`QuerySet.update` skips `auto_now`); the actions require the
+  `change` permission (`permissions=['change']`), since an action ignores `has_change_permission`.
 
 ### Queue and scheduler
 

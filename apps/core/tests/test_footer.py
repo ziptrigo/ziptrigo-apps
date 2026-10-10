@@ -1,5 +1,7 @@
 """The footer shared by every page."""
 
+import re
+
 import pytest
 from django.urls import reverse
 
@@ -11,7 +13,8 @@ def test_footer_links_to_the_feedback_page(client):
 
     assert reverse('feedback:submit') == '/feedback/'
     assert 'href="/feedback/"' in html
-    assert 'aria-current' not in html
+    [anchor] = re.findall(r'<a [^>]*href="/feedback/"[^>]*>', html)
+    assert 'aria-current' not in anchor
 
 
 def test_footer_link_is_marked_current_on_the_feedback_page(client, user):

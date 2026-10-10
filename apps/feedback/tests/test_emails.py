@@ -31,13 +31,27 @@ def test_submitter_gets_a_receipt_with_their_text(
 
 
 def test_receipt_without_a_name_greets_generically(sent_emails, django_capture_on_commit_callbacks):
-    nameless = UserFactory(name='')
+    nameless = UserFactory(name='', email_confirmed=True)
 
     _submit(nameless, 'Hi', django_capture_on_commit_callbacks)
 
     [receipt] = [m for m in sent_emails if m['to'] == nameless.email]
     assert receipt['text_body'].startswith('Hi there,')
     assert 'Hi there,' in receipt['html_body']
+
+
+def test_unconfirmed_submitter_gets_no_receipt_but_superusers_are_still_notified(
+    sent_emails, django_capture_on_commit_callbacks
+):
+    # `PUT /api/account` un-confirms the account on an email change but keeps the session, so the
+    # text must not be mailed to an address nobody has proven they control.
+    unconfirmed = UserFactory(email_confirmed=False)
+    superuser = UserFactory(is_staff=True, is_superuser=True)
+
+    _submit(unconfirmed, 'Please read this', django_capture_on_commit_callbacks)
+
+    assert [m['to'] for m in sent_emails] == [superuser.email]
+    assert all(m['subject'] != 'Thanks for your feedback' for m in sent_emails)
 
 
 def test_each_active_superuser_gets_one_notification(

@@ -46,13 +46,17 @@ def active_superusers():
 
 @task
 def send_feedback_receipt(feedback_id: str) -> None:
-    """ "Thanks for your feedback" -- to the submitter, with a copy of what they sent."""
+    """ "Thanks for your feedback" -- to the submitter, with a copy of what they sent. Only sent to
+    a confirmed address."""
     try:
         feedback = Feedback.objects.select_related('created_by').get(id=feedback_id)
     except Feedback.DoesNotExist:
         return
     user = feedback.created_by
-    if not user or not user.email:
+    # Never mail the text to an address that hasn't been confirmed: `PUT /api/account` un-confirms
+    # the account on an email change but leaves the session valid, so without this a user could
+    # aim the receipt (their own text, plus their name) at someone else's inbox.
+    if not user or not user.email or not user.email_confirmed:
         return
 
     date, time = _submitted_at(feedback)

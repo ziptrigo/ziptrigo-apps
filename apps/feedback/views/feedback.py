@@ -3,7 +3,7 @@ the page it redirects to afterwards (post/redirect/get, so a refresh never sends
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
@@ -12,7 +12,12 @@ from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import FeedbackForm
+from ..models import MAX_DESCRIPTION_LENGTH
 from ..services import submit_feedback
+
+# Set in the session by a successful submission and popped by the thank-you page, so that page
+# can only be reached by actually submitting something.
+SUBMITTED_SESSION_KEY = 'feedback_submitted'
 
 
 @login_required
@@ -34,21 +39,33 @@ def feedback_page(request: AuthenticatedHttpRequest) -> HttpResponse:
                 return ratelimit.web_response(request, limited, retarget='#feedback-msg')
 
             submit_feedback(request.user, form.cleaned_data['description'])
+            request.session[SUBMITTED_SESSION_KEY] = True
             return hx_redirect(request, reverse('feedback:thanks'))
     else:
         form = FeedbackForm()
         status = 200
 
-    template = (
-        'feedback/partials/feedback_form.html'
-        if request.method == 'POST' and is_htmx(request)
-        else 'feedback/feedback.html'
-    )
-    return render(request, template, {'form': form}, status=status)
+    partial = request.method == 'POST' and is_htmx(request)
+    context = {
+        'form': form,
+        'max_length': MAX_DESCRIPTION_LENGTH,
+        'max_length_label': f'{MAX_DESCRIPTION_LENGTH:,}',
+        # Only a bare partial response carries the out-of-band `#feedback-msg` reset; the full
+        # page already has that element, so adding it there would duplicate the id.
+        'reset_message': partial,
+    }
+    template = 'feedback/partials/feedback_form.html' if partial else 'feedback/feedback.html'
+    return render(request, template, context, status=status)
 
 
 @login_required
 @require_http_methods(['GET'])
 def thanks_page(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """Confirm that the feedback was received and a copy emailed."""
+    """Confirm that the feedback was received (and, for a confirmed address, a copy emailed).
+
+    Reachable only right after a submission: the session flag it sets is consumed here, so
+    visiting directly (or refreshing) goes back to the form.
+    """
+    if not request.session.pop(SUBMITTED_SESSION_KEY, False):
+        return redirect('feedback:submit')
     return render(request, 'feedback/thanks.html')

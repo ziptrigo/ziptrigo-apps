@@ -1,3 +1,4 @@
+{% if reset_message %}<div id="feedback-msg" hx-swap-oob="true" class="text-sm"></div>{% endif %}
 <form id="feedback-form"
       method="post"
       action="{% url 'feedback:submit' %}"
@@ -6,7 +7,7 @@
       hx-swap="outerHTML"
       hx-disabled-elt="find button[type='submit']"
       x-data="{ count: 0 }"
-      x-init="count = $refs.text.value.length">
+      x-init="count = [...$refs.text.value].length">
   {% csrf_token %}
 
   <label class="block mb-4">
@@ -15,12 +16,12 @@
       <span class="block mb-1 text-sm text-red-600">{{ error }}</span>
     {% endfor %}
     <textarea name="description" rows="9" required x-ref="text"
-              @input="count = $event.target.value.length"
+              @input="count = [...$event.target.value].length"
               placeholder="Tell us what's on your mind…"
               class="w-full rounded border {% if form.description.errors %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sage-300">{{ form.description.value|default:'' }}</textarea>
     <span class="flex justify-between gap-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
-      <span>A copy will be emailed to {{ user.email }}.</span>
-      <span class="whitespace-nowrap" :class="count > 5000 ? 'text-red-600' : ''"><span x-text="count.toLocaleString('en-US')">0</span> / 5,000</span>
+      <span>{% if user.email_confirmed %}A copy will be emailed to {{ user.email }}.{% endif %}</span>
+      <span class="whitespace-nowrap" :class="count > {{ max_length }} ? 'text-red-600' : ''"><span x-text="count.toLocaleString('en-US')">0</span> / {{ max_length_label }}</span>
     </span>
   </label>
 
