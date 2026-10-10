@@ -11,6 +11,8 @@ A single Django project (a "modular monolith") with one Django app per concern:
   the admin site, email sending, the background job scheduler (`apps.core.scheduler`).
 - **accounts** — the user model, sign-up/login/password reset, account pages.
 - **billing** — credits: balances, the transaction ledger, the credits history page.
+- **feedback** — the footer's feedback page: saves a logged-in user's message, emails them a
+  receipt and the superusers a notification, and the admin triages it by status (#82).
 - **qr_code** — QR code generation, the dashboard/editor and the `/go/<code>` short links.
 - **file_transfer** — WeTransfer-style file transfer: send large files via a direct-to-S3 upload,
   an expiring download link, a dashboard, and credit-metered storage. Logged-in and anonymous
@@ -41,6 +43,7 @@ ziptrigo-apps/
 │   ├── core/
 │   ├── accounts/
 │   ├── billing/
+│   ├── feedback/
 │   ├── qr_code/
 │   └── file_transfer/
 ├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, ...), run via `inv`
@@ -71,6 +74,7 @@ apps/<app>/
 | `/` | core landing page |
 | `/account/…` | accounts (login, register, logout, password reset, email confirmation, settings) |
 | `/billing/…` | billing (credits history) |
+| `/feedback/…` | feedback (the form, and the thank-you page) |
 | `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
@@ -83,7 +87,7 @@ apps/<app>/
 ```
 qr_code, file_transfer   (products: may not import each other)
         ↓
-     billing
+ billing, feedback
         ↓
      accounts
         ↓

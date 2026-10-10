@@ -16,6 +16,8 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       email verification, rate limiting (`apps.core.ratelimit`), client IP.
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services.
+apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
+                      to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs.
@@ -87,7 +89,7 @@ inv pip compile --clean           # delete uv.lock and re-lock from scratch
 
 ```
 qr_code | file_transfer   products; may not import each other
-billing
+billing | feedback        may not import each other either
 accounts
 core
 ```
@@ -814,6 +816,32 @@ entries. `take_down_action`, `release_hold_action` (both on `TransferAdmin`) and
 check in this project. `take_down_action` and `block_sender_action` go through an intermediate
 confirmation page before applying; `release_hold_action` and `dismiss_action` apply immediately
 from the changelist, same as Django's own built-in actions.
+
+### Feedback
+
+`apps.feedback` (issue #82) is the footer's "Feedback" page (`core/base.html` links to it with
+`{% url 'feedback:submit' %}`; a template link isn't an import). It lives above `accounts` rather
+than in `core` because it needs the user (the `created_by` FK, the submitter's address, a lookup of
+superusers) and `core` can't import `accounts`; it sits in the same layer as `billing`.
+
+- **Login required.** `GET/POST /feedback/` is an HTMX form view (`views/feedback.py`) that follows
+  the 422 convention; success is `hx_redirect` to `/feedback/thanks/` (post/redirect/get, so a
+  refresh never sends it twice). The `FEEDBACK_USER` rate limit (10/hour per user, because every
+  submission emails every superuser) is checked only after the form validates, so rejected
+  submissions don't spend it. No `/api/` endpoint.
+- **`Feedback`** (UUID id, `created_at`, `updated_at`, `created_by` `SET_NULL`, `description` up to
+  5,000 characters, `status` `new`/`in_process`/`closed`). `services.validate_description` strips
+  the text and normalizes `\r\n` to `\n` (a browser submits `\r\n`, which would otherwise count
+  twice against the cap); the form and `submit_feedback` both go through it.
+- **Emails** (`services/emails.py`) are `django.tasks` tasks enqueued in `transaction.on_commit`
+  from `submit_feedback`: a receipt to the submitter and a notification to every superuser who is
+  `is_active`, has `status=ACTIVE` and a non-empty email (one `send_email` each; no active
+  superuser logs a warning). Both pass an explicit autoescaped `html_body` -- without one
+  `SesEmailBackend` wraps `text_body` in an unescaped `<pre>`, so feedback containing HTML would
+  render as HTML in the admins' inboxes -- and no feedback text ever goes into a subject.
+- **Admin** (`FeedbackAdmin`): filter by status and date, search, everything read-only except
+  `status`, no add permission, and bulk "Mark selected as New / In process / Closed" actions that
+  set `updated_at` explicitly (`QuerySet.update` skips `auto_now`).
 
 ### Queue and scheduler
 

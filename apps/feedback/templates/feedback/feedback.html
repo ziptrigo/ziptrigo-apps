@@ -1,0 +1,21 @@
+{% extends "core/base.html" %}
+
+{% block title %}Send feedback{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-[640px] bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+    <div class="flex items-center gap-3 mb-2">
+      <i class="fas fa-comment-dots text-2xl text-sage-300"></i>
+      <h1 class="text-xl font-semibold">Send feedback</h1>
+    </div>
+    <p class="mb-6 text-sm text-gray-600 dark:text-gray-300">
+      Found a bug, have an idea, or want to tell us what you think? Every message is read.
+    </p>
+
+    <div id="feedback-msg" class="text-sm"></div>
+
+    {% include 'feedback/partials/feedback_form.html' %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "core/base.html" %}
+
+{% block title %}Thanks for your feedback{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-[640px] bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6 text-center">
+    <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-sage-100 text-sage-600">
+      <i class="fas fa-check text-2xl"></i>
+    </div>
+    <h1 class="text-xl font-semibold mb-3">Thanks for your feedback!</h1>
+
+    <p class="mb-6">
+      We've received your message and emailed a copy to <strong>{{ user.email }}</strong>.
+      Every message is read.
+    </p>
+
+    <div class="flex flex-wrap justify-center gap-3">
+      <a href="{% url 'feedback:submit' %}"
+         class="inline-flex justify-center items-center rounded border border-sage-300 font-medium px-4 py-2 hover:bg-sage-100 hover:text-gray-900">
+        Send more feedback
+      </a>
+      <a href="{% url 'core:home' %}"
+         class="inline-flex justify-center items-center rounded bg-sage-300 text-gray-900 font-medium px-4 py-2 hover:opacity-90">
+        Back to home
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

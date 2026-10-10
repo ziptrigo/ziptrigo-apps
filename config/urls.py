@@ -20,6 +20,7 @@ urlpatterns = [
     path('billing/', include('apps.billing.urls')),
     path('qr/', include('apps.qr_code.urls')),
     path('transfer/', include('apps.file_transfer.urls')),
+    path('feedback/', include('apps.feedback.urls')),
     # QR code short links live at the root (`/go/<code>`), outside the `qr/` prefix: they're
     # printed on physical QR codes, so they must stay short and never move.
     path('', include('apps.qr_code.redirect_urls')),

@@ -1,0 +1,32 @@
+<form id="feedback-form"
+      method="post"
+      action="{% url 'feedback:submit' %}"
+      hx-post="{% url 'feedback:submit' %}"
+      hx-target="this"
+      hx-swap="outerHTML"
+      hx-disabled-elt="find button[type='submit']"
+      x-data="{ count: 0 }"
+      x-init="count = $refs.text.value.length">
+  {% csrf_token %}
+
+  <label class="block mb-4">
+    <span class="block mb-1">{{ form.description.label }}</span>
+    {% for error in form.description.errors %}
+      <span class="block mb-1 text-sm text-red-600">{{ error }}</span>
+    {% endfor %}
+    <textarea name="description" rows="9" required x-ref="text"
+              @input="count = $event.target.value.length"
+              placeholder="Tell us what's on your mind…"
+              class="w-full rounded border {% if form.description.errors %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sage-300">{{ form.description.value|default:'' }}</textarea>
+    <span class="flex justify-between gap-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
+      <span>A copy will be emailed to {{ user.email }}.</span>
+      <span class="whitespace-nowrap" :class="count > 5000 ? 'text-red-600' : ''"><span x-text="count.toLocaleString('en-US')">0</span> / 5,000</span>
+    </span>
+  </label>
+
+  <button type="submit"
+          class="group w-full inline-flex justify-center items-center rounded bg-sage-300 text-gray-900 font-medium py-2 hover:opacity-90 disabled:opacity-50">
+    <span class="group-disabled:hidden">Send feedback</span>
+    <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2"></i>Sending...</span>
+  </button>
+</form>
