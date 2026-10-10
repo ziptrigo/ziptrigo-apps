@@ -86,6 +86,9 @@
               class="space-y-2">
             {% csrf_token %}
             <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">Expiry &amp; limits</p>
+            <div x-data="{ choice: '{% if transfer.expires_at %}custom{% else %}none{% endif %}' }"
+                 @change="if ($event.target.name === 'expiry_choice') choice = $event.target.value"
+                 class="space-y-2">
             <label class="block text-xs text-gray-500 dark:text-gray-400">
                 Expiry
                 <select name="expiry_choice" class="mt-1 block w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
@@ -97,12 +100,13 @@
                     <option value="none" {% if not transfer.expires_at %}selected{% endif %}>No expiration</option>
                 </select>
             </label>
-            <label class="block text-xs text-gray-500 dark:text-gray-400">
-                Custom expiry date
-                <input type="datetime-local" name="expiry_date"
-                       value="{{ transfer.expires_at|date:'Y-m-d\TH:i' }}"
-                       class="mt-1 block w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
-            </label>
+            <div x-show="choice === 'custom'" style="display: none"
+                 class="text-xs text-gray-500 dark:text-gray-400">
+                <span class="block mb-1">Expiry date</span>
+                {% now 'Y-m-d' as today_iso %}
+                {% include 'core/components/date_picker.html' with name='expiry_date' value=transfer.expires_at|date:'Y-m-d' min=today_iso %}
+            </div>
+            </div>
             <label class="block text-xs text-gray-500 dark:text-gray-400">
                 Max downloads (blank = uncapped)
                 <input type="number" min="1" name="max_downloads" value="{{ transfer.max_downloads|default_if_none:'' }}"

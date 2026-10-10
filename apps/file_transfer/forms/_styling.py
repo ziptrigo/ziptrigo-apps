@@ -21,6 +21,8 @@ class StyledFormMixin:
         super().__init__(*args, **kwargs)
         for field in self.fields.values():  # ty: ignore[unresolved-attribute]
             widget = field.widget
+            if getattr(widget, 'self_styled', False):
+                continue
             if isinstance(widget, forms.CheckboxInput):
                 classes = CHECKBOX_CLASSES
             elif isinstance(widget, forms.HiddenInput):
