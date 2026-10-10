@@ -57,7 +57,8 @@ def lint_ty(
     """
     Type-check with `ty`, Astral's type checker.
 
-    Runs once from the repo root over `apps/`, `config/` and `admin/`. The apps' `tests/` packages
+    Runs once from the repo root over `apps/`, `config/`, `admin/` and the root-level
+    `supervise.py` / `gunicorn.conf.py`. The apps' `tests/` packages
     are included; `tests_e2e/` is not.
 
     The diagnostic backlog this surfaced when `ty` replaced mypy (see #44) was triaged in #45: real
@@ -68,7 +69,7 @@ def lint_ty(
     `# ty: ignore[rule-name]` and a comment explaining why. `ty` gates `inv lint all`.
     """
     if target is None:
-        paths = ['apps', 'config', 'admin']
+        paths = ['apps', 'config', 'admin', 'supervise.py', 'gunicorn.conf.py']
     elif target == _ADMIN_TARGET:
         paths = ['admin']
     elif target in {a.value for a in DjangoApp}:

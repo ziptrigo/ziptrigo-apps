@@ -825,8 +825,9 @@ future app:
   `django_tasks_db.DatabaseBackend` normally and `ImmediateBackend` under pytest, so tests never
   need a worker. A function decorated `@task` (see `apps/file_transfer/services/emails.py`) is
   queued with `.enqueue(...)`, never called directly, and its arguments must be plain
-  strings/ids/etc (never model instances) since the backend serializes them. The `worker` compose
-  service runs `./manage.py db_worker`.
+  strings/ids/etc (never model instances) since the backend serializes them. In the deployed image
+  `supervise.py` runs `./manage.py db_worker` as a second process next to gunicorn (it installs
+  signal handlers, so it can't be a thread); locally the `worker` compose service runs it.
 - **Scheduler**: `apps.core.scheduler` -- a `JobSpec` registry (name, callable, interval, lease)
   filled by each app's `AppConfig.ready()` (`core` can't import a product, so it never discovers
   jobs itself), a `ScheduledJob` row per job whose claim is one conditional `UPDATE` guarded by the
@@ -834,9 +835,29 @@ future app:
   and the due-by-interval check use the database's `Now()`, not the calling process's clock, so
   two runners whose clocks disagree can't disagree about whether a job is due), and a
   `SchedulerRunner` that ticks every `SCHEDULER_TICK_SECONDS` running whatever's due. At-least-once,
-  so every job must be idempotent. `./manage.py run_scheduler` runs it forever; job status is a
-  read-only `ScheduledJob` admin. The `scheduler` compose service runs this, separately from
-  `worker`.
+  so every job must be idempotent. In the deployed image it runs as a daemon thread inside each
+  gunicorn worker (`gunicorn.conf.py`'s `post_worker_init` calls
+  `apps.core.scheduler.start_scheduler_thread()`, a no-op unless `SCHEDULER_ENABLED`), which is
+  safe with N workers because the claim is atomic, so only one thread wins each job per interval;
+  never start it from `AppConfig.ready()`, which also runs for `migrate`/`collectstatic`/shell.
+  `gunicorn.conf.py` imports the scheduler inside the hook (gunicorn loads that file in the master
+  before Django is configured), and `settings.LOGGING` routes everything under the `apps` logger
+  (INFO, console, `propagate: False`) to the container logs, so "Scheduler thread started", the
+  file_transfer job logs and the ratelimit "over limit" lines all show up (`conftest.py` re-enables
+  propagation under pytest so `caplog` still works).
+  Jobs therefore run inside web workers, and **an interrupted job keeps its lease until the lease
+  expires**: a deploy, a SIGHUP reload or a worker timeout kill that lands mid-job leaves that
+  job's `locked_until` set, so no runner picks it up before then (up to the job's lease, e.g. 1 h
+  for the daily jobs), and a deploy can delay a daily job by up to that long. Correct, because
+  every job is idempotent and runs at-least-once; leases are deliberately not cleared on exit.
+  `gunicorn.conf.py`'s `worker_exit` stops the runner and joins `runner.thread` for up to 5 s, which
+  only covers a thread idle between jobs. `SchedulerRunner.run_forever` calls
+  `close_old_connections()` every tick; with `DATABASE_URL` (prod/staging: `conn_max_age=600`,
+  `conn_health_checks`) each scheduler thread keeps one health-checked persistent connection, which
+  is what recovers it from a database restart, and it means **each gunicorn worker holds one extra
+  Postgres connection** when the scheduler is enabled (3 by default).
+  `./manage.py run_scheduler` remains for local development (the `scheduler` compose service) or a
+  dedicated container; job status is a read-only `ScheduledJob` admin.
 
 `file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges,
 suspends, re-enables as a fallback, deletes files past the suspension grace period),
@@ -856,21 +877,38 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 ### Docker
 
 One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`),
-shared by every service in `docker-compose.yml`: `web`, `worker`, `scheduler` and `db`. The build
+shared by every service in `docker-compose.yml`: `web`, `worker`, `scheduler` and `db` (that
+split is the local-development layout only; a deployment runs one container, below). The build
 runs `collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.dev` is mounted
 into `web`, `worker` and `scheduler` because settings require an env file.
 
-- `web` runs gunicorn (`config.wsgi`) in the image; local compose overrides it with `runserver`. It
-  has a TCP healthcheck on port 8000 that the other two services key their startup off of.
-- `worker` runs `./manage.py db_worker` and `scheduler` runs `./manage.py run_scheduler` -- the two
-  background-work mechanisms from "Queue and scheduler" above, each its own compose service (and so
-  its own container, each running its one process as PID 1) rather than one container running both
-  backgrounded with `&`: `/bin/sh` in `python:3.14-slim` is dash, which has no `wait -n`, so that
-  shape actually never ran either process (the shell hit `wait: Illegal option -n` and exited,
-  taking the container down with it, `restart: unless-stopped` looping it forever); separately,
-  `sh` as PID 1 doesn't forward `SIGTERM` to backgrounded children either, so even a working
-  supervisor script would have kept `run_scheduler`'s own graceful-stop handling from ever firing.
-  Two plain services sidestep both problems and can restart or scale independently later.
+- The image's `CMD` is `python supervise.py` (stdlib only, PID 1 after the entrypoint's `migrate`).
+  It starts gunicorn (`config.wsgi`, `-c gunicorn.conf.py`, which starts the scheduler thread in
+  each worker when `SCHEDULER_ENABLED`) and, unless `RUN_TASK_WORKER` is `0`/`false` (default on),
+  `manage.py db_worker`. It forwards SIGTERM/SIGINT to both children, gives them 30 s to exit
+  before SIGKILL, and exits as soon as either child exits (non-zero if one died on its own) so
+  `restart: unless-stopped` recovers the whole container. This is how a deployment runs web,
+  scheduler and queue worker in one container; the queue worker can't start before migrations
+  because the entrypoint finishes them first. Exit status: a child killed by a signal maps to
+  `128 + signum`, and a child that had to be SIGKILLed after the grace period makes it 137. With
+  `ENVIRONMENT=prod` and `SCHEDULER_ENABLED` unset it logs a prominent warning at start.
+- **Coupling, deliberately**: because the supervisor exits when *any* child exits, a `db_worker`
+  crash (an OOM kill, an `OperationalError` during a database restart) restarts the whole container,
+  i.e. web downtime and dropped in-flight requests, and a crash-looping queue worker is a
+  crash-looping site. This was chosen over restarting `db_worker` in place because it is simple and
+  leaves Docker's restart policy as the single recovery mechanism; revisit it if the queue worker
+  proves flaky.
+- **Shutdown timing**: three values must keep this order, each strictly below the next:
+  gunicorn's `graceful_timeout` (25 s, `gunicorn.conf.py`) < `supervise.py`'s grace (30 s, then
+  SIGKILL) < the container's stop grace period (40 s, `stop_grace_period` in the infra compose,
+  joaonc/infra#370). Docker's default is 10 s, which would cut all of it short.
+- Locally, `web` is overridden with `runserver` (so neither the scheduler thread nor the
+  supervisor runs) and has a TCP healthcheck on port 8000 that the other two services key their
+  startup off of.
+- Local compose only: `worker` runs `./manage.py db_worker` and `scheduler` runs
+  `./manage.py run_scheduler`, each its own service/container. (A shell script backgrounding both
+  with `&` was tried and never worked: `/bin/sh` in `python:3.14-slim` is dash, which has no
+  `wait -n`, and `sh` as PID 1 doesn't forward `SIGTERM`; hence the Python supervisor above.)
 - `db` is this stack's own Postgres (`postgres:18-alpine`), separate from the shared
   `docker-compose.postgres.yml` used across repos for local dev tooling (see that file's header) --
   `db` is part of the deployable stack the other services depend on.
