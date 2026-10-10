@@ -18,14 +18,22 @@
 
     <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6 mb-6">
         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Files</label>
-        <div class="flex items-center gap-4">
-            <input type="file" id="file-input" multiple
-                   class="block w-full text-sm text-gray-700 dark:text-gray-300">
+        <div id="drop-zone"
+             class="flex flex-col items-center justify-center gap-3 text-center rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-8 transition-colors">
+            <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 dark:text-gray-500"></i>
+            <p class="text-sm text-gray-700 dark:text-gray-300">Drag &amp; drop files or folders here, or</p>
+            <input type="file" id="file-input" multiple class="hidden">
             <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
-            <button type="button" id="pick-folder-btn"
-                    class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
-                <i class="fas fa-folder-open mr-1"></i>Add folder
-            </button>
+            <div class="flex items-center gap-3">
+                <button type="button" id="pick-files-btn"
+                        class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                    <i class="fas fa-file mr-1"></i>Choose files
+                </button>
+                <button type="button" id="pick-folder-btn"
+                        class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                    <i class="fas fa-folder-open mr-1"></i>Add folder
+                </button>
+            </div>
         </div>
         <ul id="file-list" class="mt-4 space-y-2"></ul>
     </div>
@@ -84,7 +92,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const draftId = "{{ draft_id }}";
     const fileInput = document.getElementById('file-input');
     const folderInput = document.getElementById('folder-input');
+    const pickFilesBtn = document.getElementById('pick-files-btn');
     const pickFolderBtn = document.getElementById('pick-folder-btn');
+    const dropZone = document.getElementById('drop-zone');
     const fileListEl = document.getElementById('file-list');
     const submitBtn = document.getElementById('send-submit-btn');
     const csrftoken = getCookie('csrftoken');
@@ -108,19 +118,17 @@ document.addEventListener('DOMContentLoaded', function () {
         },
     });
 
-    if (fileInput) {
-        fileInput.addEventListener('change', function () {
-            upload.handleFileSelection(fileInput.files);
-            fileInput.value = '';
-        });
-    }
-    if (pickFolderBtn && folderInput) {
-        pickFolderBtn.addEventListener('click', function () { folderInput.click(); });
-        folderInput.addEventListener('change', function () {
-            upload.handleFileSelection(folderInput.files);
-            folderInput.value = '';
-        });
-    }
+    pickFilesBtn.addEventListener('click', function () { fileInput.click(); });
+    pickFolderBtn.addEventListener('click', function () { folderInput.click(); });
+    fileInput.addEventListener('change', function () {
+        upload.handleFileSelection(fileInput.files);
+        fileInput.value = '';
+    });
+    folderInput.addEventListener('change', function () {
+        upload.handleFileSelection(folderInput.files);
+        folderInput.value = '';
+    });
+    initDropZone(dropZone, upload.handleFileSelection);
 });
 </script>
 {% endblock %}
