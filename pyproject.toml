@@ -141,11 +141,11 @@ modules = [
 root_packages = ['apps']
 
 [[tool.importlinter.contracts]]
-name = 'Products -> billing -> accounts -> core'
+name = 'Products -> billing | feedback -> accounts -> core'
 type = 'layers'
 layers = [
     'apps.qr_code | apps.file_transfer',
-    'apps.billing',
+    'apps.billing | apps.feedback',
     'apps.accounts',
     'apps.core',
 ]

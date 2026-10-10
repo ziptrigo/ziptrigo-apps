@@ -82,6 +82,7 @@ INSTALLED_APPS = [
     # Shared services
     'apps.accounts',
     'apps.billing',
+    'apps.feedback',
     # Products
     'apps.qr_code',
     'apps.file_transfer',
@@ -325,6 +326,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # one transfer can accumulate per hour.
     'FT_REPORT_IP': (5, 60 * 60),
     'FT_REPORT_TRANSFER': (20, 60 * 60),
+    # -- feedback (issue #82) --
+    # Logged-in only, so keyed per user. Every submission emails every superuser, so without a cap
+    # one account could flood the admins' inboxes; a real user sends a message or two, ever.
+    'FEEDBACK_USER': (10, 60 * 60),
 }
 
 
@@ -549,6 +554,7 @@ JAZZMIN_SETTINGS = {
         'billing.CreditAccount': 'fas fa-wallet',
         'qr_code.QRCode': 'fas fa-qrcode',
         'core.ScheduledJob': 'fas fa-clock',
+        'feedback.Feedback': 'fas fa-comment-dots',
         'file_transfer.Transfer': 'fas fa-paper-plane',
         'file_transfer.DownloadEvent': 'fas fa-download',
         'file_transfer.FileTransferSettings': 'fas fa-sliders-h',
