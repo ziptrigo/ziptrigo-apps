@@ -498,9 +498,23 @@ TASKS = {
     }
 }
 
-# apps.core.scheduler: how often (seconds) the `run_scheduler` management command's runner thread
-# checks for due jobs. Each job's own interval (in `JobSpec`) controls how often it actually runs.
+# apps.core.scheduler: how often (seconds) a scheduler runner -- the `run_scheduler` management
+# command's, or the thread `start_scheduler_thread()` starts inside each gunicorn worker -- checks
+# for due jobs. Each job's own interval (in `JobSpec`) controls how often it actually runs.
 SCHEDULER_TICK_SECONDS = int(os.getenv('SCHEDULER_TICK_SECONDS', '30'))
+
+# Start `apps.core.scheduler.start_scheduler_thread()` inside every gunicorn worker (see
+# `gunicorn.conf.py`). Off by default so a local checkout, `runserver` and pytest never run jobs.
+SCHEDULER_ENABLED = os.getenv('SCHEDULER_ENABLED', 'False').lower() in ('true', '1')
+
+# Python's default logging drops INFO from our own loggers; the scheduler's start/run lines
+# ("Scheduler thread started in pid ...", "Scheduler ran: ...") need to reach the container logs.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {'apps.core.scheduler': {'handlers': ['console'], 'level': 'INFO'}},
+}
 
 
 # QR code settings

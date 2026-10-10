@@ -257,7 +257,8 @@ Scopes: `main` (runtime, `[project.dependencies]`) and `dev` (tooling, `[depende
 
 ## Deployment
 
-The Docker image runs gunicorn (`config.wsgi`, `WEB_CONCURRENCY` workers, 3 by default) behind
+The Docker image runs gunicorn (`config.wsgi`, `WEB_CONCURRENCY` workers, 3 by default; plus the
+scheduler and queue worker, see Background jobs) behind
 nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrigo-apps`).
 
 - **Environment**: `.env.prod` / `.env.staging`, see [Configuration](#configuration). Needs `DATABASE_URL`.
@@ -268,10 +269,11 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   trusts; `BASE_URL`'s origin is in `CSRF_TRUSTED_ORIGINS`, and cookies are `Secure` when
   `BASE_URL` is `https://`.
 - **Media files**: a host volume for now.
-- **Background jobs**: the `worker` (`db_worker`) and `scheduler` (`run_scheduler`, see
-  [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) services need their own
-  compose services in the `infra` repo, alongside `web`; without them, file transfer's metering,
-  expiry and cleanup jobs and its queued emails never run.
+- **Background jobs**: one container runs everything. `supervise.py` (the image's `CMD`) starts
+  gunicorn, whose workers each run the scheduler as a thread, plus the `db_worker` queue worker
+  (see [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)). Set
+  `SCHEDULER_ENABLED=1` and leave `RUN_TASK_WORKER` at its default (`1`); without the scheduler
+  flag, file transfer's metering, expiry and cleanup jobs never run.
 - **nginx**: must set `X-Real-IP` from the real client address (not passed through from a
   client-supplied header) -- `file_transfer`'s download-IP logging trusts it and falls back to
   `REMOTE_ADDR` otherwise.

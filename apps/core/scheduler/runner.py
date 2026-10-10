@@ -10,6 +10,7 @@ import logging
 import threading
 import traceback
 
+from django.db import close_old_connections, connections
 from django.db.models import DateTimeField, ExpressionWrapper, F, Q
 from django.db.models.functions import Now
 
@@ -97,6 +98,10 @@ class SchedulerRunner:
             [job.name for job in get_jobs()],
         )
         while not self._stop_event.is_set():
+            # A long-lived thread outside the request cycle would otherwise hold one connection
+            # forever and never recover from a database restart; with CONN_MAX_AGE=0 this opens a
+            # fresh connection per tick.
+            close_old_connections()
             try:
                 ran = run_due_jobs()
                 if ran:
@@ -104,3 +109,4 @@ class SchedulerRunner:
             except Exception:
                 logger.exception('Scheduler tick failed')
             self._stop_event.wait(self.tick_seconds)
+        connections.close_all()

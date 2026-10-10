@@ -1,4 +1,9 @@
-"""Runs `apps.core.scheduler` forever. Started in the `worker` container; never in `web`."""
+"""Runs `apps.core.scheduler` forever.
+
+Standalone runner for local development (docker-compose `scheduler` service) or a dedicated
+container; in the deployed image the scheduler runs as a thread inside gunicorn, see
+`gunicorn.conf.py`.
+"""
 
 import logging
 import signal
