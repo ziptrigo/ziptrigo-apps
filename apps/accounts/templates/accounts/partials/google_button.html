@@ -1,9 +1,11 @@
-{# "Sign in with Google" / "Sign up with Google" (issue #91). Included by the login and register
-   pages with `label`; `next` (login only) is carried through to the callback. A plain link on
-   purpose, with hx-boost off: the redirect to Google has to be a full browser navigation, which
-   an htmx-driven request can't be. Styled after Google's branding guidelines (neutral surface,
-   thin border, the multicolour "G", the exact "Sign in with Google" / "Sign up with Google"
-   wording); the dark variant is theirs too. #}
+{% comment %}
+"Sign in with Google" / "Sign up with Google" (issue #91). Included by the login and register
+pages with `label`; `next` (login only) is carried through to the callback. A plain link on
+purpose, with hx-boost off: the redirect to Google has to be a full browser navigation, which
+an htmx-driven request can't be. Styled after Google's branding guidelines (neutral surface,
+thin border, the multicolour "G", the exact "Sign in with Google" / "Sign up with Google"
+wording); the dark variant is theirs too.
+{% endcomment %}
 {% url 'google_auth:login' as google_login_url %}
 <div class="my-4 flex items-center gap-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400" role="separator">
   <span class="h-px flex-1 bg-gray-300 dark:bg-gray-600"></span>
@@ -13,7 +15,7 @@
 <a href="{{ google_login_url }}{% if next %}?next={{ next|urlencode }}{% endif %}"
    hx-boost="false"
    id="google-signin"
-   class="w-full inline-flex justify-center items-center gap-3 rounded border border-[#747775] dark:border-[#8e918f] bg-white dark:bg-[#131314] text-[#1f1f1f] dark:text-[#e3e3e3] font-medium py-2 hover:bg-gray-50 dark:hover:bg-[#1f1f20] focus:outline-none focus:ring-2 focus:ring-sage-300">
+   class="mb-8 w-full flex justify-center items-center gap-3 rounded border border-[#747775] dark:border-[#8e918f] bg-white dark:bg-[#131314] text-[#1f1f1f] dark:text-[#e3e3e3] font-medium py-2 hover:bg-gray-50 dark:hover:bg-[#1f1f20] focus:outline-none focus:ring-2 focus:ring-sage-300">
   <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
     <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
