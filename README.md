@@ -256,8 +256,11 @@ Services*:
    `.env.prod`), never into the repo.
 
 A Google sign-in uses the same session as the password login (no JWT is issued) and requires a
-verified Google email. It signs in the account linked to the Google account, or else the existing
-account with that email (linking it), or else creates one; see CLAUDE.md, "Auth".
+verified Google email. It signs in the account linked to the Google account, or else links the
+existing account with that email -- only if that account's email is confirmed *and* it is a
+`gmail.com`/`googlemail.com` address or the Google account belongs to a Workspace domain (`hd`);
+otherwise it is refused and the user signs in with their password -- or else creates a new account
+(any verified email). See CLAUDE.md, "Auth".
 
 ## Development Workflow
 

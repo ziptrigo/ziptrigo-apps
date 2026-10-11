@@ -46,6 +46,15 @@ CONFLICT_MESSAGE = (
     "We couldn't sign you in with this Google account because the email address is already "
     'linked to a different one. Sign in with your password instead.'
 )
+UNCONFIRMED_ACCOUNT_MESSAGE = (
+    "An account with this email already exists but hasn't been confirmed yet. Confirm it from "
+    'the email we sent, or reset your password, then try again.'
+)
+EXISTING_ACCOUNT_MESSAGE = (
+    'An account with this email already exists. Sign in with your email and password instead.'
+)
+#: Domains Google itself hosts: for these, and only these, `email_verified` is authoritative.
+GOOGLE_MAIL_DOMAINS = frozenset({'gmail.com', 'googlemail.com'})
 UNVERIFIED_MESSAGE = (
     "Google hasn't verified the email address of this Google account, so we can't sign you in "
     'with it. Verify the address with Google, or sign in with your email and password.'
@@ -92,6 +101,18 @@ class AccountConflict(GoogleSignInError):
     user_message = CONFLICT_MESSAGE
 
 
+class UnconfirmedAccountConflict(AccountConflict):
+    """The email belongs to an account whose address was never (or is no longer) confirmed."""
+
+    user_message = UNCONFIRMED_ACCOUNT_MESSAGE
+
+
+class LinkNotAllowed(AccountConflict):
+    """The email belongs to a confirmed account, but Google isn't authoritative for its domain."""
+
+    user_message = EXISTING_ACCOUNT_MESSAGE
+
+
 @dataclass(frozen=True, slots=True)
 class GoogleIdentity:
     """What we use of the ID token's claims."""
@@ -100,6 +121,8 @@ class GoogleIdentity:
     email: str
     email_verified: bool
     name: str
+    #: The `hd` claim: the Google Workspace domain the account belongs to ('' for a personal one).
+    hosted_domain: str = ''
 
 
 def is_configured() -> bool:
@@ -166,12 +189,27 @@ def identity_from_claims(claims: Mapping[str, Any]) -> GoogleIdentity:
         given = claims.get('given_name')
         family = claims.get('family_name')
         name = ' '.join(p.strip() for p in (given, family) if isinstance(p, str) and p.strip())
+    hd = claims.get('hd')
     return GoogleIdentity(
         sub=sub,
         email=email.strip(),
         email_verified=_is_true(claims.get('email_verified')),
         name=name.strip()[:255],
+        hosted_domain=hd.strip() if isinstance(hd, str) else '',
     )
+
+
+def _google_is_authoritative_for(identity: GoogleIdentity) -> bool:
+    """Whether Google, not just "someone at some point", vouches for this email address.
+
+    `email_verified` only means that for an address Google hosts: `@gmail.com` / `@googlemail.com`
+    mailboxes, or a Google Workspace account (non-empty `hd`). For any other domain it can be
+    stale -- a recycled or expired domain, an ex-employee's personal Google account still listing
+    a work address -- so it's not enough to take over an existing account.
+    """
+    if identity.hosted_domain:
+        return True
+    return identity.email.rpartition('@')[2].lower() in GOOGLE_MAIL_DOMAINS
 
 
 def resolve_user(identity: GoogleIdentity) -> User:
@@ -180,23 +218,35 @@ def resolve_user(identity: GoogleIdentity) -> User:
     1. Refuse unless Google verified the email address -- otherwise anyone could claim someone
        else's address on a Google account and be matched to their account below.
     2. Match by `google_sub` -- stable, unlike the address, which a Google account can change.
+       **This deliberately does not require `email_confirmed`**: the Google identity is itself the
+       proof, so a linked user whose address was later changed (and so un-confirmed) through
+       `PUT /api/account` can still sign in with Google, unlike with a password (`LoginForm`).
     3. Otherwise match an existing account by email (case-insensitive) and link it, storing the
-       `sub`. **Pre-hijacking guard**: when that account's email was never confirmed, whoever
-       registered it did so with their own password and without proving they own the address (the
-       real owner may be signing in with Google right now). Google has just proven the owner, so
-       the account becomes confirmed *and its password unusable* -- the registrant's credentials
-       must not survive a takeover of the account by its rightful owner. An account whose email
-       was already confirmed keeps its password: its owner has proven the address before.
+       `sub` -- but only when it is safe to:
+
+       * The account's email must be **confirmed**. An unconfirmed account's holder never proved
+         the address, and may hold credentials (a password, or JWTs that outlive an email change
+         through `PUT /api/account`) that linking would hand a Google sign-in to. It is refused
+         (`UnconfirmedAccountConflict`) and nothing is written: the owner confirms it from the
+         email already sent, or resets the password, then tries again.
+       * Google must be authoritative for the address: a `@gmail.com` / `@googlemail.com` address
+         or an ID token with a non-empty `hd` (Google Workspace). Otherwise (`LinkNotAllowed`)
+         the owner signs in with their password instead.
+
+       Linking therefore only ever touches an account whose address was already confirmed, and
+       changes nothing but `google_sub` -- the password stays, nothing is confirmed here, so
+       there is no pending confirmation to retire.
     4. Otherwise create a confirmed account with an unusable password (there is nothing to type;
        "forgot password" can still set one). No confirmation email: Google already did that job.
+       Any verified address may create an account, whatever its domain.
 
     An account already linked to a *different* `sub`, or two accounts differing only by email
     case, are refused (`AccountConflict`) rather than guessed at. Inactive accounts are refused
     before anything is written.
 
     Raises:
-        UnverifiedEmail, InactiveAccount, AccountConflict: see above. All are `GoogleSignInError`s
-            with a `user_message`.
+        UnverifiedEmail, InactiveAccount, AccountConflict (and its subclasses): see above. All are
+            `GoogleSignInError`s with a `user_message`.
     """
     if not identity.email_verified:
         raise UnverifiedEmail()
@@ -243,13 +293,15 @@ def _link(user: User, identity: GoogleIdentity) -> User:
         raise AccountConflict()
     if user.status != User.STATUS_ACTIVE or not user.is_active:
         raise InactiveAccount()
+    if not user.email_confirmed:
+        logger.warning('Google sign-in refused: account %s has an unconfirmed email', user.pk)
+        raise UnconfirmedAccountConflict()
+    if not _google_is_authoritative_for(identity):
+        logger.warning(
+            'Google sign-in refused: not authoritative for the email domain of account %s', user.pk
+        )
+        raise LinkNotAllowed()
 
     user.google_sub = identity.sub
-    update_fields = ['google_sub', 'updated_at']
-    if not user.email_confirmed:
-        user.set_unusable_password()
-        user.email_confirmed = True
-        user.email_confirmed_at = datetime.now(UTC)
-        update_fields += ['password', 'email_confirmed', 'email_confirmed_at']
-    user.save(update_fields=update_fields)
+    user.save(update_fields=['google_sub', 'updated_at'])
     return user

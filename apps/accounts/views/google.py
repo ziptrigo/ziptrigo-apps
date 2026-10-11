@@ -16,7 +16,6 @@ from authlib.integrations.django_client import OAuthError
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login as auth_login
-from django.contrib.sessions.backends.base import SessionBase
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -24,9 +23,10 @@ from django.views.decorators.http import require_GET
 
 from apps.core import ratelimit
 
+from ..http import MaybeAuthenticatedHttpRequest
 from ..services import google_oauth
 from ..services.google_oauth import GoogleNotConfigured, GoogleSignInError, UnverifiedEmail
-from .login import _redirect_target
+from .redirects import redirect_target
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +39,16 @@ CANCELLED_MESSAGE = (
 FAILED_MESSAGE = "We couldn't sign you in with Google. Please try again."
 
 
-class _SessionRequest(HttpRequest):
-    """`HttpRequest` typed with the `.session` attribute `SessionMiddleware` adds at runtime."""
-
-    session: SessionBase
-
-
 def _to_login(request: HttpRequest, message: str) -> HttpResponse:
     messages.error(request, message)
     return redirect('accounts:login')
 
 
 def _unavailable(request: HttpRequest) -> HttpResponse:
-    logger.error(
+    # Info, not error: anonymous traffic (crawlers, scanners) reaches these routes whenever the
+    # feature is off, which is the normal state of an environment without a Google client. A
+    # *partial* configuration is flagged at startup by the `accounts.W001` system check.
+    logger.info(
         'Google sign-in requested but GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and '
         'GOOGLE_REDIRECT_URI are not all set'
     )
@@ -59,7 +56,7 @@ def _unavailable(request: HttpRequest) -> HttpResponse:
 
 
 @require_GET
-def google_login(request: _SessionRequest) -> HttpResponse:
+def google_login(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
     """Redirect to Google's consent screen.
 
     A same-site `?next=` (the same rule the password login applies) is remembered in the session
@@ -87,7 +84,7 @@ def google_login(request: _SessionRequest) -> HttpResponse:
 
 
 @require_GET
-def google_callback(request: _SessionRequest) -> HttpResponse:
+def google_callback(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
     """Finish the sign-in: exchange the code, read the ID token's claims, start the session."""
     limited = ratelimit.hit_ip(request, 'GOOGLE_LOGIN_IP')
     if not limited.allowed:
@@ -140,4 +137,4 @@ def google_callback(request: _SessionRequest) -> HttpResponse:
     # The same call the password form makes, so `user_logged_in` fires too (last login, and
     # `file_transfer` claiming a confirmed anonymous transfer for this address).
     auth_login(request, user, backend=google_oauth.LOGIN_BACKEND)
-    return redirect(_redirect_target(request, next_url))
+    return redirect(redirect_target(request, next_url))

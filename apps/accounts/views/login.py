@@ -2,8 +2,6 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
-from django.urls import reverse
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.core import ratelimit
@@ -11,15 +9,7 @@ from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import LoginForm
 from ..services import google_oauth, login_throttle
-
-
-def _redirect_target(request: HttpRequest, next_url: str | None) -> str:
-    """``next_url`` if it points back at this site, else the account page."""
-    if next_url and url_has_allowed_host_and_scheme(
-        next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
-    ):
-        return next_url
-    return reverse('accounts:account')
+from .redirects import redirect_target
 
 
 @require_http_methods(['GET', 'POST'])
@@ -67,7 +57,7 @@ def login_page(request: HttpRequest) -> HttpResponse:
         form = LoginForm(request, data=request.POST)
         if form.is_valid():
             auth_login(request, form.get_user())
-            return hx_redirect(request, _redirect_target(request, next_url))
+            return hx_redirect(request, redirect_target(request, next_url))
         if form.credentials_invalid and submitted_email:
             login_throttle.record_failed_attempt(submitted_email)
         status = 422

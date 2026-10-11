@@ -178,14 +178,26 @@ since Django can't serve two URLconfs under `accounts:`; exact paths, no trailin
 callback is a registered redirect URI at Google) run an OpenID Connect authorization code flow with
 Authlib's Django client, and the callback ends in the same `django.contrib.auth.login()` the
 password form uses, so `user_logged_in` fires (claim-on-login, `last_login`) and a same-site `next`
-captured at `/auth/google/login` (kept in the session, validated by the login view's own
-`_redirect_target`) is honoured. Authlib owns `state`/`nonce`; no token or code is ever logged.
+captured at `/auth/google/login` (kept in the session, validated by the shared
+`views.redirects.redirect_target`, which the password login uses too) is honoured. Authlib owns
+`state`/`nonce`; no token or code is ever logged.
 `apps.accounts.services.google_oauth` holds the lazily built, cached client and `resolve_user`:
 require Google's `email_verified` (else a 403 page), match `User.google_sub` first (nullable,
 unique), then link an existing account by case-insensitive email (storing the `sub`), else create
-one (confirmed email, unusable password, no confirmation email). **Pre-hijacking guard:** linking an
-account whose `email_confirmed` is false (someone may have registered the address with their own
-password) confirms it and makes its password unusable; an account already linked to a different
+one (confirmed email, unusable password, no confirmation email). **Signing in by `sub` does not
+require `email_confirmed`**, deliberately unlike the password login: the Google identity is the
+proof, so a linked user whose address was later changed (and so un-confirmed) through
+`PUT /api/account` can still sign in with Google. **Linking rules (anti-takeover):** an existing
+account is linked by email only if (a) its `email_confirmed` is true -- an unconfirmed account is
+*never* linked (`UnconfirmedAccountConflict`, "confirm it or reset your password, then try
+again"), because its holder never proved the address and may hold a password or JWTs that outlive
+an email change, which would otherwise survive the link; and (b) Google is authoritative for the
+address: a `gmail.com`/`googlemail.com` domain (case-insensitive) or a non-empty `hd` claim
+(Google Workspace) -- otherwise `LinkNotAllowed` ("sign in with your email and password
+instead"), since `email_verified` is only "verified at some point" for a domain Google doesn't
+host. Creating a *new* account from any verified email stays allowed. Linking changes nothing but
+`google_sub` (no confirmation, no password change), so it needs no
+`invalidate_pending_for_email`. An account already linked to a different
 `sub`, or two accounts matching the email, are refused rather than guessed at; inactive users
 (`status`/`is_active`) are refused like the password login ("User not active"). Every failure
 (denied consent, bad state, failed exchange, unexpected error) logs and redirects to the login page
@@ -651,10 +663,10 @@ receiver above) hands a confirmed, unowned anonymous transfer to whichever user 
 matching, *already-confirmed* email -- not merely matching, since an account that hasn't itself
 proven it controls that address shouldn't be able to grab someone else's transfer by signing up
 with their address first; claiming is simply deferred to that account's first login after its own
-email gets confirmed. Only the session login page fires `user_logged_in` (signup is API-only and
-never starts a session), so that's the one place claiming happens. **User decision:** claiming is
-also deferred while the account's balance is below `services.send.MIN_BALANCE_TO_SEND` (1 credit,
-the same minimum required to start a logged-in transfer) -- claiming turns a free transfer into a
+email gets confirmed. Only the session login page and the Google callback fire
+`user_logged_in` (signup is API-only and never starts a session), so those are the two places
+claiming happens. **User decision:** claiming is also deferred while the account's balance is
+below `services.send.MIN_BALANCE_TO_SEND` (1 credit, the same minimum required to start a logged-in transfer) -- claiming turns a free transfer into a
 metered one with no chance to opt out first, and at a near-zero balance the very next metering run
 would immediately suspend it. Such a transfer stays anonymous and free (still fully usable by its
 recipients) until a *later* login finds the balance topped up.

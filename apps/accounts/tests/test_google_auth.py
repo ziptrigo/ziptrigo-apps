@@ -26,6 +26,7 @@ from apps.accounts import checks as accounts_checks
 from apps.accounts.models import User
 from apps.accounts.services import google_oauth
 from apps.accounts.services.google_oauth import identity_from_claims
+from apps.accounts.tokens import CustomAccessToken
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -164,6 +165,8 @@ def test_routes_when_not_configured_redirect_to_login_with_a_message(
     assert response['Location'] == reverse('accounts:login')
     assert _messages(response) == ['Google sign-in is not available right now.']
     assert 'not all set' in caplog.text
+    # Anonymous traffic can trigger this whenever the feature is off, so it must not be an error.
+    assert {r.levelname for r in caplog.records if 'not all set' in r.getMessage()} == {'INFO'}
 
 
 def test_message_is_rendered_on_the_login_page(client, unconfigured):
@@ -238,7 +241,10 @@ def test_callback_uses_given_and_family_name_when_name_is_missing(client):
 
 def test_callback_links_an_existing_user_by_verified_email(client, user):
     # Case-insensitive match: Google's casing differs from what the account was created with.
-    response = _callback(client, _claims(email='TestUser@Example.com'))
+    user.email = 'testuser@gmail.com'
+    user.save(update_fields=['email'])
+
+    response = _callback(client, _claims(email='TestUser@Gmail.com'))
 
     assert response['Location'] == reverse('accounts:account')
     assert User.objects.count() == 1
@@ -249,22 +255,118 @@ def test_callback_links_an_existing_user_by_verified_email(client, user):
     assert user.check_password('testpass123')
 
 
-def test_callback_linking_an_unconfirmed_account_makes_its_password_unusable(client, user):
-    """Whoever registered an unconfirmed address (with their own password) must not keep access
-    once the address's real owner proves themselves with Google."""
-    user.email_confirmed = False
-    user.email_confirmed_at = None
-    user.save(update_fields=['email_confirmed', 'email_confirmed_at'])
+@pytest.mark.parametrize('domain', ['gmail.com', 'googlemail.com', 'GMAIL.COM', 'GoogleMail.com'])
+def test_callback_links_a_confirmed_account_on_a_google_hosted_domain(client, user, domain):
+    user.email = f'someone@{domain}'
+    user.save(update_fields=['email'])
 
-    _callback(client, _claims(email=user.email))
+    _callback(client, _claims(email=f'someone@{domain.swapcase()}'))
 
     user.refresh_from_db()
     assert user.google_sub == SUB
-    assert user.email_confirmed
-    assert user.email_confirmed_at is not None
-    assert not user.has_usable_password()
-    assert not user.check_password('testpass123')
     assert _signed_in_as(client, user)
+
+
+def test_callback_links_a_confirmed_account_on_a_workspace_domain_with_hd(client, user):
+    response = _callback(client, _claims(email=user.email, hd='example.com'))
+
+    assert response['Location'] == reverse('accounts:account')
+    user.refresh_from_db()
+    assert user.google_sub == SUB
+    assert user.check_password('testpass123')
+    assert _signed_in_as(client, user)
+
+
+@pytest.mark.parametrize('hd', [None, '', '   ', 123])
+def test_callback_refuses_to_link_a_confirmed_account_on_another_domain_without_hd(
+    client, user, hd
+):
+    """Google's `email_verified` isn't authoritative for a domain it doesn't host."""
+    claims = _claims(email=user.email)
+    if hd is not None:
+        claims['hd'] = hd
+
+    response = _callback(client, claims)
+
+    assert response['Location'] == reverse('accounts:login')
+    assert _messages(response) == [google_oauth.EXISTING_ACCOUNT_MESSAGE]
+    user.refresh_from_db()
+    assert user.google_sub is None
+    assert user.check_password('testpass123')
+    assert SESSION_KEY not in client.session
+
+
+def test_callback_still_creates_a_new_account_on_any_verified_domain(client):
+    response = _callback(client, _claims(email='new.person@some-other-domain.org'))
+
+    assert response['Location'] == reverse('accounts:account')
+    created = User.objects.get(email='new.person@some-other-domain.org')
+    assert created.google_sub == SUB
+    assert created.email_confirmed
+    assert _signed_in_as(client, created)
+
+
+def test_callback_refuses_to_link_an_unconfirmed_account(client, user):
+    """Whoever registered an unconfirmed address never proved it, and may hold credentials that
+    linking would hand a Google sign-in to: the account is left exactly as it was."""
+    user.email = 'testuser@gmail.com'
+    user.email_confirmed = False
+    user.email_confirmed_at = None
+    user.save(update_fields=['email', 'email_confirmed', 'email_confirmed_at'])
+
+    response = _callback(client, _claims(email=user.email))
+
+    assert response['Location'] == reverse('accounts:login')
+    assert _messages(response) == [google_oauth.UNCONFIRMED_ACCOUNT_MESSAGE]
+    user.refresh_from_db()
+    assert user.google_sub is None
+    assert not user.email_confirmed
+    assert user.email_confirmed_at is None
+    assert user.check_password('testpass123')
+    assert SESSION_KEY not in client.session
+
+
+def test_callback_refuses_to_link_an_established_account_whose_email_was_changed(
+    client, user, monkeypatch
+):
+    """The review's scenario: an attacker with a confirmed account (and JWTs) changes its email
+    to the victim's address, which un-confirms it but leaves the JWTs valid. When the victim then
+    signs up with Google, the account must not be linked to them."""
+    monkeypatch.setattr(
+        'apps.accounts.services.email_confirmation.EmailConfirmationService.send_confirmation_email',
+        lambda self, user: None,
+    )
+    token = CustomAccessToken.for_user(user)
+    update = client.put(
+        '/api/account',
+        {'email': 'victim@gmail.com'},
+        content_type='application/json',
+        HTTP_AUTHORIZATION=f'Bearer {token}',
+    )
+    assert update.status_code == 200
+    user.refresh_from_db()
+    assert user.email == 'victim@gmail.com'
+    assert not user.email_confirmed
+
+    response = _callback(client, _claims(email='victim@gmail.com'))
+
+    assert response['Location'] == reverse('accounts:login')
+    assert _messages(response) == [google_oauth.UNCONFIRMED_ACCOUNT_MESSAGE]
+    user.refresh_from_db()
+    assert user.google_sub is None
+    assert not user.email_confirmed
+    assert user.check_password('testpass123')
+    assert SESSION_KEY not in client.session
+    # The attacker's JWT still works, which is exactly why linking must not have happened.
+    assert (
+        client.put(
+            '/api/account',
+            {'name': 'Still Me'},
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        ).status_code
+        == 200
+    )
 
 
 def test_callback_matches_an_existing_user_by_sub(client, user):
@@ -608,3 +710,8 @@ def test_identity_from_claims_trims_and_caps_the_name():
     identity = identity_from_claims(_claims(name='  ' + 'x' * 300 + '  '))
 
     assert identity.name == 'x' * 255
+
+
+def test_identity_from_claims_reads_the_hosted_domain():
+    assert identity_from_claims(_claims(hd='example.com')).hosted_domain == 'example.com'
+    assert identity_from_claims(_claims()).hosted_domain == ''
