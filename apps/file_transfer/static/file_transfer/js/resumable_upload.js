@@ -64,6 +64,16 @@ function initFileTransferUpload(options) {
         return btoa(binary);
     }
 
+    // GB from 1 GB up, MB from 1 MB up, KB below that (binary units, like the sizes it replaced).
+    function formatSize(bytes) {
+        const KB = 1024;
+        const MB = KB * 1024;
+        const GB = MB * 1024;
+        if (bytes >= GB) return (bytes / GB).toFixed(1) + ' GB';
+        if (bytes >= MB) return (bytes / MB).toFixed(1) + ' MB';
+        return Math.round(bytes / KB).toLocaleString() + ' KB';
+    }
+
     function renderRow(fileId, entry) {
         let li = document.getElementById('file-row-' + fileId);
         if (!li) {
@@ -83,7 +93,7 @@ function initFileTransferUpload(options) {
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'truncate flex-1';
-        nameSpan.textContent = entry.name + ' (' + Math.round(entry.size / 1024 / 1024) + ' MB)';
+        nameSpan.textContent = entry.name + ' (' + formatSize(entry.size) + ')';
 
         const barOuter = document.createElement('span');
         barOuter.className = 'w-32 bg-gray-200 dark:bg-gray-700 rounded h-2 overflow-hidden';
@@ -94,13 +104,19 @@ function initFileTransferUpload(options) {
 
         const statusSpan = document.createElement('span');
         statusSpan.className = 'w-20 text-right';
-        statusSpan.textContent = entry.uploaded ? 'Done' : (entry.resumable ? 'Paused' : pct + '%');
+        if (entry.uploaded) {
+            statusSpan.innerHTML = '<i class="fa-solid fa-check text-green-600" title="Done"></i>';
+        } else {
+            statusSpan.textContent = entry.resumable ? 'Paused' : pct + '%';
+        }
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.setAttribute('data-remove', fileId);
-        removeBtn.className = 'text-red-500 hover:underline';
-        removeBtn.textContent = 'Remove';
+        removeBtn.className = 'text-red-500 hover:text-red-600';
+        removeBtn.title = 'Remove';
+        removeBtn.setAttribute('aria-label', 'Remove ' + entry.name);
+        removeBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
 
         li.append(nameSpan, barOuter, statusSpan, removeBtn);
     }
