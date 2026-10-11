@@ -28,7 +28,7 @@ app = typer.Typer(
 
 @app.command(name='run')
 def server_run(
-    environment: Environment = Environment.DEV,
+    environment: Environment = Environment.LOCAL,
     dry: DryAnnotation = False,
 ):
     """

@@ -89,7 +89,7 @@ def test_exit_status(returncode, expected):
         ({'ENVIRONMENT': 'prod', 'SCHEDULER_ENABLED': 'false'}, True),
         ({'ENVIRONMENT': 'prod', 'SCHEDULER_ENABLED': '1'}, False),
         ({'ENVIRONMENT': 'prod', 'SCHEDULER_ENABLED': 'True'}, False),
-        ({'ENVIRONMENT': 'dev'}, False),
+        ({'ENVIRONMENT': 'local'}, False),
         ({}, False),
     ],
 )

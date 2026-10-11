@@ -33,7 +33,7 @@ services:
     environment:
       - DEBUG=${DEBUG:-False}
       - SECRET_KEY=${SECRET_KEY:-django-insecure-change-in-production}
-      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - ENVIRONMENT=${ENVIRONMENT:-local}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
       - DATABASE_URL=${DATABASE_URL:-postgres://ziptrigo:ziptrigo@db:5432/ziptrigo}
       - BASE_URL=${BASE_URL:-http://localhost:8000}
@@ -42,11 +42,11 @@ services:
       - AWS_SES_SENDER=${AWS_SES_SENDER:-no-reply@ziptrigo.com}
       - RUN_MIGRATIONS=${RUN_MIGRATIONS:-1}
     env_file:
-      - .env.dev
+      - .env.local
     volumes:
       - ./apps:/app/apps
       - ./config:/app/config
-      - ./.env.dev:/app/.env.dev:ro
+      - ./.env.local:/app/.env.local:ro
       - media:/app/media
       - staticfiles:/app/staticfiles
     depends_on:
@@ -76,7 +76,7 @@ services:
     environment: &worker_environment
       - DEBUG=${DEBUG:-False}
       - SECRET_KEY=${SECRET_KEY:-django-insecure-change-in-production}
-      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - ENVIRONMENT=${ENVIRONMENT:-local}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
       - DATABASE_URL=${DATABASE_URL:-postgres://ziptrigo:ziptrigo@db:5432/ziptrigo}
       - BASE_URL=${BASE_URL:-http://localhost:8000}
@@ -88,11 +88,11 @@ services:
       # (see its healthcheck above), and `depends_on` below waits for that before starting.
       - RUN_MIGRATIONS=0
     env_file:
-      - .env.dev
+      - .env.local
     volumes: &worker_volumes
       - ./apps:/app/apps
       - ./config:/app/config
-      - ./.env.dev:/app/.env.dev:ro
+      - ./.env.local:/app/.env.local:ro
       - media:/app/media
     depends_on:
       db:
@@ -118,7 +118,7 @@ services:
     command: ['python', 'manage.py', 'run_scheduler']
     environment: *worker_environment
     env_file:
-      - .env.dev
+      - .env.local
     volumes: *worker_volumes
     depends_on:
       db:

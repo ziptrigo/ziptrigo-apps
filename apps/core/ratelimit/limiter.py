@@ -15,7 +15,7 @@ Design (see CLAUDE.md for the write-up of why a hand-rolled engine over a librar
   each other. Acceptable here -- every limit this project sets is headroom against abuse, not a
   precise quota (see each rule's own comment in `config/settings.py`).
 - **Two storage backends, picked by `settings.RATELIMIT_STORAGE`** (`'db'` when no `CACHE_URL` is
-  configured -- dev/prod's default and every pytest run, unless a test opts into `'cache'` with
+  configured -- local/prod's default and every pytest run, unless a test opts into `'cache'` with
   `override_settings` -- `'cache'` when `CACHE_URL` points at Redis):
 
   - `'db'`: `apps.core.models.RateLimitCounter`, one row per bucket, incremented with a single
@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 
 #: Cache alias rate limit counters use on the `'cache'` storage path (CLAUDE.md: "a dedicated
 #: cache alias so rate limiting can be pointed elsewhere later" -- e.g. its own Redis instance,
-#: without touching `'default'`). Unused entirely on the `'db'` path (dev/prod's default).
+#: without touching `'default'`). Unused entirely on the `'db'` path (local/prod's default).
 CACHE_ALIAS = 'ratelimit'
 
 

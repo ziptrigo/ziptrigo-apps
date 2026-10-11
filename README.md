@@ -112,7 +112,7 @@ enforces this (`inv lint imports`, contract in `pyproject.toml`).
 uv venv --python 3.14
 source .venv/bin/activate
 inv pip sync
-cp .env.example .env.dev          # then fill in the placeholders
+cp .env.example .env.local          # then fill in the placeholders
 python manage.py migrate
 inv server run                    # http://localhost:8000
 ```
@@ -128,7 +128,7 @@ python manage.py db_worker        # django_tasks_db: queued emails, deleting a t
 ### Docker
 
 ```bash
-cp .env.example .env.dev
+cp .env.example .env.local
 docker compose up --build         # http://localhost:8000
 ```
 
@@ -136,7 +136,7 @@ Brings up all four services: `web` (the site), `worker` (`db_worker`), `schedule
 (`run_scheduler`, see [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) and `db`
 (this stack's own Postgres). `worker` and `scheduler` wait for `web`'s healthcheck before starting,
 since only `web` applies migrations. `web`'s `DATABASE_URL` defaults to that `db` service; override
-it in `.env.dev` to point elsewhere.
+it in `.env.local` to point elsewhere.
 
 - Site: http://localhost:8000
 - Admin: http://localhost:8000/admin/
@@ -145,7 +145,7 @@ it in `.env.dev` to point elsewhere.
 ### Local AWS/S3 emulation (Floci)
 
 File transfer stores uploaded files in S3 (settings `FILE_TRANSFER_S3_*`, see `.env.example`;
-`admin/aws.py` is unrelated — it's SSO login for the AWS CLI). In dev it runs against
+`admin/aws.py` is unrelated — it's SSO login for the AWS CLI). Locally it runs against
 [Floci](https://github.com/floci/floci), a local, MIT-licensed LocalStack replacement, instead of a
 real AWS account. It lives in its own compose file, `docker-compose.floci.yml`, rather than
 `docker-compose.yml`, because the same container is shared with the `wsa` and `pfo` repos (see the
@@ -188,12 +188,12 @@ psql "$PG" -c "CREATE ROLE ziptrigo LOGIN PASSWORD '...';"
 psql "$PG" -c "CREATE DATABASE ziptrigo OWNER ziptrigo;"
 ```
 
-then set `DATABASE_URL=postgres://ziptrigo:...@127.0.0.1:5432/ziptrigo` in `.env.dev` and run
+then set `DATABASE_URL=postgres://ziptrigo:...@127.0.0.1:5432/ziptrigo` in `.env.local` and run
 `python manage.py migrate`.
 
 ## Configuration
 
-Environment variables are loaded from `.env.<environment>` at the repo root (`dev` or `prod`); see
+Environment variables are loaded from `.env.<environment>` at the repo root (`local` or `prod`); see
 `.env.example` for the full list. If `ENVIRONMENT` is set, that file is used; otherwise there must
 be exactly one `.env.*` file. `.env.example` and `.env.staging` never count as environments.
 
@@ -201,7 +201,7 @@ All env files live at the repo root and are gitignored:
 
 | File | Used by | Uploaded to (on `caia`) |
 |---|---|---|
-| `.env.dev` | local runs | |
+| `.env.local` | local runs | |
 | `.env.prod` | `app.ziptrigo.com` | `/opt/docker/ziptrigo-apps/prod/.env` |
 | `.env.staging` | `app-staging.ziptrigo.com` | `/opt/docker/ziptrigo-apps/staging/.env` |
 
@@ -209,7 +209,7 @@ All env files live at the repo root and are gitignored:
 scp .env.prod caia:/opt/docker/ziptrigo-apps/prod/.env
 ```
 
-With both `.env.dev` and `.env.prod` present, set `ENVIRONMENT` to run anything directly
+With both `.env.local` and `.env.prod` present, set `ENVIRONMENT` to run anything directly
 (`inv server run` and `inv test` already do). All three are listed in `admin/secrets_files.txt`;
 back them up (encrypted, to S3) with `inv secrets backup` and get them back with
 `inv secrets restore`.

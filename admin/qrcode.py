@@ -58,7 +58,7 @@ def qrcode_login(environment: EnvironmentAnnotation, email: str, password: str):
     Authenticate with the API and store the token.
 
     Example:
-        qrcode login dev me@example.com mypassword
+        qrcode login local me@example.com mypassword
     """
     import requests
 
