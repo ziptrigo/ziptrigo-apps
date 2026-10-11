@@ -69,3 +69,25 @@ def test_requires_login(client):
 
     assert response.status_code == 302
     assert response['Location'].startswith(reverse('accounts:login'))
+
+
+def test_account_page_shows_password_change_for_a_password_account(client, user):
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert 'Change Password' in content
+    assert 'no-password-note' not in content
+
+
+def test_account_page_explains_no_password_for_a_google_created_account(client, user):
+    user.set_unusable_password()
+    user.save()
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert 'Change Password' not in content
+    assert "You sign in with Google, so this account doesn't have a password." in content
+    assert f'href="{reverse("accounts:forgot-password")}"' in content
+    assert 'Set a password' in content
