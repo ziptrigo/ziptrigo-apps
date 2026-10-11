@@ -15,8 +15,8 @@
             {% if transfer.expires_at %}Available until {{ transfer.expires_at|date:"Y-m-d H:i" }} UTC{% else %}No expiration{% endif %}
         </p>
 
-        {# The file list (names and sizes) is always shown -- only the download itself is
-           password-gated (spec section 3). #}
+        {% comment %}The file list (names and sizes) is always shown -- only the download itself is
+           password-gated (spec section 3).{% endcomment %}
         <ul class="divide-y divide-gray-200 dark:divide-gray-700 mb-6">
             {% for file in files %}
             <li class="py-3 flex items-center justify-between">

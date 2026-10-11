@@ -194,6 +194,9 @@ def test_button_is_a_plain_link_that_bypasses_htmx(client, name, label):
     assert label in content
     link = content[content.index('<a href="/auth/google/login') :].split('>', 1)[0]
     assert 'hx-boost="false"' in link
+    # The partial's template comment must not leak into the page as text.
+    assert '{#' not in content
+    assert 'issue #91' not in content
 
 
 def test_login_button_carries_next_through(client):
