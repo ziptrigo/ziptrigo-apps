@@ -44,11 +44,11 @@ inv lint imports              # import-linter: the dependency rules between apps
 inv test unit                 # all apps
 inv test unit qr_code billing # some apps (directory names under apps/)
 inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
-inv server run [dev|prod]     # runserver on :8000
+inv server run [local|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv openapi generate --format json --file <path>
-inv qrcode login dev <email> <password>       # JWT CLIs over /api/qr/ and /api/ft/
-inv filetransfer send dev report.pdf --to a@example.com
+inv qrcode login local <email> <password>       # JWT CLIs over /api/qr/ and /api/ft/
+inv filetransfer send local report.pdf --to a@example.com
 ```
 
 Every command accepts `--dry` to print the shell command without running it. The app names `inv`
@@ -67,7 +67,7 @@ Run pytest from the repo root; `DJANGO_SETTINGS_MODULE=config.settings` and
 dependency of its own, picked up by the same `pytest`/`inv test unit` run as every app's tests:
 
 ```bash
-ENVIRONMENT=dev pytest apps/accounts/tests/unit/test_jwt.py::test_access_token
+ENVIRONMENT=local pytest apps/accounts/tests/unit/test_jwt.py::test_access_token
 ```
 
 ### Dependencies
@@ -122,15 +122,15 @@ under pytest, which must not depend on machine-local config. `config/environment
 Django-free (settings imports it before Django is configured); `admin/environment.py` is a thin
 binding over it for the CLIs.
 
-The convention: `.env.<environment>` at the repo root where `<environment>` ∈ {`dev`, `prod`}; if
+The convention: `.env.<environment>` at the repo root where `<environment>` ∈ {`local`, `prod`}; if
 `ENVIRONMENT` is set, use it; otherwise require exactly one `.env.*` file (ignoring
-`.env.example` and `.env.staging`). `.env.*` is gitignored — copy `.env.example` to `.env.dev`. `apps/core/checks.py`
+`.env.example` and `.env.staging`). `.env.*` is gitignored — copy `.env.example` to `.env.local`. `apps/core/checks.py`
 re-validates env selection and `EMAIL_BACKENDS` at `runserver` startup.
 
-The deployments' env files are `.env.prod` and `.env.staging` at the repo root, next to `.env.dev`,
+The deployments' env files are `.env.prod` and `.env.staging` at the repo root, next to `.env.local`,
 scp'd to `/opt/docker/ziptrigo-apps/<env>/.env` on the VPS. This repo is their only home; the
 `infra` repo holds none. Both deployments run with `ENVIRONMENT=prod` (staging mounts its own file
-as `.env.prod`), which is why `.env.staging` is in `IGNORED_ENV_FILE_SUFFIXES`. With `.env.dev` and
+as `.env.prod`), which is why `.env.staging` is in `IGNORED_ENV_FILE_SUFFIXES`. With `.env.local` and
 `.env.prod` both present, local runs need `ENVIRONMENT` set. All three are listed in
 `admin/secrets_files.txt` for `inv secrets backup` / `restore`.
 
@@ -141,7 +141,7 @@ missing or still placeholders (`config/secret_checks.py`, also Django-free).
 File transfer storage is one private S3 bucket per environment (`FILE_TRANSFER_S3_BUCKET`, keys
 `transfers/<transfer_id>/<file_id>` -- deliberately not `.../<filename>` as spec section 11 says,
 see `apps.file_transfer.services.storage`'s module docstring for why), defined with its CORS,
-lifecycle rule and IAM user in the `infra` repo's `apps/ziptrigo-apps` (see its README); dev points
+lifecycle rule and IAM user in the `infra` repo's `apps/ziptrigo-apps` (see its README); local points
 `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci. Each part of a multipart upload carries its own SHA-256
 checksum (`x-amz-checksum-sha256`, computed client-side and bound into the presigned URL's
 signature -- see `services.uploads.presign_parts`), so that bucket's CORS config (issue #60) must
@@ -274,7 +274,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   identifying ever sits in the cache/table in the clear. See `apps/core/ratelimit/limiter.py`'s
   docstring for the counting scheme in full.
 - **Two storage backends** (`settings.RATELIMIT_STORAGE`, code review of the first version of this
-  issue): `'db'` (dev/prod's default, and pytest's, when `CACHE_URL` isn't set) -- a dedicated
+  issue): `'db'` (local/prod's default, and pytest's, when `CACHE_URL` isn't set) -- a dedicated
   model, `apps.core.models.RateLimitCounter`, one row per bucket, incremented with a single atomic
   upsert (`INSERT ... ON CONFLICT ("key") DO UPDATE SET "count" = "count" + 1 RETURNING "count"`,
   raw SQL through `connection.cursor()`; Postgres and SQLite >= 3.35 both support `RETURNING` on an
@@ -312,7 +312,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   rate-limited view is a worse failure mode than letting requests through unmetered for a while.
   Every over-limit result also logs `logger.info` with the rule name (never the key) so 429 rates
   are visible in ordinary log monitoring.
-- **`RATELIMIT_ENABLE`** is the project-wide kill switch (env var, default on in dev/prod, off
+- **`RATELIMIT_ENABLE`** is the project-wide kill switch (env var, default on in local/prod, off
   under pytest) -- tests that exercise a limit turn it on with the `settings` fixture; the DB
   storage path needs no special test cleanup (each test's own DB transaction rolls it back), and
   `conftest.py`'s autouse `_clear_ratelimit_cache` fixture still clears the `'ratelimit'` cache
@@ -916,7 +916,7 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`),
 shared by every service in `docker-compose.yml`: `web`, `worker`, `scheduler` and `db` (that
 split is the local-development layout only; a deployment runs one container, below). The build
-runs `collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.dev` is mounted
+runs `collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.local` is mounted
 into `web`, `worker` and `scheduler` because settings require an env file.
 
 - The image's `CMD` is `python supervise.py` (stdlib only, PID 1 after the entrypoint's `migrate`).

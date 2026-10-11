@@ -144,8 +144,8 @@ def filetransfer_login(
     Authenticate with the API and store the token.
 
     Example:
-        filetransfer login dev me@example.com
-        filetransfer login dev me@example.com mypassword
+        filetransfer login local me@example.com
+        filetransfer login local me@example.com mypassword
     """
     import requests
 

@@ -16,22 +16,22 @@ def _no_environment_variable(monkeypatch):
 
 class TestSelectEnv:
     def test_env_from_env_var_dev(self, tmp_path) -> None:
-        (tmp_path / '.env.dev').touch()
-        selection = select_env(tmp_path, environment='dev')
-        assert selection.environment == 'dev'
-        assert selection.env_path == tmp_path / '.env.dev'
+        (tmp_path / '.env.local').touch()
+        selection = select_env(tmp_path, environment='local')
+        assert selection.environment == 'local'
+        assert selection.env_path == tmp_path / '.env.local'
         assert selection.errors == []
 
     def test_env_from_env_var_case_insensitive(self, tmp_path) -> None:
-        (tmp_path / '.env.dev').touch()
-        selection = select_env(tmp_path, environment='DEV')
-        assert selection.environment == 'dev'
-        assert selection.env_path == tmp_path / '.env.dev'
+        (tmp_path / '.env.local').touch()
+        selection = select_env(tmp_path, environment='LOCAL')
+        assert selection.environment == 'local'
+        assert selection.env_path == tmp_path / '.env.local'
         assert selection.errors == []
 
     def test_env_from_env_var_missing_file_is_error(self, tmp_path) -> None:
-        selection = select_env(tmp_path, environment='dev')
-        assert selection.environment == 'dev'
+        selection = select_env(tmp_path, environment='local')
+        assert selection.environment == 'local'
         assert selection.env_path is None
         assert any('not found' in e.lower() for e in selection.errors)
 
@@ -44,14 +44,14 @@ class TestSelectEnv:
         assert any('must be one of' in e.lower() for e in selection.errors)
 
     def test_no_env_var_single_env_file_is_selected(self, tmp_path) -> None:
-        (tmp_path / '.env.dev').touch()
+        (tmp_path / '.env.local').touch()
         selection = select_env(tmp_path, environment='')
-        assert selection.environment == 'dev'
-        assert selection.env_path == tmp_path / '.env.dev'
+        assert selection.environment == 'local'
+        assert selection.env_path == tmp_path / '.env.local'
         assert selection.errors == []
 
     def test_no_env_var_multiple_supported_env_files_is_error(self, tmp_path) -> None:
-        (tmp_path / '.env.dev').touch()
+        (tmp_path / '.env.local').touch()
         (tmp_path / '.env.prod').touch()
         selection = select_env(tmp_path, environment='')
         assert selection.environment is None
@@ -75,27 +75,27 @@ class TestSelectEnv:
         assert selection.warnings == []
 
     def test_env_staging_is_ignored(self, tmp_path) -> None:
-        (tmp_path / '.env.dev').touch()
+        (tmp_path / '.env.local').touch()
         (tmp_path / '.env.staging').touch()
         selection = select_env(tmp_path, environment='')
-        assert selection.environment == 'dev'
-        assert selection.env_path == tmp_path / '.env.dev'
+        assert selection.environment == 'local'
+        assert selection.env_path == tmp_path / '.env.local'
         assert selection.errors == []
         assert selection.warnings == []
 
     def test_defaults_to_os_environ_when_environment_not_provided(
         self, tmp_path, monkeypatch
     ) -> None:
-        (tmp_path / '.env.dev').touch()
-        monkeypatch.setenv('ENVIRONMENT', 'dev')
+        (tmp_path / '.env.local').touch()
+        monkeypatch.setenv('ENVIRONMENT', 'local')
         selection = select_env(tmp_path)
-        assert selection.environment == 'dev'
-        assert selection.env_path == tmp_path / '.env.dev'
+        assert selection.environment == 'local'
+        assert selection.env_path == tmp_path / '.env.local'
 
 
 class TestEnvironmentConstants:
     def test_supported_environments_contains_dev_and_prod(self) -> None:
-        assert 'dev' in SUPPORTED_ENVIRONMENTS
+        assert 'local' in SUPPORTED_ENVIRONMENTS
         assert 'prod' in SUPPORTED_ENVIRONMENTS
 
     def test_supported_environments_is_list(self) -> None:

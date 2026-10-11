@@ -5,7 +5,7 @@ This module is intentionally Django-free so it can be imported from ``settings.p
 dependency-free so it can be imported before the environment is set up.
 
 Naming convention:
-- ``.env.<ENVIRONMENT>`` files (e.g. ``.env.dev``, ``.env.prod``)
+- ``.env.<ENVIRONMENT>`` files (e.g. ``.env.local``, ``.env.prod``)
 
 Selection rules:
 - If ``ENVIRONMENT`` env var is set, use that and load ``.env.<ENVIRONMENT>``.
@@ -31,7 +31,7 @@ class Environment(StrEnum):
     environment as a plain string (``os.environ`` updates, f-strings) working unchanged.
     """
 
-    DEV = 'dev'
+    LOCAL = 'local'
     PROD = 'prod'
 
 

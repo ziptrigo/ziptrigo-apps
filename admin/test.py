@@ -30,7 +30,7 @@ DjangoAppsAnnotation = Annotated[
 
 def _test_env() -> dict[str, str]:
     env = os.environ.copy()
-    env.setdefault('ENVIRONMENT', 'dev')
+    env.setdefault('ENVIRONMENT', 'local')
     return env
 
 

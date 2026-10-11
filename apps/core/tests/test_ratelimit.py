@@ -3,7 +3,7 @@ storage backends, the disabled switch, response builders) rather than any partic
 endpoint -- those are exercised in each app's own tests (`apps/accounts/tests/...`,
 `apps/qr_code/tests/...`, `apps/file_transfer/tests/...`).
 
-`settings.RATELIMIT_STORAGE` defaults to `'db'` under pytest, same as dev/prod without
+`settings.RATELIMIT_STORAGE` defaults to `'db'` under pytest, same as local/prod without
 `CACHE_URL` (see `config/settings.py`) -- so every test below that enables rate limiting exercises
 `apps.core.models.RateLimitCounter` "naturally", and the module is marked `django_db` throughout.
 `TestCachePathBackend` opts into the `'ratelimit'` LocMem cache alias instead
@@ -329,7 +329,7 @@ class TestDbStorageBackend:
 
 @pytest.mark.usefixtures('enabled')
 class TestCachePathBackend:
-    """The Redis/LocMem storage path (`RATELIMIT_STORAGE = 'cache'`), used in dev/prod when
+    """The Redis/LocMem storage path (`RATELIMIT_STORAGE = 'cache'`), used in local/prod when
     `CACHE_URL` is set. Exercised here against the `'ratelimit'` LocMem cache alias that's still
     configured under pytest for exactly this (issue #53 code review: "keep LocMem/Redis path
     tests too")."""

@@ -8,7 +8,7 @@ from django.db import models
 class RateLimitCounter(models.Model):
     """One row per fixed-window rate-limit bucket (issue #53 code review): the DB-backed storage
     `apps.core.ratelimit` uses when `settings.RATELIMIT_STORAGE == 'db'` (no `CACHE_URL`
-    configured -- dev/prod's default). Replaces the original `DatabaseCache`-backed design, which
+    configured -- local/prod's default). Replaces the original `DatabaseCache`-backed design, which
     had two bugs: `DatabaseCache.incr` falls back to `BaseCache.incr` (get, then a plain `set` at
     the *default* timeout), silently shortening any window longer than that default the moment a
     second hit lands in the same bucket; and `DatabaseCache`'s `MAX_ENTRIES`/culling deletes rows

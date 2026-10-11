@@ -467,7 +467,7 @@ def test_login_success_saves_token(token_file, monkeypatch):
         'requests.post', lambda *a, **k: FakeResponse(200, {'access_token': 'tok123'})
     )
 
-    result = runner.invoke(filetransfer.app, ['login', 'dev', 'me@example.com', 'pw'])
+    result = runner.invoke(filetransfer.app, ['login', 'local', 'me@example.com', 'pw'])
 
     assert result.exit_code == 0
     assert token_file.read_text().strip() == 'tok123'
@@ -484,7 +484,7 @@ def test_login_prompts_for_password_when_omitted(token_file, monkeypatch):
     monkeypatch.setattr('requests.post', fake_post)
     monkeypatch.setattr(filetransfer.typer, 'prompt', lambda *a, **k: 'typed-pw')
 
-    result = runner.invoke(filetransfer.app, ['login', 'dev', 'me@example.com'])
+    result = runner.invoke(filetransfer.app, ['login', 'local', 'me@example.com'])
 
     assert result.exit_code == 0
     assert seen['password'] == 'typed-pw'
@@ -501,7 +501,7 @@ def test_login_reads_password_from_env_var(token_file, monkeypatch):
     monkeypatch.setattr('requests.post', fake_post)
     monkeypatch.setenv('FILETRANSFER_PASSWORD', 'env-pw')
 
-    result = runner.invoke(filetransfer.app, ['login', 'dev', 'me@example.com'])
+    result = runner.invoke(filetransfer.app, ['login', 'local', 'me@example.com'])
 
     assert result.exit_code == 0
     assert seen['password'] == 'env-pw'
@@ -515,7 +515,7 @@ def test_login_failure_exits_nonzero(token_file, monkeypatch):
 
     monkeypatch.setattr('requests.post', fake_post)
 
-    result = runner.invoke(filetransfer.app, ['login', 'dev', 'me@example.com', 'pw'])
+    result = runner.invoke(filetransfer.app, ['login', 'local', 'me@example.com', 'pw'])
 
     assert result.exit_code == 1
     assert not token_file.exists()
@@ -528,13 +528,13 @@ def test_list_with_no_transfers(token_file, monkeypatch):
         lambda *a, **k: FakeResponse(200, {'count': 0, 'limit': 20, 'offset': 0, 'results': []}),
     )
 
-    result = runner.invoke(filetransfer.app, ['list', 'dev'])
+    result = runner.invoke(filetransfer.app, ['list', 'local'])
 
     assert result.exit_code == 0
 
 
 def test_list_without_login_exits_nonzero(token_file):
-    result = runner.invoke(filetransfer.app, ['list', 'dev'])
+    result = runner.invoke(filetransfer.app, ['list', 'local'])
 
     assert result.exit_code == 1
 
@@ -549,7 +549,7 @@ def test_list_passes_limit_and_offset(token_file, monkeypatch):
 
     monkeypatch.setattr('requests.get', fake_get)
 
-    result = runner.invoke(filetransfer.app, ['list', 'dev', '--limit', '5', '--offset', '10'])
+    result = runner.invoke(filetransfer.app, ['list', 'local', '--limit', '5', '--offset', '10'])
 
     assert result.exit_code == 0
     assert seen['params'] == {'filter': 'active', 'limit': 5, 'offset': 10}
@@ -578,7 +578,7 @@ def test_list_hints_at_more_pages(token_file, monkeypatch, capsys):
         ),
     )
 
-    result = runner.invoke(filetransfer.app, ['list', 'dev'])
+    result = runner.invoke(filetransfer.app, ['list', 'local'])
 
     assert result.exit_code == 0
     assert '--offset 1' in result.output
@@ -589,7 +589,7 @@ def test_send_with_no_matching_files_exits_nonzero(token_file, tmp_path):
 
     result = runner.invoke(
         filetransfer.app,
-        ['send', 'dev', str(tmp_path / 'missing.bin'), '--to', 'a@example.com'],
+        ['send', 'local', str(tmp_path / 'missing.bin'), '--to', 'a@example.com'],
     )
 
     assert result.exit_code == 1
@@ -609,7 +609,7 @@ def test_send_prints_draft_id_hint_when_upload_fails(token_file, tmp_path, monke
 
     monkeypatch.setattr('requests.post', fake_post)
 
-    result = runner.invoke(filetransfer.app, ['send', 'dev', str(path), '--to', 'a@example.com'])
+    result = runner.invoke(filetransfer.app, ['send', 'local', str(path), '--to', 'a@example.com'])
 
     assert result.exit_code == 1
     assert '--draft-id draft-123' in result.output
@@ -636,7 +636,7 @@ def test_send_prints_draft_id_hint_when_finalize_fails(token_file, tmp_path, mon
     monkeypatch.setattr('requests.post', fake_post)
     monkeypatch.setattr('requests.put', lambda *a, **k: FakeResponse(200, headers={'ETag': 'e'}))
 
-    result = runner.invoke(filetransfer.app, ['send', 'dev', str(path), '--to', 'a@example.com'])
+    result = runner.invoke(filetransfer.app, ['send', 'local', str(path), '--to', 'a@example.com'])
 
     assert result.exit_code == 1
     assert '--draft-id draft-123' in result.output
@@ -653,7 +653,7 @@ def test_disable_command_patches_transfer(token_file, monkeypatch):
 
     monkeypatch.setattr('requests.patch', fake_patch)
 
-    result = runner.invoke(filetransfer.app, ['disable', 'dev', 'transfer-1'])
+    result = runner.invoke(filetransfer.app, ['disable', 'local', 'transfer-1'])
 
     assert result.exit_code == 0
     assert seen['url'].endswith('/api/ft/transfers/transfer-1')
@@ -671,7 +671,7 @@ def test_set_password_prompts_when_omitted(token_file, monkeypatch):
     monkeypatch.setattr('requests.patch', fake_patch)
     monkeypatch.setattr(filetransfer.typer, 'prompt', lambda *a, **k: 'typed-pw')
 
-    result = runner.invoke(filetransfer.app, ['set-password', 'dev', 'transfer-1'])
+    result = runner.invoke(filetransfer.app, ['set-password', 'local', 'transfer-1'])
 
     assert result.exit_code == 0
     assert seen['json'] == {'password': 'typed-pw'}
@@ -702,7 +702,7 @@ def test_show_command_prints_recipient_ids(token_file, monkeypatch):
         ),
     )
 
-    result = runner.invoke(filetransfer.app, ['show', 'dev', 'transfer-1'])
+    result = runner.invoke(filetransfer.app, ['show', 'local', 'transfer-1'])
 
     assert result.exit_code == 0
     assert 'recipient-1' in result.output
@@ -719,7 +719,7 @@ def test_resend_command(token_file, monkeypatch):
 
     monkeypatch.setattr('requests.post', fake_post)
 
-    result = runner.invoke(filetransfer.app, ['resend', 'dev', 'transfer-1', 'recipient-1'])
+    result = runner.invoke(filetransfer.app, ['resend', 'local', 'transfer-1', 'recipient-1'])
 
     assert result.exit_code == 0
     assert seen['url'].endswith('/api/ft/transfers/transfer-1/recipients/recipient-1/resend')
@@ -742,7 +742,7 @@ def test_add_recipients_command_reports_emails(token_file, monkeypatch):
 
     result = runner.invoke(
         filetransfer.app,
-        ['add-recipients', 'dev', 'transfer-1', '--to', 'a@example.com', '--to', 'b@example.com'],
+        ['add-recipients', 'local', 'transfer-1', '--to', 'a@example.com', '--to', 'b@example.com'],
     )
 
     assert result.exit_code == 0
@@ -754,6 +754,6 @@ def test_delete_command(token_file, monkeypatch):
     token_file.write_text('tok')
     monkeypatch.setattr('requests.delete', lambda *a, **k: FakeResponse(204))
 
-    result = runner.invoke(filetransfer.app, ['delete', 'dev', 'transfer-1'])
+    result = runner.invoke(filetransfer.app, ['delete', 'local', 'transfer-1'])
 
     assert result.exit_code == 0

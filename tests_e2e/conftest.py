@@ -9,10 +9,10 @@ import pytest
 def site_server():
     # Start the site from the repo root.
     env = os.environ.copy()
-    env.setdefault('ENVIRONMENT', 'dev')
+    env.setdefault('ENVIRONMENT', 'local')
 
     # Using a temporary database for E2E tests would be better,
-    # but for now we'll assume the dev environment is set up.
+    # but for now we'll assume the local environment is set up.
 
     process = subprocess.Popen(
         ['python', 'manage.py', 'runserver', '8000', '--noreload'],

@@ -38,9 +38,9 @@ COPY apps/ /app/apps/
 # Collect static files so WhiteNoise can serve them when DEBUG is off (it only uses the app
 # directories directly in DEBUG). Settings insist on an env file, so give the build a throwaway one.
 RUN mkdir -p /app/media && \
-    touch .env.dev && \
-    ENVIRONMENT=dev python manage.py collectstatic --noinput && \
-    rm .env.dev
+    touch .env.local && \
+    ENVIRONMENT=local python manage.py collectstatic --noinput && \
+    rm .env.local
 
 EXPOSE 8000
 

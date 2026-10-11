@@ -32,12 +32,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Load environment variables from the selected `.env.<ENVIRONMENT>` file.
 # This must happen before reading any `os.getenv(...)` values.
 
-# Test runs may have multiple env files in the repo; default to dev. (`ty`, which replaced mypy for
+# Test runs may have multiple env files in the repo; default to local. (`ty`, which replaced mypy for
 # static analysis, is a standalone binary that never imports this module, so there's no equivalent
 # sentinel to check for it.)
 _RUNNING_TOOLING = 'pytest' in sys.modules
 if _RUNNING_TOOLING:
-    os.environ.setdefault('ENVIRONMENT', 'dev')
+    os.environ.setdefault('ENVIRONMENT', 'local')
 
 _selection = select_env(PROJECT_ROOT)
 
@@ -157,7 +157,7 @@ if os.getenv('ENVIRONMENT') == 'prod' and not DATABASE_URL:
 #   and each test process gets its own isolated dict. Rate limiting defaults to disabled under
 #   pytest anyway (see `RATELIMIT_ENABLE` below); tests that enable it either exercise the DB
 #   storage path directly (`RATELIMIT_STORAGE` also defaults to `'db'` under pytest, same as
-#   dev/prod without `CACHE_URL` -- "runs on the test DB naturally") or opt into this `'ratelimit'`
+#   local/prod without `CACHE_URL` -- "runs on the test DB naturally") or opt into this `'ratelimit'`
 #   LocMem alias with `override_settings(RATELIMIT_STORAGE='cache')` to exercise that path's logic
 #   instead (see `apps/core/tests/test_ratelimit.py`).
 # - `CACHE_URL` set (any environment): `RedisCache` on both aliases, and `RATELIMIT_STORAGE`
@@ -165,7 +165,7 @@ if os.getenv('ENVIRONMENT') == 'prod' and not DATABASE_URL:
 #   site's general cache) at. A full cache URL, e.g. `redis://host:6379/0`; requires the `redis`
 #   package to actually be installed at runtime (not a hard dependency of this project, since it's
 #   opt-in).
-# - Otherwise (dev/prod default): just `'default'` (`LocMemCache`, per-process -- fine for the
+# - Otherwise (local/prod default): just `'default'` (`LocMemCache`, per-process -- fine for the
 #   site's own incidental caching needs). No `'ratelimit'` alias at all: `RATELIMIT_STORAGE` is
 #   `'db'`, which doesn't use a cache backend (see `apps.core.ratelimit.limiter`'s docstring for
 #   why not `DatabaseCache`, which this replaced -- issue #53 code review).
@@ -205,7 +205,7 @@ RATELIMIT_ENABLE = os.getenv(
 # `'cache'` (the `'ratelimit'` alias above -- `RedisCache` in practice, since that's the only case
 # that sets `CACHE_URL`) when one's configured, `'db'` otherwise (`apps.core.models.RateLimitCounter`,
 # an atomic upsert against whichever database `DATABASES['default']` already is -- Postgres in
-# prod, SQLite under pytest). `'db'` is also what dev/prod get with no `CACHE_URL`, and what pytest
+# prod, SQLite under pytest). `'db'` is also what local/prod get with no `CACHE_URL`, and what pytest
 # gets by default with no `CACHE_URL` set for test runs either -- see `apps/core/ratelimit/limiter.py`'s
 # docstring for both backends' semantics and why `DatabaseCache` (this setting's predecessor) was
 # replaced rather than fixed in place.
