@@ -26,3 +26,4 @@ class MaybeAuthenticatedHttpRequest(HttpRequest):
     """
 
     user: User | AnonymousUser
+    session: SessionBase

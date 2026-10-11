@@ -1,4 +1,5 @@
 from .forgot_password import forgot_password_page
+from .google import google_callback, google_login
 from .login import login_page, logout_page
 from .pages import (
     account_created_page,
@@ -17,6 +18,8 @@ __all__ = [
     'confirm_email_page',
     'email_confirmation_success',
     'forgot_password_page',
+    'google_callback',
+    'google_login',
     'login_page',
     'logout_page',
     'profile_update',

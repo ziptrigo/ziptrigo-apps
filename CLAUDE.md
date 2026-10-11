@@ -171,6 +171,42 @@ and the same `apps.core.ratelimit` rules, so validation and throttling can't dri
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email.
 
+**Sign in with Google** (issue #91) is a third way in to the *web UI*, and it is a session login
+like the password form, not a JWT one: `GET /auth/google/login` and `GET /auth/google/callback`
+(`apps/accounts/views/google.py`, URLs in `google_urls.py` under their own `google_auth:` namespace
+since Django can't serve two URLconfs under `accounts:`; exact paths, no trailing slash -- the
+callback is a registered redirect URI at Google) run an OpenID Connect authorization code flow with
+Authlib's Django client, and the callback ends in the same `django.contrib.auth.login()` the
+password form uses, so `user_logged_in` fires (claim-on-login, `last_login`) and a same-site `next`
+captured at `/auth/google/login` (kept in the session, validated by the shared
+`views.redirects.redirect_target`, which the password login uses too) is honoured. Authlib owns
+`state`/`nonce`; no token or code is ever logged.
+`apps.accounts.services.google_oauth` holds the lazily built, cached client and `resolve_user`:
+require Google's `email_verified` (else a 403 page), match `User.google_sub` first (nullable,
+unique), then link an existing account by case-insensitive email (storing the `sub`), else create
+one (confirmed email, unusable password, no confirmation email). **Signing in by `sub` does not
+require `email_confirmed`**, deliberately unlike the password login: the Google identity is the
+proof, so a linked user whose address was later changed (and so un-confirmed) through
+`PUT /api/account` can still sign in with Google. **Linking rules (anti-takeover):** an existing
+account is linked by email only if (a) its `email_confirmed` is true -- an unconfirmed account is
+*never* linked (`UnconfirmedAccountConflict`, "confirm it or reset your password, then try
+again"), because its holder never proved the address and may hold a password or JWTs that outlive
+an email change, which would otherwise survive the link; and (b) Google is authoritative for the
+address: a `gmail.com`/`googlemail.com` domain (case-insensitive) or a non-empty `hd` claim
+(Google Workspace) -- otherwise `LinkNotAllowed` ("sign in with your email and password
+instead"), since `email_verified` is only "verified at some point" for a domain Google doesn't
+host. Creating a *new* account from any verified email stays allowed. Linking changes nothing but
+`google_sub` (no confirmation, no password change), so it needs no
+`invalidate_pending_for_email`. An account already linked to a different
+`sub`, or two accounts matching the email, are refused rather than guessed at; inactive users
+(`status`/`is_active`) are refused like the password login ("User not active"). Every failure
+(denied consent, bad state, failed exchange, unexpected error) logs and redirects to the login page
+with a `messages` banner. The feature is on only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GOOGLE_REDIRECT_URI` are all set (`google_oauth.is_configured()`, passed to the login/register
+templates as `google_enabled`); unset, the button is hidden and both routes redirect with a message,
+and `apps.accounts.checks` warns (`accounts.W001`) about a *partial* configuration. The callback is
+rate limited per IP (`GOOGLE_LOGIN_IP`).
+
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.
 
@@ -627,10 +663,10 @@ receiver above) hands a confirmed, unowned anonymous transfer to whichever user 
 matching, *already-confirmed* email -- not merely matching, since an account that hasn't itself
 proven it controls that address shouldn't be able to grab someone else's transfer by signing up
 with their address first; claiming is simply deferred to that account's first login after its own
-email gets confirmed. Only the session login page fires `user_logged_in` (signup is API-only and
-never starts a session), so that's the one place claiming happens. **User decision:** claiming is
-also deferred while the account's balance is below `services.send.MIN_BALANCE_TO_SEND` (1 credit,
-the same minimum required to start a logged-in transfer) -- claiming turns a free transfer into a
+email gets confirmed. Only the session login page and the Google callback fire
+`user_logged_in` (signup is API-only and never starts a session), so those are the two places
+claiming happens. **User decision:** claiming is also deferred while the account's balance is
+below `services.send.MIN_BALANCE_TO_SEND` (1 credit, the same minimum required to start a logged-in transfer) -- claiming turns a free transfer into a
 metered one with no chance to opt out first, and at a near-zero balance the very next metering run
 would immediately suspend it. Such a transfer stays anonymous and free (still fully usable by its
 recipients) until a *later* login finds the balance topped up.

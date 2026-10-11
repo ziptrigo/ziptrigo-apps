@@ -2,24 +2,14 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
-from django.urls import reverse
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import LoginForm
-from ..services import login_throttle
-
-
-def _redirect_target(request: HttpRequest, next_url: str | None) -> str:
-    """``next_url`` if it points back at this site, else the account page."""
-    if next_url and url_has_allowed_host_and_scheme(
-        next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
-    ):
-        return next_url
-    return reverse('accounts:account')
+from ..services import google_oauth, login_throttle
+from .redirects import redirect_target
 
 
 @require_http_methods(['GET', 'POST'])
@@ -55,14 +45,19 @@ def login_page(request: HttpRequest) -> HttpResponse:
             template = (
                 'accounts/partials/login_form.html' if is_htmx(request) else 'accounts/login.html'
             )
-            response = render(request, template, {'form': form, 'next': next_url}, status=429)
+            context = {
+                'form': form,
+                'next': next_url,
+                'google_enabled': google_oauth.is_configured(),
+            }
+            response = render(request, template, context, status=429)
             response['Retry-After'] = str(limited.retry_after)
             return response
 
         form = LoginForm(request, data=request.POST)
         if form.is_valid():
             auth_login(request, form.get_user())
-            return hx_redirect(request, _redirect_target(request, next_url))
+            return hx_redirect(request, redirect_target(request, next_url))
         if form.credentials_invalid and submitted_email:
             login_throttle.record_failed_attempt(submitted_email)
         status = 422
@@ -75,7 +70,8 @@ def login_page(request: HttpRequest) -> HttpResponse:
         if request.method == 'POST' and is_htmx(request)
         else 'accounts/login.html'
     )
-    return render(request, template, {'form': form, 'next': next_url}, status=status)
+    context = {'form': form, 'next': next_url, 'google_enabled': google_oauth.is_configured()}
+    return render(request, template, context, status=status)
 
 
 @require_POST

@@ -70,6 +70,14 @@ class User(AbstractBaseUser, PermissionsMixin):
         datetime | None,
         models.DateTimeField(null=True, blank=True, help_text='When email was confirmed'),
     )
+    # Google's stable account identifier (the OpenID Connect `sub` claim), set the first time the
+    # user signs in with Google (`apps.accounts.services.google_oauth`). Matched before the email,
+    # since a Google account's address can change while its `sub` never does. Null for accounts
+    # that never used Google; unique so one Google account can't be linked to two users.
+    google_sub = cast(
+        str | None,
+        models.CharField(max_length=255, null=True, blank=True, unique=True),
+    )
     status = cast(
         str,
         models.CharField(

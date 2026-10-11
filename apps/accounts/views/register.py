@@ -12,6 +12,7 @@ from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import RegisterForm
+from ..services import google_oauth
 from ..services.signup import EmailAlreadyRegistered, create_account
 
 
@@ -58,4 +59,5 @@ def register_page(request: HttpRequest) -> HttpResponse:
         if request.method == 'POST' and is_htmx(request)
         else 'accounts/register.html'
     )
-    return render(request, template, {'form': form}, status=status)
+    context = {'form': form, 'google_enabled': google_oauth.is_configured()}
+    return render(request, template, context, status=status)

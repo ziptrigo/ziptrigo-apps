@@ -17,6 +17,9 @@ urlpatterns = [
     path('admin/', custom_admin_site.urls),
     path('api/', api.urls),  # Django Ninja API with built-in docs at /api/docs
     path('account/', include('apps.accounts.urls')),
+    # "Sign in with Google" (issue #91): `/auth/google/login` and `/auth/google/callback`. The
+    # callback is a registered redirect URI at Google, so the path must stay exactly as is.
+    path('auth/google/', include('apps.accounts.google_urls')),
     path('billing/', include('apps.billing.urls')),
     path('qr/', include('apps.qr_code.urls')),
     path('transfer/', include('apps.file_transfer.urls')),

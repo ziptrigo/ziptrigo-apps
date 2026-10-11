@@ -15,6 +15,10 @@
 
     {% include 'accounts/partials/register_form.html' %}
 
+    {% if google_enabled %}
+      {% include 'accounts/partials/google_button.html' with label='Sign up with Google' %}
+    {% endif %}
+
     <p class="mt-4 text-sm text-gray-600 dark:text-gray-300">
       Already have an account? <a href="{% url 'accounts:login' %}" class="text-sage-300 underline">Sign in</a>
     </p>

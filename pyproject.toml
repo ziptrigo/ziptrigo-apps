@@ -4,6 +4,10 @@ version = '0.1.0'
 description = 'ZipTrigo Django applications monorepo'
 requires-python = '>=3.14'
 dependencies = [
+    # Server-side OAuth 2.0 / OpenID Connect client for "Sign in with Google" (issue #91).
+    # Its Django integration fetches Google's discovery document and exchanges the authorization
+    # code over `requests`, which is therefore a runtime dependency too, not a dev-only one.
+    'authlib>=1.6,<2.0',
     'boto3>=1.34,<2.0',
     'dj-database-url>=3.1,<4.0',
     'django-cors-headers>=4.3,<5.0',
@@ -21,6 +25,7 @@ dependencies = [
     'pydantic[email]>=2.12,<3.0',
     'pyjwt[crypto]>=2.10,<3.0',
     'python-dotenv>=1.0,<2.0',
+    'requests>=2.32,<3.0',
     'segno>=1.6,<2.0',
     'whitenoise>=6.11,<7.0',
 ]
@@ -48,7 +53,6 @@ dev = [
     'pytest-playwright',
     'pyyaml',
     'pyzipper',
-    'requests',
     'ruff',
     's3fs>=2026.4.0',
     'textual-searchable-selectionlist',
