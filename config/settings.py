@@ -276,6 +276,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # by `EMAIL_VERIFICATION_START_EMAIL` below (every caller of
     # `apps.core.services.email_verification.start` shares it, including this endpoint).
     'RESEND_CONFIRMATION_IP': (10, 60 * 60),
+    # "Sign in with Google" callback (issue #91): every real sign-in is one hit, so this is
+    # headroom for a shared NAT/office IP signing in at the same time, not a per-user quota. The
+    # callback does an outbound token exchange with Google per call, which is what this protects.
+    'GOOGLE_LOGIN_IP': (30, 5 * 60),
     # -- core: shared email verification (`apps.core.services.email_verification.start`) --
     # The per-email-address-per-day cap on verification *starts* (CLAUDE.md Known gaps: a resend
     # every 60s cooldown alone still allows ~1,440 sends/day, each with fresh guess attempts).
@@ -387,6 +391,19 @@ AUTHENTICATION_BACKENDS = [
 
 # Login URL for @login_required decorator
 LOGIN_URL = 'accounts:login'
+
+# "Sign in with Google" (issue #91), a server-side OpenID Connect authorization code flow
+# (`apps.accounts.services.google_oauth`). All three come from the environment and are never
+# committed; Google sign-in is enabled only when all three are non-empty -- leaving them empty
+# (the default) hides the button and makes both routes redirect to the login page with a message,
+# so an environment without a Google OAuth client (production, today) needs no code or config
+# change. `GOOGLE_REDIRECT_URI` must match, character for character, an "Authorized redirect URI"
+# of the OAuth client in Google Cloud, and be this site's `/auth/google/callback` (no trailing
+# slash), e.g. `https://app-staging.ziptrigo.com/auth/google/callback`. A partial configuration is
+# almost certainly a mistake, so `apps.accounts.checks` warns about it at startup.
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '').strip()
 
 # Base URL used to build absolute links (emails, QR code redirects).
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')

@@ -10,7 +10,7 @@ from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import LoginForm
-from ..services import login_throttle
+from ..services import google_oauth, login_throttle
 
 
 def _redirect_target(request: HttpRequest, next_url: str | None) -> str:
@@ -55,7 +55,12 @@ def login_page(request: HttpRequest) -> HttpResponse:
             template = (
                 'accounts/partials/login_form.html' if is_htmx(request) else 'accounts/login.html'
             )
-            response = render(request, template, {'form': form, 'next': next_url}, status=429)
+            context = {
+                'form': form,
+                'next': next_url,
+                'google_enabled': google_oauth.is_configured(),
+            }
+            response = render(request, template, context, status=429)
             response['Retry-After'] = str(limited.retry_after)
             return response
 
@@ -75,7 +80,8 @@ def login_page(request: HttpRequest) -> HttpResponse:
         if request.method == 'POST' and is_htmx(request)
         else 'accounts/login.html'
     )
-    return render(request, template, {'form': form, 'next': next_url}, status=status)
+    context = {'form': form, 'next': next_url, 'google_enabled': google_oauth.is_configured()}
+    return render(request, template, context, status=status)
 
 
 @require_POST

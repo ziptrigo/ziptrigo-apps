@@ -73,6 +73,7 @@ apps/<app>/
 |---|---|
 | `/` | core landing page |
 | `/account/…` | accounts (login, register, logout, password reset, email confirmation, settings) |
+| `/auth/google/login`, `/auth/google/callback` | accounts: "Sign in with Google" (the callback is the redirect URI registered with Google, so it never moves or gains a trailing slash) |
 | `/billing/…` | billing (credits history) |
 | `/feedback/…` | feedback (the form, and the thank-you page) |
 | `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
@@ -225,6 +226,38 @@ transfer storage credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`,
 The database is Postgres when `DATABASE_URL` is set (`postgres://user:pass@host:5432/name`), and
 SQLite (`db.sqlite3`) otherwise, for local development and tests. Production requires
 `DATABASE_URL`: in a container, the SQLite file would be lost on every redeploy.
+
+### Sign in with Google
+
+Login and register pages offer "Sign in with Google" (a server-side OpenID Connect authorization
+code flow, [Authlib](https://docs.authlib.org/)) when these variables are all set; leave them empty
+and the button is hidden and `/auth/google/*` just redirects to the login page with a message. A
+partial set triggers a warning at startup (`manage.py check`, `runserver`). Nothing is read from or
+written to a file other than your `.env.<environment>`, and the client secret never leaves the
+server.
+
+| Variable | Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | the OAuth client's ID, `….apps.googleusercontent.com` |
+| `GOOGLE_CLIENT_SECRET` | the OAuth client's secret |
+| `GOOGLE_REDIRECT_URI` | this site's `/auth/google/callback`, e.g. `https://app-staging.ziptrigo.com/auth/google/callback` (local: `http://localhost:8000/auth/google/callback`) |
+
+To get them, in the [Google Cloud console](https://console.cloud.google.com/) under *APIs &
+Services*:
+
+1. *OAuth consent screen*: set the app up (name, support email; scopes `openid`, `email`,
+   `profile` are non-sensitive). While it is in **Testing** mode only the *test users* you add
+   there can sign in; publish it to allow anyone.
+2. *Credentials* > *Create credentials* > *OAuth client ID*, application type **Web application**.
+3. Under *Authorized redirect URIs* add `GOOGLE_REDIRECT_URI` **exactly** as it is in the env file
+   (scheme, host, port and path; no trailing slash). A mismatch fails with `redirect_uri_mismatch`.
+   Use one OAuth client (or at least one redirect URI) per environment.
+4. Copy the client ID and secret into the environment's env file (`.env.dev`, `.env.staging`,
+   `.env.prod`), never into the repo.
+
+A Google sign-in uses the same session as the password login (no JWT is issued) and requires a
+verified Google email. It signs in the account linked to the Google account, or else the existing
+account with that email (linking it), or else creates one; see CLAUDE.md, "Auth".
 
 ## Development Workflow
 

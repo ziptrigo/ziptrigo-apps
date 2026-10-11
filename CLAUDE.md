@@ -171,6 +171,30 @@ and the same `apps.core.ratelimit` rules, so validation and throttling can't dri
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email.
 
+**Sign in with Google** (issue #91) is a third way in to the *web UI*, and it is a session login
+like the password form, not a JWT one: `GET /auth/google/login` and `GET /auth/google/callback`
+(`apps/accounts/views/google.py`, URLs in `google_urls.py` under their own `google_auth:` namespace
+since Django can't serve two URLconfs under `accounts:`; exact paths, no trailing slash -- the
+callback is a registered redirect URI at Google) run an OpenID Connect authorization code flow with
+Authlib's Django client, and the callback ends in the same `django.contrib.auth.login()` the
+password form uses, so `user_logged_in` fires (claim-on-login, `last_login`) and a same-site `next`
+captured at `/auth/google/login` (kept in the session, validated by the login view's own
+`_redirect_target`) is honoured. Authlib owns `state`/`nonce`; no token or code is ever logged.
+`apps.accounts.services.google_oauth` holds the lazily built, cached client and `resolve_user`:
+require Google's `email_verified` (else a 403 page), match `User.google_sub` first (nullable,
+unique), then link an existing account by case-insensitive email (storing the `sub`), else create
+one (confirmed email, unusable password, no confirmation email). **Pre-hijacking guard:** linking an
+account whose `email_confirmed` is false (someone may have registered the address with their own
+password) confirms it and makes its password unusable; an account already linked to a different
+`sub`, or two accounts matching the email, are refused rather than guessed at; inactive users
+(`status`/`is_active`) are refused like the password login ("User not active"). Every failure
+(denied consent, bad state, failed exchange, unexpected error) logs and redirects to the login page
+with a `messages` banner. The feature is on only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GOOGLE_REDIRECT_URI` are all set (`google_oauth.is_configured()`, passed to the login/register
+templates as `google_enabled`); unset, the button is hidden and both routes redirect with a message,
+and `apps.accounts.checks` warns (`accounts.W001`) about a *partial* configuration. The callback is
+rate limited per IP (`GOOGLE_LOGIN_IP`).
+
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.
 
