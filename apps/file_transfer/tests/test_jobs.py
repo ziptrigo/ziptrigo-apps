@@ -14,9 +14,9 @@ pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 _ONE_GB = 1024**3
 
 
-def test_meter_transfers_charges_every_active_transfer(draft_transfer, ft_settings):
-    ft_settings.price_per_gb_per_day = Decimal('1.0')
-    ft_settings.save()
+def test_meter_transfers_charges_every_active_transfer(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
     draft_transfer.status = TransferStatus.ACTIVE
     draft_transfer.size_bytes = _ONE_GB
     draft_transfer.last_billed_at = timezone.now() - timedelta(hours=25)
@@ -310,10 +310,10 @@ def test_meter_transfers_continues_past_a_single_failing_transfer(
 
     original_meter_transfer = metering.meter_transfer
 
-    def _boom(transfer, settings_row=None):
+    def _boom(transfer, price_per_gb_per_day=None):
         if transfer.pk == draft_transfer.pk:
             raise RuntimeError('boom')
-        return original_meter_transfer(transfer, settings_row)
+        return original_meter_transfer(transfer, price_per_gb_per_day)
 
     monkeypatch.setattr(jobs, 'meter_transfer', _boom)
 

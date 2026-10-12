@@ -8,14 +8,20 @@ and by the `credits_added` signal receiver in `apps/file_transfer/apps.py` (the 
 """
 
 from datetime import timedelta
-from decimal import ROUND_FLOOR, Decimal
+from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.billing.services import InsufficientCreditsError, get_balance, spend_credits
+from apps.billing.services import (
+    InsufficientCreditsError,
+    get_balance,
+    get_storage_price_per_gb_per_day,
+    spend_credits,
+    storage_charge,
+)
 
 from ..models import FileTransferSettings, Transfer, TransferStatus
 from .emails import send_suspended_notification
@@ -25,20 +31,19 @@ from .naming import transfer_display_name
 #: Minimum balance to re-enable a suspended transfer (spec section 7).
 MIN_BALANCE_TO_REENABLE = 1
 
-_BYTES_PER_GB = Decimal(1024**3)
 _BILLING_PERIOD = timedelta(hours=24)
 
 
-def _size_in_gb(size_bytes: int) -> Decimal:
-    return Decimal(size_bytes) / _BYTES_PER_GB
-
-
-def meter_transfer(transfer: Transfer, settings_row: FileTransferSettings | None = None) -> None:
+def meter_transfer(transfer: Transfer, price_per_gb_per_day: Decimal | None = None) -> None:
     """Charge one day's storage for `transfer`, if it's due (`last_billed_at` at least 24h old).
 
-    Rounds down: `accrued` (a Decimal) collects `price_per_gb_per_day x size_in_gb` every day, and
-    only the floor of that -- whenever it's at least 1 -- is actually spent, keeping the
-    remainder. Suspends the transfer (and emails the owner) if the owner can't cover a whole
+    The price is the site-wide storage price (`BillingSettings`, shared with every other product
+    that stores files); a caller metering many transfers in a row loads it once and passes it as
+    `price_per_gb_per_day`, otherwise it's read here.
+
+    Rounds down (`apps.billing.services.storage_charge`): `accrued` (a Decimal) collects
+    `price x size_in_gb` every day, and only the floor of that -- whenever it's at least 1 -- is
+    actually spent, keeping the remainder. Suspends the transfer (and emails the owner) if the owner can't cover a whole
     credit. Never charges a suspended, disabled, expired or deleted transfer.
 
     Locks the transfer row for the duration of the charge, re-checking due-ness once the lock is
@@ -51,7 +56,8 @@ def meter_transfer(transfer: Transfer, settings_row: FileTransferSettings | None
     suspended) simply stops advancing `last_billed_at` until `reenable_transfer` resets it to
     "now", so no backlog ever accumulates across a disabled or suspended stretch.
     """
-    settings_row = settings_row or FileTransferSettings.load()
+    if price_per_gb_per_day is None:
+        price_per_gb_per_day = get_storage_price_per_gb_per_day()
     now = timezone.now()
 
     with transaction.atomic():
@@ -68,17 +74,16 @@ def meter_transfer(transfer: Transfer, settings_row: FileTransferSettings | None
             return
 
         next_billed_at = (locked.last_billed_at or now) + _BILLING_PERIOD
-        accrued = locked.accrued + settings_row.price_per_gb_per_day * _size_in_gb(
-            locked.size_bytes
+        whole_credits, remainder = storage_charge(
+            locked.accrued, locked.size_bytes, price_per_gb_per_day
         )
-        whole_credits = int(accrued.to_integral_value(rounding=ROUND_FLOOR))
         billed_days = locked.billed_days + 1
 
         if whole_credits < 1:
             Transfer.objects.filter(pk=locked.pk).update(
-                accrued=accrued, last_billed_at=next_billed_at, billed_days=F('billed_days') + 1
+                accrued=remainder, last_billed_at=next_billed_at, billed_days=F('billed_days') + 1
             )
-            transfer.accrued = accrued
+            transfer.accrued = remainder
             transfer.last_billed_at = next_billed_at
             transfer.billed_days = billed_days
             return
@@ -94,7 +99,6 @@ def meter_transfer(transfer: Transfer, settings_row: FileTransferSettings | None
             transfer.suspended_at = locked.suspended_at
             return
 
-        remainder = accrued - whole_credits
         Transfer.objects.filter(pk=locked.pk).update(
             accrued=remainder,
             last_billed_at=next_billed_at,

@@ -403,6 +403,10 @@ class FileTransferSettingsAdmin(admin.ModelAdmin):
     """Singleton settings page (spec section 9): superusers only, and there's only ever the one
     row `FileTransferSettings.load()` creates."""
 
+    # The storage price moved to `BillingSettings` (issue #98); the old column stays until a
+    # later release drops it, but is no longer editable (or read) anywhere.
+    exclude = ['price_per_gb_per_day']
+
     def _is_superuser(self, request: AuthenticatedHttpRequest) -> bool:
         return bool(request.user.is_active and request.user.is_superuser)
 

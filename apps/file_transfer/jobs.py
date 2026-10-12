@@ -9,6 +9,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.billing.services import get_storage_price_per_gb_per_day
 
 from .models import ENDED_STATUSES, DownloadEvent, FileTransferSettings, Transfer, TransferStatus
 from .services.downloads import downloads_remaining
@@ -52,6 +53,7 @@ def meter_transfers() -> None:
     transfers whose owner has topped up (fallback -- the `credits_added` signal is the fast
     path), and delete files for transfers past their suspension grace period."""
     settings_row = FileTransferSettings.load()
+    price_per_gb_per_day = get_storage_price_per_gb_per_day()
 
     # `held_for_review_at__isnull=True`: a transfer on hold pending abuse review (issue #59) is
     # never billed for the days it spends held -- `meter_transfer` re-checks this itself too
@@ -62,7 +64,7 @@ def meter_transfers() -> None:
         status=TransferStatus.ACTIVE, owner__isnull=False, held_for_review_at__isnull=True
     ):
         try:
-            meter_transfer(transfer, settings_row)
+            meter_transfer(transfer, price_per_gb_per_day)
         except Exception:
             logger.exception('meter_transfer failed for transfer %s', transfer.pk)
 

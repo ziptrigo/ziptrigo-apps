@@ -51,13 +51,17 @@ class FileTransferSettings(models.Model):
     )
 
     # Metering (spec section 7).
+    #: Deprecated (issue #98): the storage price is now shared by every product and lives in
+    #: `apps.billing.models.BillingSettings.storage_price_per_gb_per_day`. Nothing reads this
+    #: column any more; it stays only so an old container still serving during a deploy keeps
+    #: working, and a later release drops it.
     price_per_gb_per_day = cast(
         Decimal,
         models.DecimalField(
             max_digits=10,
             decimal_places=4,
             default=Decimal('0.1000'),
-            help_text='Credits charged per GB stored per day, for logged-in senders.',
+            help_text='Deprecated: superseded by Billing settings → storage price; no longer read.',
         ),
     )
     suspension_grace_days = cast(

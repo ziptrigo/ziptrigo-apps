@@ -3,13 +3,14 @@
 from django import forms
 from django.contrib import admin, messages
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import path
 
+from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.models import User
 from apps.core.admin_site import custom_admin_site
 
-from .models import CreditAccount, CreditTransaction, CreditTransactionType
+from .models import BillingSettings, CreditAccount, CreditTransaction, CreditTransactionType
 from .services import InsufficientCreditsError, add_credits, get_balance, spend_credits
 
 
@@ -137,5 +138,36 @@ class CreditAccountAdmin(admin.ModelAdmin):
         return False
 
 
+class BillingSettingsAdmin(admin.ModelAdmin):
+    """Singleton settings page (issue #98): superusers only, and there's only ever the one row
+    `BillingSettings.load()` creates."""
+
+    def _is_superuser(self, request: AuthenticatedHttpRequest) -> bool:
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_module_permission(self, request: AuthenticatedHttpRequest) -> bool:
+        return self._is_superuser(request)
+
+    def has_view_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
+        return self._is_superuser(request)
+
+    def has_add_permission(self, request: AuthenticatedHttpRequest) -> bool:
+        return self._is_superuser(request) and not BillingSettings.objects.exists()
+
+    def has_change_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
+        return self._is_superuser(request)
+
+    def has_delete_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
+        return False
+
+    def changelist_view(
+        self, request: AuthenticatedHttpRequest, extra_context=None
+    ) -> HttpResponse:
+        """Skip the changelist entirely -- there's only ever one row."""
+        settings_row = BillingSettings.load()
+        return redirect('custom_admin:billing_billingsettings_change', settings_row.pk)
+
+
 custom_admin_site.register(CreditTransaction, CreditTransactionAdmin)
 custom_admin_site.register(CreditAccount, CreditAccountAdmin)
+custom_admin_site.register(BillingSettings, BillingSettingsAdmin)

@@ -2,6 +2,7 @@
 
 import pytest
 
+from apps.billing.models import BillingSettings
 from apps.billing.services import add_credits
 
 from ..models import FileTransferSettings, Transfer, TransferStatus
@@ -23,6 +24,12 @@ def fake_storage(monkeypatch):
 @pytest.fixture
 def ft_settings(db) -> FileTransferSettings:
     return FileTransferSettings.load()
+
+
+@pytest.fixture
+def billing_settings(db) -> BillingSettings:
+    """The shared storage price (`BillingSettings`) -- metering reads it, not `ft_settings`."""
+    return BillingSettings.load()
 
 
 @pytest.fixture
