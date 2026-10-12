@@ -1507,6 +1507,11 @@ future app:
   job's `locked_until` set, so no runner picks it up before then (up to the job's lease, e.g. 1 h
   for the daily jobs), and a deploy can delay a daily job by up to that long. Correct, because
   every job is idempotent and runs at-least-once; leases are deliberately not cleared on exit.
+  A job that *finishes* (successfully or not) does release its lease (`runner._run_job`), so it is
+  due again after its `interval` even when its `lease` is longer (`receipts.retry_due`: 5 min
+  interval, 10 min lease) -- before that fix every job ran every max(interval, lease). The release
+  only applies while no later claim exists (`last_started_at <= ` this claim's), so a run that
+  outlived its lease can't free the lease of the runner that took over.
   `gunicorn.conf.py`'s `worker_exit` stops the runner and joins `runner.thread` for up to 5 s, which
   only covers a thread idle between jobs. `SchedulerRunner.run_forever` calls
   `close_old_connections()` every tick; with `DATABASE_URL` (prod/staging: `conn_max_age=600`,
