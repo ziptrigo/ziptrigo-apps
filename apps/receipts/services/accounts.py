@@ -82,6 +82,16 @@ def add_stored_bytes(user_id: object, delta: int) -> None:
     )
 
 
+def intake_slots_remaining(user: User, limit: int) -> int:
+    """How many more files the account may add right now, by an unlocked read -- a plan, not a
+    reservation (`take_intake_slot` is the one that counts, under the row lock)."""
+    account = get_account(user)
+    started = account.intake_window_started_at
+    if started is None or timezone.now() - started >= INTAKE_WINDOW:
+        return limit
+    return max(limit - account.intake_count, 0)
+
+
 def take_intake_slot(user: User, limit: int) -> None:
     """Count one more file against the account's daily cap, or raise `DailyLimitExceededError`.
 

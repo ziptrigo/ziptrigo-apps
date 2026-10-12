@@ -1,0 +1,49 @@
+Return-Path: <orders+caf_=joao=gmail.com@staples.com>
+Received: from mail.example.net (mail.example.net [203.0.113.5]) by
+ inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for
+ receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com; spf=fail (spfCheck: domain of x
+ designates 203.0.113.5) smtp.mailfrom=orders+caf_=joao=gmail.com@staples.com;
+ dkim=pass header.d=staples.com header.i=@staples.com; dmarc=pass
+ header.from=x
+X-SES-Spf-Verdict: FAIL
+X-SES-Dkim-Verdict: PASS
+Delivered-To: joao@gmail.com
+From: Staples <orders@staples.com>
+To: joao@gmail.com
+Subject: Your Staples receipt
+Date: Fri, 09 Oct 2026 12:30:00 +0000
+Message-ID: <fixture-1@example.net>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============7021965025044950642=="
+
+--===============7021965025044950642==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><img src=3D"cid:logo@vendor"><h1>Staples</h1><p>Thanks for your o=
+rder.</p><table><tr><td>Total</td><td>42.10 USD</td></tr></table><p>Order R-5=
+5102, 2026-10-09</p></body></html>
+
+--===============7021965025044950642==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="staples-receipt.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIg
+NzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4g
+Pj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA4NiA+PgpzdHJlYW0KQlQgL0YxIDEyIFRm
+IDUwIDcwMCBUZCAoU3RhcGxlcyByZWNlaXB0LiBUb3RhbCA0Mi4xMCBVU0QuIFZpc2EgNDI0Mi4g
+MjAyNi0xMC0wOSkgVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250
+IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYK
+MDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAg
+biAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzNzcgMDAw
+MDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0NDcKJSVF
+T0YK
+
+--===============7021965025044950642==--

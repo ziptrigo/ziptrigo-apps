@@ -25,6 +25,7 @@ before anything is allocated -- and refused outright if its page size is absurd.
 import io
 import math
 import re
+import warnings
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -167,6 +168,20 @@ _IMAGE_ERRORS = (
     SyntaxError,
     EOFError,
 )
+
+
+def image_dimensions(data: bytes) -> tuple[int, int] | None:
+    """`(width, height)` of an image read from its header alone -- no pixel data is decoded, so a
+    decompression bomb costs nothing here -- or `None` if it can't be opened."""
+    _ensure_heif()
+    try:
+        with warnings.catch_warnings():
+            # Pillow warns (and past twice its limit raises) when a header claims a huge image.
+            warnings.simplefilter('ignore')
+            with Image.open(io.BytesIO(data)) as image:
+                return image.size
+    except Exception:
+        return None
 
 
 def _encode_jpeg(image: Image.Image) -> bytes:

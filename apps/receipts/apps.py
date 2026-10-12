@@ -48,6 +48,14 @@ class ReceiptsConfig(AppConfig):
         )
         register_job(
             JobSpec(
+                name='receipts.poll_inbound',
+                func=jobs.poll_inbound,
+                interval=timedelta(minutes=1),
+                lease=timedelta(minutes=2),
+            )
+        )
+        register_job(
+            JobSpec(
                 name='receipts.cleanup_uploads',
                 func=jobs.cleanup_uploads,
                 interval=timedelta(hours=1),

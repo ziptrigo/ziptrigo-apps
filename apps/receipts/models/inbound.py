@@ -23,7 +23,19 @@ class InboundMessage(models.Model):
     """One row per S3 object found under `receipts/inbound/` (SES writes one object per received
     message, named after its message id). It makes polling the prefix idempotent -- a key that
     already has a row is never ingested twice -- and failures are visible in the admin and with
-    SQL. The poller and the ingest task that fill and consume it arrive in a later release."""
+    SQL. The poller (`services.inbound.poll`) creates the rows; the `ingest_message` task consumes
+    them.
+
+    `next_attempt_at` is the one "not before" timestamp of the ingest: null for a fresh message,
+    the lease while a worker has it claimed (a crashed worker's lease simply runs out, and the
+    poller then re-queues it), and the retry time after a failure. `attempts` counts claims (and
+    doubles as the claim token: the final writes of an ingest only apply while `attempts` is still
+    the value that worker claimed with).
+
+    `s3_key` is always where SES put the object, which is what identifies the message. A `failed`
+    message's object is moved out of the polled prefix to `failed_key` (`receipts/failed/...`), so
+    failures can never crowd new mail out of the listing; the admin "retry" moves it back.
+    """
 
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
@@ -38,8 +50,36 @@ class InboundMessage(models.Model):
             default=InboundMessageStatus.PENDING,
         ),
     )
+    failed_key = cast(
+        str,
+        models.CharField(
+            max_length=512,
+            blank=True,
+            default='',
+            help_text='Where the object of a failed message was moved to (outside the prefix '
+            'the poller lists). Empty while it is still at the S3 key.',
+        ),
+    )
     attempts = cast(int, models.PositiveSmallIntegerField(default=0))
     last_error = cast(str, models.TextField(blank=True, default=''))
+    next_attempt_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='Not before this time: the lease while an ingest is running, or when to '
+            'retry after a failure. Empty for a message nobody has claimed yet.',
+        ),
+    )
+    queued_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='When the ingest task was last queued, so the poller does not queue the '
+            'same message again every minute while the queue is behind.',
+        ),
+    )
     created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
     processed_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
 
@@ -69,6 +109,11 @@ class InboundEmail(models.Model):
     `raw_key` is the stripped `.eml` (attachment payloads removed) under the user's prefix and
     `size_bytes` is that object's size -- both empty/zero when nothing was stored. The `.eml` is
     deleted with the email's last receipt (`services.lifecycle.purge_receipt`).
+
+    `note` is a short, human-readable remark about what ingest did that the status alone doesn't
+    say (e.g. "1 of 3 files skipped: daily limit reached"). A `forwarding_confirmation` email also
+    carries the code and link it contained (`forwarding_confirmation_code`/`_url`), for the
+    settings page to show.
     """
 
     objects: ClassVar['Manager']
@@ -98,6 +143,13 @@ class InboundEmail(models.Model):
             choices=InboundEmailStatus.choices,
             default=InboundEmailStatus.ACCEPTED,
         ),
+    )
+    note = cast(str, models.CharField(max_length=255, blank=True, default=''))
+    forwarding_confirmation_code = cast(
+        str, models.CharField(max_length=32, blank=True, default='')
+    )
+    forwarding_confirmation_url = cast(
+        str, models.CharField(max_length=2000, blank=True, default='')
     )
     attention_notified_at = cast(
         datetime | None,

@@ -1,7 +1,15 @@
 import pytest
 from django.core.exceptions import ValidationError
 
-from ..services.addresses import matches_allowlist, normalize_address, parse_allowlist
+from ..services.accounts import inbox_address
+from ..services.addresses import (
+    domains_aligned,
+    inbox_code_from_address,
+    matches_allowlist,
+    normalize_address,
+    organizational_domain,
+    parse_allowlist,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -76,3 +84,68 @@ def test_any_of_several_addresses_may_match():
 
     assert matches_allowlist(allow, 'forwarder@gmail.com', 'me@acme.com')
     assert not matches_allowlist(allow, 'forwarder@gmail.com', 'x@y.com')
+
+
+@pytest.mark.parametrize(
+    ('address', 'code'),
+    [
+        ('receipts+k7m2xq9p@ziptrigo.com', 'k7m2xq9p'),
+        ('Receipts+K7M2XQ9P@ZipTrigo.COM', 'k7m2xq9p'),
+        ('"Receipts" <receipts+k7m2xq9p@ziptrigo.com>', 'k7m2xq9p'),
+        ('receipts@ziptrigo.com', None),
+        ('receipts+@ziptrigo.com', None),
+        ('receipts+k7m2xq9p@example.com', None),
+        ('other+k7m2xq9p@ziptrigo.com', None),
+        ('receipts+k7m2-xq9p@ziptrigo.com', None),
+        ('receipts+k7m2xq9p', None),
+        ('', None),
+    ],
+)
+def test_inbox_code_from_address(address, code):
+    assert inbox_code_from_address(address) == code
+
+
+def test_inbox_code_from_address_inverts_inbox_address(settings):
+    for configured in ('receipts@ziptrigo.com', 'receipts-staging@ziptrigo.com'):
+        settings.RECEIPTS_INBOUND_ADDRESS = configured
+        assert inbox_code_from_address(inbox_address('k7m2xq9p')) == 'k7m2xq9p'
+
+    # A production address is not a staging one.
+    assert inbox_code_from_address('receipts+k7m2xq9p@ziptrigo.com') is None
+
+
+@pytest.mark.parametrize(
+    ('domain', 'expected'),
+    [
+        ('example.com', 'example.com'),
+        ('mail.example.com', 'example.com'),
+        ('a.b.mail.EXAMPLE.com.', 'example.com'),
+        ('example.co.uk', 'example.co.uk'),
+        ('mail.example.co.uk', 'example.co.uk'),
+        ('co.uk', 'co.uk'),
+        ('localhost', 'localhost'),
+    ],
+)
+def test_organizational_domain(domain, expected):
+    assert organizational_domain(domain) == expected
+
+
+@pytest.mark.parametrize(
+    ('first', 'second', 'aligned'),
+    [
+        ('vendor.com', 'vendor.com', True),
+        ('VENDOR.com', 'vendor.com', True),
+        ('mail.vendor.com', 'vendor.com', True),
+        ('vendor.com', 'mail.vendor.com', True),
+        ('mail.vendor.com', 'bounce.vendor.com', True),
+        ('evil.com', 'vendor.com', False),
+        ('vendor.com.evil.com', 'vendor.com', False),
+        ('notvendor.com', 'vendor.com', False),
+        ('evil.co.uk', 'vendor.co.uk', False),
+        ('mail.vendor.co.uk', 'vendor.co.uk', True),
+        ('', 'vendor.com', False),
+        ('vendor.com', '', False),
+    ],
+)
+def test_domains_aligned(first, second, aligned):
+    assert domains_aligned(first, second) is aligned

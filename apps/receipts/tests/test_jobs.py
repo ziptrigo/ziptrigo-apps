@@ -31,11 +31,15 @@ def test_the_jobs_are_registered_with_the_scheduler():
         'receipts.purge_trash',
         'receipts.retry_due',
         'receipts.cleanup_uploads',
+        'receipts.poll_inbound',
     }
     assert specs['receipts.meter_storage'].interval == timedelta(hours=24)
     assert specs['receipts.purge_trash'].interval == timedelta(hours=24)
     assert specs['receipts.retry_due'].interval == timedelta(minutes=5)
     assert specs['receipts.cleanup_uploads'].interval == timedelta(hours=1)
+    assert specs['receipts.poll_inbound'].interval == timedelta(minutes=1)
+    assert specs['receipts.poll_inbound'].lease == timedelta(minutes=2)
+    assert specs['receipts.poll_inbound'].func is jobs.poll_inbound
     assert specs['receipts.meter_storage'].func is jobs.meter_storage
     assert all(job.lease > job.interval / 100 for job in specs.values())
 
@@ -478,3 +482,23 @@ class TestCleanupUploads:
 
 def test_billing_amounts_are_decimal_safe():
     assert Decimal('0.1') * 10 == Decimal('1.0')
+
+
+class TestPollInbound:
+    def test_runs_the_inbound_poll(
+        self, fake_storage, monkeypatch, django_capture_on_commit_callbacks
+    ):
+        from ..models import InboundMessage
+
+        monkeypatch.setattr('apps.receipts.services.inbound.ingest_message', _NoopTask())
+        fake_storage.seed('receipts/inbound/abc', b'raw')
+
+        with django_capture_on_commit_callbacks(execute=True):
+            jobs.poll_inbound()
+
+        assert InboundMessage.objects.filter(s3_key='receipts/inbound/abc').exists()
+
+
+class _NoopTask:
+    def enqueue(self, *args):
+        pass

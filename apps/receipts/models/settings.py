@@ -70,6 +70,17 @@ class ReceiptsSettings(models.Model):
             'counted as they are added, so deleting them does not free up the cap.',
         ),
     )
+    max_inbound_rows_per_day = cast(
+        int,
+        models.PositiveIntegerField(
+            default=500,
+            validators=[MinValueValidator(1)],
+            help_text='Emails recorded per user in a 24-hour window (accepted or rejected). '
+            'Beyond it, rejected / ignored / forwarding-confirmation emails are only logged, '
+            "not listed, so a flood of junk cannot fill someone's inbound list; accepted mail "
+            'is never dropped by this (it is limited by the daily file cap).',
+        ),
+    )
     trash_days = cast(
         int,
         models.PositiveIntegerField(

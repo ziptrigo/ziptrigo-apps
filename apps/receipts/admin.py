@@ -76,7 +76,15 @@ class InboundMessageAdmin(ReadOnlyModelAdmin):
     """The S3 objects found under `receipts/inbound/`: filter by status to find failures, read
     `last_error`, and retry."""
 
-    list_display = ['s3_key', 'status', 'attempts', 'short_error', 'created_at', 'processed_at']
+    list_display = [
+        's3_key',
+        'status',
+        'attempts',
+        'short_error',
+        'next_attempt_at',
+        'created_at',
+        'processed_at',
+    ]
     list_filter = ['status', 'created_at']
     search_fields = ['s3_key', 'last_error']
     inlines = [InboundEmailInline]
@@ -97,7 +105,7 @@ class InboundMessageAdmin(ReadOnlyModelAdmin):
 
 
 class InboundEmailAdmin(ReadOnlyModelAdmin):
-    list_display = ['recipient', 'user', 'from_address', 'subject', 'status', 'created_at']
+    list_display = ['recipient', 'user', 'from_address', 'subject', 'status', 'note', 'created_at']
     list_filter = ['status', 'created_at']
     search_fields = ['recipient', 'from_address', 'envelope_sender', 'subject', 'user__email']
     list_select_related = ['user']
