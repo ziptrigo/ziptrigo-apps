@@ -2,7 +2,7 @@
 <form method="post" action="{% url 'receipts:settings-inbox' %}"
       hx-post="{% url 'receipts:settings-inbox' %}" hx-target="#inbox-settings" hx-swap="innerHTML"
       hx-disabled-elt="find button[type='submit']"
-      x-data="{ mode: '{{ inbox_form.sender_mode.value }}' }">
+      data-mode="{{ inbox_form.sender_mode.value }}" x-data="{ mode: $el.dataset.mode }">
     {% csrf_token %}
     <section class="mb-8" aria-labelledby="senders-title">
         <h2 id="senders-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Accepted senders</h2>

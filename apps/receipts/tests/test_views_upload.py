@@ -245,3 +245,47 @@ class TestComplete:
         response = client.post(reverse('receipts:upload-complete', args=[receipt.pk]))
 
         assert response.status_code == 302
+
+    def test_it_is_csrf_protected(self, funded_user, fake_storage):
+        receipt = create_receipt(funded_user, fake_storage, uploaded=False)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(funded_user)
+
+        response = post_json(client, reverse('receipts:upload-complete', args=[receipt.pk]), {})
+
+        assert response.status_code == 403
+
+    def test_it_is_rate_limited_per_user_even_when_nothing_changes(self, web, settings):
+        # A receipt whose object never arrived stays `uploaded=False`: without its own cap, one
+        # started upload could be completed in a loop, one S3 HEAD per call.
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'RECEIPTS_UPLOAD_COMPLETE_USER': (2, 60),
+        }
+        started = start(web).json()
+        url = reverse('receipts:upload-complete', args=[started['receipt_id']])
+
+        assert post_json(web, url, {}).status_code == 422
+        assert post_json(web, url, {}).status_code == 422
+        limited = post_json(web, url, {})
+
+        assert limited.status_code == 429
+        assert limited['Retry-After']
+        assert 'error' in limited.json()
+
+    def test_start_and_complete_have_separate_budgets(self, web, settings):
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'RECEIPTS_UPLOAD_USER': (1, 60),
+            'RECEIPTS_UPLOAD_COMPLETE_USER': (5, 60),
+        }
+        started = start(web).json()
+        assert start(web).status_code == 429  # start's budget is spent...
+
+        response = post_json(
+            web, reverse('receipts:upload-complete', args=[started['receipt_id']]), {}
+        )
+
+        assert response.status_code == 422  # ...complete still answers (the file never arrived)

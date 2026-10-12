@@ -10,7 +10,7 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
-from ..models import Receipt, ReceiptCategory, ReceiptStatus
+from ..models import Receipt, ReceiptCategory, ReceiptsAccount, ReceiptStatus
 from ..services.accounts import get_account
 from ..services.filters import CSV_COLUMNS
 from .factories import create_receipt
@@ -167,6 +167,18 @@ class TestList:
         assert 'hx-get="/receipts/list/?sort=receipt_date"' in default
         flipped = web.get(reverse('receipts:dashboard'), {'sort': 'receipt_date'}).content.decode()
         assert 'hx-get="/receipts/list/"' in flipped  # back to the default (newest first)
+
+    def test_the_sort_links_say_the_current_order_to_screen_readers(self, web, make):
+        make()
+
+        default = web.get(reverse('receipts:dashboard')).content.decode()
+        assert 'aria-sort' not in default  # only valid on column headers, which these are not
+        assert 'Receipt date<span class="sr-only"> (sorted descending)</span>' in default
+        assert '(sorted ascending)' not in default and 'Added<span' not in default
+
+        ascending = web.get(reverse('receipts:dashboard'), {'sort': 'created_at'}).content.decode()
+        assert 'Added<span class="sr-only"> (sorted ascending)</span>' in ascending
+        assert 'Receipt date<span' not in ascending
 
     def test_25_per_page(self, web, make):
         for index in range(30):
@@ -333,6 +345,44 @@ class TestListPartial:
             'hx-get="/receipts/list/?status=processing&amp;page=2&amp;polls=2"'
             in response.content.decode()
         )
+
+    def test_every_request_that_swaps_the_list_shares_one_sync_target(self, web, make):
+        # The tabs sit outside the filter form, so they (and the links inside it, for clarity)
+        # name the form as the shared queue: the newest request wins (`replace`). The poller is
+        # the exception, `drop`: it must never abort a search the user just made, and its URL
+        # still carries the old filters.
+        for index in range(26):
+            make(status=ReceiptStatus.PROCESSING, vendor=f'V{index}')
+
+        content = web.get(reverse('receipts:dashboard')).content.decode()
+
+        assert 'id="receipt-filters"' in content and 'hx-sync="this:replace"' in content
+        for link in re.findall(r'<a [^>]*hx-get="[^"]*"[^>]*>', content):
+            assert 'hx-sync="#receipt-filters:replace"' in link, link
+        poller = re.search(r'<div hx-get="[^"]*" hx-trigger="every 3s"[^>]*>', content)
+        assert poller and 'hx-sync="#receipt-filters:drop"' in poller.group(0)
+        # Sort links (2), pager (page 1 of 2: Next), tabs (5).
+        assert content.count('hx-sync="#receipt-filters:replace"') == 2 + 1 + 5
+
+    def test_the_list_partial_does_not_create_the_receipts_account(self, web, make, funded_user):
+        # Plain `render`, not `render_page`: a poll or a keystroke is not a first visit.
+        make()
+        ReceiptsAccount.objects.filter(pk=funded_user.pk).delete()
+
+        response = web.get(reverse('receipts:list'), {'q': 'x'}, **HX)
+
+        assert response.status_code == 200
+        assert not ReceiptsAccount.objects.filter(pk=funded_user.pk).exists()
+
+    def test_the_search_box_state_is_read_from_a_data_attribute(self, web):
+        empty = web.get(reverse('receipts:dashboard')).content.decode()
+        filled = web.get(
+            reverse('receipts:dashboard'), {'q': "x' }; alert(1); //"}
+        ).content.decode()
+
+        assert 'x-data="{ hasValue: $el.dataset.hasValue === \'true\' }"' in empty
+        assert 'data-has-value="false"' in empty and 'data-has-value="true"' in filled
+        assert 'hasValue: true' not in filled
 
     @pytest.mark.parametrize(
         'status',

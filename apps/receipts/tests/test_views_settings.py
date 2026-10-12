@@ -53,7 +53,9 @@ class TestPage:
 
         assert 'me@acme.com, *@acme.com</textarea>' in content
         assert '<option value="EUR" selected>' in content
-        assert 'value="only"' in content and "mode: 'only'" in content
+        assert 'value="only"' in content
+        # The mode reaches Alpine through a data attribute, never interpolated into JS.
+        assert 'data-mode="only"' in content and 'x-data="{ mode: $el.dataset.mode }"' in content
 
     def test_a_forwarding_confirmation_shows_its_code_and_link(self, web, funded_user):
         create_inbound_email(

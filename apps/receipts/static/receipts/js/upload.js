@@ -159,10 +159,10 @@
         return { response: response, data: data };
     }
 
-    // Starts the upload, waiting out a 429 (a burst of files) a few times before giving up.
-    async function startWithRetry(item, body) {
+    // POSTs, waiting out a 429 (a burst of files) a few times before giving up.
+    async function postWithRetry(item, url, body) {
         for (let attempt = 0; ; attempt++) {
-            const result = await postJson(startUrl, body);
+            const result = await postJson(url, body);
             if (result.response.status !== 429 || attempt >= MAX_RATE_LIMIT_RETRIES) return result;
             if (item.cancelled) return result;
             const wait = Math.min(parseInt(result.response.headers.get('Retry-After') || '5', 10), 30);
@@ -202,7 +202,7 @@
             const checksum = await sha256Base64(item.file);
             if (item.cancelled) return;
 
-            const started = await startWithRetry(item, {
+            const started = await postWithRetry(item, startUrl, {
                 name: item.file.name,
                 size: item.file.size,
                 content_type: item.file.type,
@@ -221,12 +221,19 @@
 
             setStatus(item, 'Uploading…');
             await putFile(item, ticket);
+            if (item.cancelled) return;
 
+            // The file is in the bucket: from here `complete` verifies, queues and bills it, and
+            // a cancel could no longer stop that, so the button goes away.
+            item.row.cancel.classList.add('hidden');
             setStatus(item, 'Finishing…');
-            const completed = await postJson(completeUrlTemplate.replace(
+            const completed = await postWithRetry(item, completeUrlTemplate.replace(
                 '00000000-0000-0000-0000-000000000000', ticket.receipt_id), {});
             if (!completed.response.ok) {
-                showError(item, completed.data.error || 'The file could not be checked. Try again.');
+                const fallback = completed.response.status === 429
+                    ? 'Too many uploads at once. Try again in a minute.'
+                    : 'The file could not be checked. Try again.';
+                showError(item, completed.data.error || fallback);
                 return;
             }
             showUploaded(item, completed.data.url);

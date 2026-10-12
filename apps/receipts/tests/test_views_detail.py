@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.messages import get_messages
+from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
@@ -129,6 +130,34 @@ class TestPage:
         assert 'Re-run extraction (1 credit)' in content
         assert 'Move to trash' in content
         assert 'frame-src' not in response.get('Content-Security-Policy', '')
+
+    def test_re_run_asks_in_the_confirmation_modal_naming_the_cost(self, web, processed):
+        content = web.get(url('detail', processed)).content.decode()
+
+        assert 'hx-confirm' not in content  # not the browser's native dialog
+        assert 'x-data="confirmModal"' in content and 'id="confirm-modal-title"' in content
+        assert f'data-url="{url("reprocess", processed)}"' in content
+        assert 'data-title="Run the extraction again?"' in content
+        assert 'This costs 1 credit.' in content
+        assert 'anything you edited and your notes are kept' in content
+        assert 'data-label="Re-run extraction (1 credit)"' in content
+        assert 'data-tone="primary"' in content
+
+    def test_a_free_re_run_says_so(self, web, processed, receipts_settings):
+        ReceiptsSettings.objects.filter(pk=1).update(price_per_file=0)
+
+        content = web.get(url('detail', processed)).content.decode()
+
+        assert 'This is free.' in content and 'data-label="Re-run extraction"' in content
+
+    def test_a_failed_receipt_re_runs_through_the_same_modal(self, web, make_receipt):
+        receipt = make_receipt(status=ReceiptStatus.FAILED, failure_reason='not_a_receipt')
+
+        content = web.get(url('detail', receipt)).content.decode()
+
+        assert 'hx-confirm' not in content and 'x-data="confirmModal"' in content
+        assert f'data-url="{url("reprocess", receipt)}"' in content
+        assert 'This costs 1 credit.' in content
 
     def test_an_image_is_previewed_through_a_presigned_inline_url(
         self, web, processed, fake_storage
@@ -522,6 +551,28 @@ class TestActions:
 
         assert response.status_code == 422 and message in response.content.decode()
 
+    def test_re_run_from_the_modal_is_a_plain_post_that_redirects_back(self, web, make_receipt):
+        receipt = make_receipt(status=ReceiptStatus.NEEDS_REVIEW, vendor='Staples')
+
+        response = web.post(url('reprocess', receipt))
+
+        assert response.status_code == 302 and response['Location'] == url('detail', receipt)
+        receipt.refresh_from_db()
+        assert receipt.status == ReceiptStatus.RECEIVED
+        assert any('Reading the receipt again' in m for m in flashed(response))
+
+    def test_re_run_is_csrf_protected(self, funded_user, make_receipt):
+        receipt = make_receipt(status=ReceiptStatus.NEEDS_REVIEW)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(funded_user)
+
+        for extra in ({}, HX):
+            response = client.post(url('reprocess', receipt), **extra)
+
+            assert response.status_code == 403
+        receipt.refresh_from_db()
+        assert receipt.status == ReceiptStatus.NEEDS_REVIEW  # nothing was queued or charged
+
     def test_re_run_without_htmx_flashes_the_refusal(self, web, make_receipt):
         receipt = make_receipt(status=ReceiptStatus.PROCESSING)
 
@@ -620,6 +671,8 @@ class TestBodyView:
         )
         assert response['Content-Security-Policy'] == BODY_CSP
         assert "frame-ancestors 'self'" in BODY_CSP and "base-uri 'none'" in BODY_CSP
+        # Opaque-origin even when the body URL is opened top-level, outside the iframe.
+        assert response['Content-Security-Policy'].split('; ')[-1] == 'sandbox'
         assert response['X-Content-Type-Options'] == 'nosniff'
         assert response['Referrer-Policy'] == 'no-referrer'
         assert response['Cache-Control'] == 'private, no-store'

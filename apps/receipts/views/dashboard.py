@@ -10,7 +10,7 @@ full page. Rows still being processed refresh the list by themselves, `_MAX_AUTO
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.http import HttpResponse, StreamingHttpResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -143,7 +143,9 @@ def receipt_list(request: AuthenticatedHttpRequest) -> HttpResponse:
 
     context = _list_context(request, parsed)
     context['oob_export'] = True
-    response = render_page(request, 'receipts/partials/receipt_list.html', context)
+    # Plain `render`, not `render_page`: the partial needs neither the Receipts account nor the
+    # frozen banner, and this is the hot path (a poll every 3 s, a request per search keystroke).
+    response = render(request, 'receipts/partials/receipt_list.html', context)
     if 'polls' not in request.GET:
         response['HX-Push-Url'] = _with_query(reverse('receipts:dashboard'), context['page_query'])
     return response

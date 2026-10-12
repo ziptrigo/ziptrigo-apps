@@ -36,7 +36,8 @@
       hx-sync="this:replace"
       hx-trigger="input changed delay:300ms from:#q, change from:#category, change from:#date_from, change from:#date_to, submit">
     <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end">
-        <div class="relative flex-1" x-data="{ hasValue: {{ parsed.params.q|yesno:'true,false' }} }">
+        <div class="relative flex-1" data-has-value="{{ parsed.params.q|yesno:'true,false' }}"
+             x-data="{ hasValue: $el.dataset.hasValue === 'true' }">
             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <i class="fas fa-magnifying-glass text-gray-400" aria-hidden="true"></i>
             </div>

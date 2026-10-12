@@ -1263,7 +1263,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     and duplicate banner are all fresh). `forms.ReceiptForm` only gathers the fields and maps
     `actions.clean_changes` errors to fields (dates are ISO only). A failed receipt shows the reason
     and next step (`templatetags.receipts_ui.FAILURE_HELP`) instead of the form, with Re-run
-    (`hx-confirm`, `RECEIPTS_REPROCESS_USER`), Move to trash and Download still available; a receipt
+    (a confirmation modal naming the credit cost, `RECEIPTS_REPROCESS_USER`), Move to trash and Download still available; a receipt
     being read shows a progress panel that polls `GET <id>/?polls=n` and swaps only the right-hand
     panel (`hx-select`) plus the heading, duplicate banner and added line (`hx-select-oob`), so the
     preview doesn't flicker. A trashed receipt opens read-only with a Restore button. Images and
@@ -1273,7 +1273,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   - **Email bodies** (`body_view`): the HTML an email carried is the sender's, so it is served by
     Django, never by S3, as an isolated document: `Content-Security-Policy: default-src 'none';
     img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors
-    'self'` (`views.detail.BODY_CSP`), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+    'self'; sandbox` (`views.detail.BODY_CSP`; the bare `sandbox` makes the document opaque-origin even
+    if its URL is opened top-level, where the iframe's own attribute does not apply), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
     no-referrer`, `Cache-Control: private, no-store`, shown only inside `<iframe sandbox>` (a bare
     attribute: no `allow-scripts`, forms, popups or same-origin). So no script runs and nothing remote
     loads (a tracking pixel is blocked). The detail page that frames it also sends `Content-Security-
@@ -1289,8 +1290,12 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     XHR `PUT` to the presigned URL with exactly the headers the server returned (never
     `Content-Length`, which the browser sets) and a type-less Blob so no `Content-Type` is sent (it
     would otherwise need to be in the bucket's CORS `AllowedHeaders`) -> `POST upload/<id>/complete/`.
-    Three files at a time, a progress bar and an error line per row. Only `start` is rate limited
-    (`complete` is bounded by it).
+    Three files at a time, a progress bar and an error line per row. Both JSON endpoints are rate
+    limited per user: `start` by `RECEIPTS_UPLOAD_USER`, `complete` by the looser
+    `RECEIPTS_UPLOAD_COMPLETE_USER` (it is *not* bounded by `start`: a receipt whose object never
+    arrived stays `uploaded=False`, so each `complete` on it is a free S3 HEAD); the script waits out
+    a 429 on either. Once the PUT has succeeded the row's cancel button is hidden and a cancel can no
+    longer stop the `complete` (which would verify, queue and bill the receipt).
   - **Trash** (`/receipts/trash/`): plain POST forms ending in a redirect with a flash message (restore;
     delete forever through a confirmation modal, an S3 error is a message, not a 500); how long is
     left comes from `ReceiptsSettings.trash_days`.

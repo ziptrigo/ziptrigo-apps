@@ -58,10 +58,12 @@ logger = logging.getLogger(__name__)
 
 #: The CSP of the email body document. The first three directives are the contract (no script, no
 #: remote loads: only inline styles and `data:` images); the rest close what `default-src` does not
-#: cover (`<base>`, forms) and allow only our own pages to frame it.
+#: cover (`<base>`, forms) and allow only our own pages to frame it. `sandbox` (bare, like the
+#: iframe's attribute) makes the document itself an opaque-origin one wherever it is loaded, so the
+#: sender's HTML is not a same-origin page of the site even if the body URL is opened top-level.
 BODY_CSP = (
     "default-src 'none'; img-src data:; style-src 'unsafe-inline'; "
-    "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox"
 )
 
 #: Polls of the in-progress page for its result, every 3 s, before it stops asking.

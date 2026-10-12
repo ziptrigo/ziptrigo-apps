@@ -137,3 +137,120 @@ def test_an_email_body_is_shown_in_a_sandbox_that_runs_nothing(
     # The tracking pixel was never fetched: the CSP stopped it (the request may be seen, but fails).
     assert not [u for u in finished if 'tracker.invalid' in u]
     assert [f for u, f in blocked if 'tracker.invalid' in u and 'csp' in (f or '').lower()]
+
+
+def _text_file(path, name: str, content: bytes) -> str:
+    target = path / name
+    target.write_bytes(content)
+    return str(target)
+
+
+def test_an_unsupported_file_type_is_refused_in_its_row(
+    page: Page, receipts_server: ReceiptsServer, tmp_path
+):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/upload/')
+    requests = []
+    page.on('request', lambda request: requests.append(request.url))
+
+    page.set_input_files('#file-input', _text_file(tmp_path, 'notes.txt', b'not a receipt'))
+
+    row = page.locator('#upload-list li')
+    expect(row).to_contain_text('Unsupported file type')
+    assert not [url for url in requests if '/upload/' in url]  # never even started
+
+
+def test_a_file_that_is_not_what_it_claims_is_rejected_by_the_server(
+    page: Page, receipts_server: ReceiptsServer, tmp_path
+):
+    """A `.jpg` that is really text passes the browser's checks, uploads, and is refused (422)
+    by `complete`: the row shows the server's message and offers no "View receipt" link."""
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/upload/')
+
+    page.set_input_files(
+        '#file-input', _text_file(tmp_path, 'fake.jpg', b'MZ this is not an image')
+    )
+
+    row = page.locator('#upload-list li')
+    expect(row).to_contain_text('✕')
+    expect(row.locator('p')).not_to_contain_text('Uploaded')
+    expect(row.get_by_role('link', name='View receipt')).to_have_count(0)
+    expect(row.get_by_role('button', name='Cancel upload of fake.jpg')).to_be_hidden()
+
+
+def test_a_frozen_account_gets_a_402_row_with_a_top_up_link(
+    page: Page, receipts_server: ReceiptsServer, tmp_path
+):
+    """The account is frozen after the page loaded (so the pickers are still enabled), which is
+    what `start` answers 402 for."""
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/upload/')
+    set_frozen = (
+        'import os\n'
+        'from django.utils import timezone\n'
+        'from apps.accounts.models import User\n'
+        'from apps.receipts.models import ReceiptsAccount\n'
+        'from apps.receipts.services import get_account\n'
+        "user = User.objects.get(email=os.environ['E2E_EMAIL'])\n"
+        'get_account(user)\n'
+        'ReceiptsAccount.objects.filter(pk=user.pk).update(frozen_at={value})\n'
+    )
+    receipts_server.shell(set_frozen.format(value='timezone.now()'))
+    try:
+        page.set_input_files('#file-input', _receipt_photo(tmp_path / 'frozen.jpg'))
+
+        row = page.locator('#upload-list li')
+        expect(row).to_contain_text('paused')
+        top_up = row.get_by_role('link', name='Top up')
+        expect(top_up).to_be_visible()
+        assert 'credits' in top_up.get_attribute('href')
+    finally:
+        receipts_server.shell(set_frozen.format(value='None'))
+
+
+def test_cancelling_during_the_upload_creates_no_receipt(
+    page: Page, receipts_server: ReceiptsServer, tmp_path
+):
+    held = []
+    page.route('**/__e2e__/s3/**', lambda route: held.append(route))  # the PUT never answers
+    completed = []
+    page.on(
+        'request',
+        lambda request: completed.append(request.url) if '/complete/' in request.url else None,
+    )
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/upload/')
+
+    page.set_input_files('#file-input', _receipt_photo(tmp_path / 'cancel.jpg'))
+    row = page.locator('#upload-list li')
+    expect(row).to_contain_text('Uploading')
+    page.get_by_role('button', name='Cancel upload of cancel.jpg').click()
+
+    expect(page.locator('#upload-list li')).to_have_count(0)
+    for route in held:
+        route.abort()
+    page.wait_for_timeout(500)  # long enough for a (wrong) `complete` to have been sent
+    assert completed == []
+
+
+def test_once_the_file_is_in_the_bucket_it_can_no_longer_be_cancelled(
+    page: Page, receipts_server: ReceiptsServer, tmp_path
+):
+    """The bug this guards: a cancel after the PUT removed the row, but `complete` still ran and
+    billed the receipt. Now the button goes away as soon as the PUT succeeds, and the receipt that
+    `complete` makes is the one the row links to."""
+    held = []
+    page.route('**/upload/*/complete/', lambda route: held.append(route))
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/upload/')
+
+    page.set_input_files('#file-input', _receipt_photo(tmp_path / 'late.jpg'))
+    row = page.locator('#upload-list li')
+    expect(row).to_contain_text('Finishing')
+    expect(row.get_by_role('button', name='Cancel upload of late.jpg')).to_be_hidden()
+
+    held[0].continue_()
+    expect(row).to_contain_text('Uploaded')
+    row.get_by_role('link', name='View receipt').click()
+    expect(page.locator('h1')).to_contain_text('Staples')

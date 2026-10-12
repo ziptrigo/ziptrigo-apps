@@ -336,13 +336,18 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # one account could flood the admins' inboxes; a real user sends a message or two, ever.
     'FEEDBACK_USER': (10, 60 * 60),
     # -- receipts (issue #98) --
-    # All four are keyed per user (every receipts surface requires login) and shared between the
+    # All five are keyed per user (every receipts surface requires login) and shared between the
     # web pages and `/api/receipts/`, so one surface can't double the other's budget. Enforced at
     # the views/API, not in the services.
     # Starting an upload is one cheap row plus a presign, but a real multi-file drop calls it once
     # per file in a burst, and each file later costs an AI call; the daily per-user file cap in
     # `ReceiptsSettings` is the actual quota, this is only headroom against a scripted flood.
     'RECEIPTS_UPLOAD_USER': (120, 60),
+    # `complete` runs one S3 HEAD per call and, for an object that never arrived, changes nothing --
+    # so without a cap one started upload could be completed in a loop forever. Looser than
+    # `start`: a legitimate client calls it once per file (plus a retry on 429), and a big
+    # multi-file drop finishes its uploads in bursts, so this only has to stop a scripted loop.
+    'RECEIPTS_UPLOAD_COMPLETE_USER': (240, 60),
     # Re-running extraction spends credits and an AI call every time, so a runaway client (or a
     # stuck "Re-run" button) should hit a wall long before it drains a balance.
     'RECEIPTS_REPROCESS_USER': (30, 60 * 60),

@@ -10,7 +10,8 @@ over JSON (so, like `file_transfer`'s upload views, these answer JSON rather tha
    (`services.uploads.complete_upload`).
 
 Statuses: 422 for a rejected file (type, size, checksum, the daily limit), 402 while the account
-is frozen, 429 from `RECEIPTS_UPLOAD_USER`, 404 for another user's receipt.
+is frozen, 429 from `RECEIPTS_UPLOAD_USER` (start) or `RECEIPTS_UPLOAD_COMPLETE_USER` (complete),
+404 for another user's receipt.
 """
 
 from django.contrib.auth.decorators import login_required
@@ -93,6 +94,12 @@ def upload_start(request: AuthenticatedHttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def upload_complete(request: AuthenticatedHttpRequest, receipt_id: str) -> HttpResponse:
+    # Each call is an S3 HEAD, and a receipt whose object never arrived stays `uploaded=False`, so
+    # `complete` is not bounded by `start`: it has its own (looser) per-user rule.
+    limited = ratelimit.hit_user(request.user, 'RECEIPTS_UPLOAD_COMPLETE_USER')
+    if not limited.allowed:
+        return ratelimit.json_response(limited)
+
     receipt = get_object_or_404(Receipt, pk=receipt_id, user=request.user)
     try:
         receipt = complete_upload(receipt)

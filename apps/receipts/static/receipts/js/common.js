@@ -32,7 +32,8 @@ document.addEventListener('alpine:init', function () {
     });
 
     // The confirmation modal of `receipts/partials/confirm_modal.html`. A trigger button carries
-    // `data-url` (where the form posts), `data-title`, `data-body` and `data-label`.
+    // `data-url` (where the form posts), `data-title`, `data-body` and `data-label`, and optionally
+    // `data-tone="primary"` (a non-destructive action; the default is the red "danger" button).
     Alpine.data('confirmModal', function () {
         return {
             open: false,
@@ -40,6 +41,7 @@ document.addEventListener('alpine:init', function () {
             title: '',
             body: '',
             label: 'Delete',
+            tone: 'danger',
             trigger: null,
             show(el) {
                 const data = el.dataset;
@@ -47,6 +49,7 @@ document.addEventListener('alpine:init', function () {
                 this.title = data.title;
                 this.body = data.body;
                 this.label = data.label || 'Delete';
+                this.tone = data.tone || 'danger';
                 this.trigger = el;
                 this.open = true;
                 this.$nextTick(() => { if (this.$refs.cancel) this.$refs.cancel.focus(); });
