@@ -17,7 +17,7 @@ from email.parser import BytesParser
 from email.utils import format_datetime
 from pathlib import Path
 
-from apps.receipts.services.addresses import domains_aligned
+from apps.receipts.services.mime import strictly_aligned
 
 from . import samples
 
@@ -81,6 +81,9 @@ class Ses:
     #: Where the message was handed to SES from.
     client_ip: str = '203.0.113.5'
     helo: str = 'mail.example.net'
+    #: The host in the `from` of SES's `Received` header; default: the `helo` (SES writes what the
+    #: sender said). A different value is a message whose two headers disagree.
+    received_from: str | None = None
     extra: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -104,8 +107,8 @@ def _auth_results(ses: Ses, *, from_domain: str, return_path: str) -> str:
         )
     dmarc = ses.dmarc
     if dmarc == 'auto':
-        aligned = (ses.dkim == 'PASS' and domains_aligned(dkim_domain, from_domain)) or (
-            ses.spf == 'PASS' and domains_aligned(return_path.rpartition('@')[2], from_domain)
+        aligned = (ses.dkim == 'PASS' and strictly_aligned(dkim_domain, from_domain)) or (
+            ses.spf == 'PASS' and strictly_aligned(return_path.rpartition('@')[2], from_domain)
         )
         dmarc = 'PASS' if aligned else 'FAIL'
     if dmarc is not None:
@@ -133,7 +136,7 @@ def build_email(
     bare_return_path = ses.return_path if ses.return_path is not None else bare_from
     msg['Return-Path'] = f'<{bare_return_path}>'
     msg['Received'] = (
-        f'from {ses.helo} ({ses.helo} [{ses.client_ip}]) by '
+        f'from {ses.received_from or ses.helo} ({ses.helo} [{ses.client_ip}]) by '
         f'inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for {ses.recipient}; '
         f'{format_datetime(RECEIVED_DATE)}'
     )

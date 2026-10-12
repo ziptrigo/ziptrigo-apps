@@ -1,6 +1,9 @@
 """`services.mime`: reading a raw email. Pure functions over bytes (no database), except that the
 recipient match reads `settings.RECEIPTS_INBOUND_ADDRESS`."""
 
+import logging
+from email.message import Message
+
 import pytest
 
 from ..models import DEFAULT_ALLOWED_TYPES
@@ -31,6 +34,34 @@ def analyze(raw: bytes, **overrides):
     options = {'allowed_types': ALLOWED, 'max_file_bytes': 15 * 1024**2, 'min_inline_px': 150}
     options.update(overrides)
     return mime.analyze(mime.parse_message(raw), **options)
+
+
+def with_auth_results(
+    results: str,
+    *,
+    return_path: str | None = 'bounce+x@vendor.com',
+    received_from: str | None = 'h.test',
+) -> Message:
+    """A message with SES's top headers around an `Authentication-Results` value written by hand:
+    `Return-Path` and the topmost `Received` agree with `envelope-from=bounce+x@vendor.com;
+    helo=h.test` unless told otherwise (`None` leaves the header out)."""
+    lines = []
+    if return_path is not None:
+        lines.append(f'Return-Path: <{return_path}>')
+    if received_from is not None:
+        lines.append(
+            f'Received: from {received_from} ({received_from} [203.0.113.5]) by '
+            'inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123 for '
+            'receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000'
+        )
+    lines.append(f'Authentication-Results: {results}')
+    return mime.parse_message(('\r\n'.join(lines) + '\r\n\r\nx\r\n').encode())
+
+
+SPF_OK = (
+    'spf=pass (spfCheck: domain of vendor.com designates 203.0.113.5 as permitted sender) '
+    'client-ip=203.0.113.5; envelope-from=bounce+x@vendor.com; helo=h.test'
+)
 
 
 class TestRecipients:
@@ -188,35 +219,38 @@ class TestVerdicts:
         )
 
     def test_the_authentication_results_clauses(self):
-        def read(results: bytes) -> mime.Verdicts:
-            raw = b'Authentication-Results: ' + results + b'\n\nx\n'
-            return mime.read_verdicts(mime.parse_message(raw))
+        def read(results: str) -> mime.Verdicts:
+            return mime.read_verdicts(with_auth_results(results))
 
         verdicts = read(
-            b'amazonses.com; spf=PASS (c) client-ip=1.2.3.4; envelope-from=Bounce+x@Vendor.COM; '
-            b'helo=h.test; dkim=pass header.i=@vendor.com; dmarc=pass header.from=Vendor.com;'
+            'amazonses.com; spf=PASS (c) client-ip=1.2.3.4; envelope-from=Bounce+x@Vendor.COM; '
+            'helo=H.test; dkim=pass header.i=@vendor.com; dmarc=pass header.from=Vendor.com;'
         )
         assert verdicts.spf_pass and verdicts.spf_envelope_from == 'bounce+x@vendor.com'
         assert verdicts.dmarc_pass and verdicts.dmarc_from_domain == 'vendor.com'
-        # `smtp.mailfrom` is the other standard name for the SPF identity.
-        assert read(b'amazonses.com; spf=pass smtp.mailfrom=a@b.test').spf_envelope_from == (
-            'a@b.test'
-        )
-        # A property belongs to the clause before it: `helo` and a later method's properties never
-        # become the SPF identity or DMARC's domain.
-        verdicts = read(b'amazonses.com; spf=pass; dkim=pass header.d=a.test; dmarc=none')
+        # A property belongs to the clause before it: a later method's properties never become the
+        # SPF identity or DMARC's domain.
+        verdicts = read('amazonses.com; spf=pass; dkim=pass header.d=a.test; dmarc=none')
         assert verdicts.spf_envelope_from == '' and verdicts.dmarc_from_domain == ''
         assert verdicts.dmarc_result == 'none' and not verdicts.dmarc_pass
         # No DMARC / SPF clause at all.
-        verdicts = read(b'amazonses.com; dkim=pass header.d=a.test')
+        verdicts = read('amazonses.com; dkim=pass header.d=a.test')
         assert not verdicts.spf_pass and verdicts.dmarc_result == ''
-        # The first SPF and DMARC clause decide; a failing one is not rescued by a later pass.
-        verdicts = read(
-            b'amazonses.com; spf=fail; envelope-from=a@b.test; spf=pass; envelope-from=c@d.test; '
-            b'dmarc=fail header.from=b.test; dmarc=pass header.from=d.test'
-        )
-        assert not verdicts.spf_pass and verdicts.spf_envelope_from == 'a@b.test'
-        assert verdicts.dmarc_result == 'fail' and verdicts.dmarc_from_domain == 'b.test'
+        # Duplicates of SPF or DMARC mean *unauthenticated*, not "the first one wins": a second
+        # clause can only be something the sender got into the header.
+        for duplicated in (
+            'amazonses.com; spf=fail; envelope-from=bounce+x@vendor.com; spf=pass; dkim=pass '
+            'header.d=a.test; dmarc=pass header.from=a.test',
+            'amazonses.com; spf=pass; dkim=pass header.d=a.test; dmarc=fail header.from=a.test; '
+            'dmarc=pass header.from=a.test',
+        ):
+            verdicts = read(duplicated)
+            assert verdicts == mime.Verdicts()
+
+    def test_an_empty_or_none_result_is_just_no_authentication(self, caplog):
+        for results in ('amazonses.com;', 'amazonses.com', 'amazonses.com; none'):
+            assert mime.read_verdicts(with_auth_results(results)) == mime.Verdicts()
+        assert not caplog.records
 
     def test_the_signing_domain_comes_from_header_d_else_header_i(self):
         def read(results: bytes) -> frozenset[str]:
@@ -242,7 +276,7 @@ class TestVerdicts:
     def test_authentication_results_comments_cannot_fake_a_pass(self):
         raw = (
             b'Authentication-Results: amazonses.com; spf=fail (not dkim=pass spf=pass '
-            b'(nested; dkim=pass)) smtp.mailfrom=x; dkim=none\n\nx\n'
+            b'(nested; dkim=pass)) client-ip=1.2.3.4; dkim=none\n\nx\n'
         )
 
         verdicts = mime.read_verdicts(mime.parse_message(raw))
@@ -457,19 +491,36 @@ class TestVouchesFor:
     def test_spf_vouches_only_for_the_address_it_checked(self):
         """The `Return-Path` is listed and SPF passed -- but for a different `envelope-from`."""
         assert self.vouches('x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL')
-        assert not self.vouches(
-            'x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL',
-            spf_envelope_from='attacker@evil.test',
-        )  # fmt: skip
-        assert not self.vouches(
-            'x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL', spf_envelope_from=''
-        )
+        for checked in ('attacker@evil.test', ''):
+            verdicts = mime.Verdicts(spf_pass=True, spf_envelope_from=checked)
+            assert not verdicts.vouches_for(
+                from_address='x@other.test',
+                envelope_sender='orders@vendor.com',
+                is_listed=lambda address: address in self.LISTED,
+            )
 
-    def test_the_spf_address_is_compared_after_normalization(self):
-        assert self.vouches(
-            'x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL',
-            spf_envelope_from='Orders+tag@VENDOR.com',
-        )  # fmt: skip
+    @pytest.mark.parametrize(
+        ('return_path', 'envelope_from', 'same'),
+        [
+            ('orders@vendor.com', 'orders@vendor.com', True),
+            ('Orders@Vendor.COM', 'orders@vendor.com', True),
+            ('orders+tag@vendor.com', 'orders@vendor.com', True),
+            ('orders@vendor.com', 'ORDERS+other-tag@vendor.com', True),
+            ('orders@vendor.com', 'order@vendor.com', False),
+            ('orders@vendor.com', 'orders@mail.vendor.com', False),
+            ('orders@vendor.com', 'orders@vendor.com.evil.test', False),
+            ('o.rders@vendor.com', 'orders@vendor.com', False),
+            ('orders@vendor.com', 'prefix+orders@vendor.com', False),
+            ('orders@vendor.com', '', False),
+        ],
+    )
+    def test_the_spf_address_is_compared_after_normalization(
+        self, return_path, envelope_from, same
+    ):
+        """Case and a `+tag` are the same address (as in the allowlist); anything else is not."""
+        verdicts = mime.Verdicts(spf_pass=True, spf_envelope_from=envelope_from.lower())
+
+        assert verdicts.spf_vouches_for(return_path) is same
 
     def test_nothing_vouches_for_an_unlisted_address(self):
         assert not self.vouches('x@evil.test', 'x@evil.test')
@@ -480,6 +531,392 @@ class TestVouchesFor:
         assert not verdicts.vouches_for(
             from_address='', envelope_sender='', is_listed=lambda address: True
         )
+
+
+class TestAuthenticationResultsHardening:
+    """The header echoes values the sender chose (MAIL FROM, EHLO). Anything but SES's exact shape
+    -- structure, value grammars, agreement with `Return-Path` / `Received` -- gives no
+    authentication at all."""
+
+    LISTED = frozenset({'billing@victim.com', 'forwarding-noreply@google.com'})
+    REAL_TAIL = 'dkim=pass header.i=@attacker.com; dmarc=fail header.from=victim.com;'
+
+    def vouches(self, msg: Message, from_addr: str = 'billing@victim.com') -> bool:
+        return mime.read_verdicts(msg).vouches_for(
+            from_address=from_addr,
+            envelope_sender=mime.envelope_sender(msg),
+            is_listed=lambda address: address in self.LISTED,
+        )
+
+    # The reviewer's proof of concept: two values the sender controls land in the header SES
+    # trusts, and a `;` in them used to start a clause of the sender's choosing.
+    INJECTIONS = {
+        'quoted-mail-from': (
+            'x;dkim=pass header.i=@victim.com;dmarc=pass header.from=victim.com',
+            'amazonses.com; spf=pass (spfCheck: domain of attacker.com designates 1.2.3.4 as '
+            'permitted sender) client-ip=1.2.3.4; envelope-from="x;dkim=pass '
+            'header.i=@victim.com;dmarc=pass header.from=victim.com"@attacker.com; '
+            'helo=mail.attacker.com; ',
+        ),
+        'helo-without-spaces': (
+            'h',
+            'amazonses.com; spf=pass (c) client-ip=1.2.3.4; envelope-from=x@attacker.com; '
+            'helo=x;dkim=pass,header.i=@victim.com;dmarc=pass,header.from=victim.com; ',
+        ),
+        'rfc-valid-address-literal': (
+            'h',
+            'amazonses.com; spf=pass (c) client-ip=1.2.3.4; envelope-from=x@attacker.com; '
+            'helo=[x:a;dkim=pass,header.i=@victim.com;dmarc=pass,header.from=victim.com;x]; ',
+        ),
+        'dkim-only-against-a-domain-without-dmarc': (
+            'h',
+            'amazonses.com; spf=pass (c) client-ip=1.2.3.4; envelope-from=x@attacker.com; '
+            'helo=x;dkim=pass,header.i=@victim.com; dkim=pass header.i=@attacker.com; '
+            'dmarc=none header.from=victim.com;',
+        ),
+    }
+
+    @pytest.mark.parametrize('name', list(INJECTIONS))
+    def test_injected_clauses_authenticate_nothing(self, name, caplog):
+        _, results = self.INJECTIONS[name]
+        msg = with_auth_results(
+            results if results.rstrip().endswith(';') and 'dmarc=none' in results
+            else results + self.REAL_TAIL,
+            return_path='x@attacker.com',
+            received_from='h',
+        )  # fmt: skip
+
+        verdicts = mime.read_verdicts(msg)
+
+        assert verdicts == mime.Verdicts()
+        assert not self.vouches(msg)
+        assert 'not trusted' in caplog.text
+
+    @pytest.mark.parametrize('name', list(INJECTIONS))
+    def test_injected_clauses_fail_even_if_ses_copied_the_values_verbatim(self, name):
+        """Even if `Return-Path` and `Received` carry the same full text (SES copying MAIL FROM and
+        EHLO unchanged), the grammar refuses the value."""
+        mail_from, results = self.INJECTIONS[name]
+        helo = results.split('helo=', 1)[1].split('; ', 1)[0]
+        results = results if 'dmarc=none' in results else results + self.REAL_TAIL
+        return_path = (
+            '"x;dkim=pass header.i=@victim.com;dmarc=pass header.from=victim.com"@attacker.com'
+            if name == 'quoted-mail-from'
+            else 'x@attacker.com'
+        )
+        msg = with_auth_results(results, return_path=return_path, received_from=helo)
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+        assert not self.vouches(msg)
+
+    def test_the_same_values_are_harmless_when_they_are_plain(self):
+        """The controls: a header of the same shape with ordinary values is accepted, so the
+        regressions above fail because of the values and not the scaffolding."""
+        msg = with_auth_results(
+            'amazonses.com; spf=pass (c) client-ip=203.0.113.5; envelope-from=x@attacker.com; '
+            'helo=h.test; dkim=pass header.i=@attacker.com; dmarc=fail header.from=victim.com;',
+            return_path='x@attacker.com',
+        )
+
+        verdicts = mime.read_verdicts(msg)
+
+        assert verdicts.spf_pass and verdicts.spf_envelope_from == 'x@attacker.com'
+        assert verdicts.dmarc_result == 'fail'
+        assert not self.vouches(msg)
+
+    @pytest.mark.parametrize(
+        'results',
+        [
+            # a repeated spf / dmarc
+            f'amazonses.com; {SPF_OK}; spf=pass; dmarc=pass header.from=victim.com',
+            f'amazonses.com; {SPF_OK}; dmarc=fail header.from=victim.com; '
+            'dmarc=pass header.from=victim.com',
+            # out of order
+            f'amazonses.com; dkim=pass header.d=victim.com; {SPF_OK}',
+            f'amazonses.com; {SPF_OK}; dmarc=none header.from=victim.com; '
+            'dkim=pass header.d=victim.com',
+            'amazonses.com; spf=pass client-ip=1.2.3.4; helo=h.test; envelope-from='
+            'bounce+x@vendor.com',
+            'amazonses.com; spf=pass client-ip=1.2.3.4; helo=h.test; helo=h.test',
+            # an unknown segment, method or property
+            f'amazonses.com; {SPF_OK}; foo',
+            f'amazonses.com; {SPF_OK}; arc=pass',
+            f'amazonses.com; {SPF_OK}; dkim=pass header.d=victim.com extra=1',
+            f'amazonses.com; {SPF_OK}; dmarc=pass header.from=victim.com header.d=victim.com',
+            f'amazonses.com; {SPF_OK};; dkim=pass header.d=victim.com',
+            # properties must be separated by whitespace
+            f'amazonses.com; {SPF_OK}; dkim=pass,header.d=victim.com',
+            f'amazonses.com; {SPF_OK}; dkim=pass header.d=victim.com,header.i=@victim.com',
+            # smuggled by a quoted-string, a comment or a stray character
+            'amazonses.com; spf=pass client-ip=1.2.3.4; envelope-from="bounce+x"@vendor.com',
+            f'amazonses.com; {SPF_OK}; dkim=pass header.d="victim.com"',
+            f'amazonses.com; {SPF_OK}; dkim=pass header.d=victim.com\x0bheader.i=@v.test',
+            f'amazonses.com; {SPF_OK}; dkim=pass header.d=victim.com (unterminated',
+            f'amazonses.com; {SPF_OK}; dkim=pass header.d="victim.com',
+        ],
+    )
+    def test_anything_but_ses_exact_shape_authenticates_nothing(self, results):
+        msg = with_auth_results(results)
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+
+    @pytest.mark.parametrize(
+        ('prop', 'value'),
+        [
+            ('envelope-from', '"quoted"@vendor.com'),
+            ('envelope-from', 'a b@vendor.com'),
+            ('envelope-from', 'a,b@vendor.com'),
+            ('envelope-from', 'a@vendor.com,b@vendor.com'),
+            ('envelope-from', 'a@[1.2.3.4]'),
+            ('envelope-from', 'a@under_score.com'),
+            ('envelope-from', '@vendor.com'),
+            ('envelope-from', 'a@'),
+            ('envelope-from', 'a..b@vendor.com'),
+            ('helo', 'a,b'),
+            ('helo', '[x:a]'),
+            ('helo', '[999.1.1.1]'),
+            ('helo', '[IPv6:nonsense]'),
+            ('helo', '[1.2.3.4'),
+            ('helo', '-bad-.test'),
+            ('helo', 'a' * 64 + '.test'),
+        ],
+    )
+    def test_the_spf_properties_have_strict_grammars(self, prop, value):
+        base = {'envelope-from': 'bounce+x@vendor.com', 'helo': 'h.test'}
+        base[prop] = value
+        results = (
+            f'amazonses.com; spf=pass client-ip=1.2.3.4; envelope-from={base["envelope-from"]}; '
+            f'helo={base["helo"]}; dkim=pass header.d=vendor.com; dmarc=pass header.from=vendor.com'
+        )
+        msg = with_auth_results(
+            results, return_path=base['envelope-from'], received_from=base['helo']
+        )
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+
+    @pytest.mark.parametrize(
+        ('prop', 'value'),
+        [
+            ('header.i', '"a"@vendor.com'),
+            ('header.i', 'a b@vendor.com'),
+            ('header.i', 'vendor.com'),
+            ('header.i', '@vendor.com@evil.test'),
+            ('header.d', 'not_a_domain!'),
+            ('header.d', '@vendor.com'),
+            ('header.d', 'a@vendor.com'),
+            ('header.d', 'vendor.com.'),
+            ('header.from', 'vendor.com/x'),
+            ('header.from', 'a@vendor.com'),
+        ],
+    )
+    def test_the_dkim_and_dmarc_properties_have_strict_grammars(self, prop, value):
+        clause = 'dmarc=pass' if prop == 'header.from' else 'dkim=pass'
+        msg = with_auth_results(f'amazonses.com; {SPF_OK}; {clause} {prop}={value}')
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+
+    @pytest.mark.parametrize(
+        ('helo', 'received_from'),
+        [
+            ('mail-ej1-f49.google.com', 'mail-ej1-f49.google.com'),
+            ('Mail.Example.NET', 'mail.example.net'),
+            ('under_score.example.net', 'under_score.example.net'),
+            ('localhost', 'localhost'),
+            ('[203.0.113.5]', '[203.0.113.5]'),
+            ('[IPv6:2001:db8::1]', '[IPv6:2001:db8::1]'),
+        ],
+    )
+    def test_plain_helo_hosts_and_address_literals_are_accepted(self, helo, received_from):
+        msg = with_auth_results(
+            f'amazonses.com; spf=pass client-ip=203.0.113.5; envelope-from=bounce+x@vendor.com; '
+            f'helo={helo}; dmarc=pass header.from=vendor.com;',
+            received_from=received_from,
+        )
+
+        verdicts = mime.read_verdicts(msg)
+
+        assert verdicts.spf_pass and verdicts.dmarc_pass
+
+    def test_semicolons_inside_a_quoted_string_or_a_comment_do_not_split(self):
+        assert [
+            ' '.join(segment.split())
+            for segment in mime._split_resinfo('a; b="x;y(z"; c (d;e) f; g (h "; i) j')
+        ] == ['a', 'b="x;y(z"', 'c f', 'g j']
+        # A quoted-pair does not end either; an unbalanced one is refused.
+        assert mime._split_resinfo(r'a="x\";y"; b (c \) ; d) e') == [r'a="x\";y"', ' b   e']
+        for broken in ('a="x', 'a (b', r'a (b \)', 'a="x\\'):
+            with pytest.raises(mime._Rejected):
+                mime._split_resinfo(broken)
+
+    def test_a_comment_with_semicolons_and_parentheses_in_a_real_header_is_fine(self):
+        """SES's own comment may say anything; it is stripped before anything is read."""
+        msg = with_auth_results(
+            'amazonses.com; spf=pass (spfCheck: domain of vendor.com; (nested) "designates" '
+            '203.0.113.5 as permitted sender) client-ip=203.0.113.5; '
+            'envelope-from=bounce+x@vendor.com; helo=h.test; dmarc=pass (p=none; sp=none) '
+            'header.from=vendor.com;'
+        )
+
+        verdicts = mime.read_verdicts(msg)
+
+        assert verdicts.spf_pass and verdicts.dmarc_pass
+
+    def test_a_quoted_string_hides_a_parenthesis_from_the_comment_stripper(self):
+        """`"("` is not the start of a comment that swallows the next clause."""
+        msg = with_auth_results(
+            f'amazonses.com; {SPF_OK}; dkim=pass header.d="(" ; dmarc=pass header.from=victim.com'
+        )
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+
+    def test_envelope_from_must_be_the_return_path_address(self, caplog):
+        results = f'amazonses.com; {SPF_OK}; dmarc=pass header.from=vendor.com;'
+        assert mime.read_verdicts(with_auth_results(results)).spf_pass
+        # Case does not matter; anything else (a +tag included) does.
+        assert mime.read_verdicts(with_auth_results(results, return_path='Bounce+X@Vendor.com'))
+        for return_path in ('bounce@vendor.com', 'bounce+x@vendor.com.evil.test', 'other@x.test'):
+            assert mime.read_verdicts(with_auth_results(results, return_path=return_path)) == (
+                mime.Verdicts()
+            )
+        assert mime.read_verdicts(with_auth_results(results, return_path=None)) == mime.Verdicts()
+        assert mime.read_verdicts(with_auth_results(results, return_path='')) == mime.Verdicts()
+        assert 'envelope-from is not the Return-Path address' in caplog.text
+
+    def test_helo_must_be_the_host_of_ses_received_header(self, caplog):
+        results = f'amazonses.com; {SPF_OK}; dmarc=pass header.from=vendor.com;'
+        for received_from in ('other.test', 'h.test.evil.test', None):
+            assert mime.read_verdicts(with_auth_results(results, received_from=received_from)) == (
+                mime.Verdicts()
+            )
+        assert 'helo is not the host' in caplog.text
+
+    def test_a_received_header_that_is_not_ses_does_not_vouch_for_helo(self):
+        msg = mime.parse_message(
+            b'Return-Path: <bounce+x@vendor.com>\r\n'
+            b'Received: from h.test (h.test [1.2.3.4]) by mx.evil.test with SMTP; '
+            b'Fri, 09 Oct 2026 12:30:00 +0000\r\n'
+            b'Authentication-Results: ' + f'amazonses.com; {SPF_OK};'.encode() + b'\r\n\r\nx\r\n'
+        )
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+
+    def test_encoded_words_are_not_decoded_before_parsing(self):
+        """`=?utf-8?q?...?=` in an echoed value must not turn into a `;` after the fact."""
+        msg = with_auth_results(
+            'amazonses.com; spf=pass client-ip=1.2.3.4; envelope-from=bounce+x@vendor.com; '
+            'helo=h.test; dkim=pass header.d= =?utf-8?q?victim.com=3Bdmarc=3Dpass?=;'
+        )
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+
+    def test_a_rejection_logs_why_but_not_the_whole_header(self, caplog):
+        secret = 'x' * 500
+        msg = with_auth_results(f'amazonses.com; {SPF_OK}; dkim=pass header.d={secret}!')
+
+        with caplog.at_level(logging.WARNING, logger=mime.logger.name):
+            mime.read_verdicts(msg)
+
+        assert 'Authentication-Results not trusted' in caplog.text
+        assert secret not in caplog.text
+        assert caplog.records[0].levelno == logging.WARNING
+
+    def test_an_oversized_header_is_refused(self):
+        msg = with_auth_results(
+            f'amazonses.com; {SPF_OK}; ' + '; '.join(['dkim=pass header.d=a.test'] * 1000)
+        )
+
+        assert mime.read_verdicts(msg) == mime.Verdicts()
+
+    def test_the_real_ses_shaped_fixture_authenticates_a_listed_sender(self):
+        msg = mime.parse_message((FIXTURES / 'gmail_manual_forward.eml').read_bytes())
+
+        verdicts = mime.read_verdicts(msg)
+
+        assert verdicts.spf_pass and verdicts.dmarc_pass
+        for from_addr, envelope in (('sender@gmail.com', ''), ('x@other.test', 'sender@gmail.com')):
+            assert verdicts.vouches_for(
+                from_address=from_addr,
+                envelope_sender=envelope,
+                is_listed=lambda address: address == 'sender@gmail.com',
+            )
+
+    def test_the_forwarding_confirmation_fixture_still_authenticates(self):
+        msg = mime.parse_message((FIXTURES / 'gmail_forwarding_confirmation.eml').read_bytes())
+
+        assert mime.read_verdicts(msg).vouches_for(
+            from_address=mime.from_address(msg),
+            envelope_sender=mime.envelope_sender(msg),
+            is_listed=mime.is_forwarding_confirmation_sender,
+        )
+
+
+class TestDkimFallback:
+    """The DKIM-only path (no DMARC verdict) has no organizational-domain list: the signing domain
+    is the From domain or one is under the other."""
+
+    LISTED = frozenset({'billing@victim.github.io', 'orders@vendor.com', 'orders@mail.vendor.com'})
+
+    def vouches(self, from_addr: str, **ses) -> bool:
+        raw = build_email(from_addr=from_addr, ses=Ses(return_path='x@esp.test', **ses))
+        msg = mime.parse_message(raw)
+        return mime.read_verdicts(msg).vouches_for(
+            from_address=from_addr,
+            envelope_sender='',
+            is_listed=lambda address: address in self.LISTED,
+        )
+
+    def test_a_sibling_under_a_shared_suffix_is_not_aligned(self):
+        assert not self.vouches(
+            'billing@victim.github.io',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='attacker.github.io',
+            dmarc='NONE',
+        )
+
+    @pytest.mark.parametrize('signer', ['vendor.com', 'mail.vendor.com'])
+    def test_the_same_domain_or_a_subdomain_signer_is_aligned(self, signer):
+        assert self.vouches(
+            'orders@vendor.com', spf='FAIL', dkim='PASS', dkim_domain=signer, dmarc='NONE'
+        )
+
+    def test_a_parent_domain_signer_is_aligned(self):
+        assert self.vouches(
+            'orders@mail.vendor.com',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='vendor.com',
+            dmarc=None,
+        )
+
+    @pytest.mark.parametrize('dmarc', ['TEMPERROR', 'PERMERROR', 'POLICY', 'FAIL'])
+    def test_a_dmarc_error_or_failure_is_final(self, dmarc):
+        """No fallback to an aligned DKIM signature unless SES had no DMARC verdict, or `none`."""
+        assert not self.vouches(
+            'orders@vendor.com', spf='FAIL', dkim='PASS', dkim_domain='vendor.com', dmarc=dmarc
+        )
+
+    @pytest.mark.parametrize(
+        ('signer', 'domain', 'aligned'),
+        [
+            ('vendor.com', 'vendor.com', True),
+            ('VENDOR.com.', 'vendor.com', True),
+            ('mail.vendor.com', 'vendor.com', True),
+            ('vendor.com', 'mail.vendor.com', True),
+            ('a.vendor.com', 'b.vendor.com', False),
+            ('attacker.github.io', 'victim.github.io', False),
+            ('evil.com', 'vendor.com', False),
+            ('vendor.com.evil.com', 'vendor.com', False),
+            ('notvendor.com', 'vendor.com', False),
+            ('evil.co.uk', 'vendor.co.uk', False),
+            ('com', 'vendor.com', False),
+            ('vendor.com', 'com', False),
+            ('', 'vendor.com', False),
+            ('vendor.com', '', False),
+        ],
+    )
+    def test_strictly_aligned(self, signer, domain, aligned):
+        assert mime.strictly_aligned(signer, domain) is aligned
 
 
 class TestSenders:

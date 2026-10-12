@@ -797,6 +797,96 @@ class TestAllowlist:
 
         assert one_email(deliver(raw)).status == 'rejected_sender'
 
+    @pytest.mark.parametrize(
+        'ses',
+        [
+            # A MAIL FROM that is a quoted-string holding `;` and fake clauses.
+            {
+                'return_path': '"x;dkim=pass header.i=@staples.com;dmarc=pass '
+                'header.from=staples.com"@attacker.test',
+                'dmarc': 'FAIL',
+            },
+            # An EHLO name that carries them, with no spaces.
+            {
+                'return_path': 'x@attacker.test',
+                'helo': 'x;dkim=pass,header.i=@staples.com;dmarc=pass,header.from=staples.com',
+                'dmarc': 'FAIL',
+            },
+            # An RFC 5321 address-literal EHLO.
+            {
+                'return_path': 'x@attacker.test',
+                'helo': '[x:a;dkim=pass,header.i=@staples.com;dmarc=pass,header.from=staples.com;x]',
+                'dmarc': 'FAIL',
+            },
+            # DKIM only, for a From domain that publishes no DMARC policy.
+            {
+                'return_path': 'x@attacker.test',
+                'helo': 'x;dkim=pass,header.i=@staples.com',
+                'dmarc': 'NONE',
+            },
+        ],
+        ids=['quoted-mail-from', 'helo-no-spaces', 'address-literal-helo', 'dkim-only-no-dmarc'],
+    )
+    def test_values_the_sender_controls_cannot_inject_an_authentication_result(
+        self, deliver, inbox, ses
+    ):
+        """The header SES writes echoes MAIL FROM and EHLO; a `;` in them must not become a
+        `dkim=pass` / `dmarc=pass` clause that lets a forged `From` through."""
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='orders@staples.com',
+            spf='PASS',
+            dkim='PASS',
+            dkim_domain='attacker.test',
+            **ses,
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_an_envelope_from_that_is_not_the_return_path_is_rejected(self, deliver, inbox):
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='noreply@mailer.test',
+            return_path='orders@staples.com',
+            spf='PASS',
+            spf_envelope_from='orders@staples.com.evil.test',
+            dkim='FAIL',
+            dmarc='FAIL',
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_a_helo_that_is_not_the_received_host_is_rejected(self, deliver, inbox):
+        status = self.status(deliver, inbox, spf='PASS', dkim='PASS', received_from='other.test')
+
+        assert status == 'rejected_sender'
+
+    @pytest.mark.parametrize('dmarc', ['TEMPERROR', 'PERMERROR'])
+    def test_a_dmarc_error_does_not_fall_back_to_dkim(self, deliver, inbox, dmarc):
+        status = self.status(deliver, inbox, spf='FAIL', dkim='PASS', dmarc=dmarc)
+
+        assert status == 'rejected_sender'
+
+    def test_a_sibling_domain_dkim_signature_is_not_aligned_without_dmarc(self, deliver, inbox):
+        ReceiptsAccount.objects.filter(pk=ReceiptsAccount.objects.get().pk).update(
+            sender_allowlist=['billing@victim.github.io']
+        )
+
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='billing@victim.github.io',
+            return_path='x@esp.test',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='attacker.github.io',
+            dmarc='NONE',
+        )
+
+        assert status == 'rejected_sender'
+
     def test_a_real_shaped_ses_message_from_a_listed_sender_is_accepted(
         self, deliver, fixed_inbox, account
     ):
