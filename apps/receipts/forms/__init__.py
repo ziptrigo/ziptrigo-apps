@@ -1,4 +1,5 @@
 from .filters import (
+    DATE_RANGES,
     DEFAULT_TAB,
     PAGE_SIZE,
     TABS,
@@ -10,6 +11,7 @@ from .receipt import ReceiptForm
 from .settings import CategoryNameForm, InboxSettingsForm
 
 __all__ = [
+    'DATE_RANGES',
     'DEFAULT_TAB',
     'PAGE_SIZE',
     'TABS',

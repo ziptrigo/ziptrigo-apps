@@ -404,7 +404,7 @@ def receipts_list(
     category: str | None = typer.Option(
         None, '--category', help='A category id, or "none" for uncategorized.'
     ),
-    q: str = typer.Option('', '--q', help='Search the vendor and the notes.'),
+    q: str = typer.Option('', '--q', help='Search the vendor, the notes and the amount.'),
     date_from: str | None = typer.Option(
         None, '--from', help='Earliest receipt date, YYYY-MM-DD (inclusive).'
     ),
@@ -570,7 +570,7 @@ def receipts_export(
     out: Path = typer.Option(..., '--out', '-o', help='Where to write the CSV.'),
     status: str | None = typer.Option(None, '--status', help='As for `list`.'),
     category: str | None = typer.Option(None, '--category', help='As for `list`.'),
-    q: str = typer.Option('', '--q', help='Search the vendor and the notes.'),
+    q: str = typer.Option('', '--q', help='Search the vendor, the notes and the amount.'),
     date_from: str | None = typer.Option(None, '--from', help='Earliest receipt date.'),
     date_to: str | None = typer.Option(None, '--to', help='Latest receipt date.'),
     sort: str = typer.Option('-receipt_date', '--sort', help='As for `list`.'),
