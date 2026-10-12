@@ -402,11 +402,8 @@ class DownloadEventAdmin(admin.ModelAdmin):
 
 class FileTransferSettingsAdmin(SingletonSettingsAdmin):
     """Singleton settings page (spec section 9): there's only ever the one row
-    `FileTransferSettings.load()` creates."""
-
-    # The storage price moved to `BillingSettings` (issue #98); the old column stays until a
-    # later release drops it, but is no longer editable (or read) anywhere.
-    exclude = ['price_per_gb_per_day']
+    `FileTransferSettings.load()` creates. The storage price is on `BillingSettingsAdmin`
+    (issue #98)."""
 
 
 #: Every field on `AbuseReport`, shown read-only -- reports come from the public form (or, rarely,
