@@ -459,6 +459,16 @@ dark:border-gray-700`), each tab `border-b-2 px-3 py-2 text-sm font-medium`; the
 the user). Tabs and filters re-fetch the list with htmx and the server sends `HX-Push-Url`, so the
 address bar always holds the full page's URL.
 
+### 10.16 Vendor chips
+
+The same pill shape as the status pills (10.13), for the state of a vendor: **Vetted** (green,
+`fa-circle-check`: the user confirmed it) and **New vendor** (neutral gray, `fa-seedling`: only what
+the AI read, so it reads as a state rather than a problem; "New" in a list row). Rendered by
+`{% vendor_chip vendor.vetted %}` (`receipts/templatetags/receipts_ui.py`). On a receipt's page the
+chip sits inside the vendor field (`pointer-events-none absolute inset-y-0 right-2`), and the
+field is an ARIA combobox: `role="combobox"` on the input, a `role="listbox"` of `role="option"`
+entries that the arrow keys move through (`aria-activedescendant`), Enter picks, Escape closes.
+
 ---
 
 ## 11. Page templates

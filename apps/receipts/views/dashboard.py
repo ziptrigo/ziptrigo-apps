@@ -21,8 +21,14 @@ from apps.core import ratelimit
 from apps.core.htmx import is_htmx
 
 from ..forms import DATE_RANGES, PAGE_SIZE, TABS, ParsedFilters, parse_filters
-from ..models import IN_PROGRESS_STATUSES, ReceiptCategory, ReceiptStatus
-from ..services import dashboard_counts, filter_receipts, inbox_address_for, iter_csv
+from ..models import IN_PROGRESS_STATUSES, ReceiptCategory, ReceiptStatus, Vendor
+from ..services import (
+    dashboard_counts,
+    filter_receipts,
+    inbox_address_for,
+    iter_csv,
+    vendor_counts,
+)
 from .common import render_page
 
 #: Automatic refreshes of the list while something is still being processed (every 3 s, so about
@@ -61,7 +67,23 @@ def _sort_links(parsed: ParsedFilters) -> dict:
     return links
 
 
+def _resolve_vendor_filter(
+    request: AuthenticatedHttpRequest, parsed: ParsedFilters
+) -> Vendor | None:
+    """The vendor `?vendor=<id>` names, if it is one of the user's. Any other id (a vendor that
+    was deleted or merged away since the link was made, someone else's) is dropped from the
+    filters like any other value that doesn't validate, rather than showing an empty list."""
+    if parsed.filters.vendor is None:
+        return None
+    vendor = Vendor.objects.filter(pk=parsed.filters.vendor, user=request.user).first()
+    if vendor is None:
+        parsed.filters.vendor = None
+        parsed.params.pop('vendor', None)
+    return vendor
+
+
 def _list_context(request: AuthenticatedHttpRequest, parsed: ParsedFilters) -> dict:
+    vendor_filter = _resolve_vendor_filter(request, parsed)
     queryset = filter_receipts(request.user, parsed.filters).select_related(
         'category', 'possible_duplicate_of'
     )
@@ -116,6 +138,9 @@ def _list_context(request: AuthenticatedHttpRequest, parsed: ParsedFilters) -> d
         else '',
         'next_query': parsed.query(page=page_obj.next_page_number()) if page_obj.has_next() else '',
         'in_progress_statuses': IN_PROGRESS_STATUSES,
+        'vendor_filter': vendor_filter,
+        'clear_vendor_query': parsed.query(vendor=None),
+        'vendors_to_vet': vendor_counts(request.user)['to_vet'],
     }
 
 
@@ -163,6 +188,7 @@ def export_csv(request: AuthenticatedHttpRequest) -> HttpResponse | StreamingHtt
     # must not spend the budget); this form's are lenient (a bad value falls back to the default),
     # but the order is kept so the two can't drift apart.
     parsed = parse_filters(request)
+    _resolve_vendor_filter(request, parsed)
     limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_USER')
     if not limited.allowed:
         return ratelimit.page_response(request, limited)

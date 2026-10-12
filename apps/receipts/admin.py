@@ -5,6 +5,7 @@ orphan its S3 objects and leave the account's stored-bytes count wrong.
 """
 
 from django.contrib import admin, messages
+from django.db.models import Count
 from django.http import HttpRequest
 
 from apps.accounts.http import AuthenticatedHttpRequest
@@ -18,6 +19,8 @@ from .models import (
     Receipt,
     ReceiptsAccount,
     ReceiptsSettings,
+    Vendor,
+    VendorAlias,
 )
 from .services.inbound import reset_message_for_retry
 
@@ -45,6 +48,7 @@ class ReceiptAdmin(ReadOnlyModelAdmin):
         'id',
         'user',
         'vendor',
+        'vendor_extracted',
         'amount',
         'currency',
         'receipt_date',
@@ -56,9 +60,50 @@ class ReceiptAdmin(ReadOnlyModelAdmin):
         'deleted_at',
     ]
     list_filter = ['status', 'failure_reason', 'source', 'created_at']
-    search_fields = ['id', 'user__email', 'vendor', 'original_filename', 'sha256']
+    search_fields = [
+        'id',
+        'user__email',
+        'vendor',
+        'vendor_extracted',
+        'original_filename',
+        'sha256',
+    ]
     list_select_related = ['user']
     date_hierarchy = 'created_at'
+
+
+class VendorAliasInline(admin.TabularInline):
+    model = VendorAlias
+    extra = 0
+    can_delete = False
+    fields = ['name', 'key', 'source', 'created_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+class VendorAdmin(ReadOnlyModelAdmin):
+    """A user's vendors with the names they are known by, to see why a receipt landed where it did.
+    Read-only: renaming and merging go through the services, which keep every receipt's vendor text
+    and the aliases in step."""
+
+    list_display = ['name', 'user', 'vetted', 'receipt_count', 'created_at']
+    list_filter = [('vetted_at', admin.EmptyFieldListFilter), 'created_at']
+    search_fields = ['name', 'user__email', 'aliases__name']
+    list_select_related = ['user']
+    inlines = [VendorAliasInline]
+
+    def get_queryset(self, request: HttpRequest):
+        return super().get_queryset(request).annotate(_receipt_count=Count('receipts'))
+
+    @admin.display(boolean=True, description='Vetted', ordering='vetted_at')
+    def vetted(self, obj: Vendor) -> bool:
+        return obj.vetted
+
+    @admin.display(description='Receipts', ordering='_receipt_count')
+    def receipt_count(self, obj: Vendor) -> int:
+        return obj._receipt_count  # ty: ignore[unresolved-attribute]
 
 
 class InboundEmailInline(admin.TabularInline):
@@ -132,6 +177,7 @@ class ReceiptsAccountAdmin(ReadOnlyModelAdmin):
 
 custom_admin_site.register(ReceiptsSettings, ReceiptsSettingsAdmin)
 custom_admin_site.register(Receipt, ReceiptAdmin)
+custom_admin_site.register(Vendor, VendorAdmin)
 custom_admin_site.register(InboundMessage, InboundMessageAdmin)
 custom_admin_site.register(InboundEmail, InboundEmailAdmin)
 custom_admin_site.register(ReceiptsAccount, ReceiptsAccountAdmin)

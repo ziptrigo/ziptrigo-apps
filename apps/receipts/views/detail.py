@@ -52,7 +52,9 @@ from ..services import (
 )
 from ..services.currencies import ISO_4217_CODES
 from ..services.documents import HEIC, HTML, JPEG, PDF, PLAIN, PNG, WEBP
+from ..services.vendors import clean_name
 from .common import form_error_lines, message_response, owned_receipt, render_page
+from .vendors import vendor_field_context
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +123,9 @@ def _detail_context(request: AuthenticatedHttpRequest, receipt: Receipt) -> dict
     if receipt.possible_duplicate_of_id and not receipt.duplicate_dismissed:
         duplicate_of = receipt.possible_duplicate_of
 
-    settled = receipt.status in (ReceiptStatus.NEEDS_REVIEW, ReceiptStatus.PROCESSED)
     price = ReceiptsSettings.load().price_per_file
     return {
+        **vendor_field_context(receipt),
         'receipt': receipt,
         'preview': _preview(receipt, frozen),
         'frozen': frozen,
@@ -132,7 +134,6 @@ def _detail_context(request: AuthenticatedHttpRequest, receipt: Receipt) -> dict
         'failed': receipt.status == ReceiptStatus.FAILED,
         'poll_url': poll_url,
         'duplicate_of': duplicate_of,
-        'missing': set(receipt.missing_required_fields) if settled else set(),
         'can_download': bool(receipt.file_key and receipt.uploaded) and not frozen,
         'can_reprocess': (
             not trashed
@@ -188,10 +189,19 @@ def _save(request: AuthenticatedHttpRequest, receipt: Receipt) -> HttpResponse:
     if not form.is_valid():
         return _fail(request, receipt, form_error_lines(form))
     try:
-        update_receipt(receipt, form.cleaned_data)
+        saved = update_receipt(receipt, form.cleaned_data)
     except ValidationError as exc:
         return _fail(request, receipt, exc.messages)
     messages.success(request, 'Saved.')
+    typed = clean_name(form.cleaned_data.get('vendor'))
+    if typed and saved.vendor_ref_id is not None and typed != saved.vendor:
+        # A name that is one of the user's vendors spelled differently (`Staples Inc` for
+        # `Staples`) files the receipt under that vendor, which keeps its own name.
+        messages.info(
+            request,
+            f"Filed under your vendor {saved.vendor}. To change a vendor's name for all of its "
+            'receipts, use Rename vendor.',
+        )
     return hx_redirect(request, reverse('receipts:detail', args=[receipt.pk]))
 
 

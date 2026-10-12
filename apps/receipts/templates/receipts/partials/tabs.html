@@ -1,4 +1,4 @@
-{# Status tabs with counts, and the Trash link. Sent again, out of band, with every list refresh. #}
+{# Status tabs with counts, and the Vendors and Trash links. Sent again, out of band, with every list refresh. #}
 <div id="receipt-tabs"{% if oob %} hx-swap-oob="true"{% endif %}
      class="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 dark:border-gray-700">
     <nav aria-label="Receipt status" class="-mb-px flex flex-wrap gap-x-1">
@@ -15,8 +15,15 @@
         </a>
         {% endfor %}
     </nav>
-    <a href="{% url 'receipts:trash' %}"
-       class="mb-2 inline-flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">
-        <i class="fas fa-trash mr-1.5" aria-hidden="true"></i>Trash{% if counts.trash %} ({{ counts.trash }}){% endif %}
-    </a>
+    <span class="mb-2 inline-flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+        <a href="{% url 'receipts:vendors' %}"
+           class="inline-flex items-center gap-1.5 rounded hover:text-gray-700 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <i class="fas fa-store" aria-hidden="true"></i>Vendors
+            {% if vendors_to_vet %}<span class="rounded-full px-2 py-0.5 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{{ vendors_to_vet }} to vet</span>{% endif %}
+        </a>
+        <a href="{% url 'receipts:trash' %}"
+           class="inline-flex items-center rounded hover:text-gray-700 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <i class="fas fa-trash mr-1.5" aria-hidden="true"></i>Trash{% if counts.trash %} ({{ counts.trash }}){% endif %}
+        </a>
+    </span>
 </div>

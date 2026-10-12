@@ -55,6 +55,24 @@ class TestStatusPill:
         assert 'fa-spin' not in render('{% status_pill "processed" %}')
 
 
+class TestVendorChip:
+    def test_a_vetted_vendor(self):
+        html = render('{% vendor_chip True %}')
+
+        assert 'Vetted' in html and 'text-green-700' in html and 'dark:text-green-400' in html
+        assert 'fa-circle-check' in html and 'aria-hidden="true"' in html
+
+    def test_a_new_vendor_is_a_neutral_gray_not_a_warning(self):
+        html = render('{% vendor_chip False %}')
+
+        assert 'New vendor' in html and 'text-gray-600' in html and 'dark:text-gray-400' in html
+        assert 'amber' not in html and 'red' not in html
+
+    def test_the_short_form_for_the_vendors_page(self):
+        assert '>New</span>' in render('{% vendor_chip False True %}')
+        assert 'Vetted' in render('{% vendor_chip True True %}')
+
+
 class TestHelpers:
     @pytest.mark.parametrize('reason', list(FailureReason))
     def test_every_failure_reason_has_an_explanation_and_a_next_step(self, reason):
@@ -87,7 +105,7 @@ class TestHelpers:
 class TestEveryPage:
     """Cross-cutting checks that need a rendered page."""
 
-    @pytest.mark.parametrize('name', ['dashboard', 'upload', 'trash', 'settings'])
+    @pytest.mark.parametrize('name', ['dashboard', 'upload', 'trash', 'settings', 'vendors'])
     def test_pages_follow_the_design_checklist(self, web, name):
         content = web.get(reverse(f'receipts:{name}')).content.decode()
 
@@ -95,7 +113,7 @@ class TestEveryPage:
         assert content.count('<h1') == 1
         assert 'alert(' not in content and 'window.confirm' not in content
 
-    @pytest.mark.parametrize('name', ['dashboard', 'upload', 'trash', 'settings'])
+    @pytest.mark.parametrize('name', ['dashboard', 'upload', 'trash', 'settings', 'vendors'])
     def test_pages_load_the_shared_script_as_a_classic_script(self, web, name):
         content = web.get(reverse(f'receipts:{name}')).content.decode()
 
@@ -103,5 +121,5 @@ class TestEveryPage:
         assert '<script src="/static/receipts/js/common.js"></script>' in content
 
     def test_the_csrf_cookie_is_set_for_pages_that_post_with_script(self, web):
-        for name in ('dashboard', 'upload', 'trash', 'settings'):
+        for name in ('dashboard', 'upload', 'trash', 'settings', 'vendors'):
             assert 'csrftoken' in web.get(reverse(f'receipts:{name}')).cookies

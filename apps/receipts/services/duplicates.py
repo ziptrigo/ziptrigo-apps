@@ -1,5 +1,9 @@
 """Possible-duplicate detection: another live (not trashed) receipt of the same user with the same
-file contents (`sha256`), or with the same vendor, receipt date and amount."""
+file contents (`sha256`), or with the same vendor, receipt date and amount. Two receipts are from the
+same vendor when they are filed under the same `Vendor` (so "ACME" and a receipt read as "ACME
+Industries, LLC" count), or, for one without a link, have the same vendor text."""
+
+from django.db.models import Q
 
 from ..models import Receipt
 
@@ -19,10 +23,11 @@ def find_duplicate(receipt: Receipt) -> Receipt | None:
         if match is not None:
             return match
     if receipt.vendor and receipt.amount is not None and receipt.receipt_date:
+        same_vendor = Q(vendor__iexact=receipt.vendor)
+        if receipt.vendor_ref_id is not None:
+            same_vendor |= Q(vendor_ref_id=receipt.vendor_ref_id)
         return others.filter(
-            vendor__iexact=receipt.vendor,
-            receipt_date=receipt.receipt_date,
-            amount=receipt.amount,
+            same_vendor, receipt_date=receipt.receipt_date, amount=receipt.amount
         ).first()
     return None
 

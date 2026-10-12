@@ -18,6 +18,15 @@ from .detail import (
 )
 from .trash import delete_receipt_forever, restore_receipt, trash_page
 from .uploads import upload_complete, upload_page, upload_start
+from .vendors import (
+    vendor_delete,
+    vendor_list,
+    vendor_merge,
+    vendor_rename,
+    vendor_suggest,
+    vendor_vet,
+    vendors_page,
+)
 
 __all__ = [
     'body_view',
@@ -42,4 +51,11 @@ __all__ = [
     'upload_complete',
     'upload_page',
     'upload_start',
+    'vendor_delete',
+    'vendor_list',
+    'vendor_merge',
+    'vendor_rename',
+    'vendor_suggest',
+    'vendor_vet',
+    'vendors_page',
 ]

@@ -48,12 +48,18 @@ def test_upload_review_edit_trash_and_restore(
     expect(preview).to_be_visible()
     assert preview.evaluate('img => img.complete && img.naturalWidth > 0')
 
-    # Edit a field: Save is an htmx form that redirects back with a message.
-    page.fill('#id_vendor', 'Staples Inc')
+    # The vendor was created for it, unvetted.
+    expect(page.locator('#vendor-field')).to_contain_text('New vendor')
+
+    # Edit a field: Save is an htmx form that redirects back with a message. Typing another vendor
+    # name moves this receipt to a new (vetted) vendor of that name.
+    page.fill('#id_vendor', 'Staples Office Supply')
     page.fill('#id_notes', 'printer toner')
+    expect(page.locator('#vendor-field')).to_contain_text('future receipts read as')
     page.click('button:has-text("Save")')
     expect(page.locator('body')).to_contain_text('Saved.')
-    expect(page.locator('h1')).to_contain_text('Staples Inc')
+    expect(page.locator('h1')).to_contain_text('Staples Office Supply')
+    expect(page.locator('#vendor-field')).to_contain_text('Vetted')
     expect(page.locator('#id_notes')).to_have_value('printer toner')
 
     # A refused edit shows its message in the form's slot and changes nothing.
@@ -68,14 +74,28 @@ def test_upload_review_edit_trash_and_restore(
     # Trash it, then restore it from the Trash page.
     page.click('button:has-text("Move to trash")')
     expect(page.locator('body')).to_contain_text('Moved to the trash')
-    expect(page.locator('#receipt-list')).not_to_contain_text('Staples Inc')
+    expect(page.locator('#receipt-list')).not_to_contain_text('Staples Office Supply')
     page.click('text=Trash (1)')
-    expect(page.locator('main')).to_contain_text('Staples Inc')
+    expect(page.locator('main')).to_contain_text('Staples Office Supply')
     page.click('button:has-text("Restore")')
     expect(page.locator('main')).to_contain_text('The trash is empty.')
 
     page.goto(f'{url}/receipts/')
-    expect(page.locator('#receipt-list li', has_text='Staples Inc')).to_contain_text('Processed')
+    expect(page.locator('#receipt-list li', has_text='Staples Office Supply')).to_contain_text(
+        'Processed'
+    )
+
+    # A second copy is read as "Staples" again: that name now belongs to the vendor chosen above,
+    # so it is filed there, and the name as read is kept on the receipt.
+    page.goto(f'{url}/receipts/upload/')
+    page.set_input_files('#file-input', _receipt_photo(tmp_path / 'staples-again.jpg'))
+    expect(page.locator('#upload-list')).to_contain_text('Uploaded')
+    page.click('text=Go to receipts')
+    expect(page.locator('#receipt-list li', has_text='Staples Office Supply')).to_have_count(2)
+    page.locator('#receipt-list li', has_text='Staples Office Supply').first.click()
+    expect(page.locator('#vendor-field')).to_contain_text('Read on the receipt as')
+    expect(page.locator('#vendor-field')).to_contain_text('Staples')
+    expect(page.locator('#vendor-field')).to_contain_text('Filed under your vendor')
 
 
 def test_the_dashboard_filters_and_the_search_update_the_list_and_the_url(
@@ -254,3 +274,187 @@ def test_once_the_file_is_in_the_bucket_it_can_no_longer_be_cancelled(
     expect(row).to_contain_text('Uploaded')
     row.get_by_role('link', name='View receipt').click()
     expect(page.locator('h1')).to_contain_text('Staples')
+
+
+# -- Vendors -------------------------------------------------------------------------------------
+
+
+def _seed_vendor(
+    server: ReceiptsServer,
+    name: str,
+    *,
+    vetted: bool = False,
+    receipts: int = 1,
+    read: str = '',
+) -> None:
+    """A vendor of the e2e account with its own name as an alias, and `receipts` processed receipts
+    filed under it (without a file: these tests look at the vendor, not the preview)."""
+    server.shell(
+        'import os\n'
+        'from datetime import date\n'
+        'from decimal import Decimal\n'
+        'from django.utils import timezone\n'
+        'from apps.accounts.models import User\n'
+        'from apps.receipts.models import Receipt, Vendor, VendorAlias\n'
+        'from apps.receipts.services.vendors import normalize_key\n'
+        "user = User.objects.get(email=os.environ['E2E_EMAIL'])\n"
+        f'vendor = Vendor.objects.create(user=user, name={name!r},'
+        f' vetted_at=timezone.now() if {vetted} else None)\n'
+        f'VendorAlias.objects.create(user=user, vendor=vendor, key=normalize_key({name!r}),'
+        f" name={name!r}, source='user')\n"
+        f'for n in range({receipts}):\n'
+        f"    Receipt.objects.create(user=user, status='processed', vendor={name!r},"
+        f' vendor_ref=vendor, vendor_extracted={read!r}, amount=Decimal("10.00"), currency="USD",'
+        f' receipt_date=date(2026, 9, 1 + n), source="upload", content_type="image/jpeg")\n'
+    )
+
+
+def test_a_new_vendor_is_vetted_and_renamed_from_the_receipt_page(
+    page: Page, receipts_server: ReceiptsServer
+):
+    _seed_vendor(receipts_server, 'Zed Widgets Inc', read='ZED WIDGETS, INC.')
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/')
+    page.locator('#receipt-list li', has_text='Zed Widgets Inc').click()
+    field = page.locator('#vendor-field')
+    expect(field).to_contain_text('New vendor')
+    expect(field).to_contain_text('First receipt from this vendor.')
+
+    # "Mark as vetted" re-renders the field in place.
+    field.get_by_role('button', name='Mark as vetted').click()
+    expect(field).to_contain_text('Vetted')
+    expect(field.get_by_role('button', name='Mark as vetted')).to_have_count(0)
+    expect(field).to_contain_text('Read on the receipt as')
+
+    # "Rename vendor" opens the dialog; Escape closes it, and renaming reloads the page.
+    field.get_by_role('button', name='Rename vendor').click()
+    dialog = page.get_by_role('dialog')
+    expect(dialog).to_be_visible()
+    expect(dialog.get_by_label('Name')).to_be_focused()
+    page.keyboard.press('Escape')
+    expect(dialog).to_have_count(0)
+    field.get_by_role('button', name='Rename vendor').click()
+    dialog.get_by_label('Name').fill('Zed Widgets Worldwide')
+    dialog.get_by_role('button', name='Rename').click()
+    expect(page.locator('body')).to_contain_text('Renamed to Zed Widgets Worldwide.')
+    expect(page.locator('h1')).to_contain_text('Zed Widgets Worldwide')
+
+
+def test_the_vendor_field_suggests_vendors_and_teaches_the_one_picked(
+    page: Page, receipts_server: ReceiptsServer
+):
+    # (Read as something with another key than its own name: a vetted vendor keeps the name it is
+    # called, so moving its receipts away would teach nothing and the field would not say it does.)
+    _seed_vendor(receipts_server, 'Combo Alpha', vetted=True, read='Combo Alpha Supply Co.')
+    _seed_vendor(receipts_server, 'Combo Beta', vetted=True)
+    _seed_vendor(receipts_server, 'Combo Gamma')
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/')
+    page.locator('#receipt-list li', has_text='Combo Alpha').click()
+
+    field = page.locator('#vendor-field')
+    vendor = page.locator('#id_vendor')
+    vendor.fill('')
+    vendor.type('Combo')
+    listbox = page.get_by_role('listbox', name='Your vendors')
+    expect(listbox).to_be_visible()
+    expect(listbox.get_by_role('option')).to_have_count(4)  # three vendors and "use as new"
+    expect(listbox).to_contain_text('Not vetted yet')
+
+    # Keyboard: the arrows move, Enter picks (and does not submit the form).
+    vendor.press('ArrowDown')
+    vendor.press('ArrowDown')
+    expect(vendor).to_have_attribute('aria-activedescendant', 'vendor-option-v2')
+    vendor.press('Enter')
+    expect(vendor).to_have_value('Combo Beta')
+    expect(listbox).to_be_hidden()
+    expect(page.locator('input[name="vendor_id"]')).not_to_have_value('')
+    expect(field).to_contain_text('future receipts read as')
+    expect(field).to_contain_text('Combo Alpha Supply Co.')
+    assert page.url.rstrip('/').rsplit('/', 1)[-1] != ''  # still on the receipt's page
+
+    page.click('button:has-text("Save")')
+    expect(page.locator('h1')).to_contain_text('Combo Beta')
+
+    # Typing a name that is nobody's offers it as a new vendor; Escape closes the list.
+    vendor = page.locator('#id_vendor')
+    vendor.fill('')
+    vendor.type('Combo Delta')
+    expect(page.get_by_role('option', name='Use “Combo Delta” as a new vendor')).to_be_visible()
+    vendor.press('Escape')
+    expect(page.get_by_role('listbox', name='Your vendors')).to_be_hidden()
+
+
+def test_the_vendors_page_vets_in_bulk_merges_and_filters_the_dashboard(
+    page: Page, receipts_server: ReceiptsServer
+):
+    _seed_vendor(receipts_server, 'Bulk One', receipts=2)
+    _seed_vendor(receipts_server, 'Bulk Two')
+    _seed_vendor(receipts_server, 'Bulk Three', vetted=True)
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/vendors/')
+
+    page.fill('#vendor-q', 'Bulk')
+    rows = page.locator('#vendor-list li[id^="vendor-"]')
+    expect(rows).to_have_count(3)
+    expect(page).to_have_url(re.compile(r'\?q=Bulk'))
+
+    # The bulk bar appears with the first tick; "Mark as vetted" refreshes the list in place.
+    bar = page.get_by_role('region', name='Actions for the selected vendors')
+    expect(bar).to_be_hidden()
+    page.get_by_label('Select Bulk One').check()
+    page.get_by_label('Select Bulk Two').check()
+    expect(bar).to_contain_text('2 selected')
+    bar.get_by_role('button', name='Mark as vetted').click()
+    expect(page.locator('#vendor-list')).to_contain_text('Marked 2 vendors as vetted.')
+    expect(page.locator('#vendor-list li', has_text='Bulk Two')).to_contain_text('Vetted')
+
+    # Merge all three into the busiest vetted one.
+    for name in ('Bulk One', 'Bulk Two', 'Bulk Three'):
+        page.get_by_label(f'Select {name}').check()
+    bar.get_by_role('button', name='Merge').click()
+    dialog = page.get_by_role('dialog')
+    expect(dialog).to_contain_text('Merge 3 vendors')
+    expect(dialog).to_contain_text('Which name should the 4 receipts show?')
+    dialog.get_by_label('Bulk One').check()
+    expect(dialog.get_by_role('button', name='Merge into Bulk One')).to_be_visible()
+    dialog.get_by_role('button', name='Merge into Bulk One').click()
+    expect(page.locator('body')).to_contain_text('Merged 2 vendors into Bulk One.')
+    expect(page.locator('#vendor-list li[id^="vendor-"]')).to_have_count(1)
+
+    # The receipts count leads to the dashboard filtered to the vendor, with a chip to remove it.
+    page.get_by_role('link', name='4 receipts from Bulk One').click()
+    chip = page.get_by_text('Vendor: Bulk One')
+    expect(chip).to_be_visible()
+    expect(page.locator('#receipt-list li[id^="receipt-"]')).to_have_count(4)
+    page.get_by_role('link', name='Remove the vendor filter').click()
+    expect(chip).to_have_count(0)
+    expect(page).not_to_have_url(re.compile(r'vendor='))
+
+
+def test_a_rename_that_clashes_offers_to_merge_and_an_empty_vendor_can_be_deleted(
+    page: Page, receipts_server: ReceiptsServer
+):
+    _seed_vendor(receipts_server, 'Clash Coffee, Inc.', receipts=2, vetted=True)
+    _seed_vendor(receipts_server, 'Clash Brew')
+    _seed_vendor(receipts_server, 'Clash Empty', receipts=0)
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/receipts/vendors/?q=Clash')
+
+    # Deleting is only possible for a vendor without receipts, and asks first.
+    page.get_by_role('button', name='Actions for Clash Empty').click()
+    expect(page.get_by_role('menuitem', name='Delete')).to_be_visible()
+    page.get_by_role('menuitem', name='Delete').click()
+    page.get_by_role('dialog').get_by_role('button', name='Delete').click()
+    expect(page.locator('body')).to_contain_text('Deleted Clash Empty.')
+
+    page.get_by_role('button', name='Actions for Clash Brew').click()
+    page.get_by_role('menuitem', name='Rename').click()
+    dialog = page.get_by_role('dialog')
+    dialog.get_by_label('Name').fill('Clash Coffee')
+    dialog.get_by_role('button', name='Rename').click()
+    expect(dialog).to_contain_text('You already have a vendor called Clash Coffee, Inc.')
+    expect(dialog).to_contain_text('Merge Clash Brew into it?')
+    dialog.get_by_role('button', name='Merge into Clash Coffee, Inc.').click()
+    expect(page.locator('body')).to_contain_text('Merged 1 vendor into Clash Coffee, Inc.')
+    expect(page.locator('#vendor-list li[id^="vendor-"]')).to_have_count(1)

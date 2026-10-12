@@ -8,11 +8,13 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MaxLengthValidator
 from django.db import models
+from django.db.models import Q
 
 from apps.accounts.models import User
 
 from .category import ReceiptCategory
 from .inbound import InboundEmail
+from .vendor import Vendor
 
 if TYPE_CHECKING:
     from django.db.models import Manager
@@ -183,7 +185,34 @@ class Receipt(models.Model):
     )
 
     # -- Extracted (and user-editable) fields -------------------------------------------------
+    # `vendor` is the text everything reads (search, duplicates, the CSV, the API, the pages); it is
+    # kept equal to `vendor_ref.name` by `services.vendors`, processing and `update_receipt`.
     vendor = cast(str, models.CharField(max_length=255, blank=True, default=''))
+    vendor_ref = cast(
+        'Vendor | None',
+        models.ForeignKey(
+            Vendor,
+            null=True,
+            blank=True,
+            # RESTRICT, not PROTECT: a vendor that still has receipts can only go through a merge,
+            # but deleting the user still cascades through both tables.
+            on_delete=models.RESTRICT,
+            related_name='receipts',
+        ),
+    )
+    vendor_ref_id: int | None
+    vendor_extracted = cast(
+        str,
+        models.CharField(
+            max_length=255,
+            blank=True,
+            default='',
+            # A database default as well, so the container still serving while this migration
+            # runs (it doesn't know the column) can keep inserting receipts.
+            db_default='',
+            help_text='The vendor name as the AI read it, before matching it to a vendor.',
+        ),
+    )
     amount = cast(
         'Decimal | None',
         models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True),
@@ -300,6 +329,13 @@ class Receipt(models.Model):
             models.Index(fields=['sha256']),
             models.Index(fields=['status', 'next_attempt_at']),
             models.Index(fields=['deleted_at']),
+            # What `services.vendors.unlinked_receipts` reads (hourly): empty once every receipt
+            # with a vendor text is linked, so the job costs one index probe.
+            models.Index(
+                fields=['user'],
+                condition=Q(vendor_ref__isnull=True) & ~Q(vendor=''),
+                name='receipts_unlinked_vendor',
+            ),
         ]
         ordering = ['-created_at']
 

@@ -1,0 +1,54 @@
+{% comment %} The merge dialog's form: either the vendors to merge with the name to keep as radio buttons (`vendors`),
+   or one vendor (`vendor`) with the vendor to merge it into as a select (`targets`, `into`). Posts `keep`
+   and `ids` to the merge view and is swapped in place on a 422. {% endcomment %}
+<form method="post" action="{% url 'receipts:vendor-merge' %}" hx-post="{% url 'receipts:vendor-merge' %}"
+      hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find button[type='submit']" class="p-6"
+      {% if not into %}x-data="{ keep: $el.dataset.keep }" data-keep="{% for v in vendors %}{% if v.pk == keep_id %}{{ v.name }}{% endif %}{% endfor %}"{% endif %}>
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next_url }}">
+    {% if into %}
+    <input type="hidden" name="mode" value="into">
+    <input type="hidden" name="ids" value="{{ vendor.pk }}">
+    <h3 id="vendor-modal-title" class="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">Merge {{ vendor.name }} into another vendor</h3>
+    <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">Its {{ total }} receipt{{ total|pluralize }} will show the name of the vendor you choose, and its name becomes a name that vendor is also known by.</p>
+    {% else %}
+    {% for v in vendors %}<input type="hidden" name="ids" value="{{ v.pk }}">{% endfor %}
+    <h3 id="vendor-modal-title" class="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">Merge {{ vendors|length }} vendors</h3>
+    <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">Which name should the {{ total }} receipt{{ total|pluralize }} show?</p>
+    {% endif %}
+    {% if errors %}
+    <div class="mb-3 text-sm text-red-600 dark:text-red-400" role="alert">{% for line in errors %}{{ line }}<br>{% endfor %}</div>
+    {% endif %}
+    {% if into %}
+    <label for="vendor-merge-keep" class="block mb-1 text-sm font-medium">Merge into</label>
+    <select id="vendor-merge-keep" name="keep" required data-autofocus
+            class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <option value="">Choose a vendor&hellip;</option>
+        {% for v in targets %}
+        <option value="{{ v.pk }}" {% if v.pk == keep_id %}selected{% endif %}>{{ v.name }}{% if v.vetted %} (vetted){% endif %} &middot; {{ v.receipt_count }} receipt{{ v.receipt_count|pluralize }}</option>
+        {% endfor %}
+    </select>
+    {% else %}
+    <fieldset class="space-y-2">
+        <legend class="sr-only">Name to keep</legend>
+        {% for v in vendors %}
+        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-gray-300 dark:border-gray-600 px-3 py-2 has-[:checked]:border-brand-primary">
+            <input type="radio" name="keep" value="{{ v.pk }}" {% if v.pk == keep_id %}checked{% endif %}
+                   data-name="{{ v.name }}" @change="keep = $event.target.dataset.name"
+                   class="h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+            <span class="min-w-0 flex-1 truncate"><span class="font-medium">{{ v.name }}</span>{% if v.vetted %} <span class="text-xs text-green-700 dark:text-green-400"><i class="fas fa-circle-check" aria-hidden="true"></i> vetted</span>{% endif %}</span>
+            <span class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ v.receipt_count }} receipt{{ v.receipt_count|pluralize }}</span>
+        </label>
+        {% endfor %}
+    </fieldset>
+    {% endif %}
+    <p class="mt-4 text-xs text-gray-500 dark:text-gray-400">This changes the vendor shown on receipts you already have. It can't be undone, but a receipt can always be moved to another vendor from its page.</p>
+    <div class="mt-6 flex justify-end gap-3">
+        <button type="button" @click="close()"
+                class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">Cancel</button>
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+            <i class="fas fa-code-merge mr-2" aria-hidden="true"></i>{% if into %}Merge{% else %}<span>Merge into <span x-text="keep"></span></span>{% endif %}
+        </button>
+    </div>
+</form>

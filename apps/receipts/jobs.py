@@ -1,4 +1,4 @@
-"""The five jobs `receipts` registers with `apps.core.scheduler`, wired up from
+"""The six jobs `receipts` registers with `apps.core.scheduler`, wired up from
 `apps/receipts/apps.py`. The scheduler is at-least-once, so every job is idempotent, and each does
 its per-row work in a `try`/`except` that logs and carries on, so one bad row can't abort the rest
 of a run.
@@ -12,6 +12,9 @@ of a run.
 - `cleanup_uploads` (hourly): remove uploads never completed within 24 hours.
 - `poll_inbound` (every minute): find new emails SES left under `receipts/inbound/` and queue their
   ingest; re-queue ones that are due. See `services.inbound`.
+- `link_vendors` (hourly): link receipts that have a vendor text and no vendor (ones a container
+  of the previous release processed during the deploy that added vendors); a no-op once none are
+  left. See `services.vendors.link_unlinked_receipts`.
 """
 
 import logging
@@ -22,7 +25,7 @@ from django.utils import timezone
 from apps.billing.services import get_storage_price_per_gb_per_day
 
 from .models import Receipt, ReceiptsAccount, ReceiptsSettings, ReceiptStatus
-from .services import inbound
+from .services import inbound, vendors
 from .services.lifecycle import purge_receipt
 from .services.metering import meter_account, resume
 from .services.processing import enqueue_processing, requeue_stuck
@@ -123,3 +126,16 @@ def cleanup_uploads() -> None:
 def poll_inbound() -> None:
     """Every minute: queue ingest for new inbound emails (see `services.inbound.poll`)."""
     inbound.poll()
+
+
+def link_vendors() -> None:
+    """Hourly: give receipts that have a vendor text and no vendor their vendor, one user at a time
+    (see `services.vendors.link_unlinked_receipts`)."""
+    for user_id in vendors.users_with_unlinked_receipts():
+        try:
+            linked = vendors.link_unlinked_receipts(user_id)
+        except Exception:
+            logger.exception('Failed to link vendors for user %s', user_id)
+        else:
+            if linked:
+                logger.info('Linked %s receipts to vendors for user %s', linked, user_id)

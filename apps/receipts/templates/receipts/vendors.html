@@ -1,0 +1,54 @@
+{% extends 'receipts/layout.html' %}
+{% load static %}
+
+{% block title %}Vendors - ZipTrigo{% endblock %}
+
+{% block receipts_content %}
+<div x-data="confirmModal">
+    <a href="{% url 'receipts:dashboard' %}"
+       class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Receipts</a>
+    <h1 class="mt-2 mb-2 text-3xl font-bold text-gray-900 dark:text-gray-100">Vendors</h1>
+    <p class="mb-6 text-sm text-gray-600 dark:text-gray-400">Who your receipts are from. A new receipt is filed under a vendor you have vetted first, then under one we created from an earlier receipt, otherwise under a new one named as it was read. Receipts you already have change only when you rename or merge a vendor.</p>
+
+    {% include 'receipts/partials/vendor_tabs.html' %}
+
+    {% comment %} Collects the ticked rows: their checkboxes name this form with their `form` attribute, so the
+       filter form below (which sends the search) never sends them. {% endcomment %}
+    <form id="vendor-bulk" onsubmit="return false"></form>
+
+    <form id="vendor-filters" method="get" action="{% url 'receipts:vendors' %}"
+          hx-get="{% url 'receipts:vendor-list' %}" hx-target="#vendor-list" hx-swap="innerHTML"
+          hx-sync="this:replace" hx-trigger="input changed delay:300ms from:#vendor-q, submit">
+        <div class="relative mb-4" data-has-value="{{ parsed.params.q|yesno:'true,false' }}"
+             x-data="{ hasValue: $el.dataset.hasValue === 'true' }">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <i class="fas fa-magnifying-glass text-gray-400" aria-hidden="true"></i>
+            </div>
+            <input type="text" name="q" id="vendor-q" x-ref="q" value="{{ parsed.params.q }}" maxlength="200"
+                   autocomplete="off" enterkeyhint="search" @input="hasValue = $event.target.value !== ''"
+                   placeholder="Search vendors, including the names they were read as"
+                   aria-label="Search vendors, including the names they were read as"
+                   class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+            <button type="button" x-show="hasValue" {% if not parsed.params.q %}style="display: none"{% endif %}
+                    @click="$refs.q.value = ''; hasValue = false; $refs.q.dispatchEvent(new Event('input', { bubbles: true })); $refs.q.focus()"
+                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    aria-label="Clear search">
+                <i class="fas fa-times" aria-hidden="true"></i>
+            </button>
+        </div>
+
+        <div id="vendor-list">
+            {% include 'receipts/partials/vendor_list.html' %}
+        </div>
+    </form>
+
+    {# Where the rename and merge dialogs are loaded. #}
+    <div id="vendor-modal"></div>
+
+    {% include 'receipts/partials/confirm_modal.html' %}
+</div>
+{% endblock %}
+
+{% block receipts_js %}
+<script src="{% static 'receipts/js/vendors.js' %}"></script>
+{% endblock %}

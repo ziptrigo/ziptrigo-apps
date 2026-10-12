@@ -24,6 +24,7 @@ from .receipt import (
     ReceiptStatus,
 )
 from .settings import DEFAULT_ALLOWED_TYPES, ReceiptsSettings
+from .vendor import MAX_VENDOR_NAME_LENGTH, Vendor, VendorAlias, VendorAliasSource
 
 __all__ = [
     'CODE_ALPHABET',
@@ -34,6 +35,7 @@ __all__ = [
     'IN_PROGRESS_STATUSES',
     'MAX_CATEGORY_NAME_LENGTH',
     'MAX_NOTES_LENGTH',
+    'MAX_VENDOR_NAME_LENGTH',
     'REQUIRED_FIELDS',
     'SETTLED_STATUSES',
     'DocumentType',
@@ -49,5 +51,8 @@ __all__ = [
     'ReceiptStatus',
     'ReceiptsAccount',
     'ReceiptsSettings',
+    'Vendor',
+    'VendorAlias',
+    'VendorAliasSource',
     'generate_code',
 ]

@@ -1,0 +1,38 @@
+{% comment %} The options of the vendor field's listbox (`vendor_suggest`): the user's vendors that match what is
+   typed, vetted ones first, and an entry for using the typed text as a new vendor. Each option carries
+   the vendor's id and name for the `vendorCombobox` component to pick up. {% endcomment %}
+{% if vetted %}
+<div role="group" aria-label="Vetted">
+    <div class="px-3 pt-1 pb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400" aria-hidden="true">Vetted</div>
+    {% for entry in vetted %}
+    <div role="option" id="vendor-option-v{{ forloop.counter }}" aria-selected="false"
+         data-vendor-id="{{ entry.vendor.pk }}" data-vendor-name="{{ entry.vendor.name }}"
+         @mousedown.prevent="pick($el)" @mouseenter="activate($el)"
+         class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2">
+        <span class="min-w-0 truncate"><i class="fas fa-circle-check mr-2 text-green-600 dark:text-green-400" aria-hidden="true"></i>{{ entry.parts.0 }}<strong>{{ entry.parts.1 }}</strong>{{ entry.parts.2 }}</span>
+        <span class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ entry.vendor.receipt_count }} receipt{{ entry.vendor.receipt_count|pluralize }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% if unvetted %}
+<div role="group" aria-label="Not vetted yet">
+    <div class="mt-1 border-t border-gray-100 dark:border-gray-700 px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400" aria-hidden="true">Not vetted yet</div>
+    {% for entry in unvetted %}
+    <div role="option" id="vendor-option-u{{ forloop.counter }}" aria-selected="false"
+         data-vendor-id="{{ entry.vendor.pk }}" data-vendor-name="{{ entry.vendor.name }}"
+         @mousedown.prevent="pick($el)" @mouseenter="activate($el)"
+         class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2">
+        <span class="min-w-0 truncate"><i class="fas fa-seedling mr-2 text-gray-400" aria-hidden="true"></i>{{ entry.parts.0 }}<strong>{{ entry.parts.1 }}</strong>{{ entry.parts.2 }}</span>
+        <span class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ entry.vendor.receipt_count }} receipt{{ entry.vendor.receipt_count|pluralize }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% if offer_new %}
+<div role="option" id="vendor-option-new" aria-selected="false" data-vendor-id="" data-vendor-name="{{ term }}"
+     @mousedown.prevent="pick($el)" @mouseenter="activate($el)"
+     class="mt-1 flex cursor-pointer items-center gap-2 border-t border-gray-100 dark:border-gray-700 px-3 py-2 text-sage-600 dark:text-sage-300">
+    <i class="fas fa-plus" aria-hidden="true"></i><span class="min-w-0 truncate">Use &ldquo;{{ term }}&rdquo; as a new vendor</span>
+</div>
+{% endif %}

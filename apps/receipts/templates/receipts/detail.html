@@ -1,4 +1,5 @@
 {% extends 'receipts/layout.html' %}
+{% load static %}
 {% load receipts_ui %}
 
 {% block title %}{% firstof receipt.vendor receipt.original_filename 'Receipt' %} - ZipTrigo{% endblock %}
@@ -89,5 +90,12 @@
 
 {# The "Re-run extraction" confirmation (design system 10.9); its buttons are in the panel partials. #}
 {% include 'receipts/partials/confirm_modal.html' %}
+
+{# Where the vendor field's "Rename vendor..." dialog is loaded. #}
+<div id="vendor-modal"></div>
 </div>
+{% endblock %}
+
+{% block receipts_js %}
+<script src="{% static 'receipts/js/vendor_combobox.js' %}"></script>
 {% endblock %}
