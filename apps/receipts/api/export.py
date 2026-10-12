@@ -17,18 +17,21 @@ def export_csv(
     request,
     status: str | None = None,
     category: str | None = None,
+    vendor: int | None = None,
     q: str = '',
     date_from: str | None = None,
     date_to: str | None = None,
     sort: str = DEFAULT_SORT,
     duplicates: bool = False,
 ):
-    """Download the matching receipts as `text/csv` (same filters as `GET /receipts`; the Trash is
-    never exported). Limited per user (`RECEIPTS_EXPORT_USER`), shared with the web export; a
-    request with invalid filters is a 400 and does not spend any of that budget."""
+    """Download the matching receipts as `text/csv` (same filters as `GET /receipts`, `vendor`
+    included; the Trash is never exported). Limited per user (`RECEIPTS_EXPORT_USER`), shared with
+    the web export; a request with invalid filters is a 400 and does not spend any of that
+    budget."""
     filters = receipt_filters(
         status=status,
         category=category,
+        vendor=vendor,
         q=q,
         date_from=date_from,
         date_to=date_to,

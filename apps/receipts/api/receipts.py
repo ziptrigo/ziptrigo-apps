@@ -30,6 +30,7 @@ def list_receipts(
     request,
     status: str | None = None,
     category: str | None = None,
+    vendor: int | None = None,
     q: str = '',
     date_from: str | None = None,
     date_to: str | None = None,
@@ -44,7 +45,9 @@ def list_receipts(
     - `status`: one or more of `received`, `processing`, `waiting_for_credits`, `needs_review`,
       `processed`, `failed`, comma-separated; `in_progress` stands for the first three.
     - `category`: a category id, or `none` for uncategorized.
-    - `q`: matches the vendor and the notes.
+    - `vendor`: a vendor id (`GET /vendors`); an id that isn't yours matches nothing.
+    - `q`: matches the vendor (also by the name the AI read on the receipt), the notes and, for a
+      number like `75`, the amount.
     - `date_from` / `date_to`: `YYYY-MM-DD`, inclusive, applied to `receipt_date`.
     - `sort`: `receipt_date`, `-receipt_date` (default), `created_at` or `-created_at`.
     - `duplicates`: only receipts flagged as possible duplicates.
@@ -53,6 +56,7 @@ def list_receipts(
     filters = receipt_filters(
         status=status,
         category=category,
+        vendor=vendor,
         q=q,
         date_from=date_from,
         date_to=date_to,
@@ -62,7 +66,7 @@ def list_receipts(
     limit, offset = clamp_page(limit, offset)
     with mapped_errors():
         queryset = filter_receipts(request.auth, filters, trashed=trashed)
-    queryset = queryset.select_related('category')
+    queryset = queryset.select_related('category', 'vendor_ref')
     return {
         'count': queryset.count(),
         'limit': limit,
@@ -81,7 +85,11 @@ def get_receipt(request, receipt_id: UUID):
 def update_receipt(request, receipt_id: UUID, payload: ReceiptUpdateSchema):
     """Edit a receipt. Only the fields present in the body are applied; the extracted fields you
     change are never overwritten by a later re-run, and a `needs_review` receipt becomes
-    `processed` once vendor, amount and receipt date are all set."""
+    `processed` once vendor, amount and receipt date are all set.
+
+    The vendor is `vendor` (a name) or `vendor_id` (one of yours), not both (400). Either moves
+    this receipt to that vendor and teaches the matcher; it does not rename the vendor for its
+    other receipts (`PATCH /vendors/{id}` does). A `vendor_id` that isn't yours is a 400."""
     receipt = owned_receipt(request, receipt_id)
     with mapped_errors():
         return services.update_receipt(receipt, payload.dict(exclude_unset=True))

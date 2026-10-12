@@ -10,6 +10,13 @@ from .receipt import (
     ReceiptUpdateSchema,
 )
 from .upload import UploadStartSchema, UploadTicketSchema
+from .vendor import (
+    VendorConflictSchema,
+    VendorListSchema,
+    VendorMergeSchema,
+    VendorSchema,
+    VendorUpdateSchema,
+)
 
 __all__ = [
     'CategoryNameSchema',
@@ -25,4 +32,9 @@ __all__ = [
     'ReceiptUpdateSchema',
     'UploadStartSchema',
     'UploadTicketSchema',
+    'VendorConflictSchema',
+    'VendorListSchema',
+    'VendorMergeSchema',
+    'VendorSchema',
+    'VendorUpdateSchema',
 ]

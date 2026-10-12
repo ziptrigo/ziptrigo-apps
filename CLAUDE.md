@@ -57,9 +57,13 @@ inv qrcode login local <email> <password>       # JWT CLIs over /api/qr/, /api/f
 inv filetransfer send local report.pdf --to a@example.com
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
 inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported types are skipped
-inv receipts list local --status needs_review --from 2026-10-01 --to 2026-10-31
-inv receipts get local <receipt-id>
-inv receipts export local --out receipts.csv [--status ... --q ... --from ... --to ...]
+inv receipts list local --status needs_review --from 2026-10-01 --to 2026-10-31 [--vendor <id>]
+inv receipts get local <receipt-id>              # also the vendor's vetted state and "read as" name
+inv receipts export local --out receipts.csv [--status ... --vendor ... --q ... --from ... --to ...]
+inv receipts vendors local [--to-vet] [--q acme] # id, name, vetted, receipt count
+inv receipts vendor-rename local <id> "New name" [--not-vetted]  # a clash (409) names the other vendor
+inv receipts vendor-vet local <id>... [--unvet]
+inv receipts vendor-merge local <keep-id> <id>... [--yes]
 inv receipts inbox local                        # the address receipts can be emailed to
 inv receipts regenerate local [--yes]           # retire the address and issue a new one
 ```
@@ -553,11 +557,12 @@ inside `transaction.atomic()` (as does the dashboard's own combined settings for
 
 `apps/receipts/api/` (issue #98 phase 4; `/api/receipts/`) is JWT-only like the file_transfer one
 (router-level `auth=JWTAuth()` in `api/router.py`, so no endpoint can be added without it; endpoint
-modules `receipts.py`, `uploads.py`, `export.py`, `categories.py`, `inbox.py` share that one
-`Router`; schemas in `apps/receipts/schemas/`) and calls the exact same `apps.receipts.services` the
+modules `receipts.py`, `uploads.py`, `export.py`, `categories.py`, `vendors.py`, `inbox.py` share
+that one `Router`; schemas in `apps/receipts/schemas/`) and calls the exact same `apps.receipts.services` the
 web views do. Paths are relative to the mount, so the list is `/api/receipts/receipts`:
 `GET /receipts` (`status` -- one or several comma-separated, plus the `in_progress` shorthand for the
-three in-flight ones --, `category` an id or `none`, `q`, `date_from`/`date_to` on `receipt_date`,
+three in-flight ones --, `category` an id or `none`, `vendor` a vendor id (an id that isn't the
+caller's matches nothing, like an unknown category id), `q`, `date_from`/`date_to` on `receipt_date`,
 `sort`, `duplicates`, `trashed` to list the Trash, `limit` 1-100 default 20 / `offset`, answering
 `{count, limit, offset, results}` like the ft list), `GET|PATCH|DELETE /receipts/{id}` (`GET` also
 returns a trashed receipt; `PATCH` is partial via `payload.dict(exclude_unset=True)`, an explicit
@@ -572,14 +577,40 @@ checksum_sha256}` -> 201 `{receipt_id, url, headers, expires_in}`, the receipt's
 `api`) and `POST /uploads/{id}/complete` (idempotent; answers the receipt), `GET /export.csv` (same
 filters, a streamed `text/csv`; filters are validated before streaming starts so a bad one is a
 400 and not a broken download, and before `RECEIPTS_EXPORT_USER` is charged so it costs no
-budget -- the web export parses its lenient filters before charging too, to keep the two in step),
+budget -- the web export parses its lenient filters before charging too, to keep the two in step;
+it takes `vendor=` too),
 `GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
-`PATCH|DELETE /categories/{id}`, `GET|PATCH /inbox` (address, `sender_allowlist`,
+`PATCH|DELETE /categories/{id}`, the **vendor endpoints** (issue #123, `api/vendors.py`; the same
+`services.vendors` the Vendors page calls, with no new rate-limit rule, like categories):
+`GET /vendors` (`status=all|to_vet|vetted`, `q` over names and alias names, `limit`/`offset`,
+`{count, limit, offset, results}`; ordered by name), `GET|PATCH|DELETE /vendors/{id}` and
+`POST /vendors/merge` (`{keep, merge: [ids]}`, answers the kept vendor). A vendor is `{id, name,
+vetted, vetted_at, aliases, receipt_count, trashed_count, last_receipt_date}`: `aliases` are the
+*other* names it is known by (names only, oldest first; `services.with_alias_names`), and the
+counts are the Vendors page's -- `receipt_count` and `last_receipt_date` over **live** receipts,
+`trashed_count` the ones in the Trash (the page shows them as "+N in Trash"; a vendor is
+deletable only when both are 0). `PATCH` takes `name` and/or `vetted` (`extra='forbid'`, so an
+unknown key is a 422; an explicit `null` means unchanged, as in `PATCH /inbox`): a `name` renames
+through `rename_vendor` and, like the web dialog, leaves the vendor vetted unless the same body
+says `"vetted": false`; `vetted` alone calls `set_vetted`. A rename another vendor's name or key
+clashes with is a **409** `{detail, conflicting_vendor_id, conflicting_vendor_name}` (declared as
+the 409 response of the operation, from `VendorNameTaken.other`; nothing is changed) so a client
+can offer `POST /vendors/merge`. `DELETE` answers 204, or a 400 when the vendor still has receipts
+(live or trashed) with the service's "merge it instead" message. In `merge`, a repeated id or
+`keep` itself is ignored, no other id is a 400 (`Choose at least two vendors to merge.`), and one
+that isn't the caller's (including `keep`) is a 404 before anything is merged. `GET|PATCH /inbox` (address, `sender_allowlist`,
 `default_currency`, the latest `forwarding_confirmation` of the last 7 days via
 `services.forwarding`, shared with the settings page) and `POST /inbox/regenerate`. Receipts carry
 every field of the model except the S3 keys, the raw AI response and the upload checksum;
 `amount` is a string with two decimals, `category` is `{id, name}`, `possible_duplicate_of` an id,
-`missing_fields` lists which of vendor/amount/receipt date are unset.
+`missing_fields` lists which of vendor/amount/receipt date are unset. A receipt's `vendor` is still
+the vendor's name; `vendor_id` (`null` while none), `vendor_vetted` and `vendor_extracted` (what the
+AI read, before matching) came with issue #123, and `PATCH /receipts/{id}` takes `vendor_id` next
+to `vendor`: either moves *that receipt* through `update_receipt` (so matching, vetting and teaching
+apply as on the web), both at once is a 400 (`vendor_id: Send either vendor or vendor_id, not
+both.`), `null` clears the vendor, and a `vendor_id` that isn't the caller's is a **400**
+(`vendor_id: Unknown vendor.`, like a foreign `category`: the receipt in the path exists, the value
+is what is refused), not a 404.
 Status codes (`api/common.py`): **400** for a service `ValidationError` (field-keyed ones as
 `field: message`, including the daily file cap) or one of the few hand-parsed query parameters
 (`date_from`/`date_to` and `disposition`), **422** for everything django-ninja validates itself
@@ -589,7 +620,9 @@ than a string (the CLI's `_error_text` flattens it), **402** for
 both `AccountFrozenError` (storage unpaid: new uploads, re-runs, `.../file`) and
 `InsufficientCreditsError` (a re-run the balance can't cover) -- one documented code, as in the
 file_transfer API; reading, listing, editing and exporting stay available while frozen, **404** for
-another user's (or an unfinished upload's) receipt or category and never 403, **429** from the
+another user's (or an unfinished upload's) receipt, category or vendor (also a foreign id inside a
+merge) and never 403, **409** for a vendor rename that clashes with another vendor (above), **429**
+from the
 site-wide `RateLimitExceeded` handler with `Retry-After`. The rate limits are the web's, so the
 budgets are shared: `RECEIPTS_UPLOAD_USER` (`POST /uploads`), `RECEIPTS_UPLOAD_COMPLETE_USER`
 (`.../complete`), `RECEIPTS_REPROCESS_USER`, `RECEIPTS_EXPORT_USER` and `RECEIPTS_REGENERATE_USER`.
@@ -1256,8 +1289,11 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     htmx control inside the receipt form sets its own, or `unset`. The dashboard has a "Vendors" link
     with "N to vet" and a `?vendor=<id>` filter chip (a hidden input in `#receipt-list`, so it
     travels with search, tabs, paging and the export link; an id that isn't the user's is dropped).
-    The vendor API (`/api/receipts/vendors`), the `vendor_id` body field and the CLI commands are
-    the next step; `PATCH /receipts/{id}` with `vendor` already goes through `update_receipt`.
+  - **API and CLI.** `/api/receipts/vendors` (list, get, rename/vet, merge, delete), the
+    `vendor_id`/`vendor_vetted`/`vendor_extracted` receipt fields, the `vendor=` filter on the list
+    and the export, and the `admin/receipts.py` vendor commands are described under "API" and
+    "API and CLI" below; the API only maps `services.vendors` (`VendorNameTaken` -> 409 with the
+    conflicting vendor, any other `ValidationError` -> 400), it adds no rule of its own.
   - **Admin**: a read-only `VendorAdmin` (aliases inline, vetted filter, searches names and alias
     names, receipt count); `ReceiptAdmin` lists and searches `vendor_extracted`.
 - **Notifications** (`services.emails`, tasks on the `receipts` queue, owner only, only to a
@@ -1614,15 +1650,25 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   (a user's categories with `receipt_count`, **ordered explicitly**: `Meta.ordering` is dropped from
   a query that aggregates, so the settings page's earlier `annotate(Count(...))` left the order to
   the database). `admin/receipts.py` mirrors `admin/filetransfer.py`: `login` (password as an
-  optional argument, a hidden prompt, or `RECEIPTS_PASSWORD`), `list` (`--status --category --q
-  --from --to --sort --duplicates --trashed --limit --offset`, the full receipt id in the table
+  optional argument, a hidden prompt, or `RECEIPTS_PASSWORD`), `list` (`--status --category --vendor
+  --q --from --to --sort --duplicates --trashed --limit --offset`, the full receipt id in the table
   because `get` needs all of it), `upload <files or folders>` (SHA-256 base64 of the file, `POST
   /uploads`, a `PUT` of the bytes to the presigned URL with exactly the headers the API returned,
   `POST .../complete`; an extension outside PDF/JPG/PNG/HEIC/WebP, or an empty file, is skipped with
-  a warning, one file failing doesn't stop the rest, and the exit code is 1 if any failed), `get`,
-  `export --out file.csv` (streamed to `.<name>.part` next to `--out` and renamed into place only when
+  a warning, one file failing doesn't stop the rest, and the exit code is 1 if any failed), `get` (the
+  vendor with `(vetted)` / `(not vetted)`, its id, and "Read as" -- the name the AI read -- when that
+  differs from the vendor's),
+  `export --out file.csv` (also `--vendor`; streamed to `.<name>.part` next to `--out` and renamed into place only when
   complete, so a dropped connection never leaves a cut-off CSV), `inbox` and `regenerate` (confirms
-  unless `--yes`). Its token is **per environment**, `~/.receipts_token.<env>` (so the prod JWT is
+  unless `--yes`), and the vendor commands (issue #123): `vendors` (`--to-vet --q --limit --offset`;
+  id, name, vetted, receipts incl. "+N in trash", last receipt date), `vendor-rename <id> <name>
+  [--not-vetted]` (a 409 clash names the other vendor by id and
+  name and prints the `vendor-merge <env> <other> <id>` command that would combine them, exit 1),
+  `vendor-vet <id>... [--unvet]` (one `PATCH` per distinct id; a failure doesn't stop the rest, the
+  exit code is 1 if any failed) and `vendor-merge <keep> <id>...` (unless `--yes`, it first `GET`s
+  every vendor so the prompt shows which is kept and which are merged away -- and a wrong id fails
+  before the question --, then `POST /vendors/merge`; the kept id and repeats are dropped from the
+  list). Its token is **per environment**, `~/.receipts_token.<env>` (so the prod JWT is
   never sent to the local server; the single `~/.receipts_token` of earlier versions is ignored --
   log in again, then delete it), written by `admin.utils.write_private_file` (mode 0600 set on the
   open descriptor so a pre-existing looser file is tightened, `O_NOFOLLOW`; `filetransfer` and
