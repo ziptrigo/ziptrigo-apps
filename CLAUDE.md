@@ -658,7 +658,10 @@ package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
   `apps.qr_code.services.create_qrcode` / `validate_content`). Forms call the service validators
   to show friendly errors; the API maps the service's `ValidationError` to a 400.
 
-QR code specifics: previews are returned as PNG `data:` URIs and never written to disk. Short codes
+QR code specifics: a tracked code encodes `<BASE_URL>/go/<code>`, so in prod every printed code
+reads `https://app.ziptrigo.com/go/...` -- the chosen short-link host (issue #49; there is no
+separate short-link setting), and prod's `BASE_URL` must never change once codes are out.
+Previews are returned as PNG `data:` URIs and never written to disk. Short codes
 for tracked QR codes are issued by the server (`qr_code:short-code`) and kept in the session until
 the save, so users can't choose their own; a code taken in the meantime is replaced.
 

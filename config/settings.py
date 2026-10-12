@@ -427,7 +427,8 @@ GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '').strip()
 
-# Base URL used to build absolute links (emails, QR code redirects).
+# Base URL used to build absolute links (emails, QR code redirects). It is printed on every tracked
+# QR code (`<BASE_URL>/go/<code>`), so prod's stays `https://app.ziptrigo.com` (issue #49).
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
 
 # Deployed behind nginx, which terminates TLS and always sets `X-Forwarded-Proto`. Without this,
@@ -501,8 +502,9 @@ AWS_SES_SENDER = os.getenv('AWS_SES_SENDER', 'no-reply@ziptrigo.com')
 
 
 # File transfer storage: a private S3 bucket per environment, with its own IAM user (both in the
-# `infra` repo, `apps/ziptrigo-apps`). Separate from the SES credentials above because presigned
-# URLs need long-lived keys, not the temporary ones from assuming `AWS_ROLE`. In dev, point
+# `infra` repo, `apps/ziptrigo-apps`). Separate from the SES credentials (the default chain: IAM
+# Roles Anywhere when deployed) because presigned URLs need a long-lived key, not temporary
+# credentials that can expire before the URL does. In dev, point
 # `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci (`docker-compose.floci.yml`).
 FILE_TRANSFER_S3_BUCKET = os.getenv('FILE_TRANSFER_S3_BUCKET', '')
 FILE_TRANSFER_S3_REGION = os.getenv('FILE_TRANSFER_S3_REGION', AWS_REGION)
