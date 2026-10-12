@@ -31,12 +31,22 @@ def test_download_is_an_attachment_with_the_original_name(make_receipt, fake_sto
     ]
 
 
-def test_download_of_a_nameless_email_body_gets_a_default_name(make_receipt, fake_storage):
-    receipt = make_receipt(data=samples.HTML_BODY, original_filename='')
+@pytest.mark.parametrize(
+    ('data', 'expected'),
+    [
+        (samples.HTML_BODY, 'email.html'),
+        (b'Your receipt: total 42.10 USD, paid with Visa.', 'email.txt'),
+        (samples.jpeg_bytes(), 'receipt'),
+    ],
+)
+def test_download_of_a_nameless_file_gets_a_default_name(
+    make_receipt, fake_storage, data, expected
+):
+    receipt = make_receipt(data=data, original_filename='')
 
     files.download_url(receipt)
 
-    assert fake_storage.get_urls[0]['filename'] == 'receipt'
+    assert fake_storage.get_urls[0]['filename'] == expected
 
 
 @pytest.mark.parametrize(

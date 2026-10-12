@@ -1,0 +1,117 @@
+{% comment %} The editable fields. Vendor, receipt date and amount are the required ones: while one is missing
+   it gets an amber border and a hint. A refused save comes back (422) as text in #receipt-form-msg. {% endcomment %}
+<form id="receipt-form" method="post" action="{% url 'receipts:detail' receipt.pk %}"
+      hx-post="{% url 'receipts:detail' receipt.pk %}" hx-target="#receipt-form-msg" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type='submit']">
+    {% csrf_token %}
+    <fieldset {% if trashed %}disabled{% endif %} class="min-w-0">
+        <legend class="sr-only">Receipt details</legend>
+
+        <div class="mb-4">
+            <label for="id_vendor" class="block mb-1 text-sm font-medium">Vendor <span class="text-amber-700 dark:text-amber-400" aria-hidden="true">*</span></label>
+            <input id="id_vendor" name="vendor" type="text" maxlength="255" value="{{ receipt.vendor }}"
+                   {% if 'vendor' in missing %}aria-describedby="vendor-hint"{% endif %}
+                   class="w-full rounded border {% if 'vendor' in missing %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            {% if 'vendor' in missing %}<p id="vendor-hint" class="mt-1 text-xs text-amber-700 dark:text-amber-400"><i class="fas fa-turn-up fa-rotate-90 mr-1" aria-hidden="true"></i>We couldn't read the vendor. Check the receipt and fill it in.</p>{% endif %}
+        </div>
+
+        <div class="mb-4">
+            <label for="id_receipt_date" class="block mb-1 text-sm font-medium">Receipt date <span class="text-amber-700 dark:text-amber-400" aria-hidden="true">*</span></label>
+            <input id="id_receipt_date" name="receipt_date" type="date" value="{{ receipt.receipt_date|date:'Y-m-d' }}"
+                   {% if 'receipt_date' in missing %}aria-describedby="date-hint"{% endif %}
+                   class="w-full rounded border {% if 'receipt_date' in missing %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            {% if 'receipt_date' in missing %}<p id="date-hint" class="mt-1 text-xs text-amber-700 dark:text-amber-400"><i class="fas fa-turn-up fa-rotate-90 mr-1" aria-hidden="true"></i>We couldn't read the date. Check the receipt and fill it in.</p>{% endif %}
+        </div>
+
+        <div class="mb-4">
+            <label for="id_amount" class="block mb-1 text-sm font-medium">Amount <span class="text-amber-700 dark:text-amber-400" aria-hidden="true">*</span></label>
+            <div class="flex gap-3">
+                <input id="id_amount" name="amount" type="text" inputmode="decimal" autocomplete="off" value="{% if receipt.amount is not None %}{{ receipt.amount|stringformat:'.2f' }}{% endif %}"
+                       {% if 'amount' in missing %}aria-describedby="amount-hint"{% endif %}
+                       class="min-w-0 flex-1 rounded border {% if 'amount' in missing %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <select id="id_currency" name="currency" aria-label="Currency"
+                        class="w-28 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <option value="">&mdash;</option>
+                    {% for code in currencies %}
+                    <option value="{{ code }}" {% if code == receipt.currency %}selected{% endif %}>{{ code }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if 'amount' in missing %}<p id="amount-hint" class="mt-1 text-xs text-amber-700 dark:text-amber-400"><i class="fas fa-turn-up fa-rotate-90 mr-1" aria-hidden="true"></i>We couldn't read the amount. Check the receipt and fill it in.</p>{% endif %}
+        </div>
+
+        <fieldset class="mb-4">
+            <legend class="mb-1 text-sm font-medium">Type</legend>
+            <div class="flex items-center gap-6">
+                <label class="inline-flex items-center gap-2">
+                    <input type="radio" name="document_type" value="receipt" {% if receipt.document_type == 'receipt' %}checked{% endif %}
+                           class="h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                    <span class="text-sm">Receipt</span>
+                </label>
+                <label class="inline-flex items-center gap-2">
+                    <input type="radio" name="document_type" value="invoice" {% if receipt.document_type == 'invoice' %}checked{% endif %}
+                           class="h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                    <span class="text-sm">Invoice</span>
+                </label>
+            </div>
+        </fieldset>
+
+        <div class="mb-4">
+            <label for="id_document_number" class="block mb-1 text-sm font-medium">Number</label>
+            <input id="id_document_number" name="document_number" type="text" maxlength="100" value="{{ receipt.document_number }}"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        </div>
+
+        <div class="mb-4">
+            <label for="id_payment_method" class="block mb-1 text-sm font-medium">Payment method</label>
+            <input id="id_payment_method" name="payment_method" type="text" maxlength="100" value="{{ receipt.payment_method }}"
+                   aria-describedby="payment-help"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <p id="payment-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Only the last 4 digits are kept; longer numbers are masked.</p>
+        </div>
+
+        <div class="mb-4">
+            <label for="id_category" class="block mb-1 text-sm font-medium">Category</label>
+            <select id="id_category" name="category"
+                    class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <option value="">No category</option>
+                {% for category in categories %}
+                <option value="{{ category.pk }}" {% if category.pk == receipt.category_id %}selected{% endif %}>{{ category.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="id_notes" class="block mb-1 text-sm font-medium">Notes (yours)</label>
+            <textarea id="id_notes" name="notes" rows="3" maxlength="5000" aria-describedby="notes-help"
+                      class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">{{ receipt.notes }}</textarea>
+            <p id="notes-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 5,000 characters. Only you write here; we never touch it, not even when you run the extraction again.</p>
+        </div>
+    </fieldset>
+
+    {% if not trashed %}
+    <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
+        {% if can_reprocess %}
+        <button type="button" @click="show($el)"
+                data-url="{% url 'receipts:reprocess' receipt.pk %}"
+                data-title="Run the extraction again?"
+                data-body="{% if price_per_file %}This costs {{ price_per_file }} credit{{ price_per_file|pluralize }}.{% else %}This is free.{% endif %} The receipt is read again from the original file; anything you edited and your notes are kept."
+                data-label="Re-run extraction{% if price_per_file %} ({{ price_per_file }} credit{{ price_per_file|pluralize }}){% endif %}"
+                data-tone="primary"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            <i class="fas fa-rotate mr-2" aria-hidden="true"></i>Re-run extraction ({% if price_per_file %}{{ price_per_file }} credit{{ price_per_file|pluralize }}{% else %}free{% endif %})
+        </button>
+        {% endif %}
+        <button type="button" hx-post="{% url 'receipts:trash-receipt' receipt.pk %}" hx-disabled-elt="this"
+                hx-target="#receipt-form-msg" hx-swap="innerHTML"
+                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+            <i class="fas fa-trash mr-2" aria-hidden="true"></i>Move to trash
+        </button>
+        <button type="submit"
+                class="group inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+            <span class="group-disabled:hidden">Save</span>
+            <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2" aria-hidden="true"></i>Saving&hellip;</span>
+        </button>
+    </div>
+    {% endif %}
+</form>

@@ -1,0 +1,93 @@
+{% extends 'receipts/layout.html' %}
+{% load receipts_ui %}
+
+{% block title %}{% firstof receipt.vendor receipt.original_filename 'Receipt' %} - ZipTrigo{% endblock %}
+{# Two columns (preview, form) need more room than the form pages' max-w-3xl. #}
+{% block page_width %}max-w-5xl{% endblock %}
+
+{% block receipts_content %}
+<div x-data="confirmModal">
+<div id="receipt-heading" class="mb-6">
+    <a href="{{ dashboard_url }}"
+       class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Receipts</a>
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h1 class="min-w-0 break-words text-3xl font-bold text-gray-900 dark:text-gray-100">
+            {% firstof receipt.vendor receipt.original_filename 'Receipt' %}{% if receipt.receipt_date %}<span class="font-normal text-gray-500 dark:text-gray-400"> &middot; {{ receipt.receipt_date|date:'Y-m-d' }}</span>{% endif %}
+        </h1>
+        {% status_pill receipt.status %}
+    </div>
+</div>
+
+{% if trashed %}
+<div class="mb-6 flex flex-col gap-3 rounded-md border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">
+    <i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+    <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">This receipt is in the Trash. Restore it to edit it.</p>
+    <form method="post" action="{% url 'receipts:restore' receipt.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="detail">
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore
+        </button>
+    </form>
+</div>
+{% endif %}
+
+{% include 'receipts/partials/duplicate_banner.html' %}
+
+<div class="grid gap-6 md:grid-cols-2">
+    <!-- Preview and source (stacked above the form on phones) -->
+    <div class="min-w-0">
+        <div id="receipt-preview">
+            {% include 'receipts/partials/detail_preview.html' %}
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center gap-3">
+            {% if can_download %}
+            <a href="{% url 'receipts:download' receipt.pk %}"
+               class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="fas fa-download mr-2" aria-hidden="true"></i>Download original
+            </a>
+            {% endif %}
+            {% if preview.url and preview.kind != 'body' %}
+            <a href="{{ preview.url }}" target="_blank" rel="noopener noreferrer"
+               class="text-sm text-sage-600 dark:text-sage-300 hover:underline">Open full size</a>
+            {% endif %}
+        </div>
+
+        <div class="mt-4 space-y-1 text-sm text-gray-500 dark:text-gray-400">
+            <p>
+                {% if receipt.source == 'email' %}
+                Source: email{% if inbound_email and inbound_email.from_address %} from <span class="text-gray-700 dark:text-gray-300 break-all">{{ inbound_email.from_address }}</span>{% endif %}
+                {% if inbound_email and inbound_email.subject %}<br><span class="text-gray-700 dark:text-gray-300">&ldquo;{{ inbound_email.subject }}&rdquo;</span>{% endif %}
+                {% elif receipt.source == 'api' %}
+                Source: API upload{% if receipt.original_filename %} &middot; <span class="text-gray-700 dark:text-gray-300 break-all">{{ receipt.original_filename }}</span>{% endif %}
+                {% else %}
+                Source: uploaded{% if receipt.original_filename %} &middot; <span class="text-gray-700 dark:text-gray-300 break-all">{{ receipt.original_filename }}</span>{% endif %}
+                {% endif %}
+            </p>
+            <p id="receipt-added">
+                Added {{ receipt.created_at|date:'M j, H:i' }}{% if receipt.receipt_date %} (receipt dated {{ receipt.receipt_date|date:'M j' }}){% endif %}
+            </p>
+        </div>
+    </div>
+
+    <!-- The panel on the right: the form, or why there isn't one -->
+    <div class="min-w-0">
+        <div id="receipt-form-msg" class="mb-4 text-sm"></div>
+        <div id="receipt-panel">
+            {% if failed %}
+            {% include 'receipts/partials/detail_failed.html' %}
+            {% elif in_progress %}
+            {% include 'receipts/partials/detail_progress.html' %}
+            {% else %}
+            {% include 'receipts/partials/detail_form.html' %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{# The "Re-run extraction" confirmation (design system 10.9); its buttons are in the panel partials. #}
+{% include 'receipts/partials/confirm_modal.html' %}
+</div>
+{% endblock %}

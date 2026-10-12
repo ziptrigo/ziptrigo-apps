@@ -1,0 +1,20 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% comment %} Shared by every Receipts page: the page container (override `page_width`) and the banner shown
+   while the account's storage is paused. {% endcomment %}
+{% block content %}
+<div class="container mx-auto px-4 py-8 {% block page_width %}max-w-4xl{% endblock %}">
+    {% if receipts_frozen %}
+    {% include 'receipts/partials/frozen_banner.html' %}
+    {% endif %}
+    {% block receipts_content %}{% endblock %}
+</div>
+{% endblock %}
+
+{% comment %} A classic (non-deferred) script, so its `alpine:init` listener is registered before Alpine
+   starts. {% endcomment %}
+{% block extra_js %}
+<script src="{% static 'receipts/js/common.js' %}"></script>
+{% block receipts_js %}{% endblock %}
+{% endblock %}

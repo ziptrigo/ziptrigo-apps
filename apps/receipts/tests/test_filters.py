@@ -9,7 +9,14 @@ from django.utils import timezone
 
 from ..models import Receipt, ReceiptCategory, ReceiptStatus
 from ..services.accounts import get_account
-from ..services.filters import CSV_COLUMNS, ReceiptFilters, export_csv, filter_receipts, iter_csv
+from ..services.filters import (
+    CSV_COLUMNS,
+    ReceiptFilters,
+    dashboard_counts,
+    export_csv,
+    filter_receipts,
+    iter_csv,
+)
 from .factories import create_receipt
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -313,3 +320,47 @@ def test_csv_streams_line_by_line(funded_user, library):
 
 def test_csv_of_an_empty_library_is_just_the_header(funded_user):
     assert parse(export_csv(funded_user)) == [list(CSV_COLUMNS)]
+
+
+def test_an_unfinished_upload_is_never_listed_counted_or_exported(
+    funded_user, fake_storage, library
+):
+    create_receipt(
+        funded_user, fake_storage, uploaded=False, vendor='Half way', original_filename='x'
+    )
+
+    assert len(filter_receipts(funded_user)) == 5
+    assert len(filter_receipts(funded_user, trashed=True)) == 1
+    assert dashboard_counts(funded_user)['total'] == 5
+    assert 'Half way' not in export_csv(funded_user)
+
+
+def test_dashboard_counts(funded_user, fake_storage, library):
+    other = create_receipt(
+        funded_user, fake_storage, status=ReceiptStatus.WAITING_FOR_CREDITS, original_filename='w'
+    )
+    create_receipt(
+        funded_user, fake_storage, status=ReceiptStatus.PROCESSING, original_filename='p'
+    )
+    flagged = create_receipt(
+        funded_user, fake_storage, status=ReceiptStatus.PROCESSED, possible_duplicate_of=other
+    )
+    create_receipt(
+        funded_user,
+        fake_storage,
+        status=ReceiptStatus.PROCESSED,
+        possible_duplicate_of=other,
+        duplicate_dismissed=True,
+    )
+
+    counts = dashboard_counts(funded_user)
+
+    assert counts == {
+        'total': 5 + 4,
+        'needs_review': 1,
+        'in_progress': 2,
+        'failed': 1,
+        'duplicates': 1,
+        'trash': 1,
+    }
+    assert flagged.pk in ids(filter_receipts(funded_user, ReceiptFilters(duplicates=True)))

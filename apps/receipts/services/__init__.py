@@ -23,7 +23,7 @@ from .actions import (
 )
 from .errors import AccountFrozenError, DailyLimitExceededError
 from .files import download_url, get_body_bytes, preview_url
-from .filters import ReceiptFilters, export_csv, filter_receipts, iter_csv
+from .filters import ReceiptFilters, dashboard_counts, export_csv, filter_receipts, iter_csv
 from .inbound import ingest_message
 from .lifecycle import purge_receipt
 from .metering import meter_account, resume_account
@@ -38,6 +38,7 @@ __all__ = [
     'active_inbox_code',
     'add_stored_bytes',
     'clean_changes',
+    'dashboard_counts',
     'complete_upload',
     'create_category',
     'delete_category',

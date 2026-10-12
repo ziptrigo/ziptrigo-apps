@@ -1,0 +1,30 @@
+{# What the preview well shows: `preview.kind` is image, pdf, body, frozen or none. #}
+{% if preview.kind == 'image' %}
+<div class="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-2">
+    <img src="{{ preview.url }}" alt="Preview of {% firstof receipt.vendor receipt.original_filename 'the receipt' %}"
+         class="mx-auto max-h-[70vh] w-auto max-w-full object-contain">
+</div>
+{% elif preview.kind == 'pdf' %}
+<div class="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+    <iframe src="{{ preview.url }}" title="Preview of {% firstof receipt.vendor receipt.original_filename 'the receipt' %}"
+            class="h-[70vh] w-full"></iframe>
+</div>
+{% elif preview.kind == 'body' %}
+{% comment %} The email's own HTML: no `allow-*` tokens, so no scripts, forms, popups or same-origin access; the body
+   view adds a CSP that blocks anything remote on top. {% endcomment %}
+<div class="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700 bg-white">
+    <iframe sandbox src="{{ preview.url }}" title="Email body" loading="lazy" referrerpolicy="no-referrer"
+            class="h-[70vh] w-full"></iframe>
+</div>
+{% elif preview.kind == 'frozen' %}
+<div class="flex min-h-[12rem] flex-col items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 dark:border-gray-700 p-6 text-center">
+    <i class="fas fa-pause text-2xl text-gray-400" aria-hidden="true"></i>
+    <p class="text-sm text-gray-500 dark:text-gray-400">Previews and downloads are paused until you add credits.</p>
+    <a href="{% url 'billing:credits-history' %}" class="text-sm text-sage-600 dark:text-sage-300 hover:underline">Top up</a>
+</div>
+{% else %}
+<div class="flex min-h-[12rem] flex-col items-center justify-center gap-2 rounded-md border border-dashed border-gray-300 dark:border-gray-700 p-6 text-center">
+    <i class="fas fa-file text-2xl text-gray-400" aria-hidden="true"></i>
+    <p class="text-sm text-gray-500 dark:text-gray-400">{{ preview.message|default:'There is no preview for this file.' }}</p>
+</div>
+{% endif %}

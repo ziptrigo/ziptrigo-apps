@@ -109,8 +109,21 @@ All structure (page background, surfaces, borders, body text) is Tailwind's `gra
 |---|---|---|---|
 | Danger / error | `text-red-600`, `bg-red-600 hover:bg-red-700` | `dark:text-red-400` | Delete actions, validation errors |
 
-There are no success, warning or info colours yet. When one is needed, use Tailwind's `green`,
-`amber` or `blue` at the same steps (`-600` text light, `-400` text dark) and add it here.
+Status colours (first used by the Receipts status pills, [10.13](#1013-status-pills)) use Tailwind's
+`green`, `amber`, `blue` and `red`, always with a `dark:` twin:
+
+| Meaning | Dot / icon and border | Label text | Where |
+|---|---|---|---|
+| Success | `text-green-600` / `dark:text-green-400` | `text-green-700` / `dark:text-green-400` | Processed |
+| Needs attention | `text-amber-600` / `dark:text-amber-400` | `text-amber-700` / `dark:text-amber-400` | Needs review, "storage paused" banner, duplicate banner |
+| In progress, info | `text-blue-600` / `dark:text-blue-400` | `text-blue-600` / `dark:text-blue-400` | Received, Processing |
+| Error | `text-red-600` / `dark:text-red-400` | `text-red-600` / `dark:text-red-400` | Failed |
+| Neutral, waiting | `text-gray-500` / `dark:text-gray-400` | `text-gray-600` / `dark:text-gray-400` | Waiting for credits |
+
+Steps are `-600` on light and `-400` on dark, with one exception: label **text** in green and amber
+is `-700` on light, because `-600` on white is only 3.3:1 (green) and 3.2:1 (amber), below the 4.5:1
+needed for small text (`blue-600` is 5.2:1, `red-600` 4.8:1). On dark, `green-400`, `amber-400` and
+`blue-400` are 8.4, 8.8 and 5.8:1 on `gray-800`.
 
 ### Contrast rules
 
@@ -179,6 +192,7 @@ column (`min-h-screen flex flex-col`) with `<main class="flex-grow flex flex-col
 |---|---|---|
 | List / dashboard | `max-w-4xl` | `mb-8` |
 | Form (create / edit) | `max-w-3xl` | `mb-6` |
+| Two-column detail (preview left, form right; stacked on phones) | `max-w-5xl` | `mb-6` |
 | Product intro page | `max-w-3xl`, `py-10` | `mb-6` |
 | Auth card (login, register) | `max-w-md`, centred with `flex-grow flex items-center justify-center p-6` | `mb-6` |
 | Modal panel | `max-w-md w-full mx-4` | `mb-2` |
@@ -398,6 +412,52 @@ From `core/home.html`, for anything that links into a product:
 `block p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition`,
 icon `text-2xl text-sage-400`, title `text-xl font-semibold`, text `text-gray-700 dark:text-gray-300`.
 This is the one place sage is used as a surface.
+
+### 10.13 Status pills
+
+A small rounded label with an icon and the status in words, so colour is never the only signal.
+Used for a record's state in lists and page headers (`receipts/templatetags/receipts_ui.py`,
+`{% status_pill receipt.status %}`):
+
+```html
+<span class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border
+             text-green-700 dark:text-green-400 border-green-600/40 dark:border-green-400/40
+             px-2 py-0.5 text-xs font-medium">
+  <i class="fas fa-check text-green-600 dark:text-green-400" aria-hidden="true"></i>Processed
+</span>
+```
+
+| Status | Colour | Icon |
+|---|---|---|
+| Processed | green | `fa-check` |
+| Needs review | amber | `fa-triangle-exclamation` |
+| Received | blue | `fa-inbox` |
+| Processing | blue | `fa-spinner fa-spin` |
+| Waiting for credits | gray | `fa-coins` |
+| Failed | red | `fa-circle-xmark` |
+
+Colours and contrast: [Semantic](#semantic). Other products add their own statuses to the helper's
+table rather than writing pill markup by hand.
+
+### 10.14 Banners
+
+A full-width notice above a page's content (Receipts: "Storage is paused", "Possible duplicate").
+`rounded-md border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3`,
+the icon in the status colour, body text `text-sm text-gray-700 dark:text-gray-300` with the lead
+words in `font-medium text-gray-900 dark:text-gray-100`, and the action on the right as a
+**Secondary** button (a banner never adds a second primary button), stacked under the text on
+phones (`flex flex-col gap-3 sm:flex-row sm:items-center`). `role="alert"` for something that
+blocks work, none for the rest.
+
+### 10.15 Filter tabs
+
+Links that filter a list, with counts: an underlined row (`border-b border-gray-200
+dark:border-gray-700`), each tab `border-b-2 px-3 py-2 text-sm font-medium`; the current one has
+`border-brand-primary text-gray-900 dark:text-gray-100` and `aria-current="page"`, the others
+`border-transparent text-gray-500 dark:text-gray-400` plus a hover. The count is a small pill
+(`rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs`; amber for something that needs
+the user). Tabs and filters re-fetch the list with htmx and the server sends `HX-Push-Url`, so the
+address bar always holds the full page's URL.
 
 ---
 

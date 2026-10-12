@@ -1,0 +1,54 @@
+{# Accepted senders + default currency, one form. Replaced as a whole after a save (with "Saved"). #}
+<form method="post" action="{% url 'receipts:settings-inbox' %}"
+      hx-post="{% url 'receipts:settings-inbox' %}" hx-target="#inbox-settings" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type='submit']"
+      data-mode="{{ inbox_form.sender_mode.value }}" x-data="{ mode: $el.dataset.mode }">
+    {% csrf_token %}
+    <section class="mb-8" aria-labelledby="senders-title">
+        <h2 id="senders-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Accepted senders</h2>
+        <div id="inbox-settings-msg" class="mb-4 text-sm"></div>
+        <fieldset class="space-y-3">
+            <legend class="sr-only">Who can email receipts to you</legend>
+            <label class="flex items-center gap-2">
+                <input type="radio" name="sender_mode" value="any" x-model="mode" class="h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                <span class="text-sm">Anyone</span>
+            </label>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-start">
+                <label class="flex items-center gap-2 sm:pt-2">
+                    <input type="radio" name="sender_mode" value="only" x-model="mode" class="h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                    <span class="text-sm whitespace-nowrap">Only these</span>
+                </label>
+                <div class="min-w-0 flex-1">
+                    <label for="id_sender_allowlist" class="sr-only">Accepted senders</label>
+                    <textarea id="id_sender_allowlist" name="sender_allowlist" rows="2" :disabled="mode !== 'only'"
+                              placeholder="me@acme.com, *@acme.com" aria-describedby="senders-help"
+                              class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:bg-gray-100 dark:disabled:bg-gray-900 disabled:text-gray-500 dark:disabled:text-gray-400 disabled:cursor-not-allowed">{{ inbox_form.sender_allowlist.value|default:'' }}</textarea>
+                </div>
+            </div>
+            <p id="senders-help" class="text-xs text-gray-500 dark:text-gray-400">
+                Separate addresses with commas or new lines; <code>*@acme.com</code> accepts everyone at that domain.
+                Matches the sender or the forwarding account, and must pass SPF/DKIM.
+            </p>
+        </fieldset>
+
+        <div class="mt-6 flex flex-wrap items-end justify-between gap-4">
+            <div>
+                <label for="id_default_currency" class="block mb-1 text-sm font-medium">Default currency</label>
+                <select id="id_default_currency" name="default_currency"
+                        class="w-28 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    {% for code in currencies %}
+                    <option value="{{ code }}" {% if code == inbox_form.default_currency.value %}selected{% endif %}>{{ code }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="flex items-center gap-3">
+                {% if saved %}<span class="text-sm text-green-700 dark:text-green-400" role="status"><i class="fas fa-check mr-1" aria-hidden="true"></i>Saved</span>{% endif %}
+                <button type="submit"
+                        class="group inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+                    <span class="group-disabled:hidden">Save</span>
+                    <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2" aria-hidden="true"></i>Saving&hellip;</span>
+                </button>
+            </div>
+        </div>
+    </section>
+</form>

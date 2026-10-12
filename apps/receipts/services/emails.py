@@ -11,7 +11,7 @@ of that sender-controlled text goes into a subject line.
 The mail is only sent to a *confirmed* address: changing the email through the API un-confirms the
 account but leaves sessions valid, and these emails quote file names and subjects.
 
-Links point at `/receipts/...`; the pages themselves arrive in a later release.
+Links are absolute (`settings.BASE_URL` + `reverse()`), like the other apps' emails.
 """
 
 import logging
@@ -51,12 +51,11 @@ _FIELD_LABELS = {'vendor': 'vendor', 'amount': 'amount', 'receipt_date': 'date'}
 
 
 def receipts_url() -> str:
-    # Hard-coded until the receipts URLconf lands (a later release), when this becomes a reverse().
-    return f'{settings.BASE_URL}/receipts/'
+    return f'{settings.BASE_URL}{reverse("receipts:dashboard")}'
 
 
 def receipt_url(receipt_id: object) -> str:
-    return f'{settings.BASE_URL}/receipts/{receipt_id}/'
+    return f'{settings.BASE_URL}{reverse("receipts:detail", args=[receipt_id])}'
 
 
 def _label(receipt: Receipt) -> str:

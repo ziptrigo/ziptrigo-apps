@@ -1,6 +1,8 @@
 import pytest
+from django.conf import settings
+from django.urls import reverse
 
-from ..models import FailureReason, ReceiptStatus
+from ..models import FailureReason, Receipt, ReceiptStatus
 from ..services import emails
 from .factories import create_inbound_email, create_receipt
 
@@ -50,8 +52,12 @@ def test_the_body_lists_each_problem_with_a_link(funded_user, fake_storage, sent
     assert 'From the email "Fwd: October <b>invoices</b>"' in text
     assert "invoice-oct.pdf couldn't read the vendor, amount, date" in text
     assert 'scan.pdf contains more than one receipt; upload each separately' in text
-    assert 'Manage receipts: http://localhost:8000/receipts/' in text
-    assert '/receipts/' in text
+    base = settings.BASE_URL
+    assert f'Manage receipts: {base}{reverse("receipts:dashboard")}' in text
+    # Only a receipt that needs review gets a "Review" link, built from the URLconf.
+    needs_review = Receipt.objects.get(inbound_email=email, status=ReceiptStatus.NEEDS_REVIEW)
+    assert f'Review: {base}{reverse("receipts:detail", args=[needs_review.pk])}' in text
+    assert text.count('Review: ') == 1
 
 
 def test_the_html_body_escapes_everything_the_sender_controls(
