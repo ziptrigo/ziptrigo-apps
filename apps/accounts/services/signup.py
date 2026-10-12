@@ -1,12 +1,9 @@
-"""Shared signup logic (issue #52) for the register session view (`apps.accounts.views.register`)
-and `POST /api/auth/signup` (`apps.accounts.routers.auth.signup`) -- CLAUDE.md's "HTMX form views"
-convention: put shared create/update logic in the app's `services/` so both surfaces enforce the
-same rules, rather than duplicating the "does this email already exist" check and the user-creation
-call in each caller.
+"""Signup logic (issue #52) for the register session view (`apps.accounts.views.register`), the
+only way to create an account since issue #117 removed `POST /api/auth/signup`. Kept as a service
+per CLAUDE.md's "HTMX form views" convention, so the view holds no account-creation rules itself.
 
-Password strength is validated by each caller before this runs -- `RegisterForm.clean_password`
-for the web form, `SignupRequest`'s pydantic validator for the API -- since that's a per-field rule
-each surface's own validation layer is best placed to report. This module only re-checks the one
+Password strength is validated by the caller before this runs (`RegisterForm.clean_password`),
+since that's a per-field rule the form is best placed to report. This module only re-checks the one
 rule a form field can't guard against by itself: whether `email` is already taken. The email is
 normalized (`User.objects.normalize_email`, which lower-cases only the domain) before that check,
 since `UserManager.create_user` normalizes it too when it actually saves the row -- comparing the

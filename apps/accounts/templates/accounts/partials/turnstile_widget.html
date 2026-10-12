@@ -1,0 +1,8 @@
+{% comment %}
+Cloudflare Turnstile widget (issue #117), rendered by `accounts/js/turnstile.js` (explicit mode) so
+that the copy htmx swaps in after a 422 gets a fresh widget too. The widget adds the
+`cf-turnstile-response` hidden input to the enclosing form. Nothing renders when the captcha is off.
+{% endcomment %}
+{% if turnstile_site_key %}
+  <div class="cf-turnstile mb-4" data-sitekey="{{ turnstile_site_key }}" data-action="{{ turnstile_action }}"></div>
+{% endif %}

@@ -217,11 +217,9 @@ class TestSignupRateLimit:
         _enable(settings, 'SIGNUP_IP', limit=1)
         payload = {'name': 'A', 'email': 'a@example.com', 'password': 'Str0ngPass!'}
 
-        client.post('/api/auth/signup', payload, content_type='application/json')
+        client.post(reverse('accounts:register'), payload, **HTMX)
         response = client.post(
-            '/api/auth/signup',
-            {**payload, 'email': 'b@example.com'},
-            content_type='application/json',
+            reverse('accounts:register'), {**payload, 'email': 'b@example.com'}, **HTMX
         )
 
         assert response.status_code == 429

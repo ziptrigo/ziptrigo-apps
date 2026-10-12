@@ -14,29 +14,17 @@ from ..schemas import (
     PasswordResetRequest,
     RefreshRequest,
     ResendConfirmationRequest,
-    SignupRequest,
     TokenResponse,
 )
 from ..services import login_throttle
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.password_reset import get_password_reset_service
-from ..services.signup import EmailAlreadyRegistered, create_account
 from ..tokens import CustomAccessToken, CustomRefreshToken, matches_password
 
+# There is deliberately no signup endpoint (issue #117): accounts are created only through the web
+# register page, behind its captcha (`apps.accounts.views.register`). An API client works on behalf
+# of an account a person created there.
 router = Router()
-
-
-@router.post('/signup', response={201: dict}, auth=None)
-def signup(request: HttpRequest, payload: SignupRequest):
-    """Create a new user account and send confirmation email."""
-    ratelimit.enforce(ratelimit.hit_ip(request, 'SIGNUP_IP'))
-
-    try:
-        create_account(name=payload.name, email=payload.email, password=payload.password)
-    except EmailAlreadyRegistered:
-        raise HttpError(400, 'User with that email already exists.')
-
-    return 201, {'message': 'Account created! Please check your email to confirm your address.'}
 
 
 @router.post('/confirm-email', response={200: dict}, auth=None)
