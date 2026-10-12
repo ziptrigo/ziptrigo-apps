@@ -17,10 +17,10 @@ from apps.core.services.client_ip import client_ip
 
 from ..forms import RegisterForm
 from ..services import captcha, google_oauth
+from ..services.existing_account import handle_signup_for_existing_email
 from ..services.signup import EmailAlreadyRegistered, create_account
 
 CAPTCHA_ERROR = 'Please complete the captcha check and try again.'
-EMAIL_TAKEN_ERROR = 'An account with this email already exists.'
 
 
 @require_http_methods(['GET', 'POST'])
@@ -34,8 +34,11 @@ def register_page(request: HttpRequest) -> HttpResponse:
        not cost one of only 5 signups/hour per IP). It does *not* say whether the email is taken.
     2. The captcha, when configured (`_check_captcha`). A failure is a form error (422).
     3. `SIGNUP_IP`, so only a submission a person actually got through counts against it.
-    4. `create_account`, which is where an already-registered email is reported. Only here, behind
-       the captcha and `SIGNUP_IP`, so the page can't be used to enumerate accounts for free.
+    4. `create_account`. An already-registered email is *not* reported to the visitor (issue
+       #125): the response is the same redirect as for a new account, and the address's owner is
+       emailed instead (`handle_signup_for_existing_email`), so the page can't be used to learn
+       whether an address has an account. It is still behind the captcha and `SIGNUP_IP`, so
+       the notice email can't be triggered in bulk either.
 
     Every 422 re-renders the form partial with a fresh captcha widget, since a token is single-use
     and the swap replaces the old widget anyway. On success, redirects to the "account created"
@@ -89,9 +92,9 @@ def _create(request: HttpRequest, form: RegisterForm, captcha_enabled: bool) -> 
             email=form.cleaned_data['email'],
             password=form.cleaned_data['password'],
         )
-    except EmailAlreadyRegistered:
-        form.add_error('email', EMAIL_TAKEN_ERROR)
-        return None
+    except EmailAlreadyRegistered as exc:
+        # Same status, redirect and page as a new account -- see the docstring above.
+        handle_signup_for_existing_email(exc.email)
     return hx_redirect(request, reverse('accounts:created'))
 
 

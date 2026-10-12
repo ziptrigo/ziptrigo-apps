@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from apps.accounts.models import User
 from apps.accounts.services import captcha
-from apps.accounts.views.register import CAPTCHA_ERROR, EMAIL_TAKEN_ERROR
+from apps.accounts.views.register import CAPTCHA_ERROR
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -48,29 +48,6 @@ def test_register_without_htmx_redirects(client):
 
     assert response.status_code == 302
     assert response['Location'] == reverse('accounts:created')
-
-
-def test_duplicate_email_returns_422(client, user):
-    response = _register(client, email=user.email)
-
-    assert response.status_code == 422
-    assert 'already exists' in response.content.decode()
-    assert User.objects.filter(email=user.email).count() == 1
-
-
-def test_duplicate_email_differing_only_by_domain_case_returns_422(client, user):
-    """Issue #52 code review: `UserManager.create_user` normalizes email (lower-casing only the
-    domain) before saving, so `user.email` ('testuser@example.com') is already normalized. A
-    signup for the same address with an upper-case domain must be caught by `create_account`'s
-    normalized comparison, rather than hitting the model's unique constraint as a 500."""
-    mixed_case_domain = 'testuser@EXAMPLE.COM'
-    assert mixed_case_domain.lower() == user.email
-
-    response = _register(client, email=mixed_case_domain)
-
-    assert response.status_code == 422
-    assert 'already exists' in response.content.decode()
-    assert User.objects.filter(email=user.email).count() == 1
 
 
 def test_weak_password_too_short_returns_422(client):
@@ -252,39 +229,51 @@ def test_signup_captcha_ip_limits_calls_to_cloudflare(client, settings, verify_c
     assert len(verify_calls) == 2
 
 
-# -- account enumeration (issue #117 review) --
+# -- account enumeration (issues #117 and #125) --
+# That an already-registered address gets the same answer as a new one, and the email its owner
+# gets instead, are covered in `test_signup_existing_account.py`.
 
 
 def test_duplicate_email_counts_against_signup_ip(client, settings, user):
-    """Whether an address is registered is only answered once a submission reaches
-    `create_account`, behind the captcha and `SIGNUP_IP`, so probing it costs budget."""
+    """A submission for an already-registered address is a signup like any other as far as
+    `SIGNUP_IP` goes, so it can't be repeated for free."""
     settings.RATELIMIT_ENABLE = True
     settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'SIGNUP_IP': (1, 60 * 60)}
 
-    assert EMAIL_TAKEN_ERROR in _register(client, email=user.email).content.decode()
+    assert _register(client, email=user.email).status_code == 200
 
     response = _register(client, email=user.email)
 
     assert response.status_code == 429
-    assert EMAIL_TAKEN_ERROR not in response.content.decode()
+    assert 'Retry-After' in response
 
 
 @pytest.mark.usefixtures('captcha_on')
-def test_duplicate_email_is_not_revealed_without_the_captcha(client, user, verify_calls):
+def test_duplicate_email_without_the_captcha_is_rejected_like_any_other(
+    client, user, verify_calls, monkeypatch
+):
+    """And without a solved captcha nobody is emailed either: the notice can't be triggered
+    for free."""
+    notified: list[str] = []
+    monkeypatch.setattr(
+        'apps.accounts.views.register.handle_signup_for_existing_email', notified.append
+    )
+
     response = _register(client, email=user.email)
 
-    content = response.content.decode()
     assert response.status_code == 422
-    assert CAPTCHA_ERROR in content
-    assert EMAIL_TAKEN_ERROR not in content
+    assert CAPTCHA_ERROR in response.content.decode()
+    assert notified == []
 
 
 @pytest.mark.usefixtures('captcha_on')
-def test_duplicate_email_is_reported_after_a_passing_captcha(client, user, verify_calls):
+def test_duplicate_email_after_a_passing_captcha_redirects_like_a_new_one(
+    client, user, verify_calls
+):
     response = _register(client, email=user.email, **{captcha.RESPONSE_FIELD: 'good'})
 
-    assert response.status_code == 422
-    assert EMAIL_TAKEN_ERROR in response.content.decode()
+    assert response.status_code == 200
+    assert response['HX-Redirect'] == reverse('accounts:created')
     assert User.objects.filter(email=user.email).count() == 1
 
 

@@ -1,6 +1,8 @@
 from ninja import Router
 from ninja.errors import HttpError
 
+from apps.core import ratelimit
+
 from ..auth import JWTAuth
 from ..models import User
 from ..schemas import AccountUpdateRequest, AccountUpdateResponse
@@ -32,6 +34,10 @@ def update_account(request, payload: AccountUpdateRequest):
     previous_email = user.email
     previous_email_confirmed = user.email_confirmed
     if email_changed:
+        # Charged before the uniqueness check below, which says whether an address has an account
+        # (issue #125): a logged-in caller can ask it only so many times. Kept as a 400 rather
+        # than made indistinguishable -- see CLAUDE.md's Auth section for why that was accepted.
+        ratelimit.enforce(ratelimit.hit_user(user, 'ACCOUNT_EMAIL_CHANGE_USER'))
         # Check if email already exists
         if User.objects.filter(email=payload.email).exclude(id=user.id).exists():
             raise HttpError(400, 'Email already in use')

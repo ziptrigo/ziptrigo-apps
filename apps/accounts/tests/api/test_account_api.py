@@ -58,6 +58,62 @@ def test_email_in_use_is_rejected(client, user, sent_confirmations):
     assert user.email_confirmed
 
 
+def test_email_in_use_keeps_its_message(client, user, sent_confirmations):
+    """The 400 is kept as is (issue #125 decided to rate limit it, not hide it)."""
+    User.objects.create_user(email='taken@example.com', password='password123')
+
+    response = _put(client, user, {'email': 'taken@example.com'})
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'Email already in use'
+
+
+def test_email_change_attempts_are_rate_limited_per_user(
+    client, user, settings, sent_confirmations
+):
+    """Issue #125: the 400 above says whether an address has an account, so every attempted
+    change counts -- successful or not -- and is charged before that check."""
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'ACCOUNT_EMAIL_CHANGE_USER': (2, 3600)}
+    User.objects.create_user(email='taken@example.com', password='password123')
+
+    assert _put(client, user, {'email': 'taken@example.com'}).status_code == 400
+    assert _put(client, user, {'email': 'taken@example.com'}).status_code == 400
+    blocked_taken = _put(client, user, {'email': 'taken@example.com'})
+    blocked_free = _put(client, user, {'email': 'free@example.com'})
+
+    # Over the limit the answer is the same for a taken and a free address.
+    assert blocked_taken.status_code == blocked_free.status_code == 429
+    assert 'Retry-After' in blocked_taken
+    user.refresh_from_db()
+    assert user.email == 'testuser@example.com'
+    assert user.email_confirmed
+
+
+def test_email_change_rate_limit_is_per_user(client, user, settings, sent_confirmations):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'ACCOUNT_EMAIL_CHANGE_USER': (1, 3600)}
+    other = User.objects.create_user(email='other@example.com', password='password123')
+
+    assert _put(client, user, {'email': 'taken@example.com'}).status_code == 200
+    assert _put(client, user, {'email': 'again@example.com'}).status_code == 429
+
+    assert _put(client, other, {'email': 'other2@example.com'}).status_code == 200
+
+
+def test_updates_that_do_not_change_the_email_cost_no_budget(
+    client, user, settings, sent_confirmations
+):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'ACCOUNT_EMAIL_CHANGE_USER': (1, 3600)}
+
+    for _ in range(3):
+        assert _put(client, user, {'name': 'Renamed'}).status_code == 200
+        assert _put(client, user, {'name': 'Renamed', 'email': user.email}).status_code == 200
+
+    assert _put(client, user, {'email': 'new@example.com'}).status_code == 200
+
+
 def test_email_change_invalidates_a_still_pending_confirmation_for_the_old_address(
     client, user, sent_confirmations
 ):

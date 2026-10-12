@@ -243,16 +243,47 @@ one (tokens are single-use), and the submit button stays disabled until it yield
 429 (retargeted to `#register-msg`, so the form isn't swapped and the token may already be spent)
 it resets the widget. The view checks, in order: the form (an invalid one spends neither the token
 nor a rate limit), the captcha (`SIGNUP_CAPTCHA_IP` bounds the calls to Cloudflare; an empty token
-is rejected without one), then `SIGNUP_IP`, then `create_account`. **"This email already exists"
-comes only from `create_account`**, never from `RegisterForm` (issue #117 review): the form runs
-before the captcha and every rate limit, so answering it there would let a script enumerate
-accounts for free; now each probe costs a solved captcha and a `SIGNUP_IP` hit. `captcha.verify`
-**fails closed** (timeout, non-200, bad JSON: rejected) and, with a real secret, requires the
-reply's `hostname` to be `BASE_URL`'s host and its `action` to be `register`; Cloudflare's test
+is rejected without one), then `SIGNUP_IP`, then `create_account`. `RegisterForm` never checks
+whether the email is taken (issue #117 review): it runs before the captcha and every rate limit.
+`captcha.verify` **fails closed** (timeout, non-200, bad JSON: rejected) and, with a real secret,
+requires the reply's `hostname` to be `BASE_URL`'s host and its `action` to be `register`; Cloudflare's test
 secrets skip those two checks, since they answer with placeholder values -- so a test secret with a
 non-local `BASE_URL` triggers `accounts.W003` (shown by `manage.py check` and the container's
 `migrate` step). Login, and "Sign up with Google", have no captcha. README's "Signup captcha" has
 the Cloudflare setup.
+
+**No page or endpoint reveals whether an email address has an account** (issue #125; forgot-password
+and resend-confirmation already worked this way). The register page gives the same answer for every
+valid submission that passed the captcha and `SIGNUP_IP`: the same redirect to `accounts:created`
+(whose copy is neutral: "Check your email", not "Account created"), whatever the address. A new
+address gets an account and a confirmation email, as before. For an address that already has one,
+`create_account` raises `EmailAlreadyRegistered` (also for an `IntegrityError` from a concurrent
+signup) and the view calls `services.existing_account.handle_signup_for_existing_email`, which
+creates nothing and changes neither password nor name, and never raises (a failure there is logged,
+so it can't turn into an error page only an existing address produces):
+
+- **Confirmed account:** queues the `send_account_exists_email` task ("someone tried to create an
+  account with this address, you already have one": absolute `BASE_URL` links to sign-in and
+  forgot-password, or only to sign-in with "Sign in with Google" for an account with a `google_sub`
+  and no usable password). It carries nothing from the form, so the form can't make it say
+  something of an outsider's choosing; the task skips if the account has moved to another address
+  since. Rate limited by `SIGNUP_EXISTING_EMAIL` (1 per hour per lower-cased address, across IPs,
+  `hit_value`), over which the email is skipped silently and the response is unchanged.
+- **Unconfirmed account:** the confirmation link is resent (`send_confirmation_email`) instead of
+  the notice. Whoever left it unconfirmed most likely abandoned their own signup, and the useful
+  next step is the link, not directions to a sign-in that would refuse them. It is bounded by the
+  resend cooldown and the per-address daily cap of email verification, so it spends no
+  `SIGNUP_EXISTING_EMAIL` budget; like resend-confirmation it can supersede a link already sent.
+- **Inactive/deleted account:** nothing is sent.
+
+Timing is not made equal: the notice is queued, the new-account path sends its confirmation inline.
+Not covered by this rule, on purpose: `PUT /api/account` still answers `400 Email already in use`
+for an address that has an account, but only to a logged-in caller, and every attempted *change*
+spends `ACCOUNT_EMAIL_CHANGE_USER` (5/hour per user) before that check, so an authenticated,
+attributable and throttled caller can probe a handful of addresses an hour, which was judged
+acceptable next to an anonymous page; hiding it would mean redesigning the email-change flow. And "Sign in with Google"
+(see below) links an existing confirmed account or refuses with a specific message, which needs an
+identity Google has verified, so it is no free oracle either; left as is.
 
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email. If the address being left had been confirmed, it also gets a notice
@@ -317,6 +348,10 @@ with a `messages` banner. The feature is on only when `GOOGLE_CLIENT_ID`, `GOOGL
 templates as `google_enabled`); unset, the button is hidden and both routes redirect with a message,
 and `apps.accounts.checks` warns (`accounts.W001`) about a *partial* configuration. The callback is
 rate limited per IP (`GOOGLE_LOGIN_IP`).
+The linking refusals ("an account with this email already exists ...") do say that an address has
+an account, which the no-enumeration rule above (issue #125) otherwise forbids; that was left on
+purpose: they appear only after Google has verified the caller controls that very address, so
+nobody learns anything about an address they don't hold.
 
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.
@@ -487,7 +522,9 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   authenticate-style outcome there to gate a failed-only counter on, so it's a flat cap instead,
   but still needs many different IPs to exhaust rather than a handful of requests from one).
 - **The rules** (`settings.RATELIMIT_RULES`, one dict, each entry commented with its reasoning):
-  login (as above), signup (plus `SIGNUP_CAPTCHA_IP`, see "Auth"), forgot-password (as above,
+  login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address notice limit
+  `SIGNUP_EXISTING_EMAIL`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
+  `PUT /api/account`, per user), forgot-password (as above,
   and its response shape never changes so existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
   the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP, generous -- over the limit it
   still redirects, only the scan-count write is skipped, protecting `QRCode.scan_count`'s accuracy

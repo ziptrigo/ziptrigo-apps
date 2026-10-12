@@ -1,22 +1,22 @@
 {% extends "core/base.html" %}
 {% load static %}
 
-{% block title %}Account created{% endblock %}
+{% block title %}Check your email{% endblock %}
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
   <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6 text-center">
     <div class="flex items-center justify-center gap-3 mb-6">
       <img src="{% static 'accounts/images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
-      <h1 class="text-xl font-semibold">Account created!</h1>
+      <h1 class="text-xl font-semibold">Check your email</h1>
     </div>
     
     <p class="mb-6">
-      Your account has been created successfully. Please check your email to confirm your address before logging in.
+      We've sent you an email with what to do next. If this is a new account, follow the link in it to confirm your address before logging in.
     </p>
     
     <p class="mb-6 text-sm text-gray-600 dark:text-gray-400">
-      The confirmation link will expire in {{ confirmation_validity }}.
+      A confirmation link expires in {{ confirmation_validity }}.
     </p>
     
     <button type="button"
