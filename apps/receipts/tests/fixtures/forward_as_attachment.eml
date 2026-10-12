@@ -4,26 +4,27 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
-Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
- designates 203.0.113.5) smtp.mailfrom=joao@gmail.com; dkim=pass
- header.d=gmail.com header.i=@gmail.com; dmarc=pass header.from=x
-X-SES-Spf-Verdict: PASS
-X-SES-Dkim-Verdict: PASS
+Received-SPF: pass (spfCheck: ok) client-ip=203.0.113.5;
+ envelope-from=joao@gmail.com; helo=mail.example.net;
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of gmail.com
+ designates 203.0.113.5 as permitted sender) client-ip=203.0.113.5;
+ envelope-from=joao@gmail.com; helo=mail.example.net; dkim=pass
+ header.i=@gmail.com; dmarc=pass header.from=gmail.com;
 From: joao@gmail.com
 To: receipts+abcd2345@ziptrigo.com
 Subject: Fwd: Your Staples receipt
 Date: Fri, 09 Oct 2026 12:30:00 +0000
 Message-ID: <fixture-1@example.net>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============6853959914699950183=="
+Content-Type: multipart/mixed; boundary="===============2441027201107371850=="
 
---===============6853959914699950183==
+--===============2441027201107371850==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 See attached.
 
---===============6853959914699950183==
+--===============2441027201107371850==
 Content-Type: message/rfc822
 Content-Transfer-Encoding: 8bit
 MIME-Version: 1.0
@@ -35,26 +36,28 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
-Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
- designates 203.0.113.5) smtp.mailfrom=orders@staples.com; dkim=pass
- header.d=staples.com header.i=@staples.com; dmarc=pass header.from=x
-X-SES-Spf-Verdict: PASS
-X-SES-Dkim-Verdict: PASS
+Received-SPF: pass (spfCheck: ok) client-ip=203.0.113.5;
+ envelope-from=orders@staples.com; helo=mail.example.net;
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of
+ staples.com designates 203.0.113.5 as permitted sender)
+ client-ip=203.0.113.5; envelope-from=orders@staples.com;
+ helo=mail.example.net; dkim=pass header.i=@staples.com; dmarc=pass
+ header.from=staples.com;
 From: Staples <orders@staples.com>
 To: receipts+abcd2345@ziptrigo.com
 Subject: Your Staples receipt
 Date: Fri, 09 Oct 2026 12:30:00 +0000
 Message-ID: <fixture-1@example.net>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============8481705327793099448=="
+Content-Type: multipart/mixed; boundary="===============3412570787570036057=="
 
---===============8481705327793099448==
+--===============3412570787570036057==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Thanks for your order. Total 42.10 USD. Order R-55102 placed on 2026-10-09.
 
---===============8481705327793099448==
+--===============3412570787570036057==
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="inner-invoice.pdf"
@@ -73,6 +76,6 @@ biAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzNzcgMDAw
 MDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0NDcKJSVF
 T0YK
 
---===============8481705327793099448==--
+--===============3412570787570036057==--
 
---===============6853959914699950183==--
+--===============2441027201107371850==--

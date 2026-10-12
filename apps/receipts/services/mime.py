@@ -2,34 +2,40 @@
 receipts, and the attachment-stripped copy we keep. Pure functions over bytes -- no database, no
 S3 (`services.inbound` does the I/O and the decisions that need state).
 
-**Header assumptions** (SES receipt rule with an S3 action, `scan_enabled`; *still to be confirmed
-by the infra spike in joaonc/infra#373* -- every one of them lives in this module so a different
-reality is a change here only):
+**Header shapes** (SES receipt rule with an S3 action, `scan_enabled`; *confirmed on real staging
+mail by the infra spike*, https://github.com/ziptrigo/ziptrigo-apps/issues/98#issuecomment-6124695849;
+every one of them lives in this module so a different reality is a change here only):
 
 - SES prepends its own headers, so the **topmost** occurrence of a header is SES's and anything
   below it came from the sender. We therefore read only the first `X-SES-*-Verdict` and only the
   *first* `Authentication-Results` header, and only if its authserv-id is `amazonses.com` -- never
   a later copy a sender put in their own message to look authenticated.
-- The envelope recipient is in the `Received: ... by inbound-smtp.<region>.amazonaws.com ... for
-  <receipts+code@...>;` header SES added. Only the first `SES_RECEIVED_HEADER_COUNT` `Received`
-  header(s) count, and only if their `by` host is SES (a sender can write any `Received` they
-  like, even one that looks exactly like SES's, but it ends up below the hops that really handled
-  the message). Without one we fall back to `Delivered-To`, then `X-Original-To`, then `To`/`Cc`;
-  the first source that yields an inbox address wins.
+- The envelope recipient is in the `Received: from <host> (...) by
+  inbound-smtp.<region>.amazonaws.com with SMTP id <id> for <receipts+code@...>; <date>` header
+  SES added. Only the first `SES_RECEIVED_HEADER_COUNT` `Received` header(s) count, and only if
+  their `by` host is SES (a sender can write any `Received` they like, even one that looks exactly
+  like SES's, but it ends up below the hops that really handled the message). Without one we fall
+  back to `Delivered-To`, then `X-Original-To`, then `To`/`Cc`; the first source that yields an
+  inbox address wins. (A BCC and a Gmail auto-forward, where `To` is not our address, have not yet
+  been seen on real mail.)
 - `X-SES-Spam-Verdict` / `X-SES-Virus-Verdict` are `PASS`, `FAIL`, `GRAY` or
-  `PROCESSING_FAILED`; only `FAIL` rejects. `X-SES-Spf-Verdict` / `X-SES-Dkim-Verdict` are `PASS`
-  or not; when absent, `Authentication-Results: amazonses.com; spf=pass ...; dkim=pass
-  header.d=example.com ...` is read instead. A missing verdict counts as *not authenticated* (fail
-  closed), while a missing spam/virus verdict counts as not flagged.
+  `PROCESSING_FAILED`; only `FAIL` rejects. A missing one counts as not flagged.
+- **SES writes no SPF/DKIM verdict headers.** `X-SES-Spf-Verdict` / `X-SES-Dkim-Verdict` and
+  `Received-SPF` are ignored entirely: anyone can put them in their own message. SPF, DKIM and
+  DMARC come only from the first `Authentication-Results` header, e.g. `amazonses.com; spf=pass
+  (spfCheck: ...) client-ip=...; envelope-from=a@gmail.com; helo=...; dkim=pass
+  header.i=@gmail.com; dmarc=pass header.from=gmail.com;` -- note that `envelope-from=` (the
+  address SPF checked) is a separate `;`-segment after the `spf` result, and DKIM may carry only
+  `header.i`, no `header.d`. Anything missing counts as *not authenticated* (fail closed).
 - `Return-Path` is the envelope sender.
 
 **Who a sender is** (`Verdicts.vouches_for`): a sender address only counts as authenticated when
-the proof is about *that address*. The envelope sender (`Return-Path`) needs an SPF pass (SPF
-authenticates the envelope domain). The `From` header needs a DKIM pass whose signing domain
-(`header.d`, else the domain of `header.i`, from SES's `Authentication-Results`) is aligned with
-the `From` domain -- relaxed alignment, approximated in `addresses.domains_aligned`. Without a
-signing domain a `From` match is not authenticated. So passing SPF/DKIM for a domain of your own
-does not let you pose as somebody else's address.
+the proof is about *that address*. The envelope sender (`Return-Path`) needs an SPF pass **for that
+very address** (the `envelope-from` SES checked must equal it). The `From` header needs a DMARC
+pass whose `header.from` is exactly the `From` domain or, when SES gave no DMARC pass/fail, a DKIM
+pass whose signing domain (`header.d`, else the domain of `header.i`) is aligned with the `From`
+domain -- relaxed alignment, approximated in `addresses.domains_aligned`. So passing SPF/DKIM for a
+domain of your own does not let you pose as somebody else's address.
 
 Delivered mail is untrusted input, so the work is bounded before and while parsing:
 `exceeds_part_limit` (MIME boundary lines in the raw bytes, checked before the parser runs),
@@ -55,7 +61,7 @@ from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from urllib.parse import unquote, urlsplit
 
 from . import documents
-from .addresses import domains_aligned, inbox_code_from_address
+from .addresses import domains_aligned, inbox_code_from_address, normalize_address
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +89,8 @@ MAX_KEPT_TEXT_BYTES = 256 * 1024
 #: for it, so the sender must not be able to make it large.
 MAX_EML_BYTES = 1024 * 1024
 
-#: How many of the topmost `Received` headers SES itself writes (to be confirmed by the infra
-#: spike, joaonc/infra#373, adjust here). Only these are read for the envelope recipient.
+#: How many of the topmost `Received` headers SES itself writes (one, per the infra spike). Only
+#: these are read for the envelope recipient.
 SES_RECEIVED_HEADER_COUNT = 1
 
 #: An email body with less visible text than this isn't treated as a receipt.
@@ -93,8 +99,19 @@ MIN_BODY_CHARS = 20
 SES_AUTHSERV_ID = 'amazonses.com'
 _SES_RECEIVED_BY = re.compile(r'\bby\s+inbound-smtp\.[\w.-]*amazonaws\.com\b', re.I)
 _RECEIVED_FOR = re.compile(r'\bfor\s+(.+?)\s*(?:;|$)', re.I | re.S)
-_AUTH_RESULT = re.compile(r'^\s*(spf|dkim)\s*=\s*([a-z]+)\b(.*)$', re.I | re.S)
-_AUTH_PROPERTY = re.compile(r'\b(header\.d|header\.i)\s*=\s*"?([^\s;"]+)', re.I)
+_AUTH_RESULT = re.compile(r'^\s*([a-z][a-z0-9-]*)\s*=\s*([a-z]+)\b(.*)$', re.I | re.S)
+_AUTH_PROPERTY = re.compile(
+    r'(?<![\w.-])(header\.d|header\.i|header\.from|envelope-from|smtp\.mailfrom)'
+    r'\s*=\s*"?([^\s;"]+)',
+    re.I,
+)
+#: Authentication methods that start a new result clause in `Authentication-Results`. A segment
+#: whose `key=` is not one of these (`envelope-from=`, `helo=`, `client-ip=`, ...) is a property of
+#: the clause before it: SES writes `spf=pass (...) client-ip=...; envelope-from=...; helo=...;`.
+_AUTH_METHODS = frozenset(
+    {'spf', 'dkim', 'dmarc', 'arc', 'auth', 'iprev', 'dkim-adsp', 'dkim-atps', 'dnswl',
+     'domainkeys', 'sender-id', 'vbr', 'bimi', 'reputation', 'rrvs'}
+)  # fmt: skip
 _DOMAIN_NAME = re.compile(r'^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
 _BOUNDARY_LINE = re.compile(rb"^--[A-Za-z0-9'()+_,./:=?][^\r\n]{0,69}\r?$", re.M)
 _COMMENT = re.compile(r'\([^()]*\)')
@@ -243,35 +260,76 @@ class Verdicts:
     spam_failed: bool = False
     virus_failed: bool = False
     spf_pass: bool = False
+    #: The address SPF was checked for (`envelope-from=` of the SPF result, lowercase); empty when
+    #: SES gave none (e.g. a null sender). SPF vouches for an address only if it is this one.
+    spf_envelope_from: str = ''
     dkim_pass: bool = False
     #: Signing domains (`header.d`, else the domain of `header.i`) of the DKIM signatures that
     #: passed, from SES's `Authentication-Results`; empty when SES gave none.
     dkim_domains: frozenset[str] = frozenset()
+    #: DMARC's result (`pass`, `fail`, `none`, ... lowercase; empty if SES gave none) and the
+    #: domain it was evaluated for (`header.from=`, lowercase).
+    dmarc_result: str = ''
+    dmarc_from_domain: str = ''
+
+    @property
+    def dmarc_pass(self) -> bool:
+        return self.dmarc_result == 'pass'
 
     def dkim_aligned_with(self, address: str) -> bool:
         """A DKIM signature passed *and* its domain is aligned with `address`'s domain."""
         domain = address.rpartition('@')[2].strip().lower()
         return self.dkim_pass and any(domains_aligned(d, domain) for d in self.dkim_domains)
 
+    def spf_vouches_for(self, address: str) -> bool:
+        """SPF passed *for this address*: what SES checked (`envelope-from`) is `address`, compared
+        after `normalize_address` (case and `+tag`, as the allowlist does)."""
+        if not (address and self.spf_pass and self.spf_envelope_from):
+            return False
+        return normalize_address(address) == normalize_address(self.spf_envelope_from)
+
+    def from_authenticated(self, address: str) -> bool:
+        """Whether the `From` address is authenticated. If SES reports a DMARC pass or fail, that
+        decides: a pass counts only when its `header.from` is exactly this address's domain. With
+        no result (or `none`, a domain that publishes no policy, or an error), an aligned DKIM
+        signature (`dkim_aligned_with`) is accepted instead."""
+        domain = address.rpartition('@')[2].strip().lower()
+        if not domain:
+            return False
+        if self.dmarc_result in ('pass', 'fail'):
+            return self.dmarc_pass and self.dmarc_from_domain == domain
+        return self.dkim_aligned_with(address)
+
     def vouches_for(
         self, *, from_address: str, envelope_sender: str, is_listed: Callable[[str], bool]
     ) -> bool:
         """Whether SES authenticated a sender address that `is_listed` accepts. The proof has to be
-        about the address that matched: the envelope sender needs an SPF pass (it is what SPF
-        checks); the `From` address needs an aligned DKIM pass. Without either, the sender is
-        unauthenticated, however many SPF/DKIM passes the message has for other domains."""
-        if envelope_sender and self.spf_pass and is_listed(envelope_sender):
+        about the address that matched: the envelope sender needs an SPF pass *for it*; the `From`
+        address needs a DMARC pass for its domain (else an aligned DKIM pass). Without either, the
+        sender is unauthenticated, however many SPF/DKIM passes the message has for other
+        domains."""
+        if envelope_sender and is_listed(envelope_sender) and self.spf_vouches_for(envelope_sender):
             return True
         return (
-            bool(from_address) and is_listed(from_address) and self.dkim_aligned_with(from_address)
+            bool(from_address) and is_listed(from_address) and self.from_authenticated(from_address)
         )
 
 
 @dataclass(frozen=True, slots=True)
 class _AuthResults:
     spf: bool | None = None
+    spf_envelope_from: str = ''
     dkim: bool | None = None
     dkim_domains: frozenset[str] = frozenset()
+    dmarc_result: str = ''
+    dmarc_from_domain: str = ''
+
+
+@dataclass(slots=True)
+class _Clause:
+    method: str
+    result: str
+    properties: dict[str, str]
 
 
 def _strip_comments(value: str) -> str:
@@ -290,54 +348,89 @@ def _signing_domain(value: str) -> str:
     return domain if _DOMAIN_NAME.match(domain) else ''
 
 
+def _auth_clauses(results: str) -> list[_Clause]:
+    """The `method=result` clauses of an `Authentication-Results` value (comments already removed),
+    each with the properties (`header.d=`, `envelope-from=`, ...) that follow it -- in the same
+    `;`-segment or in later ones that are not themselves a method (`_AUTH_METHODS`). Only the
+    first value of a property counts."""
+    clauses: list[_Clause] = []
+    current: _Clause | None = None
+    for segment in results.split(';'):
+        match = _AUTH_RESULT.match(segment)
+        if match is not None and match.group(1).lower() in _AUTH_METHODS:
+            current = _Clause(match.group(1).lower(), match.group(2).lower(), {})
+            clauses.append(current)
+            rest = match.group(3)
+        else:
+            rest = segment
+        if current is not None:
+            for name, value in _AUTH_PROPERTY.findall(rest):
+                current.properties.setdefault(name.lower(), value)
+    return clauses
+
+
 def _ses_authentication_results(msg: Message) -> _AuthResults:
     """What the **first** `Authentication-Results` header says, if SES wrote it (authserv-id
-    `amazonses.com`); nothing otherwise. Later copies are the sender's. A method passes if any
-    instance of it did (a message can carry several DKIM signatures)."""
+    `amazonses.com`); nothing otherwise. Later copies are the sender's. SPF and DMARC are the first
+    clause of their kind (one per message); a DKIM check passes if any signature did (a message
+    can carry several)."""
     values = _all(msg, 'Authentication-Results')
     if not values:
         return _AuthResults()
     authserv_id, _, results = _strip_comments(values[0]).partition(';')
     if authserv_id.strip().lower() != SES_AUTHSERV_ID:
         return _AuthResults()
-    spf: bool | None = None
+    clauses = _auth_clauses(results)
+
+    spf = next((c for c in clauses if c.method == 'spf'), None)
+    dmarc = next((c for c in clauses if c.method == 'dmarc'), None)
     dkim: bool | None = None
     domains: set[str] = set()
-    for resinfo in results.split(';'):
-        match = _AUTH_RESULT.match(resinfo)
-        if match is None:
+    for clause in clauses:
+        if clause.method != 'dkim':
             continue
-        method, result, rest = match.group(1).lower(), match.group(2).lower(), match.group(3)
-        passed = result == 'pass'
-        if method == 'spf':
-            spf = bool(spf) or passed
-            continue
+        passed = clause.result == 'pass'
         dkim = bool(dkim) or passed
         if passed:
-            properties = {k.lower(): v for k, v in _AUTH_PROPERTY.findall(rest)}
             for name in ('header.d', 'header.i'):
-                domain = _signing_domain(properties.get(name, ''))
+                domain = _signing_domain(clause.properties.get(name, ''))
                 if domain:
                     domains.add(domain)
                     break
-    return _AuthResults(spf=spf, dkim=dkim, dkim_domains=frozenset(domains))
+
+    envelope_from = ''
+    if spf is not None:
+        raw = spf.properties.get('envelope-from') or spf.properties.get('smtp.mailfrom') or ''
+        envelope_from = raw.strip().strip('<>').lower()
+    return _AuthResults(
+        spf=None if spf is None else spf.result == 'pass',
+        spf_envelope_from=envelope_from,
+        dkim=dkim,
+        dkim_domains=frozenset(domains),
+        dmarc_result='' if dmarc is None else dmarc.result,
+        dmarc_from_domain=(
+            '' if dmarc is None else _signing_domain(dmarc.properties.get('header.from', ''))
+        ),
+    )
 
 
 def read_verdicts(msg: Message) -> Verdicts:
+    """What SES concluded. Spam/virus come from the topmost `X-SES-Spam-Verdict` /
+    `X-SES-Virus-Verdict`; SPF, DKIM and DMARC *only* from SES's `Authentication-Results`. The
+    `X-SES-Spf-Verdict`, `X-SES-Dkim-Verdict` and `Received-SPF` headers are deliberately not read:
+    SES never writes them, so any copy is the sender's."""
     spam = _first(msg, 'X-SES-Spam-Verdict').upper()
     virus = _first(msg, 'X-SES-Virus-Verdict').upper()
-    spf_header = _first(msg, 'X-SES-Spf-Verdict').upper()
-    dkim_header = _first(msg, 'X-SES-Dkim-Verdict').upper()
-
     results = _ses_authentication_results(msg)
-    spf_pass = spf_header == 'PASS' if spf_header else bool(results.spf)
-    dkim_pass = dkim_header == 'PASS' if dkim_header else bool(results.dkim)
     return Verdicts(
         spam_failed=spam == 'FAIL',
         virus_failed=virus == 'FAIL',
-        spf_pass=spf_pass,
-        dkim_pass=dkim_pass,
+        spf_pass=bool(results.spf),
+        spf_envelope_from=results.spf_envelope_from,
+        dkim_pass=bool(results.dkim),
         dkim_domains=results.dkim_domains,
+        dmarc_result=results.dmarc_result,
+        dmarc_from_domain=results.dmarc_from_domain,
     )
 
 
@@ -382,8 +475,8 @@ def received_at(msg: Message) -> datetime:
 #: Senders of a "confirm this forwarding address" email. These skip the sender allowlist (the
 #: account owner has to be able to complete the setup of the very forwarding that delivers their
 #: receipts) -- but only when SES authenticated the sender *as that address* (`Verdicts.vouches_for`:
-#: DKIM aligned with `google.com`, or SPF on the envelope sender), and the email only ever becomes a
-#: free `forwarding_confirmation` row, never a receipt.
+#: DMARC for `google.com`, an aligned DKIM signature, or SPF on the envelope sender), and the email
+#: only ever becomes a free `forwarding_confirmation` row, never a receipt.
 #:
 #: Gmail: `forwarding-noreply@google.com` (the older `mail-noreply@google.com` is no longer used).
 #: Outlook.com / Microsoft 365 forwarding needs no confirmation message from the forwarding side,

@@ -1,5 +1,9 @@
-"""Builds raw inbound emails the way SES stores them in S3: its own headers on top (`Return-Path`,
-the `Received ... for <recipient>` line, the verdict headers), then the sender's message.
+"""Builds raw inbound emails the way SES stores them in S3 (shapes confirmed on staging, issue #98's
+"Spike results" comment): its own headers on top (`Return-Path`, the `Received ... for <recipient>`
+line, `X-SES-Spam/Virus-Verdict`, `Received-SPF`, and one `Authentication-Results: amazonses.com`
+with the SPF, DKIM and DMARC results), then the sender's message. SES writes **no**
+`X-SES-Spf-Verdict` / `X-SES-Dkim-Verdict`, so neither does this; a test that needs one (a forged
+copy) passes it in `headers=`/`Ses.extra`.
 
 Used by the inbound tests, and to (re)generate the literal `.eml` files in `fixtures/`
 (`write_fixtures()`), so the files and the tests cannot drift apart.
@@ -12,6 +16,8 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import format_datetime
 from pathlib import Path
+
+from apps.receipts.services.addresses import domains_aligned
 
 from . import samples
 
@@ -56,16 +62,56 @@ class Ses:
     recipient: str = FIXED_ADDRESS
     spam: str | None = 'PASS'
     virus: str | None = 'PASS'
+    #: The SPF result in `Authentication-Results` (and `Received-SPF`); `None` leaves it out.
     spf: str | None = 'PASS'
     dkim: str | None = 'PASS'
     return_path: str | None = None  # default: the From address
-    #: The domain a passing DKIM signature was made for (`header.d`/`header.i` in SES's
-    #: `Authentication-Results`): default, the domain of the From address (an aligned signature);
-    #: `''` leaves the header out.
+    #: The address SPF was checked for (`envelope-from=`); default: the `Return-Path` address.
+    spf_envelope_from: str | None = None
+    #: The domain a passing DKIM signature was made for (`header.i=@<domain>` in SES's
+    #: `Authentication-Results`, as on real mail; no `header.d`): default, the domain of the From
+    #: address (an aligned signature); `''` leaves it out.
     dkim_domain: str | None = None
-    #: Leave the `X-SES-Spf/Dkim-Verdict` headers out: only `Authentication-Results` says.
-    via_authentication_results: bool = False
+    #: The DMARC result. `'auto'` (default): pass when the DKIM signature, or SPF on the envelope
+    #: sender, is aligned with the From domain, else fail -- what a real evaluation would say.
+    #: Otherwise the literal value (`'PASS'`, `'FAIL'`, `'NONE'`); `None` leaves the clause out.
+    dmarc: str | None = 'auto'
+    #: `header.from=` of the DMARC clause; default: the domain of the From address.
+    dmarc_domain: str | None = None
+    #: Where the message was handed to SES from.
+    client_ip: str = '203.0.113.5'
+    helo: str = 'mail.example.net'
     extra: list[tuple[str, str]] = field(default_factory=list)
+
+
+def _auth_results(ses: Ses, *, from_domain: str, return_path: str) -> str:
+    """The `Authentication-Results` value as SES writes it: the SPF clause, with `client-ip`,
+    `envelope-from` and `helo` as separate `;` segments after it, then DKIM, then DMARC."""
+    parts = ['amazonses.com']
+    if ses.spf is not None:
+        envelope_from = ses.spf_envelope_from if ses.spf_envelope_from is not None else return_path
+        spf = ses.spf.lower()
+        parts.append(
+            f'spf={spf} (spfCheck: domain of {return_path.rpartition("@")[2]} designates '
+            f'{ses.client_ip} as permitted sender) client-ip={ses.client_ip}'
+        )
+        parts.append(f'envelope-from={envelope_from}')
+        parts.append(f'helo={ses.helo}')
+    dkim_domain = from_domain if ses.dkim_domain is None else ses.dkim_domain
+    if ses.dkim is not None:
+        parts.append(
+            f'dkim={ses.dkim.lower()}' + (f' header.i=@{dkim_domain}' if dkim_domain else '')
+        )
+    dmarc = ses.dmarc
+    if dmarc == 'auto':
+        aligned = (ses.dkim == 'PASS' and domains_aligned(dkim_domain, from_domain)) or (
+            ses.spf == 'PASS' and domains_aligned(return_path.rpartition('@')[2], from_domain)
+        )
+        dmarc = 'PASS' if aligned else 'FAIL'
+    if dmarc is not None:
+        header_from = from_domain if ses.dmarc_domain is None else ses.dmarc_domain
+        parts.append(f'dmarc={dmarc.lower()} header.from={header_from}')
+    return '; '.join(parts) + ';'
 
 
 def build_email(
@@ -87,7 +133,7 @@ def build_email(
     bare_return_path = ses.return_path if ses.return_path is not None else bare_from
     msg['Return-Path'] = f'<{bare_return_path}>'
     msg['Received'] = (
-        f'from mail.example.net (mail.example.net [203.0.113.5]) by '
+        f'from {ses.helo} ({ses.helo} [{ses.client_ip}]) by '
         f'inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for {ses.recipient}; '
         f'{format_datetime(RECEIVED_DATE)}'
     )
@@ -95,23 +141,14 @@ def build_email(
         msg['X-SES-Spam-Verdict'] = ses.spam
     if ses.virus is not None:
         msg['X-SES-Virus-Verdict'] = ses.virus
-    dkim_domain = bare_from.rpartition('@')[2] if ses.dkim_domain is None else ses.dkim_domain
-    dkim_properties = f' header.d={dkim_domain} header.i=@{dkim_domain}' if dkim_domain else ''
-    msg['Authentication-Results'] = (
-        'amazonses.com; spf=%s (spfCheck: domain of x designates 203.0.113.5) '
-        'smtp.mailfrom=%s; dkim=%s%s; dmarc=pass header.from=x'
-        % (
-            (ses.spf or 'none').lower(),
-            bare_return_path,
-            (ses.dkim or 'none').lower(),
-            dkim_properties,
+    if ses.spf is not None:
+        msg['Received-SPF'] = (
+            f'{ses.spf.lower()} (spfCheck: ok) client-ip={ses.client_ip}; '
+            f'envelope-from={bare_return_path}; helo={ses.helo};'
         )
+    msg['Authentication-Results'] = _auth_results(
+        ses, from_domain=bare_from.rpartition('@')[2], return_path=bare_return_path
     )
-    if not ses.via_authentication_results:
-        if ses.spf is not None:
-            msg['X-SES-Spf-Verdict'] = ses.spf
-        if ses.dkim is not None:
-            msg['X-SES-Dkim-Verdict'] = ses.dkim
     for name, value in ses.extra:
         msg[name] = value
 
@@ -203,6 +240,25 @@ def gmail_auto_forward(recipient: str = FIXED_ADDRESS) -> bytes:
     )
 
 
+def gmail_manual_forward(recipient: str = FIXED_ADDRESS) -> bytes:
+    """A receipt the user forwarded by hand from Gmail, with the headers exactly as SES wrote them
+    on real staging mail (the infra spike): `Authentication-Results` with `envelope-from` as its
+    own segment, DKIM with `header.i` only, DMARC for `gmail.com`, plus `Received-SPF`."""
+    return build_email(
+        from_addr='Sender Example <sender@gmail.com>',
+        subject='Fwd: Your receipt',
+        html=HTML_RECEIPT,
+        text=None,
+        attachments=[logo()],
+        ses=Ses(
+            recipient=recipient,
+            client_ip='209.85.218.49',
+            helo='mail-ej1-f49.google.com',
+            dmarc='PASS',
+        ),
+    )
+
+
 def write_fixtures() -> None:
     """Regenerate the literal `.eml` files in `fixtures/` (run by hand after changing a builder)."""
     FIXTURES.mkdir(exist_ok=True)
@@ -211,6 +267,7 @@ def write_fixtures() -> None:
         'html_body.eml': build_email(text=None, html=HTML_RECEIPT, attachments=[logo()]),
         'gmail_forwarding_confirmation.eml': gmail_forwarding_confirmation(),
         'gmail_auto_forward.eml': gmail_auto_forward(),
+        'gmail_manual_forward.eml': gmail_manual_forward(),
         'forward_as_attachment.eml': build_email(
             from_addr='joao@gmail.com',
             to=FIXED_ADDRESS,

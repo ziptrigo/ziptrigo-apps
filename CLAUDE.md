@@ -1194,20 +1194,33 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     left by a try that was killed hard (OOM, SIGKILL -- no cleanup ran) are overwritten by the
     next one rather than orphaned and billed-never. A try that loses the unique-constraint race to
     a concurrent duplicate leaves the objects alone when the winner's `InboundEmail` row exists.
-  - **Header assumptions -- pending the infra spike in joaonc/infra#373, all in `services.mime`.**
-    SES prepends its headers, so the *topmost* instance wins and nothing a sender wrote lower down
-    can fake a verdict. Envelope recipient: the `for <addr>` of the *first*
-    `mime.SES_RECEIVED_HEADER_COUNT` (1) `Received` header, only if its `by` host is
-    `inbound-smtp.*.amazonaws.com` (a sender-written copy sits directly beneath SES's, so a
-    "contiguous run" would have trusted it); else `Delivered-To`, `X-Original-To`, `To`/`Cc` (first
-    source with an inbox address wins -- a Gmail auto-forward has the user's own address in `To`).
-    Verdicts: `X-SES-Spam-Verdict`/`X-SES-Virus-Verdict` (only `FAIL` rejects),
-    `X-SES-Spf-Verdict`/`X-SES-Dkim-Verdict`, else the SPF/DKIM results in the **first**
-    `Authentication-Results` header, accepted only if its authserv-id is `amazonses.com` (there is
-    no `Received-SPF` fallback: anyone can write one). That header also supplies the DKIM signing
-    domain(s) (`header.d=`, else the domain of `header.i=`) of the signatures that passed, used
-    for alignment below. A missing spam/virus verdict means "not flagged"; missing SPF/DKIM means
-    "not authenticated". Envelope sender: `Return-Path`.
+  - **Header shapes -- confirmed on real staging mail by the infra spike** (issue #98, comment
+    "Spike results: SES inbound headers on staging",
+    https://github.com/ziptrigo/ziptrigo-apps/issues/98#issuecomment-6124695849; all in
+    `services.mime`). SES prepends its headers, so the *topmost* instance wins and nothing a
+    sender wrote lower down can fake a verdict. Envelope recipient: the `for <addr>` of the
+    *first* `mime.SES_RECEIVED_HEADER_COUNT` (1) `Received` header (`from <host> (...) by
+    inbound-smtp.us-east-1.amazonaws.com with SMTP id <id> for <recipient>; <date>`), only if its
+    `by` host is `inbound-smtp.*.amazonaws.com` (a sender-written copy sits directly beneath SES's,
+    so a "contiguous run" would have trusted it); else `Delivered-To`, `X-Original-To`, `To`/`Cc`
+    (first source with an inbox address wins -- a Gmail auto-forward has the user's own address in
+    `To`). **Not yet verified on real mail: a BCC and a Gmail auto-forward**, the two cases where
+    `To` is not our address and the `Received ... for` header is all we have. Spam/virus:
+    `X-SES-Spam-Verdict`/`X-SES-Virus-Verdict` (topmost; only `FAIL` rejects; missing = "not
+    flagged").
+  - **Sender authentication reads one header.** SES writes **no** `X-SES-Spf-Verdict` /
+    `X-SES-Dkim-Verdict` (the spike found none), so those and `Received-SPF` are *ignored
+    entirely*: a sender could put `X-SES-Spf-Verdict: PASS` in their own message, and trusting
+    it was an authentication bypass. SPF, DKIM and DMARC come **only** from the *first*
+    `Authentication-Results` header, and only if its authserv-id is `amazonses.com` (comments
+    stripped, nesting-aware; a later copy, or Google's `ARC-Authentication-Results`, is not it).
+    Its real shape: `amazonses.com; spf=pass (spfCheck: ...) client-ip=...; envelope-from=<addr>;
+    helo=...; dkim=pass header.i=@gmail.com; dmarc=pass header.from=gmail.com;` -- the SPF
+    clause's `envelope-from` is a *separate* `;`-segment (properties belong to the clause before
+    them), and DKIM may carry `header.i` only, no `header.d` (we read `header.d`, else the domain
+    of `header.i`). The parsed result is `mime.Verdicts` (`spf_pass`, `spf_envelope_from`,
+    `dkim_pass`, `dkim_domains`, `dmarc_result`, `dmarc_from_domain`); anything missing means "not
+    authenticated" (fail closed). Envelope sender: `Return-Path`.
   - **Order of decisions per recipient:** spam `FAIL` -> `rejected_spam`; virus `FAIL` ->
     `rejected_virus`; a forwarding confirmation (below); the allowlist -> `rejected_sender`;
     then attachments / body / `no_receipt` / `rejected_too_large`; then the daily cap per file.
@@ -1217,24 +1230,29 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     accepts anyone, with no authentication needed. Otherwise the `From` address **or** the envelope
     sender must match after `addresses.normalize_address` (lowercase, `+tag` stripped, so Gmail's
     `orders+caf_=user=gmail.com@vendor.com` becomes `orders@vendor.com`), **and** SES must have
-    authenticated *the address that matched* (`mime.Verdicts.vouches_for`): a matching envelope
-    sender needs an SPF pass (SPF is about the envelope domain); a matching `From` needs a DKIM
-    pass whose signing domain is **aligned** with the `From` domain. Alignment is DMARC's relaxed
-    one, approximated by `addresses.domains_aligned`: equal, subdomain, or the same
-    "organizational domain" = last two labels, three under a common second-level suffix such as
-    `co.uk` (a hand-kept list, not the Public Suffix List; two unrelated names under an unlisted
-    suffix would look aligned). With no signing domain in `Authentication-Results`, a `From` match
-    is **not** authenticated (fail closed). So passing SPF/DKIM for a domain of your own no longer
-    lets you pose as an allowlisted address. A Gmail auto-forward (SPF broken, vendor DKIM intact)
-    is accepted through `From` + aligned DKIM. The exact header shapes (does SES write
-    `Authentication-Results` with `header.d`/`header.i`?) still await the infra spike
-    (joaonc/infra#373); until it reports, an allowlisted sender may be rejected as unverifiable
-    rather than anyone being let in.
+    authenticated *the address that matched* (`mime.Verdicts.vouches_for`):
+    - a matching **envelope sender** needs an SPF pass *for that address*: the `envelope-from` in
+      SES's SPF clause must equal the `Return-Path` (after `normalize_address`). An SPF pass for
+      some other address -- the attacker's own domain -- does not count;
+    - a matching **`From`** needs a DMARC pass whose `header.from` is exactly the `From` address's
+      domain (case-insensitive; not a subdomain or parent). When SES reports no DMARC pass/fail
+      (no clause, or `none`/an error for a domain that publishes no policy) it falls back to a DKIM
+      pass whose signing domain is **aligned** with the `From` domain; a DMARC pass/fail is never
+      second-guessed by DKIM. Alignment is DMARC's relaxed one, approximated by
+      `addresses.domains_aligned`: equal, subdomain, or the same "organizational domain" = last
+      two labels, three under a common second-level suffix such as `co.uk` (a hand-kept list, not
+      the Public Suffix List; two unrelated names under an unlisted suffix would look aligned).
+      With no signing domain, a `From` match is **not** authenticated (fail closed).
+
+    So passing SPF/DKIM for a domain of your own never lets you pose as an allowlisted address, and
+    a header you write yourself (`X-SES-*-Verdict`, `Received-SPF`, a second `Authentication-
+    Results`) authenticates nothing. A Gmail auto-forward (SPF broken, vendor DKIM intact, so DMARC
+    still passes for the vendor's domain) is accepted through `From`.
   - **Forwarding confirmations.** A message from `mime.FORWARDING_CONFIRMATION_SENDERS`
     (`forwarding-noreply@google.com`; Outlook.com/Microsoft 365 forwarding sends no such
     confirmation that we found, so there is no entry for it) that SES authenticated *as that
-    address* (the same `vouches_for` check: DKIM aligned with `google.com`, or SPF on a matching
-    envelope sender -- a pass for some other domain does not count) skips the
+    address* (the same `vouches_for` check: DMARC for `google.com` / an aligned DKIM signature, or
+    SPF on a matching envelope sender -- a pass for some other domain does not count) skips the
     allowlist and is stored as `forwarding_confirmation`: free, no receipts, no `.eml`, no cap slot,
     with the code (`Confirmation code: 123456789`, else `(#123456789)` in the subject) and the link
     in `forwarding_confirmation_code`/`_url` for the settings page to show later. The link is kept
@@ -1582,8 +1600,9 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   staff-notification email on an auto-hold: skipped rather than invented, since this project has no
   `ADMINS`/admin-email setting to send one to.
 - Receipts (#98) is fully built (phases 1 to 4: backend, email intake, the web pages, the JWT API
-  and CLI; see "Receipts" and "API" above). The email-header assumptions in `services.mime` are
-  unconfirmed until the infra spike (joaonc/infra#373) reports. Its prerequisites live elsewhere: the infra
+  and CLI; see "Receipts" and "API" above). The email-header shapes in `services.mime` were
+  confirmed on staging by the infra spike (see "Email intake"), except a BCC and a Gmail
+  auto-forward, which have not been seen on real mail yet. Its prerequisites live elsewhere: the infra
   bucket policy, IAM user, SES rules and `receipts_env` (the `infra` repo), and the owner putting
   `receipts_env` plus `OPENAI_*` into `.env.prod`/`.env.staging` before the first deploy that
   contains Receipts (prod refuses to start without them).

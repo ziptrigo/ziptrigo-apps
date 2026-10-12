@@ -145,7 +145,9 @@ class TestVerdicts:
 
         assert not verdicts.spam_failed and not verdicts.virus_failed
         assert verdicts.spf_pass and verdicts.dkim_pass
+        assert verdicts.spf_envelope_from == 'orders@staples.com'
         assert verdicts.dkim_domains == {'staples.com'}
+        assert verdicts.dmarc_pass and verdicts.dmarc_from_domain == 'staples.com'
 
     def test_only_fail_rejects(self):
         assert self.verdicts(spam='FAIL').spam_failed
@@ -168,10 +170,53 @@ class TestVerdicts:
         assert not verdicts.spf_pass and not verdicts.dkim_pass
         assert not verdicts.spam_failed and not verdicts.virus_failed
 
-    def test_falls_back_to_the_authentication_results_header(self):
-        verdicts = self.verdicts(spf='PASS', dkim='FAIL', via_authentication_results=True)
+    def test_the_real_ses_header_shape(self):
+        """Copied in shape from a message SES stored on staging (infra spike, issue #98): the
+        SPF clause's `client-ip`, `envelope-from` and `helo` are separate `;` segments, DKIM has
+        `header.i` only, DMARC has `header.from`; `Received-SPF` is there too."""
+        verdicts = mime.read_verdicts(
+            mime.parse_message((FIXTURES / 'gmail_manual_forward.eml').read_bytes())
+        )
 
-        assert verdicts.spf_pass and not verdicts.dkim_pass
+        assert verdicts == mime.Verdicts(
+            spf_pass=True,
+            spf_envelope_from='sender@gmail.com',
+            dkim_pass=True,
+            dkim_domains=frozenset({'gmail.com'}),
+            dmarc_result='pass',
+            dmarc_from_domain='gmail.com',
+        )
+
+    def test_the_authentication_results_clauses(self):
+        def read(results: bytes) -> mime.Verdicts:
+            raw = b'Authentication-Results: ' + results + b'\n\nx\n'
+            return mime.read_verdicts(mime.parse_message(raw))
+
+        verdicts = read(
+            b'amazonses.com; spf=PASS (c) client-ip=1.2.3.4; envelope-from=Bounce+x@Vendor.COM; '
+            b'helo=h.test; dkim=pass header.i=@vendor.com; dmarc=pass header.from=Vendor.com;'
+        )
+        assert verdicts.spf_pass and verdicts.spf_envelope_from == 'bounce+x@vendor.com'
+        assert verdicts.dmarc_pass and verdicts.dmarc_from_domain == 'vendor.com'
+        # `smtp.mailfrom` is the other standard name for the SPF identity.
+        assert read(b'amazonses.com; spf=pass smtp.mailfrom=a@b.test').spf_envelope_from == (
+            'a@b.test'
+        )
+        # A property belongs to the clause before it: `helo` and a later method's properties never
+        # become the SPF identity or DMARC's domain.
+        verdicts = read(b'amazonses.com; spf=pass; dkim=pass header.d=a.test; dmarc=none')
+        assert verdicts.spf_envelope_from == '' and verdicts.dmarc_from_domain == ''
+        assert verdicts.dmarc_result == 'none' and not verdicts.dmarc_pass
+        # No DMARC / SPF clause at all.
+        verdicts = read(b'amazonses.com; dkim=pass header.d=a.test')
+        assert not verdicts.spf_pass and verdicts.dmarc_result == ''
+        # The first SPF and DMARC clause decide; a failing one is not rescued by a later pass.
+        verdicts = read(
+            b'amazonses.com; spf=fail; envelope-from=a@b.test; spf=pass; envelope-from=c@d.test; '
+            b'dmarc=fail header.from=b.test; dmarc=pass header.from=d.test'
+        )
+        assert not verdicts.spf_pass and verdicts.spf_envelope_from == 'a@b.test'
+        assert verdicts.dmarc_result == 'fail' and verdicts.dmarc_from_domain == 'b.test'
 
     def test_the_signing_domain_comes_from_header_d_else_header_i(self):
         def read(results: bytes) -> frozenset[str]:
@@ -225,9 +270,13 @@ class TestVerdicts:
 
     def test_a_later_authentication_results_header_does_not_add_to_the_first(self):
         raw = build_email(
-            ses=Ses(spf='FAIL', dkim='FAIL', via_authentication_results=True),
+            ses=Ses(spf='FAIL', dkim='FAIL', dmarc='FAIL'),
             headers=[
-                ('Authentication-Results', 'amazonses.com; spf=pass; dkim=pass header.d=evil.com')
+                (
+                    'Authentication-Results',
+                    'amazonses.com; spf=pass; envelope-from=x@evil.com; dkim=pass '
+                    'header.d=evil.com; dmarc=pass header.from=evil.com',
+                )
             ],
         )
 
@@ -235,23 +284,68 @@ class TestVerdicts:
 
         assert not verdicts.spf_pass and not verdicts.dkim_pass
         assert 'evil.com' not in verdicts.dkim_domains
+        assert not verdicts.dmarc_pass and verdicts.dmarc_from_domain != 'evil.com'
 
-    def test_only_the_topmost_verdict_header_counts(self):
+    def test_only_the_topmost_spam_and_virus_verdicts_count(self):
         """SES prepends its headers; a copy the sender wrote sits below and must not win."""
         raw = build_email(
-            ses=Ses(spf='FAIL', dkim='FAIL'),
-            headers=[('X-SES-Spf-Verdict', 'PASS'), ('X-SES-Dkim-Verdict', 'PASS')],
+            ses=Ses(spam='FAIL', virus='FAIL'),
+            headers=[('X-SES-Spam-Verdict', 'PASS'), ('X-SES-Virus-Verdict', 'PASS')],
         )
 
         verdicts = mime.read_verdicts(mime.parse_message(raw))
 
-        assert not verdicts.spf_pass and not verdicts.dkim_pass
+        assert verdicts.spam_failed and verdicts.virus_failed
+
+    def test_x_ses_spf_and_dkim_verdicts_are_never_read(self):
+        """SES writes neither, so one is the sender's: injected into the message, it authenticates
+        nothing -- not with a failing `Authentication-Results`, not
+        without one."""
+        injected = [('X-SES-Spf-Verdict', 'PASS'), ('X-SES-Dkim-Verdict', 'PASS')]
+        message = build_email(ses=Ses(spf='FAIL', dkim='FAIL', dmarc='FAIL'), headers=injected)
+        right_below_ses = build_email(
+            ses=Ses(spf='FAIL', dkim='FAIL', dmarc='FAIL', extra=injected)
+        )
+        bare = b'X-SES-Spf-Verdict: PASS\nX-SES-Dkim-Verdict: PASS\n\nx\n'
+
+        for raw in (message, right_below_ses, bare):
+            verdicts = mime.read_verdicts(mime.parse_message(raw))
+
+            assert not verdicts.spf_pass and not verdicts.dkim_pass and not verdicts.dmarc_pass
+            assert not verdicts.dkim_domains
 
     def test_received_spf_is_not_trusted(self):
-        """A header anyone can write; SES's own verdict is the only source."""
-        raw = b'Received-SPF: pass (spfCheck: ok) client-ip=1.2.3.4\n\nx\n'
+        """A header anyone can write; SES's `Authentication-Results` is the only source."""
+        raw = b'Received-SPF: pass (spfCheck: ok) client-ip=1.2.3.4; envelope-from=a@b.test\n\nx\n'
+        verdicts = mime.read_verdicts(mime.parse_message(raw))
+
+        assert not verdicts.spf_pass and verdicts.spf_envelope_from == ''
+
+    def test_received_spf_does_not_back_a_failing_authentication_results(self):
+        raw = build_email(
+            ses=Ses(spf='FAIL', dkim='FAIL'),
+            headers=[('Received-SPF', 'pass (spfCheck: ok) envelope-from=orders@staples.com')],
+        )
 
         assert not mime.read_verdicts(mime.parse_message(raw)).spf_pass
+
+    def test_a_forged_authentication_results_below_the_real_one_is_ignored(self):
+        """The real (first) header says everything failed; a sender-written copy below it that
+        says `amazonses.com` and passes is still the sender's."""
+        forged = (
+            'amazonses.com; spf=pass; envelope-from=orders@staples.com; dkim=pass '
+            'header.d=staples.com; dmarc=pass header.from=staples.com'
+        )
+        raw = build_email(
+            ses=Ses(spf='FAIL', dkim='FAIL', dmarc='FAIL'),
+            headers=[('Authentication-Results', forged), ('Authentication-Results', forged)],
+        )
+
+        verdicts = mime.read_verdicts(mime.parse_message(raw))
+
+        assert not verdicts.spf_pass and not verdicts.dkim_pass and not verdicts.dmarc_pass
+        assert verdicts.dkim_domains == frozenset()
+        assert verdicts.spf_envelope_from == 'orders@staples.com'  # the real header's own value
 
 
 class TestVouchesFor:
@@ -314,6 +408,68 @@ class TestVouchesFor:
         assert not self.vouches(
             'billing@vendor.co.uk', 'b@esp.test', spf='FAIL', dkim='PASS', dkim_domain='evil.co.uk'
         )
+
+    def test_a_dmarc_pass_for_the_from_domain_vouches(self):
+        assert self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='FAIL', dmarc='PASS'
+        )
+
+    def test_a_dmarc_pass_is_compared_to_the_from_domain_case_insensitively(self):
+        assert self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='FAIL', dmarc='PASS',
+            dmarc_domain='VENDOR.com',
+        )  # fmt: skip
+
+    def test_a_dmarc_pass_for_another_domain_does_not_vouch(self):
+        """`header.from` has to be exactly the From address's domain -- not a subdomain, not the
+        parent, not somebody else's."""
+        for domain in ('evil.test', 'mail.vendor.com', 'com'):
+            assert not self.vouches(
+                'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='FAIL', dmarc='PASS',
+                dmarc_domain=domain,
+            )  # fmt: skip
+
+    def test_a_dmarc_result_decides_over_dkim_when_it_is_pass_or_fail(self):
+        """An aligned-looking DKIM signature is not second-guessed against a DMARC verdict (e.g.
+        `adkim=s` rejecting a subdomain signature)."""
+        assert not self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='PASS', dmarc='FAIL'
+        )
+        assert not self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='PASS', dmarc='PASS',
+            dmarc_domain='evil.test',
+        )  # fmt: skip
+
+    def test_without_a_dmarc_result_an_aligned_dkim_signature_vouches(self):
+        assert self.vouches('orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='PASS', dmarc=None)
+        # ... and a domain that publishes no policy (`dmarc=none`) is no worse off.
+        assert self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='PASS', dmarc='NONE'
+        )
+        assert not self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='PASS', dkim_domain='evil.test',
+            dmarc=None,
+        )  # fmt: skip
+        assert not self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='FAIL', dmarc=None
+        )
+
+    def test_spf_vouches_only_for_the_address_it_checked(self):
+        """The `Return-Path` is listed and SPF passed -- but for a different `envelope-from`."""
+        assert self.vouches('x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL')
+        assert not self.vouches(
+            'x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL',
+            spf_envelope_from='attacker@evil.test',
+        )  # fmt: skip
+        assert not self.vouches(
+            'x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL', spf_envelope_from=''
+        )
+
+    def test_the_spf_address_is_compared_after_normalization(self):
+        assert self.vouches(
+            'x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL',
+            spf_envelope_from='Orders+tag@VENDOR.com',
+        )  # fmt: skip
 
     def test_nothing_vouches_for_an_unlisted_address(self):
         assert not self.vouches('x@evil.test', 'x@evil.test')
