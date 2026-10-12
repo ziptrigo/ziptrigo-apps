@@ -227,6 +227,18 @@ and the same `apps.core.ratelimit` rules, so validation and throttling can't dri
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email.
 
+**Change password** is a session form view on the account page (`POST /account/password/`,
+`views/password.py`, `forms.ChangePasswordForm`; web only, no `/api/` endpoint). It needs the
+current password, applies `PasswordValidator` to the new one and refuses an unchanged one;
+`services.password_change.change_password` saves it and, on commit, queues the
+`send_password_changed_email` task ("your password was changed", with a link to
+`accounts:forgot-password` in case it wasn't the owner -- sent only to a *confirmed* address, like
+the feedback receipt). The view calls `update_session_auth_hash`, so this session stays signed in
+while the user's other sessions are signed out (JWTs already issued stay valid until they expire).
+A wrong *current* password counts against `CHANGE_PASSWORD_USER` (per user, failed attempts only,
+`peek` then `hit_user`), so a stolen session can't brute-force the password. A "Sign in with
+Google" account with no usable password doesn't get the form (and a POST just redirects).
+
 **Sign in with Google** (issue #91) is a third way in to the *web UI*, and it is a session login
 like the password form, not a JWT one: `GET /auth/google/login` and `GET /auth/google/callback`
 (`apps/accounts/views/google.py`, URLs in `google_urls.py` under their own `google_auth:` namespace

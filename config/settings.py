@@ -281,6 +281,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # headroom for a shared NAT/office IP signing in at the same time, not a per-user quota. The
     # callback does an outbound token exchange with Google per call, which is what this protects.
     'GOOGLE_LOGIN_IP': (30, 5 * 60),
+    # Change password on the account page: logged in, so keyed per user, and counts only a wrong
+    # *current* password (peeked first, recorded on a failure, like `LOGIN_ACCOUNT`) -- a stolen
+    # session can't brute-force the password through it, while typos in the new one cost nothing.
+    'CHANGE_PASSWORD_USER': (5, 15 * 60),
     # -- core: shared email verification (`apps.core.services.email_verification.start`) --
     # The per-email-address-per-day cap on verification *starts* (CLAUDE.md Known gaps: a resend
     # every 60s cooldown alone still allows ~1,440 sends/day, each with fresh guess attempts).
