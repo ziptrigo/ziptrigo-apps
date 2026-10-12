@@ -12,6 +12,7 @@ from .actions import (
     delete_category,
     delete_forever,
     dismiss_duplicate,
+    list_categories,
     regenerate_inbox_code,
     rename_category,
     reorder_categories,
@@ -22,8 +23,9 @@ from .actions import (
     update_receipt,
 )
 from .errors import AccountFrozenError, DailyLimitExceededError
-from .files import download_url, get_body_bytes, preview_url
+from .files import download_url, file_name, get_body_bytes, preview_url
 from .filters import ReceiptFilters, dashboard_counts, export_csv, filter_receipts, iter_csv
+from .forwarding import ForwardingConfirmation, forwarding_confirmation
 from .inbound import ingest_message
 from .lifecycle import purge_receipt
 from .metering import meter_account, resume_account
@@ -33,6 +35,7 @@ from .uploads import UploadTicket, complete_upload, start_upload
 __all__ = [
     'AccountFrozenError',
     'DailyLimitExceededError',
+    'ForwardingConfirmation',
     'ReceiptFilters',
     'UploadTicket',
     'active_inbox_code',
@@ -47,7 +50,9 @@ __all__ = [
     'download_url',
     'enqueue_processing',
     'export_csv',
+    'file_name',
     'filter_receipts',
+    'forwarding_confirmation',
     'get_account',
     'get_body_bytes',
     'inbox_address',
@@ -55,6 +60,7 @@ __all__ = [
     'ingest_message',
     'is_frozen',
     'iter_csv',
+    'list_categories',
     'meter_account',
     'preview_url',
     'process_receipt',

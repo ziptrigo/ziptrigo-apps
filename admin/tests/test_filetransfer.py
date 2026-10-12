@@ -189,6 +189,16 @@ def test_save_token_creates_file_with_owner_only_permissions(token_file):
     assert (token_file.stat().st_mode & 0o777) == 0o600
 
 
+def test_save_token_tightens_a_file_that_already_exists_with_looser_permissions(token_file):
+    token_file.write_text('old')
+    token_file.chmod(0o644)
+
+    filetransfer.save_token('secret')
+
+    assert token_file.read_text() == 'secret'
+    assert (token_file.stat().st_mode & 0o777) == 0o600
+
+
 # -- `_request`: timeout + bounded 429 retry --
 
 

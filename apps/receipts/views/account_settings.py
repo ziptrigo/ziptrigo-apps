@@ -6,9 +6,6 @@ editor are htmx partials (422 with the messages in their own slot); regenerating
 plain POST that redirects with a flash message.
 """
 
-from datetime import timedelta
-from urllib.parse import urlsplit
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -16,7 +13,6 @@ from django.db.models import Count
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
@@ -29,8 +25,10 @@ from ..models import InboundEmail, InboundEmailStatus, ReceiptCategory
 from ..services import (
     create_category,
     delete_category,
+    forwarding_confirmation,
     get_account,
     inbox_address_for,
+    list_categories,
     regenerate_inbox_code,
     rename_category,
     reorder_categories,
@@ -39,8 +37,6 @@ from ..services import (
 from ..services.currencies import ISO_4217_CODES
 from .common import form_error_lines, message_response, render_page
 
-#: How long a forwarding confirmation stays on the page (the codes expire at the provider).
-_CONFIRMATION_SHOWN_FOR = timedelta(days=7)
 _RECENT_EMAILS = 20
 
 _OUTCOMES = {
@@ -53,38 +49,6 @@ _OUTCOMES = {
     InboundEmailStatus.FORWARDING_CONFIRMATION: 'forwarding confirmation',
 }
 
-#: The only place a forwarding-confirmation link may point (what `services.mime` keeps), checked
-#: again here before it becomes an `href`.
-_CONFIRMATION_HOST = 'mail-settings.google.com'
-
-
-def _safe_confirmation_url(url: str) -> str:
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return ''
-    return url if parts.scheme == 'https' and parts.hostname == _CONFIRMATION_HOST else ''
-
-
-def _forwarding_confirmation(user) -> dict | None:
-    email = (
-        InboundEmail.objects.filter(
-            user=user,
-            status=InboundEmailStatus.FORWARDING_CONFIRMATION,
-            created_at__gte=timezone.now() - _CONFIRMATION_SHOWN_FOR,
-        )
-        .exclude(forwarding_confirmation_code='', forwarding_confirmation_url='')
-        .order_by('-created_at')
-        .first()
-    )
-    if email is None:
-        return None
-    return {
-        'received_at': email.received_at or email.created_at,
-        'code': email.forwarding_confirmation_code,
-        'url': _safe_confirmation_url(email.forwarding_confirmation_url),
-    }
-
 
 def _recent_emails(user) -> list[InboundEmail]:
     emails = list(
@@ -96,10 +60,6 @@ def _recent_emails(user) -> list[InboundEmail]:
         email.accepted = email.status == InboundEmailStatus.ACCEPTED
         email.outcome = _OUTCOMES.get(email.status, '')
     return emails
-
-
-def _categories(user) -> list[ReceiptCategory]:
-    return list(ReceiptCategory.objects.filter(user=user).annotate(receipt_count=Count('receipts')))
 
 
 def _inbox_form_context(user, form: InboxSettingsForm | None = None, *, saved: bool = False):
@@ -125,9 +85,9 @@ def _inbox_form_context(user, form: InboxSettingsForm | None = None, *, saved: b
 def settings_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     context = {
         'inbox_address': inbox_address_for(request.user),
-        'categories': _categories(request.user),
+        'categories': list_categories(request.user),
         'recent_emails': _recent_emails(request.user),
-        'confirmation': _forwarding_confirmation(request.user),
+        'confirmation': forwarding_confirmation(request.user),
         **_inbox_form_context(request.user),
     }
     return render_page(request, 'receipts/settings.html', context)
@@ -191,7 +151,7 @@ def _categories_response(request: AuthenticatedHttpRequest, *, notice: str = '')
     return render(
         request,
         'receipts/partials/settings_categories.html',
-        {'categories': _categories(request.user), 'notice': notice},
+        {'categories': list_categories(request.user), 'notice': notice},
     )
 
 

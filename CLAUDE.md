@@ -24,9 +24,10 @@ apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short 
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs.
 apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
-                      uploads, email intake, AI extraction, billing, jobs, admin and the web pages;
-                      no API or CLI yet (see "Receipts" below).
-admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer. Via `inv`.
+                      uploads, email intake, AI extraction, billing, jobs, admin, the web pages, the
+                      JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts").
+admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts.
+                      Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
 pyproject.toml        Deps, ruff/ty/pytest/import-linter config, `inv` module registry.
@@ -52,11 +53,19 @@ inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
 inv server run [local|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv openapi generate --format json --file <path>
-inv qrcode login local <email> <password>       # JWT CLIs over /api/qr/ and /api/ft/
+inv qrcode login local <email> <password>       # JWT CLIs over /api/qr/, /api/ft/ and /api/receipts/
 inv filetransfer send local report.pdf --to a@example.com
+inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
+inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported types are skipped
+inv receipts list local --status needs_review --from 2026-10-01 --to 2026-10-31
+inv receipts get local <receipt-id>
+inv receipts export local --out receipts.csv [--status ... --q ... --from ... --to ...]
+inv receipts inbox local                        # the address receipts can be emailed to
+inv receipts regenerate local [--yes]           # retire the address and issue a new one
 ```
 
-Every command accepts `--dry` to print the shell command without running it. The app names `inv`
+Every command accepts `--dry` to print the shell command without running it (the JWT HTTP-client
+CLIs -- `qrcode`, `filetransfer`, `receipts` -- run no shell command, so they have no `--dry`). The app names `inv`
 accepts come from `admin/django_app.py`, which discovers them from `apps/*/apps.py`.
 
 `admin/server.py` and `admin/openapi.py` each define one typer command, which typer collapses away
@@ -68,7 +77,7 @@ when the module is run directly (`python3 -m admin.server`) but which `inv` pres
 Run pytest from the repo root; `DJANGO_SETTINGS_MODULE=config.settings` and
 `testpaths = ['apps', 'admin']` are set in `pyproject.toml`, and default addopts include
 `--reuse-db --no-migrations`. `admin` is there for `admin/tests/` (currently
-`admin/filetransfer.py`'s unit tests) -- plain HTTP-client CLI logic with no Django/database
+`admin/filetransfer.py`'s, `admin/receipts.py`'s and the token-file handling of `qrcode`/`utils`) -- plain HTTP-client CLI logic with no Django/database
 dependency of its own, picked up by the same `pytest`/`inv test unit` run as every app's tests:
 
 ```bash
@@ -204,7 +213,8 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   (`LOGIN_URL='accounts:login'`). The login page is a session form view
   (`apps/accounts/views/login.py`, CSRF-protected, honours a same-site `next`); logout is
   POST-only. The browser never holds a JWT.
-- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py` and `admin/filetransfer.py`
+- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py`, `admin/filetransfer.py` and
+  `admin/receipts.py`
   (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE`
   users). Claim `sub`, signed with `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
 
@@ -461,7 +471,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
 
 `config/api.py` builds one `NinjaAPI`; each app exposes a `router` from its `api` module/package
 and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr/`, `/api/ft/` for
-file_transfer). Docs at `/api/docs`.
+file_transfer, `/api/receipts/` for receipts). Docs at `/api/docs`.
 
 `apps/file_transfer/api/` (issue #55 phase 3) is JWT-only (logged-in users; anonymous sending stays
 web-only) and mirrors the web send/dashboard flow endpoint-for-endpoint, calling the exact same
@@ -487,6 +497,54 @@ caller's existing empty draft rather than creating a fresh one per call, same as
 `get_or_create_draft`). `PATCH /transfers/{id}` applies its one-service-call-per-field updates
 inside `transaction.atomic()` (as does the dashboard's own combined settings form,
 `views.dashboard.update_settings`), so a later field failing can't leave an earlier one committed.
+
+`apps/receipts/api/` (issue #98 phase 4; `/api/receipts/`) is JWT-only like the file_transfer one
+(router-level `auth=JWTAuth()` in `api/router.py`, so no endpoint can be added without it; endpoint
+modules `receipts.py`, `uploads.py`, `export.py`, `categories.py`, `inbox.py` share that one
+`Router`; schemas in `apps/receipts/schemas/`) and calls the exact same `apps.receipts.services` the
+web views do. Paths are relative to the mount, so the list is `/api/receipts/receipts`:
+`GET /receipts` (`status` -- one or several comma-separated, plus the `in_progress` shorthand for the
+three in-flight ones --, `category` an id or `none`, `q`, `date_from`/`date_to` on `receipt_date`,
+`sort`, `duplicates`, `trashed` to list the Trash, `limit` 1-100 default 20 / `offset`, answering
+`{count, limit, offset, results}` like the ft list), `GET|PATCH|DELETE /receipts/{id}` (`GET` also
+returns a trashed receipt; `PATCH` is partial via `payload.dict(exclude_unset=True)`, an explicit
+`null` clears a field -- unlike `PATCH /inbox`, where `null` means unchanged -- and both update
+schemas are `extra='forbid'`, so an unknown key such as `status` or a typo is a 422, never a silent
+no-op; `DELETE` moves to the Trash and answers 204, idempotently),
+`POST /receipts/{id}/restore|reprocess|dismiss-duplicate`, `GET /receipts/{id}/file?disposition=
+attachment|inline` (a JSON `{url, disposition, filename, expires_in}` with a short-lived presigned
+URL -- never a redirect, never the S3 key; `filename` is `services.file_name`, the very name the
+URL downloads under, so an email body is `email.html`/`email.txt`, not empty), `POST /uploads` (`{filename, size, content_type?,
+checksum_sha256}` -> 201 `{receipt_id, url, headers, expires_in}`, the receipt's `source` being
+`api`) and `POST /uploads/{id}/complete` (idempotent; answers the receipt), `GET /export.csv` (same
+filters, a streamed `text/csv`; filters are validated before streaming starts so a bad one is a
+400 and not a broken download, and before `RECEIPTS_EXPORT_USER` is charged so it costs no
+budget -- the web export parses its lenient filters before charging too, to keep the two in step),
+`GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
+`PATCH|DELETE /categories/{id}`, `GET|PATCH /inbox` (address, `sender_allowlist`,
+`default_currency`, the latest `forwarding_confirmation` of the last 7 days via
+`services.forwarding`, shared with the settings page) and `POST /inbox/regenerate`. Receipts carry
+every field of the model except the S3 keys, the raw AI response and the upload checksum;
+`amount` is a string with two decimals, `category` is `{id, name}`, `possible_duplicate_of` an id,
+`missing_fields` lists which of vendor/amount/receipt date are unset.
+Status codes (`api/common.py`): **400** for a service `ValidationError` (field-keyed ones as
+`field: message`, including the daily file cap) or one of the few hand-parsed query parameters
+(`date_from`/`date_to` and `disposition`), **422** for everything django-ninja validates itself
+before an endpoint runs -- a non-UUID `{receipt_id}`, `limit=abc`, `duplicates=maybe`, a wrongly
+typed body field, an unknown `PATCH` key -- whose `detail` is a *list* of `{loc, msg, ...}` rather
+than a string (the CLI's `_error_text` flattens it), **402** for
+both `AccountFrozenError` (storage unpaid: new uploads, re-runs, `.../file`) and
+`InsufficientCreditsError` (a re-run the balance can't cover) -- one documented code, as in the
+file_transfer API; reading, listing, editing and exporting stay available while frozen, **404** for
+another user's (or an unfinished upload's) receipt or category and never 403, **429** from the
+site-wide `RateLimitExceeded` handler with `Retry-After`. The rate limits are the web's, so the
+budgets are shared: `RECEIPTS_UPLOAD_USER` (`POST /uploads`), `RECEIPTS_UPLOAD_COMPLETE_USER`
+(`.../complete`), `RECEIPTS_REPROCESS_USER`, `RECEIPTS_EXPORT_USER` and `RECEIPTS_REGENERATE_USER`.
+Where the endpoint looks up a receipt, the lookup (404) comes before its rate limit is charged
+(`reprocess`); `POST /uploads/{id}/complete` is the exception and charges
+`RECEIPTS_UPLOAD_COMPLETE_USER` first, like the web view. Tests: `apps/receipts/tests/
+test_api_*.py` over Django's test client (the real `/api/receipts/...` URLs), helpers in
+`tests/api_support.py`.
 
 **Resumable uploads** (spec section 2, issue #55 phase 3): `TransferFile.client_last_modified`
 (nullable, the browser/CLI's `lastModified`, ms since epoch) plus its name and size let a client
@@ -950,7 +1008,8 @@ and extracts vendor, amount, date and a category with an OpenAI-compatible visio
 product (same layer as `qr_code`/`file_transfer`). **Built so far:** models, settings, the
 `receipts` queue, uploads, the processing/AI pipeline, billing, jobs, admin (phase 1), email
 intake (phase 2: the S3 poller, MIME parsing, `ingest_message`, `receipts_ingest_eml`) and the web
-UI (phase 3, "Web UI" below). **Not yet:** the JWT API and `admin/receipts.py` CLI (phase 4).
+UI (phase 3, "Web UI" below) and the JWT API and `admin/receipts.py` CLI (phase 4, "API and CLI"
+below; the API itself is described under "API" above).
 Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `checks.py`,
 `management/commands/`.
 
@@ -1048,7 +1107,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   through `services.accounts.add_stored_bytes` (floored at 0; the billing clock restarts when an
   empty account gets its first bytes). `InsufficientCreditsError` **freezes** the account
   (`frozen_at`) and emails the owner: nothing is deleted, but previews, downloads, new uploads,
-  re-runs and processing are refused (`AccountFrozenError`; the API will answer 402), and the frozen
+  re-runs and processing are refused (`AccountFrozenError`; the API answers 402), and the frozen
   days are never billed (unfreezing sets `last_billed_at = now`). The `credits_added` receiver
   (`weak=False`, wrapped in `try/except` because `send` would otherwise skip file transfer's
   receiver) only queues `resume_account(user_id)`, and only for users with a Receipts account;
@@ -1060,7 +1119,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   that were **already frozen before its metering pass** (it snapshots their ids first); otherwise
   an account frozen in that very run would be unfrozen again at once, its day forgiven and its
   owner told "paused" every day for nothing.
-- **Actions** (`services.actions`, shared by the web views and the future API; `ValidationError` -> 422/400,
+- **Actions** (`services.actions`, shared by the web views and the API; `ValidationError` -> 422/400,
   `AccountFrozenError`/`InsufficientCreditsError` -> 402): `update_receipt` (partial; records the
   extracted fields that actually changed in `user_edited_fields`, `notes` aside; refuses extracted
   fields while the AI owns the receipt; moves `needs_review` <-> `processed` as the required fields
@@ -1076,7 +1135,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   issue; every cell goes through the formula guard, which also catches leading whitespace); `services.files` has the presigned inline/attachment URLs
   (an HTML body is *never* served inline from S3 -- `views.detail.body_view` streams it with a CSP; a nameless
   file downloads as `email.html`/`email.txt`/`receipt`).
-  The `RECEIPTS_*_USER` rate-limit rules exist in `RATELIMIT_RULES`; the web views enforce them (the API will).
+  The `RECEIPTS_*_USER` rate-limit rules exist in `RATELIMIT_RULES`; the web views and the API both enforce them, sharing each budget.
   `filter_receipts` and `dashboard_counts` (the tab and Trash numbers, one query) never include a
   receipt with `uploaded=False` (a direct upload still in flight or abandoned).
 - **Jobs** (`apps/receipts/jobs.py`, registered in `ready()`): `receipts.meter_storage` (daily),
@@ -1320,6 +1379,36 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     as the bucket the fake presigned URLs point at (it checks `x-amz-checksum-sha256` like S3),
     inline tasks, and its own `db.e2e.sqlite3` -- no test switch in production code. Run it with
     `inv test e2e` (needs `.env.local`).
+- **API and CLI** (phase 4). The endpoints, status codes (400/402/404/429) and shared rate-limit
+  budgets are in "API" above. Two service additions came with it: `services.forwarding`
+  (`forwarding_confirmation(user)`, the Gmail confirmation code/link of the last 7 days, moved out of
+  the settings view so the API's `/inbox` and the page share it) and `services.list_categories`
+  (a user's categories with `receipt_count`, **ordered explicitly**: `Meta.ordering` is dropped from
+  a query that aggregates, so the settings page's earlier `annotate(Count(...))` left the order to
+  the database). `admin/receipts.py` mirrors `admin/filetransfer.py`: `login` (password as an
+  optional argument, a hidden prompt, or `RECEIPTS_PASSWORD`), `list` (`--status --category --q
+  --from --to --sort --duplicates --trashed --limit --offset`, the full receipt id in the table
+  because `get` needs all of it), `upload <files or folders>` (SHA-256 base64 of the file, `POST
+  /uploads`, a `PUT` of the bytes to the presigned URL with exactly the headers the API returned,
+  `POST .../complete`; an extension outside PDF/JPG/PNG/HEIC/WebP, or an empty file, is skipped with
+  a warning, one file failing doesn't stop the rest, and the exit code is 1 if any failed), `get`,
+  `export --out file.csv` (streamed to `.<name>.part` next to `--out` and renamed into place only when
+  complete, so a dropped connection never leaves a cut-off CSV), `inbox` and `regenerate` (confirms
+  unless `--yes`). Its token is **per environment**, `~/.receipts_token.<env>` (so the prod JWT is
+  never sent to the local server; the single `~/.receipts_token` of earlier versions is ignored --
+  log in again, then delete it), written by `admin.utils.write_private_file` (mode 0600 set on the
+  open descriptor so a pre-existing looser file is tightened, `O_NOFOLLOW`; `filetransfer` and
+  `qrcode` use it too). Every request goes through `_request`: default timeout; a 429 is retried
+  after its `Retry-After` only when that is <= 60 s (`MAX_RETRY_AFTER_SECONDS`) and the call's total
+  wait stays within `MAX_TOTAL_RETRY_WAIT_SECONDS` -- the hourly rules (export, regenerate, re-run,
+  login) are not slept on, the error says "rate limited, try again in N minutes" instead; and any
+  `requests` exception exits 1 with a message (or raises `NetworkError` for the upload loop, which
+  carries on with the next file). Errors print the API's `detail`, a ninja 422 list flattened to
+  `field: message`. The site URL is read
+  when a command runs, after `set_environment` has loaded the env file: `API_BASE_URL`, else the
+  file's `BASE_URL`, else `http://localhost:8000` (the older CLIs read `API_BASE_URL` at import
+  time, before that file is loaded). Unit tests: `admin/tests/test_receipts.py`, HTTP mocked, no
+  Django.
 - **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
   (status/reason/source filters; no add/change/delete -- deleting a row would orphan its S3 objects
   and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, next attempt, last error; a "retry" action
@@ -1492,10 +1581,8 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   section 16, deferred to issue #59) are built -- see "File transfer specifics" above. No
   staff-notification email on an auto-hold: skipped rather than invented, since this project has no
   `ADMINS`/admin-email setting to send one to.
-- Receipts (#98) is only partly built: phases 1 and 2 (backend and email intake, see "Receipts"
-  above) are in; the pages (including the settings page that shows forwarding-confirmation codes)
-  and the JWT API/CLI are later phases, and its `ProductApp` is not registered yet, so it doesn't
-  appear in the nav or on the landing page. The email-header assumptions in `services.mime` are
+- Receipts (#98) is fully built (phases 1 to 4: backend, email intake, the web pages, the JWT API
+  and CLI; see "Receipts" and "API" above). The email-header assumptions in `services.mime` are
   unconfirmed until the infra spike (joaonc/infra#373) reports. Its prerequisites live elsewhere: the infra
   bucket policy, IAM user, SES rules and `receipts_env` (the `infra` repo), and the owner putting
   `receipts_env` plus `OPENAI_*` into `.env.prod`/`.env.staging` before the first deploy that

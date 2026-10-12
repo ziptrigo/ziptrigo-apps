@@ -107,6 +107,27 @@ def read_env_file_from_path(env_path: Path) -> dict[str, str]:
     return env
 
 
+def write_private_file(path: Path, text: str) -> None:
+    """
+    Write `text` to `path` so that only the owner can read it, whatever the file looked like before.
+
+    Used for the CLIs' token files. Passing `0o600` to `os.open` only applies when the file is
+    *created*; one that already exists (made by hand, or copied with a looser umask) keeps its old
+    mode through `O_TRUNC`, so the mode is set again on the open descriptor. `O_NOFOLLOW` refuses
+    to write through a symlink (an `OSError`), so a planted link can't redirect the token elsewhere.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        if hasattr(os, 'fchmod'):
+            os.fchmod(fd, 0o600)
+    except BaseException:
+        os.close(fd)
+        raise
+    with os.fdopen(fd, 'w') as fh:
+        fh.write(text)
+
+
 def read_env_file(environment: Environment) -> dict[str, str]:
     return read_env_file_from_path(PROJECT_ROOT / f'.env.{environment.value}')
 

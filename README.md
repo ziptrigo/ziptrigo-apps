@@ -22,8 +22,8 @@ A single Django project (a "modular monolith") with one Django app per concern:
 - **receipts** — receipts and invoices in, extracted fields out (#98): files go to S3 and an
   OpenAI-compatible vision model reads vendor, amount, date and a category from the user's own
   list. Credit-metered per file and per GB stored. Built: models, uploads, the AI pipeline, email
-  intake, billing, jobs, admin and the web pages (dashboard, upload, detail, trash, settings);
-  the API/CLI come in a later phase.
+  intake, billing, jobs, admin and the web pages (dashboard, upload, detail, trash, settings), plus a
+  JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (#98 phase 4).
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -52,7 +52,7 @@ ziptrigo-apps/
 │   ├── qr_code/
 │   ├── file_transfer/
 │   └── receipts/
-├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, ...), run via `inv`
+├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, receipts, ...), run via `inv`
 ├── tests_e2e/               # Playwright end-to-end tests
 ├── conftest.py              # Fixtures shared by every app's tests
 ├── Dockerfile
@@ -87,7 +87,7 @@ apps/<app>/
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
-| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…` |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…` |
 | `/admin/` | Django admin (Jazzmin) |
 
 ### Dependency rules
