@@ -295,6 +295,7 @@ class TestExport:
             'source',
             'added',
             'original_filename',
+            'vendor_as_read',
         ]
         assert row['vendor'] == 'Staples' and row['amount'] == '42.10'
         assert row['receipt_date'] == '2026-10-09' and row['category'] == 'Printer stuff'

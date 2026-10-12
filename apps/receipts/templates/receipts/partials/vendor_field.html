@@ -1,0 +1,71 @@
+{% load receipts_ui %}
+{% comment %} The vendor field of a receipt's form: an ARIA combobox over the user's own vendors (the
+   `vendorCombobox` Alpine component), the Vetted / New vendor chip, the name the AI read, and, for a
+   vendor nobody has vetted yet, the "Mark as vetted" button. Typing a name or picking a vendor moves
+   *this* receipt to it when the form is saved; "Rename vendor..." renames the vendor itself, for all of
+   its receipts. (The form sets `hx-disabled-elt="find button[type='submit']"`, which htmx 2.0 can't resolve
+   for a request made by a control that has no such button inside it: every htmx control in here sets
+   its own, or `unset`.) Re-rendered on its own (outerHTML) by "Mark as vetted". Needs `receipt`, `vendor`
+   (None when the receipt has none), `vendor_receipt_count`, `read_as`, `missing`, `trashed` and
+   `detail_url`. {% endcomment %}
+<div id="vendor-field" class="mb-4" x-data="vendorCombobox"
+     data-name="{{ receipt.vendor }}" data-vendor-id="{{ receipt.vendor_ref_id|default_if_none:'' }}"
+     data-extracted="{{ receipt.vendor_extracted }}" @click.outside="close()">
+    <div class="flex items-baseline justify-between gap-3 mb-1">
+        <label for="id_vendor" class="text-sm font-medium">Vendor <span class="text-amber-700 dark:text-amber-400" aria-hidden="true">*</span></label>
+        {% if vendor and not trashed %}
+        <button type="button" x-show="!changed"
+                hx-get="{% url 'receipts:vendor-rename' vendor.pk %}?next={{ detail_url|urlencode:'' }}"
+                hx-target="#vendor-modal" hx-swap="innerHTML" hx-disabled-elt="this"
+                class="inline-flex items-center gap-1 rounded text-xs text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <i class="fas fa-pen" aria-hidden="true"></i>Rename vendor&hellip;
+        </button>
+        {% endif %}
+    </div>
+    <div class="relative">
+        <input id="id_vendor" name="vendor" type="text" maxlength="255" value="{{ receipt.vendor }}" autocomplete="off"
+               role="combobox" aria-autocomplete="list" aria-controls="vendor-suggestions" aria-expanded="false"
+               :aria-expanded="open ? 'true' : 'false'" :aria-activedescendant="activeId"
+               {% if 'vendor' in missing %}aria-describedby="vendor-hint"{% endif %}
+               x-ref="input" x-model="name" @input="edited()" @keydown="onKeydown($event)"
+               hx-get="{% url 'receipts:vendor-suggest' %}" hx-trigger="input changed delay:200ms, focus"
+               hx-target="#vendor-suggestions" hx-swap="innerHTML" hx-sync="this:replace"
+               hx-disabled-elt="unset"
+               class="w-full rounded border {% if 'vendor' in missing %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 {% if vendor %}pl-3 pr-32{% else %}px-3{% endif %} py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <input type="hidden" name="vendor_id" value="{{ receipt.vendor_ref_id|default_if_none:'' }}" :value="vendorId">
+        <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center">
+            {% if vendor %}<span x-show="!changed">{% vendor_chip vendor.vetted %}</span>{% endif %}
+            <span x-show="changed && name.trim() !== ''" style="display: none">{% vendor_chip True %}</span>
+        </span>
+        <div id="vendor-suggestions" x-ref="list" x-show="open" style="display: none"
+             role="listbox" aria-label="Your vendors" @htmx:after-swap="onSwap()"
+             class="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-1 text-sm shadow-lg"></div>
+    </div>
+    {% if 'vendor' in missing %}<p id="vendor-hint" class="mt-1 text-xs text-amber-700 dark:text-amber-400"><i class="fas fa-turn-up fa-rotate-90 mr-1" aria-hidden="true"></i>We couldn't read the vendor. Check the receipt and fill it in.</p>{% endif %}
+
+    {% if read_as %}
+    <p x-show="!changed" class="mt-1 flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <i class="fas fa-eye mt-0.5" aria-hidden="true"></i>
+        <span>Read on the receipt as <span class="text-gray-700 dark:text-gray-300">&ldquo;{{ read_as }}&rdquo;</span>.{% if vendor %} Filed under your vendor {{ vendor.name }} ({{ vendor_receipt_count }} receipt{{ vendor_receipt_count|pluralize }}).{% endif %}</span>
+    </p>
+    {% endif %}
+
+    {% comment %} Shown once a different vendor is picked or typed: the change is forward-looking, so it says so. {% endcomment %}
+    <div x-show="showHint" style="display: none" role="status"
+         class="mt-2 flex items-start gap-2 rounded-md border border-blue-600/40 dark:border-blue-400/40 bg-blue-50 dark:bg-gray-800 px-3 py-2 text-xs text-gray-700 dark:text-gray-300">
+        <i class="fas fa-circle-info mt-0.5 text-blue-600 dark:text-blue-400" aria-hidden="true"></i>
+        <span class="flex-1">On save, future receipts read as <strong>&ldquo;{{ receipt.vendor_extracted }}&rdquo;</strong> will be filed under <strong x-text="name.trim()"></strong>. Receipts you already have stay as they are.</span>
+    </div>
+
+    {% if vendor and not vendor.vetted and not trashed %}
+    <div x-show="!changed" class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2">
+        <p class="min-w-0 flex-1 text-xs text-gray-600 dark:text-gray-300">{% if vendor_receipt_count > 1 %}{{ vendor_receipt_count }} receipts from this vendor so far.{% else %}First receipt from this vendor.{% endif %} Fix the name if you like, then mark it vetted so future receipts are matched to it first.</p>
+        <button type="button" hx-post="{% url 'receipts:vendor-vet' %}"
+                hx-vals='{"ids": "{{ vendor.pk }}", "receipt": "{{ receipt.pk }}"}'
+                hx-target="#vendor-field" hx-swap="outerHTML" hx-disabled-elt="this"
+                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors disabled:opacity-50">
+            <i class="fas fa-circle-check mr-2" aria-hidden="true"></i>Mark as vetted
+        </button>
+    </div>
+    {% endif %}
+</div>

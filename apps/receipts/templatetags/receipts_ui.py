@@ -69,6 +69,27 @@ def status_pill(status: str) -> str:
     )
 
 
+@register.simple_tag
+def vendor_chip(vetted: bool, short: bool = False) -> str:
+    """The "Vetted" / "New vendor" chip of a vendor (`short`: just "New", for the Vendors page).
+    Neutral gray for a vendor nobody confirmed yet, so it doesn't read as a problem."""
+    if vetted:
+        label, icon, tone = 'Vetted', 'fas fa-circle-check', 'green'
+    else:
+        label, icon, tone = ('New' if short else 'New vendor'), 'fas fa-seedling', 'gray'
+    text, border, icon_color = _TONES[tone]
+    return format_html(
+        '<span class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border '
+        '{} {} px-2 py-0.5 text-xs font-medium">'
+        '<i class="{} {}" aria-hidden="true"></i>{}</span>',
+        text,
+        border,
+        icon,
+        icon_color,
+        label,
+    )
+
+
 #: What to tell the user about a failed receipt, and the next step. `refundable` reasons mean no AI
 #: answer was paid for (see services.processing), so the text can say the credits came back.
 FAILURE_HELP = {

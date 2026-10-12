@@ -4,10 +4,25 @@
    the hidden inputs below keep the tab and sort when a filter changes. {% endcomment %}
 {% if parsed.tab != 'all' %}<input type="hidden" name="status" value="{{ parsed.tab }}">{% endif %}
 {% if parsed.params.sort %}<input type="hidden" name="sort" value="{{ parsed.params.sort }}">{% endif %}
+{% if vendor_filter %}<input type="hidden" name="vendor" value="{{ vendor_filter.pk }}">{% endif %}
 
 {% if oob_export %}
 {% include 'receipts/partials/tabs.html' with oob=True %}
 {% include 'receipts/partials/export_link.html' with oob=True %}
+{% endif %}
+
+{% if vendor_filter %}
+{% comment %} The vendor filter (`?vendor=<id>`, from the Vendors page): a chip that removes it. The hidden input
+   above makes it travel with the search, tabs, paging and the export link like every other filter. {% endcomment %}
+<div class="mb-4 flex flex-wrap items-center gap-2">
+    <span class="inline-flex items-center gap-2 rounded-full border border-sage-300 dark:border-sage-600 bg-sage-50 dark:bg-gray-800 py-1 pl-3 pr-1 text-sm">
+        Vendor: <strong class="font-semibold">{{ vendor_filter.name }}</strong>
+        <a href="{{ dashboard_url }}{% if clear_vendor_query %}?{{ clear_vendor_query }}{% endif %}"
+           hx-get="{{ list_url }}{% if clear_vendor_query %}?{{ clear_vendor_query }}{% endif %}" hx-target="#receipt-list" hx-swap="innerHTML" hx-sync="#receipt-filters:replace"
+           aria-label="Remove the vendor filter"
+           class="rounded-full p-1 hover:bg-sage-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-primary"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></a>
+    </span>
+</div>
 {% endif %}
 
 <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">

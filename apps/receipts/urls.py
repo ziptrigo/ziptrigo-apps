@@ -13,6 +13,14 @@ urlpatterns = [
     path('upload/start/', views.upload_start, name='upload-start'),
     path('upload/<uuid:receipt_id>/complete/', views.upload_complete, name='upload-complete'),
     path('trash/', views.trash_page, name='trash'),
+    # Vendors: the page and its list, the vendor field's suggestions, and the actions on vendors.
+    path('vendors/', views.vendors_page, name='vendors'),
+    path('vendors/list/', views.vendor_list, name='vendor-list'),
+    path('vendors/suggest/', views.vendor_suggest, name='vendor-suggest'),
+    path('vendors/vet/', views.vendor_vet, name='vendor-vet'),
+    path('vendors/merge/', views.vendor_merge, name='vendor-merge'),
+    path('vendors/<int:vendor_id>/rename/', views.vendor_rename, name='vendor-rename'),
+    path('vendors/<int:vendor_id>/delete/', views.vendor_delete, name='vendor-delete'),
     # Settings: the address, accepted senders and currency, and the category editor.
     path('settings/', views.settings_page, name='settings'),
     path('settings/regenerate/', views.regenerate_address, name='regenerate'),

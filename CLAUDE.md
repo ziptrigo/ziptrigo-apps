@@ -1083,7 +1083,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `unsupported_type`, `too_large`, `extraction_error`. Beyond the issue's list `Receipt` also has
   `preview_size_bytes` (so a purge subtracts exactly what was added), `upload_checksum_sha256`,
   `processing_started_at` (what `retry_due` uses to find a receipt stuck in `processing`) and
-  `last_error`; `InboundEmail` has `attention_notified_at`; `InboundMessage` has `failed_key`. `ReceiptsSettings` is a
+  `last_error`, and (issue #123) `vendor_ref` / `vendor_extracted` (see "Vendors");
+  `InboundEmail` has `attention_notified_at`; `InboundMessage` has `failed_key`. `ReceiptsSettings` is a
   `SingletonSettingsAdmin` singleton (`price_per_file`, `max_file_bytes` 15 MB, `allowed_types`,
   `min_inline_image_px`, `max_files_per_user_per_day`, `max_inbound_rows_per_day`, `trash_days`,
   `max_pdf_pages_to_ai`, `max_ai_attempts`); the per-GB storage price is the shared `BillingSettings` one.
@@ -1149,6 +1150,80 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   back); dismissing sets `duplicate_dismissed`. Tasks are queued with
   `enqueue_after_commit` (`apps.core.services.queue`; on commit, a failure logged and swallowed -- `retry_due`
   re-queues receipts nobody picked up).
+- **Vendors** (issue #123; `models/vendor.py`, `services/vendors.py`, migrations `0003_vendors` +
+  `0004_backfill_vendors`). A `Vendor` is one of a *user's* vendors (per user, like categories;
+  `UniqueConstraint(Lower('name'), 'user')`); `vetted_at` null means only the AI read it. A
+  `VendorAlias` is a name it is known by, stored under a normalized `key` (`normalize_key`: NFKC,
+  casefold, Latin accents stripped, `&` -> "and", dots and apostrophes removed, other punctuation a
+  word break, a leading "the" and trailing legal forms like LLC/Inc/Ltd/GmbH dropped, never down to
+  nothing; `ACME Industries, LLC`, `Acme Industries LLC` and `ACME INDUSTRIES L.L.C.` are all
+  `acme industries`); **a key belongs to one vendor per user** (`UniqueConstraint(user, key)`), which
+  is what makes matching deterministic. `Receipt.vendor_ref` is a nullable FK with `on_delete=RESTRICT`
+  (a vendor with receipts can only go through a merge; deleting the *user* still cascades through
+  both tables) and `Receipt.vendor_extracted` is what the AI read, before matching. **`Receipt.vendor`
+  (the text) stays**, kept equal to `vendor_ref.name`: search, duplicates, the CSV, the API schema,
+  the CLI and the "required fields" all read it unchanged. Only processing, `update_receipt`,
+  `rename_vendor` and `merge_vendors` write it (the last two with one `UPDATE ... WHERE vendor_ref`,
+  setting `updated_at` by hand). `vendor_extracted` has a `db_default`, so the container still
+  serving while `0003` runs (it doesn't know the column) can keep inserting receipts (the #102
+  lesson).
+  - **Matching** (`match_vendor`, run by `processing._fill_fields` unless `'vendor'` is in
+    `user_edited_fields`), in the issue's order: (1) a *vetted* vendor, by alias or by a near match
+    (`difflib` ratio >= 0.92, both keys >= 6 characters, exactly one such vendor -- never a guess
+    between two); (2) an *unvetted* vendor, by alias only (the pipeline never builds on its own
+    guesses); (3) otherwise a new unvetted vendor named as the AI read it, created in a savepoint
+    that on `IntegrityError` (a sibling receipt of the same email creating it at the same moment)
+    re-reads the winner's, with no lock on the account row. A near match does not teach an alias. A
+    new or unvetted vendor does **not** change the receipt's status. A re-run that matches another
+    vendor deletes the unvetted one it left once it has no receipts (`drop_if_orphan`, called after the
+    receipt row is saved, because until then it still references it; `lifecycle.purge_receipt` does the
+    same).
+  - **Teaching and vetting.** `update_receipt` takes `vendor` (a name) or `vendor_id` (one of the
+    user's, `vendor_ref` after cleaning; both is an error keyed `vendor_id`) and calls
+    `assign_vendor`: it moves *that receipt*, vets the chosen vendor ("the user confirmed it": a name
+    typed in, picked, renamed, merged into or marked), points the alias for the name the AI read
+    (`vendor_extracted`) at it so the next receipt read that way lands there, and drops the vendor
+    left behind if it is unvetted and empty. The vendor the receipt already has, by name or id, is a
+    no-op, so saving other fields never vets anything. A typed name resolves to the user's vendor
+    with that name or key, else creates a vetted one: typing `Staples Inc` over `Staples` files the
+    receipt under the existing `Staples` (the page says so; "Rename vendor" is how to change a name).
+    **Renaming** (`rename_vendor`) is the separate action that changes what every receipt of a vendor
+    shows; it raises `VendorNameTaken(other)` (a `ValidationError`) when another vendor has the name or
+    its key, which the page turns into an offer to merge into that vendor, and keeps both the old and
+    the new name as aliases. `merge_vendors` moves receipts (link and text) and aliases to the vendor
+    kept, in one transaction under row locks taken in id order, and vets it. `delete_vendor` refuses
+    while it has receipts, trashed ones included. **No retroactive matching**: nothing but a rename or
+    a merge changes receipts that already exist.
+  - **Duplicates and search.** `find_duplicate` compares `vendor_ref` (or the text for a receipt
+    without one); `ReceiptFilters.vendor` filters by vendor id; `q` also matches `vendor_extracted`
+    (so a renamed vendor's receipts are still found by the old name); the CSV has a trailing
+    `vendor_as_read` column.
+  - **Backfill** (`0004`): per user, receipts with a vendor are grouped by stripped, casefolded text;
+    each group becomes a vendor named by its most common spelling (receipts spelled differently get
+    that text), vetted if the user typed any of them, with aliases claimed by vetted groups first, then
+    by receipt count (own key, then the names the AI read), each only if still free -- a group whose
+    key is taken stays a separate vendor, under "To vet", for the user to merge. Reversible (clears
+    the links and the vendors). Its tests call `backfill_vendors` directly (the suite runs with
+    `--no-migrations`).
+  - **Web.** The receipt page's vendor field is an ARIA combobox (`static/receipts/js/
+    vendor_combobox.js`, suggestions from `GET vendors/suggest/` into a listbox) with a Vetted / New
+    vendor chip, "Read on the receipt as ...", "Mark as vetted" and "Rename vendor...";
+    `forms.ReceiptForm` carries the picked `vendor_id` but keeps it only while the text still is that
+    vendor's name. The **Vendors page** (`/receipts/vendors/`, tabs All / To vet / Vetted, search over
+    names and aliases, 50 per page, row menu, bulk bar) follows the dashboard's pattern; its bulk
+    checkboxes belong to a hidden `#vendor-bulk` form through their `form` attribute, so the search
+    form around the list never sends them. The rename and merge dialogs are fragments fetched into a
+    `#vendor-modal` host (`fragmentModal` in `common.js`); a refusal re-renders the form in place
+    (422), success is an `HX-Redirect` to `next` with a flash message, and bulk/row actions
+    re-render the list from `HX-Current-URL`. htmx 2.0 can't resolve an inherited
+    `hx-disabled-elt="find ..."` for a control with no such button inside it (it throws), so every
+    htmx control inside the receipt form sets its own, or `unset`. The dashboard has a "Vendors" link
+    with "N to vet" and a `?vendor=<id>` filter chip (a hidden input in `#receipt-list`, so it
+    travels with search, tabs, paging and the export link; an id that isn't the user's is dropped).
+    The vendor API (`/api/receipts/vendors`), the `vendor_id` body field and the CLI commands are
+    the next step; `PATCH /receipts/{id}` with `vendor` already goes through `update_receipt`.
+  - **Admin**: a read-only `VendorAdmin` (aliases inline, vetted filter, searches names and alias
+    names, receipt count); `ReceiptAdmin` lists and searches `vendor_extracted`.
 - **Notifications** (`services.emails`, tasks on the `receipts` queue, owner only, only to a
   *confirmed* address, autoescaped `html_body`, no sender-controlled text in a subject):
   `send_attention_email` is queued once per `InboundEmail` (CAS on `attention_notified_at`) when its
@@ -1179,7 +1254,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   owner told "paused" every day for nothing.
 - **Actions** (`services.actions`, shared by the web views and the API; `ValidationError` -> 422/400,
   `AccountFrozenError`/`InsufficientCreditsError` -> 402): `update_receipt` (partial; records the
-  extracted fields that actually changed in `user_edited_fields`, `notes` aside; refuses extracted
+  extracted fields that actually changed in `user_edited_fields`, `notes` aside; the vendor goes
+  through `assign_vendor`, see "Vendors"; refuses extracted
   fields while the AI owns the receipt; moves `needs_review` <-> `processed` as the required fields
   are filled/cleared), `reprocess` (new `attempt_id`, charged again, refused up front when the
   balance can't cover it), `trash`/`restore` (both bump `updated_at`, which `.update()` skips, so `retry_due`'s "never queued"
@@ -1188,11 +1264,11 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `regenerate_inbox_code`, `update_inbox_settings` (allowlist of emails and `*@domain`, normalized
   by `services.addresses`, plus default currency as an ISO 4217 code), category create/rename/
   reorder/delete (deleting uncategorizes). `services.filters` has `filter_receipts` (status,
-  category, `q` over vendor + notes + amount -- a numeric term (`75`, `275,5`, `$75`) also matches
+  category, `vendor` (an id), `q` over vendor (also the name the AI read) + notes + amount -- a numeric term (`75`, `275,5`, `$75`) also matches
   the amount as text with two decimals, built from whole cents so `75` finds 275.50 the same way on
   Postgres and SQLite --, `receipt_date` range, duplicates, sort; default `-receipt_date` with
   undated first) and the CSV export (`iter_csv`/`export_csv`, columns per the
-  issue; every cell goes through the formula guard, which also catches leading whitespace); `services.files` has the presigned inline/attachment URLs
+  issue plus a trailing `vendor_as_read`; every cell goes through the formula guard, which also catches leading whitespace); `services.files` has the presigned inline/attachment URLs
   (an HTML body is *never* served inline from S3 -- `views.detail.body_view` streams it with a CSP; a nameless
   file downloads as `email.html`/`email.txt`/`receipt`).
   The `RECEIPTS_*_USER` rate-limit rules exist in `RATELIMIT_RULES`; the web views and the API both enforce them, sharing each budget.
@@ -1406,7 +1482,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     on GET, the form on POST), `<id>/body/`, `<id>/download/`, `<id>/reprocess/`, `<id>/trash/`
     (move to the Trash), `<id>/restore/`, `<id>/delete/` (forever), `<id>/dismiss-duplicate/`,
     `/receipts/trash/`, `/receipts/settings/` (+ `settings/inbox/`, `settings/regenerate/`,
-    `settings/categories/...`). URL names are in `urls.py` (`receipts:detail`, ...).
+    `settings/categories/...`), `/receipts/vendors/` (+ `vendors/list/`, `suggest/`, `vet/`,
+    `merge/`, `<id>/rename/`, `<id>/delete/`). URL names are in `urls.py` (`receipts:detail`, ...).
   - **Dashboard**: status tabs with counts (All, Needs review, Processing = received + processing +
     waiting for credits, Failed, Duplicates), search (vendor, notes, amount; `autocomplete="off"` so
     the browser's past-search suggestions don't cover the list), category, a receipt-date dropdown
@@ -1415,7 +1492,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `forms.filters.resolve_date_range` turns a preset into dates against `timezone.localdate()` on
     every request, so a "This month" link stays relative, and ignores the date inputs; dates without
     a `date_range` -- older links, and the canonical URL of a custom range -- mean Custom), sortable
-    Receipt date (default newest first, undated on top) and Added columns, 25 per page.
+    Receipt date (default newest first, undated on top) and Added columns, 25 per page, a
+    "Vendors" link (with the number to vet) next to Trash and the vendor filter chip (see "Vendors").
     `forms.parse_filters` reads the query string *leniently* (a bad value is dropped) into
     `ReceiptFilters` for the services; the page, `receipt_list` and the CSV export all use it, so
     "current filters" means one thing. The filter form `hx-get`s `/receipts/list/` into
@@ -1427,7 +1505,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     3 s (`polls=` in the URL counts, capped at 40; `waiting_for_credits` is not polled, nor is a
     `received` receipt with a retry scheduled -- `Receipt.retry_scheduled`, shown as "trying again in
     ..." on the row and the detail page).
-  - **Detail**: preview left, form right (stacked on phones). Required fields (vendor, receipt date,
+  - **Detail**: preview left, form right (stacked on phones); the vendor field is described under
+    "Vendors". Required fields (vendor, receipt date,
     amount) are marked `*`, and while one is missing on a settled receipt it gets an amber border and
     a hint. A save is an htmx form: 422 puts `Label: message` lines in `#receipt-form-msg` (the form
     keeps what was typed), success flashes "Saved." and redirects back (so the heading, status pill
@@ -1522,7 +1601,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   time, before that file is loaded). Unit tests: `admin/tests/test_receipts.py`, HTTP mocked, no
   Django.
 - **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
-  (status/reason/source filters; no add/change/delete -- deleting a row would orphan its S3 objects
+  (status/reason/source filters; `VendorAdmin`, see "Vendors"; no add/change/delete -- deleting a row would orphan its S3 objects
   and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, next attempt, last error; a "retry" action
   needing `change_inboundmessage`, which moves the parked object back to `receipts/inbound/`,
   resets `failed` -> `pending` and queues `ingest_message` again through

@@ -1,0 +1,65 @@
+{% load receipts_ui %}
+{% comment %} One row of the Vendors page: a checkbox for the bulk bar (owned by #vendor-bulk through `form`), the
+   name with its chip and the other names it is read as, how many receipts (linking to the dashboard
+   filtered to the vendor), the latest receipt date and the row menu. {% endcomment %}
+<li id="vendor-{{ vendor.pk }}"
+    class="relative grid grid-cols-[1.5rem_minmax(0,1fr)_2.5rem] md:grid-cols-[1.5rem_minmax(0,1fr)_7rem_7rem_2.5rem] gap-x-4 gap-y-1 px-4 py-3 items-center has-[:checked]:bg-sage-50/60 dark:has-[:checked]:bg-gray-800/60">
+    <input type="checkbox" name="ids" value="{{ vendor.pk }}" form="vendor-bulk" aria-label="Select {{ vendor.name }}"
+           class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+    <div class="min-w-0">
+        <p class="flex flex-wrap items-center gap-2">
+            <a href="{% url 'receipts:dashboard' %}?vendor={{ vendor.pk }}"
+               class="truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">{{ vendor.name }}</a>
+            {% vendor_chip vendor.vetted True %}
+        </p>
+        {% if vendor.also_shown %}
+        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Also read as {% for name in vendor.also_shown %}&ldquo;{{ name }}&rdquo;{% if not forloop.last %}, {% endif %}{% endfor %}{% if vendor.also_more %} and {{ vendor.also_more }} more{% endif %}</p>
+        {% endif %}
+        <p class="text-xs text-gray-500 dark:text-gray-400 md:hidden">
+            {{ vendor.receipt_count }} receipt{{ vendor.receipt_count|pluralize }}{% if vendor.last_receipt_date %} &middot; last {{ vendor.last_receipt_date|date:'Y-m-d' }}{% endif %}
+        </p>
+    </div>
+    <a href="{% url 'receipts:dashboard' %}?vendor={{ vendor.pk }}"
+       class="hidden md:block text-right text-sm tabular-nums text-sage-600 dark:text-sage-300 underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-brand-primary rounded"
+       aria-label="{{ vendor.receipt_count }} receipt{{ vendor.receipt_count|pluralize }} from {{ vendor.name }}">{{ vendor.receipt_count }}{% if vendor.trashed_count %}<span class="block text-xs font-normal no-underline text-gray-500 dark:text-gray-400">+{{ vendor.trashed_count }} in Trash</span>{% endif %}</a>
+    <span class="hidden md:block text-sm tabular-nums text-gray-700 dark:text-gray-300">{% if vendor.last_receipt_date %}{{ vendor.last_receipt_date|date:'Y-m-d' }}{% else %}&mdash;{% endif %}</span>
+
+    <div class="relative justify-self-end" x-data="{ menu: false }" @keydown.escape.window="menu = false" @click.outside="menu = false">
+        <button type="button" @click="menu = !menu" aria-haspopup="menu" :aria-expanded="menu ? 'true' : 'false'"
+                aria-label="Actions for {{ vendor.name }}"
+                class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors">
+            <i class="fas fa-ellipsis-vertical text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+        </button>
+        <div x-show="menu" style="display: none" role="menu"
+             class="absolute right-0 top-full z-50 mt-1 w-52 origin-top-right rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-1 text-sm shadow-lg">
+            <a href="{% url 'receipts:dashboard' %}?vendor={{ vendor.pk }}" role="menuitem"
+               class="block rounded-md px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-list mr-2 w-4" aria-hidden="true"></i>View receipts</a>
+            <button type="button" role="menuitem" @click="menu = false"
+                    hx-get="{% url 'receipts:vendor-rename' vendor.pk %}?next={{ self_url|urlencode:'' }}"
+                    hx-target="#vendor-modal" hx-swap="innerHTML"
+                    class="block w-full rounded-md px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-pen mr-2 w-4" aria-hidden="true"></i>Rename&hellip;</button>
+            <button type="button" role="menuitem" @click="menu = false"
+                    hx-post="{% url 'receipts:vendor-vet' %}"
+                    hx-vals='{"ids": "{{ vendor.pk }}", "vetted": "{% if vendor.vetted %}0{% else %}1{% endif %}"}'
+                    hx-target="#vendor-list" hx-swap="innerHTML"
+                    class="block w-full rounded-md px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                {% if vendor.vetted %}<i class="fas fa-circle-xmark mr-2 w-4" aria-hidden="true"></i>Mark as not vetted{% else %}<i class="fas fa-circle-check mr-2 w-4" aria-hidden="true"></i>Mark as vetted{% endif %}
+            </button>
+            <button type="button" role="menuitem" @click="menu = false"
+                    hx-get="{% url 'receipts:vendor-merge' %}?from={{ vendor.pk }}&amp;next={{ self_url|urlencode:'' }}"
+                    hx-target="#vendor-modal" hx-swap="innerHTML"
+                    class="block w-full rounded-md px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-code-merge mr-2 w-4" aria-hidden="true"></i>Merge into&hellip;</button>
+            {% if vendor.receipt_count or vendor.trashed_count %}
+            <span role="menuitem" aria-disabled="true" title="Only a vendor with no receipts can be deleted. Merge it into another vendor instead."
+                  class="block cursor-not-allowed rounded-md px-4 py-2 text-gray-400 dark:text-gray-500"><i class="fas fa-trash mr-2 w-4" aria-hidden="true"></i>Delete</span>
+            {% else %}
+            <button type="button" role="menuitem" @click="menu = false; show($el)"
+                    data-url="{% url 'receipts:vendor-delete' vendor.pk %}?next={{ self_url|urlencode:'' }}"
+                    data-title="Delete vendor"
+                    data-body="Are you sure you want to delete {{ vendor.name }}? No receipts are filed under it."
+                    data-label="Delete"
+                    class="block w-full rounded-md px-4 py-2 text-left text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-trash mr-2 w-4" aria-hidden="true"></i>Delete</button>
+            {% endif %}
+        </div>
+    </div>
+</li>

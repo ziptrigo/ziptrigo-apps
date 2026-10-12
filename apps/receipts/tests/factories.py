@@ -2,12 +2,15 @@
 
 import uuid
 
+from django.utils import timezone
+
 from apps.accounts.models import User
 
-from ..models import Receipt, ReceiptSource, ReceiptStatus
+from ..models import Receipt, ReceiptSource, ReceiptStatus, Vendor, VendorAlias, VendorAliasSource
 from ..services.accounts import add_stored_bytes, get_account
 from ..services.documents import sniff_content_type
 from ..services.storage import file_key
+from ..services.vendors import normalize_key
 from . import samples
 from .fakes import FakeReceiptsStorage
 
@@ -64,3 +67,19 @@ def make_user(**fields) -> User:
     fields.setdefault('email', f'user-{uuid.uuid4().hex[:8]}@example.com')
     fields.setdefault('email_confirmed', True)
     return User.objects.create_user(**fields)
+
+
+def create_vendor(
+    user: User, name: str, *, vetted: bool = False, aliases: tuple[str, ...] = ()
+) -> Vendor:
+    """A vendor of `user` with its own name as an alias, plus an alias for each name in
+    `aliases` (the names it is also known by)."""
+    vendor = Vendor.objects.create(
+        user=user, name=name, vetted_at=timezone.now() if vetted else None
+    )
+    source = VendorAliasSource.USER if vetted else VendorAliasSource.EXTRACTED
+    for alias in (name, *aliases):
+        VendorAlias.objects.create(
+            user=user, vendor=vendor, key=normalize_key(alias), name=alias, source=source
+        )
+    return vendor

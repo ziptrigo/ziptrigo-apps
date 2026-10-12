@@ -3,7 +3,7 @@ from django.urls import reverse
 
 from ..models import InboundMessage, InboundMessageStatus, ReceiptsSettings, ReceiptStatus
 from ..services.accounts import get_account
-from .factories import create_inbound_email, create_receipt, make_user
+from .factories import create_inbound_email, create_receipt, create_vendor, make_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -68,6 +68,25 @@ class TestReadOnlyModels:
         assert response.status_code == 200
         assert b'unreadable' in response.content
 
+    def test_receipt_page_shows_the_vendor_link_and_the_name_as_read(
+        self, client, admin_user, funded_user, fake_storage
+    ):
+        acme = create_vendor(funded_user, 'ACME', vetted=True)
+        receipt = create_receipt(
+            funded_user,
+            fake_storage,
+            vendor='ACME',
+            vendor_ref=acme,
+            vendor_extracted='ACME Industries, LLC',
+        )
+        client.force_login(admin_user)
+
+        page = client.get(url('receipts_receipt_change', receipt.pk)).content.decode()
+        listing = client.get(url('receipts_receipt_changelist'), {'q': 'Industries, LLC'})
+
+        assert 'ACME Industries, LLC' in page and 'ACME' in page
+        assert str(receipt.pk) in listing.content.decode()  # searchable by the name as read
+
     def test_receipt_page_is_read_only(self, client, admin_user, funded_user, fake_storage):
         receipt = create_receipt(funded_user, fake_storage)
         client.force_login(admin_user)
@@ -112,6 +131,61 @@ class TestReadOnlyModels:
 
         assert response.status_code == 200
         assert b'orders@staples.com' in response.content
+
+
+class TestVendors:
+    @pytest.fixture
+    def vendors(self, funded_user, fake_storage):
+        acme = create_vendor(funded_user, 'ACME', vetted=True, aliases=('ACME Industries, LLC',))
+        create_vendor(funded_user, 'Blue Bottle')
+        create_receipt(funded_user, fake_storage, vendor='ACME', vendor_ref=acme)
+        return acme
+
+    def test_the_list_shows_vetted_state_and_receipt_counts(self, client, admin_user, vendors):
+        client.force_login(admin_user)
+
+        response = client.get(url('receipts_vendor_changelist'))
+
+        content = response.content.decode()
+        assert response.status_code == 200
+        assert 'ACME' in content and 'Blue Bottle' in content and 'testuser@example.com' in content
+
+    def test_it_filters_by_vetted_and_searches_alias_names(self, client, admin_user, vendors):
+        client.force_login(admin_user)
+
+        unvetted = client.get(url('receipts_vendor_changelist'), {'vetted_at__isempty': '1'})
+        by_alias = client.get(url('receipts_vendor_changelist'), {'q': 'Industries, LLC'})
+
+        assert (
+            b'Blue Bottle' in unvetted.content
+            and b'ACME' not in unvetted.content.split(b'<tbody>')[1]
+        )
+        assert (
+            b'ACME' in by_alias.content
+            and b'Blue Bottle' not in by_alias.content.split(b'<tbody>')[1]
+        )
+
+    def test_the_page_lists_the_aliases_and_is_read_only(self, client, admin_user, vendors):
+        client.force_login(admin_user)
+
+        response = client.get(url('receipts_vendor_change', vendors.pk))
+
+        content = response.content.decode()
+        assert response.status_code == 200
+        assert 'ACME Industries, LLC' in content and 'acme industries' in content
+        assert 'name="_save"' not in content
+
+    def test_it_cannot_be_added_changed_or_deleted(self, client, admin_user, vendors):
+        client.force_login(admin_user)
+
+        assert client.get(url('receipts_vendor_add')).status_code == 403
+        assert (
+            client.post(url('receipts_vendor_change', vendors.pk), {'name': 'x'}).status_code == 403
+        )
+        assert (
+            client.post(url('receipts_vendor_delete', vendors.pk), {'post': 'yes'}).status_code
+            == 403
+        )
 
 
 class TestInboundMessageRetry:

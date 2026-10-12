@@ -56,6 +56,7 @@ class ReceiptFilterForm(forms.Form):
     status = forms.ChoiceField(choices=TABS, required=False)
     q = forms.CharField(required=False, max_length=200)
     category = forms.CharField(required=False, max_length=20)
+    vendor = forms.CharField(required=False, max_length=20)
     date_range = forms.ChoiceField(choices=DATE_RANGES, required=False)
     date_from = forms.DateField(required=False)
     date_to = forms.DateField(required=False)
@@ -64,6 +65,10 @@ class ReceiptFilterForm(forms.Form):
     def clean_category(self) -> str:
         value = self.cleaned_data['category'].strip()
         return value if value == UNCATEGORIZED or re.fullmatch(r'\d{1,10}', value) else ''
+
+    def clean_vendor(self) -> str:
+        value = self.cleaned_data['vendor'].strip()
+        return value if re.fullmatch(r'\d{1,10}', value) else ''
 
 
 def resolve_date_range(key: str, today: date) -> tuple[date, date]:
@@ -115,7 +120,7 @@ class ParsedFilters:
         """Whether anything but the default view is selected (for the empty-state wording)."""
         return any(
             key in self.params
-            for key in ('status', 'q', 'category', 'date_range', 'date_from', 'date_to')
+            for key in ('status', 'q', 'category', 'vendor', 'date_range', 'date_from', 'date_to')
         )
 
 
@@ -128,6 +133,7 @@ def parse_filters(request: HttpRequest) -> ParsedFilters:
     sort = data.get('sort') or DEFAULT_SORT
     q = (data.get('q') or '').strip()
     category = data.get('category') or ''
+    vendor = str(int(data['vendor'])) if data.get('vendor') else ''
     date_range = data.get('date_range') or DATE_RANGE_ANY
     date_from = data.get('date_from')
     date_to = data.get('date_to')
@@ -145,6 +151,8 @@ def parse_filters(request: HttpRequest) -> ParsedFilters:
         params['q'] = q
     if category:
         params['category'] = category
+    if vendor:
+        params['vendor'] = vendor
     if date_range == DATE_RANGE_CUSTOM:
         # Just the dates: they say "custom" on their own, and a custom range without any is
         # simply every date.
@@ -160,6 +168,7 @@ def parse_filters(request: HttpRequest) -> ParsedFilters:
     filters = ReceiptFilters(
         status=_TAB_STATUSES.get(tab),
         category=category or None,
+        vendor=int(vendor) if vendor else None,
         q=q,
         date_from=date_from,
         date_to=date_to,

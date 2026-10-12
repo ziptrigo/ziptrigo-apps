@@ -1,5 +1,6 @@
 {% comment %} The editable fields. Vendor, receipt date and amount are the required ones: while one is missing
-   it gets an amber border and a hint. A refused save comes back (422) as text in #receipt-form-msg. {% endcomment %}
+   it gets an amber border and a hint. A refused save comes back (422) as text in #receipt-form-msg. The
+   vendor field is its own partial (`vendor_field.html`). {% endcomment %}
 <form id="receipt-form" method="post" action="{% url 'receipts:detail' receipt.pk %}"
       hx-post="{% url 'receipts:detail' receipt.pk %}" hx-target="#receipt-form-msg" hx-swap="innerHTML"
       hx-disabled-elt="find button[type='submit']">
@@ -7,13 +8,7 @@
     <fieldset {% if trashed %}disabled{% endif %} class="min-w-0">
         <legend class="sr-only">Receipt details</legend>
 
-        <div class="mb-4">
-            <label for="id_vendor" class="block mb-1 text-sm font-medium">Vendor <span class="text-amber-700 dark:text-amber-400" aria-hidden="true">*</span></label>
-            <input id="id_vendor" name="vendor" type="text" maxlength="255" value="{{ receipt.vendor }}"
-                   {% if 'vendor' in missing %}aria-describedby="vendor-hint"{% endif %}
-                   class="w-full rounded border {% if 'vendor' in missing %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
-            {% if 'vendor' in missing %}<p id="vendor-hint" class="mt-1 text-xs text-amber-700 dark:text-amber-400"><i class="fas fa-turn-up fa-rotate-90 mr-1" aria-hidden="true"></i>We couldn't read the vendor. Check the receipt and fill it in.</p>{% endif %}
-        </div>
+        {% include 'receipts/partials/vendor_field.html' %}
 
         <div class="mb-4">
             <label for="id_receipt_date" class="block mb-1 text-sm font-medium">Receipt date <span class="text-amber-700 dark:text-amber-400" aria-hidden="true">*</span></label>

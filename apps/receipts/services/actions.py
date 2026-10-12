@@ -36,6 +36,7 @@ from ..models import (
     ReceiptCategory,
     ReceiptsSettings,
     ReceiptStatus,
+    Vendor,
 )
 from . import lifecycle
 from .accounts import get_account, is_frozen
@@ -45,9 +46,11 @@ from .currencies import normalize_currency
 from .duplicates import refresh_duplicate
 from .errors import AccountFrozenError
 from .processing import enqueue_processing
+from .vendors import assign_vendor, clear_vendor
 
-#: Fields `update_receipt` accepts: the extracted ones, plus the user-only `notes`.
-EDITABLE_FIELDS = (*EXTRACTED_FIELDS, 'notes')
+#: Fields `update_receipt` accepts: the extracted ones, plus the user-only `notes` and `vendor_id`
+#: (an alternative to `vendor`: one of the user's own vendors, by id).
+EDITABLE_FIELDS = (*EXTRACTED_FIELDS, 'notes', 'vendor_id')
 
 MAX_CATEGORIES = 100
 
@@ -107,15 +110,39 @@ def _clean_category(user: User, value: Any) -> ReceiptCategory | None:
     return category
 
 
+def _clean_vendor(user: User, value: Any) -> Vendor:
+    if isinstance(value, Vendor):
+        vendor_id = value.pk
+    else:
+        try:
+            vendor_id = int(value)
+        except TypeError, ValueError:
+            raise ValidationError('Unknown vendor.') from None
+    vendor = Vendor.objects.filter(pk=vendor_id, user=user).first()
+    if vendor is None:
+        raise ValidationError('Unknown vendor.')
+    return vendor
+
+
 def clean_changes(user: User, changes: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and normalize a partial update. Raises a field-keyed `ValidationError`."""
+    """Validate and normalize a partial update. Raises a field-keyed `ValidationError`.
+
+    The vendor comes either as `vendor` (a name) or as `vendor_id` (one of the user's vendors;
+    cleaned to the `Vendor` under `vendor_ref`), never both."""
     cleaned: dict[str, Any] = {}
     errors: dict[str, list[str]] = {}
+    if 'vendor' in changes and 'vendor_id' in changes:
+        raise ValidationError({'vendor_id': ['Send either vendor or vendor_id, not both.']})
     for name, value in changes.items():
         try:
             match name:
                 case 'vendor':
                     cleaned[name] = _clean_text(value, 255, 'Vendor')
+                case 'vendor_id':
+                    # An empty id clears the vendor, like an empty name.
+                    cleaned['vendor_ref'] = (
+                        None if value in (None, '') else _clean_vendor(user, value)
+                    )
                 case 'amount':
                     cleaned[name] = _clean_amount(value)
                 case 'currency':
@@ -165,6 +192,11 @@ def update_receipt(receipt: Receipt, changes: Mapping[str, Any]) -> Receipt:
     becomes `processed`; clearing one of them on a `processed` receipt sends it back to
     `needs_review`. A `failed` receipt keeps its status.
 
+    The vendor is a name (`vendor`) or one of the user's vendors (`vendor_id`); either moves *this*
+    receipt to that vendor (a name no vendor has creates a vetted one) and teaches the matcher,
+    see `services.vendors.assign_vendor`. Renaming a vendor for all its receipts is
+    `services.vendors.rename_vendor`.
+
     Raises:
         ValidationError: a field is invalid, the receipt is in the Trash, or (except for notes) it
             is still being processed.
@@ -182,7 +214,9 @@ def update_receipt(receipt: Receipt, changes: Mapping[str, Any]) -> Receipt:
             raise ValidationError('This receipt is still being processed; try again in a moment.')
 
         edited = list(locked.user_edited_fields or [])
-        update_fields = set()
+        update_fields = _change_vendor(locked, cleaned)
+        if update_fields and 'vendor' not in edited:
+            edited.append('vendor')
         for name, value in cleaned.items():
             if getattr(locked, name) == value:
                 continue
@@ -213,6 +247,31 @@ def update_receipt(receipt: Receipt, changes: Mapping[str, Any]) -> Receipt:
         update_fields.add('updated_at')
         locked.save(update_fields=sorted(update_fields))
         return locked
+
+
+def _change_vendor(receipt: Receipt, cleaned: dict[str, Any]) -> set[str]:
+    """Apply the vendor part of a cleaned update (taking `vendor` and `vendor_ref` out of it) to
+    the locked `receipt`. Returns the fields that changed: `vendor` and `vendor_ref`, or none. The
+    vendor the receipt already has, by name or by id, is a no-op (a form always submits the whole
+    field, and saving other fields must not vet anything); anything else is the user choosing a
+    vendor, which also vets it (`assign_vendor`)."""
+    name = cleaned.pop('vendor', None)
+    named = name is not None
+    has_ref = 'vendor_ref' in cleaned
+    chosen: Vendor | None = cleaned.pop('vendor_ref', None)
+    if not named and not has_ref:
+        return set()
+
+    before = (receipt.vendor_ref_id, receipt.vendor)
+    if chosen is not None:
+        if chosen.pk != receipt.vendor_ref_id:
+            assign_vendor(receipt, vendor=chosen)
+    elif name:
+        if name != receipt.vendor:
+            assign_vendor(receipt, name=name)
+    elif receipt.vendor or receipt.vendor_ref_id is not None:
+        clear_vendor(receipt)
+    return {'vendor', 'vendor_ref'} if before != (receipt.vendor_ref_id, receipt.vendor) else set()
 
 
 # -- Re-running, trash, duplicates ---------------------------------------------------------------

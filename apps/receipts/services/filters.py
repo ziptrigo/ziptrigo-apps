@@ -40,6 +40,7 @@ CSV_COLUMNS = (
     'source',
     'added',
     'original_filename',
+    'vendor_as_read',
 )
 
 
@@ -47,12 +48,15 @@ CSV_COLUMNS = (
 class ReceiptFilters:
     """What the dashboard/API/export can filter by. `status` is one status, several (a list, or a
     comma-separated string), or `None` for all; `category` is a category id, `'none'` for
-    uncategorized, or `None`; `q` searches vendor and notes, and the amount (as text with two
-    decimals, so `75` finds 275.50) when it looks like a number; the dates bound `receipt_date`
-    (inclusive); `duplicates` keeps only receipts flagged as possible duplicates."""
+    uncategorized, or `None`; `vendor` is a vendor id; `q` searches the vendor (also by the name the
+    AI read, so a receipt is still found by it after its vendor was renamed) and the notes, and the
+    amount (as text with two decimals, so `75` finds 275.50) when it looks like a number; the dates
+    bound `receipt_date` (inclusive); `duplicates` keeps only receipts flagged as possible
+    duplicates."""
 
     status: str | Iterable[str] | None = None
     category: int | str | None = None
+    vendor: int | None = None
     q: str = ''
     date_from: date | None = None
     date_to: date | None = None
@@ -95,9 +99,19 @@ def filter_receipts(
             except TypeError, ValueError:
                 raise ValidationError('Unknown category.') from None
 
+    if filters.vendor is not None:
+        try:
+            queryset = queryset.filter(vendor_ref_id=int(filters.vendor))
+        except TypeError, ValueError:
+            raise ValidationError('Unknown vendor.') from None
+
     term = filters.q.strip()
     if term:
-        matches = Q(vendor__icontains=term) | Q(notes__icontains=term)
+        matches = (
+            Q(vendor__icontains=term)
+            | Q(vendor_extracted__icontains=term)
+            | Q(notes__icontains=term)
+        )
         amount_term = _amount_term(term)
         if amount_term:
             queryset = queryset.annotate(amount_text=_amount_text())
@@ -221,6 +235,7 @@ def iter_csv(user: User, filters: ReceiptFilters | None = None) -> Iterator[str]
                 receipt.source,
                 receipt.created_at.isoformat(),
                 receipt.original_filename,
+                receipt.vendor_extracted,
             )
         )
         yield flush()

@@ -7,7 +7,7 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from ..models import Receipt, ReceiptCategory, ReceiptStatus
+from ..models import Receipt, ReceiptCategory, ReceiptStatus, Vendor
 from ..services.accounts import get_account
 from ..services.filters import (
     CSV_COLUMNS,
@@ -145,6 +145,42 @@ def test_a_bad_category(funded_user):
         filter_receipts(funded_user, ReceiptFilters(category='abc'))
 
 
+def test_vendor(funded_user, library):
+    staples = Vendor.objects.create(user=funded_user, name='Staples')
+    Receipt.objects.filter(pk=library['staples'].pk).update(vendor_ref=staples)
+
+    by_id = filter_receipts(funded_user, ReceiptFilters(vendor=staples.pk))
+
+    assert ids(by_id) == [library['staples'].pk]
+
+
+def test_a_vendor_filter_never_reaches_another_users_receipts(
+    funded_user, other_user, library, fake_storage
+):
+    theirs = Vendor.objects.create(user=other_user, name='Theirs')
+    create_receipt(other_user, fake_storage, vendor='Theirs', vendor_ref=theirs)
+
+    assert list(filter_receipts(funded_user, ReceiptFilters(vendor=theirs.pk))) == []
+
+
+def test_a_bad_vendor(funded_user):
+    with pytest.raises(ValidationError, match='Unknown vendor'):
+        filter_receipts(funded_user, ReceiptFilters(vendor='abc'))  # ty: ignore[invalid-argument-type]
+
+
+def test_search_also_covers_the_name_the_ai_read(funded_user, fake_storage):
+    renamed = create_receipt(
+        funded_user,
+        fake_storage,
+        vendor='ACME',
+        vendor_extracted='ACME Industries, LLC',
+        status=ReceiptStatus.PROCESSED,
+    )
+
+    assert ids(filter_receipts(funded_user, ReceiptFilters(q='industries'))) == [renamed.pk]
+    assert ids(filter_receipts(funded_user, ReceiptFilters(q='acme'))) == [renamed.pk]
+
+
 def test_search_covers_vendor_and_notes_case_insensitively(funded_user, library):
     assert ids(filter_receipts(funded_user, ReceiptFilters(q='STAPLES'))) == [library['staples'].pk]
     assert ids(filter_receipts(funded_user, ReceiptFilters(q='toner'))) == [library['staples'].pk]
@@ -273,6 +309,7 @@ def test_csv_columns_are_the_ones_in_the_spec():
         'source',
         'added',
         'original_filename',
+        'vendor_as_read',
     )
 
 
@@ -353,6 +390,25 @@ def test_every_csv_cell_goes_through_the_formula_guard(funded_user, fake_storage
     assert record['currency'] == "'=1+1"
     assert record['document_type'] == "'@x"
     assert record['document_number'] == "' =y"
+
+
+def test_csv_has_the_name_the_ai_read_as_its_last_column(funded_user, fake_storage):
+    create_receipt(
+        funded_user, fake_storage, vendor='ACME', vendor_extracted='ACME Industries, LLC'
+    )
+
+    record = dict(zip(CSV_COLUMNS, parse(export_csv(funded_user))[1], strict=True))
+
+    assert CSV_COLUMNS[-1] == 'vendor_as_read'
+    assert record['vendor'] == 'ACME' and record['vendor_as_read'] == 'ACME Industries, LLC'
+
+
+def test_the_name_the_ai_read_goes_through_the_formula_guard(funded_user, fake_storage):
+    create_receipt(funded_user, fake_storage, vendor_extracted='=HYPERLINK("http://evil","x")')
+
+    record = dict(zip(CSV_COLUMNS, parse(export_csv(funded_user))[1], strict=True))
+
+    assert record['vendor_as_read'] == '\'=HYPERLINK("http://evil","x")'
 
 
 def test_csv_streams_line_by_line(funded_user, library):

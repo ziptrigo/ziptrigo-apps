@@ -36,7 +36,9 @@ def owned_receipt(
 ) -> Receipt:
     """The requester's receipt, or a 404. `trashed=True` / `False` additionally requires it to be
     in / out of the Trash; `None` accepts either."""
-    queryset = Receipt.objects.select_related('user', 'category', 'possible_duplicate_of')
+    queryset = Receipt.objects.select_related(
+        'user', 'category', 'possible_duplicate_of', 'vendor_ref'
+    )
     receipt = get_object_or_404(queryset, pk=receipt_id, user=request.user, uploaded=True)
     if trashed is not None and (receipt.deleted_at is not None) != trashed:
         raise Http404('Receipt not found')

@@ -23,6 +23,9 @@ backends don't retry, so everything here is written to be re-run safely:
    - otherwise `processed`.
    Fields the user edited (`user_edited_fields`) are never overwritten, and `notes` is never
    touched. A failed outcome stores the raw result in `ai_result` but fills no fields.
+   The vendor is matched to one of the user's own (`services.vendors.match_vendor`; an unvetted
+   vendor is created when nothing matches): `vendor_extracted` keeps what the AI read, `vendor_ref`
+   the match and `vendor` its name. A new vendor does not change the outcome above.
 5. **Transient AI errors** (timeouts, 5xx, 429, a malformed reply) put the receipt back to `received`
    with `next_attempt_at` set from a backoff; `retry_due` re-enqueues it. After
    `ReceiptsSettings.max_ai_attempts` it fails as `extraction_error`. Neither `django.tasks`'s
@@ -52,6 +55,7 @@ from apps.core.services.storage import ObjectTooLargeError
 
 from ..models import (
     EXTRACTED_FIELDS,
+    MAX_VENDOR_NAME_LENGTH,
     REQUIRED_FIELDS,
     FailureReason,
     Receipt,
@@ -65,6 +69,7 @@ from .duplicates import refresh_duplicate
 from .emails import lock_inbound_email, queue_attention_email_if_settled
 from .queue import enqueue_after_commit
 from .storage import get_storage
+from .vendors import clean_name, drop_if_orphan, match_vendor
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +97,8 @@ _SAVE_FIELDS = [
     'ai_confidence',
     'possible_duplicate_of',
     'updated_at',
+    'vendor_ref',
+    'vendor_extracted',
     *EXTRACTED_FIELDS,
 ]
 
@@ -297,6 +304,7 @@ def _apply_result(receipt_id: object, attempt_id: UUID, extracted: ai.ExtractedR
         receipt.next_attempt_at = None
         receipt.processing_started_at = None
         receipt.last_error = ''
+        left_vendor_id = None
 
         if extracted.receipt_count > 1:
             receipt.status = ReceiptStatus.FAILED
@@ -305,7 +313,7 @@ def _apply_result(receipt_id: object, attempt_id: UUID, extracted: ai.ExtractedR
             receipt.status = ReceiptStatus.FAILED
             receipt.failure_reason = FailureReason.NOT_A_RECEIPT
         else:
-            _fill_fields(receipt, extracted)
+            left_vendor_id = _fill_fields(receipt, extracted)
             edited = set(receipt.user_edited_fields or [])
             confident = extracted.confidence >= LOW_CONFIDENCE_THRESHOLD or all(
                 name in edited for name in REQUIRED_FIELDS
@@ -321,11 +329,16 @@ def _apply_result(receipt_id: object, attempt_id: UUID, extracted: ai.ExtractedR
                 refresh_duplicate(receipt)
 
         receipt.save(update_fields=_SAVE_FIELDS)
+        # Only now: until the row is saved it still references the vendor a re-run moved it from.
+        drop_if_orphan(left_vendor_id)
         queue_attention_email_if_settled(receipt)
 
 
-def _fill_fields(receipt: Receipt, extracted: ai.ExtractedReceipt) -> None:
-    """Copy the extracted values onto `receipt`, except the fields the user edited."""
+def _fill_fields(receipt: Receipt, extracted: ai.ExtractedReceipt) -> int | None:
+    """Copy the extracted values onto `receipt`, except the fields the user edited. The vendor is
+    matched to the user's own (unless they set it by hand); `vendor_extracted` always keeps what the
+    AI read. Returns the id of the vendor a re-run moved the receipt away from, if any: the caller
+    deletes it once the receipt is saved, should nothing else use it."""
     edited = set(receipt.user_edited_fields or [])
     account = get_account(receipt.user)
     categories = {
@@ -333,7 +346,6 @@ def _fill_fields(receipt: Receipt, extracted: ai.ExtractedReceipt) -> None:
         for category in ReceiptCategory.objects.filter(user_id=receipt.user_id)
     }
     values = {
-        'vendor': extracted.vendor or '',
         'amount': extracted.amount,
         'currency': extracted.currency or account.default_currency,
         'receipt_date': extracted.receipt_date,
@@ -342,9 +354,18 @@ def _fill_fields(receipt: Receipt, extracted: ai.ExtractedReceipt) -> None:
         'payment_method': extracted.payment_method or '',
         'category': categories.get((extracted.category or '').casefold()),
     }
-    for name in EXTRACTED_FIELDS:
+    for name, value in values.items():
         if name not in edited:
-            setattr(receipt, name, values[name])
+            setattr(receipt, name, value)
+
+    receipt.vendor_extracted = clean_name(extracted.vendor)[:MAX_VENDOR_NAME_LENGTH]
+    if 'vendor' in edited:
+        return None
+    left_vendor_id = receipt.vendor_ref_id
+    vendor = match_vendor(receipt.user, extracted.vendor)
+    receipt.vendor_ref = vendor
+    receipt.vendor = vendor.name if vendor is not None else ''
+    return left_vendor_id if left_vendor_id != receipt.vendor_ref_id else None
 
 
 # -- 5-6. Failures, retries, refunds --------------------------------------------------------------

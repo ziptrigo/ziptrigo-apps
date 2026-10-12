@@ -10,6 +10,7 @@ from django.tasks import task
 from ..models import InboundEmail, Receipt
 from .accounts import add_stored_bytes
 from .storage import get_storage, user_prefix
+from .vendors import drop_if_orphan
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,8 @@ logger = logging.getLogger(__name__)
 def purge_receipt(receipt: Receipt) -> None:
     """Delete `receipt` for good: its file and preview from S3, its row, and the bytes from the
     account's storage count. If it was the last receipt of its inbound email, the stripped `.eml`
-    goes too (the email row itself stays as the user's record of what arrived).
+    goes too (the email row itself stays as the user's record of what arrived). If it was the last
+    receipt of an unvetted vendor, the vendor goes too (a vetted one is the user's and stays).
 
     The receipt's own S3 deletes come first and are idempotent; the `.eml` delete and the
     database changes happen in one transaction (holding the receipt and inbound-email row locks), so
@@ -34,7 +36,11 @@ def purge_receipt(receipt: Receipt) -> None:
         # uses too), so two siblings purged at once decide about the `.eml` one after the other:
         # the second sees the first gone and deletes it. Unlocked, each saw the other and neither
         # did, leaving an object that is billed forever.
-        list(Receipt.objects.select_for_update(of=('self',)).filter(pk=receipt.pk).values('pk'))
+        vendor_ids = list(
+            Receipt.objects.select_for_update(of=('self',))
+            .filter(pk=receipt.pk)
+            .values_list('vendor_ref_id', flat=True)
+        )
         email = (
             InboundEmail.objects.select_for_update().filter(pk=receipt.inbound_email_id).first()
             if receipt.inbound_email_id is not None
@@ -54,6 +60,8 @@ def purge_receipt(receipt: Receipt) -> None:
         deleted, _ = Receipt.objects.filter(pk=receipt.pk).delete()
         if deleted:
             add_stored_bytes(receipt.user_id, -freed)
+            for vendor_id in vendor_ids:
+                drop_if_orphan(vendor_id)
 
 
 @task(queue_name='receipts')
