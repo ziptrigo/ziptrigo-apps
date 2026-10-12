@@ -28,8 +28,12 @@ _MARKING_CHILD = textwrap.dedent(
 )
 
 
+def _worker_commands(commands: list[list[str]]) -> list[list[str]]:
+    return [command for command in commands if 'db_worker' in command]
+
+
 def _has_worker(commands: list[list[str]]) -> bool:
-    return any('db_worker' in command for command in commands)
+    return bool(_worker_commands(commands))
 
 
 def test_build_commands_includes_worker_by_default():
@@ -38,9 +42,20 @@ def test_build_commands_includes_worker_by_default():
     assert _has_worker(commands)
 
 
+def test_build_commands_runs_one_worker_per_queue():
+    """`default` (emails, zips) and `receipts` (slow AI/PDF work) each get their own process, so a
+    backlog of receipts can never delay file transfer's emails."""
+    workers = _worker_commands(supervise.build_commands({}))
+
+    assert len(workers) == 2
+    default_worker, receipts_worker = workers
+    assert '--queue-name' not in default_worker  # db_worker's own default queue is `default`
+    assert receipts_worker[-2:] == ['--queue-name', 'receipts']
+
+
 @pytest.mark.parametrize('value', ['1', 'true', 'True'])
 def test_build_commands_worker_enabled(value):
-    assert _has_worker(supervise.build_commands({'RUN_TASK_WORKER': value}))
+    assert len(_worker_commands(supervise.build_commands({'RUN_TASK_WORKER': value}))) == 2
 
 
 @pytest.mark.parametrize('value', ['0', 'false', 'False'])
@@ -158,3 +173,12 @@ def test_child_ignoring_sigterm_is_killed_after_grace_and_status_is_137(tmp_path
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_failing_third_child_stops_the_others_and_returns_its_code():
+    """With two queue workers there are three children; any one failing restarts the container."""
+    failing = [sys.executable, '-c', 'import sys; sys.exit(4)']
+
+    code = supervise.supervise([_SLEEP, _SLEEP, failing], grace_seconds=2, poll_seconds=0.05)
+
+    assert code == 4
