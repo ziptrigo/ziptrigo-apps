@@ -1,0 +1,374 @@
+"""A generic, bucket-agnostic wrapper around boto3 S3, shared by every app that stores objects.
+
+`S3Storage` is a dataclass over one bucket and one boto3 client; an app builds its own instance
+from its own settings (see `apps.file_transfer.services.storage.get_storage`), so two apps can
+use two buckets (or two sets of credentials) without sharing any state. Nothing in here knows what
+a key means -- key shapes and the settings they come from belong to the caller.
+
+Besides the multipart-upload primitives the browser/CLI-driven uploads use (`create_multipart_upload`
+through `abort_multipart_upload`, with the per-part SHA-256 checksum handling described on
+`presign_part_url`), it covers the small-object cases: `put_object` / `get_object_bytes` /
+`copy_object` / `list_keys` for server-side reads and writes, and `presigned_put_url` for a
+single presigned PUT (one object, no multipart) whose size and checksum are signed into the URL.
+
+Tests construct `S3Storage(bucket=..., client=<a stub/mock>)` directly, so nothing here ever
+needs the network.
+"""
+
+import logging
+import unicodedata
+from dataclasses import dataclass
+from typing import IO, TYPE_CHECKING, Literal, cast
+from urllib.parse import quote
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
+
+logger = logging.getLogger(__name__)
+
+# Presigned download URLs are short-lived.
+GET_URL_EXPIRES_SECONDS = 15 * 60
+# Presigned upload URLs just need to outlive a slow upload of one part (or one small object).
+PUT_URL_EXPIRES_SECONDS = 60 * 60
+
+# Delete_objects accepts at most 1000 keys per call.
+_DELETE_BATCH_SIZE = 1000
+
+# `ListObjectsV2` returns at most 1000 keys per page.
+DEFAULT_LIST_MAX_KEYS = 1000
+
+Disposition = Literal['attachment', 'inline']
+
+
+def content_disposition(filename: str, disposition: Disposition = 'attachment') -> str:
+    """RFC 6266 `Content-Disposition` (`attachment` by default, or `inline`), with an ASCII-safe
+    `filename` fallback (for clients that don't understand `filename*`) alongside a
+    percent-encoded UTF-8 `filename*` (for the ones that do, so non-ASCII names still come
+    through correctly). Guards against header injection from a stored name containing quotes,
+    backslashes or control characters -- callers should already have validated the name, but this
+    is the last line of defense before the value reaches an HTTP header.
+    """
+    if disposition not in ('attachment', 'inline'):
+        raise ValueError(f'disposition must be "attachment" or "inline", not {disposition!r}')
+    stripped = ''.join(ch for ch in filename if unicodedata.category(ch) != 'Cc')
+    ascii_fallback = ''.join(ch if ch.isascii() else '_' for ch in stripped)
+    ascii_fallback = ascii_fallback.replace('\\', '_').replace('"', "'") or 'download'
+    encoded = quote(stripped.encode('utf-8'), safe='')
+    return f'{disposition}; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
+
+
+@dataclass(slots=True)
+class ObjectInfo:
+    """What `S3Storage.head_object` reports about an uploaded object."""
+
+    size: int
+    checksum_sha256: str
+
+
+def build_client(
+    region: str | None,
+    endpoint_url: str | None,
+    access_key_id: str | None,
+    secret_access_key: str | None,
+    *,
+    signature_version: str | None = None,
+) -> 'S3Client':
+    """A boto3 S3 client. An empty `endpoint_url` / credential means "not set" (the default AWS
+    endpoint, the default credential chain), so callers can pass settings values straight in.
+
+    `signature_version=None` keeps botocore's default, which for presigned URLs is the legacy
+    SigV2 in the older regions (`us-east-1`, `eu-west-1`, ...) and SigV4 elsewhere. Under SigV2 a
+    presigned PUT's `Content-Length` is *not* part of the signature, so `presign_part_url` /
+    `presigned_put_url` cannot enforce a declared size there; pass `'s3v4'` for a client whose
+    presigned uploads must pin the body's size (and have `x-amz-checksum-sha256` signed as a
+    header rather than carried as an unsigned-by-SigV2 query parameter).
+    """
+    return boto3.client(
+        's3',
+        region_name=region or None,
+        endpoint_url=endpoint_url or None,
+        aws_access_key_id=access_key_id or None,
+        aws_secret_access_key=secret_access_key or None,
+        config=Config(signature_version=signature_version) if signature_version else None,
+    )
+
+
+@dataclass(slots=True)
+class S3Storage:
+    """S3 operations on one bucket, through one boto3 client."""
+
+    bucket: str
+    client: 'S3Client'
+
+    # -- Multipart uploads ------------------------------------------------------------------
+
+    def create_multipart_upload(
+        self, key: str, *, checksum_algorithm: str | None = 'SHA256'
+    ) -> str:
+        """Start a multipart upload and return its upload id.
+
+        `checksum_algorithm` defaults to `'SHA256'` for the browser/CLI-driven uploads this class
+        exists for (a client-computed per-part checksum, verified by S3, proves the bytes made it
+        over the network intact). Once a multipart upload is created with a checksum algorithm,
+        S3 requires a matching checksum on every `UploadPart` *and* on every entry of
+        `CompleteMultipartUpload`'s part list (see `list_parts` and `complete_multipart_upload`'s
+        docstrings) -- passing `checksum_algorithm=None` opts out of that requirement for a
+        caller that uploads parts itself, server-side, over a connection S3 already authenticates
+        and encrypts (`apps.file_transfer.services.zip`'s `_S3MultipartWriter`), where a second,
+        client-side integrity check buys nothing.
+        """
+        # Two explicit calls rather than building a `dict` and spreading it in: unlike
+        # `presign_part_url`'s `Params: dict`, `create_multipart_upload`'s keyword arguments are
+        # individually typed by `mypy_boto3_s3`'s stubs, so spreading an untyped `dict` into them
+        # would need the same kind of ignore-and-explain escape hatch `complete_multipart_upload`
+        # already needs below for its own (genuinely unavoidable) untyped `Parts` list.
+        if checksum_algorithm is not None:
+            response = self.client.create_multipart_upload(
+                Bucket=self.bucket,
+                Key=key,
+                # This method's own signature only accepts `str`, not the narrower
+                # `mypy_boto3_s3`-stubs `Literal` `create_multipart_upload` wants -- callers pass a
+                # plain string (`'SHA256'` by every caller so far), so there's nothing narrower to
+                # type this parameter as without importing that stub's own literal type here.
+                ChecksumAlgorithm=checksum_algorithm,  # ty: ignore[invalid-argument-type]
+            )
+        else:
+            response = self.client.create_multipart_upload(Bucket=self.bucket, Key=key)
+        return response['UploadId']
+
+    def presign_part_url(
+        self,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        expires_in: int = PUT_URL_EXPIRES_SECONDS,
+        *,
+        content_length: int | None = None,
+        checksum_sha256: str | None = None,
+    ) -> str:
+        """A presigned URL the browser PUTs one part's bytes to directly.
+
+        `content_length` and `checksum_sha256`, when given, are baked into the URL's signature
+        (`generate_presigned_url` maps them to the `Content-Length` and `x-amz-checksum-sha256`
+        request headers respectively) -- the PUT is then only valid for a body of exactly that
+        size and that checksum, which is what actually enforces the declared file size and
+        verifies the part's integrity server-side (S3 rejects the request outright if the header
+        the browser sends doesn't match). `checksum_sha256` must be supplied by the caller (the
+        browser computes it before requesting the URL, via `crypto.subtle`) -- it can't be
+        computed here, since presigning happens before the bytes exist on this end at all.
+        """
+        params: dict = {
+            'Bucket': self.bucket,
+            'Key': key,
+            'UploadId': upload_id,
+            'PartNumber': part_number,
+        }
+        if content_length is not None:
+            params['ContentLength'] = content_length
+        if checksum_sha256 is not None:
+            params['ChecksumSHA256'] = checksum_sha256
+        return self.client.generate_presigned_url(
+            'upload_part', Params=params, ExpiresIn=expires_in
+        )
+
+    def upload_part(self, key: str, upload_id: str, part_number: int, body: bytes) -> str:
+        """Upload one part's bytes directly, server-side -- unlike `presign_part_url`, this part
+        never goes through the browser. Used by the zip builder's streaming multipart writer
+        (`apps.file_transfer.services.zip`). Returns the part's `ETag`."""
+        response = self.client.upload_part(
+            Bucket=self.bucket, Key=key, UploadId=upload_id, PartNumber=part_number, Body=body
+        )
+        return response['ETag']
+
+    def complete_multipart_upload(self, key: str, upload_id: str, parts: list[dict]) -> None:
+        """Finish the upload. `parts` is `[{'PartNumber': n, 'ETag': etag}, ...]`, in order."""
+        self.client.complete_multipart_upload(
+            Bucket=self.bucket,
+            Key=key,
+            UploadId=upload_id,
+            # `parts` comes straight from the browser's JSON (validated at the view layer, not
+            # constructed as boto3-stubs' `CompletedPartTypeDef` TypedDict), so `ty` can't match
+            # it structurally against `CompletedMultipartUploadTypeDef`.
+            MultipartUpload={'Parts': parts},  # ty: ignore[invalid-argument-type]
+        )
+
+    def list_parts(self, key: str, upload_id: str) -> list[dict]:
+        """List the parts already landed in S3 for an in-progress multipart upload (resumable
+        uploads) -- so a browser that reloaded mid-upload can ask what it already sent and only
+        PUT the parts still missing, instead of starting the file over. Raises `ClientError` with
+        code `NoSuchUpload` (via botocore) when S3 no longer knows the upload id at all (aborted
+        by the bucket's lifecycle rule, or by a cleanup job); callers that care about that case
+        (`apps.file_transfer.services.uploads.list_uploaded_parts`) catch it there rather than
+        here, so this method stays a thin, faithful wrapper like every other one in this class.
+
+        Each part's `ChecksumSHA256` (empty when the part somehow has none) is included alongside
+        `PartNumber`/`ETag`/`Size` -- the upload was created with `ChecksumAlgorithm='SHA256'`
+        (`create_multipart_upload`), so `CompleteMultipartUpload` later requires that checksum for
+        *every* part, including ones a resumed upload skips re-sending (completing a resumed
+        upload without it fails with `InvalidRequest`). Callers must round-trip it back into the
+        part list they eventually complete with.
+        """
+        parts: list[dict] = []
+        paginator = self.client.get_paginator('list_parts')
+        for page in paginator.paginate(Bucket=self.bucket, Key=key, UploadId=upload_id):
+            for part in page.get('Parts', []):
+                parts.append(
+                    {
+                        'PartNumber': part['PartNumber'],
+                        'ETag': part['ETag'],
+                        'Size': part['Size'],
+                        'ChecksumSHA256': part.get('ChecksumSHA256', ''),
+                    }
+                )
+        return parts
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        """Abort an in-progress multipart upload. Safe to call on one already gone (the bucket's
+        lifecycle rule, or a previous retry of the same cleanup job, may have beaten us to it)."""
+        try:
+            self.client.abort_multipart_upload(Bucket=self.bucket, Key=key, UploadId=upload_id)
+        except ClientError as exc:
+            logger.info('abort_multipart_upload(%s, %s) ignored: %s', key, upload_id, exc)
+
+    # -- Single objects ---------------------------------------------------------------------
+
+    def put_object(self, key: str, body: bytes, *, content_type: str | None = None) -> None:
+        """Write `body` to `key` in one request (server-side; for anything big enough to need
+        parts, use the multipart methods). Overwrites an existing object."""
+        if content_type is not None:
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
+        else:
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=body)
+
+    def copy_object(self, src_key: str, dst_key: str) -> None:
+        """Copy `src_key` to `dst_key` within this bucket, server-side (S3 caps a single
+        `CopyObject` at 5 GB). Overwrites an existing `dst_key`; the source is left in place."""
+        self.client.copy_object(
+            Bucket=self.bucket,
+            Key=dst_key,
+            CopySource={'Bucket': self.bucket, 'Key': src_key},
+        )
+
+    def get_object_bytes(self, key: str) -> bytes:
+        """The whole object's bytes, in memory -- for small objects only; use
+        `get_object_stream` for anything large. Raises `ClientError` (`NoSuchKey`) if absent."""
+        body = self.client.get_object(Bucket=self.bucket, Key=key)['Body']
+        return body.read()
+
+    def get_object_stream(self, key: str) -> IO[bytes]:
+        """A readable, streaming file-like object (`.read(n)`) for `key`'s bytes, for building
+        the zip without ever loading a whole source file into memory. The real return value is
+        botocore's `StreamingBody`, which satisfies `IO[bytes]` at runtime (`.read(amt)`) but
+        isn't declared as one in `mypy_boto3_s3`'s stubs -- hence the `cast`."""
+        body = self.client.get_object(Bucket=self.bucket, Key=key)['Body']
+        return cast('IO[bytes]', body)
+
+    def head_object(self, key: str) -> ObjectInfo:
+        """Verify an object landed in S3 and read back its size and checksum."""
+        response = self.client.head_object(Bucket=self.bucket, Key=key, ChecksumMode='ENABLED')
+        return ObjectInfo(
+            size=response['ContentLength'],
+            checksum_sha256=response.get('ChecksumSHA256', ''),
+        )
+
+    def object_exists(self, key: str) -> bool:
+        try:
+            self.head_object(key)
+        except ClientError:
+            return False
+        return True
+
+    def list_keys(self, prefix: str, *, max_keys: int | None = DEFAULT_LIST_MAX_KEYS) -> list[str]:
+        """The keys under `prefix` (`ListObjectsV2`, paginated transparently), in S3's
+        lexicographic order, at most `max_keys` of them (`None` for no limit). The cap exists so
+        a caller polling a prefix that unexpectedly holds a huge number of objects doesn't pull
+        them all into memory."""
+        if max_keys is not None and max_keys < 1:
+            raise ValueError('max_keys must be at least 1 (or None for no limit)')
+        keys: list[str] = []
+        paginator = self.client.get_paginator('list_objects_v2')
+        config = {'MaxItems': max_keys} if max_keys is not None else {}
+        for page in paginator.paginate(
+            Bucket=self.bucket,
+            Prefix=prefix,
+            PaginationConfig=config,  # ty: ignore[invalid-argument-type]
+        ):
+            for obj in page.get('Contents', []):
+                keys.append(obj['Key'])
+        return keys
+
+    # -- Presigned URLs ---------------------------------------------------------------------
+
+    def presigned_put_url(
+        self,
+        key: str,
+        *,
+        content_length: int,
+        checksum_sha256: str | None = None,
+        content_type: str | None = None,
+        expires_in: int = PUT_URL_EXPIRES_SECONDS,
+    ) -> str:
+        """A presigned URL for a single (non-multipart) PUT of exactly `content_length` bytes.
+
+        The same signing trick as `presign_part_url`: `content_length` is signed into the URL as
+        the `Content-Length` header, and `checksum_sha256` (base64, supplied by the caller since
+        the bytes don't exist on this end) as `x-amz-checksum-sha256`, so S3 rejects a PUT whose
+        body differs in size or content from what was declared. When `content_type` is given it
+        is signed too, so the client must send that exact `Content-Type`.
+        """
+        params: dict = {'Bucket': self.bucket, 'Key': key, 'ContentLength': content_length}
+        if checksum_sha256 is not None:
+            params['ChecksumSHA256'] = checksum_sha256
+        if content_type is not None:
+            params['ContentType'] = content_type
+        return self.client.generate_presigned_url('put_object', Params=params, ExpiresIn=expires_in)
+
+    def presigned_get_url(
+        self,
+        key: str,
+        filename: str,
+        expires_in: int = GET_URL_EXPIRES_SECONDS,
+        *,
+        disposition: Disposition = 'attachment',
+        content_type: str | None = None,
+    ) -> str:
+        """A short-lived download URL. By default it forces "Save As" with `filename`
+        (`disposition='attachment'`); `'inline'` lets the browser display it instead (a PDF, an
+        image). `content_type`, when given, overrides the `Content-Type` S3 responds with."""
+        params: dict = {
+            'Bucket': self.bucket,
+            'Key': key,
+            'ResponseContentDisposition': content_disposition(filename, disposition),
+        }
+        if content_type is not None:
+            params['ResponseContentType'] = content_type
+        return self.client.generate_presigned_url('get_object', Params=params, ExpiresIn=expires_in)
+
+    # -- Deletion ---------------------------------------------------------------------------
+
+    def delete_object(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete every object under `prefix`. Returns the number of objects deleted."""
+        deleted = 0
+        paginator = self.client.get_paginator('list_objects_v2')
+        keys: list[dict] = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get('Contents', []):
+                keys.append({'Key': obj['Key']})
+
+        for start in range(0, len(keys), _DELETE_BATCH_SIZE):
+            batch = keys[start : start + _DELETE_BATCH_SIZE]
+            # Same reasoning as `complete_multipart_upload` above: `batch` is a plain
+            # `list[dict]`, not boto3-stubs' `ObjectIdentifierTypeDef` TypedDict.
+            self.client.delete_objects(
+                Bucket=self.bucket,
+                Delete={'Objects': batch},  # ty: ignore[invalid-argument-type]
+            )
+            deleted += len(batch)
+        return deleted

@@ -13,7 +13,8 @@ an account, a credit balance and a layout. Django + HTMX. It started as two micr
 manage.py
 config/               The Django project: settings, urls, api (one NinjaAPI), environment.py.
 apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email,
-                      email verification, rate limiting (`apps.core.ratelimit`), client IP.
+                      email verification, rate limiting (`apps.core.ratelimit`), client IP,
+                      generic S3 storage (`apps.core.services.storage`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services.
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
@@ -147,6 +148,18 @@ checksum (`x-amz-checksum-sha256`, computed client-side and bound into the presi
 signature -- see `services.uploads.presign_parts`), so that bucket's CORS config (issue #60) must
 allow the `x-amz-checksum-sha256` request header and expose the `ETag` response header, or uploads
 fail in the browser with a CORS error rather than an S3 one.
+
+The S3 wrapper itself is generic and lives in `core`: `apps.core.services.storage.S3Storage` is a
+dataclass over a `bucket` and a boto3 client (`build_client(region, endpoint_url, access_key_id,
+secret_access_key)` builds one; an app wires its own settings into it, so apps can use different
+buckets/credentials). Besides the multipart methods it has `put_object`, `copy_object`,
+`get_object_bytes`, `list_keys`, `presigned_put_url` (a single PUT with `Content-Length` and
+`x-amz-checksum-sha256` signed in) and a `presigned_get_url` with `disposition` / `content_type`.
+`apps.file_transfer.services.storage` keeps `get_storage()` (builds that class from the
+`FILE_TRANSFER_*` settings), the key helpers and the part-size constants, and re-exports
+`S3Storage` / `ObjectInfo`. botocore signs presigned URLs with legacy SigV2 in older regions
+(`us-east-1`, `eu-west-1`, ...) unless the client is built with `signature_version='s3v4'`, and
+SigV2 does **not** sign `Content-Length`; `build_client` keeps botocore's default unless asked.
 
 ### Auth
 
