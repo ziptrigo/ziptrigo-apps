@@ -18,7 +18,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .utils import EnvironmentAnnotation, logger, set_environment
+from .utils import EnvironmentAnnotation, logger, set_environment, write_private_file
 
 app = typer.Typer(
     help=__doc__,
@@ -57,12 +57,9 @@ def get_token() -> str | None:
 
 
 def save_token(token: str) -> None:
-    """Save the authentication token to file, created with `0600` permissions from the start --
-    unlike `write_text()` followed by `chmod()`, which briefly leaves the file at the process's
-    default (typically more permissive) mode between the two calls."""
-    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w') as fh:
-        fh.write(token)
+    """Save the authentication token to file with `0600` permissions, also when the file already
+    exists with a looser mode (see `write_private_file`)."""
+    write_private_file(TOKEN_FILE, token)
 
 
 def get_headers() -> dict:
@@ -160,7 +157,7 @@ def filetransfer_login(
         token = response.json()['access_token']
         save_token(token)
         logger.info('Successfully authenticated!')
-    except requests.exceptions.RequestException as e:
+    except (requests.exceptions.RequestException, OSError) as e:
         logger.error(f'Login failed: {e}')
         raise typer.Exit(1)
 

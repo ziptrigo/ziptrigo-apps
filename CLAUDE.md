@@ -77,7 +77,7 @@ when the module is run directly (`python3 -m admin.server`) but which `inv` pres
 Run pytest from the repo root; `DJANGO_SETTINGS_MODULE=config.settings` and
 `testpaths = ['apps', 'admin']` are set in `pyproject.toml`, and default addopts include
 `--reuse-db --no-migrations`. `admin` is there for `admin/tests/` (currently
-`admin/filetransfer.py`'s and `admin/receipts.py`'s unit tests) -- plain HTTP-client CLI logic with no Django/database
+`admin/filetransfer.py`'s, `admin/receipts.py`'s and the token-file handling of `qrcode`/`utils`) -- plain HTTP-client CLI logic with no Django/database
 dependency of its own, picked up by the same `pytest`/`inv test unit` run as every app's tests:
 
 ```bash
@@ -508,14 +508,19 @@ three in-flight ones --, `category` an id or `none`, `q`, `date_from`/`date_to` 
 `sort`, `duplicates`, `trashed` to list the Trash, `limit` 1-100 default 20 / `offset`, answering
 `{count, limit, offset, results}` like the ft list), `GET|PATCH|DELETE /receipts/{id}` (`GET` also
 returns a trashed receipt; `PATCH` is partial via `payload.dict(exclude_unset=True)`, an explicit
-`null` clears a field; `DELETE` moves to the Trash and answers 204, idempotently),
+`null` clears a field -- unlike `PATCH /inbox`, where `null` means unchanged -- and both update
+schemas are `extra='forbid'`, so an unknown key such as `status` or a typo is a 422, never a silent
+no-op; `DELETE` moves to the Trash and answers 204, idempotently),
 `POST /receipts/{id}/restore|reprocess|dismiss-duplicate`, `GET /receipts/{id}/file?disposition=
 attachment|inline` (a JSON `{url, disposition, filename, expires_in}` with a short-lived presigned
-URL -- never a redirect, never the S3 key), `POST /uploads` (`{filename, size, content_type?,
+URL -- never a redirect, never the S3 key; `filename` is `services.file_name`, the very name the
+URL downloads under, so an email body is `email.html`/`email.txt`, not empty), `POST /uploads` (`{filename, size, content_type?,
 checksum_sha256}` -> 201 `{receipt_id, url, headers, expires_in}`, the receipt's `source` being
 `api`) and `POST /uploads/{id}/complete` (idempotent; answers the receipt), `GET /export.csv` (same
 filters, a streamed `text/csv`; filters are validated before streaming starts so a bad one is a
-400 and not a broken download), `GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
+400 and not a broken download, and before `RECEIPTS_EXPORT_USER` is charged so it costs no
+budget -- the web export parses its lenient filters before charging too, to keep the two in step),
+`GET|POST /categories`, `POST /categories/reorder` (`{ids}`),
 `PATCH|DELETE /categories/{id}`, `GET|PATCH /inbox` (address, `sender_allowlist`,
 `default_currency`, the latest `forwarding_confirmation` of the last 7 days via
 `services.forwarding`, shared with the settings page) and `POST /inbox/regenerate`. Receipts carry
@@ -523,8 +528,11 @@ every field of the model except the S3 keys, the raw AI response and the upload 
 `amount` is a string with two decimals, `category` is `{id, name}`, `possible_duplicate_of` an id,
 `missing_fields` lists which of vendor/amount/receipt date are unset.
 Status codes (`api/common.py`): **400** for a service `ValidationError` (field-keyed ones as
-`field: message`, including the daily file cap) or a malformed query parameter (the date filters and
-`disposition` are parsed by hand so they are 400 like everything else, not ninja's 422), **402** for
+`field: message`, including the daily file cap) or one of the few hand-parsed query parameters
+(`date_from`/`date_to` and `disposition`), **422** for everything django-ninja validates itself
+before an endpoint runs -- a non-UUID `{receipt_id}`, `limit=abc`, `duplicates=maybe`, a wrongly
+typed body field, an unknown `PATCH` key -- whose `detail` is a *list* of `{loc, msg, ...}` rather
+than a string (the CLI's `_error_text` flattens it), **402** for
 both `AccountFrozenError` (storage unpaid: new uploads, re-runs, `.../file`) and
 `InsufficientCreditsError` (a re-run the balance can't cover) -- one documented code, as in the
 file_transfer API; reading, listing, editing and exporting stay available while frozen, **404** for
@@ -532,7 +540,9 @@ another user's (or an unfinished upload's) receipt or category and never 403, **
 site-wide `RateLimitExceeded` handler with `Retry-After`. The rate limits are the web's, so the
 budgets are shared: `RECEIPTS_UPLOAD_USER` (`POST /uploads`), `RECEIPTS_UPLOAD_COMPLETE_USER`
 (`.../complete`), `RECEIPTS_REPROCESS_USER`, `RECEIPTS_EXPORT_USER` and `RECEIPTS_REGENERATE_USER`.
-A receipt is looked up (404) before its rate limit is charged. Tests: `apps/receipts/tests/
+Where the endpoint looks up a receipt, the lookup (404) comes before its rate limit is charged
+(`reprocess`); `POST /uploads/{id}/complete` is the exception and charges
+`RECEIPTS_UPLOAD_COMPLETE_USER` first, like the web view. Tests: `apps/receipts/tests/
 test_api_*.py` over Django's test client (the real `/api/receipts/...` URLs), helpers in
 `tests/api_support.py`.
 
@@ -1382,9 +1392,19 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   /uploads`, a `PUT` of the bytes to the presigned URL with exactly the headers the API returned,
   `POST .../complete`; an extension outside PDF/JPG/PNG/HEIC/WebP, or an empty file, is skipped with
   a warning, one file failing doesn't stop the rest, and the exit code is 1 if any failed), `get`,
-  `export --out file.csv` (streamed), `inbox` and `regenerate` (confirms unless `--yes`). Its token is
-  in `~/.receipts_token` (0600, separate from the other CLIs'). Every request goes through
-  `_request` (default timeout, bounded retry on 429 honouring `Retry-After`). The site URL is read
+  `export --out file.csv` (streamed to `.<name>.part` next to `--out` and renamed into place only when
+  complete, so a dropped connection never leaves a cut-off CSV), `inbox` and `regenerate` (confirms
+  unless `--yes`). Its token is **per environment**, `~/.receipts_token.<env>` (so the prod JWT is
+  never sent to the local server; the single `~/.receipts_token` of earlier versions is ignored --
+  log in again, then delete it), written by `admin.utils.write_private_file` (mode 0600 set on the
+  open descriptor so a pre-existing looser file is tightened, `O_NOFOLLOW`; `filetransfer` and
+  `qrcode` use it too). Every request goes through `_request`: default timeout; a 429 is retried
+  after its `Retry-After` only when that is <= 60 s (`MAX_RETRY_AFTER_SECONDS`) and the call's total
+  wait stays within `MAX_TOTAL_RETRY_WAIT_SECONDS` -- the hourly rules (export, regenerate, re-run,
+  login) are not slept on, the error says "rate limited, try again in N minutes" instead; and any
+  `requests` exception exits 1 with a message (or raises `NetworkError` for the upload loop, which
+  carries on with the next file). Errors print the API's `detail`, a ninja 422 list flattened to
+  `field: message`. The site URL is read
   when a command runs, after `set_environment` has loaded the env file: `API_BASE_URL`, else the
   file's `BASE_URL`, else `http://localhost:8000` (the older CLIs read `API_BASE_URL` at import
   time, before that file is loaded). Unit tests: `admin/tests/test_receipts.py`, HTTP mocked, no

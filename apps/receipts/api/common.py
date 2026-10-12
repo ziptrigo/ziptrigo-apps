@@ -4,7 +4,12 @@ HTTP statuses, and the filter/pagination parameters of the list and export endpo
 Status codes (documented once, here):
 
 - **400** a `ValidationError` from a service (a bad field, an unsupported or oversized file, the
-  daily file cap, ...), or a malformed query parameter.
+  daily file cap, ...), or one of the few query parameters parsed by hand: `date_from`/`date_to`
+  and `disposition`.
+- **422** django-ninja's own validation, before an endpoint runs, with a *list-valued* `detail`
+  (`[{"loc": ..., "msg": ...}]`, unlike every other error's string): a malformed id in the path
+  (`/receipts/not-a-uuid`), a mistyped query parameter (`limit=abc`, `duplicates=maybe`), a body
+  field of the wrong type, and an unknown key in a `PATCH` body.
 - **402** `AccountFrozenError` (storage unpaid: uploads, re-runs, previews and downloads are
   refused until the balance is topped up) and `InsufficientCreditsError` (the balance can't cover
   a re-run). One code for both, like the file transfer API: the request is well-formed, the

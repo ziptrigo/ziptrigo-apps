@@ -23,7 +23,7 @@ from .actions import (
     update_receipt,
 )
 from .errors import AccountFrozenError, DailyLimitExceededError
-from .files import download_url, get_body_bytes, preview_url
+from .files import download_url, file_name, get_body_bytes, preview_url
 from .filters import ReceiptFilters, dashboard_counts, export_csv, filter_receipts, iter_csv
 from .forwarding import ForwardingConfirmation, forwarding_confirmation
 from .inbound import ingest_message
@@ -50,6 +50,7 @@ __all__ = [
     'download_url',
     'enqueue_processing',
     'export_csv',
+    'file_name',
     'filter_receipts',
     'forwarding_confirmation',
     'get_account',

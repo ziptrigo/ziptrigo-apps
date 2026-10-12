@@ -8,6 +8,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.services import get_balance
@@ -330,6 +331,28 @@ class TestExport:
         for query in ({'status': 'bogus'}, {'sort': 'x'}, {'date_from': 'nope'}):
             response = get(client, '/export.csv', auth, **query)
             assert response.status_code == 400 and response.json()['detail']
+
+    def test_a_bad_filter_does_not_spend_the_export_budget(self, client, auth, settings):
+        limit_rule(settings, 'RECEIPTS_EXPORT_USER')
+
+        for _ in range(3):
+            assert get(client, '/export.csv', auth, status='bogus').status_code == 400
+        assert get(client, '/export.csv', auth, date_from='nope').status_code == 400
+
+        assert get(client, '/export.csv', auth).status_code == 200  # the one export is intact
+        assert get(client, '/export.csv', auth).status_code == 429
+
+    def test_the_budget_is_shared_with_the_web_export(self, client, auth, web, settings):
+        limit_rule(settings, 'RECEIPTS_EXPORT_USER')
+
+        assert web.get(reverse('receipts:export')).status_code == 200
+        assert get(client, '/export.csv', auth).status_code == 429
+
+    def test_the_api_export_counts_against_the_web_export(self, client, auth, web, settings):
+        limit_rule(settings, 'RECEIPTS_EXPORT_USER')
+
+        assert get(client, '/export.csv', auth).status_code == 200
+        assert web.get(reverse('receipts:export')).status_code == 429
 
     def test_an_empty_export_is_just_the_header(self, client, auth):
         response = get(client, '/export.csv', auth)

@@ -24,8 +24,8 @@ def export_csv(
     duplicates: bool = False,
 ):
     """Download the matching receipts as `text/csv` (same filters as `GET /receipts`; the Trash is
-    never exported). Limited per user (`RECEIPTS_EXPORT_USER`), shared with the web export."""
-    ratelimit.enforce(ratelimit.hit_user(request.auth, 'RECEIPTS_EXPORT_USER'))
+    never exported). Limited per user (`RECEIPTS_EXPORT_USER`), shared with the web export; a
+    request with invalid filters is a 400 and does not spend any of that budget."""
     filters = receipt_filters(
         status=status,
         category=category,
@@ -39,6 +39,9 @@ def export_csv(
         # Validate the filters now: the CSV is built lazily, and an error halfway through a
         # streaming body can't become a 400.
         services.filter_receipts(request.auth, filters)
+    # Only now charge the budget: a mistyped `status` or `sort` shouldn't cost one of the few
+    # exports an hour.
+    ratelimit.enforce(ratelimit.hit_user(request.auth, 'RECEIPTS_EXPORT_USER'))
     response = StreamingHttpResponse(
         services.iter_csv(request.auth, filters), content_type='text/csv; charset=utf-8'
     )

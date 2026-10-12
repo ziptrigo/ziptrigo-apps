@@ -155,11 +155,14 @@ def receipt_list(request: AuthenticatedHttpRequest) -> HttpResponse:
 @require_GET
 def export_csv(request: AuthenticatedHttpRequest) -> HttpResponse | StreamingHttpResponse:
     """The live receipts matching the current filters as CSV (the services build the file)."""
+    # Parse first, charge after, like the API's export: its filters can be refused (a 400 that
+    # must not spend the budget); this form's are lenient (a bad value falls back to the default),
+    # but the order is kept so the two can't drift apart.
+    parsed = parse_filters(request)
     limited = ratelimit.hit_user(request.user, 'RECEIPTS_EXPORT_USER')
     if not limited.allowed:
         return ratelimit.page_response(request, limited)
 
-    parsed = parse_filters(request)
     response = StreamingHttpResponse(
         iter_csv(request.user, parsed.filters), content_type='text/csv; charset=utf-8'
     )

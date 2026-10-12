@@ -10,6 +10,7 @@ receipts can be emailed to.
 
 import base64
 import hashlib
+import math
 import os
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .utils import EnvironmentAnnotation, logger, set_environment
+from .utils import EnvironmentAnnotation, logger, set_environment, write_private_file
 
 app = typer.Typer(
     help=__doc__,
@@ -29,8 +30,11 @@ app = typer.Typer(
 
 # A separate token file from `admin/qrcode.py` and `admin/filetransfer.py`: each CLI logs in
 # independently (possibly as a different account), so sharing one file would mean the last `login`
-# of any of them silently signs the others out too.
-TOKEN_FILE = Path.home() / '.receipts_token'
+# of any of them silently signs the others out too. And one per environment
+# (`~/.receipts_token.local`, `.prod`, ...; see `token_file`): a token is only valid for the server
+# that issued it, so a shared file would send the prod token to the local server and the other way
+# round. The single `~/.receipts_token` of earlier versions is no longer read: log in again.
+TOKEN_FILE_BASE = Path.home() / '.receipts_token'
 
 # Ordinary API calls; not the PUT of a file -- see `FILE_UPLOAD_TIMEOUT_SECONDS`.
 REQUEST_TIMEOUT_SECONDS = 30
@@ -38,8 +42,14 @@ REQUEST_TIMEOUT_SECONDS = 30
 # legitimately needs longer than an ordinary API call to finish PUTting one.
 FILE_UPLOAD_TIMEOUT_SECONDS = 300
 # Bounded retry for a 429 from the API's own rate limits (`RECEIPTS_UPLOAD_USER` and friends): a
-# folder of receipts legitimately calls `uploads` often enough to hit one.
+# folder of receipts legitimately calls `uploads` often enough to hit one, and that rule's window
+# is a minute. The hourly rules (export, regenerate, re-run, login) are different: waiting out
+# `Retry-After` there would hang the command for up to an hour, so a wait longer than
+# `MAX_RETRY_AFTER_SECONDS` isn't slept on at all (the error says when to try again instead), and
+# one call never sleeps more than `MAX_TOTAL_RETRY_WAIT_SECONDS` in all.
 MAX_RATE_LIMIT_RETRIES = 5
+MAX_RETRY_AFTER_SECONDS = 60
+MAX_TOTAL_RETRY_WAIT_SECONDS = 120
 # Read a file for hashing in chunks rather than all at once.
 HASH_CHUNK_BYTES = 1024 * 1024
 
@@ -64,27 +74,47 @@ def _api_url(path: str) -> str:
     return f'{base.rstrip("/")}/api{path}'
 
 
+# The environment the running command selected (`_select_environment`); it names the token file.
+_environment = 'local'
+
+
+def _select_environment(environment) -> None:
+    """Load the selected environment file (`set_environment`) and remember which environment it
+    is, for `token_file`."""
+    global _environment
+    selected = set_environment(environment)
+    _environment = str(selected or os.environ.get('ENVIRONMENT') or 'local')
+
+
+def token_file() -> Path:
+    """This environment's token file, `~/.receipts_token.<environment>`."""
+    return TOKEN_FILE_BASE.with_name(f'{TOKEN_FILE_BASE.name}.{_environment}')
+
+
 def get_token() -> str | None:
     """Retrieve stored authentication token."""
-    if TOKEN_FILE.exists():
-        return TOKEN_FILE.read_text().strip()
+    path = token_file()
+    if path.exists():
+        return path.read_text().strip()
     return None
 
 
 def save_token(token: str) -> None:
-    """Save the authentication token to file, created with `0600` permissions from the start --
-    unlike `write_text()` followed by `chmod()`, which briefly leaves the file at the process's
-    default (typically more permissive) mode between the two calls."""
-    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w') as fh:
-        fh.write(token)
+    """Save the authentication token to file with `0600` permissions, also when the file already
+    exists with a looser mode (see `write_private_file`)."""
+    write_private_file(token_file(), token)
 
 
 def get_headers() -> dict:
     """Get headers with authentication token."""
     token = get_token()
     if not token:
-        logger.error('Not authenticated. Please login first.')
+        logger.error(f'Not authenticated on {_environment}. Please login first.')
+        if TOKEN_FILE_BASE.exists():
+            logger.warning(
+                f'{TOKEN_FILE_BASE} is from an older version and no longer used: '
+                'login again, then delete it.'
+            )
         raise typer.Exit(1)
     return {'Authorization': f'Bearer {token}'}
 
@@ -103,55 +133,129 @@ def _password_from_prompt_or_env(password: str | None, env_var: str = 'RECEIPTS_
     return typer.prompt('Password', hide_input=True)
 
 
-def _retry_after_seconds(response) -> float:
-    header = response.headers.get('Retry-After')
+def _parse_retry_after(response) -> float | None:
+    """The response's `Retry-After` in seconds, or `None` if it has none (or not a number)."""
     try:
-        return max(0.0, float(header))
+        return max(0.0, float(response.headers.get('Retry-After')))
     except TypeError, ValueError:
-        return 1.0
+        return None
 
 
-def _request(method: str, url: str, **kwargs):
+def _retry_after_seconds(response) -> float:
+    parsed = _parse_retry_after(response)
+    return 1.0 if parsed is None else parsed
+
+
+def _format_wait(seconds: float) -> str:
+    """`45 seconds`, `1 minute`, `13 minutes` (rounded up)."""
+    if seconds < 60:
+        count, unit = math.ceil(seconds), 'second'
+    else:
+        count, unit = math.ceil(seconds / 60), 'minute'
+    return f'{count} {unit}{"" if count == 1 else "s"}'
+
+
+class NetworkError(Exception):
+    """A request never got a response (refused connection, timeout, ...); the message says why.
+    Only raised for a call that asked for it (`_request(..., exit_on_error=False)`)."""
+
+
+def _request(method: str, url: str, *, exit_on_error: bool = True, **kwargs):
     """`requests.<method>(url, **kwargs)`, with a default timeout (`REQUEST_TIMEOUT_SECONDS`,
-    overridable per call) and a bounded retry on 429 that honours the response's `Retry-After`
-    header -- every HTTP call this CLI makes goes through here rather than calling `requests`
-    directly, so both apply uniformly."""
+    overridable per call), a bounded retry on 429 and one place that handles a request that never
+    got an answer -- every HTTP call this CLI makes goes through here rather than calling
+    `requests` directly, so all three apply uniformly.
+
+    A 429 is retried after its `Retry-After` only when that is short (`MAX_RETRY_AFTER_SECONDS`)
+    and the call's total waiting stays within `MAX_TOTAL_RETRY_WAIT_SECONDS`; otherwise the 429
+    response is returned as it is, and `_error_text` tells the user when to try again.
+
+    A `requests` exception (connection refused, timeout, ...) exits 1 with a message, or with
+    `exit_on_error=False` raises `NetworkError` for a caller (the upload loop) that carries on.
+    """
     import requests
 
     kwargs.setdefault('timeout', REQUEST_TIMEOUT_SECONDS)
     func = getattr(requests, method)
-    response = func(url, **kwargs)
+
+    def send():
+        try:
+            return func(url, **kwargs)
+        except requests.exceptions.RequestException as e:
+            if not exit_on_error:
+                raise NetworkError(str(e)) from e
+            logger.error(f'Request failed: {e}')
+            raise typer.Exit(1) from e
+
+    response = send()
+    waited = 0.0
     for _attempt in range(MAX_RATE_LIMIT_RETRIES):
         if response.status_code != 429:
             return response
         wait = _retry_after_seconds(response)
+        if wait > MAX_RETRY_AFTER_SECONDS or waited + wait > MAX_TOTAL_RETRY_WAIT_SECONDS:
+            return response
         logger.info(f'Rate limited; waiting {wait:.0f}s before retrying...')
+        response.close()  # a streamed response holds its connection until it is closed
         time.sleep(wait)
-        response = func(url, **kwargs)
+        waited += wait
+        response = send()
     return response
 
 
-def _error_text(response) -> str:
+def _detail_text(detail) -> str:
+    """The API's `detail` as one readable line: a string as it is, and ninja's 422 list of
+    `{loc, msg, ...}` as `field: message` pairs (the `body`/`query`/`path` prefix dropped)."""
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if not (isinstance(item, dict) and 'msg' in item):
+                parts.append(str(item))
+                continue
+            loc = list(item.get('loc') or [])
+            if loc and loc[0] in ('body', 'query', 'path'):
+                was_body = loc.pop(0) == 'body'
+                if was_body and loc and loc[0] == 'payload':
+                    loc.pop(0)
+            where = '.'.join(str(part) for part in loc)
+            parts.append(f'{where}: {item["msg"]}' if where else str(item['msg']))
+        return '; '.join(parts)
+    return str(detail)
+
+
+def _error_text(response, *, hints: bool = True) -> str:
     """`<status>: <message>`, the message being the API's own `{"detail": ...}` (every error
-    response in this API -- `ninja.errors.HttpError`, and the site-wide 429 handler in
-    `config/api.py` -- carries one) rather than just the bare status code."""
+    response in this API -- `ninja.errors.HttpError`, the site-wide 429 handler in
+    `config/api.py` and ninja's 422 -- carries one) rather than just the bare status code. A body
+    that isn't JSON, or isn't an object with a `detail`, is shown as the raw text instead.
+    `hints` adds what to do about a 401 or 402 (not wanted when logging in)."""
     try:
-        detail = response.json().get('detail', response.text)
+        body = response.json()
     except ValueError:
+        body = None
+    if isinstance(body, dict) and 'detail' in body:
+        detail = _detail_text(body['detail'])
+    else:
         detail = response.text
     text = f'{response.status_code}: {detail}'
-    if response.status_code == 401:
+    if response.status_code == 429:
+        wait = _parse_retry_after(response)
+        if wait is not None:
+            text += f' (rate limited, try again in {_format_wait(wait)})'
+    elif hints and response.status_code == 401:
         text += ' (run `login` again)'
-    elif response.status_code == 402:
+    elif hints and response.status_code == 402:
         text += ' (top up your credits on the website)'
     return text
 
 
-def _raise_for_api_error(response) -> None:
+def _raise_for_api_error(response, *, hints: bool = True) -> None:
     """Exit non-zero with the API's own error message unless the response is a success."""
     if response.ok:
         return
-    logger.error(_error_text(response))
+    logger.error(_error_text(response, hints=hints))
     raise typer.Exit(1)
 
 
@@ -208,8 +312,6 @@ def _upload_receipt(headers: dict, path: Path) -> dict:
     Raises:
         UploadFailed: the API refused the file (with its message), or the `PUT` failed.
     """
-    import requests
-
     content_type = _content_type(path)
     assert content_type is not None  # `_collect_files` only lets supported files through
     size = path.stat().st_size
@@ -223,6 +325,7 @@ def _upload_receipt(headers: dict, path: Path) -> dict:
             'checksum_sha256': _sha256_base64_file(path),
         },
         headers=headers,
+        exit_on_error=False,
     )
     if not start.ok:
         raise UploadFailed(_error_text(start))
@@ -235,14 +338,18 @@ def _upload_receipt(headers: dict, path: Path) -> dict:
             data=path.read_bytes(),
             headers=ticket['headers'],
             timeout=FILE_UPLOAD_TIMEOUT_SECONDS,
+            exit_on_error=False,
         )
-    except requests.exceptions.RequestException as e:
+    except NetworkError as e:
         raise UploadFailed(f'upload failed: {e}') from e
     if not put.ok:
         raise UploadFailed(f'the upload to storage failed ({put.status_code})')
 
     complete = _request(
-        'post', _api_url(f'/receipts/uploads/{ticket["receipt_id"]}/complete'), headers=headers
+        'post',
+        _api_url(f'/receipts/uploads/{ticket["receipt_id"]}/complete'),
+        headers=headers,
+        exit_on_error=False,
     )
     if not complete.ok:
         raise UploadFailed(_error_text(complete))
@@ -270,22 +377,19 @@ def receipts_login(
         receipts login local me@example.com
         receipts login prod me@example.com mypassword
     """
-    import requests
-
-    set_environment(environment)
+    _select_environment(environment)
     password = _password_from_prompt_or_env(password)
 
+    response = _request(
+        'post', _api_url('/auth/login'), json={'email': email, 'password': password}
+    )
+    _raise_for_api_error(response, hints=False)
     try:
-        response = _request(
-            'post', _api_url('/auth/login'), json={'email': email, 'password': password}
-        )
-        response.raise_for_status()
-        token = response.json()['access_token']
-        save_token(token)
-        logger.info('Successfully authenticated!')
-    except requests.exceptions.RequestException as e:
-        logger.error(f'Login failed: {e}')
-        raise typer.Exit(1)
+        save_token(response.json()['access_token'])
+    except OSError as e:
+        logger.error(f'Could not save the token to {token_file()}: {e}')
+        raise typer.Exit(1) from e
+    logger.info('Successfully authenticated!')
 
 
 @app.command(name='list')
@@ -327,7 +431,7 @@ def receipts_list(
         receipts list local --status needs_review
         receipts list local --from 2026-10-01 --to 2026-10-31 --q staples --limit 50
     """
-    set_environment(environment)
+    _select_environment(environment)
     params: dict = {'sort': sort, 'limit': limit, 'offset': offset}
     for name, value in (
         ('status', status),
@@ -395,9 +499,7 @@ def receipts_upload(
         receipts upload local invoice.pdf photo.jpg
         receipts upload prod ./october-scans
     """
-    import requests
-
-    set_environment(environment)
+    _select_environment(environment)
     headers = get_headers()
 
     files = _collect_files(list(paths))
@@ -409,10 +511,7 @@ def receipts_upload(
     for path in files:
         try:
             receipt = _upload_receipt(headers, path)
-        except UploadFailed as e:
-            failed += 1
-            logger.error(f'{path.name}: {e}')
-        except requests.exceptions.RequestException as e:
+        except (UploadFailed, NetworkError) as e:
             failed += 1
             logger.error(f'{path.name}: {e}')
         else:
@@ -431,7 +530,7 @@ def receipts_get(environment: EnvironmentAnnotation, receipt_id: str):
     Example:
         receipts get local 1b6e2f4a-...
     """
-    set_environment(environment)
+    _select_environment(environment)
 
     response = _request('get', _api_url(f'/receipts/receipts/{receipt_id}'), headers=get_headers())
     _raise_for_api_error(response)
@@ -484,7 +583,7 @@ def receipts_export(
         receipts export local --out receipts.csv
         receipts export local --out q3.csv --from 2026-07-01 --to 2026-09-30 --status processed
     """
-    set_environment(environment)
+    _select_environment(environment)
     params: dict = {'sort': sort}
     for name, value in (
         ('status', status),
@@ -498,15 +597,38 @@ def receipts_export(
     if duplicates:
         params['duplicates'] = 'true'
 
+    headers = get_headers()
+    if not out.parent.is_dir():
+        # Checked before the request: an export spends one of the few per-hour exports.
+        logger.error(f'Not a folder: {out.parent}')
+        raise typer.Exit(1)
+
+    import requests
+
     response = _request(
-        'get', _api_url('/receipts/export.csv'), params=params, headers=get_headers(), stream=True
+        'get', _api_url('/receipts/export.csv'), params=params, headers=headers, stream=True
     )
-    _raise_for_api_error(response)
-    size = 0
-    with out.open('wb') as fh:
-        for chunk in response.iter_content(chunk_size=64 * 1024):
-            fh.write(chunk)
-            size += len(chunk)
+    try:
+        _raise_for_api_error(response)
+        # Written next to `out` and renamed into place only once it is complete, so a dropped
+        # connection never leaves a cut-off CSV at `--out` (or replaces a good older one).
+        partial = out.with_name(f'.{out.name}.part')
+        size = 0
+        try:
+            with partial.open('wb') as fh:
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    fh.write(chunk)
+                    size += len(chunk)
+            partial.replace(out)
+        except (requests.exceptions.RequestException, OSError) as e:
+            partial.unlink(missing_ok=True)
+            logger.error(f'Export failed, nothing written to {out}: {e}')
+            raise typer.Exit(1) from e
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+    finally:
+        response.close()
     logger.info(f'Wrote {out} ({size} bytes).')
 
 
@@ -518,7 +640,7 @@ def receipts_inbox(environment: EnvironmentAnnotation):
     Example:
         receipts inbox local
     """
-    set_environment(environment)
+    _select_environment(environment)
 
     response = _request('get', _api_url('/receipts/inbox'), headers=get_headers())
     _raise_for_api_error(response)
@@ -555,7 +677,7 @@ def receipts_regenerate(
         receipts regenerate local
         receipts regenerate local --yes
     """
-    set_environment(environment)
+    _select_environment(environment)
     headers = get_headers()
     if not yes and not typer.confirm(
         'The current address stops working immediately. Generate a new one?'

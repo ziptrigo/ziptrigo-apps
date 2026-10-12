@@ -133,6 +133,6 @@ def receipt_file(request, receipt_id: UUID, disposition: str = 'attachment'):
     return {
         'url': url,
         'disposition': disposition,
-        'filename': receipt.original_filename,
+        'filename': services.file_name(receipt),
         'expires_in': GET_URL_EXPIRES_SECONDS,
     }

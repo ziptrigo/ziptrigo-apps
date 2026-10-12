@@ -56,6 +56,12 @@ class FakeResponse:
         self.ok = 200 <= status_code < 400
         self.text = text if text is not None else json.dumps(self._json)
         self._content = content
+        self.closed = False
+        # Raised from `iter_content` after the first chunk: a connection dropped mid-download.
+        self.fail_mid_stream: Exception | None = None
+
+    def close(self):
+        self.closed = True
 
     def json(self):
         return self._json
@@ -69,13 +75,17 @@ class FakeResponse:
     def iter_content(self, chunk_size=1):
         for start in range(0, len(self._content), chunk_size):
             yield self._content[start : start + chunk_size]
+            if self.fail_mid_stream:
+                raise self.fail_mid_stream
 
 
 @pytest.fixture(autouse=True)
 def _no_env_file(monkeypatch):
     """Every command calls `set_environment(environment)` first, which reads a real `.env.*` file
     off disk -- irrelevant to what these tests check, and CI may not have one at all."""
-    monkeypatch.setattr(receipts, 'set_environment', lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        receipts, 'set_environment', lambda environment=None, *args, **kwargs: environment
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -92,8 +102,11 @@ def _no_sleep(monkeypatch):
 
 @pytest.fixture
 def token_file(tmp_path, monkeypatch):
-    path = tmp_path / 'token'
-    monkeypatch.setattr(receipts, 'TOKEN_FILE', path)
+    """The `local` environment's token file (the default), holding a token; the other
+    environments' files sit next to it."""
+    monkeypatch.setattr(receipts, 'TOKEN_FILE_BASE', tmp_path / 'token')
+    monkeypatch.setattr(receipts, '_environment', 'local')
+    path = tmp_path / 'token.local'
     path.write_text('tok')
     return path
 
@@ -208,6 +221,38 @@ def test_error_text_carries_the_detail_and_a_hint():
     assert 'credits' in receipts._error_text(FakeResponse(402, {'detail': 'paused'}))
 
 
+def test_error_text_shows_ninjas_422_list_readably():
+    detail = [
+        {'type': 'extra_forbidden', 'loc': ['body', 'payload', 'vendr'], 'msg': 'Extra inputs'},
+        {'type': 'int_parsing', 'loc': ['query', 'limit'], 'msg': 'Input should be an integer'},
+        {'type': 'uuid_parsing', 'loc': ['path', 'receipt_id'], 'msg': 'Input should be a UUID'},
+        {'type': 'missing', 'loc': [], 'msg': 'Field required'},
+    ]
+
+    text = receipts._error_text(FakeResponse(422, {'detail': detail}))
+
+    assert text == (
+        '422: vendr: Extra inputs; limit: Input should be an integer; '
+        'receipt_id: Input should be a UUID; Field required'
+    )
+
+
+def test_error_text_copes_with_json_that_is_not_an_object_with_a_detail():
+    assert receipts._error_text(FakeResponse(500, ['boom'], text='["boom"]')) == '500: ["boom"]'
+    assert receipts._error_text(FakeResponse(500, 'oops', text='"oops"')) == '500: "oops"'
+    assert receipts._error_text(FakeResponse(500, {'x': 1}, text='{"x": 1}')) == '500: {"x": 1}'
+    assert receipts._error_text(FakeResponse(400, {'detail': {'a': 1}})) == "400: {'a': 1}"
+
+
+def test_error_text_for_a_429_says_when_to_try_again():
+    response = FakeResponse(429, {'detail': 'Too many.'}, headers={'Retry-After': '3500'})
+
+    assert (
+        receipts._error_text(response) == '429: Too many. (rate limited, try again in 59 minutes)'
+    )
+    assert 'try again' not in receipts._error_text(FakeResponse(429, {'detail': 'Too many.'}))
+
+
 def test_get_headers_requires_login(logged_out):
     with pytest.raises(typer.Exit):
         receipts.get_headers()
@@ -219,14 +264,80 @@ def test_get_headers_returns_bearer_token(token_file):
     assert receipts.get_headers() == {'Authorization': 'Bearer abc123'}
 
 
-def test_save_token_creates_file_with_owner_only_permissions(tmp_path, monkeypatch):
-    path = tmp_path / 'token'
-    monkeypatch.setattr(receipts, 'TOKEN_FILE', path)
+def test_save_token_creates_file_with_owner_only_permissions(logged_out):
+    receipts.save_token('secret')
+
+    assert logged_out.read_text() == 'secret'
+    assert (logged_out.stat().st_mode & 0o777) == 0o600
+
+
+def test_save_token_tightens_a_file_that_already_exists_with_looser_permissions(token_file):
+    token_file.chmod(0o644)
 
     receipts.save_token('secret')
 
-    assert path.read_text() == 'secret'
-    assert (path.stat().st_mode & 0o777) == 0o600
+    assert token_file.read_text() == 'secret'
+    assert (token_file.stat().st_mode & 0o777) == 0o600
+
+
+def test_save_token_will_not_write_through_a_symlink(logged_out, tmp_path):
+    target = tmp_path / 'elsewhere'
+    target.write_text('keep')
+    logged_out.symlink_to(target)
+
+    with pytest.raises(OSError):
+        receipts.save_token('secret')
+
+    assert target.read_text() == 'keep'
+
+
+# -- One token file per environment --
+
+
+def test_each_environment_has_its_own_token_file(token_file, tmp_path, monkeypatch):
+    token_file.write_text('local-token')
+    (tmp_path / 'token.prod').write_text('prod-token')
+
+    monkeypatch.setattr(receipts, '_environment', 'prod')
+    assert receipts.get_headers() == {'Authorization': 'Bearer prod-token'}
+
+    monkeypatch.setattr(receipts, '_environment', 'local')
+    assert receipts.get_headers() == {'Authorization': 'Bearer local-token'}
+
+
+def test_commands_use_the_selected_environments_token(token_file, tmp_path, monkeypatch):
+    (tmp_path / 'token.prod').write_text('prod-token')
+    seen = {}
+
+    def fake_get(url, params=None, headers=None, **kwargs):
+        seen.update(url=url, headers=headers)
+        return FakeResponse(200, {'count': 0, 'limit': 20, 'offset': 0, 'results': []})
+
+    monkeypatch.setattr('requests.get', fake_get)
+
+    assert runner.invoke(receipts.app, ['list', 'prod']).exit_code == 0
+    assert seen['headers'] == {'Authorization': 'Bearer prod-token'}
+    assert runner.invoke(receipts.app, ['list', 'local']).exit_code == 0
+    assert seen['headers'] == {'Authorization': 'Bearer tok'}
+
+
+def test_login_writes_only_the_selected_environments_file(token_file, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        'requests.post', lambda *a, **k: FakeResponse(200, {'access_token': 'new-prod'})
+    )
+
+    result = runner.invoke(receipts.app, ['login', 'prod', 'me@example.com', 'pw'])
+
+    assert result.exit_code == 0
+    assert (tmp_path / 'token.prod').read_text() == 'new-prod'
+    assert token_file.read_text() == 'tok'
+
+
+def test_a_token_from_an_older_version_is_ignored(logged_out, tmp_path):
+    (tmp_path / 'token').write_text('legacy')
+
+    with pytest.raises(typer.Exit):
+        receipts.get_headers()
 
 
 # -- `_request`: timeout + bounded 429 retry --
@@ -279,6 +390,133 @@ def test_request_gives_up_after_max_retries(monkeypatch):
 
     assert response.status_code == 429
     assert len(calls) == receipts.MAX_RATE_LIMIT_RETRIES + 1
+
+
+def test_request_does_not_sleep_on_a_long_retry_after(monkeypatch):
+    # The hourly rules (export, regenerate, ...): waiting would hang the command for an hour.
+    slept = []
+    calls = []
+    monkeypatch.setattr(receipts.time, 'sleep', lambda s: slept.append(s))
+
+    def hourly(url, **kwargs):
+        calls.append(1)
+        return FakeResponse(429, {'detail': 'Too many requests.'}, headers={'Retry-After': '3000'})
+
+    monkeypatch.setattr('requests.get', hourly)
+
+    response = receipts._request('get', 'https://example.com')
+
+    assert response.status_code == 429
+    assert slept == [] and len(calls) == 1
+
+
+def test_request_sleeps_at_the_cap_but_not_past_it(monkeypatch):
+    slept = []
+    monkeypatch.setattr(receipts.time, 'sleep', lambda s: slept.append(s))
+    waits = iter(['60', '61'])
+
+    def get(url, **kwargs):
+        return FakeResponse(429, headers={'Retry-After': next(waits)})
+
+    monkeypatch.setattr('requests.get', get)
+
+    assert receipts._request('get', 'https://example.com').status_code == 429
+    assert slept == [60.0]  # 60 s is fine, the next 61 s is not
+
+
+def test_request_stops_retrying_once_the_total_wait_budget_is_spent(monkeypatch):
+    slept = []
+    calls = []
+    monkeypatch.setattr(receipts.time, 'sleep', lambda s: slept.append(s))
+
+    def always_55(url, **kwargs):
+        calls.append(1)
+        return FakeResponse(429, headers={'Retry-After': '55'})
+
+    monkeypatch.setattr('requests.get', always_55)
+
+    assert receipts._request('get', 'https://example.com').status_code == 429
+    assert sum(slept) <= receipts.MAX_TOTAL_RETRY_WAIT_SECONDS
+    assert slept == [55.0, 55.0]  # a third 55 s would pass the 120 s budget
+    assert len(calls) == 3
+
+
+def test_request_closes_the_429_responses_it_discards(monkeypatch):
+    first = FakeResponse(429, headers={'Retry-After': '1'})
+    final = FakeResponse(200)
+    responses = iter([first, final])
+    monkeypatch.setattr('requests.get', lambda url, **kwargs: next(responses))
+
+    assert receipts._request('get', 'https://example.com', stream=True) is final
+    assert first.closed and not final.closed
+
+
+def test_a_long_rate_limit_fails_at_once_telling_when_to_try_again(
+    token_file, tmp_path, monkeypatch
+):
+    slept = []
+    monkeypatch.setattr(receipts.time, 'sleep', lambda s: slept.append(s))
+    monkeypatch.setattr(
+        'requests.get',
+        lambda *a, **k: FakeResponse(
+            429, {'detail': 'Too many requests.'}, headers={'Retry-After': '2400'}
+        ),
+    )
+    out = tmp_path / 'out.csv'
+
+    result = runner.invoke(receipts.app, ['export', 'local', '--out', str(out)])
+
+    assert result.exit_code == 1
+    assert slept == [] and not out.exists()
+    assert 'rate limited, try again in 40 minutes' in result.output
+
+
+@pytest.mark.parametrize(
+    ('seconds', 'text'),
+    [
+        (1, '1 second'),
+        (45, '45 seconds'),
+        (60, '1 minute'),
+        (61, '2 minutes'),
+        (3600, '60 minutes'),
+    ],
+)
+def test_format_wait(seconds, text):
+    assert receipts._format_wait(seconds) == text
+
+
+def test_a_network_error_exits_1_with_a_message_in_every_command(token_file, tmp_path, monkeypatch):
+    import requests
+
+    def refuse(*args, **kwargs):
+        raise requests.exceptions.ConnectionError('connection refused')
+
+    for verb in ('get', 'post', 'patch'):
+        monkeypatch.setattr(f'requests.{verb}', refuse)
+    for args in (
+        ['list', 'local'],
+        ['get', 'local', 'abc'],
+        ['inbox', 'local'],
+        ['regenerate', 'local', '--yes'],
+        ['export', 'local', '--out', str(tmp_path / 'o.csv')],
+        ['login', 'local', 'me@example.com', 'pw'],
+    ):
+        result = runner.invoke(receipts.app, args)
+        assert result.exit_code == 1, args
+        assert 'connection refused' in result.output, args
+        assert not isinstance(result.exception, requests.exceptions.RequestException), args
+
+
+def test_request_raises_network_error_when_asked_to(monkeypatch):
+    import requests
+
+    def refuse(*args, **kwargs):
+        raise requests.exceptions.Timeout('timed out')
+
+    monkeypatch.setattr('requests.put', refuse)
+
+    with pytest.raises(receipts.NetworkError, match='timed out'):
+        receipts._request('put', 'https://example.com', exit_on_error=False)
 
 
 # -- The upload (`_upload_receipt`), with every HTTP call mocked --
@@ -450,6 +688,31 @@ def test_login_failure_exits_nonzero(logged_out, monkeypatch):
     assert not logged_out.exists()
 
 
+def test_login_failure_shows_the_apis_own_message(logged_out, monkeypatch):
+    monkeypatch.setattr(
+        'requests.post',
+        lambda *a, **k: FakeResponse(403, {'detail': 'Please confirm your email address.'}),
+    )
+
+    result = runner.invoke(receipts.app, ['login', 'local', 'me@example.com', 'pw'])
+
+    assert result.exit_code == 1
+    assert 'Please confirm your email address.' in result.output
+    assert 'login` again' not in result.output  # no "run login again" hint at the login itself
+
+
+def test_login_that_cannot_save_the_token_exits_nonzero(logged_out, monkeypatch):
+    monkeypatch.setattr(
+        'requests.post', lambda *a, **k: FakeResponse(200, {'access_token': 'tok123'})
+    )
+    logged_out.symlink_to(logged_out.parent / 'elsewhere')
+
+    result = runner.invoke(receipts.app, ['login', 'local', 'me@example.com', 'pw'])
+
+    assert result.exit_code == 1
+    assert 'Could not save the token' in result.output
+
+
 def test_commands_without_login_exit_nonzero(logged_out):
     for args in (
         ['list', 'local'],
@@ -609,6 +872,26 @@ def test_upload_carries_on_after_a_failure_and_exits_nonzero(token_file, tmp_pat
     assert '1 of 2 uploaded' in result.output
 
 
+def test_upload_carries_on_after_a_network_error(token_file, tmp_path, monkeypatch):
+    (tmp_path / 'a.jpg').write_bytes(b'aaa')
+    (tmp_path / 'b.pdf').write_bytes(b'bbb')
+
+    def fake_upload(headers, path):
+        if path.name == 'a.jpg':
+            raise receipts.NetworkError('connection refused')
+        return {'id': 'id-b', 'status': 'received'}
+
+    monkeypatch.setattr(receipts, '_upload_receipt', fake_upload)
+
+    result = runner.invoke(
+        receipts.app, ['upload', 'local', str(tmp_path / 'a.jpg'), str(tmp_path / 'b.pdf')]
+    )
+
+    assert result.exit_code == 1
+    assert 'a.jpg: connection refused' in result.output
+    assert '1 of 2 uploaded' in result.output
+
+
 def test_upload_with_nothing_supported_exits_nonzero(token_file, tmp_path):
     (tmp_path / 'notes.txt').write_text('x')
 
@@ -681,6 +964,61 @@ def test_export_streams_the_csv_to_the_file(token_file, tmp_path, monkeypatch):
         'status': 'processed',
         'date_from': '2026-10-01',
     }
+
+
+def test_export_overwrites_an_existing_file_only_on_success(token_file, tmp_path, monkeypatch):
+    out = tmp_path / 'out.csv'
+    out.write_bytes(b'old,good\r\n')
+    import requests
+
+    response = FakeResponse(200, content=b'a,b\r\n1,2\r\n3,4\r\n')
+    response.fail_mid_stream = requests.exceptions.ChunkedEncodingError('reset by peer')
+    monkeypatch.setattr('requests.get', lambda *a, **k: response)
+
+    result = runner.invoke(receipts.app, ['export', 'local', '--out', str(out)])
+
+    assert result.exit_code == 1
+    assert 'reset by peer' in result.output
+    assert out.read_bytes() == b'old,good\r\n'  # the earlier file is untouched
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['out.csv', 'token.local']
+    assert response.closed
+
+
+def test_export_mid_stream_failure_leaves_no_partial_file(token_file, tmp_path, monkeypatch):
+    import requests
+
+    response = FakeResponse(200, content=b'a,b\r\n1,2\r\n')
+    response.fail_mid_stream = requests.exceptions.ChunkedEncodingError('cut off')
+    monkeypatch.setattr('requests.get', lambda *a, **k: response)
+    out = tmp_path / 'out.csv'
+
+    result = runner.invoke(receipts.app, ['export', 'local', '--out', str(out)])
+
+    assert result.exit_code == 1
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['token.local']
+
+
+def test_export_leaves_no_temp_file_behind_on_success(token_file, tmp_path, monkeypatch):
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(200, content=b'a,b\r\n'))
+    out = tmp_path / 'out.csv'
+
+    result = runner.invoke(receipts.app, ['export', 'local', '--out', str(out)])
+
+    assert result.exit_code == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['out.csv', 'token.local']
+
+
+def test_export_into_a_missing_folder_fails_before_asking_the_server(
+    token_file, tmp_path, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr('requests.get', lambda *a, **k: calls.append(1) or FakeResponse(200))
+
+    result = runner.invoke(
+        receipts.app, ['export', 'local', '--out', str(tmp_path / 'nope' / 'out.csv')]
+    )
+
+    assert result.exit_code == 1 and calls == []
 
 
 def test_export_error_writes_no_file(token_file, tmp_path, monkeypatch):

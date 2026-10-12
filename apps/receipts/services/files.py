@@ -31,11 +31,18 @@ def _require_available(receipt: Receipt) -> None:
 
 
 def _default_name(receipt: Receipt) -> str:
-    """A name for a file that has none (an email body): `receipt` plus the right extension, so
-    it opens in the right program when saved."""
+    """A name for a file that has none (an email body): `email.html` / `email.txt`, else
+    `receipt`, so it opens in the right program when saved."""
     return {'text/html': 'email.html', 'text/plain': 'email.txt'}.get(
         receipt.content_type, 'receipt'
     )
+
+
+def file_name(receipt: Receipt) -> str:
+    """The name the original file is served under: its uploaded name, or for one that has none (an
+    email body) `_default_name`. Shared by `download_url` and the API's `.../file` answer, so the
+    name a client is told is the name in the download's `Content-Disposition`."""
+    return receipt.original_filename or _default_name(receipt)
 
 
 def download_url(receipt: Receipt) -> str:
@@ -43,7 +50,7 @@ def download_url(receipt: Receipt) -> str:
     _require_available(receipt)
     return get_storage().presigned_get_url(
         receipt.file_key,
-        receipt.original_filename or _default_name(receipt),
+        file_name(receipt),
         disposition='attachment',
     )
 

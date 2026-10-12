@@ -1,6 +1,7 @@
 """The category endpoints (`/api/receipts/categories`): the user's own list, which the AI picks
 from. Each one calls the service the settings page uses."""
 
+from django.db.models import Count
 from django.shortcuts import get_object_or_404
 
 from .. import services
@@ -16,8 +17,10 @@ def _owned(request, category_id: int) -> ReceiptCategory:
 
 
 def _counted(user, category_id: int) -> ReceiptCategory:
-    """The category again, with its `receipt_count`."""
-    return next(c for c in services.list_categories(user) if c.pk == category_id)
+    """The category again, with its `receipt_count` (one query; a 404 if it was deleted since,
+    say from another tab)."""
+    queryset = ReceiptCategory.objects.annotate(receipt_count=Count('receipts'))
+    return get_object_or_404(queryset, pk=category_id, user=user)
 
 
 @router.get('/categories', response=list[CategorySchema])

@@ -5,6 +5,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 from ninja import Schema
+from pydantic import ConfigDict
 
 
 class CategoryRefSchema(Schema):
@@ -76,9 +77,18 @@ class ReceiptListSchema(Schema):
 
 class ReceiptUpdateSchema(Schema):
     """Body for `PATCH /receipts/{id}`. Every field is optional and only the ones present in the
-    body are applied (`payload.dict(exclude_unset=True)`), so omitting a field leaves it as it is;
-    an explicit `null` (or an empty string) clears it. `amount` takes `"42.10"` or `42.1`;
-    `receipt_date` is `YYYY-MM-DD`; `category` is a category id."""
+    body are applied (`payload.dict(exclude_unset=True)`), so omitting a field leaves it as it is.
+
+    An explicit `null` **clears** the field (`{"vendor": null}`; for a text field an empty string
+    does the same). This differs from `PATCH /inbox`, where `null` means "unchanged". `amount`
+    takes `"42.10"` or `42.1`; `receipt_date` is `YYYY-MM-DD`; `category` is a category id (or
+    `null` for uncategorized -- not an empty string, which is a 422 for an integer field).
+
+    A key that is not one of these fields (a typo, or `status`, `id`, ...) is refused with a 422
+    rather than ignored, so a client can't mistake a no-op for a saved edit.
+    """
+
+    model_config = ConfigDict(extra='forbid')
 
     vendor: str | None = None
     amount: str | float | None = None

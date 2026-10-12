@@ -181,6 +181,22 @@ class TestRead:
         theirs.refresh_from_db()
         assert theirs.deleted_at is None and theirs.vendor == ''
 
+    def test_a_malformed_receipt_id_is_ninjas_422_with_a_list_detail(self, client, auth):
+        # Schema/type errors are django-ninja's, not this API's 400: `detail` is a list here.
+        for method, path in (
+            (get, '/receipts/not-a-uuid'),
+            (get, '/receipts/not-a-uuid/file'),
+            (delete, '/receipts/not-a-uuid'),
+        ):
+            response = method(client, path, auth)
+            assert response.status_code == 422
+            assert isinstance(response.json()['detail'], list)
+        assert post(client, '/receipts/not-a-uuid/reprocess', auth).status_code == 422
+
+    def test_a_mistyped_query_parameter_is_ninjas_422(self, client, auth):
+        for query in ({'limit': 'abc'}, {'offset': 'x'}, {'duplicates': 'maybe'}):
+            assert get(client, '/receipts', auth, **query).status_code == 422
+
     def test_an_unknown_or_unfinished_upload_is_a_404(self, client, auth, make):
         unfinished = make(uploaded=False)
 
@@ -399,6 +415,36 @@ class TestUpdate:
 
         assert body['status'] == 'needs_review' and body['missing_fields'] == ['vendor']
 
+    @pytest.mark.parametrize(
+        'payload',
+        [
+            {'status': 'processed'},
+            {'vendr': 'Staples'},
+            {'category_id': 3},
+            {'vendor': 'A', 'id': 1},
+        ],
+    )
+    def test_an_unknown_key_is_a_422_and_nothing_is_applied(self, client, auth, make, payload):
+        receipt = make(vendor='Staples')
+
+        response = patch(client, f'/receipts/{receipt.pk}', auth, payload)
+
+        assert response.status_code == 422
+        detail = response.json()['detail']
+        assert isinstance(detail, list) and 'extra' in detail[0]['type']
+        receipt.refresh_from_db()
+        assert receipt.vendor == 'Staples' and receipt.user_edited_fields == []
+
+    def test_an_empty_string_category_is_a_422_not_a_clear(self, client, auth, make, funded_user):
+        category = ReceiptCategory.objects.create(user=funded_user, name='Keep')
+        receipt = make(category=category)
+
+        response = patch(client, f'/receipts/{receipt.pk}', auth, {'category': ''})
+
+        assert response.status_code == 422
+        receipt.refresh_from_db()
+        assert receipt.category_id == category.pk
+
     def test_an_empty_body_changes_nothing(self, client, auth, make):
         receipt = make(vendor='Staples')
 
@@ -578,6 +624,22 @@ class TestFile:
         assert body['expires_in'] > 0
         assert fake_storage.get_urls[-1]['disposition'] == 'attachment'
         assert 'file_key' not in body
+
+    @pytest.mark.parametrize(
+        ('content_type', 'expected'),
+        [('text/html', 'email.html'), ('text/plain', 'email.txt'), ('message/rfc822', 'receipt')],
+    )
+    def test_a_file_without_a_name_gets_the_download_default(
+        self, client, auth, make, fake_storage, content_type, expected
+    ):
+        # The name the client is told is the one the signed URL's Content-Disposition uses.
+        receipt = make(data=b'body', content_type=content_type, original_filename='')
+
+        response = get(client, f'/receipts/{receipt.pk}/file', auth)
+
+        assert response.status_code == 200
+        assert response.json()['filename'] == expected
+        assert fake_storage.get_urls[-1]['filename'] == expected
 
     def test_inline_asks_for_the_preview(self, client, auth, make, fake_storage):
         receipt = make()

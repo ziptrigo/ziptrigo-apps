@@ -86,6 +86,28 @@ class TestCategories:
         category.refresh_from_db()
         assert category.name == 'Gear'
 
+    def test_rename_reports_the_receipt_count(self, client, auth, funded_user, fake_storage):
+        get_account(funded_user)
+        category = ReceiptCategory.objects.get(user=funded_user, name='Equipment')
+        create_receipt(funded_user, fake_storage, category=category)
+        create_receipt(funded_user, fake_storage, category=category, deleted_at=timezone.now())
+
+        response = patch(client, f'/categories/{category.pk}', auth, {'name': 'Gear'})
+
+        assert response.json()['receipt_count'] == 2  # the Trash counts, like the list
+
+    def test_a_category_deleted_in_between_is_a_404_not_a_500(self, funded_user):
+        from django.http import Http404
+
+        from ..api.categories import _counted
+
+        get_account(funded_user)
+        category = ReceiptCategory.objects.get(user=funded_user, name='Equipment')
+        category.delete()
+
+        with pytest.raises(Http404):
+            _counted(funded_user, category.pk)
+
     def test_rename_to_an_existing_name_is_a_400(self, client, auth, funded_user):
         get_account(funded_user)
         category = ReceiptCategory.objects.get(user=funded_user, name='Equipment')
@@ -195,6 +217,32 @@ class TestInbox:
 
         assert response.status_code == 400 and response.json()['detail'].startswith(field)
         assert get(client, '/inbox', auth).json() == before
+
+    @pytest.mark.parametrize(
+        'payload',
+        [
+            {'sender': ['a@b.co']},
+            {'default_currency': 'EUR', 'address': 'x@y.z'},
+            {'currency': 'EUR'},
+        ],
+    )
+    def test_an_unknown_key_is_a_422_and_nothing_is_applied(self, client, auth, payload):
+        before = get(client, '/inbox', auth).json()
+
+        response = patch(client, '/inbox', auth, payload)
+
+        assert response.status_code == 422 and isinstance(response.json()['detail'], list)
+        assert get(client, '/inbox', auth).json() == before
+
+    def test_null_leaves_a_setting_unchanged(self, client, auth):
+        # The opposite of `PATCH /receipts/{id}`, where null clears the field.
+        patch(client, '/inbox', auth, {'sender_allowlist': ['a@b.co'], 'default_currency': 'EUR'})
+
+        body = patch(
+            client, '/inbox', auth, {'sender_allowlist': None, 'default_currency': None}
+        ).json()
+
+        assert body['sender_allowlist'] == ['a@b.co'] and body['default_currency'] == 'EUR'
 
     def test_regenerate_retires_the_old_address(self, client, auth, funded_user):
         old = get(client, '/inbox', auth).json()['address']
