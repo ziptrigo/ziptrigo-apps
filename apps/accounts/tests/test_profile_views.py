@@ -88,6 +88,6 @@ def test_account_page_explains_no_password_for_a_google_created_account(client, 
     content = client.get(reverse('accounts:account')).content.decode()
 
     assert 'Change Password' not in content
-    assert "You sign in with Google, so this account doesn't have a password." in content
+    assert "You signed in with Google, so this account doesn't have a password." in content
     assert f'href="{reverse("accounts:forgot-password")}"' in content
     assert 'Set a password' in content
