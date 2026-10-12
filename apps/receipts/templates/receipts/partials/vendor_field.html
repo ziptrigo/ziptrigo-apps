@@ -6,8 +6,8 @@
    its receipts. (The form sets `hx-disabled-elt="find button[type='submit']"`, which htmx 2.0 can't resolve
    for a request made by a control that has no such button inside it: every htmx control in here sets
    its own, or `unset`.) Re-rendered on its own (outerHTML) by "Mark as vetted". Needs `receipt`, `vendor`
-   (None when the receipt has none), `vendor_receipt_count`, `read_as`, `missing`, `trashed` and
-   `detail_url`. {% endcomment %}
+   (None when the receipt has none), `vendor_receipt_count`, `read_as`, `teaches`, `missing`, `trashed`
+   and `detail_url`. {% endcomment %}
 <div id="vendor-field" class="mb-4" x-data="vendorCombobox"
      data-name="{{ receipt.vendor }}" data-vendor-id="{{ receipt.vendor_ref_id|default_if_none:'' }}"
      data-extracted="{{ receipt.vendor_extracted }}" @click.outside="close()">
@@ -50,12 +50,16 @@
     </p>
     {% endif %}
 
-    {% comment %} Shown once a different vendor is picked or typed: the change is forward-looking, so it says so. {% endcomment %}
+    {% comment %} Shown once a different vendor is picked or typed: the change is forward-looking, so it says so.
+       Not rendered at all when a vetted vendor is called what the AI read (`teaches` is false): that name
+       stays with it, so there is nothing to promise. {% endcomment %}
+    {% if teaches %}
     <div x-show="showHint" style="display: none" role="status"
          class="mt-2 flex items-start gap-2 rounded-md border border-blue-600/40 dark:border-blue-400/40 bg-blue-50 dark:bg-gray-800 px-3 py-2 text-xs text-gray-700 dark:text-gray-300">
         <i class="fas fa-circle-info mt-0.5 text-blue-600 dark:text-blue-400" aria-hidden="true"></i>
         <span class="flex-1">On save, future receipts read as <strong>&ldquo;{{ receipt.vendor_extracted }}&rdquo;</strong> will be filed under <strong x-text="name.trim()"></strong>. Receipts you already have stay as they are.</span>
     </div>
+    {% endif %}
 
     {% if vendor and not vendor.vetted and not trashed %}
     <div x-show="!changed" class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2">

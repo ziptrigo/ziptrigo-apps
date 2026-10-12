@@ -17,15 +17,84 @@ Nothing else changes on existing receipts: matching is not retroactive.
 Reversing clears the links and the vendors (the vendors are created by this migration or after it).
 """
 
+import re
+import unicodedata
 from collections import Counter
 
 from django.db import migrations, transaction
 from django.utils import timezone
 
-from apps.receipts.services.vendors import normalize_key
-
 USER_BATCH = 200
 RECEIPT_BATCH = 500
+MAX_VENDOR_NAME_LENGTH = 255
+
+# A frozen copy of `apps.receipts.services.vendors.normalize_key` as it was when this migration was
+# written. A migration must not import live app code (it changes, and drags the current models
+# in), and the aliases written here have to mean the same thing whatever the matcher becomes.
+LEGAL_FORMS = frozenset(
+    {
+        'ab',
+        'ag',
+        'aps',
+        'as',
+        'bv',
+        'co',
+        'company',
+        'corp',
+        'corporation',
+        'eurl',
+        'gmbh',
+        'inc',
+        'incorporated',
+        'kg',
+        'kk',
+        'limited',
+        'llc',
+        'llp',
+        'lda',
+        'lp',
+        'ltd',
+        'ltda',
+        'nv',
+        'oy',
+        'plc',
+        'pllc',
+        'pte',
+        'pty',
+        'sa',
+        'sarl',
+        'sas',
+        'sl',
+        'spa',
+        'srl',
+        'ug',
+    }
+)
+
+
+def normalize_key(name: str) -> str:
+    """The key `name` is matched under: NFKC, casefolded, Latin accents stripped, `&` read as
+    "and", dots and apostrophes removed (`L.L.C.` is `llc`, `McDonald's` is `mcdonalds`), any other
+    punctuation a word break, a leading "the" and the trailing legal forms (`LEGAL_FORMS`) dropped.
+    Neither is ever dropped down to nothing: the key of `The Co` is `co`. A name with no letters or
+    digits at all keys as its own casefolded text."""
+    text = unicodedata.normalize('NFKC', name).casefold()
+    # Only accents on an ASCII letter: stripping the marks of other scripts (a kana's dakuten) would
+    # turn one name into another.
+    kept: list[str] = []
+    for char in unicodedata.normalize('NFKD', text):
+        if unicodedata.combining(char) and kept and kept[-1].isascii():
+            continue
+        kept.append(char)
+    text = ''.join(kept).replace('&', ' and ')
+    text = re.sub(r"[.'’`´]", '', text)
+    tokens = re.sub(r'[\W_]+', ' ', text).split()
+    if len(tokens) > 1 and tokens[0] == 'the':
+        tokens = tokens[1:]
+    while len(tokens) > 1 and tokens[-1] in LEGAL_FORMS:
+        tokens.pop()
+    key = ' '.join(tokens) or ' '.join(unicodedata.normalize('NFKC', name).casefold().split())
+    return key[:MAX_VENDOR_NAME_LENGTH]
 
 
 def _group_receipts(Receipt, user_id):

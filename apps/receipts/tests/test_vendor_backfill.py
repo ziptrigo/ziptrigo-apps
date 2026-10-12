@@ -1,7 +1,9 @@
 """Migration 0004: every existing receipt gets a vendor. Called directly with the real app registry
 (the suite runs with `--no-migrations`)."""
 
+import re
 from importlib import import_module
+from pathlib import Path
 
 import pytest
 from django.apps import apps
@@ -235,3 +237,13 @@ def test_reversing_clears_the_links_and_the_vendors(make):
     assert receipt.vendor_ref is None and receipt.vendor_extracted == ''
     assert receipt.vendor == 'ACME'
     assert Vendor.objects.count() == 0 and VendorAlias.objects.count() == 0
+
+
+def test_the_migration_carries_its_own_frozen_copy_of_the_key_function():
+    """A migration must not import live app code: it changes, and the keys written here have to
+    keep their meaning."""
+    source = Path(str(migration.__file__)).read_text()
+    imports = re.findall(r'^(?:from|import) (\S+)', source, re.M)
+
+    assert not [name for name in imports if name.startswith('apps')]
+    assert migration.normalize_key('The ACME Industries, L.L.C.') == 'acme industries'

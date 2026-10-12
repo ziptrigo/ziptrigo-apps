@@ -1150,8 +1150,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   back); dismissing sets `duplicate_dismissed`. Tasks are queued with
   `enqueue_after_commit` (`apps.core.services.queue`; on commit, a failure logged and swallowed -- `retry_due`
   re-queues receipts nobody picked up).
-- **Vendors** (issue #123; `models/vendor.py`, `services/vendors.py`, migrations `0003_vendors` +
-  `0004_backfill_vendors`). A `Vendor` is one of a *user's* vendors (per user, like categories;
+- **Vendors** (issue #123; `models/vendor.py`, `services/vendors.py`, migrations `0003_vendors`,
+  `0004_backfill_vendors` and `0005_unlinked_vendor_index`). A `Vendor` is one of a *user's* vendors (per user, like categories;
   `UniqueConstraint(Lower('name'), 'user')`); `vetted_at` null means only the AI read it. A
   `VendorAlias` is a name it is known by, stored under a normalized `key` (`normalize_key`: NFKC,
   casefold, Latin accents stripped, `&` -> "and", dots and apostrophes removed, other punctuation a
@@ -1168,12 +1168,16 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   serving while `0003` runs (it doesn't know the column) can keep inserting receipts (the #102
   lesson).
   - **Matching** (`match_vendor`, run by `processing._fill_fields` unless `'vendor'` is in
-    `user_edited_fields`), in the issue's order: (1) a *vetted* vendor, by alias or by a near match
-    (`difflib` ratio >= 0.92, both keys >= 6 characters, exactly one such vendor -- never a guess
-    between two); (2) an *unvetted* vendor, by alias only (the pipeline never builds on its own
-    guesses); (3) otherwise a new unvetted vendor named as the AI read it, created in a savepoint
+    `user_edited_fields`), in the issue's order: (1) a *vetted* vendor, by alias (or by exact name)
+    or by a near match (`difflib` ratio >= 0.92, both keys >= 6 characters, exactly one such
+    vendor -- never a guess between two); (2) an *unvetted* vendor, by alias or exact name (the
+    pipeline never builds on its own guesses); (3) otherwise a new unvetted vendor named as the AI read it, created in a savepoint
     that on `IntegrityError` (a sibling receipt of the same email creating it at the same moment)
-    re-reads the winner's, with no lock on the account row. A near match does not teach an alias. A
+    re-reads the winner's, with no lock on the account row. `_find` looks up the alias key first and
+    the exact name (case-insensitive) only when nobody holds the key; when they are two different
+    vendors (a backfill leaves a vendor without the alias for its own name when another group claimed
+    the key) the vetted one wins, the key's holder if both or neither are, so `match_vendor('Staples')`
+    and `match_vendor('STAPLES INC')` can't disagree. A near match does not teach an alias. A
     new or unvetted vendor does **not** change the receipt's status. A re-run that matches another
     vendor deletes the unvetted one it left once it has no receipts (`drop_if_orphan`, called after the
     receipt row is saved, because until then it still references it; `lifecycle.purge_receipt` does the
@@ -1183,7 +1187,14 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `assign_vendor`: it moves *that receipt*, vets the chosen vendor ("the user confirmed it": a name
     typed in, picked, renamed, merged into or marked), points the alias for the name the AI read
     (`vendor_extracted`) at it so the next receipt read that way lands there, and drops the vendor
-    left behind if it is unvetted and empty. The vendor the receipt already has, by name or id, is a
+    left behind if it is unvetted and empty. **Teaching never takes a vetted vendor's own-name key**
+    (`_is_own_name_key`: `normalize_key(vendor.name)`): moving a receipt read as "Staples" away from
+    the vetted `Staples` still moves the receipt but leaves `staples` with `Staples`, otherwise
+    matching would send "Staples" and "STAPLES INC" to different vendors and renaming `Staples` would
+    be refused as a clash with the thief. `teaches_extracted_name(user, extracted)` says whether a
+    move teaches; the receipt page renders the "future receipts read as ... will be filed under ..."
+    hint only when it does (`vendor_field_context`'s `teaches`), so the page never promises it. The
+    alias of a typed name found by exact name is tagged `user`, not `extracted`. The vendor the receipt already has, by name or id, is a
     no-op, so saving other fields never vets anything. A typed name resolves to the user's vendor
     with that name or key, else creates a vetted one: typing `Staples Inc` over `Staples` files the
     receipt under the existing `Staples` (the page says so; "Rename vendor" is how to change a name).
@@ -1191,9 +1202,18 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     shows; it raises `VendorNameTaken(other)` (a `ValidationError`) when another vendor has the name or
     its key, which the page turns into an offer to merge into that vendor, and keeps both the old and
     the new name as aliases. `merge_vendors` moves receipts (link and text) and aliases to the vendor
-    kept, in one transaction under row locks taken in id order, and vets it. `delete_vendor` refuses
-    while it has receipts, trashed ones included. **No retroactive matching**: nothing but a rename or
-    a merge changes receipts that already exist.
+    kept, in one transaction under row locks taken in id order, and vets it; it is also the one place
+    that re-checks something, running `refresh_duplicate` on the live receipts it moved whose text
+    changed (newest first, each flag saved before the next check so two copies don't flag each other,
+    bounded by `MERGE_DUPLICATE_CHECK_LIMIT`, a dismissed flag respected), which is fine because a
+    merge is an explicit, retroactive user action. `delete_vendor` refuses while it has receipts,
+    trashed ones included. **No retroactive matching**: nothing but a rename or a merge changes
+    receipts that already exist. **Lock order**: rename and merge lock vendors with
+    `select_for_update(no_key=True)` (`FOR NO KEY UPDATE`: excludes each other but not a receipt being
+    filed under the vendor) and then update their receipts, while processing holds a receipt lock and
+    may then drop an orphan vendor; `drop_if_orphan` therefore locks the vendor `skip_locked` and
+    leaves it for the next orphan check or the user when someone has it, instead of waiting (the
+    other order would deadlock on Postgres).
   - **Duplicates and search.** `find_duplicate` compares `vendor_ref` (or the text for a receipt
     without one); `ReceiptFilters.vendor` filters by vendor id; `q` also matches `vendor_extracted`
     (so a renamed vendor's receipts are still found by the old name); the CSV has a trailing
@@ -1204,7 +1224,23 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     by receipt count (own key, then the names the AI read), each only if still free -- a group whose
     key is taken stays a separate vendor, under "To vet", for the user to merge. Reversible (clears
     the links and the vendors). Its tests call `backfill_vendors` directly (the suite runs with
-    `--no-migrations`).
+    `--no-migrations`). The migration carries its own frozen copy of `normalize_key` and imports
+    nothing from the app (a test checks), so the keys it writes keep their meaning whatever the
+    matcher becomes.
+  - **Receipts the backfill missed** (`link_unlinked_receipts`). The migration runs while the
+    previous release is still serving, and a receipt that release processes afterwards has a vendor
+    text and no `vendor_ref` (no chip, absent from the Vendors page and the `?vendor=` filter, not
+    updated by a rename or merge). `services.vendors.link_unlinked_receipts(user_id=None)` links
+    every such receipt, live or trashed, to the user's vendor *called* that (exact, case-insensitive),
+    else to a new unvetted one with its alias when the key is free. It never rewrites `Receipt.vendor`
+    and never uses `match_vendor`'s key or near tiers (they could file a receipt under a differently
+    named vendor, which is retroactive); it reads in id order in batches, groups by user and name,
+    and its `UPDATE` only touches receipts still unlinked (a vendor it just created and no one used
+    is dropped again; losing a creation race uses the winner's). It runs as the hourly job
+    `receipts.link_vendors` (per-user `try/except`) -- a partial index (`0005`,
+    `receipts_unlinked_vendor`, `WHERE vendor_ref_id IS NULL AND vendor <> ''`) makes a run with
+    nothing to do a single index probe -- and as `./manage.py receipts_link_vendors`, to run by hand
+    right after the deploy.
   - **Web.** The receipt page's vendor field is an ARIA combobox (`static/receipts/js/
     vendor_combobox.js`, suggestions from `GET vendors/suggest/` into a listbox) with a Vetted / New
     vendor chip, "Read on the receipt as ...", "Mark as vetted" and "Rename vendor...";
@@ -1279,7 +1315,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
   `receipts.cleanup_uploads` (hourly), `receipts.poll_inbound` (every minute, 2 min lease; see
-  "Email intake" below). Idempotent, per-row `try/except` + `logger.exception`.
+  "Email intake" below), `receipts.link_vendors` (hourly; links receipts with a vendor text and no
+  vendor, see "Vendors"). Idempotent, per-row `try/except` + `logger.exception`.
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
   `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
   "Queue and scheduler" and "Docker"). Tests: `ImmediateBackend` runs a task inline at

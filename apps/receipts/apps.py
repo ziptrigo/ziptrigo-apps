@@ -66,6 +66,14 @@ class ReceiptsConfig(AppConfig):
         )
         register_job(
             JobSpec(
+                name='receipts.link_vendors',
+                func=jobs.link_vendors,
+                interval=timedelta(hours=1),
+                lease=timedelta(minutes=30),
+            )
+        )
+        register_job(
+            JobSpec(
                 name='receipts.cleanup_uploads',
                 func=jobs.cleanup_uploads,
                 interval=timedelta(hours=1),

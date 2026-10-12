@@ -343,7 +343,9 @@ def test_a_new_vendor_is_vetted_and_renamed_from_the_receipt_page(
 def test_the_vendor_field_suggests_vendors_and_teaches_the_one_picked(
     page: Page, receipts_server: ReceiptsServer
 ):
-    _seed_vendor(receipts_server, 'Combo Alpha', vetted=True, read='Combo Alpha Corp')
+    # (Read as something with another key than its own name: a vetted vendor keeps the name it is
+    # called, so moving its receipts away would teach nothing and the field would not say it does.)
+    _seed_vendor(receipts_server, 'Combo Alpha', vetted=True, read='Combo Alpha Supply Co.')
     _seed_vendor(receipts_server, 'Combo Beta', vetted=True)
     _seed_vendor(receipts_server, 'Combo Gamma')
     receipts_server.login(page)
@@ -368,7 +370,7 @@ def test_the_vendor_field_suggests_vendors_and_teaches_the_one_picked(
     expect(listbox).to_be_hidden()
     expect(page.locator('input[name="vendor_id"]')).not_to_have_value('')
     expect(field).to_contain_text('future receipts read as')
-    expect(field).to_contain_text('Combo Alpha Corp')
+    expect(field).to_contain_text('Combo Alpha Supply Co.')
     assert page.url.rstrip('/').rsplit('/', 1)[-1] != ''  # still on the receipt's page
 
     page.click('button:has-text("Save")')

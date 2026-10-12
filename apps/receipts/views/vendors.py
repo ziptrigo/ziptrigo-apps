@@ -46,6 +46,7 @@ from ..services import (
     rename_vendor,
     set_vetted,
     suggest_vendors,
+    teaches_extracted_name,
     vendor_counts,
     with_alias_names,
 )
@@ -206,10 +207,12 @@ def vendor_vet(request: AuthenticatedHttpRequest) -> HttpResponse:
     vetted = request.POST.get('vetted', '1') != '0'
     receipt_id = request.POST.get('receipt')
     if receipt_id:
+        # First, so that a 404 means nothing was vetted.
         try:
             UUID(receipt_id)
         except ValueError:
             raise Http404('Receipt not found') from None
+        owned_receipt(request, receipt_id)
     retarget = '#receipt-form-msg' if receipt_id else '#vendor-msg'
     if not ids:
         return _error(request, 'Select at least one vendor.', retarget=retarget)
@@ -219,7 +222,7 @@ def vendor_vet(request: AuthenticatedHttpRequest) -> HttpResponse:
         return _error(request, exc.messages, retarget=retarget)
 
     if receipt_id:
-        receipt = owned_receipt(request, receipt_id)
+        receipt = owned_receipt(request, receipt_id)  # (again: its vendor was just vetted)
         if not is_htmx(request):
             return redirect('receipts:detail', receipt_id=receipt.pk)
         return render(
@@ -255,7 +258,9 @@ def vendor_delete(request: AuthenticatedHttpRequest, vendor_id: int) -> HttpResp
 
 def vendor_field_context(receipt: Receipt) -> dict:
     """What `partials/vendor_field.html` needs for `receipt`: its vendor (with how many receipts
-    it has), the name the AI read when it differs from the vendor's, and the hint state."""
+    it has), the name the AI read when it differs from the vendor's, the hint state, and whether
+    moving the receipt to another vendor teaches that name (`teaches`: a vetted vendor called that
+    keeps it, and the hint must not say otherwise)."""
     vendor = receipt.vendor_ref
     extracted = receipt.vendor_extracted
     differs = bool(extracted) and ' '.join(extracted.casefold().split()) != ' '.join(
@@ -267,6 +272,7 @@ def vendor_field_context(receipt: Receipt) -> dict:
         'vendor': vendor,
         'vendor_receipt_count': count_receipts(vendor) if vendor is not None else 0,
         'read_as': extracted if differs else '',
+        'teaches': teaches_extracted_name(receipt.user, extracted),
         'missing': set(receipt.missing_required_fields) if settled else set(),
         'trashed': receipt.deleted_at is not None,
         'detail_url': reverse('receipts:detail', args=[receipt.pk]),

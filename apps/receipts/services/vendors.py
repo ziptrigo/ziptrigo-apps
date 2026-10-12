@@ -6,16 +6,25 @@ is known by is stored as an alias under a normalized key (`normalize_key`: casef
 punctuation gone, `&` read as "and", legal forms like LLC or GmbH dropped), and a key belongs to at
 most one vendor per user. For a name the AI read, in the order of the issue:
 
-1. a vetted vendor: the key is one of its aliases, else a near match on a vetted vendor's keys;
-2. an unvetted vendor: the key is one of its aliases (exact only, so the pipeline never builds on
-   its own guesses);
+1. a vetted vendor: the key is one of its aliases (or, failing that, its name is the name read),
+   else a near match on a vetted vendor's keys;
+2. an unvetted vendor: the key is one of its aliases or its name is the name read (exact only, so
+   the pipeline never builds on its own guesses);
 3. otherwise a new, unvetted vendor named as the AI read it.
+
+The key is looked up first and the exact name only when nobody holds the key; when they point at two
+different vendors (a backfill leaves a vendor without the alias for its own name when another group
+claimed the key first) the vetted one wins, and the key's holder when both or neither are.
 
 **Teaching** is what makes the next receipt land on the right vendor: moving a receipt to another
 vendor (`assign_vendor`) points the alias for the name the AI read on it at the chosen vendor, a
-rename keeps the old name as an alias, and a merge moves the merged vendors' aliases. Nothing here
-touches existing receipts except a rename or a merge, which rewrite `Receipt.vendor` (the text that
-search, duplicates, the CSV and the API read) for the vendor's receipts in one `UPDATE`.
+rename keeps the old name as an alias, and a merge moves the merged vendors' aliases. The one key
+teaching never takes is a vetted vendor's own name (`Staples` keeps `staples` however many receipts
+read "Staples" are moved elsewhere), so what the vendors list says and what matching does can't
+disagree; `teaches_extracted_name` says which case a receipt is in. Nothing here touches existing
+receipts except a rename or a merge, which rewrite `Receipt.vendor` (the text that search,
+duplicates, the CSV and the API read) for the vendor's receipts in one `UPDATE`, and
+`link_unlinked_receipts`, which only fills in the link of a receipt that has a vendor text and none.
 
 Callers pass objects they already fetched *for the requesting user* (a missing or foreign id is the
 caller's 404); like `services.actions`, these functions raise Django's `ValidationError` for bad
@@ -25,7 +34,9 @@ input.
 import difflib
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Iterable
+from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -43,6 +54,7 @@ from ..models import (
     VendorAlias,
     VendorAliasSource,
 )
+from .duplicates import refresh_duplicate
 
 #: Trailing words that say what kind of company it is, not which one. Dropped (repeatedly, but
 #: never down to nothing) when a name becomes a key, so `ACME Industries, LLC` and `ACME
@@ -97,6 +109,11 @@ NEAR_RATIO = 0.92
 SUGGESTION_LIMIT = 8
 
 VENDOR_STATUSES = ('all', 'to_vet', 'vetted')
+
+#: How many of the receipts a merge moves are checked again for duplicates (see `merge_vendors`),
+#: and how many unlinked receipts `link_unlinked_receipts` reads at a time.
+MERGE_DUPLICATE_CHECK_LIMIT = 200
+LINK_BATCH = 200
 
 
 class VendorNameTaken(ValidationError):
@@ -172,28 +189,49 @@ def _ensure_alias(vendor: Vendor, key: str, name: str, source: str) -> bool:
     return alias.vendor_id == vendor.pk
 
 
+def _is_own_name_key(vendor: Vendor, key: str) -> bool:
+    """Whether `key` is the key of a *vetted* `vendor`'s own name: the one key teaching never takes
+    from it (the user confirmed that name, and a rename to it is refused for anyone else)."""
+    return vendor.vetted_at is not None and normalize_key(vendor.name) == key
+
+
 def _point_alias(vendor: Vendor, key: str, name: str, source: str) -> None:
-    """Make `key` an alias of `vendor`, taking it over from whichever vendor had it."""
-    if not key:
+    """Make `key` an alias of `vendor`, taking it over from whichever vendor had it, except from a
+    vetted vendor whose own name it is (see `_is_own_name_key`): it stays where it is."""
+    if not key or _ensure_alias(vendor, key, name, source):
         return
-    alias, created = VendorAlias.objects.get_or_create(
-        user_id=vendor.user_id,
-        key=key,
-        defaults={'vendor': vendor, 'name': name[:MAX_VENDOR_NAME_LENGTH], 'source': source},
+    held = (
+        VendorAlias.objects.select_related('vendor').filter(user_id=vendor.user_id, key=key).first()
     )
-    if not created and alias.vendor_id != vendor.pk:
-        VendorAlias.objects.filter(pk=alias.pk).update(vendor=vendor, source=source)
+    if held is None or _is_own_name_key(held.vendor, key):
+        return
+    VendorAlias.objects.filter(pk=held.pk).update(vendor=vendor, source=source)
 
 
-def _find(user: User, name: str, key: str) -> Vendor | None:
-    """The vendor `name` is: the one called that (ignoring case), else the one with an alias for
-    its `key`. A vendor found by name gets the alias if nobody holds the key yet (a backfill leaves
-    that out when another group claimed it first)."""
-    vendor = Vendor.objects.filter(user=user, name__iexact=name).first()
-    if vendor is not None:
-        _ensure_alias(vendor, key, name, VendorAliasSource.EXTRACTED)
-        return vendor
-    return _vendor_for_key(user, key)
+def teaches_extracted_name(user: User, extracted: str) -> bool:
+    """Whether moving a receipt the AI read as `extracted` to another vendor teaches the matcher
+    that name (`assign_vendor` does, unless a vetted vendor is called that: it keeps the name)."""
+    key = normalize_key(extracted) if extracted else ''
+    if not key:
+        return False
+    holder = _vendor_for_key(user, key)
+    return holder is None or not _is_own_name_key(holder, key)
+
+
+def _find(user: User, name: str, key: str, source: str) -> Vendor | None:
+    """The vendor `name` is: the one holding its `key` as an alias, else the one called that
+    (ignoring case). When those are two vendors the vetted one is, the key's holder if both or
+    neither are. A vendor found by name gets the alias, tagged `source`, if nobody holds the key
+    yet (a backfill leaves that out when another group claimed it first)."""
+    by_key = _vendor_for_key(user, key)
+    by_name = Vendor.objects.filter(user=user, name__iexact=name).first()
+    if by_key is None and by_name is not None:
+        _ensure_alias(by_name, key, name, source)
+        return by_name
+    if by_key is not None and by_name is not None and by_name.pk != by_key.pk:
+        if by_name.vetted_at is not None and by_key.vetted_at is None:
+            return by_name
+    return by_key
 
 
 def _create(user: User, name: str, key: str, *, vetted: bool, source: str) -> Vendor:
@@ -209,7 +247,7 @@ def _create(user: User, name: str, key: str, *, vetted: bool, source: str) -> Ve
             VendorAlias.objects.create(user=user, vendor=vendor, key=key, name=name, source=source)
         return vendor
     except IntegrityError:
-        existing = _find(user, name, key)
+        existing = _find(user, name, key, source)
         if existing is None:
             raise
         return existing
@@ -247,7 +285,7 @@ def match_vendor(user: User, name: str | None) -> Vendor | None:
     if not cleaned:
         return None
     key = normalize_key(cleaned)
-    exact = _find(user, cleaned, key)
+    exact = _find(user, cleaned, key, VendorAliasSource.EXTRACTED)
     if exact is not None and exact.vetted_at is not None:
         return exact
     near = _near_vetted_match(user, key)
@@ -277,8 +315,9 @@ def assign_vendor(
     resolved to the user's vendor with that name or key, else a new vendor is created. The chosen
     vendor becomes vetted (the user confirmed it), the receipt's `vendor_ref` and `vendor` are
     written, and the alias for the name the AI read on the receipt (`vendor_extracted`) is pointed
-    at it, so the next receipt read that way lands there. Receipts already filed are not touched.
-    A vendor the receipt leaves that is unvetted and has no receipts left is deleted.
+    at it, so the next receipt read that way lands there, unless a vetted vendor is called that
+    (`teaches_extracted_name` says which; the receipt moves either way). Receipts already filed are
+    not touched. A vendor the receipt leaves that is unvetted and has no receipts left is deleted.
 
     The caller holds the receipt's row lock (`update_receipt`) and saves nothing more than the
     fields this sets; the receipt's row is already updated here, because the old vendor can only
@@ -289,7 +328,7 @@ def assign_vendor(
         if vendor is None:
             cleaned = _check_name(name or '')
             key = normalize_key(cleaned)
-            vendor = _find(receipt.user, cleaned, key) or _create(
+            vendor = _find(receipt.user, cleaned, key, VendorAliasSource.USER) or _create(
                 receipt.user, cleaned, key, vetted=True, source=VendorAliasSource.USER
             )
         elif vendor.user_id != receipt.user_id:
@@ -332,14 +371,23 @@ def clear_vendor(receipt: Receipt) -> None:
 
 def drop_if_orphan(vendor_id: int | None) -> bool:
     """Delete the vendor if it is unvetted and no receipt, live or in the Trash, references it.
-    Returns whether it was deleted. A vendor the user vetted is theirs and stays."""
+    Returns whether it was deleted. A vendor the user vetted is theirs and stays.
+
+    The vendor row is locked with `SKIP LOCKED`: callers hold a receipt's row lock, while a rename
+    or a merge locks the vendor and then updates its receipts, so waiting here could deadlock. A
+    vendor somebody else has locked (or is filing a receipt under) is left alone; an orphan that
+    survives is harmless: the next orphan check on it, or the user's own delete, removes it."""
     if vendor_id is None:
-        return False
-    vendor = Vendor.objects.filter(pk=vendor_id, vetted_at__isnull=True).first()
-    if vendor is None or Receipt.objects.filter(vendor_ref_id=vendor_id).exists():
         return False
     try:
         with transaction.atomic():
+            vendor = (
+                Vendor.objects.select_for_update(skip_locked=True)
+                .filter(pk=vendor_id, vetted_at__isnull=True)
+                .first()
+            )
+            if vendor is None or Receipt.objects.filter(vendor_ref_id=vendor_id).exists():
+                return False
             vendor.delete()
     except RestrictedError:  # a receipt was filed under it in the meantime
         return False
@@ -377,7 +425,9 @@ def rename_vendor(vendor: Vendor, name: str, *, vetted: bool = True) -> Vendor:
     cleaned = _check_name(name)
     key = normalize_key(cleaned)
     with transaction.atomic():
-        locked = Vendor.objects.select_for_update().get(pk=vendor.pk)
+        # `FOR NO KEY UPDATE`: still excludes other renames, merges and `drop_if_orphan`, but does
+        # not hold up a receipt being filed under the vendor (that takes `FOR KEY SHARE`).
+        locked = Vendor.objects.select_for_update(no_key=True).get(pk=vendor.pk)
         other = _clash(locked.user, cleaned, key, locked.pk)
         if other is not None:
             raise VendorNameTaken(other)
@@ -431,6 +481,13 @@ def merge_vendors(keep: Vendor, others: Iterable[Vendor]) -> Vendor:
     vetted. Done in one transaction under row locks (taken in id order, so two merges can't
     deadlock).
 
+    A merge is also the one place that checks something again: the moved live receipts whose text
+    changed are re-checked for duplicates (`refresh_duplicate`, which leaves a flag the user
+    dismissed alone), since "ACME" and "ACME Industrial Supply" are now one vendor. That is fine
+    here, unlike for matching, because a merge is an explicit, retroactive user action. It is
+    bounded (`MERGE_DUPLICATE_CHECK_LIMIT`, newest first): the rest keep their flags until they
+    are edited or read again.
+
     Raises:
         ValidationError: nothing to merge, a vendor isn't the same user's, or a receipt was filed
             under one of them while merging (try again).
@@ -439,9 +496,13 @@ def merge_vendors(keep: Vendor, others: Iterable[Vendor]) -> Vendor:
     if not other_ids:
         raise ValidationError('Choose at least two vendors to merge.')
     with transaction.atomic():
+        # `FOR NO KEY UPDATE`: excludes other merges, renames and `drop_if_orphan`, but a receipt
+        # can still be filed under these vendors meanwhile (`FOR KEY SHARE`), which the delete
+        # below then reports as "try again" instead of a bare foreign key error in that receipt's
+        # own transaction.
         locked = {
             vendor.pk: vendor
-            for vendor in Vendor.objects.select_for_update()
+            for vendor in Vendor.objects.select_for_update(no_key=True)
             .filter(user=keep.user, pk__in={keep.pk, *other_ids})
             .order_by('pk')
         }
@@ -449,6 +510,14 @@ def merge_vendors(keep: Vendor, others: Iterable[Vendor]) -> Vendor:
             raise ValidationError('Unknown vendor.')
         target = locked[keep.pk]
         now = timezone.now()
+        to_recheck = list(
+            Receipt.objects.filter(
+                vendor_ref_id__in=other_ids, uploaded=True, deleted_at__isnull=True
+            )
+            .exclude(vendor=target.name)
+            .order_by('-created_at', '-id')
+            .values_list('pk', flat=True)[:MERGE_DUPLICATE_CHECK_LIMIT]
+        )
         Receipt.objects.filter(vendor_ref_id__in=other_ids).update(
             vendor_ref=target, vendor=target.name, updated_at=now
         )
@@ -468,6 +537,14 @@ def merge_vendors(keep: Vendor, others: Iterable[Vendor]) -> Vendor:
         if target.vetted_at is None:
             target.vetted_at = now
         target.save(update_fields=['vetted_at', 'updated_at'])
+        # Newest first, each flag saved before the next receipt is checked: a copy flagged as a
+        # duplicate of another is not offered that one back, so the older receipt of a pair keeps
+        # being the original instead of the two flagging each other.
+        for receipt in Receipt.objects.filter(pk__in=to_recheck).order_by('-created_at', '-id'):
+            if refresh_duplicate(receipt):
+                Receipt.objects.filter(pk=receipt.pk).update(
+                    possible_duplicate_of=receipt.possible_duplicate_of_id
+                )
     keep.vetted_at = target.vetted_at
     return keep
 
@@ -488,6 +565,88 @@ def delete_vendor(vendor: Vendor) -> None:
             vendor.delete()
     except RestrictedError:
         raise ValidationError(refusal) from None
+
+
+# -- Receipts with a vendor text and no vendor -------------------------------------------------------
+
+
+def unlinked_receipts(user_id: UUID | None = None) -> QuerySet:
+    """Receipts, live or in the Trash, that have a vendor text but no `vendor_ref`: what a
+    container running the previous release processes while the migration has already run.
+    `Receipt`'s partial index covers exactly this filter, so it costs nothing once none are
+    left."""
+    queryset = Receipt.objects.filter(vendor_ref__isnull=True).exclude(vendor='')
+    return queryset if user_id is None else queryset.filter(user_id=user_id)
+
+
+def users_with_unlinked_receipts() -> list[UUID]:
+    """The ids of the users who have any `unlinked_receipts`."""
+    return list(
+        unlinked_receipts().order_by('user_id').values_list('user_id', flat=True).distinct()
+    )
+
+
+def _vendor_called(user_id: UUID, name: str) -> tuple[Vendor, bool]:
+    """The user's vendor called `name` (ignoring case), else a new, unvetted one; either gets the
+    alias for its name if nobody holds that key. Also says whether it was just created. Losing a
+    race to create it uses the winner's."""
+    vendor = Vendor.objects.filter(user_id=user_id, name__iexact=name).first()
+    created = vendor is None
+    if vendor is None:
+        try:
+            with transaction.atomic():
+                vendor = Vendor.objects.create(user_id=user_id, name=name)
+        except IntegrityError:
+            vendor = Vendor.objects.filter(user_id=user_id, name__iexact=name).first()
+            if vendor is None:
+                raise
+            created = False
+    _ensure_alias(vendor, normalize_key(name), name, VendorAliasSource.EXTRACTED)
+    return vendor, created
+
+
+def link_unlinked_receipts(user_id: UUID | None = None, *, batch_size: int = LINK_BATCH) -> int:
+    """Link each of `unlinked_receipts` (of one user, or everybody's) to the user's vendor called
+    what its text says, creating an unvetted one when there is none. Returns how many receipts
+    were linked. Idempotent and safe to run concurrently (the update only touches a receipt that is
+    still unlinked, and a vendor created at the same moment by another run is shared).
+
+    It never changes a receipt's `vendor` text and never picks a vendor by key or near match:
+    those could file the receipt under a differently named vendor, which is a retroactive change
+    that only a rename or a merge makes. (A text that is only whitespace can't name a vendor and
+    is skipped; it is looked at again every run.) Read in batches of `batch_size`, by id."""
+    linked = 0
+    last: UUID | None = None
+    while True:
+        queryset = unlinked_receipts(user_id).order_by('id')
+        if last is not None:
+            queryset = queryset.filter(id__gt=last)
+        rows = list(queryset.values_list('id', 'user_id', 'vendor')[:batch_size])
+        if not rows:
+            return linked
+        last = rows[-1][0]
+
+        groups: dict[tuple[UUID, str], tuple[Counter[str], list[UUID], set[str]]] = {}
+        for receipt_id, owner_id, text in rows:
+            name = clean_name(text)[:MAX_VENDOR_NAME_LENGTH]
+            if name:
+                spellings, ids, texts = groups.setdefault(
+                    (owner_id, name.casefold()), (Counter(), [], set())
+                )
+                spellings[name] += 1
+                ids.append(receipt_id)
+                texts.add(text)
+        for (owner_id, _), (spellings, ids, texts) in groups.items():
+            # A new vendor is named by the commonest spelling, like the backfill does.
+            name = min(spellings, key=lambda spelling: (-spellings[spelling], spelling))
+            vendor, created = _vendor_called(owner_id, name)
+            # (`update` leaves `updated_at` alone: this is bookkeeping, not an edit.)
+            count = Receipt.objects.filter(
+                pk__in=ids, vendor_ref__isnull=True, vendor__in=texts
+            ).update(vendor_ref=vendor)
+            if created and not count:
+                drop_if_orphan(vendor.pk)
+            linked += count
 
 
 # -- Listing ---------------------------------------------------------------------------------------

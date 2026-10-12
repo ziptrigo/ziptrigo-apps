@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MaxLengthValidator
 from django.db import models
+from django.db.models import Q
 
 from apps.accounts.models import User
 
@@ -328,6 +329,13 @@ class Receipt(models.Model):
             models.Index(fields=['sha256']),
             models.Index(fields=['status', 'next_attempt_at']),
             models.Index(fields=['deleted_at']),
+            # What `services.vendors.unlinked_receipts` reads (hourly): empty once every receipt
+            # with a vendor text is linked, so the job costs one index probe.
+            models.Index(
+                fields=['user'],
+                condition=Q(vendor_ref__isnull=True) & ~Q(vendor=''),
+                name='receipts_unlinked_vendor',
+            ),
         ]
         ordering = ['-created_at']
 

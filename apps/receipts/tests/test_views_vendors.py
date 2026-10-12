@@ -284,6 +284,21 @@ class TestVet:
         response = web.post(url('vendor-vet'), {'ids': [vendor.pk], 'receipt': 'nope'}, **HX)
 
         assert response.status_code == 404
+        vendor.refresh_from_db()
+        assert vendor.vetted_at is None
+
+    def test_a_receipt_that_does_not_exist_is_a_404_and_vets_nothing(self, web, funded_user):
+        vendor = create_vendor(funded_user, 'ACME')
+
+        response = web.post(
+            url('vendor-vet'),
+            {'ids': [vendor.pk], 'receipt': '6f1e0f9e-0000-4000-8000-000000000000'},
+            **HX,
+        )
+
+        assert response.status_code == 404
+        vendor.refresh_from_db()
+        assert vendor.vetted_at is None
 
     def test_the_receipt_has_to_be_the_users(self, web, funded_user, other_user, fake_storage):
         vendor = create_vendor(funded_user, 'ACME')
@@ -292,6 +307,8 @@ class TestVet:
         response = web.post(url('vendor-vet'), {'ids': [vendor.pk], 'receipt': theirs.pk}, **HX)
 
         assert response.status_code == 404
+        vendor.refresh_from_db()
+        assert vendor.vetted_at is None  # a 404 means nothing happened
 
 
 class TestSuggest:
@@ -713,6 +730,25 @@ class TestReceiptPage:
         assert 'Filed under your vendor ACME (3 receipts)' in field
         assert 'Mark as vetted' not in field
         assert 'data-extracted="ACME Industries, LLC"' in field
+
+    def test_the_hint_promises_teaching_the_name_the_ai_read(self, web, funded_user, make):
+        vendor = create_vendor(funded_user, 'Hetzner Online GmbH')
+        receipt = make(vendor=vendor.name, vendor_ref=vendor, vendor_extracted='Hetzner')
+
+        field = self.field(web, receipt)
+
+        assert 'On save, future receipts read as' in field and 'x-show="showHint"' in field
+
+    def test_there_is_no_hint_when_a_vetted_vendor_keeps_the_name_the_ai_read(
+        self, web, funded_user, make
+    ):
+        # Staples keeps "Staples", whichever vendor this receipt is moved to: nothing to promise.
+        staples = create_vendor(funded_user, 'Staples', vetted=True)
+        receipt = make(vendor='Staples', vendor_ref=staples, vendor_extracted='STAPLES INC')
+
+        field = self.field(web, receipt)
+
+        assert 'future receipts read as' not in field and 'showHint' not in field
 
     def test_a_new_vendor_offers_to_mark_it_vetted(self, web, funded_user, make):
         vendor = create_vendor(funded_user, 'ACME Industries, LLC')

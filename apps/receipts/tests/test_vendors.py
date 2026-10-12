@@ -1,8 +1,12 @@
 """Vendors (`services/vendors.py`): the normalized key, matching what the AI read to a vendor, the
 user's edits (move a receipt, rename, vet, merge, delete) and the lists the pages are built from."""
 
+from datetime import date
+from decimal import Decimal
+
 import pytest
 from django.core.exceptions import ValidationError
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from ..models import Receipt, ReceiptStatus, Vendor, VendorAlias, VendorAliasSource
@@ -23,12 +27,18 @@ from ..services.vendors import (
     rename_vendor,
     set_vetted,
     suggest_vendors,
+    teaches_extracted_name,
     vendor_counts,
     with_alias_names,
 )
 from .factories import create_vendor
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+
+
+def refresh_duplicate_flag(receipt: Receipt):
+    """The id `receipt` is flagged as a possible duplicate of, read from the database."""
+    return Receipt.objects.values_list('possible_duplicate_of_id', flat=True).get(pk=receipt.pk)
 
 
 def alias_keys(vendor: Vendor) -> set[str]:
@@ -203,6 +213,39 @@ class TestMatchVendor:
         assert match_vendor(funded_user, 'ACME INC') == orphan
         assert alias_keys(orphan) == {'acme'}
 
+    def test_a_vendor_called_that_with_no_alias_gets_it_as_an_extracted_one(self, funded_user):
+        orphan = Vendor.objects.create(user=funded_user, name='Acme Inc')
+
+        match_vendor(funded_user, 'acme inc')
+
+        assert VendorAlias.objects.get(vendor=orphan).source == VendorAliasSource.EXTRACTED
+
+    def test_the_key_is_looked_up_before_the_name(self, funded_user):
+        # Both unvetted, the second without the alias for its name (a backfill's leftover).
+        holder = create_vendor(funded_user, 'Staples')
+        leftover = Vendor.objects.create(user=funded_user, name='Staples Inc')
+
+        assert match_vendor(funded_user, 'Staples Inc') == holder
+        assert match_vendor(funded_user, 'STAPLES') == holder
+        assert leftover.pk != holder.pk
+
+    def test_a_vetted_key_holder_beats_an_unvetted_vendor_with_the_exact_name(self, funded_user):
+        vetted = create_vendor(funded_user, 'Staples', vetted=True)
+        Vendor.objects.create(user=funded_user, name='Staples Inc')  # a backfill's leftover
+
+        assert match_vendor(funded_user, 'Staples Inc') == vetted
+        assert match_vendor(funded_user, 'Staples') == vetted
+        assert match_vendor(funded_user, 'STAPLES INC.') == vetted
+
+    def test_a_vetted_vendor_with_the_exact_name_beats_an_unvetted_key_holder(self, funded_user):
+        unvetted = create_vendor(funded_user, 'Staples')
+        vetted = Vendor.objects.create(
+            user=funded_user, name='Staples Inc', vetted_at=timezone.now()
+        )
+
+        assert match_vendor(funded_user, 'Staples Inc') == vetted
+        assert match_vendor(funded_user, 'Staples') == unvetted
+
     def test_a_long_name_is_cut_to_the_column(self, funded_user):
         vendor = match_vendor(funded_user, 'x' * 400)
 
@@ -215,9 +258,9 @@ class TestMatchVendor:
         real_find = vendors._find
         calls = []
 
-        def stale_find(user, name, key):
+        def stale_find(user, name, key, source):
             calls.append(name)
-            return None if len(calls) == 1 else real_find(user, name, key)
+            return None if len(calls) == 1 else real_find(user, name, key, source)
 
         monkeypatch.setattr(vendors, '_find', stale_find)
 
@@ -229,9 +272,9 @@ class TestMatchVendor:
         real_find = vendors._find
         calls = []
 
-        def stale_find(user, name, key):
+        def stale_find(user, name, key, source):
             calls.append(name)
-            return None if len(calls) == 1 else real_find(user, name, key)
+            return None if len(calls) == 1 else real_find(user, name, key, source)
 
         monkeypatch.setattr(vendors, '_find', stale_find)
 
@@ -317,6 +360,78 @@ class TestAssignVendor:
         receipt.refresh_from_db()
         assert receipt.vendor == 'Blue Bottle Coffee, Inc.'
 
+    def test_a_vetted_vendors_own_name_is_not_taken_from_it(self, funded_user, make_receipt):
+        staples = create_vendor(funded_user, 'Staples', vetted=True)
+        depot = create_vendor(funded_user, 'Office Depot', vetted=True)
+        receipt = make_receipt(
+            vendor='Staples', vendor_ref=staples, vendor_extracted='Staples', amount=None
+        )
+
+        assign_vendor(receipt, vendor=depot)
+
+        receipt.refresh_from_db()
+        assert receipt.vendor_ref == depot and receipt.vendor == 'Office Depot'  # still moved
+        assert alias_keys(staples) == {'staples'} and alias_keys(depot) == {'office depot'}
+        # Both spellings still agree, and the vendor can still be renamed.
+        assert match_vendor(funded_user, 'Staples') == staples
+        assert match_vendor(funded_user, 'STAPLES INC') == staples
+        rename_vendor(staples, 'Staples Inc')
+        staples.refresh_from_db()
+        assert staples.name == 'Staples Inc'
+        assert match_vendor(funded_user, 'staples') == staples
+
+    def test_a_vetted_vendors_own_name_with_a_different_spelling_is_protected_too(
+        self, funded_user, make_receipt
+    ):
+        staples = create_vendor(funded_user, 'Staples', vetted=True)
+        receipt = make_receipt(vendor_extracted='STAPLES, INC.')
+
+        assign_vendor(receipt, name='Office Depot')
+
+        assert alias_keys(staples) == {'staples'}
+        assert match_vendor(funded_user, 'Staples Inc') == staples
+
+    def test_the_name_of_an_unvetted_vendor_can_be_taken(self, funded_user, make_receipt):
+        staples = create_vendor(funded_user, 'Staples')
+        receipt = make_receipt(vendor_extracted='Staples')
+
+        depot = assign_vendor(receipt, name='Office Depot')
+
+        assert alias_keys(staples) == set() and alias_keys(depot) == {'office depot', 'staples'}
+        assert match_vendor(funded_user, 'Staples') == depot
+
+    def test_a_learned_alias_of_a_vetted_vendor_can_be_taken(self, funded_user, make_receipt):
+        # `staples ltd office` is a name the vetted vendor was taught, not its own.
+        staples = create_vendor(
+            funded_user, 'Staples', vetted=True, aliases=('Staples Ltd Office',)
+        )
+        receipt = make_receipt(vendor_extracted='Staples Ltd Office')
+
+        depot = assign_vendor(receipt, name='Office Depot')
+
+        assert alias_keys(staples) == {'staples'}
+        assert 'staples ltd office' in alias_keys(depot)
+
+    def test_a_vetted_vendors_own_name_moves_only_when_the_vendor_itself_is_chosen(
+        self, funded_user, make_receipt
+    ):
+        staples = create_vendor(funded_user, 'Staples', vetted=True)
+        receipt = make_receipt(vendor_extracted='Staples')
+
+        assign_vendor(receipt, vendor=staples)
+
+        assert alias_keys(staples) == {'staples'}
+
+    def test_a_typed_name_found_by_name_gets_the_alias_as_set_by_the_user(
+        self, funded_user, make_receipt
+    ):
+        orphan = Vendor.objects.create(user=funded_user, name='Zed Inc')  # no alias
+        receipt = make_receipt()
+
+        assign_vendor(receipt, name='zed inc')
+
+        assert VendorAlias.objects.get(vendor=orphan).source == VendorAliasSource.USER
+
     def test_a_receipt_without_a_name_read_teaches_nothing(self, funded_user, make_receipt):
         receipt = make_receipt()
 
@@ -356,6 +471,35 @@ class TestAssignVendor:
         assert not Vendor.objects.filter(pk=old.pk).exists()
 
 
+class TestTeachesExtractedName:
+    def test_a_name_nobody_has_is_taught(self, funded_user):
+        assert teaches_extracted_name(funded_user, 'Staples') is True
+
+    def test_a_name_an_unvetted_vendor_has_is_taught(self, funded_user):
+        create_vendor(funded_user, 'Staples')
+
+        assert teaches_extracted_name(funded_user, 'Staples') is True
+
+    def test_a_vetted_vendors_own_name_is_not_taught_in_any_spelling(self, funded_user):
+        create_vendor(funded_user, 'Staples', vetted=True)
+
+        assert teaches_extracted_name(funded_user, 'Staples') is False
+        assert teaches_extracted_name(funded_user, 'STAPLES, INC.') is False
+
+    def test_a_name_a_vetted_vendor_was_taught_is_taught_again(self, funded_user):
+        create_vendor(funded_user, 'Staples', vetted=True, aliases=('Staples Ltd Office',))
+
+        assert teaches_extracted_name(funded_user, 'Staples Ltd Office') is True
+
+    def test_nothing_read_is_nothing_to_teach(self, funded_user):
+        assert teaches_extracted_name(funded_user, '') is False
+
+    def test_another_users_vendors_do_not_count(self, funded_user, other_user):
+        create_vendor(other_user, 'Staples', vetted=True)
+
+        assert teaches_extracted_name(funded_user, 'Staples') is True
+
+
 class TestDropIfOrphan:
     def test_an_unvetted_vendor_without_receipts_goes_with_its_aliases(self, funded_user):
         vendor = create_vendor(funded_user, 'ACME')
@@ -380,6 +524,29 @@ class TestDropIfOrphan:
     def test_nothing_and_unknown_ids(self):
         assert drop_if_orphan(None) is False
         assert drop_if_orphan(123456) is False
+
+    def test_the_row_is_locked_without_waiting(self, funded_user, monkeypatch):
+        # (SQLite ignores row locks, so this only checks what is asked of the database.)
+        vendor = create_vendor(funded_user, 'ACME')
+        asked = []
+        real = QuerySet.select_for_update
+        monkeypatch.setattr(
+            QuerySet,
+            'select_for_update',
+            lambda self, **kwargs: asked.append(kwargs) or real(self, **kwargs),
+        )
+
+        assert drop_if_orphan(vendor.pk) is True
+        assert asked == [{'skip_locked': True}]
+
+    def test_a_vendor_somebody_else_has_locked_is_left_alone(self, funded_user, monkeypatch):
+        vendor = create_vendor(funded_user, 'ACME')
+        # What `SKIP LOCKED` does to a locked row: it is not in the result.
+        monkeypatch.setattr(QuerySet, 'first', lambda self: None)
+
+        assert drop_if_orphan(vendor.pk) is False
+        monkeypatch.undo()
+        assert Vendor.objects.filter(pk=vendor.pk).exists()
 
 
 class TestRenameVendor:
@@ -487,6 +654,22 @@ class TestRenameVendor:
 
         theirs.refresh_from_db()
         assert theirs.vendor == 'Staples'
+
+    def test_the_vendor_is_locked_without_blocking_receipts_filed_under_it(
+        self, funded_user, monkeypatch
+    ):
+        vendor = create_vendor(funded_user, 'ACME')
+        asked = []
+        real = QuerySet.select_for_update
+        monkeypatch.setattr(
+            QuerySet,
+            'select_for_update',
+            lambda self, **kwargs: asked.append(kwargs) or real(self, **kwargs),
+        )
+
+        rename_vendor(vendor, 'ACME, LTD')
+
+        assert asked == [{'no_key': True}]
 
 
 class TestSetVetted:
@@ -608,6 +791,82 @@ class TestMergeVendors:
             merge_vendors(keep, [other])
 
         assert Vendor.objects.filter(pk=other.pk).exists()
+
+    def test_the_vendors_are_locked_without_blocking_receipts_filed_under_them(
+        self, funded_user, monkeypatch
+    ):
+        keep = create_vendor(funded_user, 'ACME')
+        other = create_vendor(funded_user, 'Acme Supplies')
+        asked = []
+        real = QuerySet.select_for_update
+        monkeypatch.setattr(
+            QuerySet,
+            'select_for_update',
+            lambda self, **kwargs: asked.append(kwargs) or real(self, **kwargs),
+        )
+
+        merge_vendors(keep, [other])
+
+        assert asked == [{'no_key': True}]
+
+    def merge_duplicates(self, funded_user, make_receipt, **newer):
+        keep = create_vendor(funded_user, 'ACME', vetted=True)
+        other = create_vendor(funded_user, 'ACME Industrial Supply')
+        fields = {'amount': Decimal('42.10'), 'receipt_date': date(2026, 10, 9)}
+        older = make_receipt(vendor='ACME', vendor_ref=keep, **fields)
+        newer_receipt = make_receipt(
+            vendor='ACME Industrial Supply', vendor_ref=other, **fields, **newer
+        )
+        return keep, other, older, newer_receipt
+
+    def test_receipts_that_are_now_from_one_vendor_are_checked_for_duplicates(
+        self, funded_user, make_receipt
+    ):
+        keep, other, older, newer = self.merge_duplicates(funded_user, make_receipt)
+        assert refresh_duplicate_flag(older) is None and refresh_duplicate_flag(newer) is None
+
+        merge_vendors(keep, [other])
+
+        # The later copy is the duplicate; the original is not flagged back.
+        assert refresh_duplicate_flag(newer) == older.pk
+        assert refresh_duplicate_flag(older) is None
+
+    def test_a_flag_the_user_dismissed_stays_dismissed(self, funded_user, make_receipt):
+        keep, other, older, newer = self.merge_duplicates(
+            funded_user, make_receipt, duplicate_dismissed=True
+        )
+
+        merge_vendors(keep, [other])
+
+        assert refresh_duplicate_flag(newer) is None
+
+    def test_a_receipt_in_the_trash_is_not_checked_or_flagged_against(
+        self, funded_user, make_receipt
+    ):
+        keep, other, older, newer = self.merge_duplicates(
+            funded_user, make_receipt, deleted_at=timezone.now()
+        )
+
+        merge_vendors(keep, [other])
+
+        assert refresh_duplicate_flag(newer) is None and refresh_duplicate_flag(older) is None
+
+    def test_only_a_bounded_number_of_receipts_is_checked(
+        self, funded_user, make_receipt, monkeypatch
+    ):
+        monkeypatch.setattr(vendors, 'MERGE_DUPLICATE_CHECK_LIMIT', 1)
+        keep, other, older, newer = self.merge_duplicates(funded_user, make_receipt)
+        newest = make_receipt(
+            vendor='ACME Industrial Supply',
+            vendor_ref=other,
+            amount=Decimal('42.10'),
+            receipt_date=date(2026, 10, 9),
+        )
+
+        merge_vendors(keep, [other])
+
+        assert refresh_duplicate_flag(newest) == older.pk  # the newest one was checked
+        assert refresh_duplicate_flag(newer) is None  # this one was left as it was
 
 
 class TestDeleteVendor:

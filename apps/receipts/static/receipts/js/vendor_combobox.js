@@ -38,7 +38,8 @@ document.addEventListener('alpine:init', function () {
                     || (this.vendorId !== '' && this.vendorId !== this.originalId);
             },
 
-            // Saving will teach the name the AI read to the chosen vendor.
+            // Saving will teach the name the AI read to the chosen vendor. (The hint's markup is
+            // left out by the server when a vetted vendor is called that, which keeps the name.)
             get showHint() {
                 return this.changed && this.extracted !== '' && this.name.trim() !== '';
             },
