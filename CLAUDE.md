@@ -239,13 +239,21 @@ account a person created in the browser. The register page has a **Cloudflare Tu
 are both set (`apps.accounts.checks` warns, `accounts.W002`, about one without the other; pytest
 runs with both blanked by an autouse fixture in `apps/accounts/tests/conftest.py`). The widget is
 rendered explicitly by `accounts/js/turnstile.js` so the form htmx swaps in after a 422 gets a fresh
-one (tokens are single-use), and the submit button stays disabled until it yields a token. The view
-checks, in order: the form (an invalid one spends neither the token nor a rate limit), the captcha
-(`SIGNUP_CAPTCHA_IP` bounds the calls to Cloudflare; an empty token is rejected without one), then
-`SIGNUP_IP`, then `create_account`. `captcha.verify` **fails closed** (timeout, non-200, bad JSON:
-rejected) and, with a real secret, requires the reply's `hostname` to be `BASE_URL`'s host and its
-`action` to be `register`; Cloudflare's test secrets skip those two checks, since they answer with
-placeholder values. Login, and "Sign up with Google", have no captcha.
+one (tokens are single-use), and the submit button stays disabled until it yields a token; after a
+429 (retargeted to `#register-msg`, so the form isn't swapped and the token may already be spent)
+it resets the widget. The view checks, in order: the form (an invalid one spends neither the token
+nor a rate limit), the captcha (`SIGNUP_CAPTCHA_IP` bounds the calls to Cloudflare; an empty token
+is rejected without one), then `SIGNUP_IP`, then `create_account`. **"This email already exists"
+comes only from `create_account`**, never from `RegisterForm` (issue #117 review): the form runs
+before the captcha and every rate limit, so answering it there would let a script enumerate
+accounts for free; now each probe costs a solved captcha and a `SIGNUP_IP` hit. `captcha.verify`
+**fails closed** (timeout, non-200, bad JSON: rejected) and, with a real secret, requires the
+reply's `hostname` to be `BASE_URL`'s host and its `action` to be `register`; Cloudflare's test
+secrets skip those two checks, since they answer with placeholder values -- so a test secret with a
+non-local `BASE_URL` triggers `accounts.W003` (shown by `manage.py check` and the container's
+`migrate` step). Login, and "Sign up with Google", have no captcha. README's "Signup captcha" has
+the Cloudflare setup.
+
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email. If the address being left had been confirmed, it also gets a notice
 (`services.email_change`, "your email address was changed from X to Y"). It's a notice only, with

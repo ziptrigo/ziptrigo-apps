@@ -149,3 +149,29 @@ def test_check_is_quiet_when_fully_configured_or_not_at_all(settings, values):
     settings.TURNSTILE_SITE_KEY, settings.TURNSTILE_SECRET_KEY = values
 
     assert accounts_checks.check_turnstile() == []
+
+
+@pytest.mark.parametrize(
+    ('secret', 'site_url', 'warns'),
+    [
+        (TEST_SECRET, 'https://app.ziptrigo.com', True),
+        ('2x0000000000000000000000000000000AA', 'https://app-staging.ziptrigo.com', True),
+        (TEST_SECRET, 'http://localhost:8000', False),
+        (TEST_SECRET, 'http://127.0.0.1:8000', False),
+        (REAL_SECRET, 'https://app.ziptrigo.com', False),
+        ('', 'https://app.ziptrigo.com', False),
+    ],
+)
+def test_check_warns_about_a_test_secret_on_a_real_host(settings, secret, site_url, warns):
+    settings.TURNSTILE_SITE_KEY = 'site'
+    settings.TURNSTILE_SECRET_KEY = secret
+    settings.BASE_URL = site_url
+
+    result = accounts_checks.check_turnstile_test_secret()
+
+    if warns:
+        (warning,) = result
+        assert warning.id == 'accounts.W003'
+        assert secret not in warning.msg
+    else:
+        assert result == []

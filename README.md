@@ -271,6 +271,34 @@ existing account with that email -- only if that account's email is confirmed *a
 otherwise it is refused and the user signs in with their password -- or else creates a new account
 (any verified email). See CLAUDE.md, "Auth".
 
+### Signup captcha (Cloudflare Turnstile)
+
+The register page, the only way to create an account, has a Cloudflare Turnstile captcha when both
+of these are set. Leave both empty and the widget is hidden and the check skipped. Setting only one
+triggers a startup warning (`accounts.W002`).
+
+| Variable | Value |
+|---|---|
+| `TURNSTILE_SITE_KEY` | the widget's site key (public, rendered in the page) |
+| `TURNSTILE_SECRET_KEY` | the widget's secret key (server only) |
+
+To get them, in the [Cloudflare dashboard](https://dash.cloudflare.com/?to=/:account/turnstile):
+
+1. *Turnstile* > *Add widget*, mode **Managed**.
+2. Add the environment's hostname (`app.ziptrigo.com`, `app-staging.ziptrigo.com`). The server
+   rejects a token whose hostname isn't `BASE_URL`'s host, so the two must agree.
+3. Copy the site key and secret into that environment's env file (`.env.prod`, `.env.staging`) and
+   upload it (see the table above).
+
+For local runs, Cloudflare's test keys work on any host: site key `1x00000000000000000000AA` with
+secret `1x0000000000000000000000000000000AA` always passes (`2x...` always fails). They skip the
+hostname check, so they must never reach a deployed env file: with a non-local `BASE_URL`, a test
+secret triggers a warning (`accounts.W003`) in `manage.py check` and in the container's `migrate`
+step at every deploy.
+
+The check fails closed: if Cloudflare can't be reached, signup is refused until it can be. Login
+and "Sign up with Google" have no captcha.
+
 ## Development Workflow
 
 ```bash

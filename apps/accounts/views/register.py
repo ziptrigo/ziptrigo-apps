@@ -20,6 +20,7 @@ from ..services import captcha, google_oauth
 from ..services.signup import EmailAlreadyRegistered, create_account
 
 CAPTCHA_ERROR = 'Please complete the captcha check and try again.'
+EMAIL_TAKEN_ERROR = 'An account with this email already exists.'
 
 
 @require_http_methods(['GET', 'POST'])
@@ -28,14 +29,13 @@ def register_page(request: HttpRequest) -> HttpResponse:
 
     Order of checks on a POST, cheapest and least abusable first:
 
-    1. The form (name, email, password). An invalid submission re-renders with 422 and touches
-       neither the captcha nor any rate limit (issue #52 code review: a bad password must not cost
-       one of only 5 signups/hour per IP).
-    2. The captcha, when configured: `SIGNUP_CAPTCHA_IP` bounds how many times one IP can make us
-       call Cloudflare, then `captcha.verify`. A failure is a form error (422). An empty token is
-       rejected without a call and without charging the rule.
+    1. The form (name, email format, password). An invalid submission re-renders with 422 and
+       touches neither the captcha nor any rate limit (issue #52 code review: a bad password must
+       not cost one of only 5 signups/hour per IP). It does *not* say whether the email is taken.
+    2. The captcha, when configured (`_check_captcha`). A failure is a form error (422).
     3. `SIGNUP_IP`, so only a submission a person actually got through counts against it.
-    4. `create_account`.
+    4. `create_account`, which is where an already-registered email is reported. Only here, behind
+       the captcha and `SIGNUP_IP`, so the page can't be used to enumerate accounts for free.
 
     Every 422 re-renders the form partial with a fresh captcha widget, since a token is single-use
     and the swap replaces the old widget anyway. On success, redirects to the "account created"
@@ -47,36 +47,9 @@ def register_page(request: HttpRequest) -> HttpResponse:
         form = RegisterForm(request.POST)
         status = 422
         if form.is_valid():
-            if captcha_enabled:
-                token = request.POST.get(captcha.RESPONSE_FIELD, '')
-                if token:
-                    limited = ratelimit.hit_ip(request, 'SIGNUP_CAPTCHA_IP')
-                    if not limited.allowed:
-                        return ratelimit.web_response(request, limited, retarget='#register-msg')
-                passed = bool(token) and captcha.verify(token, client_ip(request))
-            else:
-                passed = True
-
-            if not passed:
-                form.add_error(None, CAPTCHA_ERROR)
-            else:
-                limited = ratelimit.hit_ip(request, 'SIGNUP_IP')
-                if not limited.allowed:
-                    return ratelimit.web_response(request, limited, retarget='#register-msg')
-
-                try:
-                    create_account(
-                        name=form.cleaned_data['name'],
-                        email=form.cleaned_data['email'],
-                        password=form.cleaned_data['password'],
-                    )
-                except EmailAlreadyRegistered:
-                    # The email passed `RegisterForm.clean_email`'s own uniqueness check moments
-                    # ago -- this only fires on a genuine race with another signup for the same
-                    # address.
-                    form.add_error('email', 'An account with this email already exists.')
-                else:
-                    return hx_redirect(request, reverse('accounts:created'))
+            response = _create(request, form, captcha_enabled)
+            if response is not None:
+                return response
     else:
         form = RegisterForm()
         status = 200
@@ -93,3 +66,43 @@ def register_page(request: HttpRequest) -> HttpResponse:
         'turnstile_action': captcha.ACTION,
     }
     return render(request, template, context, status=status)
+
+
+def _create(request: HttpRequest, form: RegisterForm, captcha_enabled: bool) -> HttpResponse | None:
+    """Steps 2-4 for a valid form. Returns the response to send (a redirect or a 429), or `None`
+    after adding an error to `form`, which the caller re-renders with 422."""
+    if captcha_enabled:
+        outcome = _check_captcha(request)
+        if isinstance(outcome, HttpResponse):
+            return outcome
+        if not outcome:
+            form.add_error(None, CAPTCHA_ERROR)
+            return None
+
+    limited = ratelimit.hit_ip(request, 'SIGNUP_IP')
+    if not limited.allowed:
+        return ratelimit.web_response(request, limited, retarget='#register-msg')
+
+    try:
+        create_account(
+            name=form.cleaned_data['name'],
+            email=form.cleaned_data['email'],
+            password=form.cleaned_data['password'],
+        )
+    except EmailAlreadyRegistered:
+        form.add_error('email', EMAIL_TAKEN_ERROR)
+        return None
+    return hx_redirect(request, reverse('accounts:created'))
+
+
+def _check_captcha(request: HttpRequest) -> bool | HttpResponse:
+    """Whether the submitted Turnstile token passes, or a 429 response when this IP has made us
+    call Cloudflare too often (`SIGNUP_CAPTCHA_IP`). An empty token fails without a call and
+    without charging the rule."""
+    token = request.POST.get(captcha.RESPONSE_FIELD, '')
+    if not token:
+        return False
+    limited = ratelimit.hit_ip(request, 'SIGNUP_CAPTCHA_IP')
+    if not limited.allowed:
+        return ratelimit.web_response(request, limited, retarget='#register-msg')
+    return captcha.verify(token, client_ip(request))

@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from apps.accounts.models import User
 from apps.accounts.services import captcha
-from apps.accounts.views.register import CAPTCHA_ERROR
+from apps.accounts.views.register import CAPTCHA_ERROR, EMAIL_TAKEN_ERROR
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -61,9 +61,8 @@ def test_duplicate_email_returns_422(client, user):
 def test_duplicate_email_differing_only_by_domain_case_returns_422(client, user):
     """Issue #52 code review: `UserManager.create_user` normalizes email (lower-casing only the
     domain) before saving, so `user.email` ('testuser@example.com') is already normalized. A
-    signup for the same address with an upper-case domain must be caught by
-    `RegisterForm.clean_email`'s now-normalized comparison, rather than sailing through both the
-    form's and `create_account`'s pre-checks and hitting the model's unique constraint as a 500."""
+    signup for the same address with an upper-case domain must be caught by `create_account`'s
+    normalized comparison, rather than hitting the model's unique constraint as a 500."""
     mixed_case_domain = 'testuser@EXAMPLE.COM'
     assert mixed_case_domain.lower() == user.email
 
@@ -121,9 +120,8 @@ def test_api_signup_endpoint_is_gone(client):
 
 
 def test_invalid_submissions_do_not_consume_signup_ip_rate_limit(client, settings):
-    """Issue #52 code review: rejecting a submission (bad password, blank name, a duplicate
-    email caught by `RegisterForm.clean_email`, ...) must not burn the `SIGNUP_IP` budget --
-    only a submission that actually reaches `create_account` does."""
+    """Issue #52 code review: rejecting a submission (bad password, blank name, ...) must not burn
+    the `SIGNUP_IP` budget -- only a submission that actually reaches `create_account` does."""
     settings.RATELIMIT_ENABLE = True
     settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'SIGNUP_IP': (1, 60 * 60)}
 
@@ -252,3 +250,56 @@ def test_signup_captcha_ip_limits_calls_to_cloudflare(client, settings, verify_c
     assert response.status_code == 429
     assert 'Retry-After' in response
     assert len(verify_calls) == 2
+
+
+# -- account enumeration (issue #117 review) --
+
+
+def test_duplicate_email_counts_against_signup_ip(client, settings, user):
+    """Whether an address is registered is only answered once a submission reaches
+    `create_account`, behind the captcha and `SIGNUP_IP`, so probing it costs budget."""
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'SIGNUP_IP': (1, 60 * 60)}
+
+    assert EMAIL_TAKEN_ERROR in _register(client, email=user.email).content.decode()
+
+    response = _register(client, email=user.email)
+
+    assert response.status_code == 429
+    assert EMAIL_TAKEN_ERROR not in response.content.decode()
+
+
+@pytest.mark.usefixtures('captcha_on')
+def test_duplicate_email_is_not_revealed_without_the_captcha(client, user, verify_calls):
+    response = _register(client, email=user.email)
+
+    content = response.content.decode()
+    assert response.status_code == 422
+    assert CAPTCHA_ERROR in content
+    assert EMAIL_TAKEN_ERROR not in content
+
+
+@pytest.mark.usefixtures('captcha_on')
+def test_duplicate_email_is_reported_after_a_passing_captcha(client, user, verify_calls):
+    response = _register(client, email=user.email, **{captcha.RESPONSE_FIELD: 'good'})
+
+    assert response.status_code == 422
+    assert EMAIL_TAKEN_ERROR in response.content.decode()
+    assert User.objects.filter(email=user.email).count() == 1
+
+
+@pytest.mark.usefixtures('captcha_on')
+def test_signup_ip_429_after_a_passing_captcha_is_retargeted(client, settings, verify_calls):
+    """The form isn't swapped on a 429 (the message goes to `#register-msg`); `turnstile.js`
+    resets the widget then, since the token was already spent on Cloudflare."""
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'SIGNUP_IP': (1, 60 * 60)}
+    _register(client, email='first@example.com', **{captcha.RESPONSE_FIELD: 'token-1'})
+
+    response = _register(client, **{captcha.RESPONSE_FIELD: 'token-2'})
+
+    assert response.status_code == 429
+    assert 'Retry-After' in response
+    assert response['HX-Retarget'] == '#register-msg'
+    assert len(verify_calls) == 2
+    assert not User.objects.filter(email='newuser@example.com').exists()

@@ -17,13 +17,12 @@ class RegisterForm(forms.Form):
 
     def clean_email(self) -> str:
         # Normalized the same way `apps.accounts.services.signup.create_account` (and
-        # `UserManager.create_user`) normalize it, so this check can't be fooled by a domain-case
-        # variant of an email that's already registered (e.g. `user@Example.COM` vs.
-        # `user@example.com`) -- see that module's docstring for the full story.
-        email = User.objects.normalize_email(self.cleaned_data['email'])
-        if User.objects.filter(email=email).exists():
-            raise forms.ValidationError('An account with this email already exists.')
-        return email
+        # `UserManager.create_user`) normalize it. Whether the address is already registered is
+        # deliberately *not* checked here: the form runs before the captcha and every rate limit,
+        # so a "this email already exists" answer from it would let a script enumerate accounts
+        # for free. `create_account` reports it instead, once the captcha and `SIGNUP_IP` have
+        # passed (`apps.accounts.views.register`).
+        return User.objects.normalize_email(self.cleaned_data['email'])
 
     def clean_password(self) -> str:
         password = self.cleaned_data.get('password', '')
