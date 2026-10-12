@@ -141,6 +141,7 @@ modules = [
     'admin.openapi',
     'admin.pip',
     'admin.qrcode',
+    'admin.receipts',
     'admin.secrets',
     'admin.server',
     'admin.test',

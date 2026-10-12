@@ -18,7 +18,7 @@ from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Count, Max
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -399,6 +399,19 @@ def _clean_category_name(user: User, name: str, *, exclude_pk: int | None = None
     if taken.exists():
         raise ValidationError('You already have a category with that name.')
     return cleaned
+
+
+def list_categories(user: User) -> list[ReceiptCategory]:
+    """The user's categories in their order, each with a `receipt_count` (trashed receipts
+    included: deleting the category would uncategorize those too).
+
+    Ordered explicitly: `Meta.ordering` is dropped from a query that aggregates, which would leave
+    the order up to the database."""
+    return list(
+        ReceiptCategory.objects.filter(user=user)
+        .annotate(receipt_count=Count('receipts'))
+        .order_by('sort_order', 'name')
+    )
 
 
 def create_category(user: User, name: str) -> ReceiptCategory:
