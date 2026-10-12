@@ -534,6 +534,7 @@ def test_presigned_get_url_strips_quotes_and_backslashes_from_ascii_fallback():
 
 def test_presign_part_url_signs_content_length_and_checksum():
     storage, client = _mock_storage()
+    client.generate_presigned_url.return_value = 'https://example.test/signed?X-Amz-SignedHeaders=content-length%3Bhost%3Bx-amz-checksum-sha256'
     storage.presign_part_url('k', 'upload-1', 2, content_length=1024, checksum_sha256='abcd==')
 
     params = _params(client)
@@ -550,3 +551,26 @@ def test_presign_part_url_omits_optional_params_when_not_given():
     params = _params(client)
     assert 'ContentLength' not in params
     assert 'ChecksumSHA256' not in params
+
+
+def test_presign_part_url_signs_both_headers_on_a_sigv4_client(presigner):
+    url = presigner.presign_part_url(
+        'k', 'upload-1', 1, content_length=1024, checksum_sha256='abcd=='
+    )
+    assert {'content-length', 'x-amz-checksum-sha256'} <= _signed_headers(url)
+
+
+def test_presign_part_url_refuses_a_non_sigv4_client():
+    # ziptrigo-apps#100: a default client in us-east-1 presigns with SigV2, which signs neither.
+    client = build_client('us-east-1', None, 'AKIATESTKEY', 'test-secret')
+    storage = S3Storage(bucket=BUCKET, client=client)
+
+    with pytest.raises(UnsupportedSignatureVersionError):
+        storage.presign_part_url('k', 'upload-1', 1, content_length=1024)
+
+
+def test_presign_part_url_without_size_or_checksum_allows_any_client():
+    client = build_client('us-east-1', None, 'AKIATESTKEY', 'test-secret')
+    storage = S3Storage(bucket=BUCKET, client=client)
+
+    assert storage.presign_part_url('k', 'upload-1', 1).startswith('https://')

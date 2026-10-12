@@ -59,9 +59,24 @@ INLINE_CONTENT_TYPES = frozenset(
 
 
 class UnsupportedSignatureVersionError(RuntimeError):
-    """Raised by `S3Storage.presigned_put_url` when the client isn't signing with SigV4, because
-    under any other signature version the signed `Content-Length` (the URL's whole point) isn't
-    enforced. Build the client with `build_client(..., signature_version='s3v4')`."""
+    """Raised by `S3Storage.presigned_put_url` / `presign_part_url` when the client isn't signing
+    with SigV4, because under any other signature version the signed `Content-Length` (the URL's
+    whole point) isn't enforced. Build the client with `build_client(...,
+    signature_version='s3v4')`."""
+
+
+def _require_signed(url: str, required: set[str], method: str) -> None:
+    """Raise `UnsupportedSignatureVersionError` unless every header in `required` is among the
+    presigned `url`'s `X-Amz-SignedHeaders` -- which only a SigV4 client produces. Inspects the
+    URL rather than `client.meta.config.signature_version`, which reports `'s3v4'` even for a
+    default client whose presigned URLs are SigV2."""
+    signed = set(parse_qs(urlsplit(url).query).get('X-Amz-SignedHeaders', [''])[0].split(';'))
+    if not required <= signed:
+        raise UnsupportedSignatureVersionError(
+            f'{method} needs a SigV4 client (build_client(..., '
+            f"signature_version='s3v4')): the generated URL does not sign "
+            f'{sorted(required - signed)}, so S3 would not enforce them'
+        )
 
 
 class ObjectTooLargeError(ValueError):
@@ -109,8 +124,10 @@ def build_client(
     presigned PUT's `Content-Length` is *not* part of the signature, so `presign_part_url` /
     `presigned_put_url` cannot enforce a declared size there; pass `'s3v4'` for a client whose
     presigned uploads must pin the body's size (and have `x-amz-checksum-sha256` signed as a
-    header rather than carried as an unsigned-by-SigV2 query parameter). `presigned_put_url`
-    refuses to run on a client that isn't SigV4 (`UnsupportedSignatureVersionError`).
+    header rather than carried as an unsigned-by-SigV2 query parameter). `presigned_put_url` and
+    `presign_part_url` (when asked to sign a size or checksum) refuse to run on a client that
+    isn't SigV4 (`UnsupportedSignatureVersionError`); file transfer and receipts both build theirs
+    with `'s3v4'`.
     """
     return boto3.client(
         's3',
@@ -185,10 +202,9 @@ class S3Storage:
         browser sends doesn't match). **Under SigV2** (botocore's default in `us-east-1`,
         `eu-west-1` and other older regions, unless the client is built with
         `signature_version='s3v4'`) `Content-Length` is not signed and the checksum is only an
-        unsigned query parameter, so neither is enforced; this method does not refuse to run
-        there (file_transfer still uses the default client, see ziptrigo-apps#100), so a caller
-        that depends on the size guarantee must verify the final object's size itself
-        (`head_object`). `checksum_sha256` must be supplied by the caller (the
+        unsigned query parameter, so neither would be enforced: when either is given this method
+        fails closed with `UnsupportedSignatureVersionError`, like `presigned_put_url`
+        (ziptrigo-apps#100). `checksum_sha256` must be supplied by the caller (the
         browser computes it before requesting the URL, via `crypto.subtle`) -- it can't be
         computed here, since presigning happens before the bytes exist on this end at all.
         """
@@ -198,13 +214,17 @@ class S3Storage:
             'UploadId': upload_id,
             'PartNumber': part_number,
         }
+        required: set[str] = set()
         if content_length is not None:
             params['ContentLength'] = content_length
+            required.add('content-length')
         if checksum_sha256 is not None:
             params['ChecksumSHA256'] = checksum_sha256
-        return self.client.generate_presigned_url(
-            'upload_part', Params=params, ExpiresIn=expires_in
-        )
+            required.add('x-amz-checksum-sha256')
+        url = self.client.generate_presigned_url('upload_part', Params=params, ExpiresIn=expires_in)
+        if required:
+            _require_signed(url, required, 'presign_part_url')
+        return url
 
     def upload_part(self, key: str, upload_id: str, part_number: int, body: bytes) -> str:
         """Upload one part's bytes directly, server-side -- unlike `presign_part_url`, this part
@@ -393,13 +413,7 @@ class S3Storage:
             params['ContentType'] = content_type
             required.add('content-type')
         url = self.client.generate_presigned_url('put_object', Params=params, ExpiresIn=expires_in)
-        signed = parse_qs(urlsplit(url).query).get('X-Amz-SignedHeaders', [''])[0].split(';')
-        if not required <= set(signed):
-            raise UnsupportedSignatureVersionError(
-                f'presigned_put_url needs a SigV4 client (build_client(..., '
-                f"signature_version='s3v4')): the generated URL does not sign "
-                f'{sorted(required - set(signed))}, so S3 would not enforce them'
-            )
+        _require_signed(url, required, 'presigned_put_url')
         return url
 
     def presigned_get_url(

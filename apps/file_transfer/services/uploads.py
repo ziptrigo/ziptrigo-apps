@@ -134,10 +134,9 @@ def presign_parts(
     presigned URL can't itself carry a value the *server* doesn't already know, so this only works
     because the checksum is computed client-side first and handed to us, not the other way
     round). The content length expected for each part number is signed the same way, so a part
-    can't be padded past its declared size either. All of this holds only when the client signs
-    with SigV4; botocore's default client is SigV2 in `us-east-1` and other older regions, where
-    neither header is signed (ziptrigo-apps#100), and `complete_file_upload`'s `head_object` size
-    check is what actually guards the declared size.
+    can't be padded past its declared size either. This needs a SigV4 client (SigV2 signs neither
+    header), which `storage.get_storage()` builds and `presign_part_url` insists on
+    (ziptrigo-apps#100); `complete_file_upload`'s `head_object` size check is a second guard.
 
     Raises:
         ValidationError: the upload isn't in progress, a part number is outside the valid
