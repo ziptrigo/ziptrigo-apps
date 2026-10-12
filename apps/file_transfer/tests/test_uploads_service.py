@@ -122,7 +122,7 @@ def test_presign_parts_signs_content_length_per_part(draft_transfer, fake_storag
 
 def test_complete_file_upload_marks_uploaded_and_stores_checksum(draft_transfer, fake_storage):
     file = uploads.add_file(draft_transfer, 'a.bin', 500, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 500)
+    fake_storage.seed_object(file.storage_key, 500)
 
     completed = uploads.complete_file_upload(
         file, [{'PartNumber': 1, 'ETag': 'e1'}], storage=fake_storage
@@ -139,7 +139,7 @@ def test_complete_file_upload_marks_uploaded_and_stores_checksum(draft_transfer,
 
 def test_complete_file_upload_rejects_size_mismatch(draft_transfer, fake_storage):
     file = uploads.add_file(draft_transfer, 'a.bin', 500, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 499)  # wrong size
+    fake_storage.seed_object(file.storage_key, 499)  # wrong size
 
     with pytest.raises(ValidationError):
         uploads.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e1'}], storage=fake_storage)
@@ -165,7 +165,7 @@ def test_remove_file_aborts_in_progress_upload(draft_transfer, fake_storage):
 
 def test_remove_file_deletes_uploaded_object(draft_transfer, fake_storage):
     file = uploads.add_file(draft_transfer, 'a.bin', 500, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 500)
+    fake_storage.seed_object(file.storage_key, 500)
     uploads.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e1'}], storage=fake_storage)
 
     uploads.remove_file(file, storage=fake_storage)
@@ -210,7 +210,7 @@ def test_list_uploaded_parts_empty_when_nothing_uploaded_yet(draft_transfer, fak
 
 def test_list_uploaded_parts_requires_upload_in_progress(draft_transfer, fake_storage):
     file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 10)
+    fake_storage.seed_object(file.storage_key, 10)
     uploads.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e1'}], storage=fake_storage)
 
     with pytest.raises(ValidationError):
@@ -263,7 +263,7 @@ def test_restart_upload_does_not_clobber_a_concurrent_completion(draft_transfer,
     stale = TransferFile.objects.get(pk=file.pk)  # tab B's copy, read before tab A completes
 
     # Tab A: completes the upload.
-    fake_storage.put_object(file.storage_key, 10)
+    fake_storage.seed_object(file.storage_key, 10)
     uploads.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e1'}], storage=fake_storage)
     assert file.uploaded is True
 
@@ -368,7 +368,7 @@ def test_complete_without_a_checksum_for_an_already_landed_part_is_rejected(
 def test_abort_draft_cleans_up_everything(draft_transfer, fake_storage):
     in_progress = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
     done = uploads.add_file(draft_transfer, 'b.bin', 10, storage=fake_storage)
-    fake_storage.put_object(done.storage_key, 10)
+    fake_storage.seed_object(done.storage_key, 10)
     uploads.complete_file_upload(done, [{'PartNumber': 1, 'ETag': 'e'}], storage=fake_storage)
 
     uploads.abort_draft(draft_transfer, storage=fake_storage)

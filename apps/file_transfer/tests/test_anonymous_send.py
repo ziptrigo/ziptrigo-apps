@@ -71,7 +71,7 @@ def _draft(anon_enabled) -> Transfer:
 
 def _upload(transfer: Transfer, fake_storage, size: int = 1024, name: str = 'report.pdf'):
     file = add_file(transfer, name, size, ip=IP, cookie_id=COOKIE, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, size)
+    fake_storage.seed_object(file.storage_key, size)
     complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag-1'}], storage=fake_storage)
     return file
 
@@ -378,7 +378,7 @@ class TestPerIpCaps:
             owner=None, status=TransferStatus.DRAFT, sender_ip=IP, anon_cookie_id='other-cookie'
         )
         other_file = add_file(other_draft, 'a.bin', 900, ip=IP, cookie_id='other-cookie')
-        fake_storage.put_object(other_file.storage_key, 900)
+        fake_storage.seed_object(other_file.storage_key, 900)
         complete_file_upload(
             other_file, [{'PartNumber': 1, 'ETag': 'etag-1'}], storage=fake_storage
         )

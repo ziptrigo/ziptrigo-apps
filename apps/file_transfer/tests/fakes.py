@@ -4,7 +4,7 @@ services layer calls.
 
 Realistic enough for the send flow: `complete_file_upload` calls `complete_multipart_upload` (a
 no-op here) and then `head_object` to verify the size, so tests register the "uploaded" bytes with
-`put_object` before calling it -- standing in for the browser's direct-to-S3 PUTs, which this fake
+`seed_object` before calling it -- standing in for the browser's direct-to-S3 PUTs, which this fake
 never actually receives.
 """
 
@@ -35,7 +35,7 @@ class FakeS3Storage:
     #: simulate a part already landed in S3 via a resumed upload), keyed by upload id then part
     #: number -- assembled into `objects[key]` on `complete_multipart_upload`. The browser-PUT
     #: path (`presign_part_url`) never populates this: those tests simulate the uploaded bytes
-    #: with `put_object` instead, so `complete_multipart_upload` leaves `objects` alone (and skips
+    #: with `seed_object` instead, so `complete_multipart_upload` leaves `objects` alone (and skips
     #: the checksum enforcement below) when there's nothing recorded here for the upload id.
     multipart_parts: dict[str, dict[int, bytes]] = field(default_factory=dict)
     #: Upload id -> whether `create_multipart_upload` was asked for a checksum algorithm (real S3
@@ -44,7 +44,7 @@ class FakeS3Storage:
     #: exactly what a resumed upload's completion used to omit) -- see `complete_multipart_upload`.
     checksum_required: dict[str, bool] = field(default_factory=dict)
 
-    def put_object(self, key: str, size: int) -> None:
+    def seed_object(self, key: str, size: int) -> None:
         """Test helper: pretend `size` bytes were already PUT to `key`."""
         self.objects[key] = b'\0' * size
 
@@ -92,7 +92,7 @@ class FakeS3Storage:
                 # upload's completion used to build its part list without one for parts it didn't
                 # re-PUT). Only enforced for parts this fake actually knows landed via
                 # `upload_part` (`recorded`) -- a test that only simulates the end result with
-                # `put_object` isn't exercising this at all.
+                # `seed_object` isn't exercising this at all.
                 by_number = {p.get('PartNumber'): p for p in parts}
                 for part_number in recorded:
                     supplied = by_number.get(part_number)

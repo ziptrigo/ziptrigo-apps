@@ -52,7 +52,7 @@ def uploaded_file(draft_transfer, fake_storage):
     from .. import services
 
     file = services.add_file(draft_transfer, 'report.pdf', 1024, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 1024)
+    fake_storage.seed_object(file.storage_key, 1024)
     services.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag-1'}], storage=fake_storage)
     file.refresh_from_db()
     return file

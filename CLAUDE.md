@@ -13,7 +13,8 @@ an account, a credit balance and a layout. Django + HTMX. It started as two micr
 manage.py
 config/               The Django project: settings, urls, api (one NinjaAPI), environment.py.
 apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email,
-                      email verification, rate limiting (`apps.core.ratelimit`), client IP.
+                      email verification, rate limiting (`apps.core.ratelimit`), client IP,
+                      generic S3 storage (`apps.core.services.storage`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services.
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
@@ -143,10 +144,35 @@ File transfer storage is one private S3 bucket per environment (`FILE_TRANSFER_S
 see `apps.file_transfer.services.storage`'s module docstring for why), defined with its CORS,
 lifecycle rule and IAM user in the `infra` repo's `apps/ziptrigo-apps` (see its README); local points
 `FILE_TRANSFER_S3_ENDPOINT_URL` at Floci. Each part of a multipart upload carries its own SHA-256
-checksum (`x-amz-checksum-sha256`, computed client-side and bound into the presigned URL's
-signature -- see `services.uploads.presign_parts`), so that bucket's CORS config (issue #60) must
+checksum (`x-amz-checksum-sha256`, computed client-side and passed into the presigned URL --
+see `services.uploads.presign_parts`), so that bucket's CORS config (issue #60) must
 allow the `x-amz-checksum-sha256` request header and expose the `ETag` response header, or uploads
-fail in the browser with a CORS error rather than an S3 one.
+fail in the browser with a CORS error rather than an S3 one. **Caveat on enforcement:** the
+checksum and each part's `Content-Length` are only *signed* into the URL (so S3 rejects a
+mismatching PUT) under SigV4. `get_storage()` currently builds a default client, which signs
+presigned URLs with SigV2 in `us-east-1` and other older regions, where neither is enforced; the
+guard that actually holds today is `services.uploads.complete_file_upload`'s `head_object` size
+check against the declared size at completion. Moving file_transfer to SigV4 is tracked in #100.
+
+The S3 wrapper itself is generic and lives in `core`: `apps.core.services.storage.S3Storage` is a
+dataclass over a `bucket` and a boto3 client (`build_client(region, endpoint_url, access_key_id,
+secret_access_key)` builds one; an app wires its own settings into it, so apps can use different
+buckets/credentials). Besides the multipart methods it has `put_object`, `copy_object`,
+`get_object_bytes` (optional `max_bytes`), `list_keys` (returns a plain list that may be truncated
+at `max_keys`; pass `None` when completeness matters), `presigned_put_url` (a single PUT with
+`Content-Length` and `x-amz-checksum-sha256` signed in; it raises
+`UnsupportedSignatureVersionError` when the URL it generated doesn't sign `Content-Length`, i.e. a
+non-SigV4 client; note `client.meta.config.signature_version` reads `'s3v4'` even for a default
+client whose presigned URLs are SigV2, so it inspects the URL's signed headers instead) and a `presigned_get_url` with
+`disposition` / `content_type` (an explicit `content_type` with `inline` must be one of
+`INLINE_CONTENT_TYPES`: PDF, JPEG, PNG, WebP, GIF, plain text).
+`apps.file_transfer.services.storage` keeps `get_storage()` (builds that class from the
+`FILE_TRANSFER_*` settings), the key helpers and the part-size constants, and re-exports
+`S3Storage` / `ObjectInfo`. botocore signs presigned URLs with legacy SigV2 in older regions
+(`us-east-1`, `eu-west-1`, ...) unless the client is built with `signature_version='s3v4'`, and
+SigV2 does **not** sign `Content-Length`; `build_client` keeps botocore's default unless asked.
+`presign_part_url` therefore only enforces a part's size/checksum under SigV4 and does not refuse
+a SigV2 client (file_transfer still uses the default one; see #100).
 
 ### Auth
 
