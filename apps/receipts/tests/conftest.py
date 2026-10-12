@@ -73,3 +73,29 @@ def make_receipt(funded_user, fake_storage):
         return create_receipt(funded_user, fake_storage, **kwargs)
 
     return _make
+
+
+@pytest.fixture
+def web(client, funded_user):
+    """A test client logged in as `funded_user`."""
+    client.force_login(funded_user)
+    return client
+
+
+@pytest.fixture
+def other_user(db):
+    from .factories import make_user
+
+    return make_user()
+
+
+@pytest.fixture
+def freeze(funded_user):
+    """Freeze `funded_user`'s receipts account (storage unpaid)."""
+    from django.utils import timezone
+
+    from ..models import ReceiptsAccount
+    from ..services.accounts import get_account
+
+    get_account(funded_user)
+    ReceiptsAccount.objects.filter(pk=funded_user.pk).update(frozen_at=timezone.now())

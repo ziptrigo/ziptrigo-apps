@@ -9,10 +9,20 @@ class ReceiptsConfig(AppConfig):
 
     def ready(self):
         # Registers the system checks (`@register()` runs at import).
+        from apps.core.products import ProductApp, register
+
         from . import checks  # noqa: F401
 
-        # The `ProductApp` (nav entry, landing card) is registered together with the pages, in a
-        # later release.
+        register(
+            ProductApp(
+                label=self.label,
+                name='Receipts',
+                description='Email or snap your receipts and invoices; we file and categorize them.',
+                url_name='receipts:dashboard',
+                icon='fas fa-receipt',
+            )
+        )
+
         self._register_jobs()
         self._connect_signals()
 

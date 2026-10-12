@@ -30,11 +30,21 @@ def _require_available(receipt: Receipt) -> None:
         raise ValidationError('There is no file for this receipt.')
 
 
+def _default_name(receipt: Receipt) -> str:
+    """A name for a file that has none (an email body): `receipt` plus the right extension, so
+    it opens in the right program when saved."""
+    return {'text/html': 'email.html', 'text/plain': 'email.txt'}.get(
+        receipt.content_type, 'receipt'
+    )
+
+
 def download_url(receipt: Receipt) -> str:
     """A short-lived "Save As" URL for the original file."""
     _require_available(receipt)
     return get_storage().presigned_get_url(
-        receipt.file_key, receipt.original_filename or 'receipt', disposition='attachment'
+        receipt.file_key,
+        receipt.original_filename or _default_name(receipt),
+        disposition='attachment',
     )
 
 

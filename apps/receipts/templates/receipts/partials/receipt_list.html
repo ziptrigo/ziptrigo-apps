@@ -1,0 +1,73 @@
+{% load receipts_ui %}
+{% comment %} Everything under the filters: the list card, the pager and the refresh poller. This is what the
+   tabs, filters, sort links and pager swap into #receipt-list; it sits inside the filter form, so
+   the hidden inputs below keep the tab and sort when a filter changes. {% endcomment %}
+{% if parsed.tab != 'all' %}<input type="hidden" name="status" value="{{ parsed.tab }}">{% endif %}
+{% if parsed.params.sort %}<input type="hidden" name="sort" value="{{ parsed.params.sort }}">{% endif %}
+
+{% if oob_export %}
+{% include 'receipts/partials/tabs.html' with oob=True %}
+{% include 'receipts/partials/export_link.html' with oob=True %}
+{% endif %}
+
+<div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+        <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 sm:px-6 sm:rounded-t-md">
+            <div class="flex items-center gap-4 md:grid md:grid-cols-[6.5rem_minmax(0,1fr)_9.5rem_7rem_8.5rem] md:gap-x-4">
+                {% with sort=sort_links.receipt_date %}
+                <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#receipt-list" hx-swap="innerHTML"
+                   {% if sort.active %}aria-sort="{% if sort.descending %}descending{% else %}ascending{% endif %}"{% endif %}
+                   class="group flex items-center text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-primary rounded {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200{% endif %}">
+                    Receipt date
+                    <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
+                </a>
+                {% endwith %}
+                <div class="flex items-center justify-between gap-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    <span class="hidden md:inline">Vendor</span>
+                    {% with sort=sort_links.created_at %}
+                    <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#receipt-list" hx-swap="innerHTML"
+                       {% if sort.active %}aria-sort="{% if sort.descending %}descending{% else %}ascending{% endif %}"{% endif %}
+                       class="group flex items-center focus:outline-none focus:ring-2 focus:ring-brand-primary rounded {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+                        Added
+                        <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
+                    </a>
+                    {% endwith %}
+                </div>
+                <span class="hidden md:block text-sm font-medium text-gray-500 dark:text-gray-400">Category</span>
+                <span class="hidden md:block text-right text-sm font-medium text-gray-500 dark:text-gray-400">Amount</span>
+                <span class="hidden md:block text-sm font-medium text-gray-500 dark:text-gray-400">Status</span>
+            </div>
+        </li>
+
+        {% for receipt in receipts %}
+        {% include 'receipts/partials/receipt_row.html' %}
+        {% empty %}
+        <li class="px-4 py-12 text-center sm:px-6">
+            <p class="text-sm text-gray-500 dark:text-gray-400">
+                {% if parsed.is_filtered %}No receipts found.{% else %}No receipts yet. Upload one, or email it to your address above.{% endif %}
+            </p>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="mt-6 flex items-center justify-between text-sm">
+    <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="flex gap-4">
+        {% if page_obj.has_previous %}
+        <a href="{{ dashboard_url }}?{{ prev_query }}" hx-get="{{ list_url }}?{{ prev_query }}" hx-target="#receipt-list" hx-swap="innerHTML"
+           class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a href="{{ dashboard_url }}?{{ next_query }}" hx-get="{{ list_url }}?{{ next_query }}" hx-target="#receipt-list" hx-swap="innerHTML"
+           class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if poll_url %}
+{# Something is still being read: look again in a few seconds (the view stops offering this after a while). #}
+<div hx-get="{{ poll_url }}" hx-trigger="every 3s" hx-target="#receipt-list" hx-swap="innerHTML" aria-hidden="true"></div>
+{% endif %}

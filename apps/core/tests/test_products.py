@@ -11,7 +11,7 @@ pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 def test_installed_products_are_registered_in_installed_apps_order():
     labels = [product.label for product in get_products()]
 
-    assert labels == ['qr_code', 'file_transfer']
+    assert labels == ['qr_code', 'file_transfer', 'receipts']
 
 
 def test_every_product_url_resolves():
@@ -44,3 +44,15 @@ def test_nav_and_landing_page_list_products(client):
         assert product.name in content
         # Once in the nav, once on a landing-page card.
         assert content.count(f'href="{reverse(product.url_name)}"') == 2
+
+
+def test_receipts_is_registered_as_a_product():
+    receipts = next(p for p in get_products() if p.label == 'receipts')
+
+    assert receipts.name == 'Receipts'
+    assert receipts.description == (
+        'Email or snap your receipts and invoices; we file and categorize them.'
+    )
+    assert receipts.url_name == 'receipts:dashboard'
+    assert receipts.icon == 'fas fa-receipt'
+    assert reverse(receipts.url_name) == '/receipts/'

@@ -24,8 +24,8 @@ apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short 
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs.
 apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
-                      uploads, email intake, AI extraction, billing, jobs and admin so far; no pages,
-                      API or CLI yet (see "Receipts" below).
+                      uploads, email intake, AI extraction, billing, jobs, admin and the web pages;
+                      no API or CLI yet (see "Receipts" below).
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
@@ -948,10 +948,9 @@ superusers) and `core` can't import `accounts`; it sits in the same layer as `bi
 `apps.receipts` (issue #98; app label `receipts`) takes receipts and invoices the user *receives*
 and extracts vendor, amount, date and a category with an OpenAI-compatible vision model. It is a
 product (same layer as `qr_code`/`file_transfer`). **Built so far:** models, settings, the
-`receipts` queue, uploads, the processing/AI pipeline, billing, jobs, admin (phase 1) and email
-intake (phase 2: the S3 poller, MIME parsing, `ingest_message`, `receipts_ingest_eml`). **Not yet:**
-the `ProductApp` registration, URLs/views/templates, including the settings page that will show
-forwarding-confirmation codes (phase 3), and the JWT API and `admin/receipts.py` CLI (phase 4).
+`receipts` queue, uploads, the processing/AI pipeline, billing, jobs, admin (phase 1), email
+intake (phase 2: the S3 poller, MIME parsing, `ingest_message`, `receipts_ingest_eml`) and the web
+UI (phase 3, "Web UI" below). **Not yet:** the JWT API and `admin/receipts.py` CLI (phase 4).
 Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `checks.py`,
 `management/commands/`.
 
@@ -1040,8 +1039,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `InboundEmail` right after its own row, `emails.lock_inbound_email`, so concurrent siblings run
   the "everyone done?" check one after the other; always receipt, then email) -- email intake
   creates every receipt of an email in one transaction and queues their processing on commit, so
-  all siblings exist before the first settles; `send_storage_paused_email` on freeze. Links are `/receipts/...` literals until the URLs
-  exist.
+  all siblings exist before the first settles; `send_storage_paused_email` on freeze. Links are
+  absolute: `settings.BASE_URL` + `reverse('receipts:dashboard')` / `reverse('receipts:detail', ...)`.
 - **Billing** (`services.metering`). `receipts.meter_storage` (daily) bills *per account*:
   `stored_bytes` (originals, previews, stripped emails; trashed ones included until purged) x the
   shared `BillingSettings` price through `billing.storage_charge`, row lock, `last_billed_at +=
@@ -1061,7 +1060,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   that were **already frozen before its metering pass** (it snapshots their ids first); otherwise
   an account frozen in that very run would be unfrozen again at once, its day forgiven and its
   owner told "paused" every day for nothing.
-- **Actions** (`services.actions`, shared by the future views and API; `ValidationError` -> 422/400,
+- **Actions** (`services.actions`, shared by the web views and the future API; `ValidationError` -> 422/400,
   `AccountFrozenError`/`InsufficientCreditsError` -> 402): `update_receipt` (partial; records the
   extracted fields that actually changed in `user_edited_fields`, `notes` aside; refuses extracted
   fields while the AI owns the receipt; moves `needs_review` <-> `processed` as the required fields
@@ -1075,8 +1074,11 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   category, `q` over vendor + notes, `receipt_date` range, duplicates, sort; default
   `-receipt_date` with undated first) and the CSV export (`iter_csv`/`export_csv`, columns per the
   issue; every cell goes through the formula guard, which also catches leading whitespace); `services.files` has the presigned inline/attachment URLs
-  (an HTML body is *never* served inline from S3 -- the later body view streams it with a CSP).
-  The `RECEIPTS_*_USER` rate-limit rules exist in `RATELIMIT_RULES`; the views/API will enforce them.
+  (an HTML body is *never* served inline from S3 -- `views.detail.body_view` streams it with a CSP; a nameless
+  file downloads as `email.html`/`email.txt`/`receipt`).
+  The `RECEIPTS_*_USER` rate-limit rules exist in `RATELIMIT_RULES`; the web views enforce them (the API will).
+  `filter_receipts` and `dashboard_counts` (the tab and Trash numbers, one query) never include a
+  receipt with `uploaded=False` (a direct upload still in flight or abandoned).
 - **Jobs** (`apps/receipts/jobs.py`, registered in `ready()`): `receipts.meter_storage` (daily),
   `receipts.purge_trash` (daily; deletes S3 objects, then rows, past `trash_days`, and the stripped
   `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
@@ -1228,6 +1230,91 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     download, parse, allowlist, cap, store, delete); `--to` (repeatable) replaces the headers'
     recipient, omit it to use them. The verdict headers are read from the file, so add them to
     exercise the allowlist or a rejection.
+- **Web UI** (`apps/receipts/{urls,views,forms,templatetags}`, `templates/receipts/`, `static/receipts/js/`;
+  mounted at `/receipts/`; every view `@login_required`, another user's (or an unfinished upload's)
+  receipt is a 404; all pages follow `docs/ui-design/README.md` and extend `receipts/layout.html`,
+  which adds the **"Storage is paused" banner** (with a Top up link to `billing:credits-history`)
+  while the account is frozen -- every page renders through `views.common.render_page`, which also
+  creates the `ReceiptsAccount` on first visit). Views call `services.actions`/`filters`/`uploads`/
+  `files`, never re-implementing a rule; `ValidationError` is a 422, `AccountFrozenError` and
+  `InsufficientCreditsError` are 422 too on htmx views (htmx does not swap 402) with a Top up link.
+  - **Pages**: `/receipts/` (dashboard), `/receipts/list/` (its partial), `/receipts/export.csv`,
+    `/receipts/upload/` (+ JSON `upload/start/`, `upload/<id>/complete/`), `/receipts/<id>/` (page
+    on GET, the form on POST), `<id>/body/`, `<id>/download/`, `<id>/reprocess/`, `<id>/trash/`
+    (move to the Trash), `<id>/restore/`, `<id>/delete/` (forever), `<id>/dismiss-duplicate/`,
+    `/receipts/trash/`, `/receipts/settings/` (+ `settings/inbox/`, `settings/regenerate/`,
+    `settings/categories/...`). URL names are in `urls.py` (`receipts:detail`, ...).
+  - **Dashboard**: status tabs with counts (All, Needs review, Processing = received + processing +
+    waiting for credits, Failed, Duplicates), search (vendor + notes), category, receipt-date range,
+    sortable Receipt date (default newest first, undated on top) and Added columns, 25 per page.
+    `forms.parse_filters` reads the query string *leniently* (a bad value is dropped) into
+    `ReceiptFilters` for the services; the page, `receipt_list` and the CSV export all use it, so
+    "current filters" means one thing. The filter form `hx-get`s `/receipts/list/` into
+    `#receipt-list` (which sits *inside* the form, so its hidden `status`/`sort` inputs travel with
+    the next request) and the response's `HX-Push-Url` puts the **dashboard** URL in the address bar
+    (a reload or shared link renders the full page; the list URL opened directly redirects there).
+    The tabs and the Export CSV link are re-sent out of band (`hx-swap-oob`) with every refresh, so
+    they carry the filters. While a row is `received`/`processing` the list re-fetches itself every
+    3 s (`polls=` in the URL counts, capped at 40; `waiting_for_credits` is not polled).
+  - **Detail**: preview left, form right (stacked on phones). Required fields (vendor, receipt date,
+    amount) are marked `*`, and while one is missing on a settled receipt it gets an amber border and
+    a hint. A save is an htmx form: 422 puts `Label: message` lines in `#receipt-form-msg` (the form
+    keeps what was typed), success flashes "Saved." and redirects back (so the heading, status pill
+    and duplicate banner are all fresh). `forms.ReceiptForm` only gathers the fields and maps
+    `actions.clean_changes` errors to fields (dates are ISO only). A failed receipt shows the reason
+    and next step (`templatetags.receipts_ui.FAILURE_HELP`) instead of the form, with Re-run
+    (`hx-confirm`, `RECEIPTS_REPROCESS_USER`), Move to trash and Download still available; a receipt
+    being read shows a progress panel that polls `GET <id>/?polls=n` and swaps only the right-hand
+    panel (`hx-select`) plus the heading, duplicate banner and added line (`hx-select-oob`), so the
+    preview doesn't flicker. A trashed receipt opens read-only with a Restore button. Images and
+    PDFs are previewed through a presigned *inline* S3 URL generated when the page renders (a HEIC
+    through its stored JPEG); downloads go through `<id>/download/`, which redirects to a fresh
+    presigned *attachment* URL (frozen: back to the page with a message).
+  - **Email bodies** (`body_view`): the HTML an email carried is the sender's, so it is served by
+    Django, never by S3, as an isolated document: `Content-Security-Policy: default-src 'none';
+    img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors
+    'self'` (`views.detail.BODY_CSP`), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+    no-referrer`, `Cache-Control: private, no-store`, shown only inside `<iframe sandbox>` (a bare
+    attribute: no `allow-scripts`, forms, popups or same-origin). So no script runs and nothing remote
+    loads (a tracking pixel is blocked). The detail page that frames it also sends `Content-Security-
+    Policy: frame-src 'self'`, so a `<meta http-equiv="refresh">` in the email cannot navigate the
+    frame to a remote URL. A `text/plain` body is HTML-escaped into a `<pre>` and served the same
+    way. A frozen account gets a 402 notice (with the same headers), a missing object a 404 notice,
+    a body over `MAX_BODY_BYTES` a 413.
+  - **Upload** (`views/uploads.py`, `static/receipts/js/upload.js`): drop zone (files and folders,
+    copied from file_transfer's `initDropZone`), "Choose files" and "Take photo" (`accept="image/*"
+    capture="environment"`). Per file: refuse an unsupported type/size/empty file in the row; the
+    browser computes SHA-256 (base64); `POST upload/start/` (session + CSRF, JSON in/out,
+    `RECEIPTS_UPLOAD_USER`; 422 rejected, 402 frozen, 429 waits for `Retry-After` up to 3 times) ->
+    XHR `PUT` to the presigned URL with exactly the headers the server returned (never
+    `Content-Length`, which the browser sets) and a type-less Blob so no `Content-Type` is sent (it
+    would otherwise need to be in the bucket's CORS `AllowedHeaders`) -> `POST upload/<id>/complete/`.
+    Three files at a time, a progress bar and an error line per row. Only `start` is rate limited
+    (`complete` is bounded by it).
+  - **Trash** (`/receipts/trash/`): plain POST forms ending in a redirect with a flash message (restore;
+    delete forever through a confirmation modal, an S3 error is a message, not a 500); how long is
+    left comes from `ReceiptsSettings.trash_days`.
+  - **Settings**: the address (Copy; Regenerate in a modal, `RECEIPTS_REGENERATE_USER`, then redirect), the
+    latest forwarding confirmation of the last 7 days (code, and an Open link only if it is https
+    to `mail-settings.google.com`, re-checked before it becomes an `href`), accepted senders
+    (Anyone / Only these, `forms.InboxSettingsForm` over `addresses.parse_allowlist`) with the default
+    currency in one htmx form, the category editor (add, rename inline, move up/down, delete in a modal;
+    each action re-renders `#categories`; deleting names how many receipts become uncategorized) and
+    the 20 most recent inbound emails with their outcome and `note`.
+  - **UI parts**: `{% status_pill receipt.status %}` (`receipts_ui`; colours in the design doc),
+    `partials/confirm_modal.html` driven by the `confirmModal` Alpine component and the `copyText`
+    component, both in `static/receipts/js/common.js` -- loaded as a *classic* script (not `defer`) so
+    its `alpine:init` listener exists before Alpine starts. Multi-line template comments use
+    `{% comment %}`: `{# #}` is single-line only.
+  - **Tests**: `tests/test_views_*.py`, `test_ui.py` (every page, 404s, 422 paths, rate limits via the
+    `settings` fixture, frozen account, CSV, the body headers, the `sandbox` attribute, the upload flow
+    against the fake storage and AI). One Playwright test file (`tests_e2e/test_receipts.py`: upload ->
+    processed -> edit -> trash -> restore, the filters and URL, the sandboxed body) runs against
+    `tests_e2e/receipts_e2e_settings.py`: the real site with an `INSTALLED_APPS` entry that swaps
+    the receipts storage and AI for the unit tests' fakes, an extra URL (`/__e2e__/s3/<key>`) acting
+    as the bucket the fake presigned URLs point at (it checks `x-amz-checksum-sha256` like S3),
+    inline tasks, and its own `db.e2e.sqlite3` -- no test switch in production code. Run it with
+    `inv test e2e` (needs `.env.local`).
 - **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
   (status/reason/source filters; no add/change/delete -- deleting a row would orphan its S3 objects
   and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, next attempt, last error; a "retry" action

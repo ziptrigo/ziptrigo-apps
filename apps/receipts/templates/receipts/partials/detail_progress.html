@@ -1,0 +1,28 @@
+{% comment %} The right-hand panel while the receipt is still being read. The poller refreshes this panel (and
+   the heading and banner, out of band) until it settles. {% endcomment %}
+{% load receipts_ui %}
+<div {% if poll_url %}hx-get="{{ poll_url }}" hx-trigger="every 3s" hx-target="#receipt-panel" hx-select="#receipt-panel"
+        hx-select-oob="#receipt-heading,#duplicate-banner,#receipt-added{% if preview.kind == 'none' %},#receipt-preview{% endif %}" hx-swap="outerHTML"{% endif %}
+     class="rounded-md border border-gray-200 dark:border-gray-700 px-4 py-6">
+    {% if receipt.status == 'waiting_for_credits' %}
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><i class="fas fa-coins mr-2 text-gray-400" aria-hidden="true"></i>Waiting for credits</h2>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+        We'll read this receipt as soon as you add credits.
+        <a href="{% url 'billing:credits-history' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Top up</a>
+    </p>
+    {% else %}
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><i class="fas fa-spinner fa-spin mr-2 text-blue-600 dark:text-blue-400" aria-hidden="true"></i>Reading your receipt&hellip;</h2>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+        {% if poll_url %}This usually takes a few seconds. The page updates by itself.{% else %}This is taking longer than usual. Reload the page to check again.{% endif %}
+    </p>
+    {% endif %}
+    {% if not trashed %}
+    <div class="mt-6 flex items-center justify-end">
+        <button type="button" hx-post="{% url 'receipts:trash-receipt' receipt.pk %}" hx-disabled-elt="this"
+                hx-target="#receipt-form-msg" hx-swap="innerHTML"
+                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+            <i class="fas fa-trash mr-2" aria-hidden="true"></i>Move to trash
+        </button>
+    </div>
+    {% endif %}
+</div>

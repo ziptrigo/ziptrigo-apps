@@ -21,8 +21,9 @@ A single Django project (a "modular monolith") with one Django app per concern:
   a sender block list and an optional auto-hold on repeated reports (#59).
 - **receipts** — receipts and invoices in, extracted fields out (#98): files go to S3 and an
   OpenAI-compatible vision model reads vendor, amount, date and a category from the user's own
-  list. Credit-metered per file and per GB stored. Backend only so far (models, uploads, the AI
-  pipeline, billing, jobs, admin); email intake, the pages and the API/CLI come in later phases.
+  list. Credit-metered per file and per GB stored. Built: models, uploads, the AI pipeline, email
+  intake, billing, jobs, admin and the web pages (dashboard, upload, detail, trash, settings);
+  the API/CLI come in a later phase.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -83,6 +84,7 @@ apps/<app>/
 | `/feedback/…` | feedback (the form, and the thank-you page) |
 | `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
+| `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
 | `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…` |

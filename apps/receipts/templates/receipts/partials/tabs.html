@@ -1,0 +1,21 @@
+{# Status tabs with counts, and the Trash link. Sent again, out of band, with every list refresh. #}
+<div id="receipt-tabs"{% if oob %} hx-swap-oob="true"{% endif %}
+     class="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 dark:border-gray-700">
+    <nav aria-label="Receipt status" class="-mb-px flex flex-wrap gap-x-1">
+        {% for tab in tabs %}
+        <a href="{{ tab.href }}"
+           hx-get="{{ tab.list_url }}" hx-target="#receipt-list" hx-swap="innerHTML"
+           {% if tab.active %}aria-current="page"{% endif %}
+           class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-primary {% if tab.active %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+            {{ tab.label }}
+            {% if tab.count %}
+            <span class="ml-1.5 rounded-full px-2 py-0.5 text-xs {% if tab.key == 'needs_review' %}bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">{{ tab.count }}</span>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </nav>
+    <a href="{% url 'receipts:trash' %}"
+       class="mb-2 inline-flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">
+        <i class="fas fa-trash mr-1.5" aria-hidden="true"></i>Trash{% if counts.trash %} ({{ counts.trash }}){% endif %}
+    </a>
+</div>

@@ -1,0 +1,68 @@
+{% extends 'receipts/layout.html' %}
+{% load static receipts_ui %}
+
+{% block title %}Upload receipts - ZipTrigo{% endblock %}
+{% block page_width %}max-w-3xl{% endblock %}
+
+{% block receipts_content %}
+<div class="mb-6 flex flex-wrap items-baseline justify-between gap-2">
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Upload receipts</h1>
+    <p class="text-sm text-gray-500 dark:text-gray-400">
+        Balance: <a href="{% url 'billing:credits-history' %}" class="text-sage-600 dark:text-sage-300 hover:underline">{{ balance }} credit{{ balance|pluralize }}</a>
+    </p>
+</div>
+
+{% if price_per_file and balance < price_per_file and not receipts_frozen %}
+<p class="mb-4 text-sm text-gray-500 dark:text-gray-400">
+    You don't have enough credits to read a receipt right now. Files are stored when you upload
+    them and read once you add credits.
+</p>
+{% endif %}
+
+<div id="upload-root"
+     data-start-url="{{ start_url }}"
+     data-complete-url="{{ complete_url_template }}"
+     data-max-bytes="{{ max_file_bytes }}"
+     data-frozen="{{ receipts_frozen|yesno:'true,false' }}">
+    <div id="drop-zone"
+         class="flex flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-10 text-center transition-colors">
+        <i class="fas fa-cloud-arrow-up text-3xl text-gray-400" aria-hidden="true"></i>
+        <p class="text-sm text-gray-700 dark:text-gray-300">Drop files here, or</p>
+        <input type="file" id="file-input" multiple class="hidden" tabindex="-1"
+               accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif">
+        <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden" tabindex="-1">
+        <div class="flex flex-wrap items-center justify-center gap-3">
+            <button type="button" id="pick-files-btn"
+                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                    {% if receipts_frozen %}disabled{% endif %}>
+                <i class="fas fa-file mr-2" aria-hidden="true"></i>Choose files
+            </button>
+            <button type="button" id="take-photo-btn"
+                    class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                    {% if receipts_frozen %}disabled{% endif %}>
+                <i class="fas fa-camera mr-2" aria-hidden="true"></i>Take photo
+            </button>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+            PDF, JPG, PNG, HEIC, WebP &middot; up to {{ max_file_bytes|human_size }} &middot;
+            {% if price_per_file %}{{ price_per_file }} credit{{ price_per_file|pluralize }} each{% else %}free{% endif %}
+        </p>
+        {% if receipts_frozen %}
+        <p class="text-sm text-amber-700 dark:text-amber-400">Uploads are paused until you add credits.</p>
+        {% endif %}
+    </div>
+
+    <ul id="upload-list" class="mt-6 space-y-3" aria-live="polite"></ul>
+
+    <div class="mt-6 flex items-center justify-end gap-3">
+        <a href="{{ list_url }}"
+           class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            Go to receipts <i class="fas fa-arrow-right ml-2" aria-hidden="true"></i>
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block receipts_js %}
+<script src="{% static 'receipts/js/upload.js' %}"></script>
+{% endblock %}

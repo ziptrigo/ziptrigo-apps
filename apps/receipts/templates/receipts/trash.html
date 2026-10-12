@@ -1,0 +1,68 @@
+{% extends 'receipts/layout.html' %}
+
+{% block title %}Trash - ZipTrigo{% endblock %}
+
+{% block receipts_content %}
+<div x-data="confirmModal">
+    <a href="{% url 'receipts:dashboard' %}"
+       class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Receipts</a>
+    <h1 class="mt-2 mb-2 text-3xl font-bold text-gray-900 dark:text-gray-100">Trash</h1>
+    <p class="mb-8 text-sm text-gray-500 dark:text-gray-400">
+        Items are deleted forever {{ trash_days }} days after being trashed. Until then they still count toward your storage.
+    </p>
+
+    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            {% for row in rows %}
+            {% with receipt=row.receipt %}
+            <li class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:px-6">
+                <div class="min-w-0 flex-1">
+                    <a href="{% url 'receipts:detail' receipt.pk %}"
+                       class="block truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline">{{ row.label|capfirst }}</a>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {{ receipt.receipt_date|date:'Y-m-d'|default:'No date' }}
+                        {% if receipt.amount is not None %}&middot; {{ receipt.currency }} {{ receipt.amount|floatformat:'2g' }}{% endif %}
+                        &middot; {% if row.days_left %}deleted in {{ row.days_left }} day{{ row.days_left|pluralize }}{% else %}deleted soon{% endif %}
+                    </p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <form method="post" action="{% url 'receipts:restore' receipt.pk %}">
+                        {% csrf_token %}
+                        <button type="submit"
+                                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                            <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore
+                        </button>
+                    </form>
+                    <button type="button" @click="show($el)"
+                            data-url="{% url 'receipts:delete' receipt.pk %}"
+                            data-title="Delete forever"
+                            data-body="Are you sure you want to delete {{ row.label }} forever? This can't be undone."
+                            data-label="Delete forever"
+                            class="p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                            aria-label="Delete {{ row.label }} forever" title="Delete forever">
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </li>
+            {% endwith %}
+            {% empty %}
+            <li class="px-4 py-12 text-center sm:px-6">
+                <p class="text-sm text-gray-500 dark:text-gray-400">The trash is empty.</p>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="mt-6 flex items-center justify-between text-sm">
+        <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+        <div class="flex gap-4">
+            {% if page_obj.has_previous %}<a class="text-sage-600 dark:text-sage-300 hover:underline" href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+            {% if page_obj.has_next %}<a class="text-sage-600 dark:text-sage-300 hover:underline" href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% include 'receipts/partials/confirm_modal.html' %}
+</div>
+{% endblock %}

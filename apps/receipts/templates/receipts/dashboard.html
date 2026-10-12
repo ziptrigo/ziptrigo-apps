@@ -1,0 +1,81 @@
+{% extends 'receipts/layout.html' %}
+
+{% block title %}Receipts - ZipTrigo{% endblock %}
+
+{% block receipts_content %}
+<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Receipts</h1>
+    <div class="flex items-center gap-3">
+        {% include 'receipts/partials/export_link.html' %}
+        <a href="{% url 'receipts:upload' %}"
+           class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            <i class="fas fa-arrow-up-from-bracket mr-2" aria-hidden="true"></i>Upload
+        </a>
+    </div>
+</div>
+
+<!-- Inbox address -->
+<div x-data="copyText"
+     class="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3">
+    <i class="fas fa-envelope text-sage-400" aria-hidden="true"></i>
+    <span class="text-sm text-gray-700 dark:text-gray-300">Email receipts to</span>
+    <code x-ref="text" class="break-all text-sm font-medium text-gray-900 dark:text-gray-100">{{ inbox_address }}</code>
+    <button type="button" @click="copy()"
+            class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+        <i class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+        <span x-text="copied ? 'Copied' : 'Copy'">Copy</span>
+    </button>
+    <a href="{% url 'receipts:settings' %}"
+       class="ml-auto text-sm text-sage-600 dark:text-sage-300 hover:underline">Settings <i class="fas fa-arrow-right ml-1" aria-hidden="true"></i></a>
+</div>
+
+{% include 'receipts/partials/tabs.html' %}
+
+<form id="receipt-filters" method="get" action="{% url 'receipts:dashboard' %}"
+      hx-get="{% url 'receipts:list' %}" hx-target="#receipt-list" hx-swap="innerHTML"
+      hx-sync="this:replace"
+      hx-trigger="input changed delay:300ms from:#q, change from:#category, change from:#date_from, change from:#date_to, submit">
+    <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end">
+        <div class="relative flex-1" x-data="{ hasValue: {{ parsed.params.q|yesno:'true,false' }} }">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <i class="fas fa-magnifying-glass text-gray-400" aria-hidden="true"></i>
+            </div>
+            <input type="text" name="q" id="q" x-ref="q" value="{{ parsed.params.q }}" maxlength="200"
+                   @input="hasValue = $event.target.value !== ''"
+                   placeholder="Search vendor or notes" aria-label="Search vendor or notes"
+                   class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+            <button type="button" x-show="hasValue" {% if not parsed.params.q %}style="display: none"{% endif %}
+                    @click="$refs.q.value = ''; hasValue = false; $refs.q.dispatchEvent(new Event('input', { bubbles: true })); $refs.q.focus()"
+                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    aria-label="Clear search">
+                <i class="fas fa-times" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div>
+            <label for="category" class="block mb-1 text-sm font-medium">Category</label>
+            <select name="category" id="category"
+                    class="w-full lg:w-48 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <option value="">All categories</option>
+                <option value="none" {% if parsed.params.category == 'none' %}selected{% endif %}>Uncategorized</option>
+                {% for category in categories %}
+                <option value="{{ category.pk }}" {% if parsed.params.category == category.pk|stringformat:'s' %}selected{% endif %}>{{ category.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <fieldset>
+            <legend class="mb-1 text-sm font-medium">Receipt date</legend>
+            <div class="flex items-center gap-2">
+                <input type="date" name="date_from" id="date_from" value="{{ parsed.params.date_from }}" aria-label="Receipt date from"
+                       class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <span class="text-gray-500 dark:text-gray-400" aria-hidden="true">&ndash;</span>
+                <input type="date" name="date_to" id="date_to" value="{{ parsed.params.date_to }}" aria-label="Receipt date to"
+                       class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            </div>
+        </fieldset>
+    </div>
+
+    <div id="receipt-list">
+        {% include 'receipts/partials/receipt_list.html' %}
+    </div>
+</form>
+{% endblock %}

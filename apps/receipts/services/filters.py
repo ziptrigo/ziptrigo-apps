@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from datetime import date
 
 from django.core.exceptions import ValidationError
-from django.db.models import F, Q, QuerySet
+from django.db.models import Count, F, Q, QuerySet
 
 from apps.accounts.models import User
 
-from ..models import Receipt, ReceiptStatus
+from ..models import IN_PROGRESS_STATUSES, Receipt, ReceiptStatus
 
 DEFAULT_SORT = '-receipt_date'
 SORTS = ('receipt_date', '-receipt_date', 'created_at', '-created_at')
@@ -71,7 +71,9 @@ def filter_receipts(
     """The user's receipts matching `filters`, sorted. `trashed=True` lists the Trash instead of
     the live receipts. Raises `ValidationError` for an unknown status, sort or category."""
     filters = filters or ReceiptFilters()
-    queryset = Receipt.objects.filter(user=user, deleted_at__isnull=not trashed)
+    # `uploaded=False` is a direct upload still in flight (or abandoned): no file, not a receipt
+    # yet, and never to be listed, counted or exported.
+    queryset = Receipt.objects.filter(user=user, uploaded=True, deleted_at__isnull=not trashed)
 
     statuses = _statuses(filters.status)
     if statuses:
@@ -97,6 +99,23 @@ def filter_receipts(
         queryset = queryset.filter(possible_duplicate_of__isnull=False, duplicate_dismissed=False)
 
     return queryset.order_by(*_ordering(filters.sort, trashed=trashed))
+
+
+def dashboard_counts(user: User) -> dict[str, int]:
+    """The numbers on the dashboard's tabs and Trash link, in one query: how many live receipts
+    `needs_review`, are `in_progress` (received, processing or waiting for credits), `failed` or
+    flagged as `duplicates`, plus the `total` and what is in the `trash`."""
+    live = Q(deleted_at__isnull=True)
+    return Receipt.objects.filter(user=user, uploaded=True).aggregate(
+        total=Count('pk', filter=live),
+        needs_review=Count('pk', filter=live & Q(status=ReceiptStatus.NEEDS_REVIEW)),
+        in_progress=Count('pk', filter=live & Q(status__in=IN_PROGRESS_STATUSES)),
+        failed=Count('pk', filter=live & Q(status=ReceiptStatus.FAILED)),
+        duplicates=Count(
+            'pk', filter=live & Q(possible_duplicate_of__isnull=False, duplicate_dismissed=False)
+        ),
+        trash=Count('pk', filter=Q(deleted_at__isnull=False)),
+    )
 
 
 def _ordering(sort: str, *, trashed: bool) -> list:

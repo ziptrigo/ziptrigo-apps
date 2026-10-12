@@ -1,0 +1,21 @@
+{% comment %} The "possible duplicate" banner. `#duplicate-banner` is always present, so "Not a duplicate"
+   (and the in-progress poll) can swap it. {% endcomment %}
+<div id="duplicate-banner">
+    {% if duplicate_of %}
+    <div class="mb-6 flex flex-col gap-3 rounded-md border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">
+        <i class="fas fa-triangle-exclamation text-amber-600 dark:text-amber-400" aria-hidden="true"></i>
+        <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">
+            <span class="font-medium text-gray-900 dark:text-gray-100">Possible duplicate</span> of
+            {% firstof duplicate_of.vendor duplicate_of.original_filename 'another receipt' %}{% if duplicate_of.receipt_date %}, {{ duplicate_of.receipt_date|date:'Y-m-d' }}{% endif %}{% if duplicate_of.amount is not None %}, {{ duplicate_of.currency }} {{ duplicate_of.amount|floatformat:'2g' }}{% endif %}
+        </p>
+        <div class="flex items-center gap-3">
+            <a href="{% url 'receipts:detail' duplicate_of.pk %}"
+               class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">View</a>
+            <button type="button"
+                    hx-post="{% url 'receipts:dismiss-duplicate' receipt.pk %}"
+                    hx-target="#duplicate-banner" hx-swap="outerHTML" hx-disabled-elt="this"
+                    class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">Not a duplicate</button>
+        </div>
+    </div>
+    {% endif %}
+</div>

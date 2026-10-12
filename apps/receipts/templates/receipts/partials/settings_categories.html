@@ -1,0 +1,67 @@
+{% comment %} The category editor: add, rename, reorder (up/down) and delete. Every action re-renders this
+   whole block into #categories; delete goes through the page's confirmation modal. {% endcomment %}
+<h2 id="categories-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Categories</h2>
+<div id="category-msg" class="mb-4 text-sm">
+    {% if notice %}<p class="text-green-700 dark:text-green-400" role="status">{{ notice }}</p>{% endif %}
+</div>
+
+<ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-md border border-gray-200 dark:border-gray-700">
+    {% for category in categories %}
+    <li x-data="{ editing: false }" class="flex items-center gap-2 px-3 py-2">
+        <div class="min-w-0 flex-1">
+            <div x-show="!editing" class="flex items-baseline gap-2">
+                <span class="truncate text-sm text-gray-900 dark:text-gray-100">{{ category.name }}</span>
+                {% if category.receipt_count %}<span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ category.receipt_count }} receipt{{ category.receipt_count|pluralize }}</span>{% endif %}
+            </div>
+            <form x-show="editing" style="display: none" method="post" action="{% url 'receipts:category-rename' category.pk %}"
+                  hx-post="{% url 'receipts:category-rename' category.pk %}" hx-target="#categories" hx-swap="innerHTML"
+                  class="flex items-center gap-2" @keydown.escape="editing = false">
+                {% csrf_token %}
+                <label for="rename-{{ category.pk }}" class="sr-only">Category name</label>
+                <input id="rename-{{ category.pk }}" name="name" type="text" value="{{ category.name }}" maxlength="100" required
+                       x-effect="if (editing) $nextTick(() => $el.focus())"
+                       class="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <button type="submit" aria-label="Save name" title="Save"
+                        class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                <button type="button" @click="editing = false" aria-label="Cancel renaming" title="Cancel"
+                        class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            </form>
+        </div>
+        <div x-show="!editing" class="flex flex-shrink-0 items-center">
+            <button type="button" hx-post="{% url 'receipts:category-move' category.pk %}" hx-vals='{"direction": "up"}'
+                    hx-target="#categories" hx-swap="innerHTML" {% if forloop.first %}disabled{% endif %}
+                    aria-label="Move {{ category.name }} up" title="Move up"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors disabled:opacity-30 disabled:hover:bg-transparent"><i class="fas fa-chevron-up text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            <button type="button" hx-post="{% url 'receipts:category-move' category.pk %}" hx-vals='{"direction": "down"}'
+                    hx-target="#categories" hx-swap="innerHTML" {% if forloop.last %}disabled{% endif %}
+                    aria-label="Move {{ category.name }} down" title="Move down"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors disabled:opacity-30 disabled:hover:bg-transparent"><i class="fas fa-chevron-down text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            <button type="button" @click="editing = true" aria-label="Rename {{ category.name }}" title="Rename"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'receipts:category-delete' category.pk %}"
+                    data-title="Delete category"
+                    data-body="Are you sure you want to delete {{ category.name }}?{% if category.receipt_count %} Its {{ category.receipt_count }} receipt{{ category.receipt_count|pluralize }} will become uncategorized.{% endif %}"
+                    data-label="Delete"
+                    aria-label="Delete {{ category.name }}" title="Delete"
+                    class="p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-trash" aria-hidden="true"></i></button>
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+
+<form method="post" action="{% url 'receipts:category-create' %}"
+      hx-post="{% url 'receipts:category-create' %}" hx-target="#categories" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type='submit']"
+      class="mt-4 flex items-end gap-3">
+    {% csrf_token %}
+    <div class="min-w-0 flex-1">
+        <label for="new-category" class="block mb-1 text-sm font-medium">New category</label>
+        <input id="new-category" name="name" type="text" maxlength="100" required placeholder="Category name"
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+    </div>
+    <button type="submit"
+            class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+        <i class="fas fa-plus mr-2" aria-hidden="true"></i>Add
+    </button>
+</form>

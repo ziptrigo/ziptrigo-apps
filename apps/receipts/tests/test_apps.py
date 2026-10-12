@@ -50,8 +50,11 @@ def test_the_receiver_survives_garbage_collection():
     assert 'receipts.delete_storage_on_user_delete' in _dispatch_uids(pre_delete)
 
 
-def test_no_product_is_registered_until_the_pages_exist():
-    assert 'receipts' not in [product.label for product in get_products()]
+def test_the_product_is_registered_for_the_nav_and_the_landing_page():
+    [product] = [p for p in get_products() if p.label == 'receipts']
+
+    assert product.url_name == 'receipts:dashboard'
+    assert product.icon == 'fas fa-receipt'
 
 
 def test_the_receipts_queue_is_configured():
