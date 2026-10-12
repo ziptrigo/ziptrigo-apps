@@ -1,0 +1,31 @@
+Return-Path: <forwarding-noreply@google.com>
+Received: from mail.example.net (mail.example.net [203.0.113.5]) by
+ inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for
+ receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+X-SES-Spf-Verdict: PASS
+X-SES-Dkim-Verdict: PASS
+From: Gmail Team <forwarding-noreply@google.com>
+To: receipts+abcd2345@ziptrigo.com
+Subject:
+ (#987654321) Gmail Forwarding Confirmation - Receive Mail from joao@gmail.com
+Date: Fri, 09 Oct 2026 12:30:00 +0000
+Message-ID: <fixture-1@example.net>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+joao@gmail.com has requested to automatically forward mail to your email addr=
+ess receipts+abcd2345@ziptrigo.com.
+
+Confirmation code: 987654321
+
+To allow joao@gmail.com to automatically forward mail to your address, please=
+ click the link below to confirm the request:
+
+https://mail-settings.google.com/mail/vf-%5BANGjdJ8Xk%5D-AbCdEf123
+
+If you click the link and it appears to be broken, please copy and paste it i=
+nto a new browser window. If you do not approve of this request, no further a=
+ction is required.

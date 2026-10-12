@@ -1,0 +1,44 @@
+Return-Path: <orders@staples.com>
+Received: from mail.example.net (mail.example.net [203.0.113.5]) by
+ inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for
+ receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+X-SES-Spf-Verdict: PASS
+X-SES-Dkim-Verdict: PASS
+From: Staples <orders@staples.com>
+To: receipts+abcd2345@ziptrigo.com
+Subject: Your Staples receipt
+Date: Fri, 09 Oct 2026 12:30:00 +0000
+Message-ID: <fixture-1@example.net>
+MIME-Version: 1.0
+Content-Type: multipart/related;
+ boundary="===============0694598514399620423=="
+
+--===============0694598514399620423==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><body><img src=3D"cid:logo@vendor"><h1>Staples</h1><p>Thanks for your o=
+rder.</p><table><tr><td>Total</td><td>42.10 USD</td></tr></table><p>Order R-5=
+5102, 2026-10-09</p></body></html>
+
+--===============0694598514399620423==
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Disposition: inline; filename="logo.png"
+Content-ID: <logo@vendor>
+MIME-Version: 1.0
+
+iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAB6klEQVR4nO3WsariUBAG4N9hEYsl
+lYIgCHKxMKAgShoxYmGjr2EjVr6AaUQbQSSFNhY2NiJWtoKN2FiJCIKFFmqZwsYYkmU3rIjCvYYt
+dhb2q5KZOZMT5kDi0jQNnBCYITBDYIbADIEZAjMEZgjMEJghMENg5tuXFX6/P5FIWJZ1uVwajUYq
+lbIjdjafz5fL5X6/3+v1vv/SarUCgcB94WNZMBg8HA73lMvlMgyjXq8fj8dOpwNgsVhA+4ogCPbF
+fD4XRfExYhuPx+l0+nw+a5o2HA5lWX5a+NrqsWc8Hn8scDCySCRyOp1e46qqVqtVj8cDIJfLhUKh
+2+32Zk9RFPf7vbOR3U2nU1mW8WKz2cRisfttu93G22azWTQadbYhXdcLhYJhGNvt9ueMf0fsrKIo
+pml+svBeJknSU8qyLEEQVFV1tiG32z2ZTOxXHwwGlUrlHrF9fHysVqtkMgnAsqxSqdTtdh8XftLz
+lYMzlM1ml8vla7xYLNZqtev1CmA0Gum6jj/g4AyFw+H1em2a5uMsJElSFGW322UyGa/X6/P5ms2m
+nXote+cprv//1P/ap4PADIEZAjMEZgjMEJghMENghsAMgRkCMwRmCMwQmCEwQ2CGwAyBGQIzBGYI
+zBCYITBDYIb+9gae/QCZ9w0FVfkHWQAAAABJRU5ErkJggg==
+
+--===============0694598514399620423==--

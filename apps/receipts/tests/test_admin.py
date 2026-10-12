@@ -113,6 +113,19 @@ class TestReadOnlyModels:
 
 
 class TestInboundMessageRetry:
+    @pytest.fixture(autouse=True)
+    def queued(self, monkeypatch) -> list[int]:
+        """Stands in for the `ingest_message` task: with the test queue backend it would run the
+        ingest inline (and fail, there being no object), so record what was queued instead."""
+        calls: list[int] = []
+
+        class Recorder:
+            def enqueue(self, message_id):
+                calls.append(message_id)
+
+        monkeypatch.setattr('apps.receipts.services.inbound.ingest_message', Recorder())
+        return calls
+
     def make(self, status, **fields):
         return InboundMessage.objects.create(
             s3_key=f'receipts/inbound/{status}', status=status, **fields
@@ -128,12 +141,15 @@ class TestInboundMessageRetry:
             follow=True,
         )
 
-    def test_a_superuser_resets_failed_messages_to_pending(self, client, admin_user):
+    def test_a_superuser_resets_failed_messages_to_pending(
+        self, client, admin_user, queued, django_capture_on_commit_callbacks
+    ):
         failed = self.make(InboundMessageStatus.FAILED, attempts=3, last_error='boom')
         done = self.make(InboundMessageStatus.DONE, attempts=1)
         client.force_login(admin_user)
 
-        response = self.retry(client, failed, done)
+        with django_capture_on_commit_callbacks(execute=True):
+            response = self.retry(client, failed, done)
 
         assert response.status_code == 200
         failed.refresh_from_db()
@@ -142,6 +158,7 @@ class TestInboundMessageRetry:
         assert failed.attempts == 0 and failed.last_error == ''
         assert done.status == InboundMessageStatus.DONE  # only failed ones are reset
         assert b'Reset 1 failed message' in response.content
+        assert queued == [failed.pk]  # and the ingest was queued again
 
     def test_the_list_shows_status_attempts_and_error(self, client, admin_user):
         self.make(InboundMessageStatus.FAILED, attempts=3, last_error='Could not parse MIME')

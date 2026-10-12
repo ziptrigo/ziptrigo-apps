@@ -24,8 +24,8 @@ apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short 
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs.
 apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
-                      uploads, AI extraction, billing, jobs and admin so far; no pages, API, CLI or
-                      email intake yet (see "Receipts" below).
+                      uploads, email intake, AI extraction, billing, jobs and admin so far; no pages,
+                      API or CLI yet (see "Receipts" below).
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
@@ -947,12 +947,13 @@ superusers) and `core` can't import `accounts`; it sits in the same layer as `bi
 
 `apps.receipts` (issue #98; app label `receipts`) takes receipts and invoices the user *receives*
 and extracts vendor, amount, date and a category with an OpenAI-compatible vision model. It is a
-product (same layer as `qr_code`/`file_transfer`). **Built so far (phase 1):** models, settings, the
-`receipts` queue, uploads, the processing/AI pipeline, billing, jobs, admin. **Not yet:** the
-`ProductApp` registration, URLs/views/templates (phase 3), the S3 inbound-email poller, MIME parsing
-and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and admin exist so
-`Receipt.inbound_email` has something to point at), the JWT API and `admin/receipts.py` CLI (phase
-4). Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `checks.py`.
+product (same layer as `qr_code`/`file_transfer`). **Built so far:** models, settings, the
+`receipts` queue, uploads, the processing/AI pipeline, billing, jobs, admin (phase 1) and email
+intake (phase 2: the S3 poller, MIME parsing, `ingest_message`, `receipts_ingest_eml`). **Not yet:**
+the `ProductApp` registration, URLs/views/templates, including the settings page that will show
+forwarding-confirmation codes (phase 3), and the JWT API and `admin/receipts.py` CLI (phase 4).
+Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `checks.py`,
+`management/commands/`.
 
 - **Models.** `ReceiptsAccount` (pk = the user; `default_currency`, `sender_allowlist`, and the
   storage-billing state `stored_bytes`/`last_billed_at`/`accrued`/`billed_days`/`frozen_at`) is
@@ -989,8 +990,8 @@ and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and ad
   `intake_window_started_at`; `accounts.take_intake_slot`, run under a row lock in the same
   transaction that creates the `Receipt`), deliberately not a count of `Receipt` rows (deleting
   receipts would free slots) and not the rate limiter (static rules, fails open, off under pytest);
-  being a fixed window it allows up to twice the cap across a boundary, and email intake will call
-  the same function. `complete_upload` checks the object's size, reads it back, compares
+  being a fixed window it allows up to twice the cap across a boundary, and email intake calls
+  the same function, once per file. `complete_upload` checks the object's size, reads it back, compares
   `base64(sha256(data))` with the declared checksum **unconditionally** (not only when S3 echoes one
   back), sniffs the **magic bytes** (`documents.sniff_content_type`; a
   mismatch with the claimed type deletes the object and fails the receipt `unsupported_type`),
@@ -1036,8 +1037,9 @@ and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and ad
   `send_attention_email` is queued once per `InboundEmail` (CAS on `attention_notified_at`) when its
   last receipt settles and any failed or need review (a settling receipt row-locks its
   `InboundEmail` right after its own row, `emails.lock_inbound_email`, so concurrent siblings run
-  the "everyone done?" check one after the other; always receipt, then email) -- it only fires for
-  real once email intake exists; `send_storage_paused_email` on freeze. Links are `/receipts/...` literals until the URLs
+  the "everyone done?" check one after the other; always receipt, then email) -- email intake
+  creates every receipt of an email in one transaction and queues their processing on commit, so
+  all siblings exist before the first settles; `send_storage_paused_email` on freeze. Links are `/receipts/...` literals until the URLs
   exist.
 - **Billing** (`services.metering`). `receipts.meter_storage` (daily) bills *per account*:
   `stored_bytes` (originals, previews, stripped emails; trashed ones included until purged) x the
@@ -1078,19 +1080,104 @@ and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and ad
   `receipts.purge_trash` (daily; deletes S3 objects, then rows, past `trash_days`, and the stripped
   `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
-  `receipts.cleanup_uploads` (hourly). Idempotent, per-row `try/except` + `logger.exception`.
+  `receipts.cleanup_uploads` (hourly), `receipts.poll_inbound` (every minute, 2 min lease; see
+  "Email intake" below). Idempotent, per-row `try/except` + `logger.exception`.
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
   `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
   "Queue and scheduler" and "Docker"). Tests: `ImmediateBackend` runs a task inline at
   `.enqueue()` and swallows its exceptions, so assert on database state and use
   `django_capture_on_commit_callbacks(execute=True)` around anything queued on commit; call a task
   as `<task>.call(...)` (or the underlying service function) in a test, not `<task>(...)`.
+- **Email intake** (`services.inbound` for the flow and the decisions, `services.mime` for reading a
+  raw message; issue #98 phase 2). SES drops each accepted message in `receipts/inbound/`; nothing
+  is pushed to us. The `receipts.poll_inbound` job lists up to 100 keys (`list_keys`, widened by the
+  number of `failed` messages, whose objects stay in the listing), `get_or_create`s an
+  `InboundMessage` (`pending`) per new key and queues `ingest_message(id)` on commit, and nothing
+  more: no parsing. It also re-queues `pending` rows that are *due* (never claimed and older than
+  10 min, or a retry whose `next_attempt_at` has come; throttled by `queued_at` to once per 5 min
+  so a slow queue doesn't collect a duplicate per poll) and deletes the object of a `done` message
+  that is still listed (its delete failed). `ingest_message` runs on the `receipts` queue:
+  - **Claim and retries.** One conditional `UPDATE` (`pending`, `next_attempt_at` null or past)
+    bumps `attempts` and sets `next_attempt_at` to a 10-minute lease, so a duplicate task can't
+    ingest twice and a worker that dies mid-ingest just lets the lease run out (a message claimed
+    more than 3 times is failed as "interrupted"). A failure records `last_error` and schedules the
+    retry (1 min, then 5 min; `poll_inbound` re-queues it); the third failure sets `failed` and
+    **keeps the S3 object** for inspection. Over the 40 MB guard (`get_object_bytes(max_bytes)`),
+    unparseable, or an object that is gone (with no work done) fail at once. The task never raises
+    (the queue backends don't retry; the row *is* the retry mechanism). The object is deleted only
+    after the row is marked `done`.
+  - **Recipients.** One `InboundEmail` per recipient that is an *active* `InboxCode`
+    (`receipts+<code>@<RECEIPTS_INBOUND_ADDRESS domain>`, case-insensitive, matched by
+    `addresses.inbox_code_from_address`); unknown or retired codes, and inactive users, are logged
+    and dropped without a row. Each recipient's work is a single transaction that also creates its
+    `InboundEmail`, so "the row exists" means "done" and a retry skips recipients already handled;
+    objects written inside a transaction that then fails are deleted again (no orphans, no leaked
+    cap slots).
+  - **Header assumptions -- pending the infra spike in joaonc/infra#373, all in `services.mime`.**
+    SES prepends its headers, so the *topmost* instance wins and nothing a sender wrote lower down
+    can fake a verdict. Envelope recipient: the `for <addr>` of the leading run of `Received`
+    headers whose `by` host is `inbound-smtp.*.amazonaws.com`; else `Delivered-To`, `X-Original-To`,
+    `To`/`Cc` (first source with an inbox address wins -- a Gmail auto-forward has the user's own
+    address in `To`). Verdicts: `X-SES-Spam-Verdict`/`X-SES-Virus-Verdict` (only `FAIL` rejects),
+    `X-SES-Spf-Verdict`/`X-SES-Dkim-Verdict`, else the topmost `Authentication-Results` whose
+    authserv-id is `amazonses.com`, else `Received-SPF`. A missing spam/virus verdict means "not
+    flagged"; missing SPF/DKIM means "not authenticated". Envelope sender: `Return-Path`.
+  - **Order of decisions per recipient:** spam `FAIL` -> `rejected_spam`; virus `FAIL` ->
+    `rejected_virus`; a forwarding confirmation (below); the allowlist -> `rejected_sender`;
+    then attachments / body / `no_receipt` / `rejected_too_large`; then the daily cap per file.
+    Rejected rows keep only metadata (from, envelope sender, subject, `received_at`, status,
+    `note`); no S3 objects, no `stored_bytes`, no cap slot, no charge.
+  - **Allowlist** (`ReceiptsAccount.sender_allowlist`, exact addresses and `*@domain`): empty
+    accepts anyone, with no authentication needed. Otherwise the `From` address **or** the envelope
+    sender must match after `addresses.normalize_address` (lowercase, `+tag` stripped, so Gmail's
+    `orders+caf_=user=gmail.com@vendor.com` becomes `orders@vendor.com`), **and** SES must report
+    SPF *or* DKIM as passing. Known limitation: the pass is not required to be *aligned* with the
+    matched address (any domain's SPF/DKIM pass counts), per the issue's wording; DMARC alignment
+    would be the stricter signal if the spike shows `Authentication-Results` carries it.
+  - **Forwarding confirmations.** A message from `mime.FORWARDING_CONFIRMATION_SENDERS`
+    (`forwarding-noreply@google.com`; Outlook.com/Microsoft 365 forwarding sends no such
+    confirmation that we found, so there is no entry for it) that SES authenticated skips the
+    allowlist and is stored as `forwarding_confirmation`: free, no receipts, no `.eml`, no cap slot,
+    with the code (`Confirmation code: 123456789`, else `(#123456789)` in the subject) and the link
+    in `forwarding_confirmation_code`/`_url` for the settings page to show later. The link is kept
+    only if it is `https` to `mail-settings.google.com`; without SES authentication the email is an
+    ordinary one (the allowlist applies and nothing is extracted).
+  - **What becomes a receipt** (`mime.analyze`). The tree is walked through `multipart/*` *and*
+    `message/rfc822`, so a forward-as-attachment is searched too. Every non-text (or
+    attachment-disposition) part is an attachment candidate: eligible when its **magic-byte** type
+    (`documents.sniff_content_type`, never the declared type or the name) is in
+    `ReceiptsSettings.allowed_types` and it is within `max_file_bytes`; skipped (with a reason on
+    the part in the stripped copy) when empty, unsupported, too large, or an image referenced from
+    an HTML body by `cid:` with **both sides** under `min_inline_image_px` (size read from the
+    header with Pillow; an unreadable image is not assumed to be a logo). With no eligible
+    attachment the body is the receipt: HTML preferred, else text, needing at least 20 visible
+    characters, re-encoded as UTF-8, stored with content type `text/html`/`text/plain` and an empty
+    `original_filename` (the notification email then calls it "the email body"); for a message
+    carrying a forwarded message, the body with the most visible text wins over a cover note. An
+    over-size attachment with nothing else eligible is `rejected_too_large` (the body is *not*
+    substituted); nothing usable is `no_receipt`.
+  - **Cap and storing.** Each file takes a slot with `accounts.take_intake_slot` (the uploads'
+    counter) inside the recipient's transaction, so the account row is locked until commit; none
+    available for the first file -> `rejected_cap`; some -> the rest are skipped and `note` says
+    "N of M files skipped: daily limit ...". Files go to `receipts/users/<user>/files/<receipt>`
+    and the stripped `.eml` to `.../emails/<email>.eml` (`raw_key`, `size_bytes`); `Receipt` rows
+    (`source=email`, `inbound_email`, sniffed type, `sha256`) are created, `stored_bytes` gets
+    exactly files + `.eml`, and `process_receipt` is queued on commit per receipt. **Stripped
+    `.eml`** = the original re-serialized with every attachment-like part's payload emptied and one
+    header added: `X-Receipts-Receipt-Id: <id>` or `X-Receipts-Skipped: <reason>`; a body that became
+    a receipt is stripped the same way. A frozen account still gets everything stored
+    (`process_receipt` parks the receipts in `waiting_for_credits`). An email with receipts that fail or need
+    review triggers the usual single "needs your attention" email once the last one settles.
+  - **Local runs.** `./manage.py receipts_ingest_eml file.eml --to receipts+<code>@ziptrigo.com`
+    uploads the file to `receipts/inbound/local-<uuid>` and runs the real `ingest` inline (claim,
+    download, parse, allowlist, cap, store, delete); `--to` (repeatable) replaces the headers'
+    recipient, omit it to use them. The verdict headers are read from the file, so add them to
+    exercise the allowlist or a rejection.
 - **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
   (status/reason/source filters; no add/change/delete -- deleting a row would orphan its S3 objects
-  and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, last error; a "retry" action
-  needing `change_inboundmessage`, which only resets `failed` -> `pending` through
-  `services.inbound.reset_message_for_retry` -- the hook where the later poller's re-enqueue
-  goes), `InboundEmailAdmin`, `ReceiptsAccountAdmin` (codes inline, frozen state, stored bytes).
+  and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, next attempt, last error; a "retry" action
+  needing `change_inboundmessage`, which resets `failed` -> `pending` and queues `ingest_message`
+  again through `services.inbound.reset_message_for_retry`), `InboundEmailAdmin`, `ReceiptsAccountAdmin` (codes inline, frozen state, stored bytes).
 - **Settings/env**: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (optional), `OPENAI_RECEIPTS_MODEL`,
   `RECEIPTS_AI_TIMEOUT_SECONDS`/`_MAX_RETRIES` (explicit timeout, bounded SDK retries),
   `RECEIPTS_S3_BUCKET`/`_REGION`/`_ENDPOINT_URL`, `RECEIPTS_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`,
@@ -1257,9 +1344,11 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   section 16, deferred to issue #59) are built -- see "File transfer specifics" above. No
   staff-notification email on an auto-hold: skipped rather than invented, since this project has no
   `ADMINS`/admin-email setting to send one to.
-- Receipts (#98) is only partly built: phase 1 (backend, see "Receipts" above) is in; email intake,
-  the pages and the JWT API/CLI are later phases, and its `ProductApp` is not registered yet, so
-  it doesn't appear in the nav or on the landing page. Its prerequisites live elsewhere: the infra
+- Receipts (#98) is only partly built: phases 1 and 2 (backend and email intake, see "Receipts"
+  above) are in; the pages (including the settings page that shows forwarding-confirmation codes)
+  and the JWT API/CLI are later phases, and its `ProductApp` is not registered yet, so it doesn't
+  appear in the nav or on the landing page. The email-header assumptions in `services.mime` are
+  unconfirmed until the infra spike (joaonc/infra#373) reports. Its prerequisites live elsewhere: the infra
   bucket policy, IAM user, SES rules and `receipts_env` (the `infra` repo), and the owner putting
   `receipts_env` plus `OPENAI_*` into `.env.prod`/`.env.staging` before the first deploy that
   contains Receipts (prod refuses to start without them).

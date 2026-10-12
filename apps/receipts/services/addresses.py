@@ -7,7 +7,9 @@ its subdomains). Both the stored entries and the sender being checked go through
 
 import re
 from collections.abc import Iterable
+from email.utils import parseaddr
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
@@ -89,3 +91,24 @@ def matches_allowlist(allowlist: Iterable[str], *addresses: str) -> bool:
         if f'*@{domain}' in entries:
             return True
     return False
+
+
+_CODE = re.compile(r'^[a-z0-9]{1,64}$')
+
+
+def inbox_code_from_address(address: str) -> str | None:
+    """The inbox code in `receipts+<code>@<domain>` -- the inverse of
+    `services.accounts.inbox_address` -- or `None` if `address` is not one of this deployment's
+    inbox addresses (another domain, no `+code`, or a `receipts@` with nothing after the `+`).
+    Case-insensitive; the code is returned lowercase."""
+    parsed = parseaddr(address.strip())[1].strip().lower()
+    local, at, domain = parsed.rpartition('@')
+    base_local, _, base_domain = settings.RECEIPTS_INBOUND_ADDRESS.strip().lower().partition('@')
+    base_local = base_local.split('+', 1)[0]
+    if not at or not base_domain or domain != base_domain:
+        return None
+    prefix = f'{base_local}+'
+    if not local.startswith(prefix):
+        return None
+    code = local[len(prefix) :]
+    return code if _CODE.match(code) else None

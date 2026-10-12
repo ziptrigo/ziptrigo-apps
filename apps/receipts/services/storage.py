@@ -4,7 +4,7 @@
 One private bucket per environment, shared with file transfer; everything Receipts stores is under
 `receipts/` (the infra IAM user is scoped to that prefix):
 
-- `receipts/inbound/`: where SES drops incoming mail, picked up by the poller (a later release).
+- `receipts/inbound/`: where SES drops incoming mail, picked up by the poller (`services.inbound`).
 - `receipts/users/<user_id>/files/<receipt_id>`: the original file. Keyed by id only -- never the
   filename, which is user/sender controlled -- for the same reasons as file transfer's keys (see
   `apps.file_transfer.services.storage`); the display name lives on `Receipt.original_filename`

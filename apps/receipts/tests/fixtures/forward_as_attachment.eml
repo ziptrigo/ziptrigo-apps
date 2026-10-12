@@ -1,0 +1,72 @@
+Return-Path: <joao@gmail.com>
+Received: from mail.example.net (mail.example.net [203.0.113.5]) by
+ inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for
+ receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+X-SES-Spf-Verdict: PASS
+X-SES-Dkim-Verdict: PASS
+From: joao@gmail.com
+To: receipts+abcd2345@ziptrigo.com
+Subject: Fwd: Your Staples receipt
+Date: Fri, 09 Oct 2026 12:30:00 +0000
+Message-ID: <fixture-1@example.net>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============4170647880551798568=="
+
+--===============4170647880551798568==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See attached.
+
+--===============4170647880551798568==
+Content-Type: message/rfc822
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+Content-Disposition: attachment
+
+Return-Path: <orders@staples.com>
+Received: from mail.example.net (mail.example.net [203.0.113.5]) by
+ inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for
+ receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+X-SES-Spf-Verdict: PASS
+X-SES-Dkim-Verdict: PASS
+From: Staples <orders@staples.com>
+To: receipts+abcd2345@ziptrigo.com
+Subject: Your Staples receipt
+Date: Fri, 09 Oct 2026 12:30:00 +0000
+Message-ID: <fixture-1@example.net>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============5165104693384751342=="
+
+--===============5165104693384751342==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Thanks for your order. Total 42.10 USD. Order R-55102 placed on 2026-10-09.
+
+--===============5165104693384751342==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="inner-invoice.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIg
+NzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4g
+Pj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA4NiA+PgpzdHJlYW0KQlQgL0YxIDEyIFRm
+IDUwIDcwMCBUZCAoU3RhcGxlcyByZWNlaXB0LiBUb3RhbCA0Mi4xMCBVU0QuIFZpc2EgNDI0Mi4g
+MjAyNi0xMC0wOSkgVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250
+IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYK
+MDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAg
+biAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzNzcgMDAw
+MDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0NDcKJSVF
+T0YK
+
+--===============5165104693384751342==--
+
+--===============4170647880551798568==--

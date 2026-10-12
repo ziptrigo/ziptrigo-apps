@@ -24,6 +24,7 @@ from .actions import (
 from .errors import AccountFrozenError, DailyLimitExceededError
 from .files import download_url, get_body_bytes, preview_url
 from .filters import ReceiptFilters, export_csv, filter_receipts, iter_csv
+from .inbound import ingest_message
 from .lifecycle import purge_receipt
 from .metering import meter_account, resume_account
 from .processing import enqueue_processing, process_receipt
@@ -50,6 +51,7 @@ __all__ = [
     'get_body_bytes',
     'inbox_address',
     'inbox_address_for',
+    'ingest_message',
     'is_frozen',
     'iter_csv',
     'meter_account',

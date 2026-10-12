@@ -56,6 +56,17 @@ class TestSniff:
         assert documents.sniff_content_type(b'\x00\xff\xfe binary', allow_text=True) is None
 
 
+class TestImageDimensions:
+    def test_reads_the_size_from_the_header(self):
+        assert documents.image_dimensions(samples.png_bytes((40, 70))) == (40, 70)
+        assert documents.image_dimensions(samples.jpeg_bytes((120, 30))) == (120, 30)
+        assert documents.image_dimensions(samples.heic_bytes((64, 48))) == (64, 48)
+
+    def test_unreadable_data_is_none(self):
+        assert documents.image_dimensions(b'not an image') is None
+        assert documents.image_dimensions(samples.png_bytes()[:30]) is None
+
+
 class TestImages:
     def test_a_jpeg_becomes_one_jpeg_with_no_preview(self):
         prepared = documents.prepare_input(samples.jpeg_bytes(), documents.JPEG)
