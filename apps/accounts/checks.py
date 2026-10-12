@@ -29,3 +29,29 @@ def check_google_oauth(*args, **kwargs):
             id='accounts.W001',
         )
     ]
+
+
+_TURNSTILE_SETTINGS = ('TURNSTILE_SITE_KEY', 'TURNSTILE_SECRET_KEY')
+
+
+@register()
+def check_turnstile(*args, **kwargs):
+    """Warn when the register page's captcha is only partly configured (issue #117).
+
+    Both keys empty means the captcha is off and both set means it's on; one without the other is
+    almost certainly a forgotten variable, and would otherwise surface only as a register page
+    with no captcha on it.
+    """
+    missing = [name for name in _TURNSTILE_SETTINGS if not getattr(settings, name, '')]
+    if not missing or len(missing) == len(_TURNSTILE_SETTINGS):
+        return []
+    return [
+        Warning(
+            f'The signup captcha is only partly configured: {", ".join(missing)} not set.',
+            hint=(
+                'Set TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY to enable it, or leave both '
+                'empty to disable it. Until then the register page has no captcha.'
+            ),
+            id='accounts.W002',
+        )
+    ]

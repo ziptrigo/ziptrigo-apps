@@ -20,17 +20,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class SignupRequest(BaseModel):
-    name: str
-    email: EmailStr
-    password: str
-
-    @field_validator('password')
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        return _validate_password(v)
-
-
 class EmailConfirmRequest(BaseModel):
     token: str
 

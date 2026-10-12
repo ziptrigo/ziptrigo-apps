@@ -219,11 +219,26 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
 `POST /api/auth/login` only issues JWTs; it never starts a session. Register, forgot-password,
 reset-password and resend-confirmation (issue #52) are session form views too, the same as login
 -- CSRF-protected, POST-only, following the "HTMX form views" convention below; the browser never
-sees a JWT on any of them. `/api/auth/…` still exposes the same operations (`signup`,
-`forgot-password`, `reset-password`, `resend-confirmation`) for non-browser clients; both surfaces
-share the same `apps.accounts.services` logic (`signup.create_account`,
-`password_reset.get_password_reset_service`, `email_confirmation.get_email_confirmation_service`)
-and the same `apps.core.ratelimit` rules, so validation and throttling can't drift between them.
+sees a JWT on any of them. `/api/auth/…` still exposes `forgot-password`, `reset-password` and
+`resend-confirmation` for non-browser clients; both surfaces share the same
+`apps.accounts.services` logic (`password_reset.get_password_reset_service`,
+`email_confirmation.get_email_confirmation_service`) and the same `apps.core.ratelimit` rules, so
+validation and throttling can't drift between them.
+
+**Accounts are created only on the web register page** (issue #117): `POST /api/auth/signup` was
+removed, so an API client (or, later, an MCP client -- issue #121) always works on behalf of an
+account a person created in the browser. The register page has a **Cloudflare Turnstile captcha**
+(`apps.accounts.services.captcha`), on only when `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`
+are both set (`apps.accounts.checks` warns, `accounts.W002`, about one without the other; pytest
+runs with both blanked by an autouse fixture in `apps/accounts/tests/conftest.py`). The widget is
+rendered explicitly by `accounts/js/turnstile.js` so the form htmx swaps in after a 422 gets a fresh
+one (tokens are single-use), and the submit button stays disabled until it yields a token. The view
+checks, in order: the form (an invalid one spends neither the token nor a rate limit), the captcha
+(`SIGNUP_CAPTCHA_IP` bounds the calls to Cloudflare; an empty token is rejected without one), then
+`SIGNUP_IP`, then `create_account`. `captcha.verify` **fails closed** (timeout, non-200, bad JSON:
+rejected) and, with a real secret, requires the reply's `hostname` to be `BASE_URL`'s host and its
+`action` to be `register`; Cloudflare's test secrets skip those two checks, since they answer with
+placeholder values. Login, and "Sign up with Google", have no captcha.
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
 confirmation email.
 
@@ -432,8 +447,8 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   authenticate-style outcome there to gate a failed-only counter on, so it's a flat cap instead,
   but still needs many different IPs to exhaust rather than a handful of requests from one).
 - **The rules** (`settings.RATELIMIT_RULES`, one dict, each entry commented with its reasoning):
-  login (as above), signup, forgot-password (as above, and its response shape never changes so
-  existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
+  login (as above), signup (plus `SIGNUP_CAPTCHA_IP`, see "Auth"), forgot-password (as above,
+  and its response shape never changes so existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
   the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP, generous -- over the limit it
   still redirects, only the scan-count write is skipped, protecting `QRCode.scan_count`'s accuracy
   under a shared-IP/NAT burst rather than shedding load, since a real visitor must never see an
@@ -777,7 +792,7 @@ matching, *already-confirmed* email -- not merely matching, since an account tha
 proven it controls that address shouldn't be able to grab someone else's transfer by signing up
 with their address first; claiming is simply deferred to that account's first login after its own
 email gets confirmed. Only the session login page and the Google callback fire
-`user_logged_in` (signup is API-only and never starts a session), so those are the two places
+`user_logged_in` (signup never starts a session), so those are the two places
 claiming happens. **User decision:** claiming is also deferred while the account's balance is
 below `services.send.MIN_BALANCE_TO_SEND` (1 credit, the same minimum required to start a logged-in transfer) -- claiming turns a free transfer into a
 metered one with no chance to opt out first, and at a near-zero balance the very next metering run

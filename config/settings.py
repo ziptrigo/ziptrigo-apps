@@ -262,6 +262,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'LOGIN_ACCOUNT': (30, 15 * 60),
     # Signup sends a confirmation email (SES cost); no per-account rule makes sense pre-signup.
     'SIGNUP_IP': (5, 60 * 60),
+    # Captcha attempts on the register page (issue #117): every submission that reaches the
+    # Turnstile check costs one outbound call to Cloudflare, which this bounds. Looser than
+    # `SIGNUP_IP` (which only counts submissions that passed the captcha), so a person who fails
+    # the check a few times still gets through.
+    'SIGNUP_CAPTCHA_IP': (30, 60 * 60),
     # Forgot-password: the response is identical whether or not the account exists either way, so
     # a 429 here reveals nothing a normal response wouldn't already hide (CLAUDE.md: must not leak
     # existence) -- but there's no "authenticate()" here to gate a failed-only counter on (every
@@ -426,6 +431,14 @@ LOGIN_URL = 'accounts:login'
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '').strip()
+
+# Cloudflare Turnstile captcha on the register page (issue #117,
+# `apps.accounts.services.captcha`). On only when both keys are set; leaving both empty (the
+# default, and what pytest runs with) hides the widget and skips the check. A partial
+# configuration is almost certainly a mistake, so `apps.accounts.checks` warns about it at startup.
+# Cloudflare's test keys (always pass / always fail) work on any host, localhost included.
+TURNSTILE_SITE_KEY = os.getenv('TURNSTILE_SITE_KEY', '').strip()
+TURNSTILE_SECRET_KEY = os.getenv('TURNSTILE_SECRET_KEY', '').strip()
 
 # Base URL used to build absolute links (emails, QR code redirects). It is printed on every tracked
 # QR code (`<BASE_URL>/go/<code>`), so prod's stays `https://app.ziptrigo.com` (issue #49).

@@ -93,8 +93,8 @@ class FileTransferConfig(AppConfig):
         # Same `weak=False` reasoning as above. Claim-on-login (spec section 6): a confirmed
         # anonymous transfer with no owner becomes this user's the moment they log in with a
         # matching, confirmed email. Only the session login page (`apps.accounts.views.login`)
-        # ever fires `user_logged_in` -- signup is API-only and never starts a session (see
-        # CLAUDE.md's Auth section) -- so this is the one place claiming can happen; an account
+        # ever fires `user_logged_in` -- signup never starts a session (see CLAUDE.md's Auth
+        # section) -- so this is the one place claiming can happen; an account
         # created with a matching but not-yet-confirmed email claims on whatever its first login
         # is *after* that email gets confirmed. Never let a bug here break someone's login.
         @receiver(user_logged_in, dispatch_uid='file_transfer.claim_on_login', weak=False)

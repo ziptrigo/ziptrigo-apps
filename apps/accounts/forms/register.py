@@ -5,9 +5,10 @@ from ..validators import PasswordValidator
 
 
 class RegisterForm(forms.Form):
-    """Sign-up form for the web UI (issue #52). Same rules as `SignupRequest`
-    (`POST /api/auth/signup`); account creation itself is delegated to
-    `apps.accounts.services.signup.create_account` so both surfaces share it.
+    """Sign-up form for the web UI (issue #52), the only way to create an account (issue #117).
+    Account creation itself is delegated to `apps.accounts.services.signup.create_account`. The
+    captcha is checked by the view (`apps.accounts.views.register`), not here, so that an invalid
+    form never spends a single-use token or a call to Cloudflare.
     """
 
     name = forms.CharField(max_length=255)

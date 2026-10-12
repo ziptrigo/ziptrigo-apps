@@ -6,7 +6,6 @@ from .auth import (
     PasswordResetRequest,
     RefreshRequest,
     ResendConfirmationRequest,
-    SignupRequest,
     TokenResponse,
 )
 from .users import (
@@ -25,7 +24,6 @@ __all__ = [
     'PasswordResetRequest',
     'RefreshRequest',
     'ResendConfirmationRequest',
-    'SignupRequest',
     'TokenResponse',
     'UserCreateRequest',
     'UserDeactivateRequest',
