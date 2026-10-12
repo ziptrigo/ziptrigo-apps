@@ -7,8 +7,9 @@ The file is uploaded to the inbound prefix (`receipts/inbound/local-<uuid>`, in 
 download, parse, allowlist, daily cap, store, delete. The only difference from a delivery by SES is
 that `--to` (repeatable) *replaces* the recipient found in the headers, since a saved `.eml` rarely
 has the envelope recipient SES would have added; leave `--to` out to use the headers. The SES
-verdict headers (`X-SES-Spam-Verdict`, `X-SES-Spf-Verdict`, ...) are read from the file as usual,
-so add them to test an allowlist or a rejection.
+headers SES adds (`X-SES-Spam-Verdict`, `X-SES-Virus-Verdict` and an `Authentication-Results:
+amazonses.com; ...` with the SPF/DKIM/DMARC results) are read from the file as usual, so add them
+to test an allowlist or a rejection.
 
 `process_receipt` is queued for each new receipt on the `receipts` queue (run a worker, or it
 stays `received`).

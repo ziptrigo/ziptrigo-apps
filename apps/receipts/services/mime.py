@@ -2,34 +2,55 @@
 receipts, and the attachment-stripped copy we keep. Pure functions over bytes -- no database, no
 S3 (`services.inbound` does the I/O and the decisions that need state).
 
-**Header assumptions** (SES receipt rule with an S3 action, `scan_enabled`; *still to be confirmed
-by the infra spike in joaonc/infra#373* -- every one of them lives in this module so a different
-reality is a change here only):
+**Header shapes** (SES receipt rule with an S3 action, `scan_enabled`; *confirmed on real staging
+mail by the infra spike*, https://github.com/ziptrigo/ziptrigo-apps/issues/98#issuecomment-6124695849;
+every one of them lives in this module so a different reality is a change here only):
 
 - SES prepends its own headers, so the **topmost** occurrence of a header is SES's and anything
   below it came from the sender. We therefore read only the first `X-SES-*-Verdict` and only the
   *first* `Authentication-Results` header, and only if its authserv-id is `amazonses.com` -- never
   a later copy a sender put in their own message to look authenticated.
-- The envelope recipient is in the `Received: ... by inbound-smtp.<region>.amazonaws.com ... for
-  <receipts+code@...>;` header SES added. Only the first `SES_RECEIVED_HEADER_COUNT` `Received`
-  header(s) count, and only if their `by` host is SES (a sender can write any `Received` they
-  like, even one that looks exactly like SES's, but it ends up below the hops that really handled
-  the message). Without one we fall back to `Delivered-To`, then `X-Original-To`, then `To`/`Cc`;
-  the first source that yields an inbox address wins.
+- The envelope recipient is in the `Received: from <host> (...) by
+  inbound-smtp.<region>.amazonaws.com with SMTP id <id> for <receipts+code@...>; <date>` header
+  SES added. Only the first `SES_RECEIVED_HEADER_COUNT` `Received` header(s) count, and only if
+  their `by` host is SES (a sender can write any `Received` they like, even one that looks exactly
+  like SES's, but it ends up below the hops that really handled the message). Without one we fall
+  back to `Delivered-To`, then `X-Original-To`, then `To`/`Cc`; the first source that yields an
+  inbox address wins. (A BCC and a Gmail auto-forward, where `To` is not our address, have not yet
+  been seen on real mail.)
 - `X-SES-Spam-Verdict` / `X-SES-Virus-Verdict` are `PASS`, `FAIL`, `GRAY` or
-  `PROCESSING_FAILED`; only `FAIL` rejects. `X-SES-Spf-Verdict` / `X-SES-Dkim-Verdict` are `PASS`
-  or not; when absent, `Authentication-Results: amazonses.com; spf=pass ...; dkim=pass
-  header.d=example.com ...` is read instead. A missing verdict counts as *not authenticated* (fail
-  closed), while a missing spam/virus verdict counts as not flagged.
+  `PROCESSING_FAILED`; only `FAIL` rejects. A missing one counts as not flagged.
+- **SES writes no SPF/DKIM verdict headers.** `X-SES-Spf-Verdict` / `X-SES-Dkim-Verdict` and
+  `Received-SPF` are ignored entirely: anyone can put them in their own message. SPF, DKIM and
+  DMARC come only from the first `Authentication-Results` header, e.g. `amazonses.com; spf=pass
+  (spfCheck: ...) client-ip=...; envelope-from=a@gmail.com; helo=...; dkim=pass
+  header.i=@gmail.com; dmarc=pass header.from=gmail.com;` -- note that `envelope-from=` (the
+  address SPF checked) is a separate `;`-segment after the `spf` result, and DKIM may carry only
+  `header.i`, no `header.d`. Anything missing counts as *not authenticated* (fail closed).
+- **That header echoes values the sender chose** (MAIL FROM as `envelope-from`, EHLO as `helo`),
+  so it is only believed when it has exactly SES's shape (`_auth_clauses`): split on `;` outside
+  quoted-strings and comments (RFC 8601, `_split_resinfo`); at most one `spf` clause, first,
+  followed by its `client-ip` / `envelope-from` / `helo` (in that order); then any `dkim` clauses;
+  then at most one `dmarc`; no other method, segment or property; properties separated by
+  whitespace; each value in a strict grammar (`envelope-from` a dot-atom `@` LDH domain, `helo` a
+  hostname or a plain IP literal, `header.i` `[dot-atom]@domain`, `header.d`/`header.from` a
+  domain -- no quotes, spaces, `;` or `,`). On top of that the echoed `envelope-from` must equal
+  the `Return-Path` address and `helo` the `from` host of SES's topmost `Received`, so a `;` that
+  cut a value short shows up as a mismatch. If **any** check fails the whole header is dropped --
+  no SPF, DKIM or DMARC credit -- and a warning with the reason (and the first 80 characters of
+  the header) is logged. Raw header values are read, not RFC 2047-decoded ones.
 - `Return-Path` is the envelope sender.
 
 **Who a sender is** (`Verdicts.vouches_for`): a sender address only counts as authenticated when
-the proof is about *that address*. The envelope sender (`Return-Path`) needs an SPF pass (SPF
-authenticates the envelope domain). The `From` header needs a DKIM pass whose signing domain
-(`header.d`, else the domain of `header.i`, from SES's `Authentication-Results`) is aligned with
-the `From` domain -- relaxed alignment, approximated in `addresses.domains_aligned`. Without a
-signing domain a `From` match is not authenticated. So passing SPF/DKIM for a domain of your own
-does not let you pose as somebody else's address.
+the proof is about *that address*. The envelope sender (`Return-Path`) needs an SPF pass for that
+address's *domain* with the `envelope-from` SES checked equal to it (SPF proves the sending IP may
+send for the domain, not who wrote the local part: an exact-address entry on a large shared
+provider is domain-level proof). The `From` header needs a DMARC pass whose `header.from` is
+exactly the `From` domain; when SES gave no DMARC result (or `none`) a DKIM pass whose signing
+domain (`header.d`, else the domain of `header.i`) equals the `From` domain or is a subdomain /
+parent of it (`strictly_aligned`; no organizational-domain list). A DMARC `fail`, `temperror` or
+`permerror` is final. So passing SPF/DKIM for a domain of your own does not let you pose as
+somebody else's address.
 
 Delivered mail is untrusted input, so the work is bounded before and while parsing:
 `exceeds_part_limit` (MIME boundary lines in the raw bytes, checked before the parser runs),
@@ -42,6 +63,7 @@ found like any other attachment.
 
 import copy
 import html
+import ipaddress
 import logging
 import re
 import unicodedata
@@ -55,7 +77,7 @@ from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from urllib.parse import unquote, urlsplit
 
 from . import documents
-from .addresses import domains_aligned, inbox_code_from_address
+from .addresses import inbox_code_from_address, normalize_address
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +105,8 @@ MAX_KEPT_TEXT_BYTES = 256 * 1024
 #: for it, so the sender must not be able to make it large.
 MAX_EML_BYTES = 1024 * 1024
 
-#: How many of the topmost `Received` headers SES itself writes (to be confirmed by the infra
-#: spike, joaonc/infra#373, adjust here). Only these are read for the envelope recipient.
+#: How many of the topmost `Received` headers SES itself writes (one, per the infra spike). Only
+#: these are read for the envelope recipient.
 SES_RECEIVED_HEADER_COUNT = 1
 
 #: An email body with less visible text than this isn't treated as a receipt.
@@ -93,11 +115,36 @@ MIN_BODY_CHARS = 20
 SES_AUTHSERV_ID = 'amazonses.com'
 _SES_RECEIVED_BY = re.compile(r'\bby\s+inbound-smtp\.[\w.-]*amazonaws\.com\b', re.I)
 _RECEIVED_FOR = re.compile(r'\bfor\s+(.+?)\s*(?:;|$)', re.I | re.S)
-_AUTH_RESULT = re.compile(r'^\s*(spf|dkim)\s*=\s*([a-z]+)\b(.*)$', re.I | re.S)
-_AUTH_PROPERTY = re.compile(r'\b(header\.d|header\.i)\s*=\s*"?([^\s;"]+)', re.I)
-_DOMAIN_NAME = re.compile(r'^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
+#: RFC 5322 `atext` and `dot-atom` (a mailbox local part without quotes), and an LDH hostname
+#: (letters, digits, hyphens, labels of at most 63 characters). Deliberately *not* quoted-strings,
+#: comments or address literals: every character these allow is inert in `Authentication-Results`
+#: (none is whitespace, `;`, `,`, `"`, `(` or `)`).
+_ATEXT = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]"
+_DOT_ATOM = rf'{_ATEXT}+(?:\.{_ATEXT}+)*'
+_LABEL = r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+_DOMAIN = rf'{_LABEL}(?:\.{_LABEL})*'
+#: Hosts say `_` in their EHLO name often enough that refusing it would discard the whole header of
+#: legitimate mail; it is as inert as a hyphen here.
+_HELO_LABEL = r'[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?'
+_HELO_HOST = re.compile(rf'{_HELO_LABEL}(?:\.{_HELO_LABEL})*')
+_ENVELOPE_FROM = re.compile(rf'({_DOT_ATOM})@({_DOMAIN})')
+_HEADER_I = re.compile(rf'(?:{_DOT_ATOM})?@({_DOMAIN})')
+_HEADER_DOMAIN = re.compile(_DOMAIN)
+_DKIM_OTHER_VALUE = re.compile(r'[A-Za-z0-9._+/=-]{1,512}')
+_WHITESPACE = re.compile(r'[ \t\r\n]+')
+_AUTH_RESULT_PIECE = re.compile(r'([a-z][a-z0-9-]*)=([a-z]+)', re.I)
+_AUTH_PROPERTY_PIECE = re.compile(r'([a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)?)=(.+)', re.I | re.S)
+_RECEIVED_FROM = re.compile(r'^\s*from\s+(\S+)', re.I)
+#: Longest `Authentication-Results` value we try to understand; a real one is a few hundred bytes.
+MAX_AUTH_RESULTS_CHARS = 8192
+#: The SPF clause's own segments, in the only order SES writes them: `spf=pass (...)
+#: client-ip=...; envelope-from=...; helo=...;`.
+_SPF_PROPERTIES = ('client-ip', 'envelope-from', 'helo')
+_DKIM_PROPERTIES = frozenset({'header.d', 'header.i', 'header.s', 'header.a', 'header.b'})
+_DMARC_PROPERTIES = frozenset({'header.from'})
+#: The methods SES writes, in the order it writes them (`spf`, then any `dkim`, then `dmarc`).
+_AUTH_METHODS = frozenset({'spf', 'dkim', 'dmarc'})
 _BOUNDARY_LINE = re.compile(rb"^--[A-Za-z0-9'()+_,./:=?][^\r\n]{0,69}\r?$", re.M)
-_COMMENT = re.compile(r'\([^()]*\)')
 _CID_REFERENCE = re.compile(r"""cid:([^"'\s>)]+)""", re.I)
 
 # -- Skip reasons (the value of `X-Receipts-Skipped` on a part that did not become a receipt) --
@@ -243,101 +290,378 @@ class Verdicts:
     spam_failed: bool = False
     virus_failed: bool = False
     spf_pass: bool = False
+    #: The address SPF was checked for (`envelope-from=` of the SPF result, lowercase); empty when
+    #: SES gave none (e.g. a null sender). SPF vouches for an address only if it is this one.
+    spf_envelope_from: str = ''
     dkim_pass: bool = False
     #: Signing domains (`header.d`, else the domain of `header.i`) of the DKIM signatures that
     #: passed, from SES's `Authentication-Results`; empty when SES gave none.
     dkim_domains: frozenset[str] = frozenset()
+    #: DMARC's result (`pass`, `fail`, `none`, ... lowercase; empty if SES gave none) and the
+    #: domain it was evaluated for (`header.from=`, lowercase).
+    dmarc_result: str = ''
+    dmarc_from_domain: str = ''
+
+    @property
+    def dmarc_pass(self) -> bool:
+        return self.dmarc_result == 'pass'
 
     def dkim_aligned_with(self, address: str) -> bool:
-        """A DKIM signature passed *and* its domain is aligned with `address`'s domain."""
+        """A DKIM signature passed *and* its domain is strictly aligned with `address`'s domain
+        (`strictly_aligned`)."""
         domain = address.rpartition('@')[2].strip().lower()
-        return self.dkim_pass and any(domains_aligned(d, domain) for d in self.dkim_domains)
+        return self.dkim_pass and any(strictly_aligned(d, domain) for d in self.dkim_domains)
+
+    def spf_vouches_for(self, address: str) -> bool:
+        """SPF passed for this address's *domain* and what SES checked (`envelope-from`) is
+        `address`, compared after `normalize_address` (case and `+tag`, as the allowlist does).
+        Note SPF proves only that the sending IP may send for the domain, not who wrote the local
+        part: an exact-address allowlist entry on a shared provider is domain-level proof."""
+        if not (address and self.spf_pass and self.spf_envelope_from):
+            return False
+        return normalize_address(address) == normalize_address(self.spf_envelope_from)
+
+    def from_authenticated(self, address: str) -> bool:
+        """Whether the `From` address is authenticated. If SES reports a DMARC pass or fail, that
+        decides: a pass counts only when its `header.from` is exactly this address's domain. Any
+        other result that is not "no policy" (`temperror`, `permerror`, ...) is a failure too --
+        there is no fallback from an error. With no result at all (or `none`, a domain that
+        publishes no policy), a strictly aligned DKIM signature (`dkim_aligned_with`) is accepted
+        instead."""
+        domain = address.rpartition('@')[2].strip().lower()
+        if not domain:
+            return False
+        if self.dmarc_result in ('', 'none'):
+            return self.dkim_aligned_with(address)
+        return self.dmarc_pass and self.dmarc_from_domain == domain
 
     def vouches_for(
         self, *, from_address: str, envelope_sender: str, is_listed: Callable[[str], bool]
     ) -> bool:
         """Whether SES authenticated a sender address that `is_listed` accepts. The proof has to be
-        about the address that matched: the envelope sender needs an SPF pass (it is what SPF
-        checks); the `From` address needs an aligned DKIM pass. Without either, the sender is
-        unauthenticated, however many SPF/DKIM passes the message has for other domains."""
-        if envelope_sender and self.spf_pass and is_listed(envelope_sender):
+        about the address that matched: the envelope sender needs an SPF pass *for it*; the `From`
+        address needs a DMARC pass for its domain (else an aligned DKIM pass). Without either, the
+        sender is unauthenticated, however many SPF/DKIM passes the message has for other
+        domains."""
+        if envelope_sender and is_listed(envelope_sender) and self.spf_vouches_for(envelope_sender):
             return True
         return (
-            bool(from_address) and is_listed(from_address) and self.dkim_aligned_with(from_address)
+            bool(from_address) and is_listed(from_address) and self.from_authenticated(from_address)
         )
+
+
+def strictly_aligned(signer: str, domain: str) -> bool:
+    """Whether a DKIM signing domain may vouch for a `From` domain: they are the same, or one is
+    a subdomain of the other (`mail.vendor.com` signs for `vendor.com`, and `vendor.com` for
+    `mail.vendor.com`). Siblings (`a.github.io` / `b.github.io`) are *not* aligned, and no list of
+    organizational domains is consulted: a name that is not under the other can never be
+    vouched for. Needs at least two labels on each side (never `com`)."""
+    signer, domain = signer.strip().strip('.').lower(), domain.strip().strip('.').lower()
+    if '.' not in signer or '.' not in domain:
+        return False
+    return signer == domain or domain.endswith('.' + signer) or signer.endswith('.' + domain)
 
 
 @dataclass(frozen=True, slots=True)
 class _AuthResults:
     spf: bool | None = None
+    spf_envelope_from: str = ''
     dkim: bool | None = None
     dkim_domains: frozenset[str] = frozenset()
+    dmarc_result: str = ''
+    dmarc_from_domain: str = ''
 
 
-def _strip_comments(value: str) -> str:
-    """`value` without its (possibly nested) `( ... )` comments, which can say anything."""
-    while True:
-        stripped = _COMMENT.sub(' ', value)
-        if stripped == value:
-            return value
-        value = stripped
+class _Rejected(Exception):
+    """The `Authentication-Results` header is not exactly what SES writes: nothing in it counts."""
 
 
-def _signing_domain(value: str) -> str:
-    """The domain in a `header.d` (`example.com`) or `header.i` (`@example.com`, `u@example.com`)
-    value; empty if it isn't a plausible domain name."""
-    domain = value.rpartition('@')[2].strip().strip('.').lower()
-    return domain if _DOMAIN_NAME.match(domain) else ''
+@dataclass(slots=True)
+class _Clause:
+    method: str
+    result: str
+    properties: dict[str, str]
+
+
+def _raw_all(msg: Message, name: str) -> list[str]:
+    """The raw (undecoded, folded) values of `name` in order of appearance. Not
+    `get_all`: that decodes RFC 2047 encoded words, so a sender-controlled value could decode
+    into `;` and `=` *after* the header was written."""
+    lowered = name.lower()
+    values: list[str] = []
+    for key, value in msg.raw_items():
+        if key.lower() == lowered:
+            values.append(value if isinstance(value, str) else _text(value))
+    return values
+
+
+def _split_resinfo(value: str) -> list[str]:
+    """`value` split on `;` -- but only outside quoted-strings and comments (RFC 8601 / 5322) --
+    with every comment replaced by one space. A quoted-string keeps its content (and its quotes,
+    which the value grammars then refuse); a quoted-pair (`\\x`) is one unit in either; an
+    unterminated quote or comment is `_Rejected`."""
+    segments: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    in_quote = False
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if depth:
+            if ch == '\\':
+                i += 1
+            elif ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+                if not depth:
+                    buf.append(' ')
+        elif in_quote:
+            buf.append(ch)
+            if ch == '\\':
+                i += 1
+                buf.append(value[i : i + 1])
+            elif ch == '"':
+                in_quote = False
+        elif ch == '"':
+            in_quote = True
+            buf.append(ch)
+        elif ch == '(':
+            depth = 1
+        elif ch == ';':
+            segments.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if depth or in_quote:
+        raise _Rejected('unterminated comment or quoted-string')
+    segments.append(''.join(buf))
+    return segments
+
+
+def _valid_ip(value: str) -> bool:
+    if not re.fullmatch(r'[0-9A-Fa-f:.]+', value):
+        return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _valid_domain(value: str) -> bool:
+    return len(value) <= 253 and _HEADER_DOMAIN.fullmatch(value) is not None
+
+
+def _validate_property(name: str, value: str) -> str:
+    """`value` if it is a valid value of property `name` (lowercased domains); `_Rejected`
+    otherwise. Strict grammars, no quoting: see the module docstring."""
+    if name == 'client-ip':
+        if not _valid_ip(value):
+            raise _Rejected('client-ip is not an IP address')
+        return value
+    if name == 'envelope-from':
+        match = _ENVELOPE_FROM.fullmatch(value)
+        if match is None or not _valid_domain(match.group(2)) or len(value) > 254:
+            raise _Rejected('envelope-from is not a plain local@domain address')
+        return value.lower()
+    if name == 'helo':
+        if value.startswith('[') and value.endswith(']'):
+            inner = value[1:-1]
+            if inner[:5].lower() == 'ipv6:':
+                ok = _valid_ip(inner[5:]) and ':' in inner[5:]
+            else:
+                ok = _valid_ip(inner) and ':' not in inner and inner.count('.') == 3
+            if not ok:
+                raise _Rejected('helo is not a plain IP address literal')
+        elif len(value) > 253 or _HELO_HOST.fullmatch(value) is None:
+            raise _Rejected('helo is not a hostname')
+        return value.lower()
+    if name == 'header.i':
+        match = _HEADER_I.fullmatch(value)
+        if match is None or not _valid_domain(match.group(1)) or len(value) > 320:
+            raise _Rejected('header.i is not [local]@domain')
+        return value.lower()
+    if name in ('header.d', 'header.from'):
+        if not _valid_domain(value):
+            raise _Rejected(f'{name} is not a domain')
+        return value.lower()
+    if _DKIM_OTHER_VALUE.fullmatch(value) is None:
+        raise _Rejected(f'{name} has an unexpected value')
+    return value
+
+
+def _properties(
+    pieces: list[str], allowed: Sequence[str] | frozenset[str]
+) -> list[tuple[str, str]]:
+    """The `name=value` pieces of a segment, validated. Pieces are separated by whitespace (a
+    value ends at the next whitespace), so a `,`-glued run of properties is just one bad value."""
+    found: list[tuple[str, str]] = []
+    for piece in pieces:
+        match = _AUTH_PROPERTY_PIECE.fullmatch(piece)
+        if match is None:
+            raise _Rejected('a segment has something that is not a property')
+        name = match.group(1).lower()
+        if name not in allowed:
+            raise _Rejected(f'unexpected property {name}')
+        if any(name == seen for seen, _ in found):
+            raise _Rejected(f'duplicate property {name}')
+        found.append((name, _validate_property(name, match.group(2))))
+    return found
+
+
+def _auth_clauses(segments: list[str]) -> tuple[list[_Clause], dict[str, str]]:
+    """Parse the `;`-segments of an `Authentication-Results` value (after its authserv-id) in the
+    one shape SES writes, or raise `_Rejected`: at most one `spf` clause, first, whose
+    `client-ip`, `envelope-from` and `helo` follow it (in that order, in its own segment or as
+    separate `;` segments); then any number of `dkim` clauses; then at most one `dmarc`. Anything
+    else -- a repeated or out-of-order method, an unknown method or property, a value outside its
+    grammar -- is rejected. Returns the clauses and the SPF properties."""
+    clauses: list[_Clause] = []
+    spf_properties: list[tuple[str, str]] = []
+    stage = 0  # 0: before/in the spf group, 1: dkim, 2: dmarc seen
+    for segment in segments:
+        if re.search(r'[^\x20-\x7e\t\r\n]', segment):
+            raise _Rejected('non-ASCII or control characters')
+        pieces = [piece for piece in _WHITESPACE.split(segment.strip()) if piece]
+        if not pieces:
+            raise _Rejected('an empty segment')
+        head = _AUTH_RESULT_PIECE.fullmatch(pieces[0])
+        if head is not None and head.group(1).lower() in _AUTH_METHODS:
+            method, result = head.group(1).lower(), head.group(2).lower()
+            if method == 'spf':
+                if clauses or stage:
+                    raise _Rejected('spf is repeated or not first')
+                properties = _properties(pieces[1:], _SPF_PROPERTIES)
+                spf_properties.extend(properties)
+            elif method == 'dkim':
+                if stage == 2:
+                    raise _Rejected('dkim after dmarc')
+                stage = 1
+                properties = _properties(pieces[1:], _DKIM_PROPERTIES)
+            else:
+                if stage == 2:
+                    raise _Rejected('dmarc is repeated')
+                stage = 2
+                properties = _properties(pieces[1:], _DMARC_PROPERTIES)
+            clauses.append(_Clause(method, result, dict(properties)))
+        elif clauses and clauses[-1].method == 'spf' and stage == 0:
+            spf_properties.extend(_properties(pieces, _SPF_PROPERTIES))
+        else:
+            raise _Rejected('a segment that is not a known method clause')
+        names = [name for name, _ in spf_properties]
+        if names != sorted(set(names), key=_SPF_PROPERTIES.index):
+            raise _Rejected('spf properties repeated or out of order')
+    return clauses, dict(spf_properties)
+
+
+def _received_from_host(msg: Message) -> str:
+    """The `from <host>` token of the topmost `Received` header, which must be SES's own (its `by`
+    host is SES), lowercased; empty otherwise."""
+    values = _raw_all(msg, 'Received')[:SES_RECEIVED_HEADER_COUNT]
+    if not values or not _SES_RECEIVED_BY.search(values[0]):
+        return ''
+    match = _RECEIVED_FROM.match(values[0])
+    return match.group(1).lower() if match else ''
+
+
+def _raw_return_path(msg: Message) -> str:
+    values = _raw_all(msg, 'Return-Path')
+    match = re.fullmatch(r'\s*<([^<>]*)>\s*|\s*([^<>\s]*)\s*', values[0]) if values else None
+    return ((match.group(1) or match.group(2) or '') if match else '').strip().lower()
+
+
+def _check_against_headers(msg: Message, spf_properties: dict[str, str]) -> None:
+    """The echoed MAIL FROM and EHLO must be the very ones SES wrote elsewhere. A `;` in either
+    would have cut the echo short in `Authentication-Results`, so what is left no longer matches
+    the full value in `Return-Path` / `Received`."""
+    envelope_from = spf_properties.get('envelope-from')
+    if envelope_from is not None:
+        decoded = envelope_sender(msg).lower()
+        if envelope_from != _raw_return_path(msg) or envelope_from != decoded:
+            raise _Rejected('envelope-from is not the Return-Path address')
+    helo = spf_properties.get('helo')
+    if helo is not None and helo != _received_from_host(msg):
+        raise _Rejected("helo is not the host in SES's Received header")
+
+
+def _parse_ses_authentication_results(msg: Message, value: str) -> _AuthResults:
+    if len(value) > MAX_AUTH_RESULTS_CHARS:
+        raise _Rejected('too long')
+    segments = _split_resinfo(value)
+    if segments[0].strip().lower() != SES_AUTHSERV_ID:
+        raise _Rejected('the first Authentication-Results is not from amazonses.com')
+    segments = segments[1:]
+    if segments and not segments[-1].strip():
+        segments.pop()  # SES ends the header with `;`
+    if not segments or [segment.strip().lower() for segment in segments] == ['none']:
+        return _AuthResults()
+    clauses, spf_properties = _auth_clauses(segments)
+    _check_against_headers(msg, spf_properties)
+
+    spf = next((c for c in clauses if c.method == 'spf'), None)
+    dmarc = next((c for c in clauses if c.method == 'dmarc'), None)
+    dkim: bool | None = None
+    domains: set[str] = set()
+    for clause in clauses:
+        if clause.method != 'dkim':
+            continue
+        passed = clause.result == 'pass'
+        dkim = bool(dkim) or passed
+        if passed:
+            if 'header.d' in clause.properties:
+                domains.add(clause.properties['header.d'])
+            elif 'header.i' in clause.properties:
+                domains.add(clause.properties['header.i'].rpartition('@')[2])
+    return _AuthResults(
+        spf=None if spf is None else spf.result == 'pass',
+        spf_envelope_from=spf_properties.get('envelope-from', ''),
+        dkim=dkim,
+        dkim_domains=frozenset(domains),
+        dmarc_result='' if dmarc is None else dmarc.result,
+        dmarc_from_domain='' if dmarc is None else dmarc.properties.get('header.from', ''),
+    )
 
 
 def _ses_authentication_results(msg: Message) -> _AuthResults:
     """What the **first** `Authentication-Results` header says, if SES wrote it (authserv-id
-    `amazonses.com`); nothing otherwise. Later copies are the sender's. A method passes if any
-    instance of it did (a message can carry several DKIM signatures)."""
-    values = _all(msg, 'Authentication-Results')
+    `amazonses.com`); nothing otherwise. Later copies are the sender's. The header carries values
+    the sender chose (MAIL FROM, EHLO), so it is accepted only if it has exactly SES's shape
+    (`_auth_clauses`), every value matches a strict grammar and the echoed MAIL FROM / EHLO match
+    `Return-Path` / `Received`; if any check fails the whole header is dropped and no SPF, DKIM or
+    DMARC credit is given (a warning is logged with the reason, never the header)."""
+    values = _raw_all(msg, 'Authentication-Results')
     if not values:
         return _AuthResults()
-    authserv_id, _, results = _strip_comments(values[0]).partition(';')
-    if authserv_id.strip().lower() != SES_AUTHSERV_ID:
+    try:
+        return _parse_ses_authentication_results(msg, values[0])
+    except _Rejected as exc:
+        logger.warning(
+            'Authentication-Results not trusted (%s); no SPF/DKIM/DMARC credit. Starts with: %s',
+            exc,
+            clean_text(values[0], 80),
+        )
         return _AuthResults()
-    spf: bool | None = None
-    dkim: bool | None = None
-    domains: set[str] = set()
-    for resinfo in results.split(';'):
-        match = _AUTH_RESULT.match(resinfo)
-        if match is None:
-            continue
-        method, result, rest = match.group(1).lower(), match.group(2).lower(), match.group(3)
-        passed = result == 'pass'
-        if method == 'spf':
-            spf = bool(spf) or passed
-            continue
-        dkim = bool(dkim) or passed
-        if passed:
-            properties = {k.lower(): v for k, v in _AUTH_PROPERTY.findall(rest)}
-            for name in ('header.d', 'header.i'):
-                domain = _signing_domain(properties.get(name, ''))
-                if domain:
-                    domains.add(domain)
-                    break
-    return _AuthResults(spf=spf, dkim=dkim, dkim_domains=frozenset(domains))
 
 
 def read_verdicts(msg: Message) -> Verdicts:
+    """What SES concluded. Spam/virus come from the topmost `X-SES-Spam-Verdict` /
+    `X-SES-Virus-Verdict`; SPF, DKIM and DMARC *only* from SES's `Authentication-Results`. The
+    `X-SES-Spf-Verdict`, `X-SES-Dkim-Verdict` and `Received-SPF` headers are deliberately not read:
+    SES never writes them, so any copy is the sender's."""
     spam = _first(msg, 'X-SES-Spam-Verdict').upper()
     virus = _first(msg, 'X-SES-Virus-Verdict').upper()
-    spf_header = _first(msg, 'X-SES-Spf-Verdict').upper()
-    dkim_header = _first(msg, 'X-SES-Dkim-Verdict').upper()
-
     results = _ses_authentication_results(msg)
-    spf_pass = spf_header == 'PASS' if spf_header else bool(results.spf)
-    dkim_pass = dkim_header == 'PASS' if dkim_header else bool(results.dkim)
     return Verdicts(
         spam_failed=spam == 'FAIL',
         virus_failed=virus == 'FAIL',
-        spf_pass=spf_pass,
-        dkim_pass=dkim_pass,
+        spf_pass=bool(results.spf),
+        spf_envelope_from=results.spf_envelope_from,
+        dkim_pass=bool(results.dkim),
         dkim_domains=results.dkim_domains,
+        dmarc_result=results.dmarc_result,
+        dmarc_from_domain=results.dmarc_from_domain,
     )
 
 
@@ -382,8 +706,8 @@ def received_at(msg: Message) -> datetime:
 #: Senders of a "confirm this forwarding address" email. These skip the sender allowlist (the
 #: account owner has to be able to complete the setup of the very forwarding that delivers their
 #: receipts) -- but only when SES authenticated the sender *as that address* (`Verdicts.vouches_for`:
-#: DKIM aligned with `google.com`, or SPF on the envelope sender), and the email only ever becomes a
-#: free `forwarding_confirmation` row, never a receipt.
+#: DMARC for `google.com`, an aligned DKIM signature, or SPF on the envelope sender), and the email
+#: only ever becomes a free `forwarding_confirmation` row, never a receipt.
 #:
 #: Gmail: `forwarding-noreply@google.com` (the older `mail-noreply@google.com` is no longer used).
 #: Outlook.com / Microsoft 365 forwarding needs no confirmation message from the forwarding side,

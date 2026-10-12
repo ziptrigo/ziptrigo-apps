@@ -385,6 +385,37 @@ class TestForwardingConfirmation:
         assert email.status == InboundEmailStatus.REJECTED_SENDER
         assert email.forwarding_confirmation_code == email.forwarding_confirmation_url == ''
 
+    def test_injected_verdict_headers_do_not_make_it_google(self, deliver, inbox, account):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
+        raw = build_email(
+            from_addr='forwarding-noreply@google.com',
+            text='Confirmation code: 123456\nhttps://mail-settings.google.com/mail/vf-x',
+            ses=Ses(recipient=inbox, return_path='x@evil.test', spf='FAIL', dkim='FAIL'),
+            headers=[('X-SES-Spf-Verdict', 'PASS'), ('X-SES-Dkim-Verdict', 'PASS')],
+        )
+
+        email = one_email(deliver(raw))
+
+        assert email.status == InboundEmailStatus.REJECTED_SENDER
+        assert email.forwarding_confirmation_url == ''
+
+    def test_a_dmarc_pass_for_another_domain_does_not_make_it_google(self, deliver, inbox, account):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
+        raw = build_email(
+            from_addr='forwarding-noreply@google.com',
+            text='Confirmation code: 123456',
+            ses=Ses(
+                recipient=inbox,
+                return_path='x@evil.test',
+                spf='FAIL',
+                dkim='FAIL',
+                dmarc='PASS',
+                dmarc_domain='evil.test',
+            ),
+        )
+
+        assert one_email(deliver(raw)).status == InboundEmailStatus.REJECTED_SENDER
+
     def test_google_without_a_signing_domain_is_not_google(self, deliver, inbox, account):
         ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
         raw = build_email(
@@ -692,11 +723,189 @@ class TestAllowlist:
 
         assert status == 'accepted'
 
-    def test_authentication_results_work_too(self, deliver, inbox):
-        ok = self.status(deliver, inbox, via_authentication_results=True, spf='PASS', dkim='PASS')
-        bad = self.status(deliver, inbox, via_authentication_results=True, spf='FAIL', dkim='FAIL')
+    def test_a_dmarc_pass_for_the_from_domain_authenticates_a_listed_from(self, deliver, inbox):
+        """Neither SPF nor an aligned DKIM signature of its own, but DMARC passed for the From
+        domain."""
+        assert self.status(deliver, inbox, spf='FAIL', dkim='FAIL', dmarc='PASS') == 'accepted'
 
-        assert (ok, bad) == ('accepted', 'rejected_sender')
+    def test_a_dmarc_pass_for_another_domain_does_not_authenticate_a_listed_from(
+        self, deliver, inbox
+    ):
+        status = self.status(
+            deliver, inbox, spf='FAIL', dkim='FAIL', dmarc='PASS', dmarc_domain='evil.test'
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_without_a_dmarc_result_an_aligned_dkim_authenticates(self, deliver, inbox):
+        assert self.status(deliver, inbox, spf='FAIL', dkim='PASS', dmarc=None) == 'accepted'
+        assert self.status(deliver, inbox, spf='FAIL', dkim='FAIL', dmarc=None) == 'rejected_sender'
+
+    def test_spf_for_a_different_envelope_from_does_not_authenticate_the_return_path(
+        self, deliver, inbox
+    ):
+        """`Return-Path` is the listed address, but the SPF result SES wrote is about another one."""
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='noreply@mailer.test',
+            return_path='orders@staples.com',
+            spf='PASS',
+            spf_envelope_from='attacker@evil.test',
+            dkim='FAIL',
+            dmarc='FAIL',
+        )
+
+        assert status == 'rejected_sender'
+
+    @pytest.mark.parametrize(
+        'headers',
+        [
+            [('X-SES-Spf-Verdict', 'PASS'), ('X-SES-Dkim-Verdict', 'PASS')],
+            [('Received-SPF', 'pass (spfCheck: ok) envelope-from=orders@staples.com')],
+            [
+                (
+                    'Authentication-Results',
+                    'amazonses.com; spf=pass; envelope-from=orders@staples.com; dkim=pass '
+                    'header.i=@staples.com; dmarc=pass header.from=staples.com',
+                )
+            ],
+        ],
+        ids=['injected-x-ses-verdicts', 'injected-received-spf', 'forged-authentication-results'],
+    )
+    def test_headers_the_sender_wrote_authenticate_nothing(self, deliver, inbox, headers):
+        """The regression this guards: SES never writes `X-SES-Spf/Dkim-Verdict`, so a sender could
+        add them to a message that really failed authentication and be let in."""
+        raw = build_email(
+            from_addr='orders@staples.com',
+            attachments=[pdf()],
+            ses=Ses(recipient=inbox, spf='FAIL', dkim='FAIL', dmarc='FAIL'),
+            headers=headers,
+        )
+
+        email = one_email(deliver(raw))
+
+        assert email.status == 'rejected_sender'
+
+    def test_injected_verdicts_do_not_help_without_any_authentication_results(self, deliver, inbox):
+        raw = build_email(
+            from_addr='orders@staples.com',
+            attachments=[pdf()],
+            ses=Ses(recipient=inbox, spf=None, dkim=None, dmarc=None),
+            headers=[('X-SES-Spf-Verdict', 'PASS'), ('X-SES-Dkim-Verdict', 'PASS')],
+        )
+
+        assert one_email(deliver(raw)).status == 'rejected_sender'
+
+    @pytest.mark.parametrize(
+        'ses',
+        [
+            # A MAIL FROM that is a quoted-string holding `;` and fake clauses.
+            {
+                'return_path': '"x;dkim=pass header.i=@staples.com;dmarc=pass '
+                'header.from=staples.com"@attacker.test',
+                'dmarc': 'FAIL',
+            },
+            # An EHLO name that carries them, with no spaces.
+            {
+                'return_path': 'x@attacker.test',
+                'helo': 'x;dkim=pass,header.i=@staples.com;dmarc=pass,header.from=staples.com',
+                'dmarc': 'FAIL',
+            },
+            # An RFC 5321 address-literal EHLO.
+            {
+                'return_path': 'x@attacker.test',
+                'helo': '[x:a;dkim=pass,header.i=@staples.com;dmarc=pass,header.from=staples.com;x]',
+                'dmarc': 'FAIL',
+            },
+            # DKIM only, for a From domain that publishes no DMARC policy.
+            {
+                'return_path': 'x@attacker.test',
+                'helo': 'x;dkim=pass,header.i=@staples.com',
+                'dmarc': 'NONE',
+            },
+        ],
+        ids=['quoted-mail-from', 'helo-no-spaces', 'address-literal-helo', 'dkim-only-no-dmarc'],
+    )
+    def test_values_the_sender_controls_cannot_inject_an_authentication_result(
+        self, deliver, inbox, ses
+    ):
+        """The header SES writes echoes MAIL FROM and EHLO; a `;` in them must not become a
+        `dkim=pass` / `dmarc=pass` clause that lets a forged `From` through."""
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='orders@staples.com',
+            spf='PASS',
+            dkim='PASS',
+            dkim_domain='attacker.test',
+            **ses,
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_an_envelope_from_that_is_not_the_return_path_is_rejected(self, deliver, inbox):
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='noreply@mailer.test',
+            return_path='orders@staples.com',
+            spf='PASS',
+            spf_envelope_from='orders@staples.com.evil.test',
+            dkim='FAIL',
+            dmarc='FAIL',
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_a_helo_that_is_not_the_received_host_is_rejected(self, deliver, inbox):
+        status = self.status(deliver, inbox, spf='PASS', dkim='PASS', received_from='other.test')
+
+        assert status == 'rejected_sender'
+
+    @pytest.mark.parametrize('dmarc', ['TEMPERROR', 'PERMERROR'])
+    def test_a_dmarc_error_does_not_fall_back_to_dkim(self, deliver, inbox, dmarc):
+        status = self.status(deliver, inbox, spf='FAIL', dkim='PASS', dmarc=dmarc)
+
+        assert status == 'rejected_sender'
+
+    def test_a_sibling_domain_dkim_signature_is_not_aligned_without_dmarc(self, deliver, inbox):
+        ReceiptsAccount.objects.filter(pk=ReceiptsAccount.objects.get().pk).update(
+            sender_allowlist=['billing@victim.github.io']
+        )
+
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='billing@victim.github.io',
+            return_path='x@esp.test',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='attacker.github.io',
+            dmarc='NONE',
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_a_real_shaped_ses_message_from_a_listed_sender_is_accepted(
+        self, deliver, fixed_inbox, account
+    ):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['sender@gmail.com'])
+
+        message = deliver((FIXTURES / 'gmail_manual_forward.eml').read_bytes())
+
+        assert one_email(message).status == InboundEmailStatus.ACCEPTED
+
+    def test_a_real_shaped_ses_message_from_an_unlisted_sender_is_rejected(
+        self, deliver, fixed_inbox, account
+    ):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(
+            sender_allowlist=['orders@staples.com']
+        )
+
+        message = deliver((FIXTURES / 'gmail_manual_forward.eml').read_bytes())
+
+        assert one_email(message).status == InboundEmailStatus.REJECTED_SENDER
 
     def test_an_empty_allowlist_accepts_anyone_without_authentication(
         self, deliver, inbox, account

@@ -4,11 +4,12 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
-Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
- designates 203.0.113.5) smtp.mailfrom=forwarding-noreply@google.com;
- dkim=pass header.d=google.com header.i=@google.com; dmarc=pass header.from=x
-X-SES-Spf-Verdict: PASS
-X-SES-Dkim-Verdict: PASS
+Received-SPF: pass (spfCheck: ok) client-ip=203.0.113.5;
+ envelope-from=forwarding-noreply@google.com; helo=mail.example.net;
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of
+ google.com designates 203.0.113.5 as permitted sender) client-ip=203.0.113.5;
+ envelope-from=forwarding-noreply@google.com; helo=mail.example.net; dkim=pass
+ header.i=@google.com; dmarc=pass header.from=google.com;
 From: Gmail Team <forwarding-noreply@google.com>
 To: receipts+abcd2345@ziptrigo.com
 Subject:

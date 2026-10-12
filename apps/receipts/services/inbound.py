@@ -22,8 +22,9 @@ Nothing here is pushed to us: a scheduler job polls that prefix, and the rest ru
      the allowlist -- the owner must be able to finish setting up the forwarding that delivers
      their receipts.
    - The account has a sender allowlist and the sender is not on it, or SES did not authenticate
-     the address that matched (`mime.Verdicts.vouches_for`: SPF pass for a matching envelope sender,
-     DKIM pass aligned with the domain of a matching `From`): `rejected_sender`. Empty allowlist =
+     the address that matched (`mime.Verdicts.vouches_for`: SPF pass for the very envelope sender
+     that matched, DMARC pass for the domain of a matching `From`, else an aligned DKIM pass, all
+     from SES's `Authentication-Results`): `rejected_sender`. Empty allowlist =
      anyone, no authentication needed.
    - Otherwise the eligible attachments (see `mime.analyze`) become one receipt each; with none,
      the body (HTML preferred) becomes the receipt; with neither, `no_receipt`. An attachment over
@@ -610,7 +611,7 @@ def _rejection(context: _Context, account: ReceiptsAccount) -> tuple[str, str] |
             return (
                 InboundEmailStatus.REJECTED_SENDER,
                 'The sender could not be verified (no SPF pass for the envelope sender, or no '
-                'DKIM pass aligned with the From domain).',
+                'DMARC or DKIM pass for the From domain).',
             )
     return None
 

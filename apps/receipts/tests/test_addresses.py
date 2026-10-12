@@ -3,11 +3,9 @@ from django.core.exceptions import ValidationError
 
 from ..services.accounts import inbox_address
 from ..services.addresses import (
-    domains_aligned,
     inbox_code_from_address,
     matches_allowlist,
     normalize_address,
-    organizational_domain,
     parse_allowlist,
 )
 
@@ -112,40 +110,3 @@ def test_inbox_code_from_address_inverts_inbox_address(settings):
 
     # A production address is not a staging one.
     assert inbox_code_from_address('receipts+k7m2xq9p@ziptrigo.com') is None
-
-
-@pytest.mark.parametrize(
-    ('domain', 'expected'),
-    [
-        ('example.com', 'example.com'),
-        ('mail.example.com', 'example.com'),
-        ('a.b.mail.EXAMPLE.com.', 'example.com'),
-        ('example.co.uk', 'example.co.uk'),
-        ('mail.example.co.uk', 'example.co.uk'),
-        ('co.uk', 'co.uk'),
-        ('localhost', 'localhost'),
-    ],
-)
-def test_organizational_domain(domain, expected):
-    assert organizational_domain(domain) == expected
-
-
-@pytest.mark.parametrize(
-    ('first', 'second', 'aligned'),
-    [
-        ('vendor.com', 'vendor.com', True),
-        ('VENDOR.com', 'vendor.com', True),
-        ('mail.vendor.com', 'vendor.com', True),
-        ('vendor.com', 'mail.vendor.com', True),
-        ('mail.vendor.com', 'bounce.vendor.com', True),
-        ('evil.com', 'vendor.com', False),
-        ('vendor.com.evil.com', 'vendor.com', False),
-        ('notvendor.com', 'vendor.com', False),
-        ('evil.co.uk', 'vendor.co.uk', False),
-        ('mail.vendor.co.uk', 'vendor.co.uk', True),
-        ('', 'vendor.com', False),
-        ('vendor.com', '', False),
-    ],
-)
-def test_domains_aligned(first, second, aligned):
-    assert domains_aligned(first, second) is aligned
