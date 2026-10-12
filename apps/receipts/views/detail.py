@@ -110,8 +110,10 @@ def _detail_context(request: AuthenticatedHttpRequest, receipt: Receipt) -> dict
     except ValueError:
         polls = 0
     poll_url = ''
-    if receipt.status in (ReceiptStatus.RECEIVED, ReceiptStatus.PROCESSING) and (
-        polls < _MAX_AUTO_POLLS
+    if (
+        receipt.status in (ReceiptStatus.RECEIVED, ReceiptStatus.PROCESSING)
+        and not receipt.retry_scheduled
+        and polls < _MAX_AUTO_POLLS
     ):
         poll_url = f'{reverse("receipts:detail", args=[receipt.pk])}?polls={polls + 1}'
 

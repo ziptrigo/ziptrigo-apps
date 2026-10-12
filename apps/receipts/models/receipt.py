@@ -307,6 +307,13 @@ class Receipt(models.Model):
         return f'{self.vendor or self.original_filename or self.id} ({self.status})'
 
     @property
+    def retry_scheduled(self) -> bool:
+        """A try at reading it failed in a way that may work later (a timeout, a malformed AI
+        reply) and `retry_due` will try again at `next_attempt_at`: the claim clears that field,
+        so on a `received` receipt it is only ever set by `processing._transient_failure`."""
+        return self.status == ReceiptStatus.RECEIVED and self.next_attempt_at is not None
+
+    @property
     def missing_required_fields(self) -> list[str]:
         """Which of vendor, amount and receipt date are still unset."""
         return [

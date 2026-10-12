@@ -29,6 +29,8 @@
                 {% if receipt.missing_required_fields %}&middot; {{ receipt|missing_fields }} missing{% else %}&middot; check the details{% endif %}
                 {% elif receipt.status == 'waiting_for_credits' %}
                 &middot; waiting for credits
+                {% elif receipt.retry_scheduled %}
+                &middot; couldn't read it yet, trying again in {{ receipt.next_attempt_at|timeuntil }}
                 {% elif receipt.status == 'received' or receipt.status == 'processing' %}
                 &middot; reading the receipt&hellip;
                 {% else %}
