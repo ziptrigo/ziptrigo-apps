@@ -71,7 +71,17 @@ _storage: S3Storage | None = None
 
 
 def get_storage() -> S3Storage:
-    """The process-wide `S3Storage`, built lazily from settings."""
+    """The process-wide `S3Storage`, built lazily from settings.
+
+    The bucket (like the client) is captured when the instance is first built, so an
+    `override_settings` on `FILE_TRANSFER_S3_BUCKET` mid-process has no effect; tests that need a
+    different bucket call `reset_storage_cache()` first.
+
+    The client uses botocore's default signature version, which is SigV2 for presigned URLs in
+    `us-east-1` and other older regions, so the part URLs' signed `Content-Length` is not
+    enforced there (the `head_object` size check at completion is the real guard) -- switching
+    to SigV4 is tracked in ziptrigo-apps#100.
+    """
     global _storage
     if _storage is None:
         _storage = S3Storage(

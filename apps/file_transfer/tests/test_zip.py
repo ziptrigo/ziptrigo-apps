@@ -30,7 +30,7 @@ def _make_active_transfer(funded_user, fake_storage, *, files: dict[str, bytes])
     transfer = Transfer.objects.create(owner=funded_user, status=TransferStatus.DRAFT)
     for name, content in files.items():
         file = add_file(transfer, name, len(content), storage=fake_storage)
-        fake_storage.put_object(file.storage_key, len(content))
+        fake_storage.seed_object(file.storage_key, len(content))
         fake_storage.objects[file.storage_key] = content
         complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag'}], storage=fake_storage)
     transfer.status = TransferStatus.ACTIVE
@@ -145,7 +145,7 @@ def test_build_zip_dedupes_duplicate_file_names(funded_user, fake_storage):
     transfer = Transfer.objects.create(owner=funded_user, status=TransferStatus.DRAFT)
     for content in (b'first', b'second', b'third'):
         file = add_file(transfer, 'report.pdf', len(content), storage=fake_storage)
-        fake_storage.put_object(file.storage_key, len(content))
+        fake_storage.seed_object(file.storage_key, len(content))
         fake_storage.objects[file.storage_key] = content
         complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag'}], storage=fake_storage)
     transfer.status = TransferStatus.ACTIVE
@@ -167,7 +167,7 @@ def test_build_zip_flattens_path_separators_in_entry_names(funded_user, fake_sto
     # reach the stored name unchanged, so the zip builder itself must neutralize them (a "zip
     # slip" guard for a naive/vulnerable extractor).
     file = add_file(transfer, '../../etc/passwd', 5, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 5)
+    fake_storage.seed_object(file.storage_key, 5)
     fake_storage.objects[file.storage_key] = b'12345'
     complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag'}], storage=fake_storage)
     transfer.status = TransferStatus.ACTIVE
@@ -187,7 +187,7 @@ def test_build_zip_flattens_path_separators_in_entry_names(funded_user, fake_sto
 def test_build_zip_sets_entry_dates_from_created_at(funded_user, fake_storage):
     transfer = Transfer.objects.create(owner=funded_user, status=TransferStatus.DRAFT)
     file = add_file(transfer, 'a.txt', 2, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 2)
+    fake_storage.seed_object(file.storage_key, 2)
     fake_storage.objects[file.storage_key] = b'hi'
     complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag'}], storage=fake_storage)
     file.refresh_from_db()

@@ -307,7 +307,7 @@ def test_api_finalize_transfer_blocked(client, funded_user, fake_storage):
 
     transfer = create_draft(funded_user)
     file = add_file(transfer, 'a.txt', 10, storage=fake_storage)
-    fake_storage.put_object(file.storage_key, 10)
+    fake_storage.seed_object(file.storage_key, 10)
     complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag-1'}], storage=fake_storage)
     BlockedSender.objects.create(kind=BlockedSenderKind.EMAIL, value=funded_user.email)
     headers = {'HTTP_AUTHORIZATION': f'Bearer {CustomAccessToken.for_user(funded_user)}'}
@@ -339,7 +339,7 @@ def _upload(transfer, fake_storage, size=1024):
     file = add_file(
         transfer, 'report.pdf', size, ip='203.0.113.7', cookie_id='cookie', storage=fake_storage
     )
-    fake_storage.put_object(file.storage_key, size)
+    fake_storage.seed_object(file.storage_key, size)
     complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'etag-1'}], storage=fake_storage)
     return file
 

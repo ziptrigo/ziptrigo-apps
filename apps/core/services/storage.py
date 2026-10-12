@@ -19,7 +19,7 @@ import logging
 import unicodedata
 from dataclasses import dataclass
 from typing import IO, TYPE_CHECKING, Literal, cast
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 import boto3
 from botocore.config import Config
@@ -42,6 +42,30 @@ _DELETE_BATCH_SIZE = 1000
 DEFAULT_LIST_MAX_KEYS = 1000
 
 Disposition = Literal['attachment', 'inline']
+
+# The only content types `presigned_get_url` will serve with `disposition='inline'` when given an
+# explicit `content_type`: formats a browser renders without running script. Notably absent are
+# `text/html` and `image/svg+xml`, which would execute script on the bucket's origin.
+INLINE_CONTENT_TYPES = frozenset(
+    {
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'text/plain',
+    }
+)
+
+
+class UnsupportedSignatureVersionError(RuntimeError):
+    """Raised by `S3Storage.presigned_put_url` when the client isn't signing with SigV4, because
+    under any other signature version the signed `Content-Length` (the URL's whole point) isn't
+    enforced. Build the client with `build_client(..., signature_version='s3v4')`."""
+
+
+class ObjectTooLargeError(ValueError):
+    """Raised by `S3Storage.get_object_bytes` when the object exceeds the caller's `max_bytes`."""
 
 
 def content_disposition(filename: str, disposition: Disposition = 'attachment') -> str:
@@ -85,7 +109,8 @@ def build_client(
     presigned PUT's `Content-Length` is *not* part of the signature, so `presign_part_url` /
     `presigned_put_url` cannot enforce a declared size there; pass `'s3v4'` for a client whose
     presigned uploads must pin the body's size (and have `x-amz-checksum-sha256` signed as a
-    header rather than carried as an unsigned-by-SigV2 query parameter).
+    header rather than carried as an unsigned-by-SigV2 query parameter). `presigned_put_url`
+    refuses to run on a client that isn't SigV4 (`UnsupportedSignatureVersionError`).
     """
     return boto3.client(
         's3',
@@ -154,10 +179,16 @@ class S3Storage:
 
         `content_length` and `checksum_sha256`, when given, are baked into the URL's signature
         (`generate_presigned_url` maps them to the `Content-Length` and `x-amz-checksum-sha256`
-        request headers respectively) -- the PUT is then only valid for a body of exactly that
-        size and that checksum, which is what actually enforces the declared file size and
-        verifies the part's integrity server-side (S3 rejects the request outright if the header
-        the browser sends doesn't match). `checksum_sha256` must be supplied by the caller (the
+        request headers respectively) -- under SigV4 the PUT is then only valid for a body of
+        exactly that size and that checksum, which enforces the declared part size and verifies
+        the part's integrity server-side (S3 rejects the request outright if the header the
+        browser sends doesn't match). **Under SigV2** (botocore's default in `us-east-1`,
+        `eu-west-1` and other older regions, unless the client is built with
+        `signature_version='s3v4'`) `Content-Length` is not signed and the checksum is only an
+        unsigned query parameter, so neither is enforced; this method does not refuse to run
+        there (file_transfer still uses the default client, see ziptrigo-apps#100), so a caller
+        that depends on the size guarantee must verify the final object's size itself
+        (`head_object`). `checksum_sha256` must be supplied by the caller (the
         browser computes it before requesting the URL, via `crypto.subtle`) -- it can't be
         computed here, since presigning happens before the bytes exist on this end at all.
         """
@@ -253,11 +284,30 @@ class S3Storage:
             CopySource={'Bucket': self.bucket, 'Key': src_key},
         )
 
-    def get_object_bytes(self, key: str) -> bytes:
+    def get_object_bytes(self, key: str, *, max_bytes: int | None = None) -> bytes:
         """The whole object's bytes, in memory -- for small objects only; use
-        `get_object_stream` for anything large. Raises `ClientError` (`NoSuchKey`) if absent."""
-        body = self.client.get_object(Bucket=self.bucket, Key=key)['Body']
-        return body.read()
+        `get_object_stream` for anything large. Raises `ClientError` (`NoSuchKey`) if absent.
+
+        `max_bytes`, when given, bounds what is pulled into memory: an object whose
+        `ContentLength` exceeds it raises `ObjectTooLargeError` before any of the body is read
+        (and, should a response ever lack `ContentLength`, the read itself is capped at
+        `max_bytes + 1` so the check still holds).
+        """
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        body = response['Body']
+        if max_bytes is None:
+            return body.read()
+        if max_bytes < 0:
+            raise ValueError('max_bytes must not be negative')
+        length = response.get('ContentLength')
+        if length is not None and length > max_bytes:
+            body.close()
+            raise ObjectTooLargeError(f'{key} is {length} bytes, over the {max_bytes} limit')
+        data = body.read(max_bytes + 1)
+        body.close()
+        if len(data) > max_bytes:
+            raise ObjectTooLargeError(f'{key} is over the {max_bytes} byte limit')
+        return data
 
     def get_object_stream(self, key: str) -> IO[bytes]:
         """A readable, streaming file-like object (`.read(n)`) for `key`'s bytes, for building
@@ -286,7 +336,12 @@ class S3Storage:
         """The keys under `prefix` (`ListObjectsV2`, paginated transparently), in S3's
         lexicographic order, at most `max_keys` of them (`None` for no limit). The cap exists so
         a caller polling a prefix that unexpectedly holds a huge number of objects doesn't pull
-        them all into memory."""
+        them all into memory.
+
+        **The result may be incomplete**: it is a plain list with no truncation marker, so a
+        result of exactly `max_keys` entries means "possibly more were cut off", not "that is
+        all". That is fine for polling a prefix for new objects, but a caller that must see every
+        object (cleanup, reconciliation) has to pass `max_keys=None`."""
         if max_keys is not None and max_keys < 1:
             raise ValueError('max_keys must be at least 1 (or None for no limit)')
         keys: list[str] = []
@@ -316,16 +371,36 @@ class S3Storage:
 
         The same signing trick as `presign_part_url`: `content_length` is signed into the URL as
         the `Content-Length` header, and `checksum_sha256` (base64, supplied by the caller since
-        the bytes don't exist on this end) as `x-amz-checksum-sha256`, so S3 rejects a PUT whose
-        body differs in size or content from what was declared. When `content_type` is given it
-        is signed too, so the client must send that exact `Content-Type`.
+        the bytes don't exist on this end) as `x-amz-checksum-sha256`, so under SigV4 S3 rejects
+        a PUT whose body differs in size or content from what was declared. When `content_type`
+        is given it is signed too, so the client must send that exact `Content-Type`.
+
+        Fails closed: raises `UnsupportedSignatureVersionError` unless the URL it just generated
+        actually has `content-length` (and `x-amz-checksum-sha256` / `content-type`, when given)
+        among its signed headers, which only a SigV4 client does (`build_client(...,
+        signature_version='s3v4')`). Under the legacy SigV2 presigning botocore falls back to in
+        `us-east-1` / `eu-west-1` and other older regions, `Content-Length` is not signed at all,
+        so the URL would accept a body of any size -- the one thing this method exists to prevent.
+        The check inspects the generated URL rather than `client.meta.config.signature_version`,
+        which reports `'s3v4'` even for a default client whose presigned URLs are SigV2.
         """
         params: dict = {'Bucket': self.bucket, 'Key': key, 'ContentLength': content_length}
+        required = {'content-length'}
         if checksum_sha256 is not None:
             params['ChecksumSHA256'] = checksum_sha256
+            required.add('x-amz-checksum-sha256')
         if content_type is not None:
             params['ContentType'] = content_type
-        return self.client.generate_presigned_url('put_object', Params=params, ExpiresIn=expires_in)
+            required.add('content-type')
+        url = self.client.generate_presigned_url('put_object', Params=params, ExpiresIn=expires_in)
+        signed = parse_qs(urlsplit(url).query).get('X-Amz-SignedHeaders', [''])[0].split(';')
+        if not required <= set(signed):
+            raise UnsupportedSignatureVersionError(
+                f'presigned_put_url needs a SigV4 client (build_client(..., '
+                f"signature_version='s3v4')): the generated URL does not sign "
+                f'{sorted(required - set(signed))}, so S3 would not enforce them'
+            )
+        return url
 
     def presigned_get_url(
         self,
@@ -338,7 +413,23 @@ class S3Storage:
     ) -> str:
         """A short-lived download URL. By default it forces "Save As" with `filename`
         (`disposition='attachment'`); `'inline'` lets the browser display it instead (a PDF, an
-        image). `content_type`, when given, overrides the `Content-Type` S3 responds with."""
+        image). `content_type`, when given, overrides the `Content-Type` S3 responds with.
+
+        **Inline is a security-sensitive choice.** An `inline` response renders on the bucket's
+        origin, so the content type must come from a trusted, server-determined value (sniffed
+        or fixed on the server when the object was stored) -- never from user input or the
+        uploader's claimed type -- and must never be `text/html` or `image/svg+xml`, which would
+        run script. To make that hard to get wrong, an `inline` request with an explicit
+        `content_type` outside `INLINE_CONTENT_TYPES` (PDF, JPEG, PNG, WebP, GIF, plain text)
+        raises `ValueError`. With no `content_type`, S3 serves whatever type the object was
+        stored with, which the caller must have already vetted.
+        """
+        if (
+            disposition == 'inline'
+            and content_type is not None
+            and content_type.split(';')[0].strip().lower() not in INLINE_CONTENT_TYPES
+        ):
+            raise ValueError(f'content type {content_type!r} may not be served inline')
         params: dict = {
             'Bucket': self.bucket,
             'Key': key,

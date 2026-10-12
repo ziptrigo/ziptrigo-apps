@@ -88,7 +88,7 @@ def test_full_send_flow(client, funded_user, auth_headers, fake_storage):
     assert parts_resp.status_code == 200
     assert '1' in parts_resp.json()['urls']
 
-    fake_storage.put_object(file.storage_key, 10)
+    fake_storage.seed_object(file.storage_key, 10)
     complete_resp = _post(
         client,
         f'/api/ft/transfers/{transfer_id}/files/{file_id}/complete/',
@@ -349,7 +349,7 @@ def test_list_pagination(client, funded_user, auth_headers, fake_storage):
     for i in range(3):
         transfer = create_draft(funded_user)
         file = add_file(transfer, f'f{i}.bin', 10, storage=fake_storage)
-        fake_storage.put_object(file.storage_key, 10)
+        fake_storage.seed_object(file.storage_key, 10)
         complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e'}], storage=fake_storage)
         finalize_send(transfer, SendOptions(recipients=['a@example.com']))
 

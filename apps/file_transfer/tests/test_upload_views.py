@@ -75,7 +75,7 @@ def test_part_urls_and_complete_and_remove_flow(client, draft_transfer, fake_sto
     from ..models import TransferFile
 
     file = TransferFile.objects.get(id=file_id)
-    fake_storage.put_object(file.storage_key, 10)
+    fake_storage.seed_object(file.storage_key, 10)
 
     complete_url = reverse('file_transfer:send-complete-file', args=[draft_transfer.id, file_id])
     complete_response = _post_json(

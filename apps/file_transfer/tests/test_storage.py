@@ -32,9 +32,7 @@ def _fresh_cache():
     storage.reset_storage_cache()
 
 
-def test_get_storage_builds_the_core_class_from_file_transfer_settings(
-    settings, monkeypatch, _fresh_cache
-):
+def test_get_storage_builds_the_core_class_from_file_transfer_settings(settings, _fresh_cache):
     settings.FILE_TRANSFER_S3_BUCKET = 'ft-bucket'
     settings.FILE_TRANSFER_S3_REGION = 'eu-west-1'
     settings.FILE_TRANSFER_S3_ENDPOINT_URL = 'http://localhost:4566'

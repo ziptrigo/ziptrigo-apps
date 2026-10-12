@@ -74,7 +74,7 @@ class TestAnonymousConfirmRateLimit:
         add_url = reverse('file_transfer:anon-send-add-file', args=[transfer.id])
         added = _post_json(client, add_url, {'name': 'report.pdf', 'size': 10}).json()
         file = TransferFile.objects.get(id=added['file_id'])
-        fake_storage.put_object(file.storage_key, 10)
+        fake_storage.seed_object(file.storage_key, 10)
         _post_json(
             client,
             reverse('file_transfer:anon-send-complete-file', args=[transfer.id, file.id]),

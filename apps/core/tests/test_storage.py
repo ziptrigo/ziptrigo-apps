@@ -13,7 +13,12 @@ from botocore.exceptions import ClientError
 from botocore.response import StreamingBody
 from botocore.stub import Stubber
 
-from ..services.storage import S3Storage, build_client
+from ..services.storage import (
+    ObjectTooLargeError,
+    S3Storage,
+    UnsupportedSignatureVersionError,
+    build_client,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -53,6 +58,14 @@ def _query(url: str) -> dict[str, list[str]]:
 
 def _signed_headers(url: str) -> set[str]:
     return set(_query(url)['X-Amz-SignedHeaders'][0].split(';'))
+
+
+class _ReadSpy(io.BytesIO):
+    reads = 0
+
+    def read(self, size=-1):
+        self.reads += 1
+        return super().read(size)
 
 
 def _body(data: bytes) -> StreamingBody:
@@ -111,6 +124,36 @@ def test_get_object_bytes_returns_the_whole_body(stubbed):
         'get_object', {'Body': _body(b'contents')}, {'Bucket': BUCKET, 'Key': 'a/b'}
     )
     assert storage.get_object_bytes('a/b') == b'contents'
+
+
+def test_get_object_bytes_within_max_bytes(stubbed):
+    storage, stubber = stubbed
+    stubber.add_response(
+        'get_object',
+        {'Body': _body(b'12345'), 'ContentLength': 5},
+        {'Bucket': BUCKET, 'Key': 'a/b'},
+    )
+    assert storage.get_object_bytes('a/b', max_bytes=5) == b'12345'
+
+
+def test_get_object_bytes_over_max_bytes_raises_before_reading(stubbed):
+    storage, stubber = stubbed
+    raw = _ReadSpy(b'123456')
+    stubber.add_response(
+        'get_object',
+        {'Body': StreamingBody(raw, 6), 'ContentLength': 6},
+        {'Bucket': BUCKET, 'Key': 'a/b'},
+    )
+    with pytest.raises(ObjectTooLargeError):
+        storage.get_object_bytes('a/b', max_bytes=5)
+    assert raw.reads == 0
+
+
+def test_get_object_bytes_max_bytes_caps_the_read_without_content_length(stubbed):
+    storage, stubber = stubbed
+    stubber.add_response('get_object', {'Body': _body(b'123456')}, {'Bucket': BUCKET, 'Key': 'a/b'})
+    with pytest.raises(ObjectTooLargeError):
+        storage.get_object_bytes('a/b', max_bytes=5)
 
 
 def test_get_object_bytes_missing_key_raises(stubbed):
@@ -188,6 +231,15 @@ def test_list_keys_stops_at_max_keys(stubbed):
         'list_objects_v2', _list_response(['p/1', 'p/2', 'p/3'], truncated=True, token='t1'), None
     )
     assert storage.list_keys('p/', max_keys=2) == ['p/1', 'p/2']
+
+
+def test_list_keys_with_no_limit_returns_everything(stubbed):
+    storage, stubber = stubbed
+    stubber.add_response(
+        'list_objects_v2', _list_response(['p/1', 'p/2'], truncated=True, token='t1'), None
+    )
+    stubber.add_response('list_objects_v2', _list_response(['p/3']), None)
+    assert storage.list_keys('p/', max_keys=None) == ['p/1', 'p/2', 'p/3']
 
 
 def test_list_keys_rejects_a_non_positive_max_keys(stubbed):
@@ -330,6 +382,25 @@ def test_presigned_put_url_omits_optional_params_when_not_given(presigner):
     assert 'content-type' not in signed
 
 
+def test_presigned_put_url_refuses_a_non_sigv4_client():
+    client = build_client(
+        region='us-east-1',
+        endpoint_url=None,
+        access_key_id='AKIATESTKEY',
+        secret_access_key='test-secret',
+    )
+    storage = S3Storage(bucket=BUCKET, client=client)
+
+    with pytest.raises(UnsupportedSignatureVersionError):
+        storage.presigned_put_url('k', content_length=10)
+
+
+def test_presigned_put_url_works_on_an_explicit_sigv4_client(presigner):
+    assert presigner.client.meta.config.signature_version == 's3v4'
+    url = presigner.presigned_put_url('k', content_length=10)
+    assert 'X-Amz-Algorithm=AWS4-HMAC-SHA256' in url
+
+
 def test_presigned_put_url_uses_the_expiry(presigner):
     url = presigner.presigned_put_url('k', content_length=1, expires_in=120)
     assert _query(url)['X-Amz-Expires'] == ['120']
@@ -339,7 +410,10 @@ def test_presigned_put_url_passes_expected_params_to_boto():
     from unittest.mock import MagicMock
 
     client = MagicMock()
-    client.generate_presigned_url.return_value = 'https://example.test/signed'
+    client.generate_presigned_url.return_value = (
+        'https://example.test/signed?X-Amz-SignedHeaders='
+        'content-length%3Bcontent-type%3Bhost%3Bx-amz-checksum-sha256'
+    )
     storage = S3Storage(bucket=BUCKET, client=client)
 
     storage.presigned_put_url(
@@ -395,6 +469,42 @@ def test_presigned_get_url_inline_with_content_type():
     params = _params(client)
     assert params['ResponseContentDisposition'].startswith('inline; filename="invoice.pdf"')
     assert params['ResponseContentType'] == 'application/pdf'
+
+
+@pytest.mark.parametrize(
+    'content_type',
+    ['text/html', 'image/svg+xml', 'application/xhtml+xml', 'application/octet-stream'],
+)
+def test_presigned_get_url_inline_rejects_content_types_that_could_run_script(content_type):
+    storage, client = _mock_storage()
+    with pytest.raises(ValueError):
+        storage.presigned_get_url('k', 'a', disposition='inline', content_type=content_type)
+    client.generate_presigned_url.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    'content_type',
+    [
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'text/plain',
+        'Application/PDF',
+        'text/plain; charset=utf-8',
+    ],
+)
+def test_presigned_get_url_inline_allows_safe_content_types(content_type):
+    storage, client = _mock_storage()
+    storage.presigned_get_url('k', 'a', disposition='inline', content_type=content_type)
+    assert _params(client)['ResponseContentType'] == content_type
+
+
+def test_presigned_get_url_attachment_allows_any_content_type():
+    storage, client = _mock_storage()
+    storage.presigned_get_url('k', 'a.html', content_type='text/html')
+    assert _params(client)['ResponseContentType'] == 'text/html'
 
 
 def test_presigned_get_url_rejects_an_unknown_disposition():
