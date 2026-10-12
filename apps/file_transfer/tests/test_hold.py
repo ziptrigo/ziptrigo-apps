@@ -77,18 +77,18 @@ def test_held_transfer_is_unavailable(client, draft_transfer, uploaded_file):
     assert response.status_code == 404
 
 
-def test_held_transfer_is_not_billed(draft_transfer, ft_settings):
+def test_held_transfer_is_not_billed(draft_transfer, billing_settings):
     _active(
         draft_transfer,
         size_bytes=_ONE_GB,
         last_billed_at=timezone.now() - timedelta(hours=25),
         held_for_review_at=timezone.now(),
     )
-    ft_settings.price_per_gb_per_day = Decimal('1.0')
-    ft_settings.save()
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
     balance_before = get_balance(draft_transfer.owner)
 
-    meter_transfer(draft_transfer, ft_settings)
+    meter_transfer(draft_transfer)
 
     draft_transfer.refresh_from_db()
     assert draft_transfer.billed_days == 0

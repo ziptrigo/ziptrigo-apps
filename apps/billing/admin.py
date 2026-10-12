@@ -7,9 +7,10 @@ from django.shortcuts import render
 from django.urls import path
 
 from apps.accounts.models import User
+from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
-from .models import CreditAccount, CreditTransaction, CreditTransactionType
+from .models import BillingSettings, CreditAccount, CreditTransaction, CreditTransactionType
 from .services import InsufficientCreditsError, add_credits, get_balance, spend_credits
 
 
@@ -137,5 +138,11 @@ class CreditAccountAdmin(admin.ModelAdmin):
         return False
 
 
+class BillingSettingsAdmin(SingletonSettingsAdmin):
+    """Singleton settings page (issue #98): there's only ever the one row
+    `BillingSettings.load()` creates."""
+
+
 custom_admin_site.register(CreditTransaction, CreditTransactionAdmin)
 custom_admin_site.register(CreditAccount, CreditAccountAdmin)
+custom_admin_site.register(BillingSettings, BillingSettingsAdmin)

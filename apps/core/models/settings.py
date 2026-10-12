@@ -4,6 +4,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from .singleton import load_singleton
+
 #: Bounds for the email verification knobs below (issue #58 follow-up): wide enough to allow real
 #: retuning from the admin, narrow enough that no admin-set value can break the service outright
 #: (a 0-digit code always matches, 0 attempts burns every row on arrival, 0 minutes' validity
@@ -84,5 +86,4 @@ class CoreSettings(models.Model):
     @classmethod
     def load(cls) -> 'CoreSettings':
         """Return the singleton row, creating it with defaults on first use."""
-        obj, _ = cls.objects.get_or_create(pk=1)
-        return obj
+        return load_singleton(cls)
