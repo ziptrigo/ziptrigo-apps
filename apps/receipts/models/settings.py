@@ -1,7 +1,7 @@
 from typing import ClassVar, cast
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.core.models.singleton import load_singleton
@@ -65,8 +65,9 @@ class ReceiptsSettings(models.Model):
         int,
         models.PositiveIntegerField(
             default=100,
-            help_text='Receipts a user may add in any rolling 24 hours (uploads, API and email '
-            'together). Counted from the receipts themselves, trashed ones included.',
+            help_text='Receipts a user may add in a 24-hour window (uploads, API and email '
+            'together). The window starts with the first receipt and lasts 24 hours; files are '
+            'counted as they are added, so deleting them does not free up the cap.',
         ),
     )
     trash_days = cast(
@@ -80,7 +81,7 @@ class ReceiptsSettings(models.Model):
         int,
         models.PositiveIntegerField(
             default=5,
-            validators=[MinValueValidator(1)],
+            validators=[MinValueValidator(1), MaxValueValidator(20)],
             help_text='A PDF with no text layer (a scan) is rendered to images; only this many '
             'pages are sent to the AI.',
         ),

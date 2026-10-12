@@ -8,9 +8,9 @@ One call per receipt: the prepared images (data URIs) and/or text go in, and a J
 matches `RESPONSE_SCHEMA` comes back (`response_format` of type `json_schema`). The reply is then
 validated again with the pydantic `ExtractedReceipt`, which also tidies it: an unparseable date,
 amount or document type becomes "missing" rather than failing the whole response, a currency must
-be a real ISO 4217 code, and **any run of more than 4 digits in `payment_method` is masked, keeping
-only the last 4** -- the model is told never to return a full card number, and this guarantees none
-is stored even if it does.
+be a real ISO 4217 code, and **any card-like number in `payment_method` is masked, keeping only the
+last 4 digits** (see `mask_payment_method`) -- the model is told never to return a full card
+number, and this guarantees none is stored even if it does.
 
 Failures are split in two so the pipeline can react correctly (`services.processing`):
 
@@ -42,19 +42,35 @@ logger = logging.getLogger(__name__)
 #: Upper bound for `amount`: fits `Receipt.amount` (12 digits, 2 decimal places).
 MAX_AMOUNT = Decimal('9999999999.99')
 
-_DIGIT_RUN = re.compile(r'\d(?:[ \-]?\d){4,}')
+#: A run of digits joined by single spaces or hyphens (`4111 1111 1111 1111`).
+_STRICT_RUN = re.compile(r'\d(?:[ \-]?\d){4,}')
+#: A run of digits joined by anything that separates digit groups -- whitespace in any amount,
+#: dots, hyphens, slashes (`4111.1111.1111.1111`, `4111/1111/1111/1111`, two spaces).
+_LOOSE_RUN = re.compile(r'\d(?:[\s.\-/]*\d){4,}')
+#: A loosely separated run with at least this many digits is a card/account number, whatever it
+#: is separated by (a card has 12-19 digits).
+_LONG_RUN_DIGITS = 12
+
+
+def _masked(text: str) -> str:
+    return f'••{re.sub(r"\D", "", text)[-4:]}'
+
+
+def _mask_run(match: re.Match[str]) -> str:
+    text = match.group()
+    if len(re.sub(r'\D', '', text)) >= _LONG_RUN_DIGITS or _STRICT_RUN.fullmatch(text):
+        return _masked(text)
+    # A short run with odd separators (`12345 / 6`): still mask any plainly separated run inside.
+    return _STRICT_RUN.sub(lambda inner: _masked(inner.group()), text)
 
 
 def mask_payment_method(value: str) -> str:
-    """Replace every run of more than 4 digits (optionally separated by single spaces or hyphens,
-    like `4111 1111 1111 1111`) with `••` and its last 4 digits. `Visa 4111 1111 1111 1111` becomes
-    `Visa ••1111`; `Visa ••4242` and `ending 4242` are left alone."""
-
-    def _mask(match: re.Match[str]) -> str:
-        digits = re.sub(r'\D', '', match.group())
-        return f'••{digits[-4:]}'
-
-    return _DIGIT_RUN.sub(_mask, value)
+    """Keep only the last 4 digits of any card-like number. A run of more than 4 digits joined by
+    single spaces or hyphens, or of 12 or more digits joined by whitespace, dots, hyphens or
+    slashes in any amount, is replaced by `••` and its last 4 digits: `Visa 4111 1111 1111 1111`
+    and `Visa 4111.1111.1111.1111` become `Visa ••1111`; `Visa ••4242` and `ending 4242` are left
+    alone."""
+    return _LOOSE_RUN.sub(_mask_run, value)
 
 
 class TransientAIError(Exception):

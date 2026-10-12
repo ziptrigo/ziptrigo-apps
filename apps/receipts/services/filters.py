@@ -117,17 +117,19 @@ def _ordering(sort: str, *, trashed: bool) -> list:
 
 # -- CSV export ---------------------------------------------------------------------------------
 
-_FORMULA_PREFIXES = ('=', '+', '-', '@', '\t', '\r')
+_FORMULA_PREFIXES = ('=', '+', '-', '@')
+_CONTROL_PREFIXES = ('\t', '\r')
 
 
 def _cell(value: object) -> str:
     """One CSV cell. A text that a spreadsheet would read as a formula (it starts with `=`, `+`,
-    `-`, `@`...) is prefixed with an apostrophe: vendors and notes come from emails and the AI,
-    and `=HYPERLINK(...)` in an exported file is a real attack."""
+    `-`, `@`...), even after leading whitespace (some importers trim it), is prefixed with an
+    apostrophe: vendors and notes come from emails and the AI, and `=HYPERLINK(...)` in an
+    exported file is a real attack. Every cell goes through here."""
     if value is None:
         return ''
     text = str(value)
-    if text.startswith(_FORMULA_PREFIXES):
+    if text.startswith(_CONTROL_PREFIXES) or text.lstrip().startswith(_FORMULA_PREFIXES):
         return "'" + text
     return text
 
@@ -149,21 +151,22 @@ def iter_csv(user: User, filters: ReceiptFilters | None = None) -> Iterator[str]
     queryset = filter_receipts(user, filters).select_related('category')
     for receipt in queryset.iterator(chunk_size=500):
         writer.writerow(
-            [
+            _cell(value)
+            for value in (
                 receipt.receipt_date.isoformat() if receipt.receipt_date else '',
-                _cell(receipt.vendor),
+                receipt.vendor,
                 '' if receipt.amount is None else f'{receipt.amount:.2f}',
                 receipt.currency,
-                _cell(receipt.category.name if receipt.category else ''),
+                receipt.category.name if receipt.category else '',
                 receipt.document_type,
-                _cell(receipt.document_number),
-                _cell(receipt.payment_method),
-                _cell(receipt.notes),
+                receipt.document_number,
+                receipt.payment_method,
+                receipt.notes,
                 receipt.status,
                 receipt.source,
                 receipt.created_at.isoformat(),
-                _cell(receipt.original_filename),
-            ]
+                receipt.original_filename,
+            )
         )
         yield flush()
 

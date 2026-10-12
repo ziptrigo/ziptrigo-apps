@@ -75,6 +75,24 @@ class ReceiptsAccount(models.Model):
         ),
     )
 
+    intake_window_started_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='Start of the current 24-hour window of the daily file cap; see '
+            '`apps.receipts.services.accounts.take_intake_slot`.',
+        ),
+    )
+    intake_count = cast(
+        int,
+        models.PositiveIntegerField(
+            default=0,
+            help_text='Files started in the current 24-hour window. A counter on the account, '
+            'not a count of receipt rows, so deleting receipts does not free up the cap.',
+        ),
+    )
+
     created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
 
     class Meta:

@@ -1,6 +1,8 @@
 """A user's Receipts account: creating it (with its categories and first inbox code), the inbox
 address, and the stored-bytes counter that storage billing reads."""
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import F, Value
@@ -10,6 +12,10 @@ from django.utils import timezone
 from apps.accounts.models import User
 
 from ..models import DEFAULT_CATEGORIES, InboxCode, ReceiptCategory, ReceiptsAccount
+from .errors import DailyLimitExceededError
+
+#: Length of the window the daily file cap is counted over.
+INTAKE_WINDOW = timedelta(hours=24)
 
 
 def get_account(user: User) -> ReceiptsAccount:
@@ -74,3 +80,28 @@ def add_stored_bytes(user_id: object, delta: int) -> None:
     ReceiptsAccount.objects.filter(pk=user_id).update(
         stored_bytes=Greatest(F('stored_bytes') + delta, Value(0))
     )
+
+
+def take_intake_slot(user: User, limit: int) -> None:
+    """Count one more file against the account's daily cap, or raise `DailyLimitExceededError`.
+
+    The cap is a counter on the account (`intake_count`, over a 24-hour window that starts with
+    the first file: `intake_window_started_at`), read and incremented under a row lock on the
+    account, not a count of `Receipt` rows. So two concurrent starts can't both take the last slot,
+    and deleting a receipt (forever, even) doesn't hand its slot back. Like any fixed window it
+    allows up to twice the cap across a window boundary. Call it in the same transaction that
+    creates the receipt, so a failed creation gives the slot back.
+    """
+    now = timezone.now()
+    with transaction.atomic():
+        account = ReceiptsAccount.objects.select_for_update().get(pk=get_account(user).pk)
+        started = account.intake_window_started_at
+        if started is None or now - started >= INTAKE_WINDOW:
+            started, count = now, 0
+        else:
+            count = account.intake_count
+        if count >= limit:
+            raise DailyLimitExceededError(f'You can add up to {limit} receipts per day.')
+        ReceiptsAccount.objects.filter(pk=account.pk).update(
+            intake_window_started_at=started, intake_count=count + 1
+        )

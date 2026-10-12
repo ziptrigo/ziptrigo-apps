@@ -983,25 +983,37 @@ and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and ad
   on commit. Tests swap in `FakeReceiptsStorage` (autouse in `apps/receipts/tests/conftest.py`).
 - **Uploads** (`services.uploads`): `start_upload` validates (frozen account, size, allowed type --
   the claimed type is normalized, falling back to the extension for browsers that send none -- a
-  base64 SHA-256, and the daily cap *counted from `Receipt` rows*, trashed ones included, not from
-  the rate limiter), creates a `Receipt(uploaded=False)` and presigns a single PUT with the exact
-  `Content-Length` and `x-amz-checksum-sha256` signed in. `complete_upload` checks the object's
-  size/checksum, reads it back, sniffs the **magic bytes** (`documents.sniff_content_type`; a
+  base64 SHA-256, and the daily cap), creates a `Receipt(uploaded=False)` and presigns a single PUT with the exact
+  `Content-Length` and `x-amz-checksum-sha256` signed in. The **daily cap** is a counter on the account
+  (`ReceiptsAccount.intake_count` over a 24-hour window starting at the first file,
+  `intake_window_started_at`; `accounts.take_intake_slot`, run under a row lock in the same
+  transaction that creates the `Receipt`), deliberately not a count of `Receipt` rows (deleting
+  receipts would free slots) and not the rate limiter (static rules, fails open, off under pytest);
+  being a fixed window it allows up to twice the cap across a boundary, and email intake will call
+  the same function. `complete_upload` checks the object's size, reads it back, compares
+  `base64(sha256(data))` with the declared checksum **unconditionally** (not only when S3 echoes one
+  back), sniffs the **magic bytes** (`documents.sniff_content_type`; a
   mismatch with the claimed type deletes the object and fails the receipt `unsupported_type`),
   computes the SHA-256 server-side, adds to `stored_bytes` and queues processing on commit.
   `cleanup_uploads` removes uploads not completed within 24 h.
 - **Processing** (`services.processing`, task `process_receipt` on the `receipts` queue; read its
-  module docstring). A conditional `UPDATE` claims `received`/`waiting_for_credits` -> `processing`;
+  module docstring). A conditional `UPDATE` claims `received`/`waiting_for_credits` -> `processing` (not before
+  `next_attempt_at`, so a stray duplicate task can't skip a backoff);
   in the same `atomic()` it charges `price_per_file` **once per `attempt_id`** (`charged_attempt_id`;
   a price of 0 skips `spend_credits`). A frozen account or `InsufficientCreditsError` parks the
   receipt in `waiting_for_credits`. Input preparation (`services.documents`: HEIC -> JPEG via
-  `pillow-heif` with the JPEG kept as the preview, downscale, `Image.MAX_IMAGE_PIXELS`, PDF text via
-  `pypdf` or rendered pages via `pypdfium2`, HTML -> text with the stdlib parser) and the AI call
+  `pillow-heif` with the JPEG kept as the preview, downscale, an explicit `MAX_IMAGE_PIXELS` check (Pillow's process-wide limit is left alone), PDF
+  text via `pypdf` or rendered pages via `pypdfium2` -- each page is sized with `get_size()` first
+  and rendered at a scale that keeps its bitmap under `MAX_IMAGE_PIXELS` (a page over 14,400 pt on a
+  side is unreadable), the PIL image going straight to the JPEG encoder -- HTML -> text with the stdlib parser) and the AI call
   (`services.ai`) happen outside any transaction; the result is applied under a row lock only if
-  the receipt is still `processing` for the same `attempt_id`. The AI client is
+  the receipt is still `processing` for the same `attempt_id`. A HEIC preview is
+  written before its conditional `UPDATE`; if that matches nothing and no row references the key
+  (the receipt was purged, or its user deleted, meanwhile) the object is deleted again. The AI client is
   `ai.get_client()` (tests: autouse `FakeAIClient`; the suite never touches the network); its reply
-  is validated with pydantic, `payment_method` has every digit run over 4 masked (also for
-  hand-typed values), a `category` is matched case-insensitively against the user's own list.
+  is validated with pydantic, `payment_method` is masked to its last 4 digits (a run of 5+ digits
+  joined by single spaces/hyphens, or 12+ digits joined by any whitespace, dots, hyphens or slashes;
+  also for hand-typed values and the copy kept in `ai_result`), a `category` is matched case-insensitively against the user's own list.
   Outcomes: more than one receipt -> `failed/multiple_receipts`; not a receipt ->
   `failed/not_a_receipt` (neither fills any field); a required field missing or confidence below
   0.5 (unless the user supplied all three) -> `needs_review`; else `processed`. `user_edited_fields`
@@ -1022,8 +1034,10 @@ and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and ad
 - **Notifications** (`services.emails`, tasks on the `receipts` queue, owner only, only to a
   *confirmed* address, autoescaped `html_body`, no sender-controlled text in a subject):
   `send_attention_email` is queued once per `InboundEmail` (CAS on `attention_notified_at`) when its
-  last receipt settles and any failed or need review -- it only fires for real once email intake
-  exists; `send_storage_paused_email` on freeze. Links are `/receipts/...` literals until the URLs
+  last receipt settles and any failed or need review (a settling receipt row-locks its
+  `InboundEmail` right after its own row, `emails.lock_inbound_email`, so concurrent siblings run
+  the "everyone done?" check one after the other; always receipt, then email) -- it only fires for
+  real once email intake exists; `send_storage_paused_email` on freeze. Links are `/receipts/...` literals until the URLs
   exist.
 - **Billing** (`services.metering`). `receipts.meter_storage` (daily) bills *per account*:
   `stored_bytes` (originals, previews, stripped emails; trashed ones included until purged) x the
@@ -1036,26 +1050,33 @@ and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and ad
   days are never billed (unfreezing sets `last_billed_at = now`). The `credits_added` receiver
   (`weak=False`, wrapped in `try/except` because `send` would otherwise skip file transfer's
   receiver) only queues `resume_account(user_id)`, and only for users with a Receipts account;
-  `resume_account` unfreezes at balance >= 1, then queues `waiting_for_credits` receipts oldest
-  first, stopping at the first the balance can't cover. The daily job also resumes frozen accounts
-  as a fallback.
+  `resume_account` unfreezes only when the balance covers **one day of that account's storage**
+  (`metering.daily_storage_cost`: `ceil(price * stored_bytes / 1 GiB)` at the shared price, at least
+  1) -- a flat "1 credit" would let a 5-credit-a-day account buy a forgiven day with every 1-credit
+  top-up -- and then queues `waiting_for_credits` receipts oldest first, stopping at the first the
+  balance can't cover. The daily job also resumes frozen accounts as a fallback, but only those
+  that were **already frozen before its metering pass** (it snapshots their ids first); otherwise
+  an account frozen in that very run would be unfrozen again at once, its day forgiven and its
+  owner told "paused" every day for nothing.
 - **Actions** (`services.actions`, shared by the future views and API; `ValidationError` -> 422/400,
   `AccountFrozenError`/`InsufficientCreditsError` -> 402): `update_receipt` (partial; records the
   extracted fields that actually changed in `user_edited_fields`, `notes` aside; refuses extracted
   fields while the AI owns the receipt; moves `needs_review` <-> `processed` as the required fields
   are filled/cleared), `reprocess` (new `attempt_id`, charged again, refused up front when the
-  balance can't cover it), `trash`/`restore`/`delete_forever`, `dismiss_duplicate`,
+  balance can't cover it), `trash`/`restore` (both bump `updated_at`, which `.update()` skips, so `retry_due`'s "never queued"
+  branch doesn't re-queue restored rows) /`delete_forever` (refused while the receipt is
+  `processing`; `purge_trash` skips such rows too), `dismiss_duplicate`,
   `regenerate_inbox_code`, `update_inbox_settings` (allowlist of emails and `*@domain`, normalized
   by `services.addresses`, plus default currency as an ISO 4217 code), category create/rename/
   reorder/delete (deleting uncategorizes). `services.filters` has `filter_receipts` (status,
   category, `q` over vendor + notes, `receipt_date` range, duplicates, sort; default
   `-receipt_date` with undated first) and the CSV export (`iter_csv`/`export_csv`, columns per the
-  issue, formula-injection neutralized); `services.files` has the presigned inline/attachment URLs
+  issue; every cell goes through the formula guard, which also catches leading whitespace); `services.files` has the presigned inline/attachment URLs
   (an HTML body is *never* served inline from S3 -- the later body view streams it with a CSP).
   The `RECEIPTS_*_USER` rate-limit rules exist in `RATELIMIT_RULES`; the views/API will enforce them.
 - **Jobs** (`apps/receipts/jobs.py`, registered in `ready()`): `receipts.meter_storage` (daily),
   `receipts.purge_trash` (daily; deletes S3 objects, then rows, past `trash_days`, and the stripped
-  `.eml` with the email's last receipt), `receipts.retry_due` (5 min; due retries, `processing`
+  `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
   `receipts.cleanup_uploads` (hourly). Idempotent, per-row `try/except` + `logger.exception`.
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is

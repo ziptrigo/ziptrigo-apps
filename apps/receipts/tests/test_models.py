@@ -2,6 +2,7 @@ import re
 from decimal import Decimal
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
 from ..models import (
@@ -198,6 +199,17 @@ class TestSettings:
             'image/webp',
             'image/heic',
         ]
+
+    def test_max_pdf_pages_to_ai_is_bounded(self, db):
+        row = ReceiptsSettings.load()
+        row.max_pdf_pages_to_ai = 21
+        with pytest.raises(ValidationError):
+            row.full_clean()
+        row.max_pdf_pages_to_ai = 0
+        with pytest.raises(ValidationError):
+            row.full_clean()
+        row.max_pdf_pages_to_ai = 20
+        row.full_clean()
 
     def test_load_is_a_singleton(self, db):
         ReceiptsSettings.load()

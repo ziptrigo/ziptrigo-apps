@@ -100,6 +100,24 @@ class TestMeterStorage:
         assert 'meter_account failed' in caplog.text
         assert get_balance(regular_user) == 49
 
+    def test_an_account_frozen_by_this_run_is_not_unfrozen_by_it(self, funded_user):
+        from apps.billing.services import spend_credits
+
+        spend_credits(funded_user, 97, source='test')  # 3 credits left
+        account = get_account(funded_user)
+        ReceiptsAccount.objects.filter(pk=account.pk).update(
+            stored_bytes=50 * GB, last_billed_at=timezone.now() - timedelta(hours=25)
+        )  # 5 credits a day
+
+        jobs.meter_storage()
+
+        account.refresh_from_db()
+        assert account.frozen_at is not None
+        assert get_balance(funded_user) == 3  # the day was not charged, nor forgiven
+        jobs.meter_storage()  # and the next run, with the same balance, keeps it frozen
+        account.refresh_from_db()
+        assert account.frozen_at is not None
+
     def test_running_twice_in_a_tick_charges_once(self, funded_user):
         account = get_account(funded_user)
         ReceiptsAccount.objects.filter(pk=account.pk).update(
@@ -199,6 +217,19 @@ class TestPurgeTrash:
         assert not Receipt.objects.filter(pk__in=[first.pk, second.pk]).exists()
         assert InboundEmail.objects.filter(pk=email.pk).exists()  # the record of what arrived stays
         assert get_account(funded_user).stored_bytes == 0
+
+    def test_a_receipt_still_being_processed_is_not_purged(self, funded_user, fake_storage):
+        receipt = create_receipt(
+            funded_user,
+            fake_storage,
+            status=ReceiptStatus.PROCESSING,
+            deleted_at=timezone.now() - timedelta(days=40),
+        )
+
+        jobs.purge_trash()
+
+        assert Receipt.objects.filter(pk=receipt.pk).exists()
+        assert receipt.file_key in fake_storage.objects
 
     def test_a_live_sibling_keeps_the_eml(self, funded_user, fake_storage):
         email = create_inbound_email(

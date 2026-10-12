@@ -204,6 +204,39 @@ class TestUnfreeze:
         account.refresh_from_db()
         assert account.frozen_at is None
 
+    def test_a_balance_below_a_days_storage_does_not_unfreeze(self, stored, funded_user):
+        # 50 GB at 0.1 credit/GB/day is 5 credits a day: 1-4 credits cannot pay the next run.
+        spend_credits(funded_user, 100, source='test')
+        account = stored(50)
+        metering.meter_account(account.pk)
+        account.refresh_from_db()
+        assert account.frozen_at is not None
+        add_credits(funded_user, 4, source='test')
+
+        assert metering.resume(str(funded_user.pk)) == 0
+
+        account.refresh_from_db()
+        assert account.frozen_at is not None
+
+    def test_a_balance_that_covers_a_days_storage_unfreezes(self, stored, funded_user):
+        spend_credits(funded_user, 100, source='test')
+        account = stored(50)
+        metering.meter_account(account.pk)
+        add_credits(funded_user, 5, source='test')
+
+        metering.resume(str(funded_user.pk))
+
+        account.refresh_from_db()
+        assert account.frozen_at is None
+
+    def test_the_daily_cost_rounds_up_and_is_at_least_one_credit(self, billing_settings):
+        assert metering.daily_storage_cost(0) == 1
+        assert metering.daily_storage_cost(GB) == 1  # 0.1 credit
+        assert metering.daily_storage_cost(10 * GB) == 1
+        assert metering.daily_storage_cost(11 * GB) == 2  # 1.1 credits
+        assert metering.daily_storage_cost(50 * GB) == 5
+        assert metering.daily_storage_cost(10 * GB, Decimal('0.5')) == 5
+
     def test_nothing_is_deleted_while_frozen(self, stored, funded_user, make_receipt, fake_storage):
         receipt = make_receipt()
         self.freeze(stored, funded_user)

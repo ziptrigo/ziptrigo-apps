@@ -442,6 +442,13 @@ class TestUserEditsAreKept:
         assert receipt.vendor == ''
 
 
+def retry_time_comes(receipt) -> None:
+    """The backoff elapses (a claim refuses a receipt before its `next_attempt_at`)."""
+    Receipt.objects.filter(pk=receipt.pk).update(
+        next_attempt_at=timezone.now() - timedelta(seconds=1)
+    )
+
+
 class TestRetriesAndRefunds:
     def test_a_transient_error_backs_off(self, make_receipt, fake_ai, funded_user):
         fake_ai.queue = [TransientAIError('rate limited')]
@@ -462,6 +469,7 @@ class TestRetriesAndRefunds:
         fake_ai.queue = [TransientAIError('timeout')]
         receipt = make_receipt()
         run(receipt)
+        retry_time_comes(receipt)
 
         run(receipt)
 
@@ -485,8 +493,10 @@ class TestRetriesAndRefunds:
         receipt = make_receipt()
 
         run(receipt)
+        retry_time_comes(receipt)
         run(receipt)
         assert receipt.status == ReceiptStatus.RECEIVED
+        retry_time_comes(receipt)
         run(receipt)
 
         assert receipt.status == ReceiptStatus.FAILED
@@ -639,6 +649,29 @@ class TestUnreadableInput:
         assert receipt.attempts == 1
 
 
+class TestClaimBackoff:
+    def test_a_receipt_waiting_for_its_retry_time_is_not_claimed(self, make_receipt, fake_ai):
+        receipt = make_receipt(next_attempt_at=timezone.now() + timedelta(minutes=10))
+
+        assert processing.claim(receipt.pk) is None
+
+        receipt.refresh_from_db()
+        assert receipt.status == ReceiptStatus.RECEIVED
+        assert fake_ai.calls == []
+
+    def test_a_receipt_whose_retry_time_has_come_is_claimed(self, make_receipt):
+        receipt = make_receipt(next_attempt_at=timezone.now() - timedelta(seconds=1))
+
+        claimed = processing.claim(receipt.pk)
+
+        assert claimed is not None
+        assert claimed.status == ReceiptStatus.PROCESSING
+        assert claimed.next_attempt_at is None
+
+    def test_a_receipt_with_no_retry_time_is_claimed(self, make_receipt):
+        assert processing.claim(make_receipt().pk) is not None
+
+
 class TestHeicPreview:
     def test_a_jpeg_preview_is_stored_and_counted(self, make_receipt, fake_storage, funded_user):
         original = samples.heic_bytes()
@@ -666,6 +699,30 @@ class TestHeicPreview:
         run(receipt)
 
         assert get_account(funded_user).stored_bytes == stored
+
+    def test_a_preview_written_for_a_receipt_purged_meanwhile_is_deleted(
+        self, make_receipt, fake_storage, funded_user
+    ):
+        from ..services.storage import get_storage
+
+        receipt = make_receipt(data=samples.heic_bytes())
+        Receipt.objects.filter(pk=receipt.pk).delete()  # purged while the run was working
+        before = get_account(funded_user).stored_bytes
+
+        processing._store_preview(receipt, b'\xff\xd8\xff' + b'j' * 50)
+
+        assert preview_key(funded_user.pk, receipt.pk) not in fake_storage.objects
+        assert get_account(funded_user).stored_bytes == before
+        assert get_storage() is fake_storage
+
+    def test_a_preview_already_stored_by_a_concurrent_run_is_kept(self, make_receipt, fake_storage):
+        receipt = make_receipt(data=samples.heic_bytes())
+        key = preview_key(receipt.user_id, receipt.pk)
+        Receipt.objects.filter(pk=receipt.pk).update(preview_key=key, preview_size_bytes=10)
+
+        processing._store_preview(receipt, b'\xff\xd8\xff' + b'j' * 50)
+
+        assert key in fake_storage.objects
 
     def test_other_types_get_no_preview(self, make_receipt):
         receipt = make_receipt(data=samples.png_bytes())
@@ -788,6 +845,52 @@ class TestAttentionEmail:
         assert 'more than one receipt' in mail['text_body']
         email.refresh_from_db()
         assert email.attention_notified_at is not None
+
+    def test_the_inbound_email_is_locked_before_the_siblings_are_checked(
+        self, funded_user, fake_storage, fake_ai, monkeypatch
+    ):
+        """The lock is a no-op on SQLite, so assert on the order of the calls instead."""
+        from ..services import emails
+
+        events = []
+        real_lock, real_queue = (
+            processing.lock_inbound_email,
+            emails.queue_attention_email_if_settled,
+        )
+        monkeypatch.setattr(
+            processing,
+            'lock_inbound_email',
+            lambda email_id: (events.append(('lock', email_id)), real_lock(email_id)),
+        )
+        monkeypatch.setattr(
+            processing,
+            'queue_attention_email_if_settled',
+            lambda receipt: (
+                events.append(('check', receipt.inbound_email_id)),
+                real_queue(receipt),
+            ),
+        )
+        email = create_inbound_email(funded_user)
+        receipt = create_receipt(funded_user, fake_storage, inbound_email=email, source='email')
+
+        run(receipt)
+
+        assert events == [('lock', email.pk), ('check', email.pk)]
+
+    def test_two_siblings_settling_one_after_the_other_send_exactly_one_email(
+        self, funded_user, fake_storage, fake_ai, sent_emails, django_capture_on_commit_callbacks
+    ):
+        fake_ai.default = sample_extraction(receipt_count=2)
+        email = create_inbound_email(funded_user)
+        first = create_receipt(funded_user, fake_storage, inbound_email=email, source='email')
+        second = create_receipt(funded_user, fake_storage, inbound_email=email, source='email')
+
+        with django_capture_on_commit_callbacks(execute=True):
+            run(first)
+            run(second)
+
+        assert len(sent_emails) == 1
+        assert sent_emails[0]['subject'] == '2 receipts need your attention'
 
     def test_nothing_is_sent_when_everything_processed(
         self, funded_user, fake_storage, sent_emails, django_capture_on_commit_callbacks

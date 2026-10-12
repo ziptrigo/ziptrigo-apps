@@ -34,18 +34,42 @@ class TestMaskPaymentMethod:
             ('IBAN DE89370400440532013000', 'IBAN DE••3000'),
             ('Cash', 'Cash'),
             ('12345', '••2345'),
+            ('Visa 4111.1111.1111.1111', 'Visa ••1111'),
+            ('Visa 4111/1111/1111/1111', 'Visa ••1111'),
+            ('Visa 4111  1111  1111  1111', 'Visa ••1111'),
+            ('Visa 4111 - 1111 - 1111 - 1111', 'Visa ••1111'),
+            ('Visa 4111 1111.1111-1111/', 'Visa ••1111/'),
+            ('Visa 4111\t1111\n1111 1111', 'Visa ••1111'),
+            ('Amex 3782.822463.10005', 'Amex ••0005'),
+            ('Card 4111 1111 1111 1111 exp 12/26', 'Card ••1111 exp 12/26'),
+            ('Visa ••4242 and Mastercard ••1111', 'Visa ••4242 and Mastercard ••1111'),
         ],
     )
     def test_masking(self, raw, masked):
         assert mask_payment_method(raw) == masked
 
     def test_a_long_digit_run_never_survives(self):
-        for raw in ('Card 1234567890123456', 'acct 98765 43210 1111 ref'):
+        for raw in (
+            'Card 1234567890123456',
+            'acct 98765 43210 1111 ref',
+            'Card 4111.1111.1111.1111',
+            'Card 4111/1111/1111/1111',
+            'Card 4111  1111  1111  1111',
+            'Card 4111 . 1111 / 1111 - 1111',
+        ):
             masked = mask_payment_method(raw)
             assert not re.search(r'\d{5}', masked)
 
 
 class TestExtractedReceipt:
+    def test_the_stored_result_is_masked_too(self):
+        extracted = ExtractedReceipt.model_validate(
+            {'is_receipt': True, 'receipt_count': 1, 'payment_method': 'Visa 4111.1111.1111.1111'}
+        )
+
+        assert extracted.payment_method == 'Visa ••1111'
+        assert extracted.model_dump(mode='json')['payment_method'] == 'Visa ••1111'
+
     def test_validates_a_full_response(self):
         extracted = ExtractedReceipt.model_validate(
             {

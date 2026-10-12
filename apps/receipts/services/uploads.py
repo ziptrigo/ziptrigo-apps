@@ -7,8 +7,9 @@
 2. The client PUTs the file to the URL.
 3. `complete_upload` checks the object landed with the declared size, reads it back, **sniffs its
    magic bytes** (the claimed type is never trusted: a mismatch deletes the object and fails the
-   receipt as `unsupported_type`), computes the SHA-256 server-side, counts the bytes against the
-   account's storage and queues processing.
+   receipt as `unsupported_type`), computes the SHA-256 server-side and checks it against the
+   declared checksum whatever S3 echoed back, counts the bytes against the account's storage and
+   queues processing.
 
 A receipt that is never completed is cleaned up after 24 hours (`abandon_upload`, by the
 `cleanup_uploads` job). Nothing is billed for an upload until it completes.
@@ -27,15 +28,14 @@ from typing import NoReturn
 from botocore.exceptions import BotoCoreError, ClientError
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.core.services.storage import ObjectTooLargeError
 
 from ..models import FailureReason, Receipt, ReceiptSource, ReceiptsSettings, ReceiptStatus
 from . import documents
-from .accounts import add_stored_bytes, get_account
-from .errors import AccountFrozenError, DailyLimitExceededError
+from .accounts import add_stored_bytes, get_account, take_intake_slot
+from .errors import AccountFrozenError
 from .processing import enqueue_processing
 from .storage import PUT_URL_EXPIRES_SECONDS, file_key, get_storage
 
@@ -115,8 +115,9 @@ def start_upload(
 
     Raises:
         AccountFrozenError: the account's storage is unpaid.
-        DailyLimitExceededError: `max_files_per_user_per_day` receipts were already added in the
-            last 24 hours.
+        DailyLimitExceededError: `max_files_per_user_per_day` files were already started in the
+            account's current 24-hour window (`accounts.take_intake_slot`; deleting receipts does
+            not give a slot back).
         ValidationError: the size is not between 1 byte and `max_file_bytes`, the type is not an
             allowed one, or the checksum is malformed.
     """
@@ -137,14 +138,6 @@ def start_upload(
         raise ValidationError('This file type is not supported. Use PDF, JPG, PNG, HEIC or WebP.')
     checksum_sha256 = _validate_checksum(checksum_sha256)
 
-    since = timezone.now() - timedelta(hours=24)
-    if Receipt.objects.filter(user=user, created_at__gte=since).count() >= (
-        config.max_files_per_user_per_day
-    ):
-        raise DailyLimitExceededError(
-            f'You can add up to {config.max_files_per_user_per_day} receipts per day.'
-        )
-
     receipt = Receipt(
         user=user,
         source=source,
@@ -156,7 +149,9 @@ def start_upload(
         status=ReceiptStatus.RECEIVED,
     )
     receipt.file_key = file_key(user.pk, receipt.pk)
-    receipt.save()
+    with transaction.atomic():
+        take_intake_slot(user, config.max_files_per_user_per_day)
+        receipt.save()
     url = get_storage().presigned_put_url(
         receipt.file_key, content_length=size, checksum_sha256=checksum_sha256
     )
@@ -220,6 +215,14 @@ def complete_upload(receipt: Receipt) -> Receipt:
     except (ClientError, BotoCoreError) as exc:
         raise ValidationError('The file could not be read back; try again.') from exc
 
+    # Whatever the backend echoes (Floci and others may not), compare what we actually read.
+    digest = sha256(data)
+    if (
+        receipt.upload_checksum_sha256
+        and base64.b64encode(digest.digest()).decode('ascii') != receipt.upload_checksum_sha256
+    ):
+        _reject(receipt, FailureReason.UNREADABLE, 'The uploaded file is corrupted.')
+
     sniffed = documents.sniff_content_type(data)
     if sniffed is None or not config.is_type_allowed(sniffed):
         _reject(
@@ -238,7 +241,7 @@ def complete_upload(receipt: Receipt) -> Receipt:
         won = Receipt.objects.filter(pk=receipt.pk, uploaded=False).update(
             uploaded=True,
             content_type=sniffed,
-            sha256=sha256(data).hexdigest(),
+            sha256=digest.hexdigest(),
             size_bytes=len(data),
         )
         if won:

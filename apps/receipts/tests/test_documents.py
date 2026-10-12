@@ -106,8 +106,8 @@ class TestImages:
         with pytest.raises(documents.UnreadableDocumentError, match='too large'):
             documents.prepare_input(samples.jpeg_bytes((200, 300)), documents.JPEG)
 
-    def test_pillow_is_told_the_pixel_limit(self):
-        assert Image.MAX_IMAGE_PIXELS == documents.MAX_IMAGE_PIXELS
+    def test_pillows_process_wide_limit_is_left_alone(self):
+        assert Image.MAX_IMAGE_PIXELS != documents.MAX_IMAGE_PIXELS
 
 
 class TestPdf:
@@ -133,6 +133,93 @@ class TestPdf:
         prepared = documents.prepare_input(out.getvalue(), documents.PDF, max_pdf_pages=2)
 
         assert len(prepared.images) == 2
+
+    def test_a_normal_page_renders_at_the_full_scale(self):
+        assert documents._render_scale(612, 792) == documents.PDF_RENDER_SCALE
+
+    def test_a_big_page_is_rendered_at_a_lower_scale_that_fits_the_pixel_cap(self):
+        scale = documents._render_scale(10_000, 10_000)
+
+        assert 0 < scale < documents.PDF_RENDER_SCALE
+        assert 10_000 * scale * 10_000 * scale <= documents.MAX_IMAGE_PIXELS
+
+    @pytest.mark.parametrize(
+        'size', [(14_401, 100), (100, 14_401), (0, 100), (100, -5), (float('nan'), 100)]
+    )
+    def test_an_absurd_page_size_is_refused(self, size):
+        with pytest.raises(documents.UnreadableDocumentError, match='page size'):
+            documents._render_scale(*size)
+
+    def test_the_render_is_sized_before_anything_is_allocated(self, monkeypatch):
+        """A page that would need a ~3 GB bitmap at the full scale is rendered small."""
+        import pypdfium2 as pdfium
+
+        seen = []
+
+        class Page:
+            def get_size(self):
+                return (14_000, 14_000)
+
+            def render(self, scale):
+                seen.append(scale)
+                return type('Bitmap', (), {'to_pil': lambda self: Image.new('RGB', (50, 50))})()
+
+            def close(self):
+                pass
+
+        class Pdf:
+            def __init__(self, data):
+                pass
+
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, index):
+                return Page()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(pdfium, 'PdfDocument', Pdf)
+
+        [jpeg] = documents._render_pdf_pages(b'%PDF-', 5)
+
+        assert documents.sniff_content_type(jpeg) == 'image/jpeg'
+        assert 14_000 * 14_000 * seen[0] ** 2 <= documents.MAX_IMAGE_PIXELS
+
+    def test_a_pdf_with_an_absurd_page_is_unreadable_not_rendered(self, monkeypatch):
+        import pypdfium2 as pdfium
+
+        rendered = []
+
+        class Page:
+            def get_size(self):
+                return (20_000, 20_000)
+
+            def render(self, scale):
+                rendered.append(scale)
+
+            def close(self):
+                pass
+
+        class Pdf:
+            def __init__(self, data):
+                pass
+
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, index):
+                return Page()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(pdfium, 'PdfDocument', Pdf)
+
+        with pytest.raises(documents.UnreadableDocumentError, match='page size'):
+            documents._render_pdf_pages(b'%PDF-', 5)
+        assert rendered == []
 
     def test_a_broken_pdf_is_unreadable(self):
         with pytest.raises(documents.UnreadableDocumentError):

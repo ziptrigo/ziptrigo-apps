@@ -201,6 +201,14 @@ class TestUpdateReceipt:
         assert receipt.currency == 'USD'
         assert receipt.document_type == 'invoice'
 
+    def test_a_card_number_with_dots_typed_by_hand_is_masked(self, make_receipt):
+        receipt = make_receipt(status=ReceiptStatus.PROCESSED)
+
+        actions.update_receipt(receipt, {'payment_method': 'Visa 4111.1111.1111.1111'})
+
+        receipt.refresh_from_db()
+        assert receipt.payment_method == 'Visa ••1111'
+
     def test_a_full_card_number_typed_by_hand_is_masked(self, make_receipt):
         receipt = make_receipt(status=ReceiptStatus.PROCESSED)
 
@@ -393,6 +401,18 @@ class TestTrash:
         assert receipt.deleted_at is None
         assert Receipt.objects.get(pk=receipt.pk).deleted_at is None
 
+    def test_trash_and_restore_bump_updated_at(self, make_receipt):
+        receipt = make_receipt(status=ReceiptStatus.PROCESSED)
+        long_ago = timezone.now() - timedelta(days=2)
+        Receipt.objects.filter(pk=receipt.pk).update(updated_at=long_ago)
+
+        actions.trash(receipt)
+        assert Receipt.objects.get(pk=receipt.pk).updated_at > long_ago
+
+        Receipt.objects.filter(pk=receipt.pk).update(updated_at=long_ago)
+        actions.restore(receipt)
+        assert Receipt.objects.get(pk=receipt.pk).updated_at > long_ago
+
     def test_trashing_twice_keeps_the_first_time(self, make_receipt):
         receipt = make_receipt(status=ReceiptStatus.PROCESSED)
         actions.trash(receipt)
@@ -454,6 +474,17 @@ class TestTrash:
 
         with pytest.raises(ValidationError, match='Trash'):
             actions.delete_forever(receipt)
+
+    def test_delete_forever_is_refused_while_the_receipt_is_being_processed(
+        self, make_receipt, fake_storage
+    ):
+        receipt = make_receipt(status=ReceiptStatus.PROCESSING, deleted_at=timezone.now())
+
+        with pytest.raises(ValidationError, match='being processed'):
+            actions.delete_forever(receipt)
+
+        assert Receipt.objects.filter(pk=receipt.pk).exists()
+        assert receipt.file_key in fake_storage.objects
 
     def test_delete_forever_removes_the_files_the_row_and_the_bytes(
         self, make_receipt, fake_storage, funded_user
@@ -616,6 +647,13 @@ class TestCategories:
         assert names[:2] == ['Other', 'Travel']
         remaining = [n for n in DEFAULT_CATEGORIES if n not in ('Other', 'Travel')]
         assert names[2:] == remaining
+
+    @pytest.mark.parametrize('bad', ['abc', None, '1.5', [3]])
+    def test_reorder_refuses_non_integer_ids_with_a_validation_error(self, funded_user, bad):
+        get_account(funded_user)
+
+        with pytest.raises(ValidationError, match='Unknown category'):
+            actions.reorder_categories(funded_user, [bad])
 
     def test_reorder_refuses_foreign_ids(self, funded_user, regular_user):
         get_account(regular_user)

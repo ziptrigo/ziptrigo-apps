@@ -16,11 +16,14 @@ client claimed. HEIC and HEIF are both reported as `image/heic`.
   and other non-content elements dropped).
 
 Anything that can't be decoded raises `UnreadableDocumentError`; a type with no preparation raises
-`UnsupportedDocumentError`. `Image.MAX_IMAGE_PIXELS` is set here, and an image whose header claims
-more pixels is refused before its pixel data is ever loaded (a decompression-bomb guard).
+`UnsupportedDocumentError`. An image whose header claims more than `MAX_IMAGE_PIXELS` is refused
+before its pixel data is ever loaded (a decompression-bomb guard; Pillow's own process-wide limit
+is left alone), and a PDF page is rendered at a scale that keeps its bitmap under the same cap --
+before anything is allocated -- and refused outright if its page size is absurd.
 """
 
 import io
+import math
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -33,7 +36,6 @@ JPEG_QUALITY = 85
 
 #: Images with more pixels than this are refused (the largest phone cameras write 48 MP).
 MAX_IMAGE_PIXELS = 50_000_000
-Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 #: What gets sent to the AI is capped so one huge PDF or HTML body can't blow up a request.
 MAX_TEXT_CHARS = 30_000
@@ -43,6 +45,9 @@ MIN_PDF_TEXT_CHARS = 40
 MAX_PDF_TEXT_PAGES = 20
 #: `pypdfium2` render scale: 1 is 72 dpi, so 2 is 144 dpi (a Letter page is ~1224x1584).
 PDF_RENDER_SCALE = 2
+#: A PDF page bigger than this on a side, in points (14400 pt is 200 inches, the PDF spec's own
+#: maximum), is refused as unreadable instead of rendered.
+MAX_PDF_PAGE_POINTS = 14_400
 
 PDF = 'application/pdf'
 JPEG = 'image/jpeg'
@@ -147,29 +152,37 @@ def _normalize_image(data: bytes) -> bytes:
             # Lets libjpeg decode at a reduced size, which keeps a big photo's memory use down.
             image.draft('RGB', (MAX_IMAGE_SIDE_PX, MAX_IMAGE_SIDE_PX))
         image.load()
-        image = ImageOps.exif_transpose(image) or image
-        if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
-            rgba = image.convert('RGBA')
-            flattened = Image.new('RGB', rgba.size, (255, 255, 255))
-            flattened.paste(rgba, mask=rgba.getchannel('A'))
-            image = flattened
-        elif image.mode != 'RGB':
-            image = image.convert('RGB')
-        image.thumbnail((MAX_IMAGE_SIDE_PX, MAX_IMAGE_SIDE_PX), Image.Resampling.LANCZOS)
-        out = io.BytesIO()
-        image.save(out, format='JPEG', quality=JPEG_QUALITY, optimize=True)
-        return out.getvalue()
+        return _encode_jpeg(image)
     except UnreadableDocumentError:
         raise
-    except (
-        UnidentifiedImageError,
-        Image.DecompressionBombError,
-        OSError,
-        ValueError,
-        SyntaxError,
-        EOFError,
-    ) as exc:
+    except _IMAGE_ERRORS as exc:
         raise UnreadableDocumentError(f'The image could not be read: {exc}') from exc
+
+
+_IMAGE_ERRORS = (
+    UnidentifiedImageError,
+    Image.DecompressionBombError,
+    OSError,
+    ValueError,
+    SyntaxError,
+    EOFError,
+)
+
+
+def _encode_jpeg(image: Image.Image) -> bytes:
+    """Orient, flatten and downscale an already decoded image, and encode it as a JPEG."""
+    image = ImageOps.exif_transpose(image) or image
+    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+        rgba = image.convert('RGBA')
+        flattened = Image.new('RGB', rgba.size, (255, 255, 255))
+        flattened.paste(rgba, mask=rgba.getchannel('A'))
+        image = flattened
+    elif image.mode != 'RGB':
+        image = image.convert('RGB')
+    image.thumbnail((MAX_IMAGE_SIDE_PX, MAX_IMAGE_SIDE_PX), Image.Resampling.LANCZOS)
+    out = io.BytesIO()
+    image.save(out, format='JPEG', quality=JPEG_QUALITY, optimize=True)
+    return out.getvalue()
 
 
 # -- PDFs ---------------------------------------------------------------------------------------
@@ -198,6 +211,18 @@ def _pdf_text(data: bytes) -> str:
         raise UnreadableDocumentError(f'The PDF could not be read: {exc}') from exc
 
 
+def _render_scale(width_pt: float, height_pt: float) -> float:
+    """The scale to render a `width_pt` x `height_pt` page at: `PDF_RENDER_SCALE`, lowered so the
+    bitmap stays within `MAX_IMAGE_PIXELS`. Refuses a page of absurd (or nonsensical) size."""
+    if not (0 < width_pt <= MAX_PDF_PAGE_POINTS and 0 < height_pt <= MAX_PDF_PAGE_POINTS):
+        raise UnreadableDocumentError('The PDF page size is not supported.')
+    scale = float(PDF_RENDER_SCALE)
+    if width_pt * height_pt * scale * scale > MAX_IMAGE_PIXELS:
+        # (A hair under, so rounding up to whole pixels can't tip it over.)
+        scale = math.sqrt(MAX_IMAGE_PIXELS / (width_pt * height_pt)) * 0.99
+    return scale
+
+
 def _render_pdf_pages(data: bytes, max_pages: int) -> list[bytes]:
     import pypdfium2 as pdfium
 
@@ -210,11 +235,9 @@ def _render_pdf_pages(data: bytes, max_pages: int) -> list[bytes]:
         for index in range(min(len(pdf), max(1, max_pages))):
             page = pdf[index]
             try:
-                bitmap = page.render(scale=PDF_RENDER_SCALE)
-                pil = bitmap.to_pil()
-                out = io.BytesIO()
-                pil.convert('RGB').save(out, format='PNG')
-                images.append(_normalize_image(out.getvalue()))
+                width_pt, height_pt = page.get_size()
+                scale = _render_scale(width_pt, height_pt)
+                images.append(_encode_jpeg(page.render(scale=scale).to_pil()))
             finally:
                 page.close()
         return images

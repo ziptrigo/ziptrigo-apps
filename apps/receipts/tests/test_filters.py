@@ -282,6 +282,27 @@ def test_csv_neutralizes_formulas(funded_user, fake_storage, text):
     assert rows[1][8] == "'" + text
 
 
+@pytest.mark.parametrize('text', [' =1+1', '  @SUM(A1)', '\n+1', '\u00a0-2', '\t=x', '\r=x'])
+def test_csv_neutralizes_formulas_after_leading_whitespace(funded_user, fake_storage, text):
+    create_receipt(funded_user, fake_storage, vendor=text)
+
+    rows = parse(export_csv(funded_user))
+
+    assert rows[1][1] == "'" + text
+
+
+def test_every_csv_cell_goes_through_the_formula_guard(funded_user, fake_storage):
+    create_receipt(
+        funded_user, fake_storage, currency='=1+1', document_type='@x', document_number=' =y'
+    )
+
+    record = dict(zip(CSV_COLUMNS, parse(export_csv(funded_user))[1], strict=True))
+
+    assert record['currency'] == "'=1+1"
+    assert record['document_type'] == "'@x"
+    assert record['document_number'] == "' =y"
+
+
 def test_csv_streams_line_by_line(funded_user, library):
     chunks = list(iter_csv(funded_user))
 

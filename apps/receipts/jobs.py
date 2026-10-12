@@ -3,8 +3,9 @@
 its per-row work in a `try`/`except` that logs and carries on, so one bad row can't abort the rest
 of a run.
 
-- `meter_storage` (daily): bill each account's storage; unfreeze frozen accounts that have topped up
-  (a fallback -- the `credits_added` receiver is the fast path).
+- `meter_storage` (daily): bill each account's storage; unfreeze accounts that were already frozen
+  and have topped up enough for a day of storage (a fallback -- the `credits_added` receiver is the
+  fast path).
 - `purge_trash` (daily): delete receipts that have been in the Trash for `trash_days`.
 - `retry_due` (every 5 minutes): re-queue receipts whose retry time has come, ones stuck
   `processing`, and ones that never got queued.
@@ -40,6 +41,11 @@ def meter_storage() -> None:
     """Daily: charge each account with stored bytes one day of storage, and give frozen accounts
     a chance to resume."""
     price = get_storage_price_per_gb_per_day()
+    # Snapshot who is frozen *before* metering: an account this run freezes must not be offered
+    # a resume in the same run (it would be unfrozen at once, its day forgiven).
+    already_frozen = list(
+        ReceiptsAccount.objects.filter(frozen_at__isnull=False).values_list('pk', flat=True)
+    )
     for account_pk in list(
         ReceiptsAccount.objects.filter(stored_bytes__gt=0, frozen_at__isnull=True).values_list(
             'pk', flat=True
@@ -50,9 +56,7 @@ def meter_storage() -> None:
         except Exception:
             logger.exception('meter_account failed for account %s', account_pk)
 
-    for account_pk in list(
-        ReceiptsAccount.objects.filter(frozen_at__isnull=False).values_list('pk', flat=True)
-    ):
+    for account_pk in already_frozen:
         try:
             resume(str(account_pk))
         except Exception:
@@ -63,7 +67,11 @@ def purge_trash() -> None:
     """Daily: delete the S3 objects and rows of receipts trashed more than `trash_days` ago (and
     the stripped `.eml` along with an email's last receipt)."""
     cutoff = timezone.now() - timedelta(days=ReceiptsSettings.load().trash_days)
-    for receipt in Receipt.objects.filter(deleted_at__lte=cutoff).select_related('inbound_email'):
+    # (One still being processed is left for the next run: see `actions.delete_forever`.)
+    expired = Receipt.objects.filter(deleted_at__lte=cutoff).exclude(
+        status=ReceiptStatus.PROCESSING
+    )
+    for receipt in expired.select_related('inbound_email'):
         try:
             purge_receipt(receipt)
         except Exception:

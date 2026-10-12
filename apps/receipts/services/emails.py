@@ -77,10 +77,22 @@ def _issue_text(receipt: Receipt) -> str:
         return "couldn't be processed"
 
 
+def lock_inbound_email(email_id: object) -> None:
+    """Row-lock the inbound email (inside a transaction; a no-op on SQLite). A settling receipt
+    takes this right after locking its own row, *before* it looks at its siblings: two siblings
+    settling at once then run their "is everyone done?" checks one after the other, and the
+    second sees the first's committed status. Without it each could still see the other as
+    `processing` (READ COMMITTED) and nobody would send the email. Lock order is always receipt,
+    then inbound email."""
+    if email_id is not None:
+        list(InboundEmail.objects.select_for_update().filter(pk=email_id).values_list('pk'))
+
+
 def queue_attention_email_if_settled(receipt: Receipt) -> None:
-    """Call right after `receipt` settles. When it was the last unsettled receipt of its inbound
-    email and any of them failed or need review, queue the "needs your attention" email -- at most
-    once per inbound email (a compare-and-swap on `attention_notified_at`)."""
+    """Call right after `receipt` settles (in the transaction that settled it, which has already
+    called `lock_inbound_email`). When it was the last unsettled receipt of its inbound email and
+    any of them failed or need review, queue the "needs your attention" email -- at most once per
+    inbound email (a compare-and-swap on `attention_notified_at`)."""
     email_id = receipt.inbound_email_id
     if email_id is None:
         return

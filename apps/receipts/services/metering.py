@@ -14,14 +14,21 @@ or processing (those services check `is_frozen`), and `last_billed_at` does not 
 
 **Unfreezing** (`resume_account`, a task on the `receipts` queue, queued by the `credits_added`
 receiver in `apps/receipts/apps.py` and also run by the daily job as a fallback): once the balance
-is at least 1 credit the account is unfrozen with `last_billed_at = now` -- the frozen days are not
-billed afterwards -- and then the receipts `waiting_for_credits` are processed, oldest first,
-stopping at the first one the balance can't cover.
+covers at least one day of the account's storage (`daily_storage_cost`: the whole-credit cost of
+its current `stored_bytes` at the shared price, at least 1) the account is unfrozen with
+`last_billed_at = now` -- the frozen days are not billed afterwards -- and then the receipts
+`waiting_for_credits` are processed, oldest first, stopping at the first one the balance can't
+cover. A flat "1 credit" threshold would let an account whose daily charge is, say, 5 credits buy a
+forgiven day with every 1-credit top-up; requiring a day's cost means the next daily run can pay.
+
+The daily job (`jobs.meter_storage`) only offers the resume fallback to accounts that were
+*already* frozen before its metering pass, so an account frozen in that very run isn't unfrozen
+again minutes later with that day forgiven.
 """
 
 import logging
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from uuid import UUID
 
 from django.db import transaction
@@ -45,10 +52,22 @@ from .queue import enqueue_after_commit
 
 logger = logging.getLogger(__name__)
 
-#: Minimum balance to unfreeze an account.
+#: Minimum balance to unfreeze an account, whatever it stores.
 MIN_BALANCE_TO_RESUME = 1
 
 _BILLING_PERIOD = timedelta(hours=24)
+_BYTES_PER_GB = Decimal(1024**3)
+
+
+def daily_storage_cost(stored_bytes: int, price_per_gb_per_day: Decimal | None = None) -> int:
+    """The whole credits one day of storing `stored_bytes` costs, rounded up, at least
+    `MIN_BALANCE_TO_RESUME`: the balance an account needs to be unfrozen."""
+    if price_per_gb_per_day is None:
+        price_per_gb_per_day = get_storage_price_per_gb_per_day()
+    cost = (price_per_gb_per_day * (Decimal(stored_bytes) / _BYTES_PER_GB)).to_integral_value(
+        rounding=ROUND_CEILING
+    )
+    return max(int(cost), MIN_BALANCE_TO_RESUME)
 
 
 def meter_account(account_pk: object, price_per_gb_per_day: Decimal | None = None) -> None:
@@ -125,7 +144,7 @@ def resume_account(user_id: str) -> None:
 
 
 def resume(user_id: str) -> int:
-    """Unfreeze the user's account if they can now pay, then queue their `waiting_for_credits`
+    """Unfreeze the user's account if their balance covers a day of its storage, then queue their `waiting_for_credits`
     receipts oldest first, stopping at the first the balance can't cover. Returns how many were
     queued. Does nothing for a user without a Receipts account."""
     try:
@@ -138,7 +157,7 @@ def resume(user_id: str) -> int:
 
     balance = get_balance(user)
     if account.frozen_at is not None:
-        if balance < MIN_BALANCE_TO_RESUME:
+        if balance < daily_storage_cost(account.stored_bytes):
             return 0
         unfreeze_account(account)
         account.refresh_from_db()

@@ -282,8 +282,10 @@ def trash(receipt: Receipt) -> Receipt:
     """Move to the Trash (still billed, restorable until `trash_days` pass). Receipts that were
     flagged as duplicates *of* this one lose the flag."""
     with transaction.atomic():
+        now = timezone.now()
+        # (`.update()` skips `auto_now`, so `updated_at` is set by hand throughout.)
         won = Receipt.objects.filter(pk=receipt.pk, deleted_at__isnull=True).update(
-            deleted_at=timezone.now()
+            deleted_at=now, updated_at=now
         )
         if won:
             Receipt.objects.filter(possible_duplicate_of_id=receipt.pk).update(
@@ -298,7 +300,7 @@ def restore(receipt: Receipt) -> Receipt:
     was never processed."""
     with transaction.atomic():
         won = Receipt.objects.filter(pk=receipt.pk, deleted_at__isnull=False).update(
-            deleted_at=None
+            deleted_at=None, updated_at=timezone.now()
         )
         receipt.refresh_from_db()
         if won:
@@ -310,9 +312,13 @@ def restore(receipt: Receipt) -> Receipt:
 
 
 def delete_forever(receipt: Receipt) -> None:
-    """Delete a trashed receipt for good, now rather than when the retention period ends."""
+    """Delete a trashed receipt for good, now rather than when the retention period ends. Refused
+    while the receipt is being processed: the run in flight would write a preview for a receipt
+    that no longer exists."""
     if receipt.deleted_at is None:
         raise ValidationError('Move the receipt to the Trash first.')
+    if Receipt.objects.filter(pk=receipt.pk, status=ReceiptStatus.PROCESSING).exists():
+        raise ValidationError('This receipt is being processed; try again in a minute.')
     lifecycle.purge_receipt(receipt)
 
 
@@ -415,7 +421,10 @@ def rename_category(category: ReceiptCategory, name: str) -> ReceiptCategory:
 def reorder_categories(user: User, ordered_ids: Iterable[int]) -> None:
     """Put the user's categories in the order given. Categories not mentioned keep their relative
     order after the listed ones; an id that isn't the user's is an error."""
-    ids = [int(pk) for pk in ordered_ids]
+    try:
+        ids = [int(pk) for pk in ordered_ids]
+    except TypeError, ValueError:
+        raise ValidationError('Unknown category.') from None
     categories = {c.pk: c for c in ReceiptCategory.objects.filter(user=user)}
     unknown = [pk for pk in ids if pk not in categories]
     if unknown:

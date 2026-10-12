@@ -42,6 +42,7 @@ from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
 from django.db import transaction
+from django.db.models import Q
 from django.tasks import task
 from django.utils import timezone
 
@@ -61,7 +62,7 @@ from ..models import (
 from . import ai, documents
 from .accounts import add_stored_bytes, get_account
 from .duplicates import refresh_duplicate
-from .emails import queue_attention_email_if_settled
+from .emails import lock_inbound_email, queue_attention_email_if_settled
 from .queue import enqueue_after_commit
 from .storage import get_storage
 
@@ -140,6 +141,7 @@ def claim(receipt_id: object) -> Receipt | None:
     now = timezone.now()
     with transaction.atomic():
         claimed = Receipt.objects.filter(
+            Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now),
             pk=receipt_id,
             status__in=[ReceiptStatus.RECEIVED, ReceiptStatus.WAITING_FOR_CREDITS],
             uploaded=True,
@@ -256,6 +258,14 @@ def _store_preview(receipt: Receipt, jpeg: bytes) -> None:
     if stored:
         add_stored_bytes(receipt.user_id, len(jpeg))
         receipt.preview_key = key
+    elif not Receipt.objects.filter(pk=receipt.pk, preview_key=key).exists():
+        # The receipt was purged (or its user deleted) while we were working: nothing references
+        # the object we just wrote and nothing bills it, so remove it. (If instead a concurrent run
+        # stored the same key first, the row references it and it must stay.)
+        try:
+            get_storage().delete_object(key)
+        except ClientError, BotoCoreError:
+            logger.exception('Could not delete the orphaned preview %s', key)
 
 
 # -- 4. Apply the result --------------------------------------------------------------------------
@@ -270,6 +280,9 @@ def _lock_current(receipt_id: object, attempt_id: UUID) -> Receipt | None:
         .filter(pk=receipt_id, status=ReceiptStatus.PROCESSING, attempt_id=attempt_id)
         .first()
     )
+    if receipt is not None:
+        # Serializes the siblings' "everyone settled?" check; see `emails.lock_inbound_email`.
+        lock_inbound_email(receipt.inbound_email_id)
     return receipt
 
 
@@ -422,5 +435,6 @@ def requeue_stuck(receipt_id: object, older_than: timedelta) -> bool:
         )
         if receipt is None:
             return False
+        lock_inbound_email(receipt.inbound_email_id)
         _retry_or_fail_locked(receipt, 'Processing timed out')
         return True

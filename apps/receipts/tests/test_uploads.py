@@ -136,25 +136,61 @@ class TestStartUpload:
             start(funded_user)
         assert not Receipt.objects.exists()
 
-    def test_the_daily_cap_counts_the_last_24_hours_of_receipts(
+    def test_the_daily_cap_counts_files_started_in_the_24_hour_window(
         self, funded_user, receipts_settings
     ):
         receipts_settings.max_files_per_user_per_day = 3
         receipts_settings.save()
-        old = Receipt.objects.create(user=funded_user)
-        Receipt.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(hours=25))
-        Receipt.objects.create(user=funded_user, source='email')
-        Receipt.objects.create(user=funded_user, deleted_at=timezone.now())  # trashed still counts
 
-        start(funded_user)  # the third in 24h is fine
+        for _ in range(3):
+            start(funded_user)
+
+        with pytest.raises(DailyLimitExceededError):
+            start(funded_user)
+        assert Receipt.objects.filter(user=funded_user).count() == 3
+
+    def test_the_window_restarts_after_24_hours(self, funded_user, receipts_settings):
+        receipts_settings.max_files_per_user_per_day = 1
+        receipts_settings.save()
+        start(funded_user)
+        with pytest.raises(DailyLimitExceededError):
+            start(funded_user)
+
+        ReceiptsAccount.objects.filter(pk=funded_user.pk).update(
+            intake_window_started_at=timezone.now() - timedelta(hours=25)
+        )
+
+        assert start(funded_user)
+        assert ReceiptsAccount.objects.get(pk=funded_user.pk).intake_count == 1
+
+    def test_deleting_receipts_does_not_free_up_the_cap(
+        self, funded_user, fake_storage, receipts_settings
+    ):
+        from ..services import lifecycle
+
+        receipts_settings.max_files_per_user_per_day = 2
+        receipts_settings.save()
+        first = start(funded_user).receipt
+        second = start(funded_user).receipt
+        lifecycle.purge_receipt(first)
+        lifecycle.purge_receipt(second)
+        assert not Receipt.objects.filter(user=funded_user).exists()
 
         with pytest.raises(DailyLimitExceededError):
             start(funded_user)
 
+    def test_a_rejected_start_does_not_use_a_slot(self, funded_user, receipts_settings):
+        receipts_settings.max_files_per_user_per_day = 1
+        receipts_settings.save()
+        with pytest.raises(ValidationError):
+            start(funded_user, content_type='text/html', filename='x.html')
+
+        assert start(funded_user)
+
     def test_the_cap_is_per_user(self, funded_user, regular_user, receipts_settings):
         receipts_settings.max_files_per_user_per_day = 1
         receipts_settings.save()
-        Receipt.objects.create(user=regular_user)
+        start(regular_user)
 
         assert start(funded_user)
 
@@ -301,6 +337,42 @@ class TestCompleteUpload:
 
         with pytest.raises(ValidationError, match='corrupted'):
             uploads.complete_upload(ticket.receipt)
+
+    def test_the_checksum_is_compared_even_when_the_backend_does_not_echo_one(
+        self, funded_user, fake_storage, monkeypatch
+    ):
+        from apps.core.services.storage import ObjectInfo
+
+        data = samples.jpeg_bytes()
+        ticket = start(funded_user, data, checksum=b64_sha256(b'something else'))
+        self.put(fake_storage, ticket, data)
+        monkeypatch.setattr(
+            fake_storage,
+            'head_object',
+            lambda key: ObjectInfo(size=len(data), checksum_sha256=''),
+        )
+
+        with pytest.raises(ValidationError, match='corrupted'):
+            uploads.complete_upload(ticket.receipt)
+
+        assert Receipt.objects.get(pk=ticket.receipt.pk).status == ReceiptStatus.FAILED
+        assert fake_storage.objects == {}
+
+    def test_a_matching_checksum_passes_without_a_backend_echo(
+        self, funded_user, fake_storage, monkeypatch, fake_ai
+    ):
+        from apps.core.services.storage import ObjectInfo
+
+        data = samples.jpeg_bytes()
+        ticket = start(funded_user, data)
+        self.put(fake_storage, ticket, data)
+        monkeypatch.setattr(
+            fake_storage,
+            'head_object',
+            lambda key: ObjectInfo(size=len(data), checksum_sha256=''),
+        )
+
+        assert uploads.complete_upload(ticket.receipt).uploaded is True
 
     def test_a_file_over_the_limit_lowered_since_the_upload_started(
         self, funded_user, fake_storage, receipts_settings
