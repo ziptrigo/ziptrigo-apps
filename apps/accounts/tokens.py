@@ -2,10 +2,33 @@ from datetime import timedelta
 from typing import cast
 
 from django.conf import settings
+from django.utils.crypto import salted_hmac
 from ninja_jwt.settings import api_settings
 from ninja_jwt.tokens import Token
 
 from .models import User
+
+#: The claim that ties a login token to the password it was issued under.
+PASSWORD_CLAIM = 'pwd'
+
+
+def password_fingerprint(user: User) -> str:
+    """A short HMAC of the user's password hash, put in every login token as `PASSWORD_CLAIM`.
+
+    Any change to the password (the account page, a reset, the admin, `set_unusable_password`)
+    changes it, so `JWTAuth` and `POST /api/auth/refresh` reject every token issued before the
+    change -- the same idea as Django's session auth hash, with its own salt. It's a digest keyed
+    with `SECRET_KEY`, so the token (readable by its holder) never carries the hash itself.
+    """
+    return salted_hmac(
+        'apps.accounts.tokens.password_fingerprint', user.password, algorithm='sha256'
+    ).hexdigest()[:32]
+
+
+def matches_password(token, user: User) -> bool:
+    """Whether `token` was issued under `user`'s current password. A token without the claim
+    (issued before it existed) doesn't match."""
+    return token.get(PASSWORD_CLAIM) == password_fingerprint(user)
 
 
 class CustomAccessToken(Token):
@@ -25,6 +48,7 @@ class CustomAccessToken(Token):
         # rejects it -- nothing on this side to fix.
         token = super().for_user(user)  # ty: ignore[invalid-argument-type]
         token['email'] = user.email
+        token[PASSWORD_CLAIM] = password_fingerprint(user)
         # `Token.for_user` is typed as returning `Self`, but `Self` on the base class resolves to
         # `Token`, not this subclass -- ty has no way to know the actual runtime type follows
         # `cls`, so it's cast rather than fixed.
@@ -67,6 +91,7 @@ class CustomRefreshToken(Token):
         # See `CustomAccessToken.for_user` above for why this is suppressed rather than fixed.
         token = super().for_user(user)  # ty: ignore[invalid-argument-type]
         token['email'] = user.email
+        token[PASSWORD_CLAIM] = password_fingerprint(user)
 
         # See `CustomAccessToken.for_user` above for why this is a cast, not a bug.
         return cast(CustomRefreshToken, token)

@@ -20,6 +20,7 @@ from .email_verification import (
     purge_old,
     start,
 )
+from .queue import enqueue_after_commit
 
 __all__ = [
     'EmailVerificationAlreadyConfirmed',
@@ -39,6 +40,7 @@ __all__ = [
     'confirm_by_code',
     'confirm_by_token',
     'confirm_by_token_verbose',
+    'enqueue_after_commit',
     'get_email_backend',
     'invalidate',
     'purge_old',

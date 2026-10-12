@@ -5,16 +5,17 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from apps.core import ratelimit
-from apps.core.htmx import is_htmx
+from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import ChangePasswordForm, ProfileForm
 from ..http import AuthenticatedHttpRequest
 from ..services.password_change import change_password
 
-RATE_LIMITED_MESSAGE = 'Too many wrong passwords. Please wait a while and try again.'
+RATE_LIMITED_MESSAGE = 'Too many attempts. Please wait a while and try again.'
 
 
 @login_required
@@ -27,17 +28,18 @@ def password_change(request: AuthenticatedHttpRequest) -> HttpResponse:
     the re-rendered form (422 when invalid, 429 when rate limited). Without htmx, redirects back to
     the account page, or re-renders it with the errors.
 
-    A wrong *current* password counts against `CHANGE_PASSWORD_USER` (peeked first, recorded only
-    on a failure, like login's `LOGIN_ACCOUNT`), so a stolen session can't be used to brute-force
-    the password, while typos in the new password never use up the budget.
+    Every attempt counts against `CHANGE_PASSWORD_USER`, before the current password is checked,
+    so a stolen session can't brute-force the password -- not even with parallel requests, which
+    a "check, then record only failures" counter lets through in a burst. Only the session's own
+    user can spend this budget, so counting every attempt can't lock anyone else out.
     """
     user = request.user
     if not user.has_usable_password():
         # A "Sign in with Google" account has no password to change; the page doesn't show this
         # form for it (it links to forgot-password instead).
-        return redirect('accounts:account')
+        return hx_redirect(request, reverse('accounts:account'))
 
-    limited = ratelimit.peek(str(user.pk), 'CHANGE_PASSWORD_USER')
+    limited = ratelimit.hit_user(user, 'CHANGE_PASSWORD_USER')
     if not limited.allowed:
         # Unbound, so the form never checks the password while rate limited.
         form = ChangePasswordForm(user)
@@ -56,8 +58,6 @@ def password_change(request: AuthenticatedHttpRequest) -> HttpResponse:
             return redirect('accounts:account')
         return _render(request, ChangePasswordForm(user), changed=True)
 
-    if form.current_password_invalid:
-        ratelimit.hit_user(user, 'CHANGE_PASSWORD_USER')
     return _render(request, form, status=422)
 
 

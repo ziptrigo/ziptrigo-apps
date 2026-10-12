@@ -6,9 +6,21 @@ from ninja_jwt.authentication import JWTAuth as BaseJWTAuth
 from ninja_jwt.exceptions import AuthenticationFailed
 
 from .models import User
+from .tokens import matches_password
 
 
-class JWTAuth(BaseJWTAuth):
+class _PasswordBoundUserMixin:
+    """Rejects a token issued before the user's password last changed (`tokens.PASSWORD_CLAIM`),
+    so changing or resetting a password also revokes every API token issued under the old one."""
+
+    def get_user(self, validated_token) -> User:
+        user: User = super().get_user(validated_token)  # ty: ignore[unresolved-attribute]
+        if not matches_password(validated_token, user):
+            raise AuthenticationFailed('Token was issued before a password change')
+        return user
+
+
+class JWTAuth(_PasswordBoundUserMixin, BaseJWTAuth):
     """JWT-based authentication for users with status check.
 
     `ninja_jwt`'s `authenticate` raises `InvalidToken`/`AuthenticationFailed` (e.g. a malformed,
@@ -35,7 +47,7 @@ class JWTAuth(BaseJWTAuth):
         return user
 
 
-class AsyncJWTAuth(BaseAsyncJWTAuth):
+class AsyncJWTAuth(_PasswordBoundUserMixin, BaseAsyncJWTAuth):
     """`JWTAuth` for async endpoints."""
 
     async def authenticate(self, request: HttpRequest, token: str) -> User | None:

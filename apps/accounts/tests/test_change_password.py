@@ -3,10 +3,12 @@
 from datetime import UTC, datetime
 
 import pytest
+from django.db import transaction
 from django.urls import reverse
 
 from apps.accounts.services.password_change import (
     SUBJECT,
+    change_password,
     render_password_changed_email,
     send_password_changed_email,
 )
@@ -115,6 +117,9 @@ def test_wrong_current_password(client, user, sent_emails, django_capture_on_com
         ('abcdefg', None, 'Password must contain at least one digit.'),
         (NEW_PASSWORD, 'other456', 'Passwords do not match.'),
         (PASSWORD, None, 'The new password must be different from the current one.'),
+        # Django's `AUTH_PASSWORD_VALIDATORS`, on top of `PasswordValidator`.
+        ('password1', None, 'This password is too common.'),
+        ('testuser1', None, 'The password is too similar to the email.'),
     ],
 )
 def test_invalid_new_password(client, user, new, confirm, message):
@@ -162,17 +167,55 @@ def test_get_not_allowed(client, user):
     assert client.get(reverse('accounts:password-change')).status_code == 405
 
 
-def test_account_without_password_is_redirected(client, user):
+@pytest.mark.parametrize('htmx', [True, False])
+def test_account_without_password_is_redirected(client, user, htmx):
     user.set_unusable_password()
     user.save()
     client.force_login(user)
 
-    response = _change(client, current='')
+    response = _change(client, current='', htmx=htmx)
 
-    assert response.status_code == 302
-    assert response['Location'] == reverse('accounts:account')
+    if htmx:
+        assert response['HX-Redirect'] == reverse('accounts:account')
+    else:
+        assert response.status_code == 302
+        assert response['Location'] == reverse('accounts:account')
     user.refresh_from_db()
     assert not user.has_usable_password()
+
+
+def test_rolled_back_change_sends_no_email(user, sent_emails, django_capture_on_commit_callbacks):
+    with django_capture_on_commit_callbacks(execute=True) as callbacks:
+        with pytest.raises(RuntimeError), transaction.atomic():
+            change_password(user, NEW_PASSWORD)
+            raise RuntimeError('roll back')
+
+    assert callbacks == []
+    assert sent_emails == []
+
+
+def test_queue_failure_does_not_fail_the_change(
+    client, user, monkeypatch, caplog, django_capture_on_commit_callbacks
+):
+    class BrokenTask:
+        name = 'send_password_changed_email'
+
+        def enqueue(self, *args):
+            raise RuntimeError('queue is down')
+
+    monkeypatch.setattr(
+        'apps.accounts.services.password_change.send_password_changed_email', BrokenTask()
+    )
+    client.force_login(user)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _change(client)
+
+    assert response.status_code == 200
+    assert 'Password changed.' in response.content.decode()
+    user.refresh_from_db()
+    assert user.check_password(NEW_PASSWORD)
+    assert 'Could not queue send_password_changed_email' in caplog.text
 
 
 class TestRateLimit:
@@ -181,7 +224,7 @@ class TestRateLimit:
         settings.RATELIMIT_ENABLE = True
         settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'CHANGE_PASSWORD_USER': (2, 300)}
 
-    def test_429_after_wrong_current_passwords(self, client, user):
+    def test_429_after_the_limit(self, client, user):
         client.force_login(user)
         for _ in range(2):
             assert _change(client, current='wrongpass1').status_code == 422
@@ -190,16 +233,32 @@ class TestRateLimit:
 
         assert response.status_code == 429
         assert 'Retry-After' in response
-        assert 'Too many wrong passwords' in response.content.decode()
+        assert 'Too many attempts' in response.content.decode()
+        assert '<html' not in response.content.decode()
         user.refresh_from_db()
         assert user.check_password(PASSWORD)
 
-    def test_invalid_new_password_does_not_count(self, client, user):
+    def test_every_attempt_counts(self, client, user):
+        """Counted before the current password is checked, so a burst of parallel requests can't
+        all slip past a "check first, record failures later" counter."""
         client.force_login(user)
-        for _ in range(3):
-            assert _change(client, confirm='mismatch1').status_code == 422
+        assert _change(client, confirm='mismatch1').status_code == 422
+        assert _change(client, new='abcdefg').status_code == 422
 
-        assert _change(client).status_code == 200
+        assert _change(client).status_code == 429
+
+    def test_429_without_htmx_renders_the_full_page(self, client, user):
+        client.force_login(user)
+        for _ in range(2):
+            _change(client, current='wrongpass1', htmx=False)
+
+        response = _change(client, htmx=False)
+
+        assert response.status_code == 429
+        assert 'Retry-After' in response
+        content = response.content.decode()
+        assert '<html' in content
+        assert 'Too many attempts' in content
 
 
 class TestEmail:

@@ -13,13 +13,13 @@ own (free-text) name.
 from datetime import UTC, datetime
 
 from django.conf import settings
-from django.db import transaction
 from django.tasks import task
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.core.services.email import send_email
+from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
 
@@ -27,7 +27,8 @@ SUBJECT = 'Your ZipTrigo password was changed'
 
 
 def change_password(user: User, new_password: str) -> None:
-    """Set `user`'s new password and queue the notification email once it's committed.
+    """Set `user`'s new password and queue the notification email once it's committed (a
+    failure to queue it is logged, never raised: the new password is already saved by then).
 
     The caller has already checked the current password and validated the new one
     (`apps.accounts.forms.ChangePasswordForm`). A session view must also call
@@ -35,9 +36,7 @@ def change_password(user: User, new_password: str) -> None:
     """
     user.set_password(new_password)
     user.save(update_fields=['password'])
-    user_id = str(user.pk)
-    changed_at = timezone.now().isoformat()
-    transaction.on_commit(lambda: send_password_changed_email.enqueue(user_id, changed_at))
+    enqueue_after_commit(send_password_changed_email, str(user.pk), timezone.now().isoformat())
 
 
 @task
