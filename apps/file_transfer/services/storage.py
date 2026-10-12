@@ -77,10 +77,11 @@ def get_storage() -> S3Storage:
     `override_settings` on `FILE_TRANSFER_S3_BUCKET` mid-process has no effect; tests that need a
     different bucket call `reset_storage_cache()` first.
 
-    The client uses botocore's default signature version, which is SigV2 for presigned URLs in
-    `us-east-1` and other older regions, so the part URLs' signed `Content-Length` is not
-    enforced there (the `head_object` size check at completion is the real guard) -- switching
-    to SigV4 is tracked in ziptrigo-apps#100.
+    The client signs with SigV4 (`signature_version='s3v4'`, ziptrigo-apps#100): botocore's
+    default is the legacy SigV2 for presigned URLs in `us-east-1` and other older regions, which
+    signs neither a part's `Content-Length` nor its `x-amz-checksum-sha256`, so a part could be
+    PUT at any size up to S3's 5 GB. `presign_part_url` now refuses a client that doesn't sign
+    them, and `complete_file_upload`'s `head_object` size check stays as a second guard.
     """
     global _storage
     if _storage is None:
@@ -91,6 +92,7 @@ def get_storage() -> S3Storage:
                 endpoint_url=settings.FILE_TRANSFER_S3_ENDPOINT_URL,
                 access_key_id=settings.FILE_TRANSFER_AWS_ACCESS_KEY_ID,
                 secret_access_key=settings.FILE_TRANSFER_AWS_SECRET_ACCESS_KEY,
+                signature_version='s3v4',
             ),
         )
     return _storage

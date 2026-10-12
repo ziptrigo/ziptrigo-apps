@@ -3,6 +3,8 @@ flow: the S3 key shape, and that `get_storage()` builds the generic `apps.core` 
 the `FILE_TRANSFER_*` settings. (`S3Storage` itself is tested in `apps/core/tests/test_storage.py`.)
 """
 
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 
 from apps.core.services import storage as core_storage
@@ -47,6 +49,25 @@ def test_get_storage_builds_the_core_class_from_file_transfer_settings(settings,
     assert built.client.meta.endpoint_url == 'http://localhost:4566'
     # Cached for the process, like before.
     assert storage.get_storage() is built
+
+
+def test_get_storage_signs_part_urls_with_sigv4_in_us_east_1(settings, _fresh_cache):
+    # ziptrigo-apps#100: botocore's default in us-east-1 is SigV2, which signs neither the part's
+    # Content-Length nor its checksum.
+    settings.FILE_TRANSFER_S3_BUCKET = 'ft-bucket'
+    settings.FILE_TRANSFER_S3_REGION = 'us-east-1'
+    settings.FILE_TRANSFER_S3_ENDPOINT_URL = ''
+    settings.FILE_TRANSFER_AWS_ACCESS_KEY_ID = 'AKIATESTKEY'
+    settings.FILE_TRANSFER_AWS_SECRET_ACCESS_KEY = 'test-secret'
+
+    url = storage.get_storage().presign_part_url(
+        'transfers/t/f', 'upload-1', 1, content_length=1024, checksum_sha256='abcd=='
+    )
+
+    query = parse_qs(urlsplit(url).query)
+    assert query['X-Amz-Algorithm'] == ['AWS4-HMAC-SHA256']
+    signed = set(query['X-Amz-SignedHeaders'][0].split(';'))
+    assert {'content-length', 'x-amz-checksum-sha256'} <= signed
 
 
 def test_core_names_are_still_importable_from_the_file_transfer_module():

@@ -178,12 +178,12 @@ lifecycle rule and IAM user in the `infra` repo's `apps/ziptrigo-apps` (see its 
 checksum (`x-amz-checksum-sha256`, computed client-side and passed into the presigned URL --
 see `services.uploads.presign_parts`), so that bucket's CORS config (issue #60) must
 allow the `x-amz-checksum-sha256` request header and expose the `ETag` response header, or uploads
-fail in the browser with a CORS error rather than an S3 one. **Caveat on enforcement:** the
-checksum and each part's `Content-Length` are only *signed* into the URL (so S3 rejects a
-mismatching PUT) under SigV4. `get_storage()` currently builds a default client, which signs
-presigned URLs with SigV2 in `us-east-1` and other older regions, where neither is enforced; the
-guard that actually holds today is `services.uploads.complete_file_upload`'s `head_object` size
-check against the declared size at completion. Moving file_transfer to SigV4 is tracked in #100.
+fail in the browser with a CORS error rather than an S3 one. The checksum and each part's
+`Content-Length` are *signed* into the URL, so S3 rejects a PUT whose body differs in size or
+content. That only holds under SigV4, so `get_storage()` builds its client with
+`signature_version='s3v4'` (#100) and `presign_part_url` refuses a client whose URL doesn't sign
+them; `services.uploads.complete_file_upload`'s `head_object` size check against the declared
+size stays as a second guard.
 
 The S3 wrapper itself is generic and lives in `core`: `apps.core.services.storage.S3Storage` is a
 dataclass over a `bucket` and a boto3 client (`build_client(region, endpoint_url, access_key_id,
@@ -193,7 +193,7 @@ buckets/credentials). Besides the multipart methods it has `put_object`, `copy_o
 at `max_keys`; pass `None` when completeness matters), `presigned_put_url` (a single PUT with
 `Content-Length` and `x-amz-checksum-sha256` signed in; it raises
 `UnsupportedSignatureVersionError` when the URL it generated doesn't sign `Content-Length`, i.e. a
-non-SigV4 client; note `client.meta.config.signature_version` reads `'s3v4'` even for a default
+non-SigV4 client, and so does `presign_part_url` when given a size or checksum; note `client.meta.config.signature_version` reads `'s3v4'` even for a default
 client whose presigned URLs are SigV2, so it inspects the URL's signed headers instead) and a `presigned_get_url` with
 `disposition` / `content_type` (an explicit `content_type` with `inline` must be one of
 `INLINE_CONTENT_TYPES`: PDF, JPEG, PNG, WebP, GIF, plain text).
@@ -201,9 +201,8 @@ client whose presigned URLs are SigV2, so it inspects the URL's signed headers i
 `FILE_TRANSFER_*` settings), the key helpers and the part-size constants, and re-exports
 `S3Storage` / `ObjectInfo`. botocore signs presigned URLs with legacy SigV2 in older regions
 (`us-east-1`, `eu-west-1`, ...) unless the client is built with `signature_version='s3v4'`, and
-SigV2 does **not** sign `Content-Length`; `build_client` keeps botocore's default unless asked.
-`presign_part_url` therefore only enforces a part's size/checksum under SigV4 and does not refuse
-a SigV2 client (file_transfer still uses the default one; see #100).
+SigV2 does **not** sign `Content-Length`; `build_client` keeps botocore's default unless asked,
+so every app passes `'s3v4'` (file transfer since #100, receipts from the start).
 
 ### Auth
 
