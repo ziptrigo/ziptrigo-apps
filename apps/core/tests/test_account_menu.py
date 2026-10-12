@@ -20,3 +20,21 @@ def test_login_link_for_anonymous_visitor(client):
     html = client.get(reverse('core:home')).content.decode()
     assert 'aria-label="Account menu"' not in html
     assert f'href="{reverse("accounts:login")}"' in html
+
+
+def test_account_menu_starts_with_the_users_name(client, user):
+    client.force_login(user)
+    html = client.get(reverse('core:home')).content.decode()
+    assert 'id="account-menu-name"' in html
+    assert html.index('id="account-menu-name"') < html.index(
+        f'href="{reverse("accounts:account")}"'
+    )
+    assert f'>{user.name}</div>' in html
+
+
+def test_account_menu_falls_back_to_email_without_a_name(client, user):
+    user.name = ''
+    user.save()
+    client.force_login(user)
+    html = client.get(reverse('core:home')).content.decode()
+    assert f'>{user.email}</div>' in html
