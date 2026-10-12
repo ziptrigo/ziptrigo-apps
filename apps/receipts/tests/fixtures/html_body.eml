@@ -4,6 +4,9 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
+ designates 203.0.113.5) smtp.mailfrom=orders@staples.com; dkim=pass
+ header.d=staples.com header.i=@staples.com; dmarc=pass header.from=x
 X-SES-Spf-Verdict: PASS
 X-SES-Dkim-Verdict: PASS
 From: Staples <orders@staples.com>
@@ -13,9 +16,9 @@ Date: Fri, 09 Oct 2026 12:30:00 +0000
 Message-ID: <fixture-1@example.net>
 MIME-Version: 1.0
 Content-Type: multipart/related;
- boundary="===============0694598514399620423=="
+ boundary="===============8479855486654722780=="
 
---===============0694598514399620423==
+--===============8479855486654722780==
 Content-Type: text/html; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 
@@ -23,7 +26,7 @@ Content-Transfer-Encoding: quoted-printable
 rder.</p><table><tr><td>Total</td><td>42.10 USD</td></tr></table><p>Order R-5=
 5102, 2026-10-09</p></body></html>
 
---===============0694598514399620423==
+--===============8479855486654722780==
 Content-Type: image/png
 Content-Transfer-Encoding: base64
 Content-Disposition: inline; filename="logo.png"
@@ -41,4 +44,4 @@ lYMzlM1ml8vla7xYLNZqtev1CmA0Gum6jj/g4AyFw+H1em2a5uMsJElSFGW322UyGa/X6/P5ms2m
 nXote+cprv//1P/ap4PADIEZAjMEZgjMEJghMENghsAMgRkCMwRmCMwQmCEwQ2CGwAyBGQIzBGYI
 zBCYITBDYIb+9gae/QCZ9w0FVfkHWQAAAABJRU5ErkJggg==
 
---===============0694598514399620423==--
+--===============8479855486654722780==--

@@ -970,15 +970,16 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `unsupported_type`, `too_large`, `extraction_error`. Beyond the issue's list `Receipt` also has
   `preview_size_bytes` (so a purge subtracts exactly what was added), `upload_checksum_sha256`,
   `processing_started_at` (what `retry_due` uses to find a receipt stuck in `processing`) and
-  `last_error`; `InboundEmail` has `attention_notified_at`. `ReceiptsSettings` is a
+  `last_error`; `InboundEmail` has `attention_notified_at`; `InboundMessage` has `failed_key`. `ReceiptsSettings` is a
   `SingletonSettingsAdmin` singleton (`price_per_file`, `max_file_bytes` 15 MB, `allowed_types`,
-  `min_inline_image_px`, `max_files_per_user_per_day`, `trash_days`, `max_pdf_pages_to_ai`,
-  `max_ai_attempts`); the per-GB storage price is the shared `BillingSettings` one.
+  `min_inline_image_px`, `max_files_per_user_per_day`, `max_inbound_rows_per_day`, `trash_days`,
+  `max_pdf_pages_to_ai`, `max_ai_attempts`); the per-GB storage price is the shared `BillingSettings` one.
 - **Storage.** `services.storage.get_storage()` builds the core `S3Storage` from the `RECEIPTS_*`
   settings with `signature_version='s3v4'` (required: `presigned_put_url` fails closed on a client
   that doesn't sign `Content-Length`). One bucket shared with file transfer; keys
   `receipts/users/<user_id>/files/<receipt_id>` (id only, never the filename),
-  `.../previews/<receipt_id>.jpg`, `.../emails/<email_id>.eml`, and `receipts/inbound/` for SES.
+  `.../previews/<receipt_id>.jpg`, `.../emails/<email_id>.eml`, `receipts/inbound/` for SES, and
+  `receipts/failed/` for inbound messages that failed to ingest (see "Email intake").
   Everything of a user sits under one prefix so deleting an account is one `delete_prefix`: the
   `pre_delete(User)` receiver (`apps/receipts/apps.py`, `weak=False`) queues `delete_user_storage`
   on commit. Tests swap in `FakeReceiptsStorage` (autouse in `apps/receipts/tests/conftest.py`).
@@ -1090,38 +1091,62 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   as `<task>.call(...)` (or the underlying service function) in a test, not `<task>(...)`.
 - **Email intake** (`services.inbound` for the flow and the decisions, `services.mime` for reading a
   raw message; issue #98 phase 2). SES drops each accepted message in `receipts/inbound/`; nothing
-  is pushed to us. The `receipts.poll_inbound` job lists up to 100 keys (`list_keys`, widened by the
-  number of `failed` messages, whose objects stay in the listing), `get_or_create`s an
-  `InboundMessage` (`pending`) per new key and queues `ingest_message(id)` on commit, and nothing
-  more: no parsing. It also re-queues `pending` rows that are *due* (never claimed and older than
-  10 min, or a retry whose `next_attempt_at` has come; throttled by `queued_at` to once per 5 min
-  so a slow queue doesn't collect a duplicate per poll) and deletes the object of a `done` message
-  that is still listed (its delete failed). `ingest_message` runs on the `receipts` queue:
+  is pushed to us. The `receipts.poll_inbound` job lists up to 100 keys under `receipts/inbound/`
+  (`list_keys`), `get_or_create`s an `InboundMessage` (`pending`) per new key and queues
+  `ingest_message(id)` on commit, and nothing more: no parsing. It also re-queues `pending` rows
+  that are *due* (never claimed and older than 10 min, or a retry whose `next_attempt_at` has
+  come; throttled by `queued_at` to once per 5 min so a slow queue doesn't collect a duplicate per
+  poll), deletes the object of a `done` message that is still listed (its delete failed) and
+  finishes parking a `failed` one (below). `ingest_message` runs on the `receipts` queue:
   - **Claim and retries.** One conditional `UPDATE` (`pending`, `next_attempt_at` null or past)
     bumps `attempts` and sets `next_attempt_at` to a 10-minute lease, so a duplicate task can't
     ingest twice and a worker that dies mid-ingest just lets the lease run out (a message claimed
     more than 3 times is failed as "interrupted"). A failure records `last_error` and schedules the
-    retry (1 min, then 5 min; `poll_inbound` re-queues it); the third failure sets `failed` and
-    **keeps the S3 object** for inspection. Over the 40 MB guard (`get_object_bytes(max_bytes)`),
-    unparseable, or an object that is gone (with no work done) fail at once. The task never raises
-    (the queue backends don't retry; the row *is* the retry mechanism). The object is deleted only
-    after the row is marked `done`.
+    retry (1 min, then 5 min; `poll_inbound` re-queues it); the third failure sets `failed`. Over the
+    40 MB guard (`get_object_bytes(max_bytes)`), more than `mime.MAX_BOUNDARY_LINES` (500) MIME
+    boundary lines (checked on the raw bytes **before parsing**: `MAX_RAW_BYTES` caps bytes, not
+    parts, and millions of tiny parts are gigabytes of `Message` objects -- an OOM kill of
+    `db_worker` restarts the whole container), unparseable, or an object that is gone (with no
+    work done) fail at once. The task never raises (the queue backends don't retry; the row *is*
+    the retry mechanism). The object is deleted only after the row is marked `done`. The final
+    writes (`done`, `failed`, the retry schedule) are conditional on `attempts` still being the
+    value the worker claimed with (a claim token), so a slow worker whose lease ran out can't
+    disturb the one that took over (and doesn't delete the object).
+  - **Failed messages are parked.** Anyone can make a message fail, and a failed object left under
+    `receipts/inbound/` would stay in the poller's 100-key listing forever, crowding new mail out
+    (the first version listed extra keys per failure as a workaround, which just moved the
+    problem). So `_mark_failed` copies the object to `receipts/failed/<same name>`, records it in
+    `InboundMessage.failed_key` (`s3_key` stays the original key: it is what identifies the
+    message, and a leftover original is still recognised), then deletes the original
+    (`inbound.park_failed_object`; the poller repeats it for a `failed` row whose object is still
+    listed). Admin "retry" (`reset_message_for_retry`) copies it back, resets the row and deletes
+    the parked copy. Nothing expires `receipts/failed/` (the infra lifecycle rule only covers
+    `receipts/inbound/`, and the IAM user is scoped to `receipts/*`, which includes it).
   - **Recipients.** One `InboundEmail` per recipient that is an *active* `InboxCode`
     (`receipts+<code>@<RECEIPTS_INBOUND_ADDRESS domain>`, case-insensitive, matched by
     `addresses.inbox_code_from_address`); unknown or retired codes, and inactive users, are logged
     and dropped without a row. Each recipient's work is a single transaction that also creates its
     `InboundEmail`, so "the row exists" means "done" and a retry skips recipients already handled;
-    objects written inside a transaction that then fails are deleted again (no orphans, no leaked
-    cap slots).
+    objects written for a transaction that then fails are deleted again (no leaked cap slots).
+    The email id and each receipt id are `uuid5` of (message pk, recipient[, leaf index])
+    (`inbound.email_id_for` / `receipt_id_for`), so every try writes the *same* S3 keys: objects
+    left by a try that was killed hard (OOM, SIGKILL -- no cleanup ran) are overwritten by the
+    next one rather than orphaned and billed-never. A try that loses the unique-constraint race to
+    a concurrent duplicate leaves the objects alone when the winner's `InboundEmail` row exists.
   - **Header assumptions -- pending the infra spike in joaonc/infra#373, all in `services.mime`.**
     SES prepends its headers, so the *topmost* instance wins and nothing a sender wrote lower down
-    can fake a verdict. Envelope recipient: the `for <addr>` of the leading run of `Received`
-    headers whose `by` host is `inbound-smtp.*.amazonaws.com`; else `Delivered-To`, `X-Original-To`,
-    `To`/`Cc` (first source with an inbox address wins -- a Gmail auto-forward has the user's own
-    address in `To`). Verdicts: `X-SES-Spam-Verdict`/`X-SES-Virus-Verdict` (only `FAIL` rejects),
-    `X-SES-Spf-Verdict`/`X-SES-Dkim-Verdict`, else the topmost `Authentication-Results` whose
-    authserv-id is `amazonses.com`, else `Received-SPF`. A missing spam/virus verdict means "not
-    flagged"; missing SPF/DKIM means "not authenticated". Envelope sender: `Return-Path`.
+    can fake a verdict. Envelope recipient: the `for <addr>` of the *first*
+    `mime.SES_RECEIVED_HEADER_COUNT` (1) `Received` header, only if its `by` host is
+    `inbound-smtp.*.amazonaws.com` (a sender-written copy sits directly beneath SES's, so a
+    "contiguous run" would have trusted it); else `Delivered-To`, `X-Original-To`, `To`/`Cc` (first
+    source with an inbox address wins -- a Gmail auto-forward has the user's own address in `To`).
+    Verdicts: `X-SES-Spam-Verdict`/`X-SES-Virus-Verdict` (only `FAIL` rejects),
+    `X-SES-Spf-Verdict`/`X-SES-Dkim-Verdict`, else the SPF/DKIM results in the **first**
+    `Authentication-Results` header, accepted only if its authserv-id is `amazonses.com` (there is
+    no `Received-SPF` fallback: anyone can write one). That header also supplies the DKIM signing
+    domain(s) (`header.d=`, else the domain of `header.i=`) of the signatures that passed, used
+    for alignment below. A missing spam/virus verdict means "not flagged"; missing SPF/DKIM means
+    "not authenticated". Envelope sender: `Return-Path`.
   - **Order of decisions per recipient:** spam `FAIL` -> `rejected_spam`; virus `FAIL` ->
     `rejected_virus`; a forwarding confirmation (below); the allowlist -> `rejected_sender`;
     then attachments / body / `no_receipt` / `rejected_too_large`; then the daily cap per file.
@@ -1130,18 +1155,31 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   - **Allowlist** (`ReceiptsAccount.sender_allowlist`, exact addresses and `*@domain`): empty
     accepts anyone, with no authentication needed. Otherwise the `From` address **or** the envelope
     sender must match after `addresses.normalize_address` (lowercase, `+tag` stripped, so Gmail's
-    `orders+caf_=user=gmail.com@vendor.com` becomes `orders@vendor.com`), **and** SES must report
-    SPF *or* DKIM as passing. Known limitation: the pass is not required to be *aligned* with the
-    matched address (any domain's SPF/DKIM pass counts), per the issue's wording; DMARC alignment
-    would be the stricter signal if the spike shows `Authentication-Results` carries it.
+    `orders+caf_=user=gmail.com@vendor.com` becomes `orders@vendor.com`), **and** SES must have
+    authenticated *the address that matched* (`mime.Verdicts.vouches_for`): a matching envelope
+    sender needs an SPF pass (SPF is about the envelope domain); a matching `From` needs a DKIM
+    pass whose signing domain is **aligned** with the `From` domain. Alignment is DMARC's relaxed
+    one, approximated by `addresses.domains_aligned`: equal, subdomain, or the same
+    "organizational domain" = last two labels, three under a common second-level suffix such as
+    `co.uk` (a hand-kept list, not the Public Suffix List; two unrelated names under an unlisted
+    suffix would look aligned). With no signing domain in `Authentication-Results`, a `From` match
+    is **not** authenticated (fail closed). So passing SPF/DKIM for a domain of your own no longer
+    lets you pose as an allowlisted address. A Gmail auto-forward (SPF broken, vendor DKIM intact)
+    is accepted through `From` + aligned DKIM. The exact header shapes (does SES write
+    `Authentication-Results` with `header.d`/`header.i`?) still await the infra spike
+    (joaonc/infra#373); until it reports, an allowlisted sender may be rejected as unverifiable
+    rather than anyone being let in.
   - **Forwarding confirmations.** A message from `mime.FORWARDING_CONFIRMATION_SENDERS`
     (`forwarding-noreply@google.com`; Outlook.com/Microsoft 365 forwarding sends no such
-    confirmation that we found, so there is no entry for it) that SES authenticated skips the
+    confirmation that we found, so there is no entry for it) that SES authenticated *as that
+    address* (the same `vouches_for` check: DKIM aligned with `google.com`, or SPF on a matching
+    envelope sender -- a pass for some other domain does not count) skips the
     allowlist and is stored as `forwarding_confirmation`: free, no receipts, no `.eml`, no cap slot,
     with the code (`Confirmation code: 123456789`, else `(#123456789)` in the subject) and the link
     in `forwarding_confirmation_code`/`_url` for the settings page to show later. The link is kept
-    only if it is `https` to `mail-settings.google.com`; without SES authentication the email is an
-    ordinary one (the allowlist applies and nothing is extracted).
+    only if it is `https` to `mail-settings.google.com` (a candidate that doesn't parse, like
+    `https://[x`, is skipped); without that authentication the email is an ordinary one (the
+    allowlist applies and nothing is extracted).
   - **What becomes a receipt** (`mime.analyze`). The tree is walked through `multipart/*` *and*
     `message/rfc822`, so a forward-as-attachment is searched too. Every non-text (or
     attachment-disposition) part is an attachment candidate: eligible when its **magic-byte** type
@@ -1156,16 +1194,33 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     carrying a forwarded message, the body with the most visible text wins over a cover note. An
     over-size attachment with nothing else eligible is `rejected_too_large` (the body is *not*
     substituted); nothing usable is `no_receipt`.
-  - **Cap and storing.** Each file takes a slot with `accounts.take_intake_slot` (the uploads'
-    counter) inside the recipient's transaction, so the account row is locked until commit; none
-    available for the first file -> `rejected_cap`; some -> the rest are skipped and `note` says
-    "N of M files skipped: daily limit ...". Files go to `receipts/users/<user>/files/<receipt>`
-    and the stripped `.eml` to `.../emails/<email>.eml` (`raw_key`, `size_bytes`); `Receipt` rows
-    (`source=email`, `inbound_email`, sniffed type, `sha256`) are created, `stored_bytes` gets
-    exactly files + `.eml`, and `process_receipt` is queued on commit per receipt. **Stripped
-    `.eml`** = the original re-serialized with every attachment-like part's payload emptied and one
-    header added: `X-Receipts-Receipt-Id: <id>` or `X-Receipts-Skipped: <reason>`; a body that became
-    a receipt is stripped the same way. A frozen account still gets everything stored
+  - **Cap and storing** (`inbound._store`). How many files fit is planned from an unlocked read of
+    the cap (`accounts.intake_slots_remaining`); none -> `rejected_cap`; fewer than there are ->
+    the rest are skipped and `note` says "N of M files skipped: daily limit ...". The objects are
+    uploaded **first**, outside any transaction (files to `receipts/users/<user>/files/<receipt>`,
+    the stripped `.eml` to `.../emails/<email>.eml`), then **one short transaction** takes the
+    slots (`accounts.take_intake_slot`, the uploads' counter, under the account row lock -- held
+    only for this, not for the uploads), creates the `InboundEmail` and the `Receipt` rows
+    (`source=email`, `inbound_email`, sniffed type, `sha256`), adds exactly files + `.eml` to
+    `stored_bytes` and queues `process_receipt` per receipt on commit; if the transaction fails the
+    objects are deleted. If another upload took slots in between (the plan no longer fits), it is
+    re-planned, up to 3 rounds, then the ordinary retry. **Stripped `.eml`** = the original
+    re-serialized (from a deep copy of the tree parsed once, not re-parsed per recipient) with
+    every attachment-like part's payload emptied and one header added: `X-Receipts-Receipt-Id:
+    <id>` or `X-Receipts-Skipped: <reason>`; a body that became a receipt is stripped the same way.
+    **It is bounded**, because the user pays for it and the sender chooses what is in it: any
+    other text part over `mime.MAX_KEPT_TEXT_BYTES` (256 KB) is emptied (`X-Receipts-Skipped: too
+    large`), leaves past `MAX_LEAVES` (300) and anything below `MAX_DEPTH` (30) are emptied, and if
+    the result is still over `MAX_EML_BYTES` (1 MB) -- or can't be serialized -- only the top-level
+    headers are kept (`X-Receipts-Stripped: headers only`). Likewise `mime` never keeps the bytes
+    of a part it skipped, and does not even choose a body when an attachment is eligible. One depth
+    measure (`mime._walk`: each `multipart/*` and `message/rfc822` is a level) serves every walker,
+    and `_choose_body` skips a part the main walk didn't reach (≈20+ nested forwards used to raise
+    `KeyError` there). **Rows ceiling:** an email that stores nothing (rejected, ignored, a
+    forwarding confirmation) gets its `InboundEmail` row only while the user has fewer than
+    `ReceiptsSettings.max_inbound_rows_per_day` (500) rows from the last 24 hours; beyond that it
+    is only logged, so a flood of junk can't fill the list or the database. Accepted mail is never
+    dropped by it (the file cap limits that). A frozen account still gets everything stored
     (`process_receipt` parks the receipts in `waiting_for_credits`). An email with receipts that fail or need
     review triggers the usual single "needs your attention" email once the last one settles.
   - **Local runs.** `./manage.py receipts_ingest_eml file.eml --to receipts+<code>@ziptrigo.com`
@@ -1176,8 +1231,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
 - **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
   (status/reason/source filters; no add/change/delete -- deleting a row would orphan its S3 objects
   and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, next attempt, last error; a "retry" action
-  needing `change_inboundmessage`, which resets `failed` -> `pending` and queues `ingest_message`
-  again through `services.inbound.reset_message_for_retry`), `InboundEmailAdmin`, `ReceiptsAccountAdmin` (codes inline, frozen state, stored bytes).
+  needing `change_inboundmessage`, which moves the parked object back to `receipts/inbound/`,
+  resets `failed` -> `pending` and queues `ingest_message` again through
+  `services.inbound.reset_message_for_retry`), `InboundEmailAdmin`, `ReceiptsAccountAdmin` (codes inline, frozen state, stored bytes).
 - **Settings/env**: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (optional), `OPENAI_RECEIPTS_MODEL`,
   `RECEIPTS_AI_TIMEOUT_SECONDS`/`_MAX_RETRIES` (explicit timeout, bounded SDK retries),
   `RECEIPTS_S3_BUCKET`/`_REGION`/`_ENDPOINT_URL`, `RECEIPTS_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`,

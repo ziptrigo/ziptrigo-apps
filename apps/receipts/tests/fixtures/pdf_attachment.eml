@@ -4,6 +4,9 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
+ designates 203.0.113.5) smtp.mailfrom=orders@staples.com; dkim=pass
+ header.d=staples.com header.i=@staples.com; dmarc=pass header.from=x
 X-SES-Spf-Verdict: PASS
 X-SES-Dkim-Verdict: PASS
 From: Staples <orders@staples.com>
@@ -12,15 +15,15 @@ Subject: Your Staples receipt
 Date: Fri, 09 Oct 2026 12:30:00 +0000
 Message-ID: <fixture-1@example.net>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============5148263007099826968=="
+Content-Type: multipart/mixed; boundary="===============5456404004040712604=="
 
---===============5148263007099826968==
+--===============5456404004040712604==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Thanks for your order. Total 42.10 USD. Order R-55102 placed on 2026-10-09.
 
---===============5148263007099826968==
+--===============5456404004040712604==
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="invoice.pdf"
@@ -39,4 +42,4 @@ biAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzNzcgMDAw
 MDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0NDcKJSVF
 T0YK
 
---===============5148263007099826968==--
+--===============5456404004040712604==--

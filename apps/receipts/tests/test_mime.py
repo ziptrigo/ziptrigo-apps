@@ -23,6 +23,10 @@ pytestmark = [pytest.mark.unit]
 ALLOWED = DEFAULT_ALLOWED_TYPES.split(',')
 
 
+def strip(raw: bytes, markers) -> bytes:
+    return mime.build_stripped_eml(raw, mime.parse_message(raw), markers)
+
+
 def analyze(raw: bytes, **overrides):
     options = {'allowed_types': ALLOWED, 'max_file_bytes': 15 * 1024**2, 'min_inline_px': 150}
     options.update(overrides)
@@ -48,8 +52,7 @@ class TestRecipients:
         assert self.addresses(raw) == []
 
     def test_a_forged_ses_received_header_below_a_real_hop_is_ignored(self):
-        """Only the leading run of SES's own `Received` headers counts: one the sender wrote ends
-        up below the sender-side hops, however SES-like it looks."""
+        """One the sender wrote ends up below the sender-side hops, however SES-like it looks."""
         raw = (
             b'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for '
             b'receipts+aaaa2222@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000\n'
@@ -59,6 +62,32 @@ class TestRecipients:
         )
 
         assert self.addresses(raw) == ['receipts+aaaa2222@ziptrigo.com']
+
+    def test_a_forged_ses_received_header_right_beneath_the_real_one_is_ignored(self):
+        """Only the topmost `SES_RECEIVED_HEADER_COUNT` `Received` header(s) are SES's: a copy the
+        sender wrote that ends up directly under it is not."""
+        raw = (
+            b'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for '
+            b'receipts+aaaa2222@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000\n'
+            b'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id b for '
+            b'receipts+bbbb3333@ziptrigo.com; Fri, 09 Oct 2026 12:29:00 +0000\n\nx\n'
+        )
+
+        assert self.addresses(raw) == ['receipts+aaaa2222@ziptrigo.com']
+
+    def test_the_number_of_trusted_received_headers_is_one_constant(self, monkeypatch):
+        monkeypatch.setattr(mime, 'SES_RECEIVED_HEADER_COUNT', 2)
+        raw = (
+            b'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for '
+            b'receipts+aaaa2222@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000\n'
+            b'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id b for '
+            b'receipts+bbbb3333@ziptrigo.com; Fri, 09 Oct 2026 12:29:00 +0000\n\nx\n'
+        )
+
+        assert self.addresses(raw) == [
+            'receipts+aaaa2222@ziptrigo.com',
+            'receipts+bbbb3333@ziptrigo.com',
+        ]
 
     def test_falls_back_to_delivered_to_then_x_original_to_then_to_and_cc(self):
         base = b'Subject: x\n\nbody\n'
@@ -115,7 +144,8 @@ class TestVerdicts:
         verdicts = self.verdicts()
 
         assert not verdicts.spam_failed and not verdicts.virus_failed
-        assert verdicts.spf_pass and verdicts.dkim_pass and verdicts.authenticated
+        assert verdicts.spf_pass and verdicts.dkim_pass
+        assert verdicts.dkim_domains == {'staples.com'}
 
     def test_only_fail_rejects(self):
         assert self.verdicts(spam='FAIL').spam_failed
@@ -124,15 +154,18 @@ class TestVerdicts:
             verdicts = self.verdicts(spam=value, virus=value)
             assert not verdicts.spam_failed and not verdicts.virus_failed
 
-    def test_either_spf_or_dkim_authenticates(self):
-        assert self.verdicts(spf='PASS', dkim='FAIL').authenticated
-        assert self.verdicts(spf='FAIL', dkim='PASS').authenticated
-        assert not self.verdicts(spf='FAIL', dkim='GRAY').authenticated
+    def test_spf_and_dkim_are_separate(self):
+        both = self.verdicts(spf='PASS', dkim='FAIL')
+        assert both.spf_pass and not both.dkim_pass
+        both = self.verdicts(spf='FAIL', dkim='PASS')
+        assert not both.spf_pass and both.dkim_pass
+        both = self.verdicts(spf='FAIL', dkim='GRAY')
+        assert not both.spf_pass and not both.dkim_pass
 
     def test_missing_verdicts_mean_not_authenticated_and_not_flagged(self):
         verdicts = self.verdicts(spam=None, virus=None, spf=None, dkim=None)
 
-        assert not verdicts.authenticated
+        assert not verdicts.spf_pass and not verdicts.dkim_pass
         assert not verdicts.spam_failed and not verdicts.virus_failed
 
     def test_falls_back_to_the_authentication_results_header(self):
@@ -140,20 +173,68 @@ class TestVerdicts:
 
         assert verdicts.spf_pass and not verdicts.dkim_pass
 
+    def test_the_signing_domain_comes_from_header_d_else_header_i(self):
+        def read(results: bytes) -> frozenset[str]:
+            raw = b'Authentication-Results: ' + results + b'\n\nx\n'
+            return mime.read_verdicts(mime.parse_message(raw)).dkim_domains
+
+        assert read(b'amazonses.com; dkim=pass header.d=Vendor.COM header.i=@mail.vendor.com') == {
+            'vendor.com'
+        }
+        assert read(b'amazonses.com; dkim=pass header.i=@mail.vendor.com') == {'mail.vendor.com'}
+        assert read(b'amazonses.com; dkim=pass header.i=bounce@vendor.com') == {'vendor.com'}
+        assert read(b'amazonses.com; dkim=pass') == frozenset()
+        # Only a signature that passed names a domain.
+        assert read(b'amazonses.com; dkim=fail header.d=vendor.com') == frozenset()
+        two = read(
+            b'amazonses.com; dkim=pass header.d=a.com; dkim=fail header.d=b.com; '
+            b'dkim=pass header.d=c.com'
+        )
+        assert two == {'a.com', 'c.com'}
+        # Nonsense is not a domain.
+        assert read(b'amazonses.com; dkim=pass header.d=not_a_domain!') == frozenset()
+
     def test_authentication_results_comments_cannot_fake_a_pass(self):
         raw = (
-            b'Authentication-Results: amazonses.com; spf=fail (not dkim=pass spf=pass) '
-            b'smtp.mailfrom=x; dkim=none\n\nx\n'
+            b'Authentication-Results: amazonses.com; spf=fail (not dkim=pass spf=pass '
+            b'(nested; dkim=pass)) smtp.mailfrom=x; dkim=none\n\nx\n'
         )
 
         verdicts = mime.read_verdicts(mime.parse_message(raw))
 
-        assert not verdicts.authenticated
+        assert not verdicts.spf_pass and not verdicts.dkim_pass
 
     def test_an_authentication_results_header_from_somebody_else_is_ignored(self):
-        raw = b'Authentication-Results: mx.evil.test; spf=pass; dkim=pass\n\nx\n'
+        raw = b'Authentication-Results: mx.evil.test; spf=pass; dkim=pass header.d=x.com\n\nx\n'
 
-        assert not mime.read_verdicts(mime.parse_message(raw)).authenticated
+        verdicts = mime.read_verdicts(mime.parse_message(raw))
+
+        assert not verdicts.spf_pass and not verdicts.dkim_pass and not verdicts.dkim_domains
+
+    def test_only_the_first_authentication_results_header_counts(self):
+        """SES prepends its header: a later one that says `amazonses.com` is the sender's."""
+        raw = (
+            b'Authentication-Results: mx.evil.test; spf=none\n'
+            b'Authentication-Results: amazonses.com; spf=pass; dkim=pass header.d=vendor.com\n'
+            b'\nx\n'
+        )
+
+        verdicts = mime.read_verdicts(mime.parse_message(raw))
+
+        assert not verdicts.spf_pass and not verdicts.dkim_pass and not verdicts.dkim_domains
+
+    def test_a_later_authentication_results_header_does_not_add_to_the_first(self):
+        raw = build_email(
+            ses=Ses(spf='FAIL', dkim='FAIL', via_authentication_results=True),
+            headers=[
+                ('Authentication-Results', 'amazonses.com; spf=pass; dkim=pass header.d=evil.com')
+            ],
+        )
+
+        verdicts = mime.read_verdicts(mime.parse_message(raw))
+
+        assert not verdicts.spf_pass and not verdicts.dkim_pass
+        assert 'evil.com' not in verdicts.dkim_domains
 
     def test_only_the_topmost_verdict_header_counts(self):
         """SES prepends its headers; a copy the sender wrote sits below and must not win."""
@@ -162,12 +243,87 @@ class TestVerdicts:
             headers=[('X-SES-Spf-Verdict', 'PASS'), ('X-SES-Dkim-Verdict', 'PASS')],
         )
 
-        assert not mime.read_verdicts(mime.parse_message(raw)).authenticated
+        verdicts = mime.read_verdicts(mime.parse_message(raw))
 
-    def test_received_spf_is_the_last_resort(self):
+        assert not verdicts.spf_pass and not verdicts.dkim_pass
+
+    def test_received_spf_is_not_trusted(self):
+        """A header anyone can write; SES's own verdict is the only source."""
         raw = b'Received-SPF: pass (spfCheck: ok) client-ip=1.2.3.4\n\nx\n'
 
-        assert mime.read_verdicts(mime.parse_message(raw)).spf_pass
+        assert not mime.read_verdicts(mime.parse_message(raw)).spf_pass
+
+
+class TestVouchesFor:
+    """Authentication has to be about the address that matched: SPF for the envelope sender, an
+    aligned DKIM signature for the From address."""
+
+    LISTED = frozenset({'orders@vendor.com', 'billing@vendor.co.uk'})
+
+    def vouches(self, from_addr: str, envelope: str, **ses) -> bool:
+        raw = build_email(from_addr=from_addr, ses=Ses(return_path=envelope, **ses))
+        verdicts = mime.read_verdicts(mime.parse_message(raw))
+        return verdicts.vouches_for(
+            from_address=from_addr,
+            envelope_sender=envelope,
+            is_listed=lambda address: address in self.LISTED,
+        )
+
+    def test_spf_pass_vouches_for_a_listed_envelope_sender(self):
+        assert self.vouches('x@other.test', 'orders@vendor.com', spf='PASS', dkim='FAIL')
+
+    def test_spf_does_not_vouch_for_a_listed_from_address(self):
+        """Pass SPF for your own domain, put somebody else's address in `From`."""
+        assert not self.vouches(
+            'orders@vendor.com', 'me@evil.test', spf='PASS', dkim='FAIL', dkim_domain=''
+        )
+
+    def test_an_aligned_dkim_signature_vouches_for_a_listed_from_address(self):
+        assert self.vouches('orders@vendor.com', 'bounce@esp.test', spf='FAIL', dkim='PASS')
+
+    def test_a_subdomain_signature_is_aligned(self):
+        assert self.vouches(
+            'orders@vendor.com',
+            'b@esp.test',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='mail.vendor.com',
+        )
+
+    def test_an_unaligned_dkim_signature_does_not_vouch(self):
+        assert not self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='PASS', dkim_domain='evil.test'
+        )
+
+    def test_without_a_signing_domain_a_from_match_is_not_authenticated(self):
+        assert not self.vouches(
+            'orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='PASS', dkim_domain=''
+        )
+
+    def test_a_failed_dkim_verdict_does_not_vouch_even_with_an_aligned_domain(self):
+        assert not self.vouches('orders@vendor.com', 'b@esp.test', spf='FAIL', dkim='FAIL')
+
+    def test_unrelated_names_under_a_two_level_suffix_are_not_aligned(self):
+        assert self.vouches(
+            'billing@vendor.co.uk',
+            'b@esp.test',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='vendor.co.uk',
+        )
+        assert not self.vouches(
+            'billing@vendor.co.uk', 'b@esp.test', spf='FAIL', dkim='PASS', dkim_domain='evil.co.uk'
+        )
+
+    def test_nothing_vouches_for_an_unlisted_address(self):
+        assert not self.vouches('x@evil.test', 'x@evil.test')
+
+    def test_an_empty_envelope_sender_and_from_never_vouch(self):
+        verdicts = mime.Verdicts(spf_pass=True, dkim_pass=True, dkim_domains=frozenset({''}))
+
+        assert not verdicts.vouches_for(
+            from_address='', envelope_sender='', is_listed=lambda address: True
+        )
 
 
 class TestSenders:
@@ -228,6 +384,22 @@ class TestForwardingConfirmation:
         code, link = mime.extract_forwarding_confirmation(mime.parse_message(raw))
 
         assert (code, link) == ('123456', '')
+
+    def test_a_malformed_link_is_skipped_not_a_crash(self):
+        """`urlsplit` raises `ValueError` on `https://[x`; that used to fail the whole message."""
+        raw = build_email(
+            text='Confirmation code: 123456\nhttps://[x\nhttps://[::1\n'
+            'https://mail-settings.google.com/mail/vf-ok\n',
+        )
+
+        code, link = mime.extract_forwarding_confirmation(mime.parse_message(raw))
+
+        assert (code, link) == ('123456', 'https://mail-settings.google.com/mail/vf-ok')
+
+    def test_a_message_with_only_a_malformed_link_has_no_link(self):
+        raw = build_email(text='Confirmation code: 123456\nhttps://[x\n')
+
+        assert mime.extract_forwarding_confirmation(mime.parse_message(raw)) == ('123456', '')
 
     def test_the_code_falls_back_to_the_subject(self):
         raw = build_email(subject='(#55512345) Gmail Forwarding Confirmation', text='hello')
@@ -388,7 +560,7 @@ class TestStrippedEml:
             by_name['logo.png']: (mime.SKIPPED_HEADER, mime.SKIP_INLINE),
         }
 
-        stripped = mime.build_stripped_eml(raw, markers)
+        stripped = strip(raw, markers)
 
         assert len(stripped) < len(raw) / 2
         msg = mime.parse_message(stripped)
@@ -406,14 +578,209 @@ class TestStrippedEml:
         # The body text parts are untouched.
         assert b'Thanks for your order' in stripped
 
+    def test_the_tree_it_is_given_is_not_modified(self):
+        """One parse serves every recipient: stripping works on a copy."""
+        raw = build_email(attachments=[pdf()])
+        parsed = mime.parse_message(raw)
+        index = analyze(raw).attachments[0].index
+
+        mime.build_stripped_eml(raw, parsed, {index: (mime.SKIPPED_HEADER, 'x')})
+
+        [attachment] = [p for p in mime.iter_leaves(parsed) if mime.is_attachment_like(p)]
+        assert mime.part_bytes(attachment) == samples.text_pdf_bytes()
+        assert attachment['X-Receipts-Skipped'] is None
+
     def test_a_message_that_cannot_be_rebuilt_keeps_its_headers(self, monkeypatch):
         raw = build_email(attachments=[pdf()])
-        monkeypatch.setattr(mime, 'parse_message', lambda _raw: 1 / 0)
+        monkeypatch.setattr(mime.copy, 'deepcopy', lambda _msg: 1 / 0)
 
-        stripped = mime.build_stripped_eml(raw, {})
+        stripped = strip(raw, {})
 
         assert stripped.startswith(b'Return-Path:') and b'X-Receipts-Stripped' in stripped
         assert b'JVBERi0' not in stripped  # no attachment data
+
+    def test_a_big_text_part_that_is_not_the_receipt_is_emptied(self):
+        """A 5 MB HTML body next to a tiny PDF: the PDF is the receipt, and the stored copy must
+        not carry the body (the user pays for it)."""
+        big = '<html><body>' + 'x' * (5 * 1024 * 1024) + '</body></html>'
+        raw = build_email(html=big, attachments=[pdf()])
+        index = analyze(raw).attachments[0].index
+
+        stripped = strip(raw, {index: (mime.RECEIPT_ID_HEADER, 'rid')})
+
+        assert len(stripped) < 20 * 1024
+        msg = mime.parse_message(stripped)
+        html_part = msg.get_body(preferencelist=('html',))  # ty: ignore[unresolved-attribute]
+        assert html_part is not None
+        assert html_part['X-Receipts-Skipped'] == mime.SKIP_TOO_LARGE
+        assert mime.part_text(html_part).strip() == ''
+        # The small plain-text part is kept.
+        assert b'Thanks for your order' in stripped
+
+    def test_text_parts_under_the_limit_are_kept(self):
+        raw = build_email(html=HTML_RECEIPT)
+
+        stripped = strip(raw, {})
+
+        assert b'Thanks for your order' in stripped and b'X-Receipts-Skipped' not in stripped
+
+    def test_a_sender_written_marker_header_does_not_survive(self):
+        raw = build_email(attachments=[pdf()])
+        parsed = mime.parse_message(raw)
+        [attachment] = [p for p in mime.iter_leaves(parsed) if mime.is_attachment_like(p)]
+        attachment['X-Receipts-Receipt-Id'] = 'forged'
+        index = analyze(raw).attachments[0].index
+
+        stripped = mime.build_stripped_eml(
+            raw, parsed, {index: (mime.SKIPPED_HEADER, 'inline image')}
+        )
+
+        assert b'forged' not in stripped
+
+    def test_over_the_total_ceiling_only_the_headers_are_kept(self, monkeypatch):
+        raw = build_email(html=HTML_RECEIPT, subject='Order')
+        monkeypatch.setattr(mime, 'MAX_EML_BYTES', 1200)
+
+        stripped = strip(raw, {})
+
+        assert stripped.startswith(b'Return-Path:') and b'Subject: Order' in stripped
+        assert b'X-Receipts-Stripped: headers only' in stripped
+        assert b'Thanks for your order' not in stripped
+        assert len(stripped) < 1200
+
+    def test_leaves_past_the_cap_and_parts_below_the_depth_limit_are_emptied(self, monkeypatch):
+        monkeypatch.setattr(mime, 'MAX_LEAVES', 2)
+        raw = build_email(
+            text='first text part of the email, long enough',
+            attachments=[
+                Attachment('a.txt', b'secret-one', 'text', 'plain'),
+                Attachment('b.txt', b'secret-two', 'text', 'plain'),
+            ],
+        )
+
+        stripped = strip(raw, {})
+
+        assert b'secret-two' not in stripped  # the third leaf is over the cap
+        assert b'X-Receipts-Skipped: ' + mime.SKIP_OVER_LIMIT.encode() in stripped
+
+        monkeypatch.setattr(mime, 'MAX_LEAVES', 300)
+        monkeypatch.setattr(mime, 'MAX_DEPTH', 1)
+        nested = build_email(
+            text='cover note for the forward, long enough',
+            nested=build_email(
+                attachments=[Attachment('deep.txt', b'deep-secret', 'text', 'plain')]
+            ),
+        )
+
+        stripped = strip(nested, {})
+
+        assert b'deep-secret' not in stripped
+
+
+class TestLimits:
+    def multipart(self, parts: int) -> bytes:
+        body = b''.join(b'--b\r\n\r\nx\r\n' for _ in range(parts))
+        return (
+            b'Content-Type: multipart/mixed; boundary=b\r\nSubject: bomb\r\n\r\n'
+            + body
+            + b'--b--\r\n'
+        )
+
+    def test_a_message_with_too_many_parts_is_refused_before_parsing(self):
+        assert mime.exceeds_part_limit(self.multipart(mime.MAX_BOUNDARY_LINES + 1))
+        assert not mime.exceeds_part_limit(self.multipart(mime.MAX_BOUNDARY_LINES - 10))
+
+    def test_the_scan_is_fast_on_a_huge_bomb(self):
+        import time
+
+        raw = b'--b\r\n\r\nx\r\n' * 2_000_000  # ~20 MB of parts
+
+        started = time.monotonic()
+        assert mime.exceeds_part_limit(raw)
+        assert time.monotonic() - started < 2
+
+    def test_ordinary_dashes_are_not_parts(self):
+        raw = b'Subject: report\n\n' + b'-----\n' * 5000 + b'-- \n' * 5000 + b'--- -- \n' * 5000
+
+        assert not mime.exceeds_part_limit(raw)
+
+    def test_the_fixtures_and_a_forward_are_far_below_the_limit(self):
+        for name in ('pdf_attachment.eml', 'forward_as_attachment.eml', 'html_body.eml'):
+            assert not mime.exceeds_part_limit((FIXTURES / name).read_bytes())
+
+    def test_leaves_are_capped(self, monkeypatch):
+        monkeypatch.setattr(mime, 'MAX_LEAVES', 5)
+        raw = build_email(
+            attachments=[Attachment(f'{i}.txt', b'x', 'text', 'plain') for i in range(10)]
+        )
+
+        assert len(list(mime.iter_leaves(mime.parse_message(raw)))) == 5
+
+    def test_data_of_a_skipped_part_is_not_kept(self):
+        junk = Attachment('x.bin', b'MZ' + b'\x00' * 1000, 'application', 'octet-stream')
+        analysis = analyze(build_email(attachments=[junk, pdf()]), max_file_bytes=100_000)
+        [skipped, eligible] = analysis.attachments
+
+        assert skipped.skip == mime.SKIP_UNSUPPORTED
+        assert skipped.data == b'' and skipped.size == 1002
+        assert eligible.data == samples.text_pdf_bytes()
+
+    def test_the_body_is_not_analysed_when_an_attachment_is_eligible(self):
+        assert analyze(build_email(html=HTML_RECEIPT, attachments=[pdf()])).body is None
+
+
+def nested_forwards(levels: int, bottom: bytes | None = None) -> bytes:
+    raw = bottom or build_email(
+        text='The actual receipt: total 42.10 USD, order R-55102, thank you.'
+    )
+    for _ in range(levels):
+        raw = build_email(text='FYI, see below.', nested=raw)
+    return raw
+
+
+class TestDeepNesting:
+    """A message forwarded inside a forwarded message inside ...: both tree walkers share one
+    depth measure, so a crafted nest can no longer make `analyze` raise."""
+
+    @pytest.mark.parametrize('levels', [1, 5, 12, 20, 25, 40])
+    def test_analyze_never_raises(self, levels):
+        analysis = analyze(nested_forwards(levels))
+
+        assert analysis.attachments == []  # nothing attached anywhere
+        # Whatever was within reach is fine; the point is that it finishes.
+
+    def test_a_shallow_nest_still_finds_the_innermost_body(self):
+        analysis = analyze(nested_forwards(3))
+
+        assert analysis.body is not None and b'The actual receipt' in analysis.body.data
+
+    def test_the_regression_input_really_has_a_leaf_outside_the_main_walk(self):
+        """Why `_choose_body` used to raise `KeyError`: restarted from a deep nested message, the
+        per-message walk reaches a leaf the top-level walk (and so its index) never saw."""
+        msg = mime.parse_message(nested_forwards(25))
+        in_reach = {id(p) for p in mime.iter_leaves(msg)}
+
+        outside = [
+            leaf
+            for candidate in mime.iter_messages(msg)
+            for leaf in mime.iter_leaves(candidate, into_messages=False)
+            if id(leaf) not in in_reach
+        ]
+
+        assert outside
+        assert (
+            mime.analyze(
+                msg, allowed_types=ALLOWED, max_file_bytes=1024, min_inline_px=150
+            ).attachments
+            == []
+        )
+
+    def test_an_attachment_inside_a_deep_nest_is_not_a_crash(self):
+        inner = build_email(attachments=[pdf('inner.pdf')])
+
+        analysis = analyze(nested_forwards(22, inner))
+
+        assert all(a.skip == '' for a in analysis.eligible)
 
 
 def test_the_literal_fixtures_parse_and_match_their_builders():

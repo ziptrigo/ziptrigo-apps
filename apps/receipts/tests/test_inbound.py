@@ -9,6 +9,7 @@ from datetime import timedelta
 
 import pytest
 from botocore.exceptions import ClientError
+from django.db import IntegrityError
 from django.utils import timezone
 
 from apps.billing.services import add_credits, get_balance
@@ -28,7 +29,14 @@ from ..models import (
 from ..services import inbound, mime
 from ..services.accounts import get_account, inbox_address_for
 from ..services.lifecycle import purge_receipt
-from ..services.storage import INBOUND_PREFIX, email_key, file_key, user_prefix
+from ..services.storage import (
+    FAILED_PREFIX,
+    INBOUND_PREFIX,
+    email_key,
+    failed_key_for,
+    file_key,
+    user_prefix,
+)
 from . import samples
 from .emails import (
     FIXED_ADDRESS,
@@ -45,6 +53,7 @@ from .emails import (
 )
 from .factories import make_user
 from .fakes import sample_extraction
+from .test_mime import nested_forwards
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -76,6 +85,16 @@ def deliver(fake_storage, django_capture_on_commit_callbacks):
         return message
 
     return _deliver
+
+
+def assert_parked(fake_storage, message: InboundMessage) -> None:
+    """A failed message's object is kept, but not under the prefix the poller lists."""
+    assert message.status == InboundMessageStatus.FAILED
+    assert message.failed_key == failed_key_for(message.s3_key)
+    assert message.failed_key.startswith(FAILED_PREFIX)
+    assert message.failed_key in fake_storage.objects
+    assert message.s3_key not in fake_storage.objects
+    assert not fake_storage.list_keys(INBOUND_PREFIX)
 
 
 def one_email(message: InboundMessage) -> InboundEmail:
@@ -272,20 +291,30 @@ class TestGmailAutoForward:
     def test_an_allowlist_matches_the_normalized_envelope_sender(
         self, deliver, inbox, account, fake_storage
     ):
-        """SPF fails after a forward and `From` is not listed, but the envelope sender,
-        `orders+caf_=...@staples.com`, normalizes to a listed address and DKIM passed."""
+        """`From` is not listed, but the envelope sender, `orders+caf_=...@staples.com`,
+        normalizes to a listed address, and SPF passed for it."""
         ReceiptsAccount.objects.filter(pk=account.pk).update(
             sender_allowlist=['orders@staples.com']
         )
         raw = build_email(
             from_addr='Staples Orders <noreply@mailer.example>',
-            ses=Ses(
-                recipient=inbox, return_path='orders+caf_=joao=gmail.com@staples.com', spf='FAIL'
-            ),
+            ses=Ses(recipient=inbox, return_path='orders+caf_=joao=gmail.com@staples.com'),
             attachments=[pdf()],
         )
 
         message = deliver(raw)
+
+        assert one_email(message).status == InboundEmailStatus.ACCEPTED
+
+    def test_a_forwarded_receipt_is_matched_by_from_and_an_aligned_dkim(
+        self, deliver, fixed_inbox, account
+    ):
+        """Gmail's forward breaks SPF; the vendor's own DKIM signature survives."""
+        ReceiptsAccount.objects.filter(pk=account.pk).update(
+            sender_allowlist=['orders@staples.com']
+        )
+
+        message = deliver((FIXTURES / 'gmail_auto_forward.eml').read_bytes())
 
         assert one_email(message).status == InboundEmailStatus.ACCEPTED
 
@@ -332,6 +361,70 @@ class TestForwardingConfirmation:
         email = one_email(message)
         assert email.status == InboundEmailStatus.REJECTED_SENDER
         assert email.forwarding_confirmation_url == ''
+
+    def test_authentication_for_another_domain_does_not_make_it_google(
+        self, deliver, inbox, account, fake_storage
+    ):
+        """SPF and DKIM pass -- for the attacker's own domain. Posing as Google's forwarding
+        sender must not skip the allowlist or plant a code on the settings page."""
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
+        raw = build_email(
+            from_addr='forwarding-noreply@google.com',
+            text='Confirmation code: 123456\nhttps://mail-settings.google.com/mail/vf-x',
+            ses=Ses(
+                recipient=inbox,
+                return_path='attacker@evil.test',
+                spf='PASS',
+                dkim='PASS',
+                dkim_domain='evil.test',
+            ),
+        )
+
+        email = one_email(deliver(raw))
+
+        assert email.status == InboundEmailStatus.REJECTED_SENDER
+        assert email.forwarding_confirmation_code == email.forwarding_confirmation_url == ''
+
+    def test_google_without_a_signing_domain_is_not_google(self, deliver, inbox, account):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
+        raw = build_email(
+            from_addr='forwarding-noreply@google.com',
+            text='Confirmation code: 123456',
+            ses=Ses(recipient=inbox, return_path='x@evil.test', dkim_domain=''),
+        )
+
+        assert one_email(deliver(raw)).status == InboundEmailStatus.REJECTED_SENDER
+
+    def test_a_signature_by_a_google_subdomain_is_aligned(self, deliver, inbox, account):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
+        raw = build_email(
+            from_addr='forwarding-noreply@google.com',
+            text='Confirmation code: 123456',
+            ses=Ses(recipient=inbox, return_path='x@bounce.test', dkim_domain='mail.google.com'),
+        )
+
+        assert one_email(deliver(raw)).status == InboundEmailStatus.FORWARDING_CONFIRMATION
+
+    def test_a_malformed_link_in_the_confirmation_does_not_fail_the_message(
+        self, deliver, inbox, fake_storage
+    ):
+        """`urlsplit('https://[x')` raises `ValueError`; that used to fail the message for good
+        (and, through it, let anyone fill the poller's listing with failures)."""
+        raw = build_email(
+            from_addr='forwarding-noreply@google.com',
+            text='Confirmation code: 123456\nhttps://[x\n',
+            ses=Ses(recipient=inbox),
+        )
+
+        message = deliver(raw)
+
+        assert message.status == InboundMessageStatus.DONE
+        email = one_email(message)
+        assert email.status == InboundEmailStatus.FORWARDING_CONFIRMATION
+        assert (email.forwarding_confirmation_code, email.forwarding_confirmation_url) == (
+            '123456',
+            '',
+        )
 
     def test_spam_is_still_rejected_first(self, deliver, inbox):
         raw = build_email(
@@ -486,8 +579,75 @@ class TestAllowlist:
     def test_a_listed_sender_with_spf_passes(self, deliver, inbox):
         assert self.status(deliver, inbox, spf='PASS', dkim='FAIL') == 'accepted'
 
-    def test_a_listed_sender_with_only_dkim_passes(self, deliver, inbox):
+    def test_a_listed_sender_with_only_an_aligned_dkim_passes(self, deliver, inbox):
         assert self.status(deliver, inbox, spf='FAIL', dkim='PASS') == 'accepted'
+
+    def test_spf_for_an_unrelated_envelope_domain_does_not_authenticate_a_listed_from(
+        self, deliver, inbox
+    ):
+        """The bypass: pass SPF for your own domain, write the allowlisted address in `From`."""
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='orders@staples.com',
+            return_path='attacker@evil.test',
+            spf='PASS',
+            dkim='FAIL',
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_a_dkim_pass_for_an_unrelated_domain_does_not_authenticate_a_listed_from(
+        self, deliver, inbox
+    ):
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='orders@staples.com',
+            return_path='attacker@evil.test',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='evil.test',
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_a_from_match_without_a_signing_domain_is_not_authenticated(self, deliver, inbox):
+        status = self.status(deliver, inbox, spf='FAIL', dkim='PASS', dkim_domain='')
+
+        assert status == 'rejected_sender'
+
+    def test_dkim_for_a_subdomain_of_the_from_domain_is_aligned(self, deliver, inbox):
+        status = self.status(
+            deliver, inbox, spf='FAIL', dkim='PASS', dkim_domain='mail.staples.com'
+        )
+
+        assert status == 'accepted'
+
+    def test_dkim_does_not_authenticate_a_match_on_the_envelope_sender_alone(self, deliver, inbox):
+        """Only `Return-Path` is listed; the proof available (DKIM) is about the From domain."""
+        status = self.status(
+            deliver,
+            inbox,
+            from_addr='noreply@mailer.test',
+            return_path='orders@staples.com',
+            spf='FAIL',
+            dkim='PASS',
+            dkim_domain='mailer.test',
+        )
+
+        assert status == 'rejected_sender'
+
+    def test_the_rejection_says_why(self, deliver, inbox):
+        raw = build_email(
+            from_addr='orders@staples.com',
+            attachments=[pdf()],
+            ses=Ses(recipient=inbox, return_path='x@evil.test', dkim='FAIL'),
+        )
+
+        email = one_email(deliver(raw))
+
+        assert 'could not be verified' in email.note
 
     def test_a_listed_sender_without_any_authentication_is_rejected(self, deliver, inbox):
         assert self.status(deliver, inbox, spf='FAIL', dkim='FAIL') == 'rejected_sender'
@@ -533,7 +693,7 @@ class TestAllowlist:
         assert status == 'accepted'
 
     def test_authentication_results_work_too(self, deliver, inbox):
-        ok = self.status(deliver, inbox, via_authentication_results=True)
+        ok = self.status(deliver, inbox, via_authentication_results=True, spf='PASS', dkim='PASS')
         bad = self.status(deliver, inbox, via_authentication_results=True, spf='FAIL', dkim='FAIL')
 
         assert (ok, bad) == ('accepted', 'rejected_sender')
@@ -921,7 +1081,7 @@ class TestRetries:
         assert message.attempts == 3
         assert 'RuntimeError: boom' in message.last_error
         assert message.next_attempt_at is None
-        assert message.s3_key in fake_storage.objects  # kept for inspection
+        assert_parked(fake_storage, message)  # kept for inspection, out of the polled prefix
 
     def test_a_failed_message_is_never_claimed_again(self, fake_storage):
         message = self.seed(fake_storage, b'x')
@@ -942,7 +1102,7 @@ class TestRetries:
         message.refresh_from_db()
         assert message.status == InboundMessageStatus.FAILED
         assert 'interrupted' in message.last_error
-        assert message.s3_key in fake_storage.objects
+        assert_parked(fake_storage, message)
 
     def test_a_running_claim_is_not_taken_twice(self, fake_storage, inbox):
         message = self.seed(
@@ -972,7 +1132,7 @@ class TestRetries:
         message.refresh_from_db()
         assert message.status == InboundMessageStatus.FAILED and message.attempts == 1
         assert 'over 10 bytes' in message.last_error
-        assert message.s3_key in fake_storage.objects
+        assert_parked(fake_storage, message)
 
     def test_a_missing_object_fails_at_once(self, fake_storage):
         message = InboundMessage.objects.create(s3_key=f'{INBOUND_PREFIX}gone')
@@ -1064,6 +1224,499 @@ class TestRetries:
         assert queued == [message.pk]
 
 
+class TestFailedMessagesAreParked:
+    def seed(self, fake_storage, raw: bytes) -> InboundMessage:
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, raw)
+        return InboundMessage.objects.create(s3_key=key)
+
+    def test_a_retry_moves_the_object_back_and_the_ingest_then_works(
+        self, fake_storage, inbox, django_capture_on_commit_callbacks, monkeypatch
+    ):
+        raw = build_email(attachments=[pdf()], ses=Ses(recipient=inbox))
+        message = self.seed(fake_storage, raw)
+        limit = inbound.MAX_RAW_BYTES
+        monkeypatch.setattr(inbound, 'MAX_RAW_BYTES', 10)  # too large -> fails at once
+        inbound.ingest(message.pk)
+        message.refresh_from_db()
+        assert_parked(fake_storage, message)
+        parked_key = message.failed_key
+        monkeypatch.setattr(inbound, 'MAX_RAW_BYTES', limit)
+
+        with django_capture_on_commit_callbacks(execute=True):
+            assert inbound.reset_message_for_retry(message)
+
+        message.refresh_from_db()
+        assert message.status == InboundMessageStatus.DONE  # the queued ingest ran inline
+        assert message.failed_key == ''
+        assert parked_key not in fake_storage.objects
+        assert Receipt.objects.count() == 1
+
+    def test_a_retry_puts_the_object_back_under_the_polled_prefix(self, fake_storage, monkeypatch):
+        queued_ids = []
+
+        class Recorder:
+            def enqueue(self, message_id):
+                queued_ids.append(message_id)
+
+        monkeypatch.setattr(inbound, 'ingest_message', Recorder())
+        message = self.seed(fake_storage, b'raw')
+        parked = failed_key_for(message.s3_key)
+        fake_storage.objects[parked] = fake_storage.objects.pop(message.s3_key)
+        InboundMessage.objects.filter(pk=message.pk).update(status='failed', failed_key=parked)
+        message.refresh_from_db()
+
+        assert inbound.reset_message_for_retry(message)
+
+        message.refresh_from_db()
+        assert message.status == 'pending' and message.failed_key == ''
+        assert fake_storage.objects == {message.s3_key: b'raw'}
+
+    def test_a_retry_whose_move_back_fails_changes_nothing(self, fake_storage, monkeypatch):
+        message = self.seed(fake_storage, b'raw')
+        parked = failed_key_for(message.s3_key)
+        fake_storage.objects[parked] = fake_storage.objects.pop(message.s3_key)
+        InboundMessage.objects.filter(pk=message.pk).update(status='failed', failed_key=parked)
+        message.refresh_from_db()
+
+        def broken(*args, **kwargs):
+            raise ClientError({'Error': {'Code': 'AccessDenied', 'Message': 'x'}}, 'CopyObject')
+
+        monkeypatch.setattr(fake_storage, 'copy_object', broken)
+
+        assert not inbound.reset_message_for_retry(message)
+
+        message.refresh_from_db()
+        assert message.status == 'failed' and message.failed_key == parked
+
+    def test_a_failure_whose_move_fails_is_finished_by_the_next_poll(
+        self, fake_storage, monkeypatch
+    ):
+        monkeypatch.setattr(inbound, 'MAX_RAW_BYTES', 10)
+        message = self.seed(fake_storage, b'x' * 100)
+        real_copy = fake_storage.copy_object
+
+        def broken(*args, **kwargs):
+            raise ClientError({'Error': {'Code': 'InternalError', 'Message': 'x'}}, 'CopyObject')
+
+        monkeypatch.setattr(fake_storage, 'copy_object', broken)
+        inbound.ingest(message.pk)
+        message.refresh_from_db()
+        assert message.status == 'failed' and message.failed_key == ''
+        assert message.s3_key in fake_storage.objects
+
+        monkeypatch.setattr(fake_storage, 'copy_object', real_copy)
+        inbound.poll()
+
+        message.refresh_from_db()
+        assert_parked(fake_storage, message)
+
+    def test_the_parked_key_mirrors_the_inbound_name(self):
+        assert failed_key_for(f'{INBOUND_PREFIX}abc123') == f'{FAILED_PREFIX}abc123'
+        assert failed_key_for('somewhere/else') == f'{FAILED_PREFIX}somewhere_else'
+
+    def test_a_missing_object_has_nothing_to_park(self, fake_storage):
+        message = InboundMessage.objects.create(s3_key=f'{INBOUND_PREFIX}gone')
+
+        inbound.ingest(message.pk)
+
+        message.refresh_from_db()
+        assert message.status == 'failed' and message.failed_key == ''
+        assert not fake_storage.objects
+
+
+class TestClaimToken:
+    """The final writes only apply while the worker still holds the claim it made."""
+
+    def claimed(self, fake_storage) -> InboundMessage:
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, b'raw')
+        message = InboundMessage.objects.create(s3_key=key)
+        claimed = inbound._claim(message.pk)
+        assert claimed is not None
+        return claimed
+
+    def take_over(self, message: InboundMessage) -> None:
+        """Another worker claims it after the lease ran out."""
+        InboundMessage.objects.filter(pk=message.pk).update(
+            next_attempt_at=timezone.now() - timedelta(seconds=1)
+        )
+        assert inbound._claim(message.pk) is not None
+
+    def test_a_stale_worker_cannot_mark_it_done(self, fake_storage):
+        stale = self.claimed(fake_storage)
+        self.take_over(stale)
+
+        assert not inbound._mark_done(stale)
+
+        assert InboundMessage.objects.get(pk=stale.pk).status == 'pending'
+
+    def test_a_stale_worker_cannot_fail_it_or_move_its_object(self, fake_storage):
+        stale = self.claimed(fake_storage)
+        self.take_over(stale)
+
+        inbound._mark_failed(stale, 'boom')
+
+        current = InboundMessage.objects.get(pk=stale.pk)
+        assert current.status == 'pending' and current.last_error == ''
+        assert stale.s3_key in fake_storage.objects and not current.failed_key
+
+    def test_a_stale_failure_does_not_shorten_the_new_workers_lease(self, fake_storage):
+        stale = self.claimed(fake_storage)
+        self.take_over(stale)
+        lease = InboundMessage.objects.get(pk=stale.pk).next_attempt_at
+
+        inbound._record_failure(stale, RuntimeError('late'))
+
+        current = InboundMessage.objects.get(pk=stale.pk)
+        assert current.next_attempt_at == lease and current.last_error == ''
+
+    def test_a_stale_worker_does_not_delete_the_object(self, fake_storage, inbox, monkeypatch):
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, build_email(attachments=[pdf()], ses=Ses(recipient=inbox)))
+        message = InboundMessage.objects.create(s3_key=key)
+        real_mark_done = inbound._mark_done
+
+        def lose_the_claim(message):
+            InboundMessage.objects.filter(pk=message.pk).update(attempts=message.attempts + 1)
+            return real_mark_done(message)
+
+        monkeypatch.setattr(inbound, '_mark_done', lose_the_claim)
+
+        inbound.ingest(message.pk)
+
+        assert key in fake_storage.objects  # the worker that holds the claim now will finish it
+
+
+class TestHostileMessages:
+    def test_deeply_nested_forwards_are_ingested_not_failed(self, deliver, inbox):
+        """About 20 `message/rfc822` levels used to raise `KeyError` in `analyze` -- a crash a
+        free account could repeat to fail messages for good."""
+        for levels in (20, 25, 40):
+            raw = nested_forwards(levels, build_email(attachments=[pdf('deep.pdf')]))
+            raw = raw.replace(FIXED_ADDRESS.encode(), inbox.encode())
+
+            message = deliver(raw)
+
+            assert message.status == InboundMessageStatus.DONE, message.last_error
+            assert message.attempts == 1
+
+    def test_deep_nesting_with_a_text_body_at_the_bottom(self, deliver, inbox):
+        raw = nested_forwards(25).replace(FIXED_ADDRESS.encode(), inbox.encode())
+
+        message = deliver(raw)
+
+        assert message.status == InboundMessageStatus.DONE, message.last_error
+        assert one_email(message).status in (
+            InboundEmailStatus.ACCEPTED,
+            InboundEmailStatus.NO_RECEIPT,
+        )
+
+    def test_a_part_count_bomb_fails_fast_and_for_good(self, fake_storage, inbox, monkeypatch):
+        parts = b''.join(b'--b\r\n\r\nx\r\n' for _ in range(mime.MAX_BOUNDARY_LINES + 100))
+        raw = (
+            (
+                f'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for {inbox};\r\n'
+                'Content-Type: multipart/mixed; boundary=b\r\n\r\n'
+            ).encode()
+            + parts
+            + b'--b--\r\n'
+        )
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, raw)
+        message = InboundMessage.objects.create(s3_key=key)
+        monkeypatch.setattr(
+            mime, 'parse_message', lambda _raw: pytest.fail('a bomb must not reach the parser')
+        )
+
+        inbound.ingest(message.pk)
+
+        message.refresh_from_db()
+        assert message.attempts == 1  # no retries
+        assert 'MIME parts' in message.last_error
+        assert_parked(fake_storage, message)
+        assert InboundEmail.objects.count() == 0
+
+    def test_a_huge_html_body_next_to_a_pdf_does_not_inflate_the_stored_eml(
+        self, deliver, inbox, fake_storage, funded_user
+    ):
+        """5 MB of HTML plus a tiny PDF: the PDF is the receipt; the HTML used to be kept whole
+        in the `.eml`, and billed."""
+        big = '<html><body><p>' + 'x' * (5 * 1024 * 1024) + '</p></body></html>'
+        raw = build_email(html=big, attachments=[pdf()], ses=Ses(recipient=inbox))
+
+        message = deliver(raw)
+
+        email = one_email(message)
+        assert email.status == InboundEmailStatus.ACCEPTED
+        eml = fake_storage.objects[email.raw_key]
+        assert len(eml) < 20 * 1024 and email.size_bytes == len(eml)
+        assert b'X-Receipts-Skipped: too large' in eml
+        files = sum(r.size_bytes for r in email.receipts.all())
+        assert get_account(funded_user).stored_bytes == files + len(eml)
+
+    def test_a_stripped_eml_over_the_ceiling_is_headers_only(
+        self, deliver, inbox, fake_storage, monkeypatch
+    ):
+        monkeypatch.setattr(mime, 'MAX_EML_BYTES', 1100)
+        raw = build_email(attachments=[pdf()], ses=Ses(recipient=inbox))
+
+        email = one_email(deliver(raw))
+
+        eml = fake_storage.objects[email.raw_key]
+        assert b'X-Receipts-Stripped: headers only' in eml and b'Thanks for your order' not in eml
+        assert email.receipts.count() == 1  # the receipt itself is unaffected
+
+    def test_a_message_parsed_once_serves_every_recipient(
+        self, deliver, funded_user, inbox, fake_storage, monkeypatch
+    ):
+        other = make_user()
+        add_credits(other, 50, source='test')
+        calls = []
+        real_parse = mime.parse_message
+        monkeypatch.setattr(mime, 'parse_message', lambda raw: calls.append(1) or real_parse(raw))
+        raw = build_email(
+            attachments=[pdf()],
+            ses=Ses(recipient=f'{inbox}, {inbox_address_for(other)}'),
+        )
+
+        message = deliver(raw)
+
+        assert message.emails.count() == 2
+        assert len(calls) == 1
+        # And each recipient's copy is marked with its own receipt id.
+        for email in message.emails.all():
+            [receipt] = list(email.receipts.all())
+            assert (
+                f'X-Receipts-Receipt-Id: {receipt.pk}'.encode()
+                in fake_storage.objects[email.raw_key]
+            )
+
+
+class TestDeterministicIds:
+    def test_ids_depend_only_on_message_recipient_and_part(self):
+        a = inbound.receipt_id_for(7, 'receipts+abcd2345@ziptrigo.com', 2)
+
+        assert a == inbound.receipt_id_for(7, 'receipts+abcd2345@ziptrigo.com', 2)
+        assert a != inbound.receipt_id_for(8, 'receipts+abcd2345@ziptrigo.com', 2)
+        assert a != inbound.receipt_id_for(7, 'receipts+abcd2345@ziptrigo.com', 3)
+        assert a != inbound.receipt_id_for(7, 'receipts+zzzz2222@ziptrigo.com', 2)
+        assert inbound.email_id_for(7, 'x@y.com') != inbound.receipt_id_for(7, 'x@y.com', 0)
+
+    def test_the_rows_use_them(self, deliver, inbox):
+        message = deliver(build_email(attachments=[pdf(), jpeg()], ses=Ses(recipient=inbox)))
+
+        email = one_email(message)
+        assert email.pk == inbound.email_id_for(message.pk, inbox)
+        possible = {inbound.receipt_id_for(message.pk, inbox, leaf) for leaf in range(20)}
+        receipts = list(email.receipts.all())
+        assert len(receipts) == 2 and {r.pk for r in receipts} <= possible
+
+    def test_a_hard_crash_leaves_no_orphans_after_the_retry(
+        self, fake_storage, funded_user, inbox, django_capture_on_commit_callbacks, monkeypatch
+    ):
+        """Simulate a kill after the uploads: nothing ran the cleanup (deletes are disabled and
+        the transaction fails). The next try writes the very same keys, so the bucket ends up
+        with exactly the stored objects and nothing left over."""
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, build_email(attachments=[pdf(), jpeg()], ses=Ses(recipient=inbox)))
+        message = InboundMessage.objects.create(s3_key=key)
+        real_delete = fake_storage.delete_object
+        real_add = inbound.add_stored_bytes
+
+        def kill(*args, **kwargs):
+            raise RuntimeError('kill')
+
+        monkeypatch.setattr(fake_storage, 'delete_object', lambda k: None)
+        monkeypatch.setattr(inbound, 'add_stored_bytes', kill)
+        inbound.ingest(message.pk)
+        orphans = {k for k in fake_storage.objects if k.startswith(user_prefix(funded_user.pk))}
+        assert len(orphans) == 3  # two files and the .eml, written, with no rows
+
+        monkeypatch.setattr(inbound, 'add_stored_bytes', real_add)
+        monkeypatch.setattr(fake_storage, 'delete_object', real_delete)
+        InboundMessage.objects.filter(pk=message.pk).update(next_attempt_at=None)
+        with django_capture_on_commit_callbacks(execute=True):
+            inbound.ingest(message.pk)
+
+        message.refresh_from_db()
+        assert message.status == InboundMessageStatus.DONE
+        stored = {k for k in fake_storage.objects if k.startswith(user_prefix(funded_user.pk))}
+        assert stored == orphans  # the same keys, overwritten
+        email = one_email(message)
+        assert stored == {email.raw_key, *(r.file_key for r in email.receipts.all())}
+        assert get_account(funded_user).stored_bytes == sum(
+            len(fake_storage.objects[k]) for k in stored
+        )
+
+    def test_a_concurrent_duplicate_does_not_delete_the_winners_objects(
+        self, fake_storage, funded_user, inbox, django_capture_on_commit_callbacks, monkeypatch
+    ):
+        """Two workers ingesting the same message write the same keys. The one that loses the
+        unique-constraint race must leave the winner's objects alone."""
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, build_email(attachments=[pdf()], ses=Ses(recipient=inbox)))
+        message = InboundMessage.objects.create(s3_key=key)
+        context = inbound._Context(
+            message=message,
+            raw=fake_storage.objects[key],
+            parsed=mime.parse_message(fake_storage.objects[key]),
+        )
+        [recipient] = mime.scan_recipients(context.parsed).matches
+        real_store_round = inbound._store_round
+
+        def other_worker_finishes_first(*args, **kwargs):
+            # The winner completes this recipient (rows and objects) just before we commit.
+            monkeypatch.setattr(inbound, '_store_round', real_store_round)
+            with django_capture_on_commit_callbacks(execute=False):
+                inbound._ingest_for_recipient(context, recipient)
+            monkeypatch.setattr(inbound, '_store_round', other_worker_finishes_first)
+            return real_store_round(*args, **kwargs)
+
+        monkeypatch.setattr(inbound, '_store_round', other_worker_finishes_first)
+        with pytest.raises(IntegrityError):  # the loser hits the unique constraint
+            inbound._ingest_for_recipient(context, recipient)
+
+        [email] = list(InboundEmail.objects.all())
+        assert email.raw_key in fake_storage.objects
+        [receipt] = list(email.receipts.all())
+        assert receipt.file_key in fake_storage.objects
+
+
+class TestStoreStructure:
+    def test_objects_are_uploaded_before_any_transaction_or_lock_starts(
+        self, deliver, inbox, fake_storage, funded_user, monkeypatch
+    ):
+        """The account row must not be locked while megabytes go to S3."""
+        from django.db import connection
+
+        seen = []
+        real_put = fake_storage.put_object
+
+        def put(key, body, **kwargs):
+            if key.startswith(user_prefix(funded_user.pk)):
+                seen.append((len(connection.savepoint_ids), get_account(funded_user).intake_count))
+            real_put(key, body, **kwargs)
+
+        monkeypatch.setattr(fake_storage, 'put_object', put)
+
+        message = deliver(build_email(attachments=[pdf(), jpeg()], ses=Ses(recipient=inbox)))
+
+        assert message.status == InboundMessageStatus.DONE
+        assert len(seen) == 3  # two files and the .eml
+        assert all(depth == 0 and count == 0 for depth, count in seen)
+        assert get_account(funded_user).intake_count == 2
+
+    def test_a_cap_that_shrinks_meanwhile_is_planned_again(
+        self, deliver, inbox, funded_user, fake_storage, monkeypatch
+    ):
+        ReceiptsSettings.objects.update_or_create(pk=1, defaults={'max_files_per_user_per_day': 1})
+        real = inbound.intake_slots_remaining
+        answers = iter([5])  # the first look says there is room for everything
+
+        monkeypatch.setattr(
+            inbound, 'intake_slots_remaining', lambda *a: next(answers, None) or real(*a)
+        )
+
+        message = deliver(
+            build_email(attachments=[pdf('a.pdf'), jpeg('b.jpg')], ses=Ses(recipient=inbox))
+        )
+
+        email = one_email(message)
+        assert email.status == InboundEmailStatus.ACCEPTED
+        assert [r.original_filename for r in email.receipts.all()] == ['a.pdf']
+        assert '1 of 2 files skipped' in email.note
+        assert get_account(funded_user).intake_count == 1
+        stored = {k for k in fake_storage.objects if k.startswith(user_prefix(funded_user.pk))}
+        assert stored == {email.raw_key, *(r.file_key for r in email.receipts.all())}
+
+    def test_a_cap_that_keeps_changing_falls_back_to_the_ordinary_retry(
+        self, fake_storage, inbox, funded_user, monkeypatch
+    ):
+        ReceiptsSettings.objects.update_or_create(pk=1, defaults={'max_files_per_user_per_day': 1})
+        monkeypatch.setattr(inbound, 'intake_slots_remaining', lambda *a: 5)
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, build_email(attachments=[pdf(), jpeg()], ses=Ses(recipient=inbox)))
+        message = InboundMessage.objects.create(s3_key=key)
+
+        inbound.ingest(message.pk)
+
+        message.refresh_from_db()
+        assert (
+            message.status == InboundMessageStatus.PENDING
+            and 'cap kept changing' in message.last_error
+        )
+        assert not [k for k in fake_storage.objects if k.startswith(user_prefix(funded_user.pk))]
+        assert get_account(funded_user).intake_count == 0
+
+
+class TestInboundRowsCeiling:
+    def set_ceiling(self, rows: int) -> None:
+        ReceiptsSettings.objects.update_or_create(pk=1, defaults={'max_inbound_rows_per_day': rows})
+
+    def spam(self, inbox: str) -> bytes:
+        return build_email(ses=Ses(recipient=inbox, spam='FAIL'))
+
+    def test_junk_beyond_the_ceiling_is_logged_not_listed(
+        self, deliver, inbox, funded_user, caplog
+    ):
+        self.set_ceiling(3)
+
+        messages = [deliver(self.spam(inbox)) for _ in range(6)]
+
+        assert InboundEmail.objects.filter(user=funded_user).count() == 3
+        assert all(m.status == InboundMessageStatus.DONE for m in messages)
+        assert 'not recorded' in caplog.text
+
+    def test_accepted_mail_is_never_dropped_by_the_ceiling(self, deliver, inbox, funded_user):
+        self.set_ceiling(2)
+        for _ in range(3):
+            deliver(self.spam(inbox))
+
+        message = deliver(build_email(attachments=[pdf()], ses=Ses(recipient=inbox)))
+
+        assert one_email(message).status == InboundEmailStatus.ACCEPTED
+        assert Receipt.objects.count() == 1
+
+    def test_the_other_unaccepted_kinds_are_covered_too(self, deliver, fixed_inbox, account):
+        self.set_ceiling(1)
+        deliver(self.spam(fixed_inbox))
+
+        confirmation = deliver((FIXTURES / 'gmail_forwarding_confirmation.eml').read_bytes())
+        no_receipt = deliver(build_email(text='ok', ses=Ses(recipient=fixed_inbox)))
+
+        assert not confirmation.emails.exists() and not no_receipt.emails.exists()
+
+    def test_only_the_last_24_hours_count(self, deliver, inbox, funded_user):
+        self.set_ceiling(1)
+        deliver(self.spam(inbox))
+        InboundEmail.objects.filter(user=funded_user).update(
+            created_at=timezone.now() - timedelta(hours=25)
+        )
+
+        message = deliver(self.spam(inbox))
+
+        assert message.emails.count() == 1
+
+    def test_the_ceiling_is_per_user(self, deliver, inbox):
+        self.set_ceiling(1)
+        other = make_user()
+        add_credits(other, 10, source='test')
+        deliver(self.spam(inbox))
+
+        message = deliver(self.spam(inbox_address_for(other)))
+
+        assert message.emails.count() == 1
+
+    def test_a_dropped_row_does_not_make_the_message_fail_or_retry_forever(self, deliver, inbox):
+        self.set_ceiling(1)
+        deliver(self.spam(inbox))
+
+        message = deliver(self.spam(inbox))
+
+        assert message.status == InboundMessageStatus.DONE and message.attempts == 1
+
+
 @pytest.fixture
 def queued(monkeypatch):
     """Replaces the `ingest_message` task with a recorder, so the poll can be tested alone."""
@@ -1136,19 +1789,46 @@ class TestPoll:
         assert InboundMessage.objects.count() == inbound.POLL_BATCH
 
     def test_failed_messages_do_not_hide_new_mail(
-        self, fake_storage, queued, django_capture_on_commit_callbacks
+        self, fake_storage, queued, django_capture_on_commit_callbacks, monkeypatch
     ):
-        """Failed messages keep their object, so they stay in the listing; the poll widens it."""
-        InboundMessage.objects.bulk_create(
-            InboundMessage(s3_key=self.put(fake_storage, f'a{i:04}'), status='failed')
-            for i in range(inbound.POLL_BATCH)
-        )
+        """The starvation bug: failed objects used to stay in the listing, so with enough of them
+        the poller never reached newer keys. Now a failure moves its object out of the prefix."""
+        monkeypatch.setattr(inbound, 'MAX_RAW_BYTES', 10)
+        for i in range(inbound.POLL_BATCH + 20):
+            key = self.put(fake_storage, f'a{i:04}', b'x' * 100)  # over the size guard: fails
+            message = InboundMessage.objects.create(s3_key=key)
+            inbound.ingest(message.pk)
+
+        # Whatever happened to them, none of the failures is left in the polled prefix.
+        failed = InboundMessage.objects.filter(status='failed')
+        assert failed.count() == inbound.POLL_BATCH + 20
+        assert not fake_storage.list_keys(INBOUND_PREFIX)
         new_key = self.put(fake_storage, 'zzzz-new')
 
         with django_capture_on_commit_callbacks(execute=True):
             inbound.poll()
 
         assert InboundMessage.objects.filter(s3_key=new_key, status='pending').exists()
+
+    def test_an_interrupted_move_of_failed_messages_is_finished_by_the_poll(
+        self, fake_storage, queued, django_capture_on_commit_callbacks
+    ):
+        """If a failure was recorded but the object never left (the copy or delete failed), the
+        poller finishes the move, a batch a minute; new mail is still registered meanwhile."""
+        InboundMessage.objects.bulk_create(
+            InboundMessage(s3_key=self.put(fake_storage, f'a{i:04}'), status='failed')
+            for i in range(inbound.POLL_BATCH + 50)
+        )
+        new_key = self.put(fake_storage, 'zzzz-new')
+
+        for _ in range(3):
+            with django_capture_on_commit_callbacks(execute=True):
+                inbound.poll()
+
+        assert InboundMessage.objects.filter(s3_key=new_key, status='pending').exists()
+        assert fake_storage.list_keys(INBOUND_PREFIX) == [new_key]
+        parked = InboundMessage.objects.filter(status='failed', failed_key__startswith='receipts/')
+        assert parked.count() == inbound.POLL_BATCH + 50
 
     def test_a_done_message_whose_object_survived_is_cleaned_up(self, fake_storage, queued):
         key = self.put(fake_storage, 'done-one')
@@ -1159,13 +1839,16 @@ class TestPoll:
         assert key not in fake_storage.objects
         assert queued == []
 
-    def test_a_failed_message_is_left_alone(self, fake_storage, queued):
+    def test_a_failed_message_is_not_ingested_again_just_moved(self, fake_storage, queued):
         key = self.put(fake_storage, 'failed-one')
-        InboundMessage.objects.create(s3_key=key, status=InboundMessageStatus.FAILED)
+        message = InboundMessage.objects.create(s3_key=key, status=InboundMessageStatus.FAILED)
 
         inbound.poll()
 
-        assert key in fake_storage.objects and queued == []
+        message.refresh_from_db()
+        assert queued == []
+        assert message.failed_key == failed_key_for(key)
+        assert key not in fake_storage.objects and message.failed_key in fake_storage.objects
 
     def test_an_unqueued_pending_message_is_requeued_after_ten_minutes(self, fake_storage, queued):
         stale = InboundMessage.objects.create(s3_key=self.put(fake_storage, 'stale'))

@@ -65,6 +65,8 @@ class FakeReceiptsStorage:
         return keys if max_keys is None else keys[:max_keys]
 
     def copy_object(self, src_key: str, dst_key: str) -> None:
+        if src_key not in self.objects:
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'missing'}}, 'CopyObject')
         self.objects[dst_key] = self.objects[src_key]
 
     def presigned_put_url(

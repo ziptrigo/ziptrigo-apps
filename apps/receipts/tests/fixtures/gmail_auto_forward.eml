@@ -4,6 +4,10 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com; spf=fail (spfCheck: domain of x
+ designates 203.0.113.5) smtp.mailfrom=orders+caf_=joao=gmail.com@staples.com;
+ dkim=pass header.d=staples.com header.i=@staples.com; dmarc=pass
+ header.from=x
 X-SES-Spf-Verdict: FAIL
 X-SES-Dkim-Verdict: PASS
 Delivered-To: joao@gmail.com
@@ -13,9 +17,9 @@ Subject: Your Staples receipt
 Date: Fri, 09 Oct 2026 12:30:00 +0000
 Message-ID: <fixture-1@example.net>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============3030160867311277921=="
+Content-Type: multipart/mixed; boundary="===============7021965025044950642=="
 
---===============3030160867311277921==
+--===============7021965025044950642==
 Content-Type: text/html; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 
@@ -23,7 +27,7 @@ Content-Transfer-Encoding: quoted-printable
 rder.</p><table><tr><td>Total</td><td>42.10 USD</td></tr></table><p>Order R-5=
 5102, 2026-10-09</p></body></html>
 
---===============3030160867311277921==
+--===============7021965025044950642==
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="staples-receipt.pdf"
@@ -42,4 +46,4 @@ biAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzNzcgMDAw
 MDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0NDcKJSVF
 T0YK
 
---===============3030160867311277921==--
+--===============7021965025044950642==--

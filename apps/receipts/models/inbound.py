@@ -28,7 +28,13 @@ class InboundMessage(models.Model):
 
     `next_attempt_at` is the one "not before" timestamp of the ingest: null for a fresh message,
     the lease while a worker has it claimed (a crashed worker's lease simply runs out, and the
-    poller then re-queues it), and the retry time after a failure. `attempts` counts claims.
+    poller then re-queues it), and the retry time after a failure. `attempts` counts claims (and
+    doubles as the claim token: the final writes of an ingest only apply while `attempts` is still
+    the value that worker claimed with).
+
+    `s3_key` is always where SES put the object, which is what identifies the message. A `failed`
+    message's object is moved out of the polled prefix to `failed_key` (`receipts/failed/...`), so
+    failures can never crowd new mail out of the listing; the admin "retry" moves it back.
     """
 
     objects: ClassVar['Manager']
@@ -42,6 +48,16 @@ class InboundMessage(models.Model):
             max_length=16,
             choices=InboundMessageStatus.choices,
             default=InboundMessageStatus.PENDING,
+        ),
+    )
+    failed_key = cast(
+        str,
+        models.CharField(
+            max_length=512,
+            blank=True,
+            default='',
+            help_text='Where the object of a failed message was moved to (outside the prefix '
+            'the poller lists). Empty while it is still at the S3 key.',
         ),
     )
     attempts = cast(int, models.PositiveSmallIntegerField(default=0))

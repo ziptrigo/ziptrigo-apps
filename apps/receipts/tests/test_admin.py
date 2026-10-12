@@ -33,6 +33,7 @@ class TestSettings:
                 'allowed_types': 'application/pdf',
                 'min_inline_image_px': 100,
                 'max_files_per_user_per_day': 7,
+                'max_inbound_rows_per_day': 50,
                 'trash_days': 10,
                 'max_pdf_pages_to_ai': 2,
                 'max_ai_attempts': 4,
@@ -42,6 +43,7 @@ class TestSettings:
         assert response.status_code == 302
         row.refresh_from_db()
         assert (row.price_per_file, row.trash_days, row.max_ai_attempts) == (3, 10, 4)
+        assert row.max_inbound_rows_per_day == 50
 
     def test_forbidden_for_non_superuser_staff(self, client, regular_user):
         regular_user.is_staff = True

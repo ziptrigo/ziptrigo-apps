@@ -4,6 +4,9 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
+ designates 203.0.113.5) smtp.mailfrom=forwarding-noreply@google.com;
+ dkim=pass header.d=google.com header.i=@google.com; dmarc=pass header.from=x
 X-SES-Spf-Verdict: PASS
 X-SES-Dkim-Verdict: PASS
 From: Gmail Team <forwarding-noreply@google.com>

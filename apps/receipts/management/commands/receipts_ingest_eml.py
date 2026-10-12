@@ -64,6 +64,6 @@ class Command(BaseCommand):
         if message.status != InboundMessageStatus.DONE:
             raise CommandError(
                 f'Ingest {message.status} after {message.attempts} attempt(s): {message.last_error}'
-                f' (the object is still at {key})'
+                f' (the object is at {message.failed_key or key})'
             )
         self.stdout.write(self.style.SUCCESS(f'Done ({key}).'))

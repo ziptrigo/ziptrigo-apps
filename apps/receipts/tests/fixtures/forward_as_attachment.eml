@@ -4,6 +4,9 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
+ designates 203.0.113.5) smtp.mailfrom=joao@gmail.com; dkim=pass
+ header.d=gmail.com header.i=@gmail.com; dmarc=pass header.from=x
 X-SES-Spf-Verdict: PASS
 X-SES-Dkim-Verdict: PASS
 From: joao@gmail.com
@@ -12,15 +15,15 @@ Subject: Fwd: Your Staples receipt
 Date: Fri, 09 Oct 2026 12:30:00 +0000
 Message-ID: <fixture-1@example.net>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============4170647880551798568=="
+Content-Type: multipart/mixed; boundary="===============6853959914699950183=="
 
---===============4170647880551798568==
+--===============6853959914699950183==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 See attached.
 
---===============4170647880551798568==
+--===============6853959914699950183==
 Content-Type: message/rfc822
 Content-Transfer-Encoding: 8bit
 MIME-Version: 1.0
@@ -32,6 +35,9 @@ Received: from mail.example.net (mail.example.net [203.0.113.5]) by
  receipts+abcd2345@ziptrigo.com; Fri, 09 Oct 2026 12:30:00 +0000
 X-SES-Spam-Verdict: PASS
 X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com; spf=pass (spfCheck: domain of x
+ designates 203.0.113.5) smtp.mailfrom=orders@staples.com; dkim=pass
+ header.d=staples.com header.i=@staples.com; dmarc=pass header.from=x
 X-SES-Spf-Verdict: PASS
 X-SES-Dkim-Verdict: PASS
 From: Staples <orders@staples.com>
@@ -40,15 +46,15 @@ Subject: Your Staples receipt
 Date: Fri, 09 Oct 2026 12:30:00 +0000
 Message-ID: <fixture-1@example.net>
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="===============5165104693384751342=="
+Content-Type: multipart/mixed; boundary="===============8481705327793099448=="
 
---===============5165104693384751342==
+--===============8481705327793099448==
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Thanks for your order. Total 42.10 USD. Order R-55102 placed on 2026-10-09.
 
---===============5165104693384751342==
+--===============8481705327793099448==
 Content-Type: application/pdf
 Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="inner-invoice.pdf"
@@ -67,6 +73,6 @@ biAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzNzcgMDAw
 MDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0NDcKJSVF
 T0YK
 
---===============5165104693384751342==--
+--===============8481705327793099448==--
 
---===============4170647880551798568==--
+--===============6853959914699950183==--

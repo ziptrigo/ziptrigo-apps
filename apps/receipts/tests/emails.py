@@ -59,7 +59,11 @@ class Ses:
     spf: str | None = 'PASS'
     dkim: str | None = 'PASS'
     return_path: str | None = None  # default: the From address
-    #: Use `Authentication-Results` instead of the `X-SES-Spf/Dkim-Verdict` headers.
+    #: The domain a passing DKIM signature was made for (`header.d`/`header.i` in SES's
+    #: `Authentication-Results`): default, the domain of the From address (an aligned signature);
+    #: `''` leaves the header out.
+    dkim_domain: str | None = None
+    #: Leave the `X-SES-Spf/Dkim-Verdict` headers out: only `Authentication-Results` says.
     via_authentication_results: bool = False
     extra: list[tuple[str, str]] = field(default_factory=list)
 
@@ -80,7 +84,8 @@ def build_email(
     ses = ses or Ses()
     msg = EmailMessage()
     bare_from = from_addr.rpartition('<')[2].rstrip('>') or from_addr
-    msg['Return-Path'] = f'<{ses.return_path if ses.return_path is not None else bare_from}>'
+    bare_return_path = ses.return_path if ses.return_path is not None else bare_from
+    msg['Return-Path'] = f'<{bare_return_path}>'
     msg['Received'] = (
         f'from mail.example.net (mail.example.net [203.0.113.5]) by '
         f'inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123def456 for {ses.recipient}; '
@@ -90,13 +95,19 @@ def build_email(
         msg['X-SES-Spam-Verdict'] = ses.spam
     if ses.virus is not None:
         msg['X-SES-Virus-Verdict'] = ses.virus
-    if ses.via_authentication_results:
-        msg['Authentication-Results'] = (
-            'amazonses.com; spf=%s (spfCheck: domain of x designates 203.0.113.5) '
-            'smtp.mailfrom=x; dkim=%s header.i=@x; dmarc=pass header.from=x'
-            % ((ses.spf or 'none').lower(), (ses.dkim or 'none').lower())
+    dkim_domain = bare_from.rpartition('@')[2] if ses.dkim_domain is None else ses.dkim_domain
+    dkim_properties = f' header.d={dkim_domain} header.i=@{dkim_domain}' if dkim_domain else ''
+    msg['Authentication-Results'] = (
+        'amazonses.com; spf=%s (spfCheck: domain of x designates 203.0.113.5) '
+        'smtp.mailfrom=%s; dkim=%s%s; dmarc=pass header.from=x'
+        % (
+            (ses.spf or 'none').lower(),
+            bare_return_path,
+            (ses.dkim or 'none').lower(),
+            dkim_properties,
         )
-    else:
+    )
+    if not ses.via_authentication_results:
         if ses.spf is not None:
             msg['X-SES-Spf-Verdict'] = ses.spf
         if ses.dkim is not None:

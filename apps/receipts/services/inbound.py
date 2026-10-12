@@ -7,8 +7,9 @@ Nothing here is pushed to us: a scheduler job polls that prefix, and the rest ru
 1. **`poll`** (job `receipts.poll_inbound`, every minute): list up to 100 keys; each key without an
    `InboundMessage` row gets one (`pending`) and an `ingest_message` task, queued on commit. It
    parses nothing. It also re-queues `pending` rows that are due -- never picked up for 10
-   minutes (a crash between the commit and the enqueue), or whose retry time has come -- and
-   deletes the object of a `done` message that is still listed (its delete failed).
+   minutes (a crash between the commit and the enqueue), or whose retry time has come -- deletes
+   the object of a `done` message that is still listed (its delete failed), and finishes moving
+   a `failed` message's object out of the prefix (see Retries).
 2. **`ingest`** (task `ingest_message`): claim the row, download the object, parse it
    (`services.mime`), and for each recipient that is an *active* inbox code do the work below in
    one transaction, then delete the object and mark the row `done`.
@@ -20,9 +21,10 @@ Nothing here is pushed to us: a scheduler job polls that prefix, and the rest ru
      `forwarding_confirmation` with the code and link it contained. Free, no receipts, and it skips
      the allowlist -- the owner must be able to finish setting up the forwarding that delivers
      their receipts.
-   - The account has a sender allowlist and the sender is not on it (or SES did not vouch for the
-     sender with SPF or DKIM): `rejected_sender`. Empty allowlist = anyone, no authentication
-     needed.
+   - The account has a sender allowlist and the sender is not on it, or SES did not authenticate
+     the address that matched (`mime.Verdicts.vouches_for`: SPF pass for a matching envelope sender,
+     DKIM pass aligned with the domain of a matching `From`): `rejected_sender`. Empty allowlist =
+     anyone, no authentication needed.
    - Otherwise the eligible attachments (see `mime.analyze`) become one receipt each; with none,
      the body (HTML preferred) becomes the receipt; with neither, `no_receipt`. An attachment over
      `max_file_bytes` with nothing else eligible: `rejected_too_large`.
@@ -38,15 +40,29 @@ Nothing here is pushed to us: a scheduler job polls that prefix, and the rest ru
 
 **Retries.** A claim bumps `attempts` and sets `next_attempt_at` to a lease. A failure puts the row
 back to `pending` with a backoff (1 min, then 5 min) and the poller re-queues it when due; after
-`MAX_ATTEMPTS` it is `failed` and **its S3 object is kept** for inspection (admin "retry" resets
-it). An unrecoverable message (over the size guard, unparseable, object gone) fails at once. A
-worker that dies mid-ingest just lets the lease run out. Each recipient's work is one database
-transaction (its `InboundEmail` row is created in it), so "the row exists" means "fully done" and a
-retry skips recipients already handled; objects written for a transaction that then fails are
-deleted again.
+`MAX_ATTEMPTS` it is `failed`. An unrecoverable message (over the size guard, too many parts,
+unparseable, object gone) fails at once. A worker that dies mid-ingest just lets the lease run out.
+The final writes (`done`, `failed`, the retry schedule) only apply while `attempts` is still the
+value the writing worker claimed with, so a slow worker whose lease ran out can't disturb the
+one that took over.
 
-Delivered mail is untrusted input: everything here is bounded (raw size, nesting depth, per-file
-size, header lengths) and nothing from the message reaches a subject line or a key.
+**A failed message's object is moved** to `receipts/failed/<name>` (`InboundMessage.failed_key`;
+`s3_key` stays the original key, which identifies the message) -- it must not stay under
+`receipts/inbound/`, where a pile of failures would crowd new mail out of the poller's listing
+(anyone can make a message fail). Admin "retry" moves it back and resets the row. The move is
+copy, record, delete, and the poller finishes it if it was interrupted.
+
+Each recipient's work is done so that "the `InboundEmail` row exists" means "fully done" and a
+retry skips recipients already handled. Ids (the email's and each receipt's) are derived from
+(message, recipient[, leaf]) with `uuid5`, so the S3 keys are the same on every try: objects
+written by a try that died hard (OOM, SIGKILL -- no cleanup ran) are overwritten by the next one
+instead of being orphaned. The objects are written first, then one short transaction takes the
+cap slots and creates the rows (so the account row is not locked during uploads); if it fails the
+objects are deleted again.
+
+Delivered mail is untrusted input: everything here is bounded (raw size, number of MIME parts,
+nesting depth, per-file size, the stored `.eml`, header lengths, rows per user per day) and nothing
+from the message reaches a subject line or a key.
 """
 
 import hashlib
@@ -79,20 +95,17 @@ from ..models import (
     ReceiptStatus,
 )
 from . import mime
-from .accounts import add_stored_bytes, take_intake_slot
+from .accounts import add_stored_bytes, intake_slots_remaining, take_intake_slot
 from .addresses import matches_allowlist
 from .errors import DailyLimitExceededError
 from .processing import enqueue_processing
 from .queue import enqueue_after_commit
-from .storage import INBOUND_PREFIX, email_key, file_key, get_storage
+from .storage import INBOUND_PREFIX, email_key, failed_key_for, file_key, get_storage
 
 logger = logging.getLogger(__name__)
 
 #: Keys listed per poll.
 POLL_BATCH = 100
-#: Messages that failed keep their object, so they stay in the listing forever; the poll lists that
-#: many extra keys (up to this cap) so a pile of failures can't hide new mail behind them.
-POLL_EXTRA_FOR_FAILED_MAX = 900
 #: A `pending` message nobody has claimed for this long was probably never queued.
 PENDING_STALE_AFTER = timedelta(minutes=10)
 #: Don't queue the same message again within this window (a slow queue would otherwise collect a
@@ -106,10 +119,33 @@ RETRY_BACKOFF = (timedelta(minutes=1), timedelta(minutes=5))
 #: SES accepts messages up to 40 MB; nothing bigger is ever read into memory.
 MAX_RAW_BYTES = 40 * 1024 * 1024
 MAX_ERROR_CHARS = 2000
+#: The window the per-user `max_inbound_rows_per_day` ceiling counts rows over.
+ROWS_WINDOW = timedelta(hours=24)
+#: How often `_store` re-plans when the daily cap changes under it (another upload took the slots
+#: it was counting on) before giving up to the ordinary retry.
+STORE_ROUNDS = 3
+
+#: Namespace of the deterministic ids (`email_id_for`, `receipt_id_for`). Random, and fixed forever:
+#: changing it would change the keys a retry writes.
+_ID_NAMESPACE = uuid.UUID('4b7d9a2e-6c1f-4e58-9a3d-0f5e2c8b7a14')
 
 
 class PermanentIngestError(Exception):
     """A message that can never be ingested, however often it is retried (the row fails at once)."""
+
+
+class _SlotsChangedError(Exception):
+    """The daily cap changed between planning how many files to store and taking the slots."""
+
+
+def email_id_for(message_id: int, recipient: str) -> uuid.UUID:
+    """The id of the `InboundEmail` for one recipient of one message: the same on every try."""
+    return uuid.uuid5(_ID_NAMESPACE, f'email:{message_id}:{recipient}')
+
+
+def receipt_id_for(message_id: int, recipient: str, leaf_index: int) -> uuid.UUID:
+    """The id of the `Receipt` made from one part of one message for one recipient."""
+    return uuid.uuid5(_ID_NAMESPACE, f'receipt:{message_id}:{recipient}:{leaf_index}')
 
 
 # -- 1. Polling ---------------------------------------------------------------------------------
@@ -118,22 +154,23 @@ class PermanentIngestError(Exception):
 def poll() -> None:
     """One run of the `receipts.poll_inbound` job. Keep it light: one S3 listing, a few queries."""
     storage = get_storage()
-    failed = InboundMessage.objects.filter(status=InboundMessageStatus.FAILED).count()
-    limit = POLL_BATCH + min(failed, POLL_EXTRA_FOR_FAILED_MAX)
     keys = [
         key
-        for key in storage.list_keys(INBOUND_PREFIX, max_keys=limit)
+        for key in storage.list_keys(INBOUND_PREFIX, max_keys=POLL_BATCH)
         if key != INBOUND_PREFIX and not key.endswith('/')
     ]
-    known = dict(InboundMessage.objects.filter(s3_key__in=keys).values_list('s3_key', 'status'))
+    known = {m.s3_key: m for m in InboundMessage.objects.filter(s3_key__in=keys)}
     for key in keys:
         try:
-            status = known.get(key)
-            if status is None:
+            message = known.get(key)
+            if message is None:
                 _register(key)
-            elif status == InboundMessageStatus.DONE:
+            elif message.status == InboundMessageStatus.DONE:
                 # Done, but the delete after it failed: finish it.
                 delete_inbound_object(key)
+            elif message.status == InboundMessageStatus.FAILED:
+                # Failed, but the move out of this prefix didn't finish: finish it.
+                park_failed_object(message)
         except Exception:
             logger.exception('Could not handle inbound key %s', key)
     _requeue_due()
@@ -184,21 +221,60 @@ def delete_inbound_object(key: str) -> None:
         logger.exception('Could not delete the inbound object %s', key)
 
 
+def park_failed_object(message: InboundMessage) -> None:
+    """Move a failed message's object out of the polled prefix: copy it to `receipts/failed/...`,
+    record where, delete the original. Idempotent and safe to interrupt (the copy is repeated, the
+    record only ever points at an object that exists); a failure is logged and the poller tries
+    again. Nothing to do if the object is already gone."""
+    destination = message.failed_key or failed_key_for(message.s3_key)
+    try:
+        get_storage().copy_object(message.s3_key, destination)
+    except ClientError as exc:
+        if not _is_missing(exc):
+            logger.exception('Could not move the failed object %s', message.s3_key)
+        return
+    except BotoCoreError:
+        logger.exception('Could not move the failed object %s', message.s3_key)
+        return
+    InboundMessage.objects.filter(pk=message.pk).update(failed_key=destination)
+    delete_inbound_object(message.s3_key)
+
+
 def reset_message_for_retry(message: InboundMessage) -> bool:
     """Put a `failed` message back to `pending` with a fresh attempt count and queue it, for the
-    admin's "retry" action. Returns whether anything changed. (`created_at` is left alone.)"""
-    changed = InboundMessage.objects.filter(
+    admin's "retry" action: its object is moved back to where SES put it first. Returns whether
+    anything changed. (`created_at` is left alone.)"""
+    current = InboundMessage.objects.filter(
         pk=message.pk, status=InboundMessageStatus.FAILED
+    ).first()
+    if current is None:
+        return False
+    if current.failed_key:
+        try:
+            get_storage().copy_object(current.failed_key, current.s3_key)
+        except ClientError as exc:
+            if not _is_missing(exc):
+                logger.exception('Could not move %s back for a retry', current.failed_key)
+                return False
+            # Not there: either it was never parked or it is already back; the ingest will say.
+        except BotoCoreError:
+            logger.exception('Could not move %s back for a retry', current.failed_key)
+            return False
+    changed = InboundMessage.objects.filter(
+        pk=current.pk, status=InboundMessageStatus.FAILED
     ).update(
         status=InboundMessageStatus.PENDING,
         attempts=0,
         last_error='',
+        failed_key='',
         processed_at=None,
         next_attempt_at=None,
         queued_at=timezone.now(),
     )
     if changed:
-        enqueue_after_commit(ingest_message, message.pk)
+        if current.failed_key:
+            delete_inbound_object(current.failed_key)
+        enqueue_after_commit(ingest_message, current.pk)
     return bool(changed)
 
 
@@ -248,12 +324,18 @@ def _claim(message_id: int) -> InboundMessage | None:
 
 
 def _mark_failed(message: InboundMessage, error: str) -> None:
-    InboundMessage.objects.filter(pk=message.pk).update(
+    """Fail the message for good (only if the caller still holds the claim) and move its object out
+    of the polled prefix."""
+    updated = InboundMessage.objects.filter(
+        pk=message.pk, status=InboundMessageStatus.PENDING, attempts=message.attempts
+    ).update(
         status=InboundMessageStatus.FAILED,
         last_error=error[:MAX_ERROR_CHARS],
         next_attempt_at=None,
         processed_at=timezone.now(),
     )
+    if updated:
+        park_failed_object(message)
 
 
 def _record_failure(message: InboundMessage, exc: Exception) -> None:
@@ -262,19 +344,26 @@ def _record_failure(message: InboundMessage, exc: Exception) -> None:
         _mark_failed(message, error)
         return
     delay = RETRY_BACKOFF[min(message.attempts, len(RETRY_BACKOFF)) - 1]
-    InboundMessage.objects.filter(pk=message.pk, status=InboundMessageStatus.PENDING).update(
+    InboundMessage.objects.filter(
+        pk=message.pk, status=InboundMessageStatus.PENDING, attempts=message.attempts
+    ).update(
         last_error=error[:MAX_ERROR_CHARS],
         next_attempt_at=timezone.now() + delay,
         queued_at=None,
     )
 
 
-def _mark_done(message: InboundMessage) -> None:
-    InboundMessage.objects.filter(pk=message.pk).update(
-        status=InboundMessageStatus.DONE,
-        processed_at=timezone.now(),
-        next_attempt_at=None,
-        last_error='',
+def _mark_done(message: InboundMessage) -> bool:
+    """Mark the message done, if the caller still holds the claim. Returns whether it did."""
+    return bool(
+        InboundMessage.objects.filter(
+            pk=message.pk, status=InboundMessageStatus.PENDING, attempts=message.attempts
+        ).update(
+            status=InboundMessageStatus.DONE,
+            processed_at=timezone.now(),
+            next_attempt_at=None,
+            last_error='',
+        )
     )
 
 
@@ -297,6 +386,10 @@ def _ingest_claimed(message: InboundMessage, override: Sequence[str] | None) -> 
             return
         raise PermanentIngestError('The inbound object is missing.') from exc
 
+    if mime.exceeds_part_limit(raw):
+        raise PermanentIngestError(
+            f'The message has more than {mime.MAX_BOUNDARY_LINES} MIME parts.'
+        )
     try:
         parsed = mime.parse_message(raw)
         scan = (
@@ -317,8 +410,8 @@ def _ingest_claimed(message: InboundMessage, override: Sequence[str] | None) -> 
     for recipient in scan.matches:
         _ingest_for_recipient(context, recipient)
 
-    _mark_done(message)
-    delete_inbound_object(message.s3_key)
+    if _mark_done(message):
+        delete_inbound_object(message.s3_key)
 
 
 # -- Per recipient ------------------------------------------------------------------------------
@@ -365,7 +458,7 @@ class _File:
     filename: str
     content_type: str
     data: bytes
-    receipt_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    receipt_id: uuid.UUID
 
 
 _EXTENSIONS = {
@@ -405,6 +498,7 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
 
     config = ReceiptsSettings.load()
     email = InboundEmail(
+        id=email_id_for(message.pk, recipient.address),
         user=user,
         message=message,
         recipient=recipient.address,
@@ -417,18 +511,27 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
     rejection = _rejection(context, account)
     if rejection is not None:
         email.status, email.note = rejection
-        email.save()
+        _record_unaccepted(email, user, config, message.s3_key)
         return
     if _is_forwarding_confirmation(context):
         email.status = InboundEmailStatus.FORWARDING_CONFIRMATION
         email.forwarding_confirmation_code, email.forwarding_confirmation_url = (
             mime.extract_forwarding_confirmation(context.parsed)
         )
-        email.save()
+        _record_unaccepted(email, user, config, message.s3_key)
         return
 
     analysis = context.analysis(config)
-    files = [_File(a.index, _filename(a), a.content_type, a.data) for a in analysis.eligible]
+    files = [
+        _File(
+            a.index,
+            _filename(a),
+            a.content_type,
+            a.data,
+            receipt_id_for(message.pk, recipient.address, a.index),
+        )
+        for a in analysis.eligible
+    ]
     if not files:
         if analysis.too_large:
             email.status = InboundEmailStatus.REJECTED_TOO_LARGE
@@ -438,15 +541,49 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
             email.note = 'The message body is too large.'
         elif analysis.body is not None:
             body = analysis.body
-            files = [_File(body.index, '', body.content_type, body.data)]
+            files = [
+                _File(
+                    body.index,
+                    '',
+                    body.content_type,
+                    body.data,
+                    receipt_id_for(message.pk, recipient.address, body.index),
+                )
+            ]
         else:
             email.status = InboundEmailStatus.NO_RECEIPT
             email.note = 'No supported attachment and no readable text.'
         if not files:
-            email.save()
+            _record_unaccepted(email, user, config, message.s3_key)
             return
 
     _store(context, config, user, email, analysis, files)
+
+
+def _record_unaccepted(
+    email: InboundEmail, user: User, config: ReceiptsSettings, source_key: str
+) -> None:
+    """Save the row of an email that stored nothing (rejected, ignored, a forwarding confirmation)
+    -- unless the user already has `max_inbound_rows_per_day` rows from the last 24 hours, in which
+    case it is only logged: a flood of junk must not fill someone's inbound list or the database.
+    (Not saving it means a retry decides again, harmlessly.)"""
+    recent = InboundEmail.objects.filter(
+        user=user, created_at__gte=timezone.now() - ROWS_WINDOW
+    ).count()
+    if recent >= config.max_inbound_rows_per_day:
+        logger.info(
+            'Inbound %s: %s email for user %s not recorded (%s rows in the last 24h)',
+            source_key,
+            email.status,
+            user.pk,
+            recent,
+        )
+        return
+    email.save(force_insert=True)
+
+
+def _is_listed(allowlist: Sequence[str], address: str) -> bool:
+    return bool(address) and matches_allowlist(allowlist, address)
 
 
 def _rejection(context: _Context, account: ReceiptsAccount) -> tuple[str, str] | None:
@@ -459,20 +596,30 @@ def _rejection(context: _Context, account: ReceiptsAccount) -> tuple[str, str] |
         return None
     allowlist = account.sender_allowlist
     if allowlist:
-        listed = matches_allowlist(allowlist, context.from_address, context.envelope_sender)
-        if not listed:
+
+        def is_listed(address: str) -> bool:
+            return _is_listed(allowlist, address)
+
+        if not (is_listed(context.from_address) or is_listed(context.envelope_sender)):
             return InboundEmailStatus.REJECTED_SENDER, 'The sender is not on the accepted list.'
-        if not verdicts.authenticated:
+        if not verdicts.vouches_for(
+            from_address=context.from_address,
+            envelope_sender=context.envelope_sender,
+            is_listed=is_listed,
+        ):
             return (
                 InboundEmailStatus.REJECTED_SENDER,
-                'The sender could not be verified (SPF or DKIM did not pass).',
+                'The sender could not be verified (no SPF pass for the envelope sender, or no '
+                'DKIM pass aligned with the From domain).',
             )
     return None
 
 
 def _is_forwarding_confirmation(context: _Context) -> bool:
-    return context.verdicts.authenticated and mime.is_forwarding_confirmation_sender(
-        context.from_address, context.envelope_sender
+    return context.verdicts.vouches_for(
+        from_address=context.from_address,
+        envelope_sender=context.envelope_sender,
+        is_listed=mime.is_forwarding_confirmation_sender,
     )
 
 
@@ -484,54 +631,71 @@ def _store(
     analysis: mime.Analysis,
     files: list[_File],
 ) -> None:
-    """Take daily-cap slots, write the objects, create the rows -- all of one recipient's work in
-    one transaction. Objects already written when something fails are deleted again."""
+    """Store the files (as many as the daily cap allows) and create the rows.
+
+    The objects are written first, outside any transaction; then one short transaction takes the
+    cap slots (locking the account row only for its own duration), creates the rows and adds the
+    bytes. If the transaction fails the objects are deleted again. The number of files is planned
+    from an unlocked look at the cap; if another upload takes slots in between, the plan is made
+    again."""
+    limit = config.max_files_per_user_per_day
+    for _ in range(STORE_ROUNDS):
+        planned = files[: intake_slots_remaining(user, limit)]
+        if not planned:
+            email.status = InboundEmailStatus.REJECTED_CAP
+            email.note = f'Daily limit of {limit} receipts reached.'
+            _record_unaccepted(email, user, config, context.message.s3_key)
+            return
+        try:
+            _store_round(context, config, user, email, analysis, files, planned)
+        except _SlotsChangedError:
+            continue
+        return
+    raise RuntimeError('The daily receipt cap kept changing while storing; will retry.')
+
+
+def _store_round(
+    context: _Context,
+    config: ReceiptsSettings,
+    user: User,
+    email: InboundEmail,
+    analysis: mime.Analysis,
+    files: list[_File],
+    planned: list[_File],
+) -> None:
+    limit = config.max_files_per_user_per_day
+    notes = []
+    if len(planned) < len(files):
+        notes.append(
+            f'{len(files) - len(planned)} of {len(files)} files skipped: daily limit of '
+            f'{limit} receipts reached.'
+        )
+    if analysis.too_large:
+        notes.append(f'{len(analysis.too_large)} file(s) over the size limit skipped.')
+    email.status = InboundEmailStatus.ACCEPTED
+    email.note = ' '.join(notes)[:255]
+
+    eml = mime.build_stripped_eml(context.raw, context.parsed, _markers(analysis, planned))
+    email.raw_key = email_key(user.pk, email.pk)
+    email.size_bytes = len(eml)
+
     storage = get_storage()
     written: list[str] = []
     try:
+        for item in planned:
+            key = file_key(user.pk, item.receipt_id)
+            storage.put_object(key, item.data, content_type=item.content_type)
+            written.append(key)
+        storage.put_object(email.raw_key, eml, content_type='message/rfc822')
+        written.append(email.raw_key)
+
         with transaction.atomic():
-            taken: list[_File] = []
-            for item in files:
+            for _ in planned:
                 try:
-                    take_intake_slot(user, config.max_files_per_user_per_day)
+                    take_intake_slot(user, limit)
                 except DailyLimitExceededError:
-                    break
-                taken.append(item)
-            skipped = len(files) - len(taken)
-
-            if not taken:
-                email.status = InboundEmailStatus.REJECTED_CAP
-                email.note = f'Daily limit of {config.max_files_per_user_per_day} receipts reached.'
-                email.save()
-                return
-
-            email.status = InboundEmailStatus.ACCEPTED
-            notes = []
-            if skipped:
-                notes.append(
-                    f'{skipped} of {len(files)} files skipped: daily limit of '
-                    f'{config.max_files_per_user_per_day} receipts reached.'
-                )
-            if analysis.too_large:
-                notes.append(f'{len(analysis.too_large)} file(s) over the size limit skipped.')
-            email.note = ' '.join(notes)[:255]
-
-            added = 0
-            for item in taken:
-                key = file_key(user.pk, item.receipt_id)
-                storage.put_object(key, item.data, content_type=item.content_type)
-                written.append(key)
-                added += len(item.data)
-
-            markers = _markers(analysis, taken)
-            eml = mime.build_stripped_eml(context.raw, markers)
-            email.raw_key = email_key(user.pk, email.pk)
-            email.size_bytes = len(eml)
-            storage.put_object(email.raw_key, eml, content_type='message/rfc822')
-            written.append(email.raw_key)
-            added += len(eml)
-
-            email.save()
+                    raise _SlotsChangedError from None
+            email.save(force_insert=True)
             Receipt.objects.bulk_create(
                 Receipt(
                     id=item.receipt_id,
@@ -546,17 +710,26 @@ def _store(
                     uploaded=True,
                     status=ReceiptStatus.RECEIVED,
                 )
-                for item in taken
+                for item in planned
             )
-            add_stored_bytes(user.pk, added)
-            for item in taken:
+            add_stored_bytes(user.pk, sum(len(item.data) for item in planned) + len(eml))
+            for item in planned:
                 enqueue_processing(item.receipt_id)
-    except BaseException:
-        for key in written:
-            try:
-                storage.delete_object(key)
-            except ClientError, BotoCoreError:
-                logger.exception('Could not delete the orphaned object %s', key)
+    except BaseException as exc:
+        # Another worker may have finished this very recipient meanwhile (the keys are the same
+        # for both of us): then the objects are its, and must stay.
+        completed_elsewhere = (
+            not isinstance(exc, _SlotsChangedError)
+            and InboundEmail.objects.filter(
+                message=email.message, recipient=email.recipient
+            ).exists()
+        )
+        if not completed_elsewhere:
+            for key in written:
+                try:
+                    storage.delete_object(key)
+                except ClientError, BotoCoreError:
+                    logger.exception('Could not delete the orphaned object %s', key)
         raise
 
 

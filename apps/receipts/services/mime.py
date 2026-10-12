@@ -8,30 +8,44 @@ reality is a change here only):
 
 - SES prepends its own headers, so the **topmost** occurrence of a header is SES's and anything
   below it came from the sender. We therefore read only the first `X-SES-*-Verdict` and only the
-  first `Authentication-Results` whose authserv-id is `amazonses.com`, never a later copy a sender
-  put in their own message to look authenticated.
-- The envelope recipient is in a `Received: ... by inbound-smtp.<region>.amazonaws.com ... for
-  <receipts+code@...>;` header SES added. Only the leading run of `Received` headers whose `by`
-  host is SES counts (a sender can write any `Received` they like, but it ends up below the hops
-  that really handled the message). Without one we fall back to `Delivered-To`, then
-  `X-Original-To`, then `To`/`Cc`; the first source that yields an inbox address wins.
+  *first* `Authentication-Results` header, and only if its authserv-id is `amazonses.com` -- never
+  a later copy a sender put in their own message to look authenticated.
+- The envelope recipient is in the `Received: ... by inbound-smtp.<region>.amazonaws.com ... for
+  <receipts+code@...>;` header SES added. Only the first `SES_RECEIVED_HEADER_COUNT` `Received`
+  header(s) count, and only if their `by` host is SES (a sender can write any `Received` they
+  like, even one that looks exactly like SES's, but it ends up below the hops that really handled
+  the message). Without one we fall back to `Delivered-To`, then `X-Original-To`, then `To`/`Cc`;
+  the first source that yields an inbox address wins.
 - `X-SES-Spam-Verdict` / `X-SES-Virus-Verdict` are `PASS`, `FAIL`, `GRAY` or
   `PROCESSING_FAILED`; only `FAIL` rejects. `X-SES-Spf-Verdict` / `X-SES-Dkim-Verdict` are `PASS`
-  or not; when absent, `Authentication-Results: amazonses.com; spf=pass ...; dkim=pass ...` is read
-  instead, then `Received-SPF`. A missing verdict counts as *not authenticated* (fail closed),
-  while a missing spam/virus verdict counts as not flagged.
+  or not; when absent, `Authentication-Results: amazonses.com; spf=pass ...; dkim=pass
+  header.d=example.com ...` is read instead. A missing verdict counts as *not authenticated* (fail
+  closed), while a missing spam/virus verdict counts as not flagged.
 - `Return-Path` is the envelope sender.
+
+**Who a sender is** (`Verdicts.vouches_for`): a sender address only counts as authenticated when
+the proof is about *that address*. The envelope sender (`Return-Path`) needs an SPF pass (SPF
+authenticates the envelope domain). The `From` header needs a DKIM pass whose signing domain
+(`header.d`, else the domain of `header.i`, from SES's `Authentication-Results`) is aligned with
+the `From` domain -- relaxed alignment, approximated in `addresses.domains_aligned`. Without a
+signing domain a `From` match is not authenticated. So passing SPF/DKIM for a domain of your own
+does not let you pose as somebody else's address.
+
+Delivered mail is untrusted input, so the work is bounded before and while parsing:
+`exceeds_part_limit` (MIME boundary lines in the raw bytes, checked before the parser runs),
+`MAX_DEPTH` and `MAX_LEAVES` (what the walkers visit), and `build_stripped_eml`'s size limits.
 
 The parsed tree is walked by `iter_leaves`, which descends into `multipart/*` **and**
 `message/rfc822` (a message forwarded "as attachment"), so an invoice inside a forwarded email is
 found like any other attachment.
 """
 
+import copy
 import html
 import logging
 import re
 import unicodedata
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email import policy
@@ -41,13 +55,37 @@ from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from urllib.parse import unquote, urlsplit
 
 from . import documents
-from .addresses import inbox_code_from_address
+from .addresses import domains_aligned, inbox_code_from_address
 
 logger = logging.getLogger(__name__)
 
-#: Deepest nesting of multiparts / forwarded messages we walk (a crafted message could nest
-#: thousands deep; Python's own parser limit is a `RecursionError`).
+#: Deepest nesting we walk, counted the same way everywhere (`_walk`): every `multipart/*` and every
+#: `message/rfc822` is one level. A crafted message could nest thousands deep; Python's own parser
+#: limit is a `RecursionError`. Anything deeper is not visited, analysed or kept.
 MAX_DEPTH = 30
+
+#: Most leaf parts (non-container parts) `iter_leaves` yields; the rest are ignored (and emptied in
+#: the stored copy). Together with `MAX_BOUNDARY_LINES` this bounds the work a message can cause.
+MAX_LEAVES = 300
+
+#: A message whose raw bytes hold more MIME boundary-like lines than this is refused before it is
+#: parsed. `MAX_RAW_BYTES` alone caps bytes, not parts: a minimal part is ~10 bytes, so 40 MB could
+#: be millions of `Message` objects (gigabytes, minutes of CPU). No real receipt has hundreds.
+MAX_BOUNDARY_LINES = 500
+
+#: A text part (an email body) kept in the stored copy is emptied above this many bytes, with
+#: `X-Receipts-Skipped: too large`. A receipt that *is* the body is emptied regardless (it is
+#: stored as its own file); this bounds the bodies that are not.
+MAX_KEPT_TEXT_BYTES = 256 * 1024
+
+#: The stored, stripped `.eml` never exceeds this many bytes: if it does after the per-part limits,
+#: only the top-level headers are kept (`X-Receipts-Stripped: headers only`). The user pays storage
+#: for it, so the sender must not be able to make it large.
+MAX_EML_BYTES = 1024 * 1024
+
+#: How many of the topmost `Received` headers SES itself writes (to be confirmed by the infra
+#: spike, joaonc/infra#373, adjust here). Only these are read for the envelope recipient.
+SES_RECEIVED_HEADER_COUNT = 1
 
 #: An email body with less visible text than this isn't treated as a receipt.
 MIN_BODY_CHARS = 20
@@ -55,7 +93,10 @@ MIN_BODY_CHARS = 20
 SES_AUTHSERV_ID = 'amazonses.com'
 _SES_RECEIVED_BY = re.compile(r'\bby\s+inbound-smtp\.[\w.-]*amazonaws\.com\b', re.I)
 _RECEIVED_FOR = re.compile(r'\bfor\s+(.+?)\s*(?:;|$)', re.I | re.S)
-_AUTH_RESULT = re.compile(r'\b(spf|dkim)\s*=\s*([a-z]+)', re.I)
+_AUTH_RESULT = re.compile(r'^\s*(spf|dkim)\s*=\s*([a-z]+)\b(.*)$', re.I | re.S)
+_AUTH_PROPERTY = re.compile(r'\b(header\.d|header\.i)\s*=\s*"?([^\s;"]+)', re.I)
+_DOMAIN_NAME = re.compile(r'^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$')
+_BOUNDARY_LINE = re.compile(rb"^--[A-Za-z0-9'()+_,./:=?][^\r\n]{0,69}\r?$", re.M)
 _COMMENT = re.compile(r'\([^()]*\)')
 _CID_REFERENCE = re.compile(r"""cid:([^"'\s>)]+)""", re.I)
 
@@ -65,6 +106,7 @@ SKIP_UNSUPPORTED = 'unsupported type'
 SKIP_INLINE = 'inline image'
 SKIP_TOO_LARGE = 'too large'
 SKIP_DAILY_LIMIT = 'daily limit'
+SKIP_OVER_LIMIT = 'too deep or too many parts'
 
 RECEIPT_ID_HEADER = 'X-Receipts-Receipt-Id'
 SKIPPED_HEADER = 'X-Receipts-Skipped'
@@ -73,6 +115,18 @@ SKIPPED_HEADER = 'X-Receipts-Skipped'
 def parse_message(raw: bytes) -> Message:
     """Parse with the modern `policy.default` (decoded headers, `EmailMessage` parts)."""
     return BytesParser(policy=policy.default).parsebytes(raw)
+
+
+def exceeds_part_limit(raw: bytes) -> bool:
+    """Whether `raw` has more MIME boundary-like lines (`--token`, optionally `--token--`) than
+    `MAX_BOUNDARY_LINES` -- a cheap scan, made before the parser builds a `Message` per part.
+    Lines that merely start with dashes (`-----`, a `-- ` signature) are not counted."""
+    count = 0
+    for _ in _BOUNDARY_LINE.finditer(raw):
+        count += 1
+        if count > MAX_BOUNDARY_LINES:
+            return True
+    return False
 
 
 def _text(value: object) -> str:
@@ -119,12 +173,12 @@ class RecipientScan:
 
 
 def _received_for_addresses(msg: Message) -> list[str]:
-    """The `for <address>` of the `Received` headers SES wrote -- the leading run of `Received`
-    headers whose `by` host is SES. The run stops at the first one that isn't: a header further
-    down was written by the sender's side, and may say anything (including that it was received by
-    SES for somebody else)."""
+    """The `for <address>` of the `Received` header(s) SES wrote: the topmost
+    `SES_RECEIVED_HEADER_COUNT`, each only if its `by` host is SES. Further down is the sender's
+    side, which may say anything -- including a header that looks just like SES's and says it
+    received the message for somebody else."""
     found: list[str] = []
-    for value in _all(msg, 'Received'):
+    for value in _all(msg, 'Received')[:SES_RECEIVED_HEADER_COUNT]:
         if not _SES_RECEIVED_BY.search(value):
             break
         match = _RECEIVED_FOR.search(value)
@@ -190,26 +244,83 @@ class Verdicts:
     virus_failed: bool = False
     spf_pass: bool = False
     dkim_pass: bool = False
+    #: Signing domains (`header.d`, else the domain of `header.i`) of the DKIM signatures that
+    #: passed, from SES's `Authentication-Results`; empty when SES gave none.
+    dkim_domains: frozenset[str] = frozenset()
 
-    @property
-    def authenticated(self) -> bool:
-        """SES vouches for the sender: SPF *or* DKIM passed."""
-        return self.spf_pass or self.dkim_pass
+    def dkim_aligned_with(self, address: str) -> bool:
+        """A DKIM signature passed *and* its domain is aligned with `address`'s domain."""
+        domain = address.rpartition('@')[2].strip().lower()
+        return self.dkim_pass and any(domains_aligned(d, domain) for d in self.dkim_domains)
+
+    def vouches_for(
+        self, *, from_address: str, envelope_sender: str, is_listed: Callable[[str], bool]
+    ) -> bool:
+        """Whether SES authenticated a sender address that `is_listed` accepts. The proof has to be
+        about the address that matched: the envelope sender needs an SPF pass (it is what SPF
+        checks); the `From` address needs an aligned DKIM pass. Without either, the sender is
+        unauthenticated, however many SPF/DKIM passes the message has for other domains."""
+        if envelope_sender and self.spf_pass and is_listed(envelope_sender):
+            return True
+        return (
+            bool(from_address) and is_listed(from_address) and self.dkim_aligned_with(from_address)
+        )
 
 
-def _ses_authentication_results(msg: Message) -> dict[str, bool]:
-    """`{'spf': passed, 'dkim': passed}` from the topmost `Authentication-Results` SES wrote (its
-    authserv-id is `amazonses.com`); empty when there is none. A result is `True` if any instance
-    of the method passed (a message can carry several DKIM signatures)."""
-    for value in _all(msg, 'Authentication-Results'):
-        authserv_id, _, results = value.partition(';')
-        if authserv_id.strip().lower() != SES_AUTHSERV_ID:
+@dataclass(frozen=True, slots=True)
+class _AuthResults:
+    spf: bool | None = None
+    dkim: bool | None = None
+    dkim_domains: frozenset[str] = frozenset()
+
+
+def _strip_comments(value: str) -> str:
+    """`value` without its (possibly nested) `( ... )` comments, which can say anything."""
+    while True:
+        stripped = _COMMENT.sub(' ', value)
+        if stripped == value:
+            return value
+        value = stripped
+
+
+def _signing_domain(value: str) -> str:
+    """The domain in a `header.d` (`example.com`) or `header.i` (`@example.com`, `u@example.com`)
+    value; empty if it isn't a plausible domain name."""
+    domain = value.rpartition('@')[2].strip().strip('.').lower()
+    return domain if _DOMAIN_NAME.match(domain) else ''
+
+
+def _ses_authentication_results(msg: Message) -> _AuthResults:
+    """What the **first** `Authentication-Results` header says, if SES wrote it (authserv-id
+    `amazonses.com`); nothing otherwise. Later copies are the sender's. A method passes if any
+    instance of it did (a message can carry several DKIM signatures)."""
+    values = _all(msg, 'Authentication-Results')
+    if not values:
+        return _AuthResults()
+    authserv_id, _, results = _strip_comments(values[0]).partition(';')
+    if authserv_id.strip().lower() != SES_AUTHSERV_ID:
+        return _AuthResults()
+    spf: bool | None = None
+    dkim: bool | None = None
+    domains: set[str] = set()
+    for resinfo in results.split(';'):
+        match = _AUTH_RESULT.match(resinfo)
+        if match is None:
             continue
-        parsed: dict[str, bool] = {}
-        for method, result in _AUTH_RESULT.findall(_COMMENT.sub(' ', results)):
-            parsed[method.lower()] = parsed.get(method.lower(), False) or result.lower() == 'pass'
-        return parsed
-    return {}
+        method, result, rest = match.group(1).lower(), match.group(2).lower(), match.group(3)
+        passed = result == 'pass'
+        if method == 'spf':
+            spf = bool(spf) or passed
+            continue
+        dkim = bool(dkim) or passed
+        if passed:
+            properties = {k.lower(): v for k, v in _AUTH_PROPERTY.findall(rest)}
+            for name in ('header.d', 'header.i'):
+                domain = _signing_domain(properties.get(name, ''))
+                if domain:
+                    domains.add(domain)
+                    break
+    return _AuthResults(spf=spf, dkim=dkim, dkim_domains=frozenset(domains))
 
 
 def read_verdicts(msg: Message) -> Verdicts:
@@ -218,22 +329,15 @@ def read_verdicts(msg: Message) -> Verdicts:
     spf_header = _first(msg, 'X-SES-Spf-Verdict').upper()
     dkim_header = _first(msg, 'X-SES-Dkim-Verdict').upper()
 
-    results = _ses_authentication_results(msg) if not (spf_header and dkim_header) else {}
-    if spf_header:
-        spf_pass = spf_header == 'PASS'
-    elif 'spf' in results:
-        spf_pass = results['spf']
-    else:
-        spf_pass = _first(msg, 'Received-SPF').lower().startswith('pass')
-    if dkim_header:
-        dkim_pass = dkim_header == 'PASS'
-    else:
-        dkim_pass = results.get('dkim', False)
+    results = _ses_authentication_results(msg)
+    spf_pass = spf_header == 'PASS' if spf_header else bool(results.spf)
+    dkim_pass = dkim_header == 'PASS' if dkim_header else bool(results.dkim)
     return Verdicts(
         spam_failed=spam == 'FAIL',
         virus_failed=virus == 'FAIL',
         spf_pass=spf_pass,
         dkim_pass=dkim_pass,
+        dkim_domains=results.dkim_domains,
     )
 
 
@@ -277,8 +381,9 @@ def received_at(msg: Message) -> datetime:
 
 #: Senders of a "confirm this forwarding address" email. These skip the sender allowlist (the
 #: account owner has to be able to complete the setup of the very forwarding that delivers their
-#: receipts) -- but only when SES authenticated the sender, and the email only ever becomes a free
-#: `forwarding_confirmation` row, never a receipt.
+#: receipts) -- but only when SES authenticated the sender *as that address* (`Verdicts.vouches_for`:
+#: DKIM aligned with `google.com`, or SPF on the envelope sender), and the email only ever becomes a
+#: free `forwarding_confirmation` row, never a receipt.
 #:
 #: Gmail: `forwarding-noreply@google.com` (the older `mail-noreply@google.com` is no longer used).
 #: Outlook.com / Microsoft 365 forwarding needs no confirmation message from the forwarding side,
@@ -310,7 +415,11 @@ def extract_forwarding_confirmation(msg: Message) -> tuple[str, str]:
     link = ''
     for candidate in _URL.findall(blob):
         candidate = candidate.rstrip('.,;')
-        if urlsplit(candidate).hostname in FORWARDING_LINK_HOSTS:
+        try:
+            host = urlsplit(candidate).hostname
+        except ValueError:  # e.g. `https://[x`: a malformed link is skipped, not a crash
+            continue
+        if host in FORWARDING_LINK_HOSTS:
             link = candidate[:2000]
             break
     return code, link
@@ -324,34 +433,42 @@ def _children(part: Message) -> list[Message]:
     return [child for child in payload if isinstance(child, Message)]
 
 
-def iter_leaves(msg: Message, *, into_messages: bool = True, _depth: int = 0) -> Iterator[Message]:
-    """Every non-container part in document order. Containers are `multipart/*` and, when
-    `into_messages` is true, `message/rfc822` (whose inner message's parts are yielded too)."""
+def _walk(
+    node: Message, *, into_messages: bool = True, _depth: int = 0, _parent: Message | None = None
+) -> Iterator[tuple[Message, Message | None]]:
+    """Every node (containers and leaves) in document order, each with its parent. The one depth
+    measure for every walker: each `multipart/*` and each `message/rfc822` is one level, and a
+    node deeper than `MAX_DEPTH` (with everything under it) is not visited. With `into_messages`
+    false a `message/rfc822` is not descended into."""
     if _depth > MAX_DEPTH:
         return
-    if msg.is_multipart() and (into_messages or msg.get_content_type() != 'message/rfc822'):
-        for child in _children(msg):
-            yield from iter_leaves(child, into_messages=into_messages, _depth=_depth + 1)
-    elif not msg.is_multipart():
-        yield msg
+    yield node, _parent
+    if node.is_multipart() and (into_messages or node.get_content_type() != 'message/rfc822'):
+        for child in _children(node):
+            yield from _walk(child, into_messages=into_messages, _depth=_depth + 1, _parent=node)
 
 
-def _nested_messages(part: Message, depth: int) -> Iterator[Message]:
-    if depth > MAX_DEPTH:
-        return
-    for child in _children(part):
-        if child.get_content_type() == 'message/rfc822':
-            for inner in _children(child):
-                yield inner
-                yield from _nested_messages(inner, depth + 1)
-        else:
-            yield from _nested_messages(child, depth + 1)
+def iter_leaves(msg: Message, *, into_messages: bool = True) -> Iterator[Message]:
+    """Every non-container part in document order, at most `MAX_LEAVES` of them. Containers are
+    `multipart/*` and, when `into_messages` is true, `message/rfc822` (whose inner message's parts
+    are yielded too)."""
+    count = 0
+    for node, _ in _walk(msg, into_messages=into_messages):
+        if node.is_multipart():
+            continue
+        if count >= MAX_LEAVES:
+            return
+        count += 1
+        yield node
 
 
 def iter_messages(msg: Message) -> Iterator[Message]:
-    """`msg` and every message nested in it as `message/rfc822`, outermost first."""
+    """`msg` and every message nested in it as `message/rfc822`, outermost first (the same walk,
+    so the same depth limit, as `iter_leaves`)."""
     yield msg
-    yield from _nested_messages(msg, 0)
+    for node, parent in _walk(msg):
+        if parent is not None and parent.get_content_type() == 'message/rfc822':
+            yield node
 
 
 def _is_text(part: Message) -> bool:
@@ -400,7 +517,10 @@ class AttachmentInfo:
     index: int
     filename: str
     content_type: str
+    #: The decoded payload -- only kept for an eligible part; a skipped one is empty (its `size`
+    #: is all that is needed), so a message full of unusable parts doesn't stay in memory.
     data: bytes
+    size: int = 0
     skip: str = ''
 
 
@@ -456,11 +576,14 @@ def _choose_body(msg: Message, index_of: dict[int, int]) -> BodyInfo | None:
             part = next((p for p in leaves if p.get_content_type() == content_type), None)
             if part is None:
                 continue
+            index = index_of.get(id(part))
+            if index is None:  # deeper than the main walk goes: not a part we track
+                continue
             visible = len(_visible_text(part))
             if visible < MIN_BODY_CHARS:
                 continue
             info = BodyInfo(
-                index=index_of[id(part)],
+                index=index,
                 content_type=content_type,
                 data=part_text(part).encode('utf-8', 'replace'),
             )
@@ -477,7 +600,8 @@ def analyze(
     `services.inbound`): an attachment is eligible when its **sniffed** type (the magic bytes --
     never the declared type or the file name) is an allowed one and it fits `max_file_bytes`;
     an image referenced from the HTML body by `cid:` with both sides under `min_inline_px` is a
-    logo or a signature and is skipped; the body is only chosen as a fallback."""
+    logo or a signature and is skipped; the body is only chosen as a fallback (so `Analysis.body`
+    is `None` whenever an attachment is eligible)."""
     leaves = list(iter_leaves(msg))
     index_of = {id(leaf): i for i, leaf in enumerate(leaves)}
     cids = _cid_references(msg)
@@ -493,6 +617,7 @@ def analyze(
             filename=_text(leaf.get_filename() or ''),
             content_type=sniffed or '',
             data=data,
+            size=len(data),
         )
         if not data:
             info.skip = SKIP_EMPTY
@@ -502,8 +627,12 @@ def analyze(
             info.skip = SKIP_INLINE
         elif len(data) > max_file_bytes:
             info.skip = SKIP_TOO_LARGE
+        if info.skip:
+            info.data = b''
         attachments.append(info)
-    return Analysis(attachments=attachments, body=_choose_body(msg, index_of))
+    # The body is only a fallback: with an eligible attachment it is never looked at.
+    eligible = any(not info.skip for info in attachments)
+    return Analysis(attachments=attachments, body=None if eligible else _choose_body(msg, index_of))
 
 
 def _is_tiny_inline_image(
@@ -522,24 +651,63 @@ def _is_tiny_inline_image(
 # -- The stripped copy --------------------------------------------------------------------------
 
 
-def build_stripped_eml(raw: bytes, markers: dict[int, tuple[str, str]]) -> bytes:
+def _payload_size(part: Message) -> int:
+    payload = part.get_payload()
+    return len(payload) if isinstance(payload, str | bytes) else 0
+
+
+def _empty(part: Message, header: str, value: str) -> None:
+    part.set_payload('')
+    for name in (RECEIPT_ID_HEADER, SKIPPED_HEADER):  # one the sender wrote must not survive
+        del part[name]
+    part[header] = value
+
+
+def build_stripped_eml(raw: bytes, parsed: Message, markers: dict[int, tuple[str, str]]) -> bytes:
     """The email as we keep it: every part in `markers` (leaf index -> `(header, value)`, from
     `X-Receipts-Receipt-Id` / `X-Receipts-Skipped`) has its payload replaced by an empty body and
     that header added, so the file it became (or would have) is not stored twice and the
-    original structure and headers survive. Re-parses `raw` rather than mutating the tree used
-    for the analysis, so one message can be stripped differently per recipient.
+    original structure and headers survive. Works on a deep copy of `parsed` (the tree the
+    analysis used, parsed once), so one message can be stripped differently per recipient.
 
-    If the message can't be serialized again, only its top-level headers are kept."""
+    The result is bounded, because the user pays to store it and the sender chooses what is in
+    it: any other text part over `MAX_KEPT_TEXT_BYTES`, any leaf past `MAX_LEAVES` and anything
+    deeper than `MAX_DEPTH` is emptied too (`X-Receipts-Skipped`), and if the whole is still over
+    `MAX_EML_BYTES` -- or the message can't be serialized again -- only its top-level headers are
+    kept (`raw` is where they come from)."""
     try:
-        msg = parse_message(raw)
-        for index, leaf in enumerate(iter_leaves(msg)):
-            marker = markers.get(index)
-            if marker is None:
+        msg = copy.deepcopy(parsed)
+        nodes = list(_walk(msg))
+        visited = {id(node) for node, _ in nodes}
+        leaf_index = 0
+        for node, _ in nodes:
+            if node.is_multipart():
+                # Children the walk never reached (too deep) are dropped.
+                if any(id(child) not in visited for child in _children(node)):
+                    node.set_payload('')
                 continue
-            leaf.set_payload('')
-            leaf[marker[0]] = marker[1]
-        return msg.as_bytes(policy=policy.default.clone(refold_source='none'))
+            index, leaf_index = leaf_index, leaf_index + 1
+            marker = markers.get(index)
+            if index >= MAX_LEAVES:
+                _empty(node, SKIPPED_HEADER, SKIP_OVER_LIMIT)
+            elif marker is not None:
+                _empty(node, *marker)
+            elif _is_text(node) and _payload_size(node) > MAX_KEPT_TEXT_BYTES:
+                _empty(node, SKIPPED_HEADER, SKIP_TOO_LARGE)
+        eml = msg.as_bytes(policy=policy.default.clone(refold_source='none'))
+        if len(eml) <= MAX_EML_BYTES:
+            return eml
+        logger.info(
+            'Stripped email is %s bytes (over %s); keeping its headers only',
+            len(eml),
+            MAX_EML_BYTES,
+        )
     except Exception:
         logger.exception('Could not rebuild the stripped email; keeping its headers only')
-        head = re.split(rb'\r?\n\r?\n', raw, maxsplit=1)[0]
-        return head + b'\nX-Receipts-Stripped: headers only\n'
+    return _headers_only(raw)
+
+
+def _headers_only(raw: bytes) -> bytes:
+    match = re.search(rb'\r?\n\r?\n', raw)
+    head = raw[: match.start()] if match else raw
+    return head[:MAX_EML_BYTES] + b'\nX-Receipts-Stripped: headers only\n'

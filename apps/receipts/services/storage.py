@@ -5,6 +5,10 @@ One private bucket per environment, shared with file transfer; everything Receip
 `receipts/` (the infra IAM user is scoped to that prefix):
 
 - `receipts/inbound/`: where SES drops incoming mail, picked up by the poller (`services.inbound`).
+  The infra lifecycle rule expires objects here after a while.
+- `receipts/failed/`: where a message that could not be ingested is moved to, so it never sits in
+  the polled prefix (a pile of failures would crowd new mail out of the listing). Not expired;
+  the admin "retry" moves it back. Within `receipts/*`, so the IAM user may use it.
 - `receipts/users/<user_id>/files/<receipt_id>`: the original file. Keyed by id only -- never the
   filename, which is user/sender controlled -- for the same reasons as file transfer's keys (see
   `apps.file_transfer.services.storage`); the display name lives on `Receipt.original_filename`
@@ -36,12 +40,14 @@ from apps.core.services.storage import (
 
 __all__ = [
     'GET_URL_EXPIRES_SECONDS',
+    'FAILED_PREFIX',
     'INBOUND_PREFIX',
     'PUT_URL_EXPIRES_SECONDS',
     'USERS_PREFIX',
     'ObjectInfo',
     'S3Storage',
     'email_key',
+    'failed_key_for',
     'file_key',
     'get_storage',
     'preview_key',
@@ -52,7 +58,17 @@ __all__ = [
 #: Where SES writes incoming messages.
 INBOUND_PREFIX = 'receipts/inbound/'
 
+#: Where messages that failed to ingest are parked.
+FAILED_PREFIX = 'receipts/failed/'
+
 USERS_PREFIX = 'receipts/users/'
+
+
+def failed_key_for(inbound_key: str) -> str:
+    """Where the object at `inbound_key` is parked when its message fails: the same name under
+    `FAILED_PREFIX`."""
+    name = inbound_key[len(INBOUND_PREFIX) :] if inbound_key.startswith(INBOUND_PREFIX) else None
+    return f'{FAILED_PREFIX}{name if name else inbound_key.replace("/", "_")}'
 
 
 def user_prefix(user_id: object) -> str:
