@@ -1,9 +1,9 @@
 """Submitting feedback (issue #82): validation plus the row and the two emails it triggers."""
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
 
 from apps.accounts.models import User
+from apps.core.services.queue import enqueue_after_commit
 
 from ..models import MAX_DESCRIPTION_LENGTH, Feedback
 from . import emails
@@ -39,6 +39,6 @@ def submit_feedback(user: User, description: str) -> Feedback:
     description = validate_description(description)
     feedback = Feedback.objects.create(created_by=user, description=description)
     feedback_id = str(feedback.id)
-    transaction.on_commit(lambda: emails.send_feedback_receipt.enqueue(feedback_id))
-    transaction.on_commit(lambda: emails.notify_superusers_of_feedback.enqueue(feedback_id))
+    enqueue_after_commit(emails.send_feedback_receipt, feedback_id)
+    enqueue_after_commit(emails.notify_superusers_of_feedback, feedback_id)
     return feedback

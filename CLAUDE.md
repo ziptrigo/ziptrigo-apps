@@ -215,6 +215,13 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   `admin/receipts.py`
   (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE`
   users). Claim `sub`, signed with `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
+  **Tokens are bound to the password**: every access and refresh token carries `pwd`
+  (`tokens.PASSWORD_CLAIM`, a `SECRET_KEY`-keyed HMAC of the password hash, never the hash itself),
+  and `JWTAuth`/`AsyncJWTAuth` (so `AdminAuth` too) and `POST /api/auth/refresh` reject a token
+  whose `pwd` doesn't match the user's current password. Any password change -- the account page,
+  a reset, the admin, `set_unusable_password` -- therefore revokes every token issued before it,
+  like Django's session auth hash does for sessions. A token without the claim is rejected, so
+  tokens issued before this shipped stopped working and CLI users had to log in again once.
 
 `POST /api/auth/login` only issues JWTs; it never starts a session. Register, forgot-password,
 reset-password and resend-confirmation (issue #52) are session form views too, the same as login
@@ -225,7 +232,32 @@ share the same `apps.accounts.services` logic (`signup.create_account`,
 `password_reset.get_password_reset_service`, `email_confirmation.get_email_confirmation_service`)
 and the same `apps.core.ratelimit` rules, so validation and throttling can't drift between them.
 Changing the email through `PUT /api/account` un-confirms the account and sends a new
-confirmation email.
+confirmation email. If the address being left had been confirmed, it also gets a notice
+(`services.email_change`, "your email address was changed from X to Y"). It's a notice only, with
+no "do this if it wasn't you" step (a product decision): the old owner can't use forgot-password
+(it goes to the new address) or a password login (it needs a confirmed email), and the project has
+no support address.
+
+**Change password** is a session form view on the account page (`POST /account/password/`,
+`views/password.py`, `forms.ChangePasswordForm`; web only, no `/api/` endpoint). It needs the
+current password and refuses an unchanged one; the new one goes through `PasswordValidator` *and*
+Django's `AUTH_PASSWORD_VALIDATORS` (too common, all digits, too similar to the email or name --
+signup and reset still apply only `PasswordValidator`). `services.password_change.change_password`
+saves it and, on commit, queues the `send_password_changed_email` task ("your password was
+changed", with a link to `accounts:forgot-password` in case it wasn't the owner -- sent only to a
+*confirmed* address, like the feedback receipt). The view calls `update_session_auth_hash`, so this
+session stays signed in while the user's other sessions are signed out, and every JWT issued
+before the change stops working (see the `pwd` claim above). **Every** attempt counts against
+`CHANGE_PASSWORD_USER` (per user, `hit_user` before the current password is checked): a
+"`peek`, then record failures" counter like login's `LOGIN_ACCOUNT` lets a burst of parallel
+requests through before the first failure is recorded, and only the session's own user can spend
+this budget, so there's no lockout of someone else to avoid. A "Sign in with Google" account with
+no usable password doesn't get the form (and a POST just redirects, `hx_redirect`).
+
+Tasks queued from inside a transaction go through `apps.core.services.queue.enqueue_after_commit`
+(on commit; a failure to enqueue is logged and swallowed, since the domain write is already
+committed and raising would only turn it into an error page). `accounts`, `feedback` and
+`receipts` use it.
 
 **Sign in with Google** (issue #91) is a third way in to the *web UI*, and it is a session login
 like the password form, not a JWT one: `GET /auth/google/login` and `GET /auth/google/callback`
@@ -1092,7 +1124,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   (`services.duplicates`): another live receipt of the user with the same `sha256`, or the same
   vendor + date + amount (oldest wins; a receipt flagged *as a duplicate of this one* isn't offered
   back); dismissing sets `duplicate_dismissed`. Tasks are queued with
-  `services.queue.enqueue_after_commit` (on commit, a failure logged and swallowed -- `retry_due`
+  `enqueue_after_commit` (`apps.core.services.queue`; on commit, a failure logged and swallowed -- `retry_due`
   re-queues receipts nobody picked up).
 - **Notifications** (`services.emails`, tasks on the `receipts` queue, owner only, only to a
   *confirmed* address, autoescaped `html_body`, no sender-controlled text in a subject):

@@ -7,6 +7,7 @@ from .pages import (
     confirm_email_page,
     email_confirmation_success,
 )
+from .password import password_change
 from .profile import profile_update
 from .register import register_page
 from .resend_confirmation import resend_confirmation_page
@@ -22,6 +23,7 @@ __all__ = [
     'google_login',
     'login_page',
     'logout_page',
+    'password_change',
     'profile_update',
     'register_page',
     'resend_confirmation_page',

@@ -78,3 +78,68 @@ def test_email_change_invalidates_a_still_pending_confirmation_for_the_old_addre
     assert response.status_code == 200
     pending = EmailVerification.objects.get(pk=pending_id)
     assert pending.invalidated_at is not None
+
+
+@pytest.fixture
+def sent_notices(monkeypatch) -> list[dict]:
+    """Capture what the "email changed" notice hands to `send_email`."""
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        'apps.accounts.services.email_change.send_email', lambda **kwargs: sent.append(kwargs)
+    )
+    return sent
+
+
+def test_email_change_notifies_the_previous_confirmed_address(
+    client, user, sent_confirmations, sent_notices, django_capture_on_commit_callbacks
+):
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _put(client, user, {'email': 'new@example.com'})
+
+    assert response.status_code == 200
+    assert len(sent_notices) == 1
+    notice = sent_notices[0]
+    assert notice['to'] == 'testuser@example.com'
+    assert notice['subject'] == 'Your ZipTrigo email address was changed'
+    assert 'from testuser@example.com to new@example.com' in notice['text_body']
+
+
+def test_email_change_from_an_unconfirmed_address_sends_no_notice(
+    client, user, sent_confirmations, sent_notices, django_capture_on_commit_callbacks
+):
+    user.email_confirmed = False
+    user.save()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        _put(client, user, {'email': 'new@example.com'})
+
+    assert sent_notices == []
+
+
+def test_name_only_change_sends_no_notice(
+    client, user, sent_confirmations, sent_notices, django_capture_on_commit_callbacks
+):
+    with django_capture_on_commit_callbacks(execute=True):
+        _put(client, user, {'name': 'Renamed'})
+
+    assert sent_notices == []
+
+
+def test_email_changed_notice_escapes_the_name(user):
+    from datetime import UTC, datetime
+
+    from apps.accounts.services.email_change import render_email_changed_notice
+
+    user.name = '<b>Mallory</b>'
+    _, text_body, html_body = render_email_changed_notice(
+        user=user,
+        previous_email='old@example.com',
+        new_email='new@example.com',
+        changed_at=datetime(2026, 10, 12, 14, 5, tzinfo=UTC),
+    )
+
+    assert '2026-10-12 at 14:05 UTC' in text_body
+    assert '&lt;b&gt;Mallory&lt;/b&gt;' in html_body
+    assert '<b>Mallory</b>' not in html_body
+    assert 'old@example.com' in html_body
+    assert 'new@example.com' in html_body
