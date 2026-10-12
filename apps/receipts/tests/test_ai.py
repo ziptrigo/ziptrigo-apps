@@ -239,7 +239,7 @@ class TestOpenAIClient:
     def test_a_blank_base_url_means_the_openai_api(self, settings):
         settings.OPENAI_BASE_URL = ''
 
-        assert 'api.openai.com' in str(ai.OpenAIReceiptClient()._client.base_url)
+        assert ai.OpenAIReceiptClient()._client.base_url.host == 'api.openai.com'
 
     def test_success_sends_a_json_schema_request_and_validates_the_reply(self, openai_client):
         reply = json.dumps({'vendor': 'Staples', 'amount': 42.1, 'confidence': 0.8})
