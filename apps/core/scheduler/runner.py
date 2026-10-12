@@ -9,6 +9,7 @@ they hold the lease. At-least-once: a job can run twice if a process dies mid-ru
 import logging
 import threading
 import traceback
+from datetime import datetime
 
 from django.db import close_old_connections, connections
 from django.db.models import DateTimeField, ExpressionWrapper, F, Q
@@ -28,7 +29,14 @@ def _ensure_row(job: JobSpec) -> None:
 
 
 def try_claim(job: JobSpec) -> bool:
-    """Attempt to claim `job` for this process. Returns whether the claim succeeded.
+    """Attempt to claim `job` for this process. Returns whether the claim succeeded (see
+    `_claim`)."""
+    return _claim(job) is not None
+
+
+def _claim(job: JobSpec) -> datetime | None:
+    """Claim `job`, returning the claim's `last_started_at` (the token `_run_job` releases the
+    lease with), or `None` when it isn't claimable.
 
     Succeeds only when the row's lease isn't currently held (`locked_until` unset or in the past,
     per the database clock) and the job is due (`last_started_at` unset or older than its
@@ -49,10 +57,23 @@ def try_claim(job: JobSpec) -> bool:
             interval_seconds=int(job.interval.total_seconds()),
         )
     )
-    return updated == 1
+    if updated != 1:
+        return None
+    # Read back the database's own timestamp: no other runner can claim the row while this
+    # claim's lease holds, so this is the value this claim set.
+    return (
+        ScheduledJob.objects.filter(name=job.name).values_list('last_started_at', flat=True).first()
+    )
 
 
-def _run_job(job: JobSpec) -> None:
+def _run_job(job: JobSpec, claimed_at: datetime | None) -> None:
+    """Run `job` and record the outcome, then release the lease, so the job is due again once its
+    interval passes rather than once its (usually longer) lease runs out. The release only
+    applies while no later claim exists (`last_started_at <= claimed_at`): a run that outlived its
+    lease and was claimed again by another runner must not free that runner's lease. (`<=` rather
+    than `==`: SQLite stores `Now()` as text with millisecond precision, which an equality test
+    against the read-back value misses.) A process that dies mid-job never gets here, so its lease
+    holds until it expires."""
     try:
         job.func()
     except Exception:
@@ -68,6 +89,11 @@ def _run_job(job: JobSpec) -> None:
             last_error='',
             run_count=F('run_count') + 1,
         )
+    finally:
+        if claimed_at is not None:
+            ScheduledJob.objects.filter(name=job.name, last_started_at__lte=claimed_at).update(
+                locked_until=None
+            )
 
 
 def run_due_jobs() -> list[str]:
@@ -75,9 +101,10 @@ def run_due_jobs() -> list[str]:
     ran = []
     for job in get_jobs():
         _ensure_row(job)
-        if try_claim(job):
+        claimed_at = _claim(job)
+        if claimed_at is not None:
             ran.append(job.name)
-            _run_job(job)
+            _run_job(job, claimed_at)
     return ran
 
 
