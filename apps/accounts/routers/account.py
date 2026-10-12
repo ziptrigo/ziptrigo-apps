@@ -4,6 +4,7 @@ from ninja.errors import HttpError
 from ..auth import JWTAuth
 from ..models import User
 from ..schemas import AccountUpdateRequest, AccountUpdateResponse
+from ..services.email_change import notify_previous_address
 from ..services.email_confirmation import get_email_confirmation_service
 
 router = Router()
@@ -29,6 +30,7 @@ def update_account(request, payload: AccountUpdateRequest):
     # can't claim an address they don't own.
     email_changed = bool(payload.email and payload.email != user.email)
     previous_email = user.email
+    previous_email_confirmed = user.email_confirmed
     if email_changed:
         # Check if email already exists
         if User.objects.filter(email=payload.email).exclude(id=user.id).exists():
@@ -46,6 +48,10 @@ def update_account(request, payload: AccountUpdateRequest):
         # account claims that address next.
         service.invalidate_pending_for_email(previous_email)
         service.send_confirmation_email(user)
+        # Tell the address being left behind, but only one the owner had proven: an unconfirmed
+        # one may never have been theirs.
+        if previous_email_confirmed:
+            notify_previous_address(user, previous_email)
 
     return AccountUpdateResponse(
         message=(

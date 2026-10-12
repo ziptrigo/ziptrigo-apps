@@ -19,7 +19,7 @@ from ..schemas import (
 from ..services import login_throttle
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.password_reset import get_password_reset_service
-from ..tokens import CustomAccessToken, CustomRefreshToken
+from ..tokens import CustomAccessToken, CustomRefreshToken, matches_password
 
 # There is deliberately no signup endpoint (issue #117): accounts are created only through the web
 # register page, behind its captcha (`apps.accounts.views.register`). An API client works on behalf
@@ -150,6 +150,11 @@ def refresh_token(request: HttpRequest, payload: RefreshRequest) -> TokenRespons
 
     if user.status != User.STATUS_ACTIVE:
         raise HttpError(403, 'User not active')
+
+    # A refresh token issued before the password last changed is revoked (see
+    # `apps.accounts.tokens.password_fingerprint`).
+    if not matches_password(refresh, user):
+        raise HttpError(401, 'Invalid or expired refresh token')
 
     # Generate a new access token
     access = CustomAccessToken.for_user(user)
