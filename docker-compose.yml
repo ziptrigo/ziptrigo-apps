@@ -101,6 +101,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  worker-receipts:
+    # The second `django_tasks_db` queue worker, for the `receipts` queue (AI extraction, PDF and
+    # image work). Its own service so slow receipts never delay the `default` queue's emails and zip
+    # builds, mirroring the two `db_worker` processes `supervise.py` starts in the deployed image.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ziptrigo-worker-receipts
+    command: ['python', 'manage.py', 'db_worker', '--queue-name', 'receipts']
+    environment: *worker_environment
+    env_file:
+      - .env.local
+    volumes: *worker_volumes
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
   scheduler:
     # `apps.core.scheduler`'s runner (the four file_transfer jobs, spec section 10). A separate
     # service from `worker` rather than the two of them backgrounded in one container with `&` +

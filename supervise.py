@@ -1,10 +1,14 @@
-"""Container PID 1: runs gunicorn and (optionally) the `django_tasks_db` queue worker.
+"""Container PID 1: runs gunicorn and (optionally) the `django_tasks_db` queue workers.
 
 `db_worker` installs signal handlers, which only work on a process's main thread, so it can't be a
-thread inside gunicorn like the scheduler is. This supervisor starts both, forwards SIGTERM/SIGINT
-to them, and exits as soon as either child exits so Docker restarts the whole container. That
-coupling is deliberate (one recovery mechanism, Docker's restart policy), so a queue-worker crash
-also restarts gunicorn.
+thread inside gunicorn like the scheduler is. This supervisor starts them all, forwards
+SIGTERM/SIGINT to them, and exits as soon as any child exits so Docker restarts the whole
+container. That coupling is deliberate (one recovery mechanism, Docker's restart policy), so a
+queue-worker crash also restarts gunicorn.
+
+There are two queue workers, one process per queue: `default` (emails, zip builds, deleting a
+transfer's objects) and `receipts` (AI extraction and PDF/image work, which can be slow), so a
+backlog of receipts never delays file transfer's emails.
 
 Shutdown timing, each value strictly below the next: gunicorn's `graceful_timeout` (25 s, in
 `gunicorn.conf.py`) < this supervisor's `grace_seconds` (30 s, then SIGKILL) < the container's stop
@@ -60,6 +64,7 @@ def build_commands(env: Mapping[str, str] = os.environ) -> list[list[str]]:
     ]
     if env.get('RUN_TASK_WORKER', '1').lower() in ('true', '1'):
         commands.append(['python', 'manage.py', 'db_worker'])
+        commands.append(['python', 'manage.py', 'db_worker', '--queue-name', 'receipts'])
     return commands
 
 

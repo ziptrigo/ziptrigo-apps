@@ -19,6 +19,10 @@ A single Django project (a "modular monolith") with one Django app per concern:
   (email-confirmed, per-IP-capped, gated off by default) senders alike, resumable uploads, a JWT
   API (`/api/ft/`) and `admin/filetransfer.py` CLI (#55 phases 1-3); abuse reports, admin takedown,
   a sender block list and an optional auto-hold on repeated reports (#59).
+- **receipts** — receipts and invoices in, extracted fields out (#98): files go to S3 and an
+  OpenAI-compatible vision model reads vendor, amount, date and a category from the user's own
+  list. Credit-metered per file and per GB stored. Backend only so far (models, uploads, the AI
+  pipeline, billing, jobs, admin); email intake, the pages and the API/CLI come in later phases.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -45,7 +49,8 @@ ziptrigo-apps/
 │   ├── billing/
 │   ├── feedback/
 │   ├── qr_code/
-│   └── file_transfer/
+│   ├── file_transfer/
+│   └── receipts/
 ├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, ...), run via `inv`
 ├── tests_e2e/               # Playwright end-to-end tests
 ├── conftest.py              # Fixtures shared by every app's tests
@@ -86,7 +91,7 @@ apps/<app>/
 ### Dependency rules
 
 ```
-qr_code, file_transfer   (products: may not import each other)
+qr_code, file_transfer, receipts   (products: may not import each other)
         ↓
  billing, feedback
         ↓
@@ -124,6 +129,7 @@ expiry, cleanup) and queued emails need the worker processes too, in separate te
 ```bash
 python manage.py run_scheduler    # apps.core.scheduler: the four file_transfer jobs
 python manage.py db_worker        # django_tasks_db: queued emails, deleting a transfer's objects
+python manage.py db_worker --queue-name receipts   # Receipts' AI/PDF work, its own queue
 ```
 
 ### Docker
@@ -133,9 +139,10 @@ cp .env.example .env.local
 docker compose up --build         # http://localhost:8000
 ```
 
-Brings up all four services: `web` (the site), `worker` (`db_worker`), `scheduler`
+Brings up all five services: `web` (the site), `worker` (`db_worker`), `worker-receipts`
+(`db_worker --queue-name receipts`), `scheduler`
 (`run_scheduler`, see [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)) and `db`
-(this stack's own Postgres). `worker` and `scheduler` wait for `web`'s healthcheck before starting,
+(this stack's own Postgres). The workers and `scheduler` wait for `web`'s healthcheck before starting,
 since only `web` applies migrations. `web`'s `DATABASE_URL` defaults to that `db` service; override
 it in `.env.local` to point elsewhere.
 
@@ -310,12 +317,12 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   `BASE_URL` is `https://`.
 - **Media files**: a host volume for now.
 - **Background jobs**: one container runs everything. `supervise.py` (the image's `CMD`) starts
-  gunicorn, whose workers each run the scheduler as a thread, plus the `db_worker` queue worker
-  (see [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)). Set
+  gunicorn, whose workers each run the scheduler as a thread, plus two `db_worker` queue workers
+  (`default` and `receipts`; see [Queue and scheduler in CLAUDE.md](CLAUDE.md#queue-and-scheduler)). Set
   `SCHEDULER_ENABLED=1` and leave `RUN_TASK_WORKER` at its default (`1`); without the scheduler
   flag, file transfer's metering, expiry and cleanup jobs never run (`supervise.py` logs a
   warning at start when `ENVIRONMENT=prod` and the flag is off).
-  Because the supervisor exits when either child exits, **a queue-worker crash restarts the whole
+  Because the supervisor exits when any child exits, **a queue-worker crash restarts the whole
   container, so it shows up as web downtime**; this was chosen on purpose (simple, Docker's restart
   policy is the single recovery mechanism). The container's stop grace period must exceed 30 s
   (40 s in the infra compose, joaonc/infra#370; Docker's default is 10 s): gunicorn's

@@ -20,9 +20,17 @@ dependencies = [
     'django>=6.1,<6.2',
     'gunicorn>=26.2,<27.0',
     'jinja2>=3.1,<4.0',
+    # OpenAI-compatible client for receipt extraction (issue #98); used with an explicit timeout
+    # and a bounded `max_retries` (`apps.receipts.services.ai`).
+    'openai>=2.0,<3.0',
     'pillow>=12.0,<13.0',
+    # HEIC/HEIF decoding for receipt photos (registers a Pillow opener; issue #98).
+    'pillow-heif>=1.0,<2.0',
     'psycopg[binary]>=3.3,<4.0',
     'pydantic[email]>=2.12,<3.0',
+    # PDF text extraction (`pypdf`) and page rendering for scanned PDFs (`pypdfium2`) for receipts.
+    'pypdf>=6.0,<7.0',
+    'pypdfium2>=5.0,<6.0',
     'pyjwt[crypto]>=2.10,<3.0',
     'python-dotenv>=1.0,<2.0',
     'requests>=2.32,<3.0',
@@ -148,7 +156,7 @@ root_packages = ['apps']
 name = 'Products -> billing | feedback -> accounts -> core'
 type = 'layers'
 layers = [
-    'apps.qr_code | apps.file_transfer',
+    'apps.qr_code | apps.file_transfer | apps.receipts',
     'apps.billing | apps.feedback',
     'apps.accounts',
     'apps.core',
