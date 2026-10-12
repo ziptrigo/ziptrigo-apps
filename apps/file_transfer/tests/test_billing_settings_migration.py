@@ -67,9 +67,7 @@ def test_the_old_column_is_dropped_only_after_the_copy():
 
 
 def test_the_model_no_longer_has_the_old_field():
-    field_names = {field.name for field in FileTransferSettings._meta.get_fields()}
-
-    assert 'price_per_gb_per_day' not in field_names
+    assert not hasattr(FileTransferSettings.load(), 'price_per_gb_per_day')
 
 
 def test_the_admin_page_has_no_price_field(client, admin_user):
