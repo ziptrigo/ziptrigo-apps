@@ -16,6 +16,7 @@ from django.utils.html import format_html
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.models import User
+from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
 from . import services
@@ -399,38 +400,13 @@ class DownloadEventAdmin(admin.ModelAdmin):
         return False
 
 
-class FileTransferSettingsAdmin(admin.ModelAdmin):
-    """Singleton settings page (spec section 9): superusers only, and there's only ever the one
-    row `FileTransferSettings.load()` creates."""
+class FileTransferSettingsAdmin(SingletonSettingsAdmin):
+    """Singleton settings page (spec section 9): there's only ever the one row
+    `FileTransferSettings.load()` creates."""
 
     # The storage price moved to `BillingSettings` (issue #98); the old column stays until a
     # later release drops it, but is no longer editable (or read) anywhere.
     exclude = ['price_per_gb_per_day']
-
-    def _is_superuser(self, request: AuthenticatedHttpRequest) -> bool:
-        return bool(request.user.is_active and request.user.is_superuser)
-
-    def has_module_permission(self, request: AuthenticatedHttpRequest) -> bool:
-        return self._is_superuser(request)
-
-    def has_view_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
-        return self._is_superuser(request)
-
-    def has_add_permission(self, request: AuthenticatedHttpRequest) -> bool:
-        return self._is_superuser(request) and not FileTransferSettings.objects.exists()
-
-    def has_change_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
-        return self._is_superuser(request)
-
-    def has_delete_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
-        return False
-
-    def changelist_view(
-        self, request: AuthenticatedHttpRequest, extra_context=None
-    ) -> HttpResponse:
-        """Skip the changelist entirely -- there's only ever one row."""
-        settings_row = FileTransferSettings.load()
-        return redirect('custom_admin:file_transfer_filetransfersettings_change', settings_row.pk)
 
 
 #: Every field on `AbuseReport`, shown read-only -- reports come from the public form (or, rarely,

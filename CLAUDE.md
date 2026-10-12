@@ -16,8 +16,8 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       email verification, rate limiting (`apps.core.ratelimit`), client IP,
                       generic S3 storage (`apps.core.services.storage`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
-apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the shared
-                      storage price (BillingSettings).
+apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
+                      shared storage price (BillingSettings).
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
                       to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
@@ -112,13 +112,15 @@ Each app may import only from layers below it. Enforced by the import-linter con
   `/admin/billing/billingsettings/`). Products read it through
   `apps.billing.services.get_storage_price_per_gb_per_day()` and do the daily accrual arithmetic
   with `storage_charge(accrued, size_bytes, price)` -> `(whole_credits_to_spend, new_remainder)`
-  (floor, remainder carried) rather than each rolling their own. `file_transfer`'s
+  (floor, remainder carried, quantized to 6 decimal places like `Transfer.accrued`) rather than
+  each rolling their own. `file_transfer`'s
   `meter_transfer` takes the price as an optional argument so the daily job loads it once per run.
   The old `FileTransferSettings.price_per_gb_per_day` is **deprecated and no longer read**: its
   column stays (hidden from `FileTransferSettingsAdmin`) so an old container still serving during
   a deploy keeps working, and "release 2" of #98 drops it. `file_transfer` migration
   `0006_copy_price_to_billing_settings` copied any customised value into `BillingSettings` (it
-  lives in `file_transfer` because `billing` can't depend on a product).
+  lives in `file_transfer` because `billing` can't depend on a product); it only copies when no
+  `BillingSettings` row exists yet, so re-running it never overwrites a newer price.
 - `billing` can't import a product either, so it exposes a `credits_added` signal
   (`apps.billing.signals`, sent from `add_credits` after commit) for a product to react to a top-up
   without `billing` knowing it exists. `file_transfer` listens for it to re-enable a user's
@@ -558,10 +560,15 @@ and to the admin tools page.
 Singleton settings pages (superusers only, one row, `changelist_view` redirects straight to the
 change form): `CoreSettingsAdmin` (`/admin/core/coresettings/`, email verification knobs -- issue
 #58), `BillingSettingsAdmin` (`/admin/billing/billingsettings/`, the storage price shared by all
-products -- issue #98) and `FileTransferSettingsAdmin` (`/admin/file_transfer/filetransfersettings/`,
-spec section 9, plus the issue #59 `auto_hold_report_threshold`; its old per-GB price field is
-deprecated and hidden, see "Dependency rules between apps"). Each loads its row with the model's own
-`.load()` classmethod rather than a fixture.
+products -- issue #98) and `FileTransferSettingsAdmin`
+(`/admin/file_transfer/filetransfersettings/`, spec section 9, plus the issue #59
+`auto_hold_report_threshold`; its old per-GB price field is deprecated and hidden, see
+"Dependency rules between apps"). All three share the
+`apps.core.admin_singleton.SingletonSettingsAdmin` base (superusers only, add only while no row
+exists, never delete, changelist redirects to the change form; the URL name is derived from the
+model), and each loads its row with the model's own `.load()` classmethod
+(`apps.core.models.singleton.load_singleton`, which re-reads the row if a concurrent first use
+loses the insert race) rather than a fixture.
 
 `AbuseReportAdmin` (`/admin/file_transfer/abusereport/`, issue #59) is a read-only report list --
 filter by status/reason/date, a link to the reported transfer -- with three bulk actions: "Dismiss",
@@ -975,7 +982,8 @@ future app:
   dedicated container; job status is a read-only `ScheduledJob` admin.
 
 `file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges at
-the shared `BillingSettings` storage price, suspends, re-enables as a fallback, deletes files past the suspension grace period),
+the shared `BillingSettings` storage price, suspends, re-enables as a fallback, deletes files
+past the suspension grace period),
 `expire_transfers` (every 5 min -- also finishes the deferred file deletion described above),
 `cleanup_drafts` (hourly), `purge_download_ips` (daily). Each wraps its per-transfer work in
 `try`/`except Exception: logger.exception(...)` so one bad row can't abort the rest of that run's

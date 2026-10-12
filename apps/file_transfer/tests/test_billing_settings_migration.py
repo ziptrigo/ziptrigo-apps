@@ -30,14 +30,24 @@ def test_copies_a_customised_price():
     assert BillingSettings.load().storage_price_per_gb_per_day == Decimal('0.35')
 
 
-def test_overwrites_an_existing_billing_row():
-    BillingSettings.load()
+def test_an_existing_billing_row_is_left_alone():
+    BillingSettings.objects.create(pk=1, storage_price_per_gb_per_day=Decimal('0.7'))
     FileTransferSettings.objects.create(pk=1, price_per_gb_per_day=Decimal('2'))
 
     _migration.copy_price_to_billing_settings(apps, None)
 
     assert BillingSettings.objects.count() == 1
-    assert BillingSettings.load().storage_price_per_gb_per_day == Decimal('2')
+    assert BillingSettings.load().storage_price_per_gb_per_day == Decimal('0.7')
+
+
+def test_rerunning_does_not_overwrite_a_newer_price():
+    FileTransferSettings.objects.create(pk=1, price_per_gb_per_day=Decimal('0.35'))
+    _migration.copy_price_to_billing_settings(apps, None)
+    BillingSettings.objects.filter(pk=1).update(storage_price_per_gb_per_day=Decimal('0.9'))
+
+    _migration.copy_price_to_billing_settings(apps, None)
+
+    assert BillingSettings.load().storage_price_per_gb_per_day == Decimal('0.9')
 
 
 def test_without_a_file_transfer_settings_row_nothing_is_created():
@@ -60,7 +70,10 @@ def test_migration_depends_on_billing_model_and_latest_file_transfer_migration()
     dependencies = _migration.Migration.dependencies
 
     assert ('billing', '0002_billingsettings') in dependencies
-    assert any(app == 'file_transfer' for app, _ in dependencies)
+    assert (
+        'file_transfer',
+        '0005_alter_filetransfersettings_price_per_gb_per_day',
+    ) in dependencies
 
 
 def test_deprecated_field_is_not_editable_in_the_admin(client, admin_user):

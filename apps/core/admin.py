@@ -5,10 +5,9 @@ a read-only `EmailVerification` admin for support, and a read-only `RateLimitCou
 """
 
 from django.contrib import admin
-from django.http import HttpResponse
-from django.shortcuts import redirect
 
-from .admin_site import AuthenticatedHttpRequest, custom_admin_site
+from .admin_singleton import SingletonSettingsAdmin
+from .admin_site import custom_admin_site
 from .models import CoreSettings, EmailVerification, RateLimitCounter, ScheduledJob
 
 #: Every field on `EmailVerification` except its code/token hashes -- spelled out rather than
@@ -59,39 +58,9 @@ class ScheduledJobAdmin(admin.ModelAdmin):
         return False
 
 
-class CoreSettingsAdmin(admin.ModelAdmin):
-    """Singleton settings page (issue #58): superusers only, and there's only ever the one row
-    `CoreSettings.load()` creates."""
-
-    def _is_superuser(self, request: AuthenticatedHttpRequest) -> bool:
-        # `request.user` is typed `PermissionsMixin` here (see `AuthenticatedHttpRequest`'s
-        # docstring in `admin_site.py`) -- `core` can't import `accounts`, so unlike
-        # `apps.file_transfer.admin.FileTransferSettingsAdmin`'s equivalent check, there's no
-        # `is_active` on that type to check; the admin site itself already requires an active,
-        # staff-authenticated session to reach any view here at all.
-        return bool(request.user.is_superuser)
-
-    def has_module_permission(self, request: AuthenticatedHttpRequest) -> bool:
-        return self._is_superuser(request)
-
-    def has_view_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
-        return self._is_superuser(request)
-
-    def has_add_permission(self, request: AuthenticatedHttpRequest) -> bool:
-        return self._is_superuser(request) and not CoreSettings.objects.exists()
-
-    def has_change_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
-        return self._is_superuser(request)
-
-    def has_delete_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
-        return False
-
-    def changelist_view(
-        self, request: AuthenticatedHttpRequest, extra_context=None
-    ) -> HttpResponse:
-        """Skip the changelist entirely -- there's only ever one row."""
-        settings_row = CoreSettings.load()
-        return redirect('custom_admin:core_coresettings_change', settings_row.pk)
+class CoreSettingsAdmin(SingletonSettingsAdmin):
+    """Singleton settings page (issue #58): there's only ever the one row `CoreSettings.load()`
+    creates."""
 
 
 class EmailVerificationAdmin(admin.ModelAdmin):

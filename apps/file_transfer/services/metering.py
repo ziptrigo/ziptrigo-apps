@@ -43,8 +43,9 @@ def meter_transfer(transfer: Transfer, price_per_gb_per_day: Decimal | None = No
 
     Rounds down (`apps.billing.services.storage_charge`): `accrued` (a Decimal) collects
     `price x size_in_gb` every day, and only the floor of that -- whenever it's at least 1 -- is
-    actually spent, keeping the remainder. Suspends the transfer (and emails the owner) if the owner can't cover a whole
-    credit. Never charges a suspended, disabled, expired or deleted transfer.
+    actually spent, keeping the remainder. Suspends the transfer (and emails the owner) if the
+    owner can't cover a whole credit. Never charges a suspended, disabled, expired or deleted
+    transfer.
 
     Locks the transfer row for the duration of the charge, re-checking due-ness once the lock is
     held (a concurrent run of the same at-least-once job must not double-charge the same day), and

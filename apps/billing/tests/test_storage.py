@@ -66,7 +66,21 @@ def test_whole_plus_remainder_is_the_new_total():
     whole, remainder = storage_charge(accrued, size, price)
 
     assert 0 <= remainder < 1
-    assert whole + remainder == accrued + price * (Decimal(size) / Decimal(_GB))
+    total = accrued + price * (Decimal(size) / Decimal(_GB))
+    # Equal to within the remainder's 6-decimal-place precision (half an ulp at most).
+    assert abs(whole + remainder - total) <= Decimal('0.0000005')
+
+
+def test_remainder_is_quantized_to_six_decimal_places():
+    # 1 byte at 1 credit/GB/day is 1 / 2**30 = 9.31e-10: far below 6 places.
+    whole, remainder = storage_charge(Decimal('0'), 1, Decimal('1'))
+    assert (whole, remainder) == (0, Decimal('0.000000'))
+
+    # A repeating fraction is cut to exactly 6 places, rounding half-even.
+    whole, remainder = storage_charge(Decimal('0'), _GB, Decimal('1') / Decimal(3))
+    assert whole == 0
+    assert remainder == Decimal('0.333333')
+    assert remainder.as_tuple().exponent == -6
 
 
 @pytest.mark.django_db

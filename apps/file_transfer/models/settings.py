@@ -4,6 +4,8 @@ from typing import ClassVar, cast
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 
+from apps.core.models.singleton import load_singleton
+
 _GB = 1024**3
 
 
@@ -98,8 +100,7 @@ class FileTransferSettings(models.Model):
     @classmethod
     def load(cls) -> 'FileTransferSettings':
         """Return the singleton row, creating it with defaults on first use."""
-        obj, _ = cls.objects.get_or_create(pk=1)
-        return obj
+        return load_singleton(cls)
 
     def anonymous_allowed_expiry_days_list(self) -> list[int]:
         return [

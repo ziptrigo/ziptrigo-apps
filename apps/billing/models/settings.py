@@ -5,6 +5,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import MinValueValidator
 from django.db import models
 
+from apps.core.models.singleton import load_singleton
+
 
 class BillingSettings(models.Model):
     """Singleton admin-editable settings shared by every product that charges credits: today just
@@ -45,5 +47,4 @@ class BillingSettings(models.Model):
     @classmethod
     def load(cls) -> 'BillingSettings':
         """Return the singleton row, creating it with defaults on first use."""
-        obj, _ = cls.objects.get_or_create(pk=1)
-        return obj
+        return load_singleton(cls)
