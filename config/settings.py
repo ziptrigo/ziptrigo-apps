@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     # Products
     'apps.qr_code',
     'apps.file_transfer',
+    'apps.receipts',
     # Task queue: an ORM-backed store for `django.tasks` (Django 6's built-in task queue API).
     'django_tasks_db',
 ]
@@ -334,6 +335,22 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # Logged-in only, so keyed per user. Every submission emails every superuser, so without a cap
     # one account could flood the admins' inboxes; a real user sends a message or two, ever.
     'FEEDBACK_USER': (10, 60 * 60),
+    # -- receipts (issue #98) --
+    # All four are keyed per user (every receipts surface requires login) and shared between the
+    # web pages and `/api/receipts/`, so one surface can't double the other's budget. Enforced at
+    # the views/API, not in the services.
+    # Starting an upload is one cheap row plus a presign, but a real multi-file drop calls it once
+    # per file in a burst, and each file later costs an AI call; the daily per-user file cap in
+    # `ReceiptsSettings` is the actual quota, this is only headroom against a scripted flood.
+    'RECEIPTS_UPLOAD_USER': (120, 60),
+    # Re-running extraction spends credits and an AI call every time, so a runaway client (or a
+    # stuck "Re-run" button) should hit a wall long before it drains a balance.
+    'RECEIPTS_REPROCESS_USER': (30, 60 * 60),
+    # A CSV export walks every matching row; a handful an hour is plenty for a human.
+    'RECEIPTS_EXPORT_USER': (10, 60 * 60),
+    # Regenerating retires the address and mints a new one; there is no legitimate reason to do it
+    # more than a few times, and doing it in a loop only churns rows.
+    'RECEIPTS_REGENERATE_USER': (5, 60 * 60),
 }
 
 
@@ -505,10 +522,54 @@ if os.getenv('ENVIRONMENT') == 'prod':
         )
 
 
+# Receipts (issue #98): AI extraction through an OpenAI-compatible, vision-capable API, and S3
+# storage. `RECEIPTS_S3_BUCKET` is the *same* per-environment app bucket as
+# `FILE_TRANSFER_S3_BUCKET` (every receipts key is under `receipts/`); the IAM user behind
+# `RECEIPTS_AWS_*` is scoped to that prefix (both in the `infra` repo, `apps/ziptrigo-apps`). In dev
+# point `RECEIPTS_S3_ENDPOINT_URL` at Floci. Local and pytest need none of these (the AI and the
+# storage are faked in tests); `ENVIRONMENT=prod` -- which includes staging -- refuses to start
+# without them, below. There is deliberately no feature flag.
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+# Unset: the OpenAI API itself. Set it to use any OpenAI-compatible server.
+OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', '')
+OPENAI_RECEIPTS_MODEL = os.getenv('OPENAI_RECEIPTS_MODEL', '')
+# Explicit HTTP timeout and a bounded number of the SDK's own quick retries; longer outages are
+# retried by `apps.receipts.services.processing` with a backoff (`ReceiptsSettings.max_ai_attempts`).
+RECEIPTS_AI_TIMEOUT_SECONDS = float(os.getenv('RECEIPTS_AI_TIMEOUT_SECONDS', '60'))
+RECEIPTS_AI_MAX_RETRIES = int(os.getenv('RECEIPTS_AI_MAX_RETRIES', '2'))
+
+RECEIPTS_S3_BUCKET = os.getenv('RECEIPTS_S3_BUCKET', '')
+RECEIPTS_S3_REGION = os.getenv('RECEIPTS_S3_REGION', AWS_REGION)
+RECEIPTS_S3_ENDPOINT_URL = os.getenv('RECEIPTS_S3_ENDPOINT_URL') or None
+RECEIPTS_AWS_ACCESS_KEY_ID = os.getenv('RECEIPTS_AWS_ACCESS_KEY_ID', '')
+RECEIPTS_AWS_SECRET_ACCESS_KEY = os.getenv('RECEIPTS_AWS_SECRET_ACCESS_KEY', '')
+# The address mail is received at: `receipts+<code>@<domain of this>`, e.g.
+# `receipts@ziptrigo.com`, or `receipts-staging@ziptrigo.com` on staging.
+RECEIPTS_INBOUND_ADDRESS = os.getenv('RECEIPTS_INBOUND_ADDRESS', 'receipts@ziptrigo.com')
+
+if os.getenv('ENVIRONMENT') == 'prod':
+    _insecure = insecure_secrets(
+        {
+            'OPENAI_API_KEY': OPENAI_API_KEY,
+            'OPENAI_RECEIPTS_MODEL': OPENAI_RECEIPTS_MODEL,
+            'RECEIPTS_S3_BUCKET': RECEIPTS_S3_BUCKET,
+            'RECEIPTS_AWS_ACCESS_KEY_ID': RECEIPTS_AWS_ACCESS_KEY_ID,
+            'RECEIPTS_AWS_SECRET_ACCESS_KEY': RECEIPTS_AWS_SECRET_ACCESS_KEY,
+        }
+    )
+    if _insecure:
+        raise ImproperlyConfigured(
+            f'Set real values for {", ".join(_insecure)} in production; '
+            'they are missing or still placeholders.'
+        )
+
+
 # Task queue: Django 6's built-in `django.tasks`, backed by `django_tasks_db` (an ORM-based
 # backend; Django core only ships the Immediate/Dummy backends). One `worker` container runs
 # `./manage.py db_worker` to execute queued tasks (emails, zip building, deleting a transfer's
-# objects). Tests run everything inline via `ImmediateBackend` so they don't depend on a worker.
+# objects). Receipts has its own `receipts` queue, served by a second `db_worker --queue-name
+# receipts`, so slow AI/PDF work can't delay file transfer's emails and zip builds. Tests run
+# everything inline via `ImmediateBackend` so they don't depend on a worker.
 TASKS = {
     'default': {
         'BACKEND': (
@@ -516,7 +577,7 @@ TASKS = {
             if _RUNNING_TOOLING
             else 'django_tasks_db.DatabaseBackend'
         ),
-        'QUEUES': ['default'],
+        'QUEUES': ['default', 'receipts'],
     }
 }
 
@@ -575,6 +636,9 @@ JAZZMIN_SETTINGS = {
         'file_transfer.Transfer': 'fas fa-paper-plane',
         'file_transfer.DownloadEvent': 'fas fa-download',
         'file_transfer.FileTransferSettings': 'fas fa-sliders-h',
+        'receipts.Receipt': 'fas fa-receipt',
+        'receipts.ReceiptsAccount': 'fas fa-inbox',
+        'receipts.ReceiptsSettings': 'fas fa-sliders-h',
     },
     'topmenu_links': [
         {'name': 'Site', 'url': 'core:home'},

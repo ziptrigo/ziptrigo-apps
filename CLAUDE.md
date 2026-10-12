@@ -23,6 +23,9 @@ apps/feedback/        Footer "Feedback" page: saves a user's message, emails a r
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
                       S3 uploads, metering, "download all" zip, jobs.
+apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
+                      uploads, AI extraction, billing, jobs and admin so far; no pages, API, CLI or
+                      email intake yet (see "Receipts" below).
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
@@ -90,7 +93,7 @@ inv pip compile --clean           # delete uv.lock and re-lock from scratch
 ### Dependency rules between apps
 
 ```
-qr_code | file_transfer   products; may not import each other
+qr_code | file_transfer | receipts   products; may not import each other
 billing | feedback        may not import each other either
 accounts
 core
@@ -153,7 +156,10 @@ as `.env.prod`), which is why `.env.staging` is in `IGNORED_ENV_FILE_SUFFIXES`. 
 
 With `ENVIRONMENT=prod`, settings raise `ImproperlyConfigured` if `SECRET_KEY`, `JWT_SECRET` or
 the file transfer S3 credentials (`FILE_TRANSFER_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`) are
-missing or still placeholders (`config/secret_checks.py`, also Django-free).
+missing or still placeholders (`config/secret_checks.py`, also Django-free). The same goes for
+Receipts' `OPENAI_API_KEY`, `OPENAI_RECEIPTS_MODEL`, `RECEIPTS_S3_BUCKET`,
+`RECEIPTS_AWS_ACCESS_KEY_ID` and `RECEIPTS_AWS_SECRET_ACCESS_KEY`: Receipts has no feature flag, so
+infra and the env files must land before the app deploy (local and pytest need none of them).
 
 File transfer storage is one private S3 bucket per environment (`FILE_TRANSFER_S3_BUCKET`, keys
 `transfers/<transfer_id>/<file_id>` -- deliberately not `.../<filename>` as spec section 11 says,
@@ -937,6 +943,139 @@ superusers) and `core` can't import `accounts`; it sits in the same layer as `bi
   set `updated_at` explicitly (`QuerySet.update` skips `auto_now`); the actions require the
   `change` permission (`permissions=['change']`), since an action ignores `has_change_permission`.
 
+### Receipts
+
+`apps.receipts` (issue #98; app label `receipts`) takes receipts and invoices the user *receives*
+and extracts vendor, amount, date and a category with an OpenAI-compatible vision model. It is a
+product (same layer as `qr_code`/`file_transfer`). **Built so far (phase 1):** models, settings, the
+`receipts` queue, uploads, the processing/AI pipeline, billing, jobs, admin. **Not yet:** the
+`ProductApp` registration, URLs/views/templates (phase 3), the S3 inbound-email poller, MIME parsing
+and `ingest_message` (phase 2; the `InboundMessage`/`InboundEmail` models and admin exist so
+`Receipt.inbound_email` has something to point at), the JWT API and `admin/receipts.py` CLI (phase
+4). Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `checks.py`.
+
+- **Models.** `ReceiptsAccount` (pk = the user; `default_currency`, `sender_allowlist`, and the
+  storage-billing state `stored_bytes`/`last_billed_at`/`accrued`/`billed_days`/`frozen_at`) is
+  created lazily by `services.accounts.get_account`, which also seeds the 12 default
+  `ReceiptCategory` rows and issues the first `InboxCode`. Codes are 8 lowercase characters from an
+  alphabet without look-alikes (`i l o 0 1`), unique across *all* rows and never reissued: a
+  regenerated code is retired (`active=False`, `retired_at`) and kept forever, with a partial unique
+  constraint allowing one active code per account. `Receipt` is one stored file: `receipt_date`
+  (the date on the document) is separate from `created_at`; `vendor`, `amount` (Decimal, 2 dp) and
+  `receipt_date` are the *required* fields (all nullable/blank until filled); `notes` is the user's
+  alone (max 5,000) and never touched by the AI or a re-run; trash is `deleted_at`, not a status.
+  `status`: `received` -> `processing` -> `processed` | `needs_review` | `failed`, plus
+  `waiting_for_credits`; `failure_reason`: `multiple_receipts`, `not_a_receipt`, `unreadable`,
+  `unsupported_type`, `too_large`, `extraction_error`. Beyond the issue's list `Receipt` also has
+  `preview_size_bytes` (so a purge subtracts exactly what was added), `upload_checksum_sha256`,
+  `processing_started_at` (what `retry_due` uses to find a receipt stuck in `processing`) and
+  `last_error`; `InboundEmail` has `attention_notified_at`. `ReceiptsSettings` is a
+  `SingletonSettingsAdmin` singleton (`price_per_file`, `max_file_bytes` 15 MB, `allowed_types`,
+  `min_inline_image_px`, `max_files_per_user_per_day`, `trash_days`, `max_pdf_pages_to_ai`,
+  `max_ai_attempts`); the per-GB storage price is the shared `BillingSettings` one.
+- **Storage.** `services.storage.get_storage()` builds the core `S3Storage` from the `RECEIPTS_*`
+  settings with `signature_version='s3v4'` (required: `presigned_put_url` fails closed on a client
+  that doesn't sign `Content-Length`). One bucket shared with file transfer; keys
+  `receipts/users/<user_id>/files/<receipt_id>` (id only, never the filename),
+  `.../previews/<receipt_id>.jpg`, `.../emails/<email_id>.eml`, and `receipts/inbound/` for SES.
+  Everything of a user sits under one prefix so deleting an account is one `delete_prefix`: the
+  `pre_delete(User)` receiver (`apps/receipts/apps.py`, `weak=False`) queues `delete_user_storage`
+  on commit. Tests swap in `FakeReceiptsStorage` (autouse in `apps/receipts/tests/conftest.py`).
+- **Uploads** (`services.uploads`): `start_upload` validates (frozen account, size, allowed type --
+  the claimed type is normalized, falling back to the extension for browsers that send none -- a
+  base64 SHA-256, and the daily cap *counted from `Receipt` rows*, trashed ones included, not from
+  the rate limiter), creates a `Receipt(uploaded=False)` and presigns a single PUT with the exact
+  `Content-Length` and `x-amz-checksum-sha256` signed in. `complete_upload` checks the object's
+  size/checksum, reads it back, sniffs the **magic bytes** (`documents.sniff_content_type`; a
+  mismatch with the claimed type deletes the object and fails the receipt `unsupported_type`),
+  computes the SHA-256 server-side, adds to `stored_bytes` and queues processing on commit.
+  `cleanup_uploads` removes uploads not completed within 24 h.
+- **Processing** (`services.processing`, task `process_receipt` on the `receipts` queue; read its
+  module docstring). A conditional `UPDATE` claims `received`/`waiting_for_credits` -> `processing`;
+  in the same `atomic()` it charges `price_per_file` **once per `attempt_id`** (`charged_attempt_id`;
+  a price of 0 skips `spend_credits`). A frozen account or `InsufficientCreditsError` parks the
+  receipt in `waiting_for_credits`. Input preparation (`services.documents`: HEIC -> JPEG via
+  `pillow-heif` with the JPEG kept as the preview, downscale, `Image.MAX_IMAGE_PIXELS`, PDF text via
+  `pypdf` or rendered pages via `pypdfium2`, HTML -> text with the stdlib parser) and the AI call
+  (`services.ai`) happen outside any transaction; the result is applied under a row lock only if
+  the receipt is still `processing` for the same `attempt_id`. The AI client is
+  `ai.get_client()` (tests: autouse `FakeAIClient`; the suite never touches the network); its reply
+  is validated with pydantic, `payment_method` has every digit run over 4 masked (also for
+  hand-typed values), a `category` is matched case-insensitively against the user's own list.
+  Outcomes: more than one receipt -> `failed/multiple_receipts`; not a receipt ->
+  `failed/not_a_receipt` (neither fills any field); a required field missing or confidence below
+  0.5 (unless the user supplied all three) -> `needs_review`; else `processed`. `user_edited_fields`
+  are never overwritten. **Transient** AI errors (timeouts, 5xx, 429, malformed reply) put the
+  receipt back to `received` with `next_attempt_at` (5 min / 30 min / 2 h backoff) for the
+  `retry_due` job -- neither `django.tasks` retries nor `run_after` (the Immediate backend rejects
+  it) -- and after `max_ai_attempts` it fails `extraction_error`. **Refunds** go through
+  `add_credits(tx_type=REFUND, source='receipts')` guarded by a compare-and-swap on `refunded_at`:
+  for retries exhausted, a permanent AI error, and a file that could not even be read (no AI call
+  was made -- a deliberate extension of the issue, which only mentions exhausted retries). A receipt
+  the AI *did* answer about (not a receipt, several receipts, needs review) stays charged.
+  `credits_added` fires for a refund too; that is fine, the receiver is idempotent. Duplicates
+  (`services.duplicates`): another live receipt of the user with the same `sha256`, or the same
+  vendor + date + amount (oldest wins; a receipt flagged *as a duplicate of this one* isn't offered
+  back); dismissing sets `duplicate_dismissed`. Tasks are queued with
+  `services.queue.enqueue_after_commit` (on commit, a failure logged and swallowed -- `retry_due`
+  re-queues receipts nobody picked up).
+- **Notifications** (`services.emails`, tasks on the `receipts` queue, owner only, only to a
+  *confirmed* address, autoescaped `html_body`, no sender-controlled text in a subject):
+  `send_attention_email` is queued once per `InboundEmail` (CAS on `attention_notified_at`) when its
+  last receipt settles and any failed or need review -- it only fires for real once email intake
+  exists; `send_storage_paused_email` on freeze. Links are `/receipts/...` literals until the URLs
+  exist.
+- **Billing** (`services.metering`). `receipts.meter_storage` (daily) bills *per account*:
+  `stored_bytes` (originals, previews, stripped emails; trashed ones included until purged) x the
+  shared `BillingSettings` price through `billing.storage_charge`, row lock, `last_billed_at +=
+  24h`, floor of `accrued`, like file transfer's per-transfer metering. `stored_bytes` changes only
+  through `services.accounts.add_stored_bytes` (floored at 0; the billing clock restarts when an
+  empty account gets its first bytes). `InsufficientCreditsError` **freezes** the account
+  (`frozen_at`) and emails the owner: nothing is deleted, but previews, downloads, new uploads,
+  re-runs and processing are refused (`AccountFrozenError`; the API will answer 402), and the frozen
+  days are never billed (unfreezing sets `last_billed_at = now`). The `credits_added` receiver
+  (`weak=False`, wrapped in `try/except` because `send` would otherwise skip file transfer's
+  receiver) only queues `resume_account(user_id)`, and only for users with a Receipts account;
+  `resume_account` unfreezes at balance >= 1, then queues `waiting_for_credits` receipts oldest
+  first, stopping at the first the balance can't cover. The daily job also resumes frozen accounts
+  as a fallback.
+- **Actions** (`services.actions`, shared by the future views and API; `ValidationError` -> 422/400,
+  `AccountFrozenError`/`InsufficientCreditsError` -> 402): `update_receipt` (partial; records the
+  extracted fields that actually changed in `user_edited_fields`, `notes` aside; refuses extracted
+  fields while the AI owns the receipt; moves `needs_review` <-> `processed` as the required fields
+  are filled/cleared), `reprocess` (new `attempt_id`, charged again, refused up front when the
+  balance can't cover it), `trash`/`restore`/`delete_forever`, `dismiss_duplicate`,
+  `regenerate_inbox_code`, `update_inbox_settings` (allowlist of emails and `*@domain`, normalized
+  by `services.addresses`, plus default currency as an ISO 4217 code), category create/rename/
+  reorder/delete (deleting uncategorizes). `services.filters` has `filter_receipts` (status,
+  category, `q` over vendor + notes, `receipt_date` range, duplicates, sort; default
+  `-receipt_date` with undated first) and the CSV export (`iter_csv`/`export_csv`, columns per the
+  issue, formula-injection neutralized); `services.files` has the presigned inline/attachment URLs
+  (an HTML body is *never* served inline from S3 -- the later body view streams it with a CSP).
+  The `RECEIPTS_*_USER` rate-limit rules exist in `RATELIMIT_RULES`; the views/API will enforce them.
+- **Jobs** (`apps/receipts/jobs.py`, registered in `ready()`): `receipts.meter_storage` (daily),
+  `receipts.purge_trash` (daily; deletes S3 objects, then rows, past `trash_days`, and the stripped
+  `.eml` with the email's last receipt), `receipts.retry_due` (5 min; due retries, `processing`
+  stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
+  `receipts.cleanup_uploads` (hourly). Idempotent, per-row `try/except` + `logger.exception`.
+- **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
+  `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
+  "Queue and scheduler" and "Docker"). Tests: `ImmediateBackend` runs a task inline at
+  `.enqueue()` and swallows its exceptions, so assert on database state and use
+  `django_capture_on_commit_callbacks(execute=True)` around anything queued on commit; call a task
+  as `<task>.call(...)` (or the underlying service function) in a test, not `<task>(...)`.
+- **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
+  (status/reason/source filters; no add/change/delete -- deleting a row would orphan its S3 objects
+  and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, last error; a "retry" action
+  needing `change_inboundmessage`, which only resets `failed` -> `pending` through
+  `services.inbound.reset_message_for_retry` -- the hook where the later poller's re-enqueue
+  goes), `InboundEmailAdmin`, `ReceiptsAccountAdmin` (codes inline, frozen state, stored bytes).
+- **Settings/env**: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (optional), `OPENAI_RECEIPTS_MODEL`,
+  `RECEIPTS_AI_TIMEOUT_SECONDS`/`_MAX_RETRIES` (explicit timeout, bounded SDK retries),
+  `RECEIPTS_S3_BUCKET`/`_REGION`/`_ENDPOINT_URL`, `RECEIPTS_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`,
+  `RECEIPTS_INBOUND_ADDRESS`; the five required ones are checked in prod (see "Settings and
+  environment"), `apps.receipts.checks` warns about a *partial* local configuration.
+
 ### Queue and scheduler
 
 Two background-work mechanisms, both used by `file_transfer` (spec issue #55) and available to any
@@ -947,9 +1086,14 @@ future app:
   `django_tasks_db.DatabaseBackend` normally and `ImmediateBackend` under pytest, so tests never
   need a worker. A function decorated `@task` (see `apps/file_transfer/services/emails.py`) is
   queued with `.enqueue(...)`, never called directly, and its arguments must be plain
-  strings/ids/etc (never model instances) since the backend serializes them. In the deployed image
-  `supervise.py` runs `./manage.py db_worker` as a second process next to gunicorn (it installs
-  signal handlers, so it can't be a thread); locally the `worker` compose service runs it.
+  strings/ids/etc (never model instances) since the backend serializes them. There are two queues,
+  `default` and `receipts` (`TASKS[...]['QUEUES']`): Receipts' AI/PDF/image work is slow and must
+  not delay file transfer's emails and zip builds, so it has its own queue and its own worker
+  process. In the deployed image `supervise.py` runs `./manage.py db_worker` (the `default` queue)
+  *and* `./manage.py db_worker --queue-name receipts` as extra processes next to gunicorn (they
+  install signal handlers, so they can't be threads); locally the `worker` and `worker-receipts`
+  compose services run them. A task whose queue has no worker is never executed, so a new queue
+  needs a worker added in both places.
 - **Scheduler**: `apps.core.scheduler` -- a `JobSpec` registry (name, callable, interval, lease)
   filled by each app's `AppConfig.ready()` (`core` can't import a product, so it never discovers
   jobs itself), a `ScheduledJob` row per job whose claim is one conditional `UPDATE` guarded by the
@@ -1000,16 +1144,17 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 ### Docker
 
 One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`),
-shared by every service in `docker-compose.yml`: `web`, `worker`, `scheduler` and `db` (that
+shared by every service in `docker-compose.yml`: `web`, `worker`, `worker-receipts`, `scheduler` and `db` (that
 split is the local-development layout only; a deployment runs one container, below). The build
 runs `collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.local` is mounted
-into `web`, `worker` and `scheduler` because settings require an env file.
+into `web`, `worker`, `worker-receipts` and `scheduler` because settings require an env file.
 
 - The image's `CMD` is `python supervise.py` (stdlib only, PID 1 after the entrypoint's `migrate`).
   It starts gunicorn (`config.wsgi`, `-c gunicorn.conf.py`, which starts the scheduler thread in
   each worker when `SCHEDULER_ENABLED`) and, unless `RUN_TASK_WORKER` is `0`/`false` (default on),
-  `manage.py db_worker`. It forwards SIGTERM/SIGINT to both children, gives them 30 s to exit
-  before SIGKILL, and exits as soon as either child exits (non-zero if one died on its own) so
+  two queue workers, `manage.py db_worker` (the `default` queue) and `manage.py db_worker
+  --queue-name receipts` (issue #98). It forwards SIGTERM/SIGINT to all its children, gives them 30
+  s to exit before SIGKILL, and exits as soon as any child exits (non-zero if one died on its own) so
   `restart: unless-stopped` recovers the whole container. This is how a deployment runs web,
   scheduler and queue worker in one container; the queue worker can't start before migrations
   because the entrypoint finishes them first. Exit status: a child killed by a signal maps to
@@ -1028,16 +1173,17 @@ into `web`, `worker` and `scheduler` because settings require an env file.
 - Locally, `web` is overridden with `runserver` (so neither the scheduler thread nor the
   supervisor runs) and has a TCP healthcheck on port 8000 that the other two services key their
   startup off of.
-- Local compose only: `worker` runs `./manage.py db_worker` and `scheduler` runs
-  `./manage.py run_scheduler`, each its own service/container. (A shell script backgrounding both
+- Local compose only: `worker` runs `./manage.py db_worker`, `worker-receipts` runs `./manage.py
+  db_worker --queue-name receipts` and `scheduler` runs `./manage.py run_scheduler`, each its own
+  service/container. (A shell script backgrounding both
   with `&` was tried and never worked: `/bin/sh` in `python:3.14-slim` is dash, which has no
   `wait -n`, and `sh` as PID 1 doesn't forward `SIGTERM`; hence the Python supervisor above.)
 - `db` is this stack's own Postgres (`postgres:18-alpine`), separate from the shared
   `docker-compose.postgres.yml` used across repos for local dev tooling (see that file's header) --
   `db` is part of the deployable stack the other services depend on.
 
-Only `web` runs `docker-entrypoint.sh`'s `migrate` step (`RUN_MIGRATIONS=1`; `worker` and
-`scheduler` explicitly set `RUN_MIGRATIONS=0`) -- `worker`/`scheduler` `depends_on: web:
+Only `web` runs `docker-entrypoint.sh`'s `migrate` step (`RUN_MIGRATIONS=1`; `worker`,
+`worker-receipts` and `scheduler` explicitly set `RUN_MIGRATIONS=0`) -- the others `depends_on: web:
 condition: service_healthy`, and `web`'s healthcheck can only pass once gunicorn/`runserver` is
 actually listening, which the entrypoint only starts after `migrate` finishes, so this also rules
 out the migration race two concurrently-starting containers would otherwise hit. The database is
@@ -1090,6 +1236,12 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   section 16, deferred to issue #59) are built -- see "File transfer specifics" above. No
   staff-notification email on an auto-hold: skipped rather than invented, since this project has no
   `ADMINS`/admin-email setting to send one to.
+- Receipts (#98) is only partly built: phase 1 (backend, see "Receipts" above) is in; email intake,
+  the pages and the JWT API/CLI are later phases, and its `ProductApp` is not registered yet, so
+  it doesn't appear in the nav or on the landing page. Its prerequisites live elsewhere: the infra
+  bucket policy, IAM user, SES rules and `receipts_env` (the `infra` repo), and the owner putting
+  `receipts_env` plus `OPENAI_*` into `.env.prod`/`.env.staging` before the first deploy that
+  contains Receipts (prod refuses to start without them).
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set), not a host-level guard: a
   coarse nginx `limit_req` is still recommended as defense-in-depth, tracked in the separate
