@@ -10,6 +10,7 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
+from ..forms.filters import resolve_date_range
 from ..models import Receipt, ReceiptCategory, ReceiptsAccount, ReceiptStatus
 from ..services.accounts import get_account
 from ..services.filters import CSV_COLUMNS
@@ -27,6 +28,13 @@ def make(funded_user, fake_storage):
         return create_receipt(funded_user, fake_storage, **fields)
 
     return _make
+
+
+def input_tag(content: str, name: str) -> str:
+    """The `<input>` tag named `name` in a page."""
+    match = re.search(rf'<input [^>]*name="{name}"[^>]*>', content)
+    assert match, name
+    return match[0]
 
 
 def titles(response) -> list[str]:
@@ -214,7 +222,9 @@ class TestFilters:
                 notes='conference trip',
                 possible_duplicate_of=make(vendor='Delta original'),
             ),
-            'Staples': make(vendor='Staples', receipt_date=date(2026, 10, 9)),
+            'Staples': make(
+                vendor='Staples', receipt_date=date(2026, 10, 9), amount=Decimal('42.10')
+            ),
             'Review me': make(status=ReceiptStatus.NEEDS_REVIEW, vendor='Review me'),
             'Broken': make(status=ReceiptStatus.FAILED, vendor='Broken'),
             'Busy': make(status=ReceiptStatus.PROCESSING, vendor='Busy'),
@@ -230,6 +240,7 @@ class TestFilters:
             ({'status': 'duplicates'}, {'Delta'}),
             ({'q': 'conference'}, {'Delta'}),
             ({'q': 'staples'}, {'Staples'}),
+            ({'q': '42.1'}, {'Staples'}),
             ({'date_from': '2026-10-05'}, {'Staples'}),
             ({'date_to': '2026-10-03'}, {'Delta'}),
         ],
@@ -249,9 +260,89 @@ class TestFilters:
         assert str(library['Delta'].pk) not in uncategorized and len(uncategorized) >= 5
 
     @pytest.mark.parametrize(
+        ('params', 'expected'),
+        [
+            ({'date_range': 'last_15_days'}, {'Delta', 'Staples'}),
+            ({'date_range': 'last_30_days'}, {'Delta', 'Staples', 'September'}),
+            ({'date_range': 'this_month'}, {'Delta', 'Staples'}),
+            ({'date_range': 'this_quarter'}, {'Delta', 'Staples'}),
+            ({'date_range': 'this_year'}, {'Delta', 'Staples', 'September', 'March'}),
+            # A preset wins over dates that are still in the form from an earlier custom range.
+            ({'date_range': 'this_month', 'date_from': '2026-10-05'}, {'Delta', 'Staples'}),
+            ({'date_range': 'custom', 'date_from': '2026-10-05'}, {'Staples'}),
+            ({'date_range': 'custom', 'date_to': '2026-09-30'}, {'September', 'March', 'Old'}),
+        ],
+    )
+    def test_date_ranges(self, web, library, make, monkeypatch, params, expected):
+        monkeypatch.setattr(timezone, 'localdate', lambda: date(2026, 10, 12))
+        library['September'] = make(vendor='September', receipt_date=date(2026, 9, 20))
+        library['March'] = make(vendor='March', receipt_date=date(2026, 3, 1))
+        library['Old'] = make(vendor='Old', receipt_date=date(2025, 12, 31))
+
+        dated = {name for name, r in library.items() if r.receipt_date}
+        ids = set(titles(web.get(reverse('receipts:dashboard'), params))) & {
+            str(library[name].pk) for name in dated
+        }
+
+        assert ids == {str(library[name].pk) for name in expected}
+
+    @pytest.mark.parametrize(
+        ('params', 'pushed'),
+        [
+            ({'date_range': 'this_month'}, '/receipts/?date_range=this_month'),
+            (
+                {'date_range': 'this_month', 'date_from': '2026-10-05'},
+                '/receipts/?date_range=this_month',
+            ),
+            (
+                {'date_range': 'custom', 'date_from': '2026-10-05'},
+                '/receipts/?date_from=2026-10-05',
+            ),
+            ({'date_range': 'custom'}, '/receipts/'),
+            ({'date_range': '', 'date_from': '2026-10-05'}, '/receipts/?date_from=2026-10-05'),
+            ({'date_range': 'bogus'}, '/receipts/'),
+        ],
+    )
+    def test_the_date_range_in_the_pushed_url(self, web, make, params, pushed):
+        make()
+
+        assert web.get(reverse('receipts:list'), params, **HX)['HX-Push-Url'] == pushed
+
+    def test_a_preset_shows_the_dropdown_with_the_dates_hidden(self, web, make):
+        make()
+
+        content = web.get(
+            reverse('receipts:dashboard'), {'date_range': 'last_30_days'}
+        ).content.decode()
+
+        assert '<option value="last_30_days" selected>Last 30 days</option>' in content
+        date_from = input_tag(content, 'date_from')
+        assert ' disabled' in date_from
+
+    def test_dates_alone_open_as_a_custom_range(self, web, make):
+        make()
+
+        content = web.get(
+            reverse('receipts:dashboard'), {'date_from': '2026-10-05'}
+        ).content.decode()
+
+        assert '<option value="custom" selected>Custom</option>' in content
+        date_from = input_tag(content, 'date_from')
+        assert 'value="2026-10-05"' in date_from and ' disabled' not in date_from
+
+    def test_the_search_box_turns_off_the_browsers_suggestions(self, web, make):
+        make()
+
+        content = web.get(reverse('receipts:dashboard')).content.decode()
+
+        search = input_tag(content, 'q')
+        assert 'autocomplete="off"' in search
+
+    @pytest.mark.parametrize(
         'params',
         [
             {'status': 'bogus'},
+            {'date_range': 'last_century'},
             {'sort': 'vendor'},
             {'date_from': 'yesterday'},
             {'category': 'abc'},
@@ -490,3 +581,21 @@ class TestFrozenAccount:
         make(vendor='Still here')
 
         assert 'Still here' in web.get(reverse('receipts:dashboard')).content.decode()
+
+
+@pytest.mark.parametrize(
+    ('key', 'today', 'expected'),
+    [
+        ('last_15_days', date(2026, 10, 12), (date(2026, 9, 28), date(2026, 10, 12))),
+        ('last_30_days', date(2026, 10, 12), (date(2026, 9, 13), date(2026, 10, 12))),
+        ('this_month', date(2026, 2, 14), (date(2026, 2, 1), date(2026, 2, 28))),
+        ('this_month', date(2028, 2, 1), (date(2028, 2, 1), date(2028, 2, 29))),
+        ('this_quarter', date(2026, 1, 1), (date(2026, 1, 1), date(2026, 3, 31))),
+        ('this_quarter', date(2026, 5, 20), (date(2026, 4, 1), date(2026, 6, 30))),
+        ('this_quarter', date(2026, 9, 30), (date(2026, 7, 1), date(2026, 9, 30))),
+        ('this_quarter', date(2026, 12, 31), (date(2026, 10, 1), date(2026, 12, 31))),
+        ('this_year', date(2026, 10, 12), (date(2026, 1, 1), date(2026, 12, 31))),
+    ],
+)
+def test_resolve_date_range(key, today, expected):
+    assert resolve_date_range(key, today) == expected

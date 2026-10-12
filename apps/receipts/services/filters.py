@@ -3,12 +3,14 @@ and the CSV export, so all three always agree on what "the current filters" mean
 
 import csv
 import io
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
 
 from django.core.exceptions import ValidationError
-from django.db.models import Count, F, Q, QuerySet
+from django.db.models import BigIntegerField, CharField, Count, F, Q, QuerySet, Value
+from django.db.models.functions import Abs, Cast, Concat, LPad, Mod, Round
 
 from apps.accounts.models import User
 
@@ -19,6 +21,10 @@ SORTS = ('receipt_date', '-receipt_date', 'created_at', '-created_at')
 
 #: `category=` value that selects receipts with no category.
 UNCATEGORIZED = 'none'
+
+#: A search term that can also be (part of) an amount: digits with at most one `.` or `,` as the
+#: decimal separator (`75`, `275.5`, `.50`, `275,50`), optionally after a currency symbol.
+_AMOUNT_TERM = re.compile(r'[$€£]?\s*(\d*[.,]?\d*)')
 
 CSV_COLUMNS = (
     'receipt_date',
@@ -41,7 +47,8 @@ CSV_COLUMNS = (
 class ReceiptFilters:
     """What the dashboard/API/export can filter by. `status` is one status, several (a list, or a
     comma-separated string), or `None` for all; `category` is a category id, `'none'` for
-    uncategorized, or `None`; `q` searches vendor and notes; the dates bound `receipt_date`
+    uncategorized, or `None`; `q` searches vendor and notes, and the amount (as text with two
+    decimals, so `75` finds 275.50) when it looks like a number; the dates bound `receipt_date`
     (inclusive); `duplicates` keeps only receipts flagged as possible duplicates."""
 
     status: str | Iterable[str] | None = None
@@ -90,7 +97,12 @@ def filter_receipts(
 
     term = filters.q.strip()
     if term:
-        queryset = queryset.filter(Q(vendor__icontains=term) | Q(notes__icontains=term))
+        matches = Q(vendor__icontains=term) | Q(notes__icontains=term)
+        amount_term = _amount_term(term)
+        if amount_term:
+            queryset = queryset.annotate(amount_text=_amount_text())
+            matches |= Q(amount_text__contains=amount_term)
+        queryset = queryset.filter(matches)
     if filters.date_from:
         queryset = queryset.filter(receipt_date__gte=filters.date_from)
     if filters.date_to:
@@ -99,6 +111,30 @@ def filter_receipts(
         queryset = queryset.filter(possible_duplicate_of__isnull=False, duplicate_dismissed=False)
 
     return queryset.order_by(*_ordering(filters.sort, trashed=trashed))
+
+
+def _amount_term(term: str) -> str:
+    """`term` as it would appear in an amount's text (`'275,5'` -> `'275.5'`), or `''` when it
+    isn't a number."""
+    match = _AMOUNT_TERM.fullmatch(term)
+    if not match or not any(char.isdigit() for char in match[1]):
+        return ''
+    return match[1].replace(',', '.')
+
+
+def _amount_text() -> Concat:
+    """`amount` as text with exactly two decimals and no sign (`275.50`), built the same way on
+    Postgres and SQLite: casting the decimal itself gives `275.50` on one and `275.5` on the other.
+    Rounded to whole cents first, so a float on SQLite (`0.29 * 100 = 28.999...`) can't lose one,
+    and the remainder cast back to an integer, since SQLite's `MOD` answers a float (`5.0`)."""
+    cents = Cast(Round(Abs(F('amount')) * 100), BigIntegerField())
+    remainder = Cast(Mod(cents, 100), BigIntegerField())
+    return Concat(
+        Cast(cents / 100, CharField()),
+        Value('.'),
+        LPad(Cast(remainder, CharField()), 2, Value('0')),
+        output_field=CharField(),
+    )
 
 
 def dashboard_counts(user: User) -> dict[str, int]:

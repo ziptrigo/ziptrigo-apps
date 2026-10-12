@@ -154,6 +154,51 @@ def test_search_covers_vendor_and_notes_case_insensitively(funded_user, library)
     assert ids(filter_receipts(funded_user, ReceiptFilters(q='nothing like this'))) == []
 
 
+@pytest.mark.parametrize(
+    ('amount', 'term', 'found'),
+    [
+        ('275.50', '75', True),
+        ('275.50', '275.50', True),
+        ('275.50', '275.5', True),
+        ('275.50', '275,50', True),
+        ('275.50', '.50', True),
+        ('275.50', '$275', True),
+        ('275.50', '€ 75.5', True),
+        ('275.50', '7550', False),
+        ('275.50', '76', False),
+        ('5.00', '5.00', True),
+        ('5.00', '5.0', True),
+        ('0.29', '0.29', True),
+        ('0.05', '.05', True),
+        ('-12.30', '12.30', True),
+        ('1234567890.99', '7890.9', True),
+    ],
+)
+def test_search_also_covers_the_amount(funded_user, fake_storage, amount, term, found):
+    receipt = create_receipt(
+        funded_user, fake_storage, status=ReceiptStatus.PROCESSED, amount=Decimal(amount)
+    )
+    create_receipt(funded_user, fake_storage, status=ReceiptStatus.PROCESSED, amount=None)
+
+    result = ids(filter_receipts(funded_user, ReceiptFilters(q=term)))
+
+    assert result == ([receipt.pk] if found else [])
+
+
+def test_a_numeric_search_still_finds_vendor_and_notes(funded_user, library):
+    library['staples'].notes = 'order 389'
+    library['staples'].save()
+
+    result = filter_receipts(funded_user, ReceiptFilters(q='389'))
+
+    assert set(ids(result)) == {library['delta'].pk, library['staples'].pk}
+
+
+@pytest.mark.parametrize('term', ['.', ',', '$', '1.2.3', '12a'])
+def test_a_term_that_is_not_a_number_does_not_search_amounts(funded_user, library, term):
+    assert ids(filter_receipts(funded_user, ReceiptFilters(q=term))) == []
+
+
 def test_date_range_is_inclusive_and_applies_to_the_receipt_date(funded_user, library):
     result = filter_receipts(
         funded_user, ReceiptFilters(date_from=date(2026, 10, 3), date_to=date(2026, 10, 9))

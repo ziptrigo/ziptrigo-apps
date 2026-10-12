@@ -20,7 +20,7 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
 from apps.core.htmx import is_htmx
 
-from ..forms import PAGE_SIZE, TABS, ParsedFilters, parse_filters
+from ..forms import DATE_RANGES, PAGE_SIZE, TABS, ParsedFilters, parse_filters
 from ..models import IN_PROGRESS_STATUSES, ReceiptCategory, ReceiptStatus
 from ..services import dashboard_counts, filter_receipts, inbox_address_for, iter_csv
 from .common import render_page
@@ -129,6 +129,7 @@ def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
         {
             'inbox_address': inbox_address_for(request.user),
             'categories': ReceiptCategory.objects.filter(user=request.user),
+            'date_ranges': DATE_RANGES,
             'form_values': parsed.params,
         }
     )

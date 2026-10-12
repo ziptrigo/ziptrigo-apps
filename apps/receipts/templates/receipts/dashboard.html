@@ -34,16 +34,19 @@
 <form id="receipt-filters" method="get" action="{% url 'receipts:dashboard' %}"
       hx-get="{% url 'receipts:list' %}" hx-target="#receipt-list" hx-swap="innerHTML"
       hx-sync="this:replace"
-      hx-trigger="input changed delay:300ms from:#q, change from:#category, change from:#date_from, change from:#date_to, submit">
+      hx-trigger="input changed delay:300ms from:#q, change from:#category, change from:#date_range, change from:#date_from, change from:#date_to, submit">
     <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end">
         <div class="relative flex-1" data-has-value="{{ parsed.params.q|yesno:'true,false' }}"
              x-data="{ hasValue: $el.dataset.hasValue === 'true' }">
             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <i class="fas fa-magnifying-glass text-gray-400" aria-hidden="true"></i>
             </div>
+            {% comment %} autocomplete="off": the browser's own suggestions (past searches) would cover
+               the list right under the box. {% endcomment %}
             <input type="text" name="q" id="q" x-ref="q" value="{{ parsed.params.q }}" maxlength="200"
+                   autocomplete="off" enterkeyhint="search"
                    @input="hasValue = $event.target.value !== ''"
-                   placeholder="Search vendor or notes" aria-label="Search vendor or notes"
+                   placeholder="Search vendor, notes or amount" aria-label="Search vendor, notes or amount"
                    class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
             <button type="button" x-show="hasValue" {% if not parsed.params.q %}style="display: none"{% endif %}
                     @click="$refs.q.value = ''; hasValue = false; $refs.q.dispatchEvent(new Event('input', { bubbles: true })); $refs.q.focus()"
@@ -63,14 +66,28 @@
                 {% endfor %}
             </select>
         </div>
-        <fieldset>
+        {% comment %} A preset, or "Custom" to show the two dates. Hidden, the dates are disabled so they
+           aren't sent (the server ignores them for a preset anyway). {% endcomment %}
+        <fieldset data-range="{{ parsed.date_range }}" x-data="{ range: $el.dataset.range }">
             <legend class="mb-1 text-sm font-medium">Receipt date</legend>
-            <div class="flex items-center gap-2">
-                <input type="date" name="date_from" id="date_from" value="{{ parsed.params.date_from }}" aria-label="Receipt date from"
-                       class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
-                <span class="text-gray-500 dark:text-gray-400" aria-hidden="true">&ndash;</span>
-                <input type="date" name="date_to" id="date_to" value="{{ parsed.params.date_to }}" aria-label="Receipt date to"
-                       class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label for="date_range" class="sr-only">Receipt date range</label>
+                <select name="date_range" id="date_range" x-model="range"
+                        class="w-full sm:w-auto lg:w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    {% for value, label in date_ranges %}
+                    <option value="{{ value }}" {% if parsed.date_range == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <div x-show="range === 'custom'" {% if parsed.date_range != 'custom' %}style="display: none"{% endif %}
+                     class="flex items-center gap-2">
+                    <input type="date" name="date_from" id="date_from" value="{{ parsed.params.date_from }}" aria-label="Receipt date from"
+                           :disabled="range !== 'custom'" {% if parsed.date_range != 'custom' %}disabled{% endif %}
+                           class="w-full sm:w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <span class="text-gray-500 dark:text-gray-400" aria-hidden="true">&ndash;</span>
+                    <input type="date" name="date_to" id="date_to" value="{{ parsed.params.date_to }}" aria-label="Receipt date to"
+                           :disabled="range !== 'custom'" {% if parsed.date_range != 'custom' %}disabled{% endif %}
+                           class="w-full sm:w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                </div>
             </div>
         </fieldset>
     </div>

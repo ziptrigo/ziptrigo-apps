@@ -1133,8 +1133,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `regenerate_inbox_code`, `update_inbox_settings` (allowlist of emails and `*@domain`, normalized
   by `services.addresses`, plus default currency as an ISO 4217 code), category create/rename/
   reorder/delete (deleting uncategorizes). `services.filters` has `filter_receipts` (status,
-  category, `q` over vendor + notes, `receipt_date` range, duplicates, sort; default
-  `-receipt_date` with undated first) and the CSV export (`iter_csv`/`export_csv`, columns per the
+  category, `q` over vendor + notes + amount -- a numeric term (`75`, `275,5`, `$75`) also matches
+  the amount as text with two decimals, built from whole cents so `75` finds 275.50 the same way on
+  Postgres and SQLite --, `receipt_date` range, duplicates, sort; default `-receipt_date` with
+  undated first) and the CSV export (`iter_csv`/`export_csv`, columns per the
   issue; every cell goes through the formula guard, which also catches leading whitespace); `services.files` has the presigned inline/attachment URLs
   (an HTML body is *never* served inline from S3 -- `views.detail.body_view` streams it with a CSP; a nameless
   file downloads as `email.html`/`email.txt`/`receipt`).
@@ -1351,8 +1353,14 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `/receipts/trash/`, `/receipts/settings/` (+ `settings/inbox/`, `settings/regenerate/`,
     `settings/categories/...`). URL names are in `urls.py` (`receipts:detail`, ...).
   - **Dashboard**: status tabs with counts (All, Needs review, Processing = received + processing +
-    waiting for credits, Failed, Duplicates), search (vendor + notes), category, receipt-date range,
-    sortable Receipt date (default newest first, undated on top) and Added columns, 25 per page.
+    waiting for credits, Failed, Duplicates), search (vendor, notes, amount; `autocomplete="off"` so
+    the browser's past-search suggestions don't cover the list), category, a receipt-date dropdown
+    (`date_range`: Any date, Last 15/30 days -- ending today --, This month/quarter/year -- the whole
+    calendar period --, or Custom, which alone shows and enables the `date_from`/`date_to` inputs;
+    `forms.filters.resolve_date_range` turns a preset into dates against `timezone.localdate()` on
+    every request, so a "This month" link stays relative, and ignores the date inputs; dates without
+    a `date_range` -- older links, and the canonical URL of a custom range -- mean Custom), sortable
+    Receipt date (default newest first, undated on top) and Added columns, 25 per page.
     `forms.parse_filters` reads the query string *leniently* (a bad value is dropped) into
     `ReceiptFilters` for the services; the page, `receipt_list` and the CSV export all use it, so
     "current filters" means one thing. The filter form `hx-get`s `/receipts/list/` into
