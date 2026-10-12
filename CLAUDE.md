@@ -1070,7 +1070,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   written before its conditional `UPDATE`; if that matches nothing and no row references the key
   (the receipt was purged, or its user deleted, meanwhile) the object is deleted again. The AI client is
   `ai.get_client()` (tests: autouse `FakeAIClient`; the suite never touches the network); its reply
-  is validated with pydantic, `payment_method` is masked to its last 4 digits (a run of 5+ digits
+  is validated with pydantic (`ai.parse_response` first unwraps one code fence, one-item list or
+  JSON string around the object -- an OpenAI-compatible endpoint need not enforce the strict
+  `json_schema`, and `qwen/qwen3.6-plus` replies `[{...}]` -- and logs the start of a reply that
+  still fails, card-like digits masked), `payment_method` is masked to its last 4 digits (a run of 5+ digits
   joined by single spaces/hyphens, or 12+ digits joined by any whitespace, dots, hyphens or slashes;
   also for hand-typed values and the copy kept in `ai_result`), a `category` is matched case-insensitively against the user's own list.
   Outcomes: more than one receipt -> `failed/multiple_receipts`; not a receipt ->
@@ -1357,7 +1360,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     (a reload or shared link renders the full page; the list URL opened directly redirects there).
     The tabs and the Export CSV link are re-sent out of band (`hx-swap-oob`) with every refresh, so
     they carry the filters. While a row is `received`/`processing` the list re-fetches itself every
-    3 s (`polls=` in the URL counts, capped at 40; `waiting_for_credits` is not polled).
+    3 s (`polls=` in the URL counts, capped at 40; `waiting_for_credits` is not polled, nor is a
+    `received` receipt with a retry scheduled -- `Receipt.retry_scheduled`, shown as "trying again in
+    ..." on the row and the detail page).
   - **Detail**: preview left, form right (stacked on phones). Required fields (vendor, receipt date,
     amount) are marked `*`, and while one is missing on a settled receipt it gets an amber border and
     a hint. A save is an htmx form: 422 puts `Label: message` lines in `#receipt-form-msg` (the form

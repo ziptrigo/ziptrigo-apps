@@ -90,7 +90,10 @@ def _list_context(request: AuthenticatedHttpRequest, parsed: ParsedFilters) -> d
         polls = 0
     page_query = parsed.query(page=page_obj.number if page_obj.number > 1 else None)
     poll_url = ''
-    if polls < _MAX_AUTO_POLLS and any(r.status in _POLLED_STATUSES for r in receipts):
+    # A receipt waiting for a retry won't change for minutes, so it doesn't keep the list polling.
+    if polls < _MAX_AUTO_POLLS and any(
+        r.status in _POLLED_STATUSES and not r.retry_scheduled for r in receipts
+    ):
         poll_url = _with_query(
             reverse('receipts:list'),
             f'{page_query}&polls={polls + 1}' if page_query else f'polls={polls + 1}',

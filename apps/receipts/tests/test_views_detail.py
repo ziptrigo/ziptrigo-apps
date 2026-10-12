@@ -1,6 +1,6 @@
 """A receipt's page and the actions on it (`views/detail.py`), including the email body view."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -341,6 +341,18 @@ class TestStates:
         assert 'hx-select="#receipt-panel"' in content
         assert 'id="receipt-form"' not in content
         assert 'every 3s' not in capped and 'taking longer than usual' in capped
+
+    def test_a_scheduled_retry_says_so_and_does_not_poll(self, web, make_receipt):
+        receipt = make_receipt(
+            status=ReceiptStatus.RECEIVED,
+            attempts=1,
+            next_attempt_at=timezone.now() + timedelta(minutes=30),
+        )
+
+        content = web.get(url('detail', receipt)).content.decode()
+
+        assert 'Trying again shortly' in content and 'Reading your receipt' not in content
+        assert 'every 3s' not in content
 
     def test_waiting_for_credits_does_not_poll_and_offers_a_top_up(self, web, make_receipt):
         receipt = make_receipt(status=ReceiptStatus.WAITING_FOR_CREDITS)

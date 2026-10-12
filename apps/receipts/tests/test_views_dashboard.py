@@ -332,6 +332,18 @@ class TestListPartial:
         assert 'hx-get="/receipts/list/?polls=6"' in later
         assert 'every 3s' not in capped
 
+    def test_a_row_waiting_for_a_retry_says_so_and_does_not_poll(self, web, make):
+        make(
+            status=ReceiptStatus.RECEIVED,
+            attempts=1,
+            next_attempt_at=timezone.now() + timedelta(minutes=30),
+        )
+
+        content = web.get(reverse('receipts:list'), **HX).content.decode()
+
+        assert "couldn't read it yet, trying again in" in content
+        assert 'every 3s' not in content
+
     def test_a_poll_keeps_the_filters_and_the_page_and_does_not_push_the_url(self, web, make):
         for index in range(26):
             make(status=ReceiptStatus.PROCESSING, vendor=f'V{index}')

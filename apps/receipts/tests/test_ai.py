@@ -140,10 +140,49 @@ class TestParseResponse:
     def test_parses_json(self):
         assert parse_response(json.dumps({'vendor': 'A', 'confidence': 0.5})).vendor == 'A'
 
-    @pytest.mark.parametrize('raw', [None, '', '   ', 'not json', '[1, 2]', '"text"'])
+    @pytest.mark.parametrize(
+        'raw',
+        [
+            # qwen/qwen3.6-plus on staging, despite the strict json_schema response format.
+            '[\n  {"vendor": "A", "confidence": 0.5}\n]',
+            '```json\n{"vendor": "A", "confidence": 0.5}\n```',
+            '```\n[{"vendor": "A", "confidence": 0.5}]\n```',
+            json.dumps(json.dumps({'vendor': 'A', 'confidence': 0.5})),
+            '  {"vendor": "A", "confidence": 0.5}\n',
+        ],
+    )
+    def test_common_wrappers_around_the_object_are_accepted(self, raw):
+        assert parse_response(raw).vendor == 'A'
+
+    @pytest.mark.parametrize(
+        'raw',
+        [
+            None,
+            '',
+            '   ',
+            'not json',
+            '[1, 2]',
+            '"text"',
+            '[]',
+            '[{"vendor": "A"}, {"vendor": "B"}]',
+            '[[{"vendor": "A"}]]',
+            '```json\nnot json\n```',
+            'Here you go: {"vendor": "A"}',
+        ],
+    )
     def test_anything_else_is_an_invalid_response(self, raw):
         with pytest.raises(InvalidAIResponseError):
             parse_response(raw)
+
+    def test_an_unparseable_reply_is_logged_with_card_numbers_masked(self, caplog):
+        raw = '["card 4111 1111 1111 1111", "x"]'
+        with caplog.at_level('WARNING', logger='apps.receipts.services.ai'):
+            with pytest.raises(InvalidAIResponseError):
+                parse_response(raw)
+
+        assert 'Unparseable AI reply' in caplog.text
+        assert '••1111' in caplog.text
+        assert '4111 1111' not in caplog.text
 
     def test_an_invalid_response_counts_as_transient(self):
         assert issubclass(InvalidAIResponseError, TransientAIError)

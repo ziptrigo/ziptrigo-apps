@@ -10,6 +10,12 @@
         We'll read this receipt as soon as you add credits.
         <a href="{% url 'billing:credits-history' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Top up</a>
     </p>
+    {% elif receipt.retry_scheduled %}
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><i class="fas fa-clock-rotate-left mr-2 text-blue-600 dark:text-blue-400" aria-hidden="true"></i>Trying again shortly</h2>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+        We couldn't read this receipt on the last try. We'll try again in {{ receipt.next_attempt_at|timeuntil }};
+        if it still doesn't work, you get the credit back. Reload the page to check.
+    </p>
     {% else %}
     <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><i class="fas fa-spinner fa-spin mr-2 text-blue-600 dark:text-blue-400" aria-hidden="true"></i>Reading your receipt&hellip;</h2>
     <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">

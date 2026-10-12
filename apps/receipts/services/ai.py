@@ -245,7 +245,7 @@ Rules:
   a full card or account number.
 - category: pick exactly one name from the list given, or null if none fits.
 - confidence is a number from 0 to 1 for the extraction as a whole.
-Reply with the JSON object only."""
+Reply with a single JSON object only (not an array, no code fence, no other text)."""
 
 
 @dataclass(slots=True)
@@ -287,17 +287,65 @@ def build_messages(request: ExtractionRequest) -> list[dict[str, Any]]:
     ]
 
 
+#: A reply wrapped in a Markdown code fence (```json ... ```), which some models add.
+_CODE_FENCE = re.compile(r'\A```[A-Za-z0-9_-]*[ \t]*\n?(.*?)\n?[ \t]*```\Z', re.DOTALL)
+#: How much of a reply that fails to parse is logged.
+_LOG_SNIPPET_CHARS = 200
+
+
+def _unwrap(payload: Any) -> Any:
+    """Undo the wrappers models put around the object despite the strict schema: a list holding
+    exactly one object (`qwen/qwen3.6-plus` replies `[{...}]`) and the object JSON-encoded as a
+    string -- one layer of each, at most. Anything else is returned unchanged, so it still fails
+    validation."""
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return payload
+    if isinstance(payload, list) and len(payload) == 1:
+        payload = payload[0]
+    return payload
+
+
+def _parse(raw: str) -> ExtractedReceipt:
+    text = raw.strip()
+    fenced = _CODE_FENCE.match(text)
+    if fenced:
+        text = fenced.group(1).strip()
+    try:
+        payload = _unwrap(json.loads(text))
+    except json.JSONDecodeError as exc:
+        raise InvalidAIResponseError(f'The AI reply was not JSON: {exc}') from exc
+    if not isinstance(payload, dict):
+        raise InvalidAIResponseError(
+            f'The AI reply was not a JSON object (got {type(payload).__name__}).'
+        )
+    try:
+        return ExtractedReceipt.model_validate(payload)
+    except ValidationError as exc:
+        raise InvalidAIResponseError(f'The AI reply did not match the schema: {exc}') from exc
+
+
 def parse_response(raw: str | None) -> ExtractedReceipt:
-    """Validate the model's reply. Raises `InvalidAIResponseError` if it isn't the expected JSON."""
+    """Validate the model's reply. Raises `InvalidAIResponseError` if it isn't the expected JSON.
+
+    Tolerates a code fence, a one-item list and a JSON string around the object (`_unwrap`): an
+    OpenAI-compatible endpoint doesn't necessarily enforce `response_format`'s strict schema. A
+    reply that still fails is logged (its start, card-like digit runs masked) so the next new
+    shape shows up in the logs rather than only as "not a JSON object" on the receipt."""
     if not raw or not raw.strip():
         raise InvalidAIResponseError('The AI returned an empty reply.')
     try:
-        payload = json.loads(raw)
-        if not isinstance(payload, dict):
-            raise InvalidAIResponseError('The AI reply was not a JSON object.')
-        return ExtractedReceipt.model_validate(payload)
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise InvalidAIResponseError(f'The AI reply did not match the schema: {exc}') from exc
+        return _parse(raw)
+    except InvalidAIResponseError as exc:
+        logger.warning(
+            'Unparseable AI reply (%s; %d chars): %r',
+            exc,
+            len(raw),
+            mask_payment_method(raw[:_LOG_SNIPPET_CHARS]),
+        )
+        raise
 
 
 class OpenAIReceiptClient:
