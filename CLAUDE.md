@@ -579,10 +579,12 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   existing address gets, `SIGNUP_EXISTING_EMAIL` and `SIGNUP_EXISTING_EMAIL_DAY`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
   `PUT /api/account`, per user), forgot-password (as above,
   and its response shape never changes so existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
-  the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP, generous -- over the limit it
-  still redirects, only the scan-count write is skipped, protecting `QRCode.scan_count`'s accuracy
-  under a shared-IP/NAT burst rather than shedding load, since a real visitor must never see an
-  error just because someone else scanned the same code), and every file_transfer surface called
+  the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP,
+  generous, charged *before* the code lookup so made-up codes spend the budget too -- over the limit
+  a known code still redirects, only the scan-count write is skipped, protecting
+  `QRCode.scan_count`'s accuracy under a shared-IP/NAT burst rather than shedding load, and an
+  unknown one is still a 404, never a 429, since a real visitor must never see an error just
+  because someone else scanned the same code), and every file_transfer surface called
   out in issue #53 (anonymous upload/confirm endpoints, logged-in uploads, the download page,
   password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
   even from many IPs -- and the manage link), plus abuse reports (issue #59: `FT_REPORT_IP` strict
@@ -609,15 +611,24 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
 - **nginx** (issue #119): a coarse per-IP `limit_req` sits in front of the whole site as
   defense-in-depth below the application layer. It is configured in the separate `infra` repo
   (`apps/ziptrigo-apps/nginx.conf`, both `app.ziptrigo.com` and `app-staging.ziptrigo.com`), not
-  here: one `limit_req_zone` per environment (`ziptrigo_apps_prod` / `ziptrigo_apps_staging`) keyed
-  on `$binary_remote_addr` -- the visitor, since both HTTPS server blocks include
-  `cloudflare-realip.conf` first -- at 20 r/s with `burst=100 nodelay`, answering **429** like the
-  app. The numbers are far above ordinary use (the receipts list polls every 3 s, htmx search per
-  keystroke pause, upload JSON calls), so the app's own limits above remain the real ones.
-  **`/go/<code>` is exempt** (a `map` blanks the key for that path, and nginx doesn't count a
-  request with an empty key), since a scan burst from one NAT address must never see an error, the
-  same reason the app itself only skips the scan-count write there; presigned S3 uploads never reach
-  nginx at all. Nothing in this repo depends on it.
+  here, and is described here as designed, not as deployed (check the issue's checkboxes). Per
+  environment there are two zones, routed by a pair of `map`s on the raw `$request_uri` (what
+  gunicorn receives; `$uri` is normalized, so it would let `/x/../go/abc` pass for a short link):
+  the main zone (`ziptrigo_apps_prod` / `_staging`, keyed on `$binary_remote_addr` -- the visitor,
+  since both HTTPS server blocks include `cloudflare-realip.conf` -- for everything except the
+  `/go/<code>` shape) at 20 r/s with `burst=100 nodelay`, and **`/go/<code>` on its own looser
+  zone** (`ziptrigo_apps_go_prod` / `_staging`, 50 r/s, `burst=500`) instead of an exemption: a scan
+  burst from one NAT address must never see an error, the same reason the app itself only skips the
+  scan-count write there, but a flood of made-up codes (one lookup each, which the app's own rule
+  does not shed: an unknown code over its limit is still looked up and 404s) is still shed. The
+  `/go/` shape is Django's route (`^go/(?P<short_code>[^/]+)/?$`) read off the raw URI, so
+  dot-segment, percent-encoded and `/go/a/b/c` paths are counted by the main zone. The numbers are
+  far above ordinary use (the receipts list polls every 3 s, htmx search per keystroke pause, upload
+  JSON calls), so the app's own limits above remain the real ones. Over the limit nginx answers
+  **429** with a short plain-text body and `Retry-After: 1`, not the app's JSON or htmx partial:
+  `core/base.html`'s `htmx-config` swaps 429, so an htmx request rejected by nginx swaps that text
+  into its target, acceptable during a flood. nginx keys IPv6 on the full /128, unlike the app's
+  /64. Presigned S3 uploads never reach nginx at all. Nothing in this repo depends on it.
 
 ### API
 
@@ -1927,7 +1938,8 @@ gunicorn must only ever be reachable from nginx's own private Docker bridge addr
 published on a public interface directly**, since `settings.TRUSTED_PROXIES`' default trust list is
 exactly that private range (see "File transfer specifics" and "Rate limiting" above's "Trusted
 proxy"). A coarse per-IP `limit_req` in nginx itself is configured in the `infra` repo
-(`apps/ziptrigo-apps/nginx.conf`, issue #119; see "Rate limiting" above).
+(`apps/ziptrigo-apps/nginx.conf`, issue #119; main zone plus a looser `/go/<code>` zone, see
+"Rate limiting" above).
 
 ## State of the test suites
 
@@ -1981,7 +1993,8 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   EHLO or MAIL FROM it renders differently from what the grammars expect is not being rejected.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set); the coarse nginx `limit_req`
-  that backs it up as defense-in-depth is configured in the separate `infra` repo (#119).
+  that backs it up as defense-in-depth is configured in the separate `infra` repo (#119), not
+  yet deployed when this was written.
 
 ## Conventions
 

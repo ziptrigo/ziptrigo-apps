@@ -176,3 +176,38 @@ class TestRedirectRateLimit:
         assert response.status_code == 302
         qr_code.refresh_from_db()
         assert qr_code.scan_count == 2
+
+    def test_unknown_codes_spend_the_budget(self, client, qr_code, settings):
+        """Charged before the lookup (issue #119): a run of made-up codes from one IP uses up the
+        budget, so a real code requested right after still redirects but isn't counted."""
+        _enable(settings, 'QR_REDIRECT_IP', limit=2)
+
+        client.get('/go/nope1/')
+        client.get('/go/nope2/')
+        response = client.get(f'/go/{qr_code.short_code}/')
+
+        assert response.status_code == 302
+        assert response['Location'] == 'https://example.com'
+        qr_code.refresh_from_db()
+        assert qr_code.scan_count == 0
+
+    def test_unknown_code_is_a_404_not_a_429_over_the_limit(self, client, settings):
+        _enable(settings, 'QR_REDIRECT_IP', limit=1)
+
+        first = client.get('/go/nope1/')
+        second = client.get('/go/nope2/')  # over the limit
+
+        assert first.status_code == 404
+        assert second.status_code == 404
+        assert 'Retry-After' not in second
+
+    def test_unknown_codes_do_not_spend_another_ips_budget(self, client, qr_code, settings):
+        _enable(settings, 'QR_REDIRECT_IP', limit=1)
+
+        client.get('/go/nope1/', REMOTE_ADDR='10.0.0.1')
+        client.get('/go/nope2/', REMOTE_ADDR='10.0.0.1')
+        response = client.get(f'/go/{qr_code.short_code}/', REMOTE_ADDR='10.0.0.2')
+
+        assert response.status_code == 302
+        qr_code.refresh_from_db()
+        assert qr_code.scan_count == 1

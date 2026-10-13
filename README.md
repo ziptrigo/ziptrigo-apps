@@ -360,7 +360,8 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
 - **nginx**: must set `X-Real-IP` from the real client address (not passed through from a
   client-supplied header) -- `file_transfer`'s download-IP logging trusts it and falls back to
   `REMOTE_ADDR` otherwise. The `infra` repo's `apps/ziptrigo-apps/nginx.conf` also applies a
-  coarse per-IP `limit_req` (20 r/s, `burst=100`, answering 429; `/go/<code>` is exempt) as
+  coarse per-IP `limit_req` (20 r/s, `burst=100`; `/go/<code>` short links on their own looser
+  zone, 50 r/s, `burst=500`; both answer 429 with a short plain-text body and `Retry-After: 1`) as
   defense-in-depth below the app's own rate limits (issue #119); those limits remain the real ones.
 
 ## Design System
