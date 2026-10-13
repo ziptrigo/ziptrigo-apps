@@ -606,9 +606,18 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   `accounts.services.email_confirmation.send_confirmation_email` and
   `file_transfer.views.anonymous`'s confirm views both catch and swallow/surface it like the
   existing `ResendTooSoon`.
-- **nginx**: a coarse `limit_req` in front of the whole site is still recommended (the `infra`
-  repo) as defense-in-depth below the application layer -- out of scope here, since `infra` is a
-  separate repo, but worth adding there.
+- **nginx** (issue #119): a coarse per-IP `limit_req` sits in front of the whole site as
+  defense-in-depth below the application layer. It is configured in the separate `infra` repo
+  (`apps/ziptrigo-apps/nginx.conf`, both `app.ziptrigo.com` and `app-staging.ziptrigo.com`), not
+  here: one `limit_req_zone` per environment (`ziptrigo_apps_prod` / `ziptrigo_apps_staging`) keyed
+  on `$binary_remote_addr` -- the visitor, since both HTTPS server blocks include
+  `cloudflare-realip.conf` first -- at 20 r/s with `burst=100 nodelay`, answering **429** like the
+  app. The numbers are far above ordinary use (the receipts list polls every 3 s, htmx search per
+  keystroke pause, upload JSON calls), so the app's own limits above remain the real ones.
+  **`/go/<code>` is exempt** (a `map` blanks the key for that path, and nginx doesn't count a
+  request with an empty key), since a scan burst from one NAT address must never see an error, the
+  same reason the app itself only skips the scan-count write there; presigned S3 uploads never reach
+  nginx at all. Nothing in this repo depends on it.
 
 ### API
 
@@ -1917,8 +1926,8 @@ passing the CSRF check, and nginx must also set `X-Real-IP` from the real client
 gunicorn must only ever be reachable from nginx's own private Docker bridge address, never
 published on a public interface directly**, since `settings.TRUSTED_PROXIES`' default trust list is
 exactly that private range (see "File transfer specifics" and "Rate limiting" above's "Trusted
-proxy"). A coarse `limit_req` in nginx itself is a recommended defense-in-depth addition in the
-`infra` repo, not done here.
+proxy"). A coarse per-IP `limit_req` in nginx itself is configured in the `infra` repo
+(`apps/ziptrigo-apps/nginx.conf`, issue #119; see "Rate limiting" above).
 
 ## State of the test suites
 
@@ -1971,9 +1980,8 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   `Return-Path` and `Received`) is recommended to confirm what SES writes, and that a legitimate
   EHLO or MAIL FROM it renders differently from what the grammars expect is not being rejected.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
-  on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set), not a host-level guard: a
-  coarse nginx `limit_req` is still recommended as defense-in-depth, tracked in the separate
-  `infra` repo, not done here.
+  on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set); the coarse nginx `limit_req`
+  that backs it up as defense-in-depth is configured in the separate `infra` repo (#119).
 
 ## Conventions
 

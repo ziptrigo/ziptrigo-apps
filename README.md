@@ -359,7 +359,9 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   `graceful_timeout` 25 s < the supervisor's 30 s < 40 s.
 - **nginx**: must set `X-Real-IP` from the real client address (not passed through from a
   client-supplied header) -- `file_transfer`'s download-IP logging trusts it and falls back to
-  `REMOTE_ADDR` otherwise.
+  `REMOTE_ADDR` otherwise. The `infra` repo's `apps/ziptrigo-apps/nginx.conf` also applies a
+  coarse per-IP `limit_req` (20 r/s, `burst=100`, answering 429; `/go/<code>` is exempt) as
+  defense-in-depth below the app's own rate limits (issue #119); those limits remain the real ones.
 
 ## Design System
 
