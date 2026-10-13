@@ -7,9 +7,13 @@ import io
 from datetime import date
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from .. import services
 from ..models import Receipt, ReceiptStatus, Vendor, VendorAlias
+from ..schemas import MAX_MERGE_IDS
 from .api_support import (  # noqa: F401 -- the fixtures are used by name
     auth,
     delete,
@@ -324,6 +328,39 @@ class TestUpdate:
             patch(client, f'/vendors/{vendor.pk}', auth, {'vetted': 'perhaps'}).status_code == 422
         )
 
+    def test_a_vendor_deleted_during_the_rename_is_a_404(
+        self, client, auth, funded_user, monkeypatch
+    ):
+        # The ownership check passes, then the vendor is merged away or deleted from another tab
+        # before `rename_vendor` re-reads (and locks) the row: a 404, not a 500.
+        vendor = create_vendor(funded_user, 'Staples')
+        rename = services.rename_vendor
+
+        def deleted_first(target, name, **kwargs):
+            Vendor.objects.filter(pk=target.pk).delete()
+            return rename(target, name, **kwargs)
+
+        monkeypatch.setattr(services, 'rename_vendor', deleted_first)
+
+        response = patch(client, f'/vendors/{vendor.pk}', auth, {'name': 'Office Staples'})
+
+        assert response.status_code == 404
+
+    def test_the_ownership_check_does_not_compute_the_statistics(
+        self, client, auth, funded_user, filed
+    ):
+        vendor = create_vendor(funded_user, 'Staples')
+        filed(vendor)
+
+        with CaptureQueriesContext(connection) as queries:
+            assert patch(client, f'/vendors/{vendor.pk}', auth, {'vetted': True}).status_code == 200
+
+        # The statistics (an aggregate over the receipts) and the alias names are built once, for
+        # the response, not also for the ownership check.
+        sql = [q['sql'] for q in queries.captured_queries]
+        assert len([q for q in sql if 'receipts_receipt' in q]) == 1
+        assert len([q for q in sql if 'receipts_vendoralias' in q]) == 1
+
     def test_another_users_vendor_is_a_404(self, client, auth, other_user):
         theirs = create_vendor(other_user, 'Theirs')
 
@@ -419,6 +456,30 @@ class TestMerge:
         response = post(client, '/vendors/merge', auth, {'keep': keep.pk, 'merge': [987654]})
 
         assert response.status_code == 404
+
+    def test_more_than_the_maximum_ids_is_a_422_and_nothing_is_merged(
+        self, client, auth, funded_user
+    ):
+        keep = create_vendor(funded_user, 'ACME')
+        others = [create_vendor(funded_user, f'Vendor {i}') for i in range(MAX_MERGE_IDS + 1)]
+
+        response = post(
+            client, '/vendors/merge', auth, {'keep': keep.pk, 'merge': [v.pk for v in others]}
+        )
+
+        assert response.status_code == 422
+        assert Vendor.objects.filter(user=funded_user).count() == MAX_MERGE_IDS + 2
+
+    def test_exactly_the_maximum_is_merged(self, client, auth, funded_user):
+        keep = create_vendor(funded_user, 'ACME')
+        others = [create_vendor(funded_user, f'Vendor {i}') for i in range(MAX_MERGE_IDS)]
+
+        response = post(
+            client, '/vendors/merge', auth, {'keep': keep.pk, 'merge': [v.pk for v in others]}
+        )
+
+        assert response.status_code == 200
+        assert list(Vendor.objects.filter(user=funded_user)) == [keep]
 
     @pytest.mark.parametrize(
         'payload',
@@ -616,15 +677,24 @@ class TestPatchReceiptVendor:
                 == 422
             )
 
-    def test_the_vendor_it_already_has_changes_nothing(self, client, auth, funded_user, filed):
+    @pytest.mark.parametrize('by', ['vendor_id', 'vendor'])
+    def test_the_vendor_it_already_has_changes_nothing(self, client, auth, funded_user, filed, by):
+        # Documented on the PATCH endpoint: this does not vet the vendor, `PATCH /vendors/{id}`
+        # with `{"vetted": true}` does.
         vendor = create_vendor(funded_user, 'Staples')  # unvetted
         receipt = filed(vendor)
+        sent = vendor.pk if by == 'vendor_id' else vendor.name
 
-        body = patch(client, f'/receipts/{receipt.pk}', auth, {'vendor_id': vendor.pk}).json()
+        body = patch(client, f'/receipts/{receipt.pk}', auth, {by: sent}).json()
 
         assert body['vendor_vetted'] is False  # not a choice, so no vetting
+        vendor.refresh_from_db()
+        assert vendor.vetted_at is None
         receipt.refresh_from_db()
         assert receipt.user_edited_fields == []
+
+        vetted = patch(client, f'/vendors/{vendor.pk}', auth, {'vetted': True}).json()
+        assert vetted['vetted'] is True
 
 
 class TestVendorFilter:

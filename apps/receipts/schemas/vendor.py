@@ -3,7 +3,11 @@
 from datetime import date, datetime
 
 from ninja import Schema
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
+
+#: The most vendors one `POST /vendors/merge` takes besides `keep` (more is a 422). A merge is one
+#: transaction locking every vendor in it, so a client can't make it arbitrarily large.
+MAX_MERGE_IDS = 100
 
 
 class VendorSchema(Schema):
@@ -58,10 +62,11 @@ class VendorUpdateSchema(Schema):
 
 
 class VendorMergeSchema(Schema):
-    """Body for `POST /vendors/merge`: the vendor to keep and the vendors to merge into it."""
+    """Body for `POST /vendors/merge`: the vendor to keep and the vendors to merge into it (at most
+    `MAX_MERGE_IDS`, 100; a longer list is a 422)."""
 
     keep: int
-    merge: list[int]
+    merge: list[int] = Field(max_length=MAX_MERGE_IDS)
 
 
 class VendorConflictSchema(Schema):

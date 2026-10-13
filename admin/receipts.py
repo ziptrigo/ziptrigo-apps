@@ -13,6 +13,7 @@ import base64
 import hashlib
 import math
 import os
+import shlex
 import time
 from pathlib import Path
 
@@ -770,14 +771,17 @@ def receipts_vendor_rename(
     clash = _conflict(response)
     if clash is not None:
         other_id = clash['conflicting_vendor_id']
-        other_name = clash.get('conflicting_vendor_name')
+        other_name = clash.get('conflicting_vendor_name') or name
         logger.error(
-            f'Not renamed: you already have a vendor called '
-            f'{other_name if other_name else name!r} (id {other_id}).'
+            f'Not renamed: you already have a vendor called {other_name!r} (id {other_id}).'
         )
         logger.error(
             f'To combine them, run: receipts vendor-merge {_environment} {other_id} {vendor_id}'
             f' (keeps vendor {other_id}).'
+        )
+        logger.error(
+            f'Then, to use the new spelling: receipts vendor-rename {_environment} {other_id} '
+            f'{shlex.quote(name)}'
         )
         raise typer.Exit(1)
     _raise_for_api_error(response)

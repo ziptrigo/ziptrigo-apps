@@ -8,6 +8,10 @@ is a 404, also inside a merge. A rename that clashes with another vendor is a 40
 vendor's id; see `common.py` for the other status codes.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
 
 from .. import services
@@ -21,6 +25,24 @@ from ..schemas import (
 )
 from .common import DEFAULT_LIMIT, clamp_page, mapped_errors
 from .router import router
+
+
+def _owned(user, vendor_id: int) -> Vendor:
+    """The caller's vendor, or a 404. A plain lookup: no statistics, for the endpoints that only
+    need to know the vendor is theirs (`_counted` builds what the response shows)."""
+    return get_object_or_404(Vendor, pk=vendor_id, user=user)
+
+
+@contextmanager
+def _vendor_errors() -> Iterator[None]:
+    """`mapped_errors()`, plus a vendor that vanished after the ownership check (merged or deleted
+    from another tab or client; `rename_vendor` re-reads the row under its lock) is the same 404
+    as one that was never the caller's."""
+    with mapped_errors():
+        try:
+            yield
+        except Vendor.DoesNotExist as exc:
+            raise HttpError(404, 'Not Found') from exc
 
 
 def _counted(user, vendor_id: int) -> Vendor:
@@ -75,10 +97,10 @@ def merge_vendors(request, payload: VendorMergeSchema):
     vetted. Returns `keep`. A 404 if any of the ids isn't yours; a 400 if there is nothing to
     merge (no id besides `keep`)."""
     wanted = list(dict.fromkeys([payload.keep, *payload.merge]))
-    found = {v.pk: v for v in services.list_vendors(request.auth).filter(pk__in=wanted)}
+    found = {v.pk: v for v in Vendor.objects.filter(user=request.auth, pk__in=wanted)}
     if len(found) != len(wanted):
         raise HttpError(404, 'Not Found')
-    with mapped_errors():
+    with _vendor_errors():
         services.merge_vendors(
             found[payload.keep], [v for pk, v in found.items() if pk != payload.keep]
         )
@@ -98,11 +120,11 @@ def update_vendor(request, vendor_id: int, payload: VendorUpdateSchema):
     """Rename and/or vet a vendor. A `name` that another of your vendors already has (or an
     equivalent one: case, punctuation and `LLC`/`Inc.`-style endings don't count) is a 409 with
     `conflicting_vendor_id`, and nothing is changed: merge the two with `POST /vendors/merge`."""
-    vendor = _counted(request.auth, vendor_id)
+    vendor = _owned(request.auth, vendor_id)
     changes = payload.dict(exclude_unset=True)
     name: str | None = changes.get('name')
     vetted: bool | None = changes.get('vetted')
-    with mapped_errors():
+    with _vendor_errors():
         if name is not None:
             # Renaming is a confirmation: vetted afterwards unless the request says otherwise.
             clash = _rename(vendor, name, True if vetted is None else vetted)
@@ -121,7 +143,7 @@ def update_vendor(request, vendor_id: int, payload: VendorUpdateSchema):
 def delete_vendor(request, vendor_id: int):
     """Delete a vendor that has no receipts, live or in the Trash (a 400 otherwise: merge it into
     another vendor instead)."""
-    vendor = _counted(request.auth, vendor_id)
-    with mapped_errors():
+    vendor = _owned(request.auth, vendor_id)
+    with _vendor_errors():
         services.delete_vendor(vendor)
     return 204, None

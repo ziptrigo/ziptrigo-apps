@@ -11,6 +11,7 @@ from .receipt import (
 )
 from .upload import UploadStartSchema, UploadTicketSchema
 from .vendor import (
+    MAX_MERGE_IDS,
     VendorConflictSchema,
     VendorListSchema,
     VendorMergeSchema,
@@ -19,6 +20,7 @@ from .vendor import (
 )
 
 __all__ = [
+    'MAX_MERGE_IDS',
     'CategoryNameSchema',
     'CategoryOrderSchema',
     'CategoryRefSchema',

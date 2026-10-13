@@ -1355,6 +1355,23 @@ def test_vendor_rename_clash_names_the_other_vendor_and_suggests_a_merge(token_f
     assert result.exit_code == 1
     assert 'Not renamed' in result.output and "'ACME' (id 7)" in result.output
     assert 'receipts vendor-merge local 7 12' in result.output
+    assert 'receipts vendor-rename local 7 ACME' in result.output  # the follow-up for the spelling
+
+
+def test_vendor_rename_clash_hint_quotes_a_name_with_spaces(token_file, monkeypatch):
+    body = {
+        'detail': 'You already have a vendor called ACME.',
+        'conflicting_vendor_id': 7,
+        'conflicting_vendor_name': 'ACME',
+    }
+    monkeypatch.setattr('requests.patch', lambda *a, **k: FakeResponse(409, body))
+
+    result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'ACME, LTD'])
+
+    assert result.exit_code == 1
+    assert "'ACME' (id 7)" in result.output
+    output = ' '.join(result.output.split())  # the console wraps long lines
+    assert "receipts vendor-rename local 7 'ACME, LTD'" in output
 
 
 def test_vendor_rename_clash_without_a_name_in_the_body(token_file, monkeypatch):
@@ -1364,7 +1381,9 @@ def test_vendor_rename_clash_without_a_name_in_the_body(token_file, monkeypatch)
     result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'Acme'])
 
     assert result.exit_code == 1
-    assert 'id 7' in result.output and 'vendor-merge local 7 12' in result.output
+    assert "'Acme' (id 7)" in result.output  # quoted like the other case: the requested name
+    assert 'vendor-merge local 7 12' in result.output
+    assert 'vendor-rename local 7 Acme' in result.output
 
 
 def test_vendor_rename_other_errors_show_the_apis_message(token_file, monkeypatch):

@@ -105,6 +105,9 @@ class ReceiptUpdateSchema(Schema):
     to a new one) or `vendor_id` (one of your vendors; `null` clears it, like `vendor: null`),
     never both (a 400). Either moves **this receipt** only, vets the vendor and teaches the matcher
     the name the AI read on it; `PATCH /vendors/{id}` renames a vendor for all its receipts.
+    Sending the vendor the receipt already has (the same `vendor_id`, or the same name) changes
+    nothing, its vetted state included: to vet a vendor, send `PATCH /vendors/{id}` with
+    `{"vetted": true}`.
 
     A key that is not one of these fields (a typo, or `status`, `id`, ...) is refused with a 422
     rather than ignored, so a client can't mistake a no-op for a saved edit.

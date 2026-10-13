@@ -89,7 +89,10 @@ def update_receipt(request, receipt_id: UUID, payload: ReceiptUpdateSchema):
 
     The vendor is `vendor` (a name) or `vendor_id` (one of yours), not both (400). Either moves
     this receipt to that vendor and teaches the matcher; it does not rename the vendor for its
-    other receipts (`PATCH /vendors/{id}` does). A `vendor_id` that isn't yours is a 400."""
+    other receipts (`PATCH /vendors/{id}` does). Sending the vendor the receipt already has (the
+    same `vendor_id`, or the same name) changes nothing, its vetted state included: to vet a
+    vendor, use `PATCH /vendors/{id}` with `{"vetted": true}`. A `vendor_id` that isn't yours is a
+    400."""
     receipt = owned_receipt(request, receipt_id)
     with mapped_errors():
         return services.update_receipt(receipt, payload.dict(exclude_unset=True))
