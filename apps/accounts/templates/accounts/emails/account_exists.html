@@ -1,0 +1,15 @@
+<div style="font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: #2c3432; line-height: 1.5;">
+  <p>{{ greeting }}</p>
+  <p>Someone tried to create a ZipTrigo account with this email address ({{ email }}), but you already have one.</p>
+  {% if google_only %}
+  <p>If it was you, there is nothing to set up again. You signed up with Google: use "Sign in with Google" on the sign-in page.</p>
+  <p><a href="{{ login_url }}" style="color: #3b4a47;">{{ login_url }}</a></p>
+  {% else %}
+  <p>If it was you, there is nothing to set up again. You can sign in here:</p>
+  <p><a href="{{ login_url }}" style="color: #3b4a47;">{{ login_url }}</a></p>
+  <p>If you forgot your password, you can reset it here:</p>
+  <p><a href="{{ forgot_password_url }}" style="color: #3b4a47;">{{ forgot_password_url }}</a></p>
+  {% endif %}
+  <p>If it wasn't you, you can ignore this email: nothing about your account was changed.</p>
+  <p>--<br>The ZipTrigo Team</p>
+</div>

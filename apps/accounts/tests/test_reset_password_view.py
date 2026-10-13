@@ -19,11 +19,7 @@ def _url(token: str) -> str:
 
 
 def _reset_token(user: User) -> str:
-    # `Token.for_user`'s `cls` typevar is bound to `Token` itself, not a subclass -- ty flags every
-    # call site the same way it already flags `PasswordResetService.request_reset` and this file's
-    # own API counterpart (`apps/accounts/tests/test_auth.py`), see `apps.accounts.tokens`'s module
-    # comments. Centralised here so the suppression exists once, not at every call site below.
-    return str(PasswordResetToken.for_user(user))  # ty: ignore[invalid-argument-type]
+    return str(PasswordResetToken.for_user(user))
 
 
 def test_get_with_valid_token_renders_form(client, user):

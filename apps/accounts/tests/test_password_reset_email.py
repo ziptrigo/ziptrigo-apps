@@ -44,3 +44,21 @@ def test_render_password_reset_email_works_without_name(settings, client, db):
     assert reset_url in text_body
     assert 'noname@example.com' in html_body
     assert reset_url in html_body
+
+
+def test_render_password_reset_email_escapes_the_name(db):
+    """The name is free text -- for an account its creator never confirmed, whatever they typed --
+    so it must not reach the HTML body as markup."""
+    user = User(
+        email='victim@example.com', name='<a href="https://evil.example">x</a><script>1</script>'
+    )
+
+    _, text_body, html_body = render_password_reset_email(
+        user=user, reset_url='https://example.com/reset-password/T/'
+    )
+
+    assert '<script>' not in html_body
+    assert '<a href="https://evil.example"' not in html_body
+    assert '&lt;script&gt;' in html_body
+    # The plain-text body is text, so it is left as typed.
+    assert '<script>' in text_body

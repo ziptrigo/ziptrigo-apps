@@ -267,6 +267,18 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # `SIGNUP_IP` (which only counts submissions that passed the captcha), so a person who fails
     # the check a few times still gets through.
     'SIGNUP_CAPTCHA_IP': (30, 60 * 60),
+    # Signing up with an address that already has an account emails its owner (issue #125) -- a
+    # "you already have an account" notice, or, for an account never confirmed, a "finish setting
+    # up" link -- and the page itself answers the same as for a new address, so it can't be used to
+    # find out whether an address is registered. Per (lower-cased) address across every IP: the
+    # form is open to anyone with a solved captcha, so without these it would be a way to flood a
+    # stranger's inbox. One an hour is plenty for the owner who forgot they had signed up, and the
+    # daily ceiling stops a patient sender from getting one in every hour all day (`SIGNUP_IP`
+    # bounds how fast a single IP can try). Both are checked together and counted only when an email
+    # is actually queued; over either, the email is skipped silently and the response doesn't
+    # change. (Locking down an unconfirmed account is not rate limited: it is what protects it.)
+    'SIGNUP_EXISTING_EMAIL': (1, 60 * 60),
+    'SIGNUP_EXISTING_EMAIL_DAY': (3, 24 * 60 * 60),
     # Forgot-password: the response is identical whether or not the account exists either way, so
     # a 429 here reveals nothing a normal response wouldn't already hide (CLAUDE.md: must not leak
     # existence) -- but there's no "authenticate()" here to gate a failed-only counter on (every
@@ -293,6 +305,12 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # own user can spend it, so there's no lockout of anyone else to avoid; the budget leaves room
     # for a few typos in the new password.
     'CHANGE_PASSWORD_USER': (10, 15 * 60),
+    # Changing the email with `PUT /api/account`: it answers 400 "Email already in use" for an
+    # address that has an account (issue #125), so every attempted *change* counts, keyed per user
+    # and charged before that check -- the caller is logged in, so this bounds how many addresses
+    # one account can probe, and a real change is a once-in-a-blue-moon event (a few typos at most).
+    # A name-only update, or resubmitting the current address, is not a change and costs nothing.
+    'ACCOUNT_EMAIL_CHANGE_USER': (5, 60 * 60),
     # -- core: shared email verification (`apps.core.services.email_verification.start`) --
     # The per-email-address-per-day cap on verification *starts* (CLAUDE.md Known gaps: a resend
     # every 60s cooldown alone still allows ~1,440 sends/day, each with fresh guess attempts).

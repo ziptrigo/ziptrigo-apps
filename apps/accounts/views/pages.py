@@ -19,7 +19,8 @@ def account_page(request: AuthenticatedHttpRequest) -> HttpResponse:
 
 
 def account_created_page(request: HttpRequest) -> HttpResponse:
-    """Render the account created confirmation page."""
+    """Render the "check your email" page every valid signup lands on -- the same page whether or
+    not the address already had an account (issue #125)."""
     validity_minutes = settings.EMAIL_CONFIRMATION_TOKEN_TTL_HOURS * 60
     return render(
         request,

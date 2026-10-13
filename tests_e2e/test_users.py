@@ -23,4 +23,4 @@ def test_create_account(page: Page, site_server: str):
     # Check if we are redirected to the account created page
     expect(page).to_have_url(f'{site_server}/account/created/')
     expect(page.locator('h1')).not_to_contain_text('Create account')
-    expect(page.locator('h1')).to_contain_text('Account created')
+    expect(page.locator('h1')).to_contain_text('Check your email')

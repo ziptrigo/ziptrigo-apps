@@ -7,7 +7,7 @@ This used to carry its own JWT (`EmailConfirmationToken`, now removed): a confir
 signed, stateless token that stayed valid until it expired -- clicking it twice, or an email
 client's own link-prefetching, was always harmless. Moving onto `core`'s DB-backed, single-use
 verifications changes that in one deliberate way: starting a *new* verification for the same
-email (a resend, or signing up again with an unconfirmed address) now invalidates the previous
+email (a resend) now invalidates the previous
 one, so an old confirmation email left in someone's inbox stops working once a newer one has been
 sent. `confirm_token` stays idempotent for a link that already confirmed *itself*, though (see
 `apps.core.services.email_verification.confirm_by_token`), so a plain double-click still works
@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from django.conf import settings
+from django.tasks import task
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from apps.core.services.email import EmailBackendClass, get_email_backend
@@ -70,8 +72,9 @@ class EmailConfirmationService:
     def send_confirmation_email(self, user: User) -> None:
         """Start a new verification for `user.email` and send the confirmation email.
 
-        Called from three places (signup, `PUT /api/account` changing the email, and the
-        `resend-confirmation` endpoint) -- none of which should turn either of the two expected,
+        Called from three places (the queued signup task `send_signup_confirmation_email`,
+        `PUT /api/account` changing the email, and the `resend-confirmation` endpoint) -- none of
+        which should turn either of the two expected,
         non-fatal outcomes below into a hard failure for the caller, so both are silently
         swallowed (after logging, for `EmailVerificationSendFailed`) rather than raised. This
         matches what the old JWT-based version did for a send failure: it called `send_email`
@@ -169,6 +172,28 @@ def get_email_confirmation_service() -> EmailConfirmationService:
     return EmailConfirmationService(email_backend_classes=get_email_backend())
 
 
+@task
+def send_signup_confirmation_email(user_id: str, email: str) -> None:
+    """Send a new account's confirmation email, off the signup request (issue #125).
+
+    Sending inline made a signup for a new address slower than one for an address that already has
+    an account, which is a way to tell them apart; both now queue their email. Queued with
+    `apps.core.services.queue.enqueue_after_commit` from `signup.create_account`; any failure here
+    only logs -- `send_confirmation_email` already swallows a delivery failure or the resend
+    cooldown, and the page's "resend confirmation" is the recovery for a mail that never came.
+
+    `email` is the address the account was created with: if it has changed since, nothing is sent
+    (the new address gets its own confirmation from `PUT /api/account`).
+    """
+    try:
+        user = User.objects.get(pk=user_id, email=email)
+    except User.DoesNotExist:
+        return
+    if user.email_confirmed:
+        return
+    get_email_confirmation_service().send_confirmation_email(user)
+
+
 def format_validity_minutes(minutes: int) -> str:
     """Render a validity window (in minutes) as friendly text, e.g. `'30 minutes'` or
     `'48 hours'`. Shared between the confirmation email and the "account created" page so both
@@ -205,17 +230,15 @@ If you did not create this account, please ignore this email.
 The ZipTrigo Team
 """
 
-    html_body = f'''<html>
-<head></head>
-<body>
-<p>Hi {user.name or user.email},</p>
-<p>Thank you for creating an account! Please confirm your email address by clicking the link below:</p>
-<p><a href="{confirmation_url}">{confirmation_url}</a></p>
-<p>This link will expire in {expiry_text}.</p>
-<p>If you did not create this account, please ignore this email.</p>
-<p>--<br>
-The ZipTrigo Team</p>
-</body>
-</html>'''
+    # Autoescaped: `user.name` is free text, and for an account whoever created it left
+    # unconfirmed it is whatever *they* typed -- the address's owner may be the one reading it.
+    html_body = render_to_string(
+        'accounts/emails/email_confirmation.html',
+        {
+            'greeting_name': user.name or user.email,
+            'confirmation_url': confirmation_url,
+            'expiry_text': expiry_text,
+        },
+    )
 
     return subject, text_body, html_body

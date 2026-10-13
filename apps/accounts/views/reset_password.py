@@ -2,6 +2,9 @@
 `fetch()` flow to `POST /api/auth/reset-password` (CLAUDE.md's "HTMX form views" convention). No
 rate limit here, matching that endpoint -- the token itself (`apps.accounts.tokens.PasswordResetToken`)
 is the unguessable secret, unlike a login password or a short download-page password.
+
+A successful reset also confirms the account's email (`PasswordResetService.reset_password`): the
+link went to that address.
 """
 
 from django.contrib import messages
@@ -36,8 +39,7 @@ def reset_password_page(request: HttpRequest, token: str) -> HttpResponse:
     if request.method == 'POST':
         form = ResetPasswordForm(request.POST)
         if form.is_valid():
-            user.set_password(form.cleaned_data['password'])
-            user.save(update_fields=['password'])
+            service.reset_password(user, form.cleaned_data['password'], token=token)
             messages.success(request, 'Your password has been reset. You can now log in.')
             return hx_redirect(request, reverse('accounts:login'))
         status = 422
