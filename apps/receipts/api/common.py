@@ -14,8 +14,13 @@ Status codes (documented once, here):
   refused until the balance is topped up) and `InsufficientCreditsError` (the balance can't cover
   a re-run). One code for both, like the file transfer API: the request is well-formed, the
   account just can't pay for it right now.
-- **404** a receipt, upload or category that isn't the caller's (never 403, so an id can't be
-  probed).
+- **404** a receipt, upload, category or vendor that isn't the caller's (never 403, so an id can't
+  be probed). That includes a foreign id inside `POST /vendors/merge`. A foreign `vendor_id` (or
+  `category`) in a *receipt* `PATCH` body is a 400 instead (`vendor_id: Unknown vendor.`): the
+  receipt in the path exists, it is the value that is refused.
+- **409** a vendor rename that another vendor's name already takes (`PATCH /vendors/{id}`), with
+  `conflicting_vendor_id` in the body so a client can offer `POST /vendors/merge`. A vendor that
+  still has receipts can't be deleted: that is a 400, with the advice to merge it.
 - **429** the site-wide rate limiter (`ratelimit.enforce`), with `Retry-After`.
 """
 
@@ -75,7 +80,7 @@ def mapped_errors() -> Iterator[None]:
 def owned_receipt(request, receipt_id, *, include_unfinished: bool = False) -> Receipt:
     """The caller's receipt (live or trashed), or a 404. A direct upload that has not completed
     (`uploaded=False`) is not a receipt yet: only the `complete` endpoint asks for those."""
-    queryset = Receipt.objects.select_related('category')
+    queryset = Receipt.objects.select_related('category', 'vendor_ref')
     if not include_unfinished:
         queryset = queryset.filter(uploaded=True)
     return get_object_or_404(queryset, id=receipt_id, user=request.auth)
@@ -103,10 +108,13 @@ def receipt_filters(
     date_to: str | None,
     sort: str,
     duplicates: bool,
+    vendor: int | None = None,
 ) -> ReceiptFilters:
     """The list and export filters, as `ReceiptFilters` (the same definition the dashboard uses).
     `status` is one status or several, comma-separated (`in_progress` stands for the three
-    in-flight ones); `category` is an id or `none`; the dates bound `receipt_date`, inclusive."""
+    in-flight ones); `category` is an id or `none`; `vendor` is a vendor id (an id that isn't the
+    caller's matches nothing, like an unknown category id); the dates bound `receipt_date`,
+    inclusive."""
     statuses: list[str] | None = None
     if status:
         statuses = []
@@ -115,6 +123,7 @@ def receipt_filters(
     return ReceiptFilters(
         status=statuses,
         category=category or None,
+        vendor=vendor,
         q=q,
         date_from=_parse_date('date_from', date_from),
         date_to=_parse_date('date_to', date_to),

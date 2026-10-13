@@ -28,6 +28,9 @@ RECEIPT: dict = {
     'size_bytes': 1234,
     'sha256': '',
     'vendor': 'Staples',
+    'vendor_id': 12,
+    'vendor_vetted': True,
+    'vendor_extracted': 'Staples Inc.',
     'amount': '42.10',
     'currency': 'USD',
     'receipt_date': '2026-10-09',
@@ -500,6 +503,10 @@ def test_a_network_error_exits_1_with_a_message_in_every_command(token_file, tmp
         ['regenerate', 'local', '--yes'],
         ['export', 'local', '--out', str(tmp_path / 'o.csv')],
         ['login', 'local', 'me@example.com', 'pw'],
+        ['vendors', 'local'],
+        ['vendor-rename', 'local', '1', 'ACME'],
+        ['vendor-vet', 'local', '1'],
+        ['vendor-merge', 'local', '1', '2', '--yes'],
     ):
         result = runner.invoke(receipts.app, args)
         assert result.exit_code == 1, args
@@ -754,6 +761,8 @@ def test_list_passes_the_filters_through(token_file, monkeypatch):
             'needs_review',
             '--category',
             '3',
+            '--vendor',
+            '12',
             '--q',
             'staples',
             '--from',
@@ -779,6 +788,7 @@ def test_list_passes_the_filters_through(token_file, monkeypatch):
         'offset': 10,
         'status': 'needs_review',
         'category': '3',
+        'vendor': 12,
         'q': 'staples',
         'date_from': '2026-10-01',
         'date_to': '2026-10-31',
@@ -930,6 +940,59 @@ def test_get_prints_the_receipt(token_file, monkeypatch):
         assert text in result.output
 
 
+def test_get_shows_the_vendors_state_and_the_name_it_was_read_as(token_file, monkeypatch):
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(200, RECEIPT))
+
+    result = runner.invoke(receipts.app, ['get', 'local', RECEIPT['id']])
+
+    assert 'Staples (vetted)' in result.output
+    assert 'Vendor ID: 12' in result.output
+    assert 'Read as: Staples Inc.' in result.output
+
+
+def test_get_says_when_the_vendor_is_not_vetted(token_file, monkeypatch):
+    receipt = {**RECEIPT, 'vendor_vetted': False}
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(200, receipt))
+
+    result = runner.invoke(receipts.app, ['get', 'local', RECEIPT['id']])
+
+    assert 'Staples (not vetted)' in result.output
+
+
+def test_get_leaves_out_read_as_when_it_is_the_vendors_name(token_file, monkeypatch):
+    receipt = {**RECEIPT, 'vendor_extracted': ' staples '}
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(200, receipt))
+
+    result = runner.invoke(receipts.app, ['get', 'local', RECEIPT['id']])
+
+    assert 'Read as' not in result.output
+
+
+def test_get_copes_with_a_receipt_that_has_no_vendor(token_file, monkeypatch):
+    receipt = {
+        **RECEIPT,
+        'vendor': '',
+        'vendor_id': None,
+        'vendor_vetted': False,
+        'vendor_extracted': '',
+    }
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(200, receipt))
+
+    result = runner.invoke(receipts.app, ['get', 'local', RECEIPT['id']])
+
+    assert result.exit_code == 0
+    assert 'Vendor' not in result.output and 'Read as' not in result.output
+
+
+def test_get_copes_with_an_older_server_without_the_vendor_fields(token_file, monkeypatch):
+    receipt = {k: v for k, v in RECEIPT.items() if not k.startswith('vendor_')}
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(200, receipt))
+
+    result = runner.invoke(receipts.app, ['get', 'local', RECEIPT['id']])
+
+    assert result.exit_code == 0 and 'Staples' in result.output
+
+
 def test_get_not_found_exits_nonzero(token_file, monkeypatch):
     monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(404, {'detail': 'Not Found'}))
 
@@ -952,7 +1015,18 @@ def test_export_streams_the_csv_to_the_file(token_file, tmp_path, monkeypatch):
 
     result = runner.invoke(
         receipts.app,
-        ['export', 'local', '--out', str(out), '--from', '2026-10-01', '--status', 'processed'],
+        [
+            'export',
+            'local',
+            '--out',
+            str(out),
+            '--from',
+            '2026-10-01',
+            '--status',
+            'processed',
+            '--vendor',
+            '12',
+        ],
     )
 
     assert result.exit_code == 0
@@ -962,6 +1036,7 @@ def test_export_streams_the_csv_to_the_file(token_file, tmp_path, monkeypatch):
     assert seen['params'] == {
         'sort': '-receipt_date',
         'status': 'processed',
+        'vendor': 12,
         'date_from': '2026-10-01',
     }
 
@@ -1122,3 +1197,372 @@ def test_regenerate_rate_limited_exits_nonzero(token_file, monkeypatch):
     result = runner.invoke(receipts.app, ['regenerate', 'local', '--yes'])
 
     assert result.exit_code == 1
+
+
+# -- Vendors --
+
+VENDOR: dict = {
+    'id': 12,
+    'name': 'ACME',
+    'vetted': True,
+    'vetted_at': '2026-10-10T09:00:00Z',
+    'aliases': ['ACME Industries, LLC'],
+    'receipt_count': 3,
+    'trashed_count': 0,
+    'last_receipt_date': '2026-10-09',
+}
+TO_VET: dict = {
+    **VENDOR,
+    'id': 13,
+    'name': 'Staples',
+    'vetted': False,
+    'vetted_at': None,
+    'receipt_count': 1,
+    'trashed_count': 2,
+    'last_receipt_date': None,
+}
+
+
+def vendor_page(*vendors, count=None, offset=0):
+    return {
+        'count': len(vendors) if count is None else count,
+        'limit': 20,
+        'offset': offset,
+        'results': list(vendors),
+    }
+
+
+def test_vendors_lists_them(token_file, monkeypatch):
+    seen = {}
+
+    def fake_get(url, params=None, headers=None, **kwargs):
+        seen.update(url=url, params=params, headers=headers)
+        return FakeResponse(200, vendor_page(VENDOR, TO_VET))
+
+    monkeypatch.setattr('requests.get', fake_get)
+
+    result = runner.invoke(receipts.app, ['vendors', 'local'], env={'COLUMNS': '200'})
+
+    assert result.exit_code == 0
+    assert seen['url'] == 'http://localhost:8000/api/receipts/vendors'
+    assert seen['headers'] == {'Authorization': 'Bearer tok'}
+    assert seen['params'] == {'status': 'all', 'limit': 20, 'offset': 0}
+    for text in ('ACME', 'Staples', '12', '13', 'yes', 'to vet', '2026-10-09'):
+        assert text in result.output
+    assert '(+2 in trash)' in result.output
+
+
+def test_vendors_passes_the_filters_through(token_file, monkeypatch):
+    seen = {}
+
+    def fake_get(url, params=None, **kwargs):
+        seen['params'] = params
+        return FakeResponse(200, vendor_page())
+
+    monkeypatch.setattr('requests.get', fake_get)
+
+    result = runner.invoke(
+        receipts.app,
+        ['vendors', 'local', '--to-vet', '--q', 'acme', '--limit', '5', '--offset', '10'],
+    )
+
+    assert result.exit_code == 0
+    assert seen['params'] == {'status': 'to_vet', 'limit': 5, 'offset': 10, 'q': 'acme'}
+
+
+def test_vendors_with_none(token_file, monkeypatch):
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(200, vendor_page()))
+
+    result = runner.invoke(receipts.app, ['vendors', 'local'])
+
+    assert result.exit_code == 0 and 'No vendors found' in result.output
+
+
+def test_vendors_hints_at_more_pages(token_file, monkeypatch):
+    monkeypatch.setattr(
+        'requests.get', lambda *a, **k: FakeResponse(200, vendor_page(VENDOR, count=5))
+    )
+
+    result = runner.invoke(receipts.app, ['vendors', 'local'])
+
+    assert '--offset 1' in result.output
+
+
+def test_vendors_api_error_exits_nonzero(token_file, monkeypatch):
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(401, {'detail': 'nope'}))
+
+    result = runner.invoke(receipts.app, ['vendors', 'local'])
+
+    assert result.exit_code == 1 and 'login' in result.output
+
+
+def test_vendor_commands_without_login_exit_nonzero(logged_out):
+    for args in (
+        ['vendors', 'local'],
+        ['vendor-rename', 'local', '1', 'x'],
+        ['vendor-vet', 'local', '1'],
+        ['vendor-merge', 'local', '1', '2', '--yes'],
+    ):
+        assert runner.invoke(receipts.app, args).exit_code == 1, args
+
+
+def test_vendor_rename(token_file, monkeypatch):
+    seen = {}
+
+    def fake_patch(url, json=None, headers=None, **kwargs):
+        seen.update(url=url, json=json, headers=headers)
+        return FakeResponse(200, VENDOR)
+
+    monkeypatch.setattr('requests.patch', fake_patch)
+
+    result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'ACME'])
+
+    assert result.exit_code == 0
+    assert seen['url'] == 'http://localhost:8000/api/receipts/vendors/12'
+    assert seen['json'] == {'name': 'ACME'}  # renaming vets by default: nothing extra sent
+    assert seen['headers'] == {'Authorization': 'Bearer tok'}
+    assert 'Renamed' in result.output and 'ACME' in result.output and '3 receipts' in result.output
+
+
+def test_vendor_rename_not_vetted(token_file, monkeypatch):
+    seen = {}
+
+    def fake_patch(url, json=None, **kwargs):
+        seen['json'] = json
+        return FakeResponse(200, {**VENDOR, 'vetted': False})
+
+    monkeypatch.setattr('requests.patch', fake_patch)
+
+    result = runner.invoke(
+        receipts.app, ['vendor-rename', 'local', '12', 'ACME, LTD', '--not-vetted']
+    )
+
+    assert result.exit_code == 0
+    assert seen['json'] == {'name': 'ACME, LTD', 'vetted': False}
+    assert 'not vetted' in result.output
+
+
+def test_vendor_rename_clash_names_the_other_vendor_and_suggests_a_merge(token_file, monkeypatch):
+    body = {
+        'detail': 'You already have a vendor called ACME.',
+        'conflicting_vendor_id': 7,
+        'conflicting_vendor_name': 'ACME',
+    }
+    monkeypatch.setattr('requests.patch', lambda *a, **k: FakeResponse(409, body))
+
+    result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'ACME'])
+
+    assert result.exit_code == 1
+    assert 'Not renamed' in result.output and "'ACME' (id 7)" in result.output
+    assert 'receipts vendor-merge local 7 12' in result.output
+    assert 'receipts vendor-rename local 7 ACME' in result.output  # the follow-up for the spelling
+
+
+def test_vendor_rename_clash_hint_quotes_a_name_with_spaces(token_file, monkeypatch):
+    body = {
+        'detail': 'You already have a vendor called ACME.',
+        'conflicting_vendor_id': 7,
+        'conflicting_vendor_name': 'ACME',
+    }
+    monkeypatch.setattr('requests.patch', lambda *a, **k: FakeResponse(409, body))
+
+    result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'ACME, LTD'])
+
+    assert result.exit_code == 1
+    assert "'ACME' (id 7)" in result.output
+    output = ' '.join(result.output.split())  # the console wraps long lines
+    assert "receipts vendor-rename local 7 'ACME, LTD'" in output
+
+
+def test_vendor_rename_clash_without_a_name_in_the_body(token_file, monkeypatch):
+    body = {'detail': 'You already have a vendor called Acme.', 'conflicting_vendor_id': 7}
+    monkeypatch.setattr('requests.patch', lambda *a, **k: FakeResponse(409, body))
+
+    result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'Acme'])
+
+    assert result.exit_code == 1
+    assert "'Acme' (id 7)" in result.output  # quoted like the other case: the requested name
+    assert 'vendor-merge local 7 12' in result.output
+    assert 'vendor-rename local 7 Acme' in result.output
+
+
+def test_vendor_rename_other_errors_show_the_apis_message(token_file, monkeypatch):
+    for status, message in ((404, 'Not Found'), (400, 'Enter a vendor name.')):
+        monkeypatch.setattr(
+            'requests.patch',
+            lambda *a, status=status, message=message, **k: FakeResponse(
+                status, {'detail': message}
+            ),
+        )
+
+        result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'x'])
+
+        assert result.exit_code == 1
+        assert f'{status}: {message}' in result.output
+        assert 'vendor-merge' not in result.output
+
+
+def test_a_409_that_is_not_a_clash_is_an_ordinary_error(token_file, monkeypatch):
+    monkeypatch.setattr('requests.patch', lambda *a, **k: FakeResponse(409, {'detail': 'busy'}))
+
+    result = runner.invoke(receipts.app, ['vendor-rename', 'local', '12', 'x'])
+
+    assert result.exit_code == 1 and '409: busy' in result.output
+    assert 'vendor-merge' not in result.output
+
+
+def test_vendor_vet_several(token_file, monkeypatch):
+    calls = []
+
+    def fake_patch(url, json=None, **kwargs):
+        calls.append((url, json))
+        return FakeResponse(200, VENDOR)
+
+    monkeypatch.setattr('requests.patch', fake_patch)
+
+    result = runner.invoke(receipts.app, ['vendor-vet', 'local', '12', '13', '12'])
+
+    assert result.exit_code == 0
+    assert calls == [
+        ('http://localhost:8000/api/receipts/vendors/12', {'vetted': True}),
+        ('http://localhost:8000/api/receipts/vendors/13', {'vetted': True}),
+    ]  # a repeated id is sent once
+    assert 'Vetted' in result.output
+
+
+def test_vendor_vet_unvet(token_file, monkeypatch):
+    seen = {}
+
+    def fake_patch(url, json=None, **kwargs):
+        seen['json'] = json
+        return FakeResponse(200, {**VENDOR, 'vetted': False})
+
+    monkeypatch.setattr('requests.patch', fake_patch)
+
+    result = runner.invoke(receipts.app, ['vendor-vet', 'local', '12', '--unvet'])
+
+    assert result.exit_code == 0
+    assert seen['json'] == {'vetted': False} and 'Not vetted' in result.output
+
+
+def test_vendor_vet_carries_on_after_a_failure_and_exits_nonzero(token_file, monkeypatch):
+    def fake_patch(url, json=None, **kwargs):
+        if url.endswith('/12'):
+            return FakeResponse(404, {'detail': 'Not Found'})
+        return FakeResponse(200, {**VENDOR, 'id': 13, 'name': 'Staples'})
+
+    monkeypatch.setattr('requests.patch', fake_patch)
+
+    result = runner.invoke(receipts.app, ['vendor-vet', 'local', '12', '13'])
+
+    assert result.exit_code == 1
+    assert 'Vendor 12: 404: Not Found' in result.output
+    assert 'Staples' in result.output  # the second one was still done
+
+
+def test_vendor_merge_asks_first_and_aborts_on_no(token_file, monkeypatch):
+    posts = []
+    by_id = {12: VENDOR, 13: TO_VET}
+    monkeypatch.setattr(
+        'requests.get', lambda url, **k: FakeResponse(200, by_id[int(url.rsplit('/', 1)[1])])
+    )
+    monkeypatch.setattr(
+        'requests.post', lambda *a, **k: posts.append(a) or FakeResponse(200, VENDOR)
+    )
+
+    result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '13'], input='n\n')
+
+    assert result.exit_code == 1
+    assert posts == []
+    assert 'Cancelled' in result.output
+    # The prompt says which vendor is kept and which is merged away.
+    assert 'Keep:' in result.output and 'ACME' in result.output
+    assert 'Merge:' in result.output and 'Staples' in result.output
+
+
+def test_vendor_merge_proceeds_on_yes(token_file, monkeypatch):
+    seen = {}
+    by_id = {12: VENDOR, 13: TO_VET, 14: {**TO_VET, 'id': 14, 'name': 'Staples Inc'}}
+    monkeypatch.setattr(
+        'requests.get', lambda url, **k: FakeResponse(200, by_id[int(url.rsplit('/', 1)[1])])
+    )
+
+    def fake_post(url, json=None, headers=None, **kwargs):
+        seen.update(url=url, json=json, headers=headers)
+        return FakeResponse(200, {**VENDOR, 'receipt_count': 6})
+
+    monkeypatch.setattr('requests.post', fake_post)
+
+    result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '13', '14'], input='y\n')
+
+    assert result.exit_code == 0
+    assert seen['url'] == 'http://localhost:8000/api/receipts/vendors/merge'
+    assert seen['json'] == {'keep': 12, 'merge': [13, 14]}
+    assert seen['headers'] == {'Authorization': 'Bearer tok'}
+    assert 'Merged' in result.output and '6 receipts' in result.output
+
+
+def test_vendor_merge_yes_skips_the_prompt_and_the_lookups(token_file, monkeypatch):
+    seen = {}
+
+    def no_get(*args, **kwargs):
+        raise AssertionError('--yes should not look the vendors up first')
+
+    monkeypatch.setattr('requests.get', no_get)
+
+    def fake_post(url, json=None, **kwargs):
+        seen['json'] = json
+        return FakeResponse(200, VENDOR)
+
+    monkeypatch.setattr('requests.post', fake_post)
+
+    result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '13', '--yes'])
+
+    assert result.exit_code == 0
+    assert seen['json'] == {'keep': 12, 'merge': [13]}
+    assert 'Merge?' not in result.output
+
+
+def test_vendor_merge_ignores_the_kept_id_and_repeats_in_the_list(token_file, monkeypatch):
+    seen = {}
+
+    def fake_post(url, json=None, **kwargs):
+        seen['json'] = json
+        return FakeResponse(200, VENDOR)
+
+    monkeypatch.setattr('requests.post', fake_post)
+
+    result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '13', '12', '13', '-y'])
+
+    assert result.exit_code == 0 and seen['json'] == {'keep': 12, 'merge': [13]}
+
+
+def test_vendor_merge_with_nothing_to_merge_exits_without_a_request(token_file, monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError('no request expected')
+
+    monkeypatch.setattr('requests.post', fail)
+    monkeypatch.setattr('requests.get', fail)
+
+    result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '12', '--yes'])
+
+    assert result.exit_code == 1 and 'besides the one to keep' in result.output
+
+
+def test_vendor_merge_stops_before_asking_when_a_vendor_is_unknown(token_file, monkeypatch):
+    posts = []
+    monkeypatch.setattr('requests.get', lambda *a, **k: FakeResponse(404, {'detail': 'Not Found'}))
+    monkeypatch.setattr('requests.post', lambda *a, **k: posts.append(a) or FakeResponse(200))
+
+    result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '99'])
+
+    assert result.exit_code == 1 and '404' in result.output
+    assert posts == [] and 'Merge?' not in result.output
+
+
+def test_vendor_merge_api_error_exits_nonzero(token_file, monkeypatch):
+    monkeypatch.setattr('requests.post', lambda *a, **k: FakeResponse(404, {'detail': 'Not Found'}))
+
+    result = runner.invoke(receipts.app, ['vendor-merge', 'local', '12', '13', '--yes'])
+
+    assert result.exit_code == 1 and '404' in result.output

@@ -4,14 +4,16 @@ Receipts CLI
 
 Command line interface for the receipts JWT API (`/api/receipts/`, issue #98 phase 4), on the model
 of `admin/filetransfer.py`: log in, upload receipts and invoices (PDF, JPG, PNG, HEIC, WebP) with
-direct-to-S3 uploads, list and inspect them, export a CSV, and see or regenerate the inbox address
-receipts can be emailed to.
+direct-to-S3 uploads, list and inspect them, export a CSV, look after the vendors the receipts are
+filed under (list, rename, vet, merge), and see or regenerate the inbox address receipts can be
+emailed to.
 """
 
 import base64
 import hashlib
 import math
 import os
+import shlex
 import time
 from pathlib import Path
 
@@ -362,6 +364,26 @@ def _amount(receipt: dict) -> str:
     return f'{receipt["amount"]} {receipt["currency"]}'.strip()
 
 
+def _vendor_text(receipt: dict) -> str:
+    """The receipt's vendor with whether the user has vetted it (`Staples (vetted)`); just the
+    name, or nothing, for a receipt without a vendor."""
+    name = receipt['vendor']
+    if not name or receipt.get('vendor_id') is None:
+        return name
+    return f'{name} ({"vetted" if receipt.get("vendor_vetted") else "not vetted"})'
+
+
+def _same_name(a: str, b: str) -> bool:
+    return ' '.join(a.casefold().split()) == ' '.join(b.casefold().split())
+
+
+def _read_as(receipt: dict) -> str:
+    """The name the AI read on the receipt, when it differs from the vendor's name (the vendor
+    was renamed or the receipt moved to another one); empty otherwise."""
+    extracted = receipt.get('vendor_extracted') or ''
+    return '' if _same_name(extracted, receipt['vendor']) else extracted
+
+
 @app.command(name='login')
 def receipts_login(
     environment: EnvironmentAnnotation,
@@ -404,6 +426,9 @@ def receipts_list(
     category: str | None = typer.Option(
         None, '--category', help='A category id, or "none" for uncategorized.'
     ),
+    vendor: int | None = typer.Option(
+        None, '--vendor', help='A vendor id (see the `vendors` command).'
+    ),
     q: str = typer.Option('', '--q', help='Search the vendor, the notes and the amount.'),
     date_from: str | None = typer.Option(
         None, '--from', help='Earliest receipt date, YYYY-MM-DD (inclusive).'
@@ -429,6 +454,7 @@ def receipts_list(
     Example:
         receipts list local
         receipts list local --status needs_review
+        receipts list local --vendor 12
         receipts list local --from 2026-10-01 --to 2026-10-31 --q staples --limit 50
     """
     _select_environment(environment)
@@ -436,6 +462,7 @@ def receipts_list(
     for name, value in (
         ('status', status),
         ('category', category),
+        ('vendor', vendor),
         ('q', q),
         ('date_from', date_from),
         ('date_to', date_to),
@@ -542,7 +569,9 @@ def receipts_get(environment: EnvironmentAnnotation, receipt_id: str):
         ('ID', receipt['id']),
         ('Status', receipt['status']),
         ('Failure', receipt['failure_reason']),
-        ('Vendor', receipt['vendor']),
+        ('Vendor', _vendor_text(receipt)),
+        ('Vendor ID', str(receipt.get('vendor_id') or '')),
+        ('Read as', _read_as(receipt)),
         ('Amount', _amount(receipt)),
         ('Receipt date', receipt['receipt_date'] or ''),
         ('Type', receipt['document_type']),
@@ -570,6 +599,7 @@ def receipts_export(
     out: Path = typer.Option(..., '--out', '-o', help='Where to write the CSV.'),
     status: str | None = typer.Option(None, '--status', help='As for `list`.'),
     category: str | None = typer.Option(None, '--category', help='As for `list`.'),
+    vendor: int | None = typer.Option(None, '--vendor', help='As for `list`.'),
     q: str = typer.Option('', '--q', help='Search the vendor, the notes and the amount.'),
     date_from: str | None = typer.Option(None, '--from', help='Earliest receipt date.'),
     date_to: str | None = typer.Option(None, '--to', help='Latest receipt date.'),
@@ -582,12 +612,14 @@ def receipts_export(
     Example:
         receipts export local --out receipts.csv
         receipts export local --out q3.csv --from 2026-07-01 --to 2026-09-30 --status processed
+        receipts export local --out acme.csv --vendor 12
     """
     _select_environment(environment)
     params: dict = {'sort': sort}
     for name, value in (
         ('status', status),
         ('category', category),
+        ('vendor', vendor),
         ('q', q),
         ('date_from', date_from),
         ('date_to', date_to),
@@ -630,6 +662,211 @@ def receipts_export(
     finally:
         response.close()
     logger.info(f'Wrote {out} ({size} bytes).')
+
+
+def _vendor_url(vendor_id: int) -> str:
+    return _api_url(f'/receipts/vendors/{vendor_id}')
+
+
+def _vendor_summary(vendor: dict) -> str:
+    """`ACME (id 12, vetted, 3 receipts)`: how a vendor is named in a message."""
+    count = vendor['receipt_count']
+    state = 'vetted' if vendor['vetted'] else 'not vetted'
+    return (
+        f'{vendor["name"]} (id {vendor["id"]}, {state}, {count} receipt{"" if count == 1 else "s"})'
+    )
+
+
+def _conflict(response) -> dict | None:
+    """The body of a 409 from a vendor rename (`conflicting_vendor_id`, ...), or `None`."""
+    if response.status_code != 409:
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) and 'conflicting_vendor_id' in body else None
+
+
+@app.command(name='vendors')
+def receipts_vendors(
+    environment: EnvironmentAnnotation,
+    to_vet: bool = typer.Option(
+        False, '--to-vet', help='Only vendors you have not vetted (confirmed) yet.'
+    ),
+    q: str = typer.Option('', '--q', help="Search the vendors' names and the names they go by."),
+    limit: int = typer.Option(20, '--limit', help='Max vendors to show (1-100).'),
+    offset: int = typer.Option(0, '--offset', help='Number of vendors to skip.'),
+):
+    """
+    List your vendors: the companies your receipts are filed under.
+
+    Example:
+        receipts vendors local
+        receipts vendors local --to-vet
+        receipts vendors local --q acme
+    """
+    _select_environment(environment)
+    params: dict = {'status': 'to_vet' if to_vet else 'all', 'limit': limit, 'offset': offset}
+    if q:
+        params['q'] = q
+
+    response = _request('get', _api_url('/receipts/vendors'), params=params, headers=get_headers())
+    _raise_for_api_error(response)
+    body = response.json()
+    vendors = body['results']
+
+    if not vendors:
+        logger.info('No vendors found.')
+        return
+
+    table = Table(title='Your Vendors')
+    table.add_column('ID', style='cyan', no_wrap=True, justify='right')
+    table.add_column('Name', style='white')
+    table.add_column('Vetted', style='green', no_wrap=True)
+    table.add_column('Receipts', style='magenta', justify='right')
+    table.add_column('Last receipt', style='white', no_wrap=True)
+    for vendor in vendors:
+        trashed = f' (+{vendor["trashed_count"]} in trash)' if vendor['trashed_count'] else ''
+        table.add_row(
+            str(vendor['id']),
+            vendor['name'],
+            'yes' if vendor['vetted'] else 'to vet',
+            f'{vendor["receipt_count"]}{trashed}',
+            vendor['last_receipt_date'] or '',
+        )
+    Console().print(table)
+
+    shown_through = body['offset'] + len(vendors)
+    if shown_through < body['count']:
+        logger.info(
+            f'Showing {body["offset"] + 1}-{shown_through} of {body["count"]}. '
+            f'Use --offset {shown_through} to see more.'
+        )
+
+
+@app.command(name='vendor-rename')
+def receipts_vendor_rename(
+    environment: EnvironmentAnnotation,
+    vendor_id: int = typer.Argument(..., help='The vendor id (see the `vendors` command).'),
+    name: str = typer.Argument(..., help='The new name.'),
+    not_vetted: bool = typer.Option(
+        False, '--not-vetted', help='Leave the vendor unvetted (renaming vets it by default).'
+    ),
+):
+    """
+    Rename a vendor: every receipt filed under it shows the new name, and the old name still
+    matches it. If another vendor already has that name, nothing changes and the command says
+    which, so you can merge the two with `vendor-merge`.
+
+    Example:
+        receipts vendor-rename local 12 "ACME, LTD"
+    """
+    _select_environment(environment)
+    body: dict = {'name': name}
+    if not_vetted:
+        body['vetted'] = False
+
+    response = _request('patch', _vendor_url(vendor_id), json=body, headers=get_headers())
+    clash = _conflict(response)
+    if clash is not None:
+        other_id = clash['conflicting_vendor_id']
+        other_name = clash.get('conflicting_vendor_name') or name
+        logger.error(
+            f'Not renamed: you already have a vendor called {other_name!r} (id {other_id}).'
+        )
+        logger.error(
+            f'To combine them, run: receipts vendor-merge {_environment} {other_id} {vendor_id}'
+            f' (keeps vendor {other_id}).'
+        )
+        logger.error(
+            f'Then, to use the new spelling: receipts vendor-rename {_environment} {other_id} '
+            f'{shlex.quote(name)}'
+        )
+        raise typer.Exit(1)
+    _raise_for_api_error(response)
+    vendor = response.json()
+    logger.info(f'Renamed: {_vendor_summary(vendor)}.')
+
+
+@app.command(name='vendor-vet')
+def receipts_vendor_vet(
+    environment: EnvironmentAnnotation,
+    vendor_ids: list[int] = typer.Argument(..., help='The vendor ids to mark as vetted.'),
+    unvet: bool = typer.Option(False, '--unvet', help='Mark them as not vetted instead.'),
+):
+    """
+    Mark vendors as vetted (confirmed by you), so future receipts are matched to them first. A
+    vendor that can't be updated doesn't stop the rest (the exit code is non-zero if any failed).
+
+    Example:
+        receipts vendor-vet local 12 13 14
+        receipts vendor-vet local 12 --unvet
+    """
+    _select_environment(environment)
+    headers = get_headers()
+
+    failed = 0
+    for vendor_id in dict.fromkeys(vendor_ids):
+        response = _request(
+            'patch', _vendor_url(vendor_id), json={'vetted': not unvet}, headers=headers
+        )
+        if not response.ok:
+            failed += 1
+            logger.error(f'Vendor {vendor_id}: {_error_text(response)}')
+            continue
+        logger.info(f'{"Not vetted" if unvet else "Vetted"}: {_vendor_summary(response.json())}.')
+
+    if failed:
+        raise typer.Exit(1)
+
+
+@app.command(name='vendor-merge')
+def receipts_vendor_merge(
+    environment: EnvironmentAnnotation,
+    keep: int = typer.Argument(..., help='The id of the vendor to keep.'),
+    vendor_ids: list[int] = typer.Argument(..., help='The ids of the vendors to merge into it.'),
+    yes: bool = typer.Option(False, '--yes', '-y', help='Do not ask for confirmation.'),
+):
+    """
+    Merge vendors into one: their receipts move to the vendor you keep and show its name, the names
+    they were known by now match it too, and the merged vendors are deleted. This can't be undone.
+
+    Example:
+        receipts vendor-merge local 12 13 14
+        receipts vendor-merge local 12 13 --yes
+    """
+    _select_environment(environment)
+    headers = get_headers()
+    others = [vendor_id for vendor_id in dict.fromkeys(vendor_ids) if vendor_id != keep]
+    if not others:
+        logger.error('Give at least one vendor besides the one to keep.')
+        raise typer.Exit(1)
+
+    if not yes:
+        # Show what the ids are before asking (and fail on a wrong one before the prompt).
+        summaries = {}
+        for vendor_id in (keep, *others):
+            lookup = _request('get', _vendor_url(vendor_id), headers=headers)
+            _raise_for_api_error(lookup)
+            summaries[vendor_id] = _vendor_summary(lookup.json())
+        logger.info(f'Keep:  {summaries[keep]}')
+        for vendor_id in others:
+            logger.info(f'Merge: {summaries[vendor_id]}')
+        if not typer.confirm(
+            'Their receipts move to the vendor you keep, and the others are deleted. Merge?'
+        ):
+            logger.info('Cancelled.')
+            raise typer.Exit(1)
+
+    response = _request(
+        'post',
+        _api_url('/receipts/vendors/merge'),
+        json={'keep': keep, 'merge': others},
+        headers=headers,
+    )
+    _raise_for_api_error(response)
+    logger.info(f'Merged: {_vendor_summary(response.json())}.')
 
 
 @app.command(name='inbox')
