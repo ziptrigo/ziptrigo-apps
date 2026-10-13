@@ -89,8 +89,8 @@ def reset_password(request: HttpRequest, payload: PasswordResetConfirm):
     if user is None:
         raise HttpError(400, 'Invalid or expired token.')
 
-    user.set_password(payload.password)
-    user.save(update_fields=['password'])
+    # Also confirms the account's email: the link went to that address (see the service).
+    service.reset_password(user, payload.password, token=payload.token)
 
     return 200, {'message': 'Password has been reset.'}
 

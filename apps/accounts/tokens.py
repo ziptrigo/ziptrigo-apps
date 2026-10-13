@@ -97,8 +97,27 @@ class CustomRefreshToken(Token):
         return cast(CustomRefreshToken, token)
 
 
+#: The claim that ties a password reset token to the address it was emailed to.
+RESET_EMAIL_CLAIM = 'email'
+
+
 class PasswordResetToken(Token):
-    """JWT token for password reset links."""
+    """JWT token for password reset links.
+
+    It carries the address it is emailed to (`RESET_EMAIL_CLAIM`). Using the link proves control
+    of that address, so a reset confirms the account's email -- but only while the account still
+    has it (`PasswordResetService`): after an email change, a link sent to the old address must
+    neither confirm the new, unproven one nor reset the password.
+    """
 
     token_type = 'password_reset'
     lifetime = timedelta(hours=settings.PASSWORD_RESET_TOKEN_TTL_HOURS)
+
+    @classmethod
+    # See `CustomAccessToken.for_user` above for why this narrowing is suppressed rather than fixed.
+    def for_user(cls, user: User) -> 'PasswordResetToken':  # ty: ignore[invalid-method-override]
+        """Create a reset token for the given user, bound to the address it is being sent to."""
+        # See `CustomAccessToken.for_user` above for why this is suppressed rather than fixed.
+        token = super().for_user(user)  # ty: ignore[invalid-argument-type]
+        token[RESET_EMAIL_CLAIM] = user.email
+        return cast(PasswordResetToken, token)

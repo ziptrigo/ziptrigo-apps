@@ -37,8 +37,9 @@ def register_page(request: HttpRequest) -> HttpResponse:
     4. `create_account`. An already-registered email is *not* reported to the visitor (issue
        #125): the response is the same redirect as for a new account, and the address's owner is
        emailed instead (`handle_signup_for_existing_email`), so the page can't be used to learn
-       whether an address has an account. It is still behind the captcha and `SIGNUP_IP`, so
-       the notice email can't be triggered in bulk either.
+       whether an address has an account (nor, by how long it takes: both paths hash the password
+       and queue an email). It is still behind the captcha and `SIGNUP_IP`, so the notice can't be
+       triggered in bulk either.
 
     Every 422 re-renders the form partial with a fresh captcha widget, since a token is single-use
     and the swap replaces the old widget anyway. On success, redirects to the "account created"
@@ -86,6 +87,7 @@ def _create(request: HttpRequest, form: RegisterForm, captcha_enabled: bool) -> 
     if not limited.allowed:
         return ratelimit.web_response(request, limited, retarget='#register-msg')
 
+    already_registered: str | None = None
     try:
         create_account(
             name=form.cleaned_data['name'],
@@ -93,8 +95,13 @@ def _create(request: HttpRequest, form: RegisterForm, captcha_enabled: bool) -> 
             password=form.cleaned_data['password'],
         )
     except EmailAlreadyRegistered as exc:
-        # Same status, redirect and page as a new account -- see the docstring above.
-        handle_signup_for_existing_email(exc.email)
+        already_registered = exc.email
+    if already_registered is not None:
+        # Same status, redirect and page as a new account -- see the docstring above. Handled
+        # outside the `except` block so that anything logged there doesn't chain this exception
+        # (which carries the address) into its traceback. The password is passed only so it gets
+        # hashed like a new account's (timing); it is never stored.
+        handle_signup_for_existing_email(already_registered, form.cleaned_data['password'])
     return hx_redirect(request, reverse('accounts:created'))
 
 

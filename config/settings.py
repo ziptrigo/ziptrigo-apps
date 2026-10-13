@@ -267,15 +267,18 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # `SIGNUP_IP` (which only counts submissions that passed the captcha), so a person who fails
     # the check a few times still gets through.
     'SIGNUP_CAPTCHA_IP': (30, 60 * 60),
-    # Signing up with an address that already has an account emails its owner a "you already have
-    # an account" notice (issue #125) -- the page itself answers the same as for a new address, so
-    # it can't be used to find out whether an address is registered. Per (lower-cased) address
-    # across every IP: the form is open to anyone with a solved captcha, so without this it would
-    # be a way to flood a stranger's inbox. One an hour is plenty for the owner who forgot they had
-    # signed up; over the limit the email is skipped silently and the response doesn't change.
-    # Applies to the notice only: an unconfirmed account gets its confirmation link resent
-    # instead, which `EMAIL_VERIFICATION_START_EMAIL` and the resend cooldown already bound.
+    # Signing up with an address that already has an account emails its owner (issue #125) -- a
+    # "you already have an account" notice, or, for an account never confirmed, a "finish setting
+    # up" link -- and the page itself answers the same as for a new address, so it can't be used to
+    # find out whether an address is registered. Per (lower-cased) address across every IP: the
+    # form is open to anyone with a solved captcha, so without these it would be a way to flood a
+    # stranger's inbox. One an hour is plenty for the owner who forgot they had signed up, and the
+    # daily ceiling stops a patient sender from getting one in every hour all day (`SIGNUP_IP`
+    # bounds how fast a single IP can try). Both are checked together and counted only when an email
+    # is actually queued; over either, the email is skipped silently and the response doesn't
+    # change. (Locking down an unconfirmed account is not rate limited: it is what protects it.)
     'SIGNUP_EXISTING_EMAIL': (1, 60 * 60),
+    'SIGNUP_EXISTING_EMAIL_DAY': (3, 24 * 60 * 60),
     # Forgot-password: the response is identical whether or not the account exists either way, so
     # a 429 here reveals nothing a normal response wouldn't already hide (CLAUDE.md: must not leak
     # existence) -- but there's no "authenticate()" here to gate a failed-only counter on (every

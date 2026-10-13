@@ -90,6 +90,21 @@ def test_email_change_attempts_are_rate_limited_per_user(
     assert user.email_confirmed
 
 
+def test_email_change_429_drops_a_name_sent_with_it(client, user, settings, sent_confirmations):
+    """A 429 refuses the whole update on purpose: nothing was written yet, so the name sent along
+    with the email isn't saved either."""
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'ACCOUNT_EMAIL_CHANGE_USER': (1, 3600)}
+    assert _put(client, user, {'email': 'first@example.com'}).status_code == 200
+
+    response = _put(client, user, {'name': 'Renamed', 'email': 'second@example.com'})
+
+    assert response.status_code == 429
+    after = User.objects.get(pk=user.pk)
+    assert after.name == 'Test User'
+    assert after.email == 'first@example.com'
+
+
 def test_email_change_rate_limit_is_per_user(client, user, settings, sent_confirmations):
     settings.RATELIMIT_ENABLE = True
     settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'ACCOUNT_EMAIL_CHANGE_USER': (1, 3600)}

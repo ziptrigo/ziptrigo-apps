@@ -256,7 +256,8 @@ def test_duplicate_email_without_the_captcha_is_rejected_like_any_other(
     for free."""
     notified: list[str] = []
     monkeypatch.setattr(
-        'apps.accounts.views.register.handle_signup_for_existing_email', notified.append
+        'apps.accounts.views.register.handle_signup_for_existing_email',
+        lambda email, password: notified.append(email),
     )
 
     response = _register(client, email=user.email)
@@ -292,3 +293,20 @@ def test_signup_ip_429_after_a_passing_captcha_is_retargeted(client, settings, v
     assert response['HX-Retarget'] == '#register-msg'
     assert len(verify_calls) == 2
     assert not User.objects.filter(email='newuser@example.com').exists()
+
+
+@pytest.mark.usefixtures('captcha_on')
+def test_duplicate_email_spends_the_captcha_and_signup_ip_like_a_new_one(
+    client, settings, user, verify_calls
+):
+    """Guards the order in `_create`: an already-registered address must pay for the captcha and a
+    `SIGNUP_IP` hit before anything is emailed, or the notice would be free to trigger."""
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'SIGNUP_IP': (1, 60 * 60)}
+
+    first = _register(client, email=user.email, **{captcha.RESPONSE_FIELD: 'token-1'})
+    second = _register(client, email=user.email, **{captcha.RESPONSE_FIELD: 'token-2'})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert verify_calls == [('token-1', '127.0.0.1'), ('token-2', '127.0.0.1')]

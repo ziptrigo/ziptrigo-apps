@@ -20,8 +20,10 @@ escape as a 500.
 
 from django.db import IntegrityError, transaction
 
+from apps.core.services.queue import enqueue_after_commit
+
 from ..models import User
-from .email_confirmation import get_email_confirmation_service
+from .email_confirmation import send_signup_confirmation_email
 
 
 class EmailAlreadyRegistered(Exception):
@@ -35,7 +37,8 @@ class EmailAlreadyRegistered(Exception):
 
 
 def create_account(*, name: str, email: str, password: str) -> User:
-    """Create a new user account and send its confirmation email.
+    """Create a new user account and queue its confirmation email (a `django.tasks` task, so the
+    request doesn't wait for the mail server -- see `send_signup_confirmation_email`).
 
     Raises:
         EmailAlreadyRegistered: `email` is already registered (including when it only differs
@@ -51,5 +54,5 @@ def create_account(*, name: str, email: str, password: str) -> User:
     except IntegrityError:
         raise EmailAlreadyRegistered(email) from None
 
-    get_email_confirmation_service().send_confirmation_email(user)
+    enqueue_after_commit(send_signup_confirmation_email, str(user.pk), user.email)
     return user

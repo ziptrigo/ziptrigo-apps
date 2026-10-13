@@ -37,6 +37,8 @@ def update_account(request, payload: AccountUpdateRequest):
         # Charged before the uniqueness check below, which says whether an address has an account
         # (issue #125): a logged-in caller can ask it only so many times. Kept as a 400 rather
         # than made indistinguishable -- see CLAUDE.md's Auth section for why that was accepted.
+        # A 429 refuses the whole request on purpose: a name sent along with the email is not
+        # saved either (nothing has been written yet), rather than half-applying an update.
         ratelimit.enforce(ratelimit.hit_user(user, 'ACCOUNT_EMAIL_CHANGE_USER'))
         # Check if email already exists
         if User.objects.filter(email=payload.email).exclude(id=user.id).exists():

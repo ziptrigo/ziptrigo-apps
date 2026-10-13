@@ -230,7 +230,8 @@ sees a JWT on any of them. `/api/auth/…` still exposes `forgot-password`, `res
 `resend-confirmation` for non-browser clients; both surfaces share the same
 `apps.accounts.services` logic (`password_reset.get_password_reset_service`,
 `email_confirmation.get_email_confirmation_service`) and the same `apps.core.ratelimit` rules, so
-validation and throttling can't drift between them.
+validation and throttling can't drift between them. A reset also confirms the account's email (see
+below).
 
 **Accounts are created only on the web register page** (issue #117): `POST /api/auth/signup` was
 removed, so an API client (or, later, an MCP client -- issue #121) always works on behalf of an
@@ -258,25 +259,73 @@ valid submission that passed the captcha and `SIGNUP_IP`: the same redirect to `
 (whose copy is neutral: "Check your email", not "Account created"), whatever the address. A new
 address gets an account and a confirmation email, as before. For an address that already has one,
 `create_account` raises `EmailAlreadyRegistered` (also for an `IntegrityError` from a concurrent
-signup) and the view calls `services.existing_account.handle_signup_for_existing_email`, which
-creates nothing and changes neither password nor name, and never raises (a failure there is logged,
-so it can't turn into an error page only an existing address produces):
+signup) and the view -- outside its `except` block, so a logged traceback doesn't chain the address
+-- calls `services.existing_account.handle_signup_for_existing_email(email, password)`, which
+creates nothing, never stores or logs what the visitor typed, and never raises (a failure there is
+logged with the account's id, never the address, so it can't turn into an error page only an
+existing address produces):
 
 - **Confirmed account:** queues the `send_account_exists_email` task ("someone tried to create an
   account with this address, you already have one": absolute `BASE_URL` links to sign-in and
   forgot-password, or only to sign-in with "Sign in with Google" for an account with a `google_sub`
   and no usable password). It carries nothing from the form, so the form can't make it say
   something of an outsider's choosing; the task skips if the account has moved to another address
-  since. Rate limited by `SIGNUP_EXISTING_EMAIL` (1 per hour per lower-cased address, across IPs,
-  `hit_value`), over which the email is skipped silently and the response is unchanged.
-- **Unconfirmed account:** the confirmation link is resent (`send_confirmation_email`) instead of
-  the notice. Whoever left it unconfirmed most likely abandoned their own signup, and the useful
-  next step is the link, not directions to a sign-in that would refuse them. It is bounded by the
-  resend cooldown and the per-address daily cap of email verification, so it spends no
-  `SIGNUP_EXISTING_EMAIL` budget; like resend-confirmation it can supersede a link already sent.
+  since. Nothing about the account changes.
+- **Unconfirmed account: locked down, and the confirmation link is *not* resent** (review of
+  #127). Whoever left it unconfirmed chose its password, and that may be someone other than the
+  address's owner -- the "pre-hijack": register a victim's address with a password you know and
+  wait; if the victim's own signup resent the link and they clicked it, the account would be
+  confirmed with the attacker's password (and a later "Sign in with Google" would link it, exactly
+  what the Google-linking rules above refuse). So `_lock_down_unconfirmed` (on *every* attempt, even
+  when the email below is rate limited, since it is what closes the hole) makes the password
+  unusable -- which also revokes its JWTs and sessions, being derived from the password hash -- and
+  invalidates every pending confirmation link for the address (`invalidate_pending_for_email`);
+  name and email are untouched. Then the `send_finish_setup_email` task mails the address "Finish
+  setting up your ZipTrigo account" with a **set-password link** (the ordinary reset token,
+  `PasswordResetService.reset_url_for`, valid `PASSWORD_RESET_TOKEN_TTL_HOURS`, made when the task
+  runs). It has no `user.name` greeting and nothing from the form (on an unconfirmed row the name
+  is the creator's; `render_finish_setup_email` doesn't even take the user), and is autoescaped like
+  the other notices. An unconfirmed account that has a `google_sub` (only an email change can
+  produce one: someone is using it), a staff/superuser one (`createsuperuser` leaves the email
+  unconfirmed, and an admin's account was never a stranger's to pre-register) and an
+  inactive/deleted one are left alone, no email.
+  **Trade-off, accepted:** an owner who signed up legitimately but never confirmed, and whose
+  address someone else then submits, finds their password dead until they follow that email (or
+  use forgot-password, below); an account whose email was changed through `PUT /api/account` and
+  not yet confirmed suffers the same if someone submits that address. The way back is always the
+  same: forgot-password accepts an unconfirmed account, so an owner over the email budget, or whose
+  link expired, requests a reset there.
+- Both emails share one per-address budget: `SIGNUP_EXISTING_EMAIL` (1 per hour) and
+  `SIGNUP_EXISTING_EMAIL_DAY` (3 per day), per lower-cased address across IPs. `_may_email`
+  `peek`s both and counts both only when an email is going to be queued; over either, the email is
+  skipped silently and the response is unchanged.
 - **Inactive/deleted account:** nothing is sent.
 
-Timing is not made equal: the notice is queued, the new-account path sends its confirmation inline.
+**A password reset through an emailed link confirms the account's email** (review of #127; the
+shared `PasswordResetService.reset_password`, used by the reset page and `POST
+/api/auth/reset-password`, which both also invalidate any confirmation link still out for the
+address): the link went to that address. That is how the "finish setting up" email completes, and
+it makes forgot-password work end to end for an unconfirmed account. Because that only holds for the
+address the link was *sent to*, the reset token carries it (`tokens.RESET_EMAIL_CLAIM`, set by
+`PasswordResetToken.for_user`): a link for an address the account has since left is invalid (it used
+to be able to reset the password too), a link without the claim (sent before it existed) still
+resets the password but confirms nothing, and the confirming write is conditional on the address
+still being the one on the link. Claim-on-login (file transfer) needs `email_confirmed`, so it
+becomes possible at the next login after such a reset, the same as after a confirmation link.
+Residual, not new: the confirmation email sent to the victim at the attacker's *first* signup (and
+resend-confirmation) still confirms an account with its creator's password if the victim clicks it;
+that is inherent to confirming by link and password signup, and is not closed here.
+
+**Timing is roughly equalised** (review of #127): the existing-address path hashes the submitted
+password once and discards it (`make_password`, like `ModelBackend` does for an unknown user), the
+new-account path hashes it in `create_user`, and both then queue exactly one email with
+`enqueue_after_commit` -- a new account's confirmation is the `send_signup_confirmation_email` task
+(`services.email_confirmation`, skipped if the address moved or was confirmed; a queue failure is
+logged and the page's resend-confirmation is the recovery), not an inline send. Resend-confirmation
+and `PUT /api/account` still call `send_confirmation_email` inline. What's left is a database round
+trip or two, not the SES latency or a password hash. The confirmation email itself now renders from
+an autoescaped template (`accounts/emails/email_confirmation.html`, as does the password-reset
+one): `user.name` is free text, an attacker's on an account they created.
 Not covered by this rule, on purpose: `PUT /api/account` still answers `400 Email already in use`
 for an address that has an account, but only to a logged-in caller, and every attempted *change*
 spends `ACCOUNT_EMAIL_CHANGE_USER` (5/hour per user) before that check, so an authenticated,
@@ -522,8 +571,8 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   authenticate-style outcome there to gate a failed-only counter on, so it's a flat cap instead,
   but still needs many different IPs to exhaust rather than a handful of requests from one).
 - **The rules** (`settings.RATELIMIT_RULES`, one dict, each entry commented with its reasoning):
-  login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address notice limit
-  `SIGNUP_EXISTING_EMAIL`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
+  login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address limits on the email an
+  existing address gets, `SIGNUP_EXISTING_EMAIL` and `SIGNUP_EXISTING_EMAIL_DAY`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
   `PUT /api/account`, per user), forgot-password (as above,
   and its response shape never changes so existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
   the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP, generous -- over the limit it
