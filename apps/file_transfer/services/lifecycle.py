@@ -5,7 +5,7 @@ dashboard delete-now, or an out-of-credits grace period running out (spec sectio
 from collections.abc import Callable, Collection
 
 from django.db import transaction
-from django.db.models import DateTimeField, Value
+from django.db.models import DateTimeField, Q, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -56,6 +56,7 @@ def end_transfer(
     storage: S3Storage | None = None,
     before_delete: Callable[[], None] | None = None,
     from_statuses: Collection[str] = _LIVE_STATUSES,
+    only_if: Q | None = None,
 ) -> bool:
     """Move `transfer` to a terminal availability status, optionally deleting its files and
     notifying the owner. Returns whether this call ended it.
@@ -67,6 +68,13 @@ def end_transfer(
     the claim deletes the files and notifies. A caller that knows more passes a narrower
     `from_statuses` (the grace-period job: `SUSPENDED` only), so it can't end a transfer that has
     since moved to another live status. The default is every non-terminal status.
+
+    Status is not the only precondition a caller decided on from a stale read: a hold applied
+    after delete-now's check, an expiry the owner extended, a `max_downloads` they raised, a
+    transfer re-enabled and suspended again (a fresh grace period) all leave the status in
+    `from_statuses`. `only_if` is an extra `Q` ANDed into the claim's `WHERE`, so a caller passes
+    the very condition it acted on (`expires_at__lte=now`, `held_for_review_at__isnull=True`, ...)
+    and loses the claim -- `False`, nothing done -- when the row no longer satisfies it.
 
     `status` is `TransferStatus.EXPIRED` (natural expiry, or max downloads reached),
     `TransferStatus.DELETED` (dashboard delete-now, or an out-of-credits grace period running
@@ -93,9 +101,10 @@ def end_transfer(
     if status == TransferStatus.DELETED:
         changes['deleted_at'] = Coalesce('deleted_at', Value(now, DateTimeField()))
     with transaction.atomic():
-        claimed = Transfer.objects.filter(pk=transfer.pk, status__in=from_statuses).update(
-            **changes
-        )
+        claim = Transfer.objects.filter(pk=transfer.pk, status__in=from_statuses)
+        if only_if is not None:
+            claim = claim.filter(only_if)
+        claimed = claim.update(**changes)
         if not claimed:
             return False
         if before_delete is not None:

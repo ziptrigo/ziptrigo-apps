@@ -305,7 +305,20 @@ def abort_draft(transfer: Transfer, *, storage: S3Storage | None = None) -> bool
     (which holds the row lock while it flips the status) or the anonymous confirmation has since
     activated is left alone: its files are not touched and it is not marked `DELETED`. The claim
     and the S3 work share one transaction, so a storage error rolls the status back and the next
-    `cleanup_drafts` run retries the draft."""
+    `cleanup_drafts` run retries the draft.
+
+    Two limits of that, accepted rather than designed around:
+
+    - The rollback undoes the database only. If `delete_prefix` fails partway, the objects it
+      already deleted and the multipart uploads already aborted stay gone, yet the draft is back
+      to `DRAFT`; a `finalize_send` that was waiting on the row lock would then send a transfer
+      with missing files. (Before the claim there was no lock at all, so the window is not new.)
+    - The claim holds the row lock -- on SQLite, the database write lock -- across every S3 call
+      (one `abort_multipart_upload` per file, then the prefix sweep), so a sender's own request
+      on the same draft waits for all of it.
+
+    Committing the claim first and doing the S3 work after (retried by `cleanup_drafts`, like
+    `end_transfer`'s deferred deletion) would close both; it was left out on purpose."""
     storage = storage or get_storage()
     with transaction.atomic():
         now = timezone.now()

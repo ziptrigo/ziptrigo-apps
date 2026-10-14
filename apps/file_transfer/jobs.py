@@ -6,6 +6,7 @@ job can run twice for the same tick.
 import logging
 from datetime import timedelta
 
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -111,6 +112,8 @@ def expire_transfers() -> None:
                 delete_files=True,
                 notify=True,
                 from_statuses=_EXPIRABLE_STATUSES,
+                # Not extended since the query: an owner who pushed `expires_at` out wins.
+                only_if=Q(expires_at__lte=now),
             )
         except Exception:
             logger.exception('Failed to expire transfer %s', transfer.pk)
@@ -126,6 +129,9 @@ def expire_transfers() -> None:
                     TransferStatus.EXPIRED,
                     delete_files=False,
                     from_statuses=(TransferStatus.ACTIVE,),
+                    # Still at or over the limit: an owner who raised `max_downloads` since the
+                    # count above wins. (Downloads are only ever added, never removed.)
+                    only_if=Q(max_downloads__lte=transfer.download_count),
                 )
         except Exception:
             logger.exception('Failed to end transfer %s past its download limit', transfer.pk)

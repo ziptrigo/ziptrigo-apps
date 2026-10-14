@@ -19,7 +19,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -237,6 +237,8 @@ def delete_files_past_grace_period(settings_row: FileTransferSettings | None = N
             delete_files=True,
             notify=True,
             from_statuses=(TransferStatus.SUSPENDED,),
+            # Not re-suspended since the query: a fresh suspension starts a fresh grace period.
+            only_if=Q(suspended_at__lte=cutoff),
         ):
             count += 1
     return count

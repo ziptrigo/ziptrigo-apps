@@ -212,8 +212,12 @@ def delete_transfer(request, transfer_id: UUID):
     if transfer.status == TransferStatus.DRAFT:
         if services.abort_draft(transfer):
             return 204, None
-        # Sent between the lookup above and the abort: delete it as the sent transfer it now is.
+        # Lost the claim: the draft changed between the lookup above and the abort.
         transfer.refresh_from_db()
+        if transfer.status == TransferStatus.DELETED:
+            # `cleanup_drafts` (or a second request) got there first: deleting is idempotent.
+            return 204, None
+        # Sent meanwhile: delete it as the sent transfer it now is.
     try:
         services.delete_transfer_now(transfer)
     except TransferHeldError as exc:
