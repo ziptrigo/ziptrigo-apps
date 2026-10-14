@@ -33,17 +33,42 @@ draws one 1.9 MB Form XObject 40 times needs 1.4 GB, because the renderer decode
 for every use; 40 different forms do the same; and many big streams cost pypdf minutes of CPU).
 No per-object cap can bound a renderer, so `prepare_input` runs the whole preparation in a child
 process (`_prepare_in_child`) with a hard address-space limit (`RLIMIT_AS`, `DOCUMENT_MEMORY_MB`,
-Linux only) and a wall-clock timeout (`DOCUMENT_TIMEOUT_SECONDS`). A child that runs out of
-memory, is killed, crashes or is still running at the deadline (it is killed) becomes a
-`DocumentTooComplexError`, and the worker's own memory is never at risk. The child is this very
-file run as a script (`python -I documents.py`): importing `apps.receipts.services.documents`
-would import the whole Django-dependent services package, so the file has no relative imports and
-needs none of it. It takes the bytes on stdin and answers JSON on stdout, never touches the
-database, and runs with a minimal environment (no keys or credentials) because it parses hostile
-files. Where `RLIMIT_AS` isn't enforced (macOS, so a developer machine) only the timeout bounds it.
+Linux only), a CPU-time limit (`RLIMIT_CPU`, `DOCUMENT_CPU_SECONDS`) and a wall-clock timeout
+(`DOCUMENT_TIMEOUT_SECONDS`, a multiple of the CPU limit: CPU time does not grow with the load on
+the host, so it is what refuses a CPU-heavy file, and the wall clock only catches a child that
+hangs). The child is this very file run as a script (`python -I documents.py`): importing
+`apps.receipts.services.documents` would import the whole Django-dependent services package, so
+the file has no relative imports and needs none of it. It takes the bytes on stdin and answers JSON
+on stdout, never touches the database, runs in its own session and with a minimal environment, and
+asks the kernel's OOM killer to pick it before anything else (`oom_score_adj`). Where `RLIMIT_AS`
+isn't enforced (macOS, so a developer machine) only the CPU limit and the timeout bound it.
+
+**Two kinds of failure** (`prepare_input`'s contract). Only an outcome that means *this file is
+over the budget* is a `DocumentTooComplexError` (a permanent `too_large`): the child died of
+SIGABRT (an allocation failed in native code), SIGSEGV, SIGBUS, SIGILL, SIGTRAP (native crashes)
+or SIGXCPU (the CPU limit), exited
+with status 127 after announcing that it had started (the dynamic loader giving up on a failed
+mapping, which is how x86-64 glibc can end it instead of SIGABRT), raised `MemoryError`, or said
+`too_complex`. Anything that says nothing about the file -- an ordinary
+non-zero exit, no or a malformed reply, SIGINT/SIGTERM/SIGHUP, **SIGKILL** (with `RLIMIT_AS` a
+file over its budget fails an allocation instead; SIGKILL is the kernel's OOM killer, i.e. memory
+pressure on the container or host whoever caused it), the wall-clock timeout, the child failing to
+start or to import a library -- is a `DocumentChildError`, which is
+*not* an `UnreadableDocumentError`: the caller treats it as a transient failure (retried, bounded
+by `max_ai_attempts`), so a broken image or a mistaken setting does not permanently fail every
+receipt, and a hostile file still costs only a few budgets. Both the child and the in-process path
+(`RECEIPTS_DOCUMENT_SANDBOX` off) go through `_prepare_guarded`, which maps what a library throws
+the same way, so the unit tests exercise the production branches.
+
+**This is a resource budget, not an isolation boundary.** The child gets no keys in its
+environment, but it is an ordinary process: when the worker runs as root it drops to an
+unprivileged user (see `_unprivileged_ids`; if it may not switch, it warns and runs the child as
+itself), and that is all. It can still use the network and read
+whatever that user can read; a memory-corruption bug in pdfium, libheif or libde265 is not
+contained by anything here. Keep secret files unreadable by other users (mode 0600).
 
 `RECEIPTS_DOCUMENT_SANDBOX` (settings; off under pytest so unit tests stay in-process and can
-monkeypatch internals) switches the child off, `_prepare_unsandboxed` being the in-process path.
+monkeypatch internals) switches the child off, `_prepare_unsandboxed` being the raw in-process work.
 """
 
 import base64
@@ -52,6 +77,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import warnings
@@ -95,15 +121,22 @@ PDF_RENDER_SCALE = 2
 #: maximum), is refused as unreadable instead of rendered.
 MAX_PDF_PAGE_POINTS = 14_400
 
-#: The budget of the child process `prepare_input` runs in (see the module docstring); the
-#: settings `RECEIPTS_DOCUMENT_MEMORY_MB` and `RECEIPTS_DOCUMENT_TIMEOUT_SECONDS` override them.
+#: The budget of the child process `prepare_input` runs in (see the module docstring); the settings
+#: `RECEIPTS_DOCUMENT_MEMORY_MB`, `RECEIPTS_DOCUMENT_CPU_SECONDS` and
+#: `RECEIPTS_DOCUMENT_TIMEOUT_SECONDS` override them (`apps.receipts.checks` bounds them).
 #: Address space, not resident memory (that is what `RLIMIT_AS` counts). Measured on Linux with
 #: pillow 12.3, pypdfium2 5.14 and pillow-heif 1.8: the interpreter and libraries map under 96 MB,
 #: an ordinary receipt needs 96-128 MB, and the worst legitimate inputs, a 48-megapixel HEIC or a
 #: 50-megapixel PNG, pass at 512 MB. So this leaves 2x over the worst; the shared-form PDF needs
 #: 1.4 GB and is refused. Lower it (setting) if the container has less room than that to spare.
 DOCUMENT_MEMORY_MB = 1024
-#: Preparing a receipt takes a second or so; a few pages of a big scan, ten.
+#: CPU seconds the child may use. Ordinary receipts need 0.1-1.5 s (a few pages of a big scan, a
+#: 48-megapixel photo, a few more), so this leaves an order of magnitude; a hostile file costs the
+#: worker at most this much of CPU per try.
+DOCUMENT_CPU_SECONDS = 25
+#: Wall-clock seconds before the child is killed: 2.4x the CPU limit, so that on a busy host the
+#: CPU limit (which load does not change) refuses a CPU-heavy file, and this only catches a child
+#: that hangs without using CPU.
 DOCUMENT_TIMEOUT_SECONDS = 60.0
 
 PDF = 'application/pdf'
@@ -139,6 +172,14 @@ class DocumentTooComplexError(UnreadableDocumentError):
 
 class UnsupportedDocumentError(DocumentError):
     """The file is a type this pipeline can't prepare."""
+
+
+class DocumentChildError(DocumentError):
+    """Preparing the file failed in a way that says nothing about the file: the child process
+    exited abnormally or gave no usable answer, was stopped by an outside signal, hit the
+    wall-clock timeout, or could not import a library. Deliberately *not* an
+    `UnreadableDocumentError`: the caller retries (a bounded number of times) instead of failing
+    the receipt for good."""
 
 
 @dataclass(slots=True)
@@ -275,6 +316,12 @@ def _encode_jpeg(image: Image.Image) -> bytes:
 # -- PDFs ---------------------------------------------------------------------------------------
 
 
+class _RenderFailedError(UnreadableDocumentError):
+    """pdfium could not open or render the PDF. Usually the file is corrupt, but pdfium reports a
+    failed allocation this way too (not as a `MemoryError`), which is why the child looks at how
+    much address space it had used when one of these is raised (`_reply_for`)."""
+
+
 def _pdf_text(data: bytes) -> str:
     from pypdf import PdfReader, apply_configuration
     from pypdf.errors import LimitReachedError
@@ -317,7 +364,7 @@ def _render_pdf_pages(data: bytes, max_pages: int) -> list[bytes]:
     try:
         pdf = pdfium.PdfDocument(data)
     except Exception as exc:
-        raise UnreadableDocumentError(f'The PDF could not be rendered: {exc}') from exc
+        raise _RenderFailedError(f'The PDF could not be rendered: {exc}') from exc
     try:
         images: list[bytes] = []
         for index in range(min(len(pdf), max(1, max_pages))):
@@ -332,7 +379,7 @@ def _render_pdf_pages(data: bytes, max_pages: int) -> list[bytes]:
     except UnreadableDocumentError:
         raise
     except Exception as exc:
-        raise UnreadableDocumentError(f'The PDF could not be rendered: {exc}') from exc
+        raise _RenderFailedError(f'The PDF could not be rendered: {exc}') from exc
     finally:
         pdf.close()
 
@@ -412,21 +459,65 @@ _SUPPORTED_TYPES = IMAGE_TYPES | {PDF, HTML, PLAIN}
 
 def prepare_input(data: bytes, content_type: str, *, max_pdf_pages: int = 5) -> PreparedInput:
     """Prepare `data` (of the detected `content_type`) for the AI. See the module docstring: unless
-    `settings.RECEIPTS_DOCUMENT_SANDBOX` is off it runs in a child process under a memory and time
-    budget, and a file that exceeds it raises `DocumentTooComplexError`."""
+    `settings.RECEIPTS_DOCUMENT_SANDBOX` is off it runs in a child process under a memory, CPU and
+    time budget. Raises `UnreadableDocumentError` for a file that can't be read,
+    `DocumentTooComplexError` (a subclass) for one over the budget, `UnsupportedDocumentError` for
+    a type it doesn't handle and `DocumentChildError` when the failure says nothing about the file
+    (the caller retries)."""
     if content_type not in _SUPPORTED_TYPES:
         raise UnsupportedDocumentError(f'Cannot read {content_type or "this file type"}.')
     from django.conf import settings
 
     if not getattr(settings, 'RECEIPTS_DOCUMENT_SANDBOX', True):
-        return _prepare_unsandboxed(data, content_type, max_pdf_pages=max_pdf_pages)
+        return _prepare_guarded(data, content_type, max_pdf_pages=max_pdf_pages)
     return _prepare_in_child(
         data,
         content_type,
         max_pdf_pages=max_pdf_pages,
         memory_mb=getattr(settings, 'RECEIPTS_DOCUMENT_MEMORY_MB', DOCUMENT_MEMORY_MB),
+        cpu_seconds=getattr(settings, 'RECEIPTS_DOCUMENT_CPU_SECONDS', DOCUMENT_CPU_SECONDS),
         timeout=getattr(settings, 'RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', DOCUMENT_TIMEOUT_SECONDS),
+        child_user=getattr(settings, 'RECEIPTS_DOCUMENT_CHILD_USER', CHILD_USER),
     )
+
+
+_OVER_MEMORY = 'The file needs more memory than allowed.'
+
+
+def _caused_by_memory_error(exc: BaseException | None) -> bool:
+    """Whether a `MemoryError` is anywhere in `exc`'s `__cause__` / `__context__` chain: the
+    readers above wrap whatever a library raises (a failed allocation included) in their own
+    error."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, MemoryError):
+            return True
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def _prepare_guarded(data: bytes, content_type: str, *, max_pdf_pages: int = 5) -> PreparedInput:
+    """`_prepare_unsandboxed` with what a library throws mapped to this module's errors, the one
+    place that decides it: the child (production) and the in-process path (tests) both call this,
+    so they can't disagree. A `MemoryError`, or an error caused by one, is over the budget
+    (`DocumentTooComplexError`); a library that could not be imported is the installation's fault,
+    not the file's (`DocumentChildError`); any other unforeseen exception is taken to be the file's
+    (`UnreadableDocumentError`)."""
+    try:
+        return _prepare_unsandboxed(data, content_type, max_pdf_pages=max_pdf_pages)
+    except UnsupportedDocumentError, DocumentTooComplexError:
+        raise
+    except UnreadableDocumentError as exc:
+        if _caused_by_memory_error(exc):
+            raise DocumentTooComplexError(_OVER_MEMORY) from exc
+        raise
+    except ImportError as exc:
+        raise DocumentChildError(f'A library could not be loaded: {exc}') from exc
+    except Exception as exc:  # a library failing in a way nobody foresaw: the file is the cause
+        if _caused_by_memory_error(exc):
+            raise DocumentTooComplexError(_OVER_MEMORY) from exc
+        raise UnreadableDocumentError(f'The file could not be read: {exc}') from exc
 
 
 def _prepare_unsandboxed(
@@ -460,14 +551,90 @@ def _prepare_unsandboxed(
 # -- The child process --------------------------------------------------------------------------
 #
 # Protocol: the parent writes one JSON line (`content_type`, `max_pdf_pages`, `memory_mb`,
-# `timeout`) and then the file's bytes to the child's stdin; the child answers one JSON document
-# on stdout: `{"ok": {"text", "images": [base64], "preview_jpeg": base64 | null}}` or
-# `{"error": "unreadable" | "too_complex" | "unsupported", "message"}`. Anything else (a non-zero
-# exit, a signal, no or malformed output) means the child died: it was killed for using too much
-# memory, crashed in native code, or hit the CPU limit.
+# `cpu_seconds`) and then the file's bytes to the child's stdin; once its limits are set the child
+# writes `_STARTED_MARKER`, and it then answers one JSON document on stdout: `{"ok": {"text", "images": [base64], "preview_jpeg": base64 | null}}` or
+# `{"error": "unreadable" | "too_complex" | "unsupported" | "failed", "message"}`. Anything else (a
+# non-zero exit, a signal, no or malformed output) means the child died; `_prepare_in_child` tells
+# a death that means "over the budget" from the rest.
 
 _CHILD_ENV_KEYS = ('PATH', 'LANG', 'LC_ALL', 'LD_LIBRARY_PATH', 'SYSTEMROOT')
-_STDERR_LOGGED_CHARS = 300
+#: Run the child as this user when the worker is root (settings: `RECEIPTS_DOCUMENT_CHILD_USER`;
+#: empty keeps the worker's own user).
+CHILD_USER = 'nobody'
+#: How the OS ends a child that is over the budget: a failed allocation in native code under
+#: `RLIMIT_AS` (SIGABRT), a crash, the CPU limit. **Not SIGKILL**: with the limits above a file
+#: over its budget never reaches the OOM killer, so a SIGKILL means memory pressure on the
+#: container or host (the child is its first victim, `oom_score_adj`), which a retry may survive.
+#: Any other signal (SIGINT, SIGTERM, SIGHUP, ...) came from outside and says nothing about the
+#: file either.
+_BUDGET_SIGNALS = frozenset(
+    {
+        signal.SIGABRT,
+        signal.SIGSEGV,
+        signal.SIGBUS,
+        signal.SIGXCPU,
+        # pdfium's own out-of-memory crash (`ud2` / `int3`) on x86-64, instead of an abort:
+        signal.SIGILL,
+        signal.SIGTRAP,
+    }
+)
+#: Exit statuses that mean the same, **but only from a child that had started** (see
+#: `_STARTED_MARKER`). 127 is glibc's dynamic loader giving up (`_exit(127)`) when a lazy `dlopen`
+#: or thread-local allocation fails because the address space is used up ("cannot allocate memory
+#: for thread-local data: ABORT"): on x86-64 that is how a file needing gigabytes of pdfium
+#: memory can end instead of SIGABRT. The same status before the marker is a broken install (a
+#: library the interpreter can't load), which is not the file's doing.
+_BUDGET_EXIT_STATUSES = frozenset({127})
+#: The first thing the child writes to stdout, once its limits are in force. It tells a child that
+#: ran out of memory while working (which can end with a plain exit status, above) from one that
+#: never got going.
+_STARTED_MARKER = b'#started\n'
+#: Reply kinds a child may send, and what each means to the caller.
+_REPLY_ERRORS: dict[object, type[DocumentError]] = {
+    'unreadable': UnreadableDocumentError,
+    'too_complex': DocumentTooComplexError,
+    'unsupported': UnsupportedDocumentError,
+    'failed': DocumentChildError,
+}
+_LOGGED_MESSAGE_CHARS = 200
+#: After the CPU limit (SIGXCPU) the kernel sends SIGKILL this many seconds later.
+_CPU_GRACE_SECONDS = 2
+
+
+_warned_missing_user = False
+
+
+def _unprivileged_ids(user: str) -> dict:
+    """`subprocess` arguments that run the child as `user` with no supplementary groups, when this
+    process is root and `user` exists; `{}` (the child keeps our identity) otherwise, e.g. on a
+    developer machine."""
+    global _warned_missing_user
+    if not user or not hasattr(os, 'geteuid') or os.geteuid() != 0:
+        return {}
+    import pwd
+
+    try:
+        entry = pwd.getpwnam(user)
+    except KeyError:
+        if not _warned_missing_user:
+            _warned_missing_user = True
+            logger.warning(
+                'RECEIPTS_DOCUMENT_CHILD_USER %r does not exist; the document child runs as root',
+                user,
+            )
+        return {}
+    return {'user': entry.pw_uid, 'group': entry.pw_gid, 'extra_groups': []}
+
+
+def _describe_exit(returncode: int) -> str:
+    """How a child ended, for the log: a signal's name or the exit status. Never anything the
+    child wrote."""
+    if returncode < 0:
+        try:
+            return f'signal {signal.Signals(-returncode).name}'
+        except ValueError:
+            return f'signal {-returncode}'
+    return f'exit status {returncode}'
 
 
 def _prepare_in_child(
@@ -476,69 +643,122 @@ def _prepare_in_child(
     *,
     max_pdf_pages: int,
     memory_mb: int,
+    cpu_seconds: float,
     timeout: float,
+    child_user: str = '',
     command: list[str] | None = None,
 ) -> PreparedInput:
-    """Run `_prepare_unsandboxed` in a child process; see the module docstring. `command` replaces
-    the child's command line (tests only)."""
+    """Run `_prepare_guarded` in a child process; see the module docstring. `command` replaces the
+    child's command line (tests only)."""
     request = {
         'content_type': content_type,
         'max_pdf_pages': max_pdf_pages,
         'memory_mb': memory_mb,
-        'timeout': timeout,
+        'cpu_seconds': cpu_seconds,
     }
     command = command or [sys.executable, '-I', str(Path(__file__).resolve())]
     # Only what the interpreter and its libraries need: no keys, tokens or database credentials in
     # a process that decodes files strangers sent.
     env = {key: os.environ[key] for key in _CHILD_ENV_KEYS if key in os.environ}
-    try:
-        # On a timeout, `run` kills the child and waits for it before raising.
-        result = subprocess.run(
+    payload = json.dumps(request).encode() + b'\n' + data
+
+    def run(identity: dict) -> subprocess.CompletedProcess:
+        # On a timeout, `run` kills the child and waits for it before raising. The child's own
+        # session keeps a terminal's or process group's signals (Ctrl-C on a local worker) from
+        # reaching it; `RLIMIT_CPU` still ends one whose worker is gone. Its stderr is dropped
+        # (the child answers on stdout and silences its libraries): it is unbounded and can echo
+        # the file, so nothing of it is kept or logged.
+        return subprocess.run(
             command,
-            input=json.dumps(request).encode() + b'\n' + data,
-            capture_output=True,
+            input=payload,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             timeout=timeout,
             env=env,
             check=False,
+            start_new_session=True,
+            **identity,
         )
-    except subprocess.TimeoutExpired as exc:
-        logger.warning(
-            'Preparing a %s file took more than %s s; child killed', content_type, timeout
-        )
-        raise DocumentTooComplexError('The file took too long to read.') from exc
 
-    reply = _parse_reply(result.stdout) if result.returncode == 0 else None
+    try:
+        identity = _unprivileged_ids(child_user)
+        try:
+            result = run(identity)
+        except PermissionError:
+            if not identity:
+                raise
+            # Not allowed to switch user (a container without CAP_SETUID/CAP_SETGID), or the
+            # user can't run the interpreter: better a child with the worker's own identity than
+            # every receipt failing to start one.
+            logger.warning(
+                "Could not start the document child as %r; running it as the worker's user",
+                child_user,
+            )
+            result = run({})
+    except subprocess.TimeoutExpired as exc:
+        logger.error('Preparing a %s file took more than %s s; child killed', content_type, timeout)
+        raise DocumentChildError('Reading the file took too long.') from exc
+    except OSError as exc:  # could not even start it
+        logger.error('Could not start the document child: %s', type(exc).__name__)
+        raise DocumentChildError('Reading the file could not be started.') from exc
+
+    started, stdout = _split_started(result.stdout)
+    reply = _parse_reply(stdout) if result.returncode == 0 else None
     if reply is None:
-        stderr = result.stderr.decode(errors='replace').strip()[-_STDERR_LOGGED_CHARS:]
-        logger.warning(
-            'The child preparing a %s file (%d bytes) died with exit status %s (negative: signal) '
-            'under a %d MB limit; stderr: %s',
+        exit_description = _describe_exit(result.returncode)
+        if (result.returncode < 0 and -result.returncode in _BUDGET_SIGNALS) or (
+            started and result.returncode in _BUDGET_EXIT_STATUSES
+        ):
+            logger.warning(
+                'The child preparing a %s file (%d bytes) ended with %s: over its budget '
+                '(%d MB, %s CPU s)',
+                content_type,
+                len(data),
+                exit_description,
+                memory_mb,
+                cpu_seconds,
+            )
+            raise DocumentTooComplexError('The file needs more memory or time than is allowed.')
+        logger.error(
+            'The child preparing a %s file (%d bytes) ended with %s and no usable answer',
             content_type,
             len(data),
-            result.returncode,
-            memory_mb,
-            stderr,
+            exit_description,
         )
-        raise DocumentTooComplexError('The file needs more memory or time than is allowed.')
+        raise DocumentChildError('Reading the file failed.')
 
-    if 'ok' in reply:
+    if reply.get('ok') is not None:
         ok = reply['ok']
-        return PreparedInput(
-            text=ok['text'],
-            images=[base64.b64decode(image) for image in ok['images']],
-            preview_jpeg=(
-                base64.b64decode(ok['preview_jpeg']) if ok['preview_jpeg'] is not None else None
-            ),
+        try:
+            return PreparedInput(
+                text=ok['text'],
+                images=[base64.b64decode(image, validate=True) for image in ok['images']],
+                preview_jpeg=(
+                    base64.b64decode(ok['preview_jpeg'], validate=True)
+                    if ok['preview_jpeg'] is not None
+                    else None
+                ),
+            )
+        except ValueError as exc:  # invalid base64 (`binascii.Error` is one)
+            logger.error('The child preparing a %s file sent undecodable data', content_type)
+            raise DocumentChildError('Reading the file failed.') from exc
+    error = _REPLY_ERRORS[reply['error']]
+    message = str(reply.get('message', 'The file could not be read.'))
+    if error is DocumentChildError:
+        logger.error(
+            'The child preparing a %s file reported a failure: %s',
+            content_type,
+            message[:_LOGGED_MESSAGE_CHARS],
         )
-    error = _REPLY_ERRORS.get(reply.get('error'), UnreadableDocumentError)
-    raise error(str(reply.get('message', 'The file could not be read.')))
+        message = 'Reading the file failed.'
+    raise error(message)
 
 
-_REPLY_ERRORS: dict[object, type[DocumentError]] = {
-    'unreadable': UnreadableDocumentError,
-    'too_complex': DocumentTooComplexError,
-    'unsupported': UnsupportedDocumentError,
-}
+def _split_started(stdout: bytes) -> tuple[bool, bytes]:
+    """Whether the child announced that it had started, and the rest of its output."""
+    if stdout.startswith(_STARTED_MARKER):
+        return True, stdout[len(_STARTED_MARKER) :]
+    return False, stdout
 
 
 def _parse_reply(stdout: bytes) -> dict | None:
@@ -547,7 +767,7 @@ def _parse_reply(stdout: bytes) -> dict | None:
         reply = json.loads(stdout)
         if isinstance(reply, dict):
             ok = reply.get('ok')
-            if ok is None and isinstance(reply.get('error'), str):
+            if ok is None and reply.get('error') in _REPLY_ERRORS:
                 return reply
             if (
                 isinstance(ok, dict)
@@ -562,17 +782,38 @@ def _parse_reply(stdout: bytes) -> dict | None:
     return None
 
 
-def _limit_resources(memory_mb: int, timeout: float) -> None:
+_OOM_SCORE_ADJ_PATH = '/proc/self/oom_score_adj'
+
+
+def _prefer_to_be_oom_killed(path: str = _OOM_SCORE_ADJ_PATH) -> None:
+    """In the child: make the kernel's OOM killer pick this process before the worker's other
+    processes (the largest-RSS heuristic could otherwise pick the worker, and the supervisor then
+    restarts the whole container). Raising one's own score needs no privilege; not Linux, nothing
+    to do."""
+    try:
+        with open(path, 'w') as score:
+            score.write('1000')
+    except OSError:
+        pass
+
+
+def _limit_resources(memory_mb: int, cpu_seconds: float) -> None:
     """In the child: cap the address space (Linux; elsewhere `RLIMIT_AS` isn't enforced and macOS
-    even rejects it) and the CPU time (so a child orphaned by a killed worker ends by itself)."""
+    even rejects it), the CPU time (the soft limit ends the child with SIGXCPU; it also ends a
+    child orphaned by a killed worker) and core dumps."""
     import resource
 
-    limits = [(resource.RLIMIT_CPU, int(timeout) + 1)]
+    cpu = max(1, int(cpu_seconds))
+    limits = [
+        (resource.RLIMIT_CPU, (cpu, cpu + _CPU_GRACE_SECONDS)),
+        (resource.RLIMIT_CORE, (0, 0)),
+    ]
     if sys.platform.startswith('linux'):
-        limits.append((resource.RLIMIT_AS, memory_mb * 1024 * 1024))
+        limit = memory_mb * 1024 * 1024
+        limits.append((resource.RLIMIT_AS, (limit, limit)))
     for which, value in limits:
         try:
-            resource.setrlimit(which, (value, value))
+            resource.setrlimit(which, value)
         except ValueError, OSError:
             pass
 
@@ -589,37 +830,41 @@ def _peak_address_space() -> int | None:
     return None
 
 
+#: A pdfium failure after the child had mapped this fraction of its budget is reported as the
+#: budget's (see `_RenderFailedError`). High on purpose: a corrupt but large image or PDF can map
+#: a good part of the budget without having run out of it. A known limitation: `VmPeak` counts
+#: mappings that succeeded, so one big allocation that fails well below the limit (400 MB asked
+#: at 700 of 1024 MB mapped) leaves a peak under this and the file is called unreadable instead
+#: of too complex. Both are permanent and refunded; only the label and help text differ.
+_NEAR_BUDGET = 0.85
+
+
 def _handle_request(payload: bytes) -> dict:
     """The child's work: `payload` is the request line and the file; returns the reply."""
     header, _, data = payload.partition(b'\n')
-    request = json.loads(header)
-    reply = _reply_for(data, request)
-    if reply.get('error') == 'unreadable':
-        # Hitting `RLIMIT_AS` mostly shows up as a `MemoryError`, but a library may turn a failed
-        # allocation into its own exception (pdfium: "could not be rendered"), which is not the
-        # file being corrupt. A failure after the process has used over half its budget is
-        # reported as the budget's.
-        peak = _peak_address_space()
-        if peak is not None and peak * 2 >= request['memory_mb'] * 1024 * 1024:
-            return {'error': 'too_complex', 'message': 'The file needs more memory than allowed.'}
-    return reply
+    return _reply_for(data, json.loads(header))
 
 
 def _reply_for(data: bytes, request: dict) -> dict:
     try:
-        prepared = _prepare_unsandboxed(
+        prepared = _prepare_guarded(
             data, request['content_type'], max_pdf_pages=request['max_pdf_pages']
         )
     except UnsupportedDocumentError as exc:
         return {'error': 'unsupported', 'message': str(exc)}
     except DocumentTooComplexError as exc:
         return {'error': 'too_complex', 'message': str(exc)}
+    except _RenderFailedError as exc:
+        # Hitting `RLIMIT_AS` mostly shows up as a `MemoryError`, but pdfium turns a failed
+        # allocation into its own error, which is not the file being corrupt.
+        peak = _peak_address_space()
+        if peak is not None and peak >= _NEAR_BUDGET * request['memory_mb'] * 1024 * 1024:
+            return {'error': 'too_complex', 'message': _OVER_MEMORY}
+        return {'error': 'unreadable', 'message': str(exc)}
     except UnreadableDocumentError as exc:
         return {'error': 'unreadable', 'message': str(exc)}
-    except MemoryError:
-        return {'error': 'too_complex', 'message': 'The file needs more memory than allowed.'}
-    except Exception as exc:  # a library failing in a way nobody foresaw: the file is the cause
-        return {'error': 'unreadable', 'message': f'The file could not be read: {exc}'}
+    except DocumentChildError as exc:
+        return {'error': 'failed', 'message': str(exc)}
     return {
         'ok': {
             'text': prepared.text,
@@ -634,13 +879,27 @@ def _reply_for(data: bytes, request: dict) -> dict:
 
 
 def _child_main() -> None:
+    _prefer_to_be_oom_killed()
+    # Libraries log and warn about the file (pypdf prints one line per bad object, and can echo
+    # strings from it); the parent drops stderr anyway, this keeps the child from spending time on it.
+    logging.disable(logging.CRITICAL)
+    warnings.simplefilter('ignore')
     # Keep anything a library prints to stdout out of the reply.
     reply_stream = os.fdopen(os.dup(1), 'wb')
     os.dup2(2, 1)
-    payload = sys.stdin.buffer.read()
-    request = json.loads(payload.partition(b'\n')[0])
-    _limit_resources(request['memory_mb'], request['timeout'])
-    reply_stream.write(json.dumps(_handle_request(payload)).encode())
+    try:
+        payload = sys.stdin.buffer.read()
+        request = json.loads(payload.partition(b'\n')[0])
+        _limit_resources(request['memory_mb'], request['cpu_seconds'])
+        reply_stream.write(_STARTED_MARKER)
+        reply_stream.flush()
+        reply = _handle_request(payload)
+        out = json.dumps(reply).encode()
+    except MemoryError:
+        out = json.dumps({'error': 'too_complex', 'message': _OVER_MEMORY}).encode()
+    except Exception as exc:  # a broken request or installation: nothing to do with the file
+        out = json.dumps({'error': 'failed', 'message': type(exc).__name__}).encode()
+    reply_stream.write(out)
     reply_stream.flush()
 
 

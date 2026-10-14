@@ -239,6 +239,15 @@ def _run(receipt: Receipt) -> None:
     except documents.UnreadableDocumentError as exc:
         _fail(receipt.pk, attempt_id, FailureReason.UNREADABLE, str(exc))
         return
+    except documents.DocumentChildError as exc:
+        # The child failed in a way that says nothing about the file (it crashed or timed out
+        # without hitting a limit, was signalled from outside, could not start, or is broken):
+        # not a permanent failure of this receipt. Retried like an AI outage, so a hostile file
+        # still ends after `max_ai_attempts` budgets and a mistake in the setup shows up as errors
+        # in the log, not as every receipt failed for good.
+        logger.error('Receipt %s: reading the file failed, will retry: %s', receipt.pk, exc)
+        _transient_failure(receipt.pk, attempt_id, str(exc))
+        return
 
     if prepared.preview_jpeg and not receipt.preview_key:
         _store_preview(receipt, prepared.preview_jpeg)
