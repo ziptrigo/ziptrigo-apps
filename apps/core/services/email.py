@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 import boto3
-from asgiref.sync import sync_to_async
 from botocore.exceptions import ClientError
 from django.conf import settings
 
@@ -157,40 +156,6 @@ def send_email(
         try:
             backend = build_email_backend(backend_cls)
             backend.send_email(to=to, subject=subject, text_body=text_body, html_body=html_body)
-            successes += 1
-        except Exception:
-            failures += 1
-            logger.exception('Email backend %s failed to send email', backend_name)
-
-    return successes, failures
-
-
-async def asend_email(
-    *,
-    to: str,
-    subject: str,
-    text_body: str,
-    html_body: str | None = None,
-    backend_classes: list[EmailBackendClass] | None = None,
-) -> tuple[int, int]:
-    """Send the same email using all configured backends asynchronously.
-
-    Returns a tuple of (success_count, failure_count).
-    """
-
-    if backend_classes is None:
-        backend_classes = get_email_backend()
-
-    successes = 0
-    failures = 0
-
-    for backend_cls in backend_classes:
-        backend_name = getattr(backend_cls, '__name__', str(backend_cls))
-        try:
-            backend = build_email_backend(backend_cls)
-            await sync_to_async(backend.send_email)(
-                to=to, subject=subject, text_body=text_body, html_body=html_body
-            )
             successes += 1
         except Exception:
             failures += 1

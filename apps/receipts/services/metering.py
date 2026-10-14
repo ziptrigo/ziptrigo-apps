@@ -45,11 +45,11 @@ from apps.billing.services import (
     storage_charge,
     storage_day_cost,
 )
+from apps.core.services.queue import enqueue_after_commit
 
 from ..models import Receipt, ReceiptsAccount, ReceiptsSettings, ReceiptStatus
 from .emails import send_storage_paused_email
 from .processing import enqueue_processing
-from .queue import enqueue_after_commit
 
 logger = logging.getLogger(__name__)
 

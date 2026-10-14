@@ -48,6 +48,8 @@ class TestPage:
         )
         assert 'accept="image/*" capture="environment"' in content
         assert 'receipts/js/upload.js' in content
+        # `initDropZone` lives in core's shared script, which must load before the page's own.
+        assert content.index('core/js/drop_zone.js') < content.index('receipts/js/upload.js')
         assert 'PDF, JPG, PNG, HEIC, WebP' in content
         assert 'up to 15 MB' in content and '1 credit each' in content
         assert f'data-start-url="{reverse("receipts:upload-start")}"' in content

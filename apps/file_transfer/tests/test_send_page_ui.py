@@ -14,6 +14,9 @@ def _assert_upload_controls(html: str) -> None:
         assert f'id="{element_id}"' in html, element_id
     assert 'webkitdirectory' in html
     assert 'initDropZone(dropZone' in html
+    # `initDropZone` lives in core's shared script, which must load before the page's own.
+    assert 'core/js/drop_zone.js' in html
+    assert html.index('core/js/drop_zone.js') < html.index('file_transfer/js/resumable_upload.js')
 
 
 def test_send_page_has_drop_zone_and_pickers(client, funded_user):

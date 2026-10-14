@@ -13,7 +13,6 @@ from apps.accounts.models import User
 from apps.billing.services import get_storage_price_per_gb_per_day
 
 from .models import ENDED_STATUSES, DownloadEvent, FileTransferSettings, Transfer, TransferStatus
-from .services.downloads import downloads_remaining
 from .services.emails import send_expires_soon_notification
 from .services.lifecycle import end_transfer, finish_deferred_deletion
 from .services.metering import (
@@ -122,7 +121,7 @@ def expire_transfers() -> None:
         status=TransferStatus.ACTIVE, max_downloads__isnull=False
     ):
         try:
-            remaining = downloads_remaining(transfer)
+            remaining = transfer.downloads_remaining
             if remaining is not None and remaining <= 0:
                 end_transfer(
                     transfer,

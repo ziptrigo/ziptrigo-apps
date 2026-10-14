@@ -13,14 +13,6 @@ from .password import verify_password
 from .storage import S3Storage, get_storage
 
 
-def download_count(transfer: Transfer) -> int:
-    return transfer.download_count
-
-
-def downloads_remaining(transfer: Transfer) -> int | None:
-    return transfer.downloads_remaining
-
-
 def is_available(transfer: Transfer) -> bool:
     """Whether the transfer's public page should work at all. The page itself must never say
     *why* it doesn't (spec section 3): expired, disabled, suspended, deleted, taken down,
@@ -31,7 +23,7 @@ def is_available(transfer: Transfer) -> bool:
         return False
     if transfer.expires_at and transfer.expires_at <= timezone.now():
         return False
-    remaining = downloads_remaining(transfer)
+    remaining = transfer.downloads_remaining
     if remaining is not None and remaining <= 0:
         return False
     return True
@@ -92,7 +84,7 @@ def record_download(
         # presigned URL this call is about to hand back must still resolve, so
         # `expire_transfers` removes the objects once it's had time to expire instead. That job
         # also re-checks this ending as a fallback in case the process dies right here.
-        remaining = downloads_remaining(locked_transfer)
+        remaining = locked_transfer.downloads_remaining
         if remaining is not None and remaining <= 0:
             end_transfer(locked_transfer, TransferStatus.EXPIRED, delete_files=False)
 

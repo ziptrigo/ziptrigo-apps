@@ -33,7 +33,6 @@ from apps.core.services.storage import ObjectTooLargeError
 from ..forms import ReceiptForm
 from ..models import (
     IN_PROGRESS_STATUSES,
-    FailureReason,
     Receipt,
     ReceiptCategory,
     ReceiptsSettings,
@@ -50,6 +49,7 @@ from ..services import (
     trash,
     update_receipt,
 )
+from ..services.actions import NOT_REPROCESSABLE
 from ..services.currencies import ISO_4217_CODES
 from ..services.documents import HEIC, HTML, JPEG, PDF, PLAIN, PNG, WEBP
 from ..services.vendors import clean_name
@@ -73,7 +73,6 @@ _MAX_AUTO_POLLS = 40
 
 _BODY_TYPES = (HTML, PLAIN)
 _IMAGE_TYPES = (JPEG, PNG, WEBP, HEIC)
-_NOT_REPROCESSABLE = (FailureReason.UNSUPPORTED_TYPE, FailureReason.TOO_LARGE)
 
 
 # -- The page -----------------------------------------------------------------------------------
@@ -139,7 +138,7 @@ def _detail_context(request: AuthenticatedHttpRequest, receipt: Receipt) -> dict
             not trashed
             and not in_progress
             and bool(receipt.file_key)
-            and receipt.failure_reason not in _NOT_REPROCESSABLE
+            and receipt.failure_reason not in NOT_REPROCESSABLE
         ),
         'price_per_file': price,
         'categories': ReceiptCategory.objects.filter(user=request.user),

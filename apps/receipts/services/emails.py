@@ -26,6 +26,7 @@ from django.utils.html import format_html, format_html_join
 
 from apps.accounts.models import User
 from apps.core.services.email import send_email
+from apps.core.services.queue import enqueue_after_commit
 
 from ..models import (
     IN_PROGRESS_STATUSES,
@@ -34,7 +35,6 @@ from ..models import (
     Receipt,
     ReceiptStatus,
 )
-from .queue import enqueue_after_commit
 
 logger = logging.getLogger(__name__)
 

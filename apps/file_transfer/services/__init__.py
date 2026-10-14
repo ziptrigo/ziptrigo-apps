@@ -31,8 +31,6 @@ from .anonymous import (
 from .claim import claim_transfers_for_user
 from .downloads import (
     check_password,
-    download_count,
-    downloads_remaining,
     is_available,
     record_download,
     requires_password,
@@ -95,8 +93,6 @@ __all__ = [
     'delete_transfer_now',
     'disable_transfer',
     'dismiss_report',
-    'download_count',
-    'downloads_remaining',
     'end_transfer',
     'ensure_zip_build_started',
     'finalize_send',

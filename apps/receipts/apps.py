@@ -97,10 +97,10 @@ class ReceiptsConfig(AppConfig):
         from django.dispatch import receiver
 
         from apps.billing.signals import credits_added
+        from apps.core.services.queue import enqueue_after_commit
 
         from .models import ReceiptsAccount
         from .services import lifecycle, metering
-        from .services.queue import enqueue_after_commit
 
         logger = logging.getLogger(__name__)
 

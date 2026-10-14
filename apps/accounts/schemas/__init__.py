@@ -8,12 +8,6 @@ from .auth import (
     ResendConfirmationRequest,
     TokenResponse,
 )
-from .users import (
-    UserCreateRequest,
-    UserDeactivateRequest,
-    UserResponse,
-    UserUpdateRequest,
-)
 
 __all__ = [
     'AccountUpdateRequest',
@@ -25,8 +19,4 @@ __all__ = [
     'RefreshRequest',
     'ResendConfirmationRequest',
     'TokenResponse',
-    'UserCreateRequest',
-    'UserDeactivateRequest',
-    'UserResponse',
-    'UserUpdateRequest',
 ]

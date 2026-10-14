@@ -54,7 +54,7 @@ EDITABLE_FIELDS = (*EXTRACTED_FIELDS, 'notes', 'vendor_id')
 
 MAX_CATEGORIES = 100
 
-_NOT_REPROCESSABLE = (FailureReason.UNSUPPORTED_TYPE, FailureReason.TOO_LARGE)
+NOT_REPROCESSABLE = (FailureReason.UNSUPPORTED_TYPE, FailureReason.TOO_LARGE)
 
 
 # -- Editing a receipt ----------------------------------------------------------------------------
@@ -296,11 +296,7 @@ def reprocess(receipt: Receipt) -> Receipt:
             raise ValidationError('Restore this receipt from the Trash first.')
         if locked.status in IN_PROGRESS_STATUSES:
             raise ValidationError('This receipt is already being processed.')
-        if (
-            locked.failure_reason in _NOT_REPROCESSABLE
-            or not locked.uploaded
-            or not locked.file_key
-        ):
+        if locked.failure_reason in NOT_REPROCESSABLE or not locked.uploaded or not locked.file_key:
             raise ValidationError('This file cannot be processed again.')
         if is_frozen(locked.user):
             raise AccountFrozenError()

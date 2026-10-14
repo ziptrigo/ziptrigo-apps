@@ -19,7 +19,7 @@ def update_account(request, payload: AccountUpdateRequest):
 
     Requires JWT authentication.
     """
-    # `request` is left unannotated (as elsewhere in this package, e.g. `routers/users.py`)
+    # `request` is left unannotated (as elsewhere in this package, e.g. `routers/auth.py`)
     # rather than typed `HttpRequest`, which doesn't declare `.auth` -- `JWTAuth` (see `jwt_auth`
     # above) sets it to the authenticated `User` at runtime.
     user: User = request.auth

@@ -34,7 +34,7 @@ from ninja.errors import HttpError
 
 from apps.billing.services import InsufficientCreditsError
 
-from ..models import Receipt, ReceiptStatus
+from ..models import IN_PROGRESS_STATUSES, Receipt
 from ..services import AccountFrozenError
 from ..services.filters import DEFAULT_SORT, ReceiptFilters
 
@@ -45,11 +45,6 @@ MAX_LIMIT = 100
 #: A `status=` shorthand for everything the pipeline still owns, like the dashboard's Processing
 #: tab (`received`, `processing`, `waiting_for_credits`).
 IN_PROGRESS = 'in_progress'
-_IN_PROGRESS_STATUSES = (
-    ReceiptStatus.RECEIVED,
-    ReceiptStatus.PROCESSING,
-    ReceiptStatus.WAITING_FOR_CREDITS,
-)
 
 
 def validation_detail(exc: ValidationError) -> str:
@@ -119,7 +114,7 @@ def receipt_filters(
     if status:
         statuses = []
         for part in (p.strip() for p in status.split(',')):
-            statuses.extend(_IN_PROGRESS_STATUSES if part == IN_PROGRESS else [part])
+            statuses.extend(IN_PROGRESS_STATUSES if part == IN_PROGRESS else [part])
     return ReceiptFilters(
         status=statuses,
         category=category or None,
