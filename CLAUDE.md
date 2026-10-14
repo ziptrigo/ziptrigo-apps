@@ -274,6 +274,18 @@ non-local `BASE_URL` triggers `accounts.W003` (shown by `manage.py check` and th
 `migrate` step). Login, and "Sign up with Google", have no captcha. README's "Signup captcha" has
 the Cloudflare setup.
 
+**Email case** (audit #15): `User.email` is stored with `normalize_email` (domain lower-cased, local
+part as typed) and its unique constraint is case-sensitive. The login, forgot-password,
+resend-confirmation and register forms all share `forms.email.NormalizedEmailMixin.clean_email`
+(like the API's `EmailStr`), so a mixed-case *domain* finds the account on every surface. Login and
+the reset/resend lookups stay exact on the local part (legacy rows may differ only by case).
+Existence/uniqueness checks ignore case entirely (`email__iexact`: `create_account`,
+`handle_signup_for_existing_email`, `PUT /api/account`), so `Alice@gmail.com` next to
+`alice@gmail.com` is the existing-account path / a 400, never a second row (Google linking matches
+`iexact` and refuses two rows as `AccountConflict`). Where legacy case-duplicates exist, the signup
+path picks the oldest. A `UniqueConstraint(Lower('email'))` is deliberately not added: it needs a
+check of prod data for existing duplicates first.
+
 **No page or endpoint reveals whether an email address has an account** (issue #125; forgot-password
 and resend-confirmation already worked this way). The register page gives the same answer for every
 valid submission that passed the captcha and `SIGNUP_IP`: the same redirect to `accounts:created`

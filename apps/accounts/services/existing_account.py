@@ -74,7 +74,9 @@ def handle_signup_for_existing_email(email: str, password: str) -> None:
     user_pk = None
     try:
         make_password(password)
-        user = User.objects.filter(email=email).first()
+        # Ignoring case, like `create_account`'s check that sent us here. Rows that differ only
+        # by case can exist from before that check did (legacy); the oldest is "the" account.
+        user = User.objects.filter(email__iexact=email).order_by('created_at', 'pk').first()
         if user is None:
             # The row `create_account` collided with is gone again (or the collision was on
             # something else): nobody to tell.
