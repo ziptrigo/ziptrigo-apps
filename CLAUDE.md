@@ -697,7 +697,7 @@ nested path parameter like `/transfers/{id}/files/...`. `TransferSchema.recipien
 a separate lookup (`POST /transfers/{id}/recipients/{recipient_id}/resend`, `admin/filetransfer.py
 resend`). Status codes: 400 for a service `ValidationError` (including a malformed `PATCH` --
 `expiry_date` without `expiry_choice`, or `?filter=` outside `active`/`ended`/`all`; an `expiry_date`
-with no UTC offset is read in `TIME_ZONE` by `resolve_expiry`, not a 500), **402** for
+with no UTC offset is read in `TIME_ZONE` by `resolve_expiry`, not a 500; a date alone, `2027-12-31`, means the end of that day like the web date picker -- `schemas.transfer.ExpiryDate`), **402** for
 `InsufficientCreditsError` (a documented choice over 400 -- the request is well-formed, the account
 just can't cover it right now), 404 for another user's transfer (never 403, so it doesn't confirm
 the id exists), 429 via the site-wide rate-limit handler (`FT_UPLOAD_USER`, same rule and budget as
