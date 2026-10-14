@@ -25,6 +25,7 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import get_balance
 from apps.core import ratelimit
+from apps.core.json_numbers import whole_number
 
 from ..models import Receipt, ReceiptsSettings
 from ..services import AccountFrozenError, complete_upload, start_upload
@@ -53,6 +54,13 @@ def upload_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     )
 
 
+def _parse_size(raw: object) -> int | None:
+    """The declared size as a whole number of bytes, or `None` for anything else (including a
+    negative one). Whether it is within the allowed range is `start_upload`'s to say."""
+    size = whole_number(raw)
+    return size if size is not None and size >= 0 else None
+
+
 @login_required
 @require_POST
 def upload_start(request: AuthenticatedHttpRequest) -> HttpResponse:
@@ -64,10 +72,9 @@ def upload_start(request: AuthenticatedHttpRequest) -> HttpResponse:
     name = str(body.get('name', ''))
     content_type = str(body.get('content_type', ''))
     checksum = str(body.get('checksum_sha256', ''))
-    try:
-        size = int(body.get('size', 0))
-    except TypeError, ValueError:
-        return JsonResponse({'error': 'The file size must be a number.'}, status=422)
+    size = _parse_size(body.get('size', 0))
+    if size is None:
+        return JsonResponse({'error': 'The file size must be a whole number of bytes.'}, status=422)
     if not name.strip():
         return JsonResponse({'error': 'The file needs a name.'}, status=422)
 

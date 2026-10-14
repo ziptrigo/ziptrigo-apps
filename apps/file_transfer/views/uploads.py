@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
+from apps.core.json_numbers import whole_number
 
 from .. import services
 from ..models import Transfer, TransferFile, TransferStatus
@@ -25,6 +26,22 @@ def _json_body(request: HttpRequest) -> dict:
         return json.loads(request.body or b'{}')
     except json.JSONDecodeError:
         return {}
+
+
+def parse_parts(raw_parts: object) -> list[dict] | None:
+    """`[{part_number, checksum_sha256}, ...]` from a request body, or `None` if it isn't one (a
+    part number that isn't a whole number included). Also used by the anonymous twin."""
+    if not isinstance(raw_parts, list):
+        return None
+    parts = []
+    for part in raw_parts:
+        if not isinstance(part, dict) or 'checksum_sha256' not in part:
+            return None
+        number = whole_number(part.get('part_number'))
+        if number is None:
+            return None
+        parts.append({'part_number': number, 'checksum_sha256': str(part['checksum_sha256'])})
+    return parts
 
 
 def _draft(request: AuthenticatedHttpRequest, draft_id: str) -> Transfer:
@@ -45,21 +62,14 @@ def add_file(request: AuthenticatedHttpRequest, draft_id: str) -> HttpResponse:
     transfer = _draft(request, draft_id)
     body = _json_body(request)
     name = str(body.get('name', ''))[:255].strip()
-    try:
-        size = int(body.get('size', 0))
-    except TypeError, ValueError:
+    size = whole_number(body.get('size', 0))
+    if size is None:
         return JsonResponse({'error': 'size must be an integer.'}, status=422)
 
     if not name:
         return JsonResponse({'error': 'name is required.'}, status=422)
 
-    client_last_modified = body.get('client_last_modified')
-    try:
-        client_last_modified = (
-            int(client_last_modified) if client_last_modified is not None else None
-        )
-    except TypeError, ValueError:
-        client_last_modified = None
+    client_last_modified = whole_number(body.get('client_last_modified'))
 
     try:
         file = services.add_file(transfer, name, size, client_last_modified=client_last_modified)
@@ -91,13 +101,8 @@ def part_urls(request: AuthenticatedHttpRequest, draft_id: str, file_id: str) ->
         return ratelimit.json_response(limited)
     file = _file(request, draft_id, file_id)
     body = _json_body(request)
-    raw_parts = body.get('parts', [])
-    try:
-        parts = [
-            {'part_number': int(p['part_number']), 'checksum_sha256': str(p['checksum_sha256'])}
-            for p in raw_parts
-        ]
-    except TypeError, ValueError, KeyError:
+    parts = parse_parts(body.get('parts', []))
+    if parts is None:
         return JsonResponse(
             {'error': 'parts must be a list of {part_number, checksum_sha256}.'}, status=422
         )

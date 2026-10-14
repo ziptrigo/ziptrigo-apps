@@ -2020,7 +2020,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     core's shared `initDropZone`, `core/js/drop_zone.js`, with the empty-drop alert turned off), "Choose files" and "Take photo" (`accept="image/*"
     capture="environment"`). Per file: refuse an unsupported type/size/empty file in the row; the
     browser computes SHA-256 (base64); `POST upload/start/` (session + CSRF, JSON in/out,
-    `RECEIPTS_UPLOAD_USER`; 422 rejected, 402 frozen, 429 waits for `Retry-After` up to 3 times) ->
+    `RECEIPTS_UPLOAD_USER`; a `size` that isn't a whole number of bytes, `1e400` included, is a 422 -- every JSON size,
+    timestamp and part number in the web upload views, file transfer's too, goes through
+    `apps.core.json_numbers.whole_number`, never a bare `int()`; 422 rejected, 402 frozen, 429 waits for `Retry-After` up to 3 times) ->
     XHR `PUT` to the presigned URL with exactly the headers the server returned (never
     `Content-Length`, which the browser sets) and a type-less Blob so no `Content-Type` is sent (it
     would otherwise need to be in the bucket's CORS `AllowedHeaders`) -> `POST upload/<id>/complete/`.
