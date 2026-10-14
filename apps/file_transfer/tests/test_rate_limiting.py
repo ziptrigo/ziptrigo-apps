@@ -14,7 +14,13 @@ from django.utils import timezone
 from ..models import Transfer, TransferStatus
 from ..services import password as password_service
 
-pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.unit,
+    # Every test here makes two or more requests against a limit of 1-2 per fixed window; see the
+    # fixture's docstring for why a real clock makes that flaky.
+    pytest.mark.usefixtures('ratelimit_clock'),
+]
 
 
 def _post_json(client, url, payload):
@@ -499,9 +505,9 @@ class TestRecipientEmailRateLimit:
         response = client.post(url, **hx)
 
         assert response.status_code == 429
-        assert 'try again in' in response.content.decode()
-        assert 'minutes' in response.content.decode()
-        assert int(response['Retry-After']) > 60
+        # 2,600 s left of the hourly window: the message and the header say the same thing.
+        assert response['Retry-After'] == '2600'
+        assert 'Too many requests. Please try again in 44 minutes.' in response.content.decode()
 
     def test_api_429_says_how_long_to_wait(self, client, active, queued, settings, funded_user):
         from apps.accounts.tokens import CustomAccessToken
@@ -515,8 +521,27 @@ class TestRecipientEmailRateLimit:
         response = client.post(url, **headers)
 
         assert response.status_code == 429
-        assert 'minutes' in response.json()['detail']
-        assert int(response['Retry-After']) > 60
+        assert response['Retry-After'] == '2600'
+        assert response.json()['detail'] == 'Too many requests. Please try again in 44 minutes.'
+
+    def test_wait_shrinks_with_the_clock_and_ends_with_the_window(
+        self, client, active, queued, settings, ratelimit_clock
+    ):
+        transfer, recipient = active
+        _enable(settings, 'FT_RECIPIENT_EMAIL_USER', limit=1, window=3600)
+        client.force_login(transfer.owner)
+        url = reverse('file_transfer:resend-recipient', args=[transfer.id, recipient.id])
+        hx = {'HTTP_HX_REQUEST': 'true'}
+
+        client.post(url, **hx)
+        ratelimit_clock.advance(600)
+        response = client.post(url, **hx)
+        assert response['Retry-After'] == '2000'
+        assert 'try again in 34 minutes.' in response.content.decode()
+
+        ratelimit_clock.advance(2000)  # the window is over: a fresh budget
+        assert client.post(url, **hx).status_code == 200
+        assert len(queued) == 2
 
     def test_api_refusals_do_not_spend_the_budget(
         self, client, active, queued, settings, funded_user

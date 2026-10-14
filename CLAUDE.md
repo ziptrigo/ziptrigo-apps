@@ -581,7 +581,11 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   under pytest) -- tests that exercise a limit turn it on with the `settings` fixture; the DB
   storage path needs no special test cleanup (each test's own DB transaction rolls it back), and
   `conftest.py`'s autouse `_clear_ratelimit_cache` fixture still clears the `'ratelimit'` cache
-  alias for tests that opt into the cache storage path.
+  alias for tests that opt into the cache storage path. A test that makes two requests against a
+  limit per fixed window, or asserts on `Retry-After` / `retry_message`, uses the root
+  `conftest.py`'s `ratelimit_clock` fixture (freezes the limiter's own clock 1,000 s into an hour,
+  `advance()` to move it): windows are aligned to the wall clock, so with the real one such a test
+  fails whenever it runs within a window length of a boundary.
 - **Responses**: ninja endpoints call `ratelimit.enforce(result)`, which raises `RateLimitExceeded`
   -- one exception handler in `config/api.py` turns that into `{"detail": ...}` with a
   `Retry-After` header for every router. Plain/HTMX views call `ratelimit.web_response(request,

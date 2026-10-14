@@ -7,6 +7,7 @@ import pytest
 from django.core.cache import caches
 
 from apps.accounts.tests.factories import UserFactory
+from apps.core.ratelimit import limiter
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +21,45 @@ def _clear_ratelimit_cache():
     caches['ratelimit'].clear()
     yield
     caches['ratelimit'].clear()
+
+
+class RateLimitClock:
+    """The wall clock `apps.core.ratelimit.limiter` reads, frozen until a test moves it."""
+
+    #: A multiple of 3600, so a fixed window of 60 s or one hour starts exactly here.
+    EPOCH = 500_000 * 3600
+
+    def __init__(self, now: float):
+        self.now = now
+
+    def time(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def ratelimit_clock(monkeypatch):
+    """Freeze the clock the rate limiter reads, 1,000 s into an hour (and so 40 s into a minute).
+
+    The limiter's windows are fixed and aligned to the wall clock (see
+    `apps/core/ratelimit/limiter.py`), so a test that makes two requests against a limit of 1 per
+    window fails whenever the real clock crosses a window boundary between them (the second
+    request lands in a new window and is allowed), and one that checks `Retry-After` or the
+    "try again in N minutes" message depends on how far into the window the run happens to be.
+    Both only show up when the test runs near a boundary or slowly. With the clock frozen a
+    window never ends mid-test and `retry_after` is exact: 2,600 s (44 minutes) for an hourly
+    rule, 20 s for a one-minute one. `advance()` moves it deliberately.
+
+    Only the limiter's own clock is replaced (its module-level `time`), not `time.time`
+    globally, so nothing else (sessions, token expiry, the database) sees the frozen time. Not
+    autouse: `core`'s limiter tests pass `now=` themselves, and the storage-error and cache
+    paths would not want it.
+    """
+    clock = RateLimitClock(RateLimitClock.EPOCH + 1000)
+    monkeypatch.setattr(limiter, 'time', clock)
+    return clock
 
 
 @pytest.fixture(autouse=True)
