@@ -7,7 +7,13 @@ from django.utils import timezone
 
 from apps.billing.services import InsufficientCreditsError, get_balance, spend_credits
 
-from ..models import BlockedSender, BlockedSenderKind, TransferRecipient, TransferStatus
+from ..models import (
+    BlockedSender,
+    BlockedSenderKind,
+    Transfer,
+    TransferRecipient,
+    TransferStatus,
+)
 from ..services import actions
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -299,3 +305,25 @@ def test_reenable_suspended_refused_when_balance_below_a_days_cost(
     with pytest.raises(InsufficientCreditsError, match='at least 3 credits'):
         actions.reenable_transfer_action(draft_transfer)
     assert draft_transfer.status == TransferStatus.SUSPENDED
+
+
+def test_reenable_disabled_refused_when_balance_below_a_days_cost(draft_transfer, billing_settings):
+    """The DISABLED path needs a day's cost too -- it's the next charge the transfer incurs."""
+    billing_settings.storage_price_per_gb_per_day = Decimal('3.0')
+    billing_settings.save()
+    _active(draft_transfer, status=TransferStatus.DISABLED, size_bytes=1024**3)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner) - 2, source='test')
+
+    with pytest.raises(InsufficientCreditsError, match='at least 3 credits'):
+        actions.reenable_transfer_action(draft_transfer)
+    assert draft_transfer.status == TransferStatus.DISABLED
+
+
+def test_reenable_refused_when_the_transfer_ended_since_it_was_read(draft_transfer):
+    _active(draft_transfer, status=TransferStatus.SUSPENDED, suspended_at=timezone.now())
+    Transfer.objects.filter(pk=draft_transfer.pk).update(status=TransferStatus.DELETED)
+
+    with pytest.raises(ValidationError, match='can no longer be re-enabled'):
+        actions.reenable_transfer_action(draft_transfer)
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DELETED

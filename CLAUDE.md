@@ -143,7 +143,14 @@ Each app may import only from layers below it. Enforced by the import-linter con
   the balance covers *its own* next day (`services.metering.daily_cost`: `ceil(price x size / GiB)`,
   at least 1; several of a user's: oldest suspension first, running sum) -- the receiver, the daily
   fallback and `reenable_transfer_action` all apply it, since a flat 1 credit would forgive the day
-  it couldn't pay on every run (free storage).
+  it couldn't pay on every run (free storage). Re-enabling a *disabled* transfer needs a day's cost
+  too, on purpose: it is the next charge the transfer incurs. The write is conditional on the status
+  that was read (`reenable_transfer` returns whether it matched), so racing the grace-period delete
+  or delete-now can't resurrect an ended transfer. A suspended transfer's billing clock restarts at
+  now; a disabled one keeps its `last_billed_at`, clamped to no earlier than 24h ago, so
+  disable + re-enable can't dodge the day in progress and a long disabled stretch is still not a
+  backlog. A transfer held for abuse review is re-enabled without counting toward the running sum.
+  The suspension email states the credits needed.
 - The same shape covers background jobs: `core` can't import a product to discover its jobs, so
   `apps.core.scheduler` is a registry (like `apps.core.products`) that a product fills from its own
   `AppConfig.ready()`. See "Queue and scheduler" below.

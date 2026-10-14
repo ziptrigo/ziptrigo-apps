@@ -62,8 +62,9 @@ def reenable_transfer_action(transfer: Transfer, *, ip: str | None = None) -> Tr
     this transfer's storage (`metering.daily_cost`, at least spec section 7's 1-credit minimum) --
     a disabled transfer resumes being metered the moment it's re-enabled, so an owner who can't
     pay for it shouldn't be able to un-pause one just to have it suspended again on the next
-    metering tick, and (suspended) have the day it couldn't pay forgiven every time. The billing
-    clock resets to now either way.
+    metering tick, and (suspended) have the day it couldn't pay forgiven every time. A suspended
+    transfer's billing clock restarts at now; a disabled one keeps its own (see
+    `metering.reenable_transfer`), so disabling and re-enabling never skips a charge.
 
     Blocked (issue #59 code review) the same as re-adding recipients or resending: re-enabling is
     itself a send path (the link starts working, and delivering to it again, again), and refused
@@ -80,7 +81,10 @@ def reenable_transfer_action(transfer: Transfer, *, ip: str | None = None) -> Tr
                 f'You need at least {needed} {"credit" if needed == 1 else "credits"} '
                 'to re-enable this transfer (one day of storage).'
             )
-    reenable_transfer(transfer)
+    if not reenable_transfer(transfer):
+        # The row changed under us (ended by the grace-period job or delete-now, or re-enabled in
+        # another tab): the conditional write matched nothing, so nothing was resurrected.
+        raise ValidationError('This transfer can no longer be re-enabled.')
     return transfer
 
 

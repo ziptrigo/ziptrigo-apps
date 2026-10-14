@@ -435,7 +435,6 @@ def test_suspended_before_the_run_is_reenabled_once_balance_covers_a_day(
     assert draft_transfer.status == TransferStatus.SUSPENDED
 
     add_credits(draft_transfer.owner, 1, description='top up', source='test')
-    Transfer.objects.filter(pk=draft_transfer.pk).update(status=TransferStatus.SUSPENDED)
     jobs.meter_transfers()
 
     draft_transfer.refresh_from_db()

@@ -572,6 +572,31 @@ def test_resend_returns_409_when_held(client, draft_transfer, uploaded_file, aut
     assert response.status_code == 409
 
 
+def test_update_reenable_returns_402_below_a_days_cost(
+    client, draft_transfer, uploaded_file, auth_headers, billing_settings
+):
+    from decimal import Decimal
+
+    from ..services.send import SendOptions, finalize_send
+
+    billing_settings.storage_price_per_gb_per_day = Decimal('3.0')
+    billing_settings.save()
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    draft_transfer.status = TransferStatus.SUSPENDED
+    draft_transfer.size_bytes = 1024**3
+    draft_transfer.save()
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner) - 2, source='test')
+
+    response = _patch(
+        client, f'/api/ft/transfers/{draft_transfer.id}', {'disabled': False}, auth_headers
+    )
+
+    assert response.status_code == 402
+    assert 'at least 3 credits' in response.json()['detail']
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED
+
+
 def test_update_reenable_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
     from django.utils import timezone
 
