@@ -7,14 +7,23 @@ differs from an existing address only by case (Google sign-in matches `iexact` a
 both rows as a conflict forever).
 """
 
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth import SESSION_KEY
 from django.urls import reverse
+from django.utils import timezone
 
+from apps.accounts.forms.admin import UserAdminChangeForm, UserAdminCreationForm
 from apps.accounts.models import User
 from apps.accounts.services import google_oauth
-from apps.accounts.services.existing_account import handle_signup_for_existing_email
+from apps.accounts.services.email_confirmation import get_email_confirmation_service
+from apps.accounts.services.existing_account import (
+    FINISH_SETUP_SUBJECT,
+    handle_signup_for_existing_email,
+)
 from apps.accounts.tokens import CustomAccessToken
+from apps.core.models import EmailVerification
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -113,11 +122,168 @@ def test_signup_with_a_case_variant_sends_the_existing_account_its_notice(
     assert [m['to'] for m in sent] == [user.email]
 
 
-def test_existing_account_lookup_survives_legacy_duplicates(user):
-    """Rows that differ only by case can already exist; the oldest is the account, no crash."""
-    User.objects.create_user(email='TestUser@example.com', password='x1y2z3w4')
+@pytest.fixture
+def legacy_pair(user):
+    """Two rows that differ only by case, as could exist before signup checked for it: the
+    fixture user `testuser@example.com` (older) and `TestUser@example.com` (newer)."""
+    newer = User.objects.create_user(email='TestUser@example.com', password='x1y2z3w4')
+    newer.email_confirmed = True
+    newer.save(update_fields=['email_confirmed'])
+    now = timezone.now()
+    User.objects.filter(pk=user.pk).update(created_at=now - timedelta(days=1))
+    User.objects.filter(pk=newer.pk).update(created_at=now)
+    return user, newer
 
-    handle_signup_for_existing_email('testuser@example.com', 'password123')  # must not raise
+
+@pytest.fixture
+def notices(monkeypatch) -> list[dict]:
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        'apps.accounts.services.existing_account.send_email', lambda **kw: sent.append(kw)
+    )
+    return sent
+
+
+def _handle(email, django_capture_on_commit_callbacks, caplog):
+    """Run the handler as a request would, and prove it did not swallow an error on the way:
+    it never raises, so a lookup that blew up would otherwise look like a pass."""
+    with django_capture_on_commit_callbacks(execute=True):
+        handle_signup_for_existing_email(email, 'password123')
+    assert 'Could not handle a signup' not in caplog.text
+
+
+def test_existing_account_lookup_survives_legacy_duplicates(
+    legacy_pair, notices, django_capture_on_commit_callbacks, caplog
+):
+    """Rows that differ only by case can already exist: no crash (a `.get()` would raise
+    `MultipleObjectsReturned`, which the handler swallows), and exactly one notice goes out.
+    With no exact match the oldest row is the account."""
+    older, _newer = legacy_pair
+
+    _handle('TESTUSER@example.com', django_capture_on_commit_callbacks, caplog)
+
+    assert [m['to'] for m in notices] == [older.email]
+
+
+def test_existing_account_lookup_prefers_the_exact_spelling_among_legacy_duplicates(
+    legacy_pair, notices, django_capture_on_commit_callbacks, caplog
+):
+    _older, newer = legacy_pair
+
+    _handle(newer.email, django_capture_on_commit_callbacks, caplog)
+
+    assert [m['to'] for m in notices] == ['TestUser@example.com']
+
+
+def test_existing_account_lookup_exact_match_wins_for_the_older_row_too(
+    legacy_pair, notices, django_capture_on_commit_callbacks, caplog
+):
+    older, _newer = legacy_pair
+
+    _handle(older.email, django_capture_on_commit_callbacks, caplog)
+
+    assert [m['to'] for m in notices] == ['testuser@example.com']
+
+
+def test_signup_with_a_case_variant_locks_down_the_stored_unconfirmed_row(
+    client, user, monkeypatch, django_capture_on_commit_callbacks
+):
+    """The locked-down and mailed row is the stored one, whatever spelling was typed."""
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        'apps.accounts.services.existing_account.send_email', lambda **kw: sent.append(kw)
+    )
+    monkeypatch.setattr('apps.core.services.email_verification.send_email', lambda **kw: (1, 0))
+    user.email_confirmed = False
+    user.email_confirmed_at = None
+    user.save()
+    get_email_confirmation_service().send_confirmation_email(user)
+    pending = EmailVerification.objects.filter(
+        email__iexact=user.email, confirmed_at__isnull=True, invalidated_at__isnull=True
+    )
+    assert pending.exists()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = client.post(
+            reverse('accounts:register'),
+            {'name': 'Intruder', 'email': 'TestUser@Example.com', 'password': 'intruder123'},
+            **HTMX,
+        )
+
+    assert response.status_code == 200
+    assert User.objects.count() == 1
+    after = User.objects.get(pk=user.pk)
+    assert not after.has_usable_password()
+    assert after.email == 'testuser@example.com'
+    assert not pending.exists()
+    assert [(m['to'], m['subject']) for m in sent] == [
+        ('testuser@example.com', FINISH_SETUP_SUBJECT)
+    ]
+
+
+# -- the admin forms --
+
+
+def test_admin_creation_form_refuses_a_case_variant_of_an_existing_address(user):
+    form = UserAdminCreationForm(
+        {
+            'email': 'TestUser@example.com',
+            'name': 'Dup',
+            'usable_password': 'true',
+            'password1': 'S3cure-pass-42',
+            'password2': 'S3cure-pass-42',
+        }
+    )
+
+    assert not form.is_valid()
+    assert form.errors['email'] == ['A user with this email already exists.']
+
+
+def test_admin_creation_form_normalizes_the_domain(db):
+    form = UserAdminCreationForm(
+        {
+            'email': 'New@Example.COM',
+            'name': 'New',
+            'usable_password': 'true',
+            'password1': 'S3cure-pass-42',
+            'password2': 'S3cure-pass-42',
+        }
+    )
+
+    assert form.is_valid(), form.errors
+    assert form.save().email == 'New@example.com'
+
+
+def test_admin_change_form_refuses_moving_to_a_case_variant_of_another_address(user, admin_user):
+    admin_user.email = 'admin@example.com'
+    admin_user.save(update_fields=['email'])
+    form = UserAdminChangeForm(
+        {
+            'email': 'ADMIN@example.com',
+            'name': 'x',
+            'status': User.STATUS_ACTIVE,
+            'is_active': 'on',
+        },
+        instance=user,
+    )
+
+    assert not form.is_valid()
+    assert 'email' in form.errors
+
+
+def test_admin_change_form_leaves_one_of_two_legacy_rows_editable(legacy_pair):
+    _older, newer = legacy_pair
+    form = UserAdminChangeForm(
+        {
+            'email': newer.email,
+            'name': 'Renamed',
+            'status': User.STATUS_ACTIVE,
+            'is_active': 'on',
+        },
+        instance=newer,
+    )
+
+    assert form.is_valid(), form.errors
 
 
 # -- PUT /api/account --

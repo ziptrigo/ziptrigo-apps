@@ -275,16 +275,33 @@ non-local `BASE_URL` triggers `accounts.W003` (shown by `manage.py check` and th
 the Cloudflare setup.
 
 **Email case** (audit #15): `User.email` is stored with `normalize_email` (domain lower-cased, local
-part as typed) and its unique constraint is case-sensitive. The login, forgot-password,
-resend-confirmation and register forms all share `forms.email.NormalizedEmailMixin.clean_email`
-(like the API's `EmailStr`), so a mixed-case *domain* finds the account on every surface. Login and
-the reset/resend lookups stay exact on the local part (legacy rows may differ only by case).
-Existence/uniqueness checks ignore case entirely (`email__iexact`: `create_account`,
-`handle_signup_for_existing_email`, `PUT /api/account`), so `Alice@gmail.com` next to
-`alice@gmail.com` is the existing-account path / a 400, never a second row (Google linking matches
-`iexact` and refuses two rows as `AccountConflict`). Where legacy case-duplicates exist, the signup
-path picks the oldest. A `UniqueConstraint(Lower('email'))` is deliberately not added: it needs a
-check of prod data for existing duplicates first.
+part as typed) and its unique constraint is **case-sensitive**, so the database alone does not stop
+`Alice@gmail.com` next to `alice@gmail.com`; only application checks do, and not everywhere:
+
+- *Web forms.* The login, forgot-password, resend-confirmation and register forms share
+  `forms.email.NormalizedEmailMixin.clean_email` (like the API's `EmailStr`), so a mixed-case
+  *domain* finds the account on every surface. Login and the reset/resend lookups stay **exact on
+  the local part, on purpose**: the local part is the stored spelling, legacy rows may differ only by
+  case (so a case-folded lookup could hit the wrong one of two, or several), and a case-insensitive
+  lookup on those paths would also make them behave differently from the API's.
+- *Checks that ignore case entirely* (`email__iexact`): `create_account`,
+  `handle_signup_for_existing_email`, `PUT /api/account` and the admin user forms
+  (`forms/admin.py`: `UserAdminCreationForm` and `UserAdminChangeForm` refuse another account's
+  address in any case and normalize the domain; an unchanged address isn't re-checked, so one of two
+  legacy rows stays editable). A case-variant signup takes the existing-account path (see "Auth"),
+  never a second row (Google linking matches `iexact` and refuses two rows as `AccountConflict`).
+  Where legacy case-duplicates exist, that path picks the row spelled exactly like the signup
+  address, else the oldest (`created_at`, `pk`), and locks down / mails the *stored* spelling.
+- *Not covered:* `createsuperuser` (`create_user`) and the Django shell still rely on the
+  case-sensitive constraint alone. **Open race:** two concurrent signups of a *new* address in
+  different case both pass the `iexact` pre-check and both insert; only a database constraint
+  closes it. `UniqueConstraint(Lower('email'))` is deliberately not added yet: prod data needs
+  checking for existing duplicates first (`SELECT lower(email), count(*) FROM accounts_user GROUP BY
+  1 HAVING count(*) > 1`), and they need resolving, since the migration would fail on them.
+  **Index caveat:** Django compiles `email__iexact` on Postgres to `UPPER(email) = UPPER(%s)`, so an
+  index only helps if it is on `Upper('email')` (or the lookups are switched to a `Lower`
+  annotation to match a `Lower('email')` index); until then the `iexact` checks are a sequential
+  scan over `accounts_user`. Check with `EXPLAIN` when the table is large enough to matter.
 
 **No page or endpoint reveals whether an email address has an account** (issue #125; forgot-password
 and resend-confirmation already worked this way). The register page gives the same answer for every
