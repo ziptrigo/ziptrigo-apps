@@ -17,6 +17,7 @@ needs the network.
 
 import logging
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import IO, TYPE_CHECKING, Literal, cast
 from urllib.parse import parse_qs, quote, urlsplit
@@ -457,6 +458,26 @@ class S3Storage:
 
     def delete_object(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def delete_objects(self, keys: Iterable[str]) -> int:
+        """Delete `keys` (up to 1000 per request). A key that does not exist is a no-op success,
+        as with `delete_object`. If S3 reports a failure for any key the rest of the batch is
+        still deleted and a `RuntimeError` naming the failed keys is raised afterwards. Returns the
+        number of keys asked for."""
+        key_list = list(keys)
+        failed: list[str] = []
+        for start in range(0, len(key_list), _DELETE_BATCH_SIZE):
+            batch = [{'Key': key} for key in key_list[start : start + _DELETE_BATCH_SIZE]]
+            response = self.client.delete_objects(
+                Bucket=self.bucket,
+                Delete={'Objects': batch, 'Quiet': True},  # ty: ignore[invalid-argument-type]
+            )
+            failed.extend(
+                f'{error.get("Key")}: {error.get("Code")}' for error in response.get('Errors', [])
+            )
+        if failed:
+            raise RuntimeError(f'S3 could not delete {len(failed)} object(s): {"; ".join(failed)}')
+        return len(key_list)
 
     def delete_prefix(self, prefix: str) -> int:
         """Delete every object under `prefix`. Returns the number of objects deleted."""

@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from apps.core.models import ScheduledJob
 from apps.core.scheduler import JobSpec, clear_registry, get_jobs, register, run_due_jobs, try_claim
+from apps.core.scheduler.runner import _run_job
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -173,3 +174,32 @@ def test_a_claim_that_never_finishes_keeps_its_lease():
     _make_due_again('test.job')
 
     assert try_claim(spec) is False
+
+
+def test_a_claim_on_a_whole_second_still_releases_its_lease():
+    # SQLite stores `Now()` as text with milliseconds ("...:00.000") but renders a read-back
+    # datetime with no fraction when it is a whole second ("...:00"); a plain `<=` on that text
+    # missed the claim, leaving the lease held (a 1-in-1000 flake of the test above).
+    from datetime import UTC, datetime
+
+    from django.db import connection
+
+    spec = JobSpec(
+        name='test.job', func=lambda: None, interval=timedelta(minutes=5), lease=timedelta(hours=1)
+    )
+    ScheduledJob.objects.create(name='test.job', interval_seconds=300)
+    claimed_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    if connection.vendor == 'sqlite':
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE core_scheduledjob SET last_started_at = '2026-01-01 12:00:00.000',"
+                " locked_until = '2099-01-01 00:00:00' WHERE name = 'test.job'"
+            )
+    else:
+        ScheduledJob.objects.filter(name='test.job').update(
+            last_started_at=claimed_at, locked_until=datetime(2099, 1, 1, tzinfo=UTC)
+        )
+
+    _run_job(spec, claimed_at)
+
+    assert ScheduledJob.objects.get(name='test.job').locked_until is None

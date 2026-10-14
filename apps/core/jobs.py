@@ -1,9 +1,10 @@
 """`core`'s own periodic jobs: purging old `EmailVerification` rows (issue #58), purging
 expired `RateLimitCounter` rows (issue #53 code review), and pruning finished task results and
-expired sessions (audit #18). A job lets its exceptions propagate: the scheduler's runner logs them
-and records the run as failed (`ScheduledJob.last_error`), which a swallowed one would hide. Registered from `CoreConfig.ready()`, the
-same way each product registers its own jobs with `apps.core.scheduler` -- see CLAUDE.md, "Queue
-and scheduler". `core` has no product to belong to, so it registers these on itself.
+expired sessions (audit #18). A job lets its exceptions propagate: the scheduler's runner logs
+them and records the run as failed (`ScheduledJob.last_error`), which a swallowed one would hide.
+Registered from `CoreConfig.ready()`, the same way each product registers its own jobs with
+`apps.core.scheduler` -- see CLAUDE.md, "Queue and scheduler". `core` has no product to belong to,
+so it registers these on itself.
 """
 
 import logging
@@ -24,7 +25,8 @@ logger = logging.getLogger(__name__)
 #: day; two weeks is plenty to look into a failure.
 TASK_RESULT_RETENTION = timedelta(days=14)
 
-#: Rows deleted per statement, so one run never holds a long lock on a table that was never pruned.
+#: Rows deleted per statement: short transactions and small WAL bursts on a table that was never
+#: pruned (not a table lock; a `DELETE` doesn't block the workers' inserts or claims).
 PURGE_BATCH = 1000
 
 

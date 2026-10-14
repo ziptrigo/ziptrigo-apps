@@ -9,7 +9,7 @@ they hold the lease. At-least-once: a job can run twice if a process dies mid-ru
 import logging
 import threading
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.db import close_old_connections, connections
 from django.db.models import DateTimeField, ExpressionWrapper, F, Q
@@ -66,13 +66,19 @@ def _claim(job: JobSpec) -> datetime | None:
     )
 
 
+#: Slack for the release comparison in `_run_job`; a real re-claim comes a whole lease later.
+_CLAIM_TOLERANCE = timedelta(milliseconds=1)
+
+
 def _run_job(job: JobSpec, claimed_at: datetime | None) -> None:
     """Run `job` and record the outcome, then release the lease, so the job is due again once its
     interval passes rather than once its (usually longer) lease runs out. The release only
-    applies while no later claim exists (`last_started_at <= claimed_at`): a run that outlived its
-    lease and was claimed again by another runner must not free that runner's lease. (`<=` rather
-    than `==`: SQLite stores `Now()` as text with millisecond precision, which an equality test
-    against the read-back value misses.) A process that dies mid-job never gets here, so its lease
+    applies while no later claim exists (`last_started_at` not after `claimed_at`): a run that
+    outlived its lease and was claimed again by another runner must not free that runner's lease.
+    The test is `< claimed_at + _CLAIM_TOLERANCE`, not `==` or `<=`: SQLite stores `Now()` as text
+    with millisecond precision (`...:00.123`) but compares it with the read-back value rendered
+    without a fraction when it is a whole second (`...:00`), and a longer string sorts after its
+    prefix, so `<=` missed the claim 1 time in 1000. A process that dies mid-job never gets here, so its lease
     holds until it expires."""
     try:
         job.func()
@@ -91,9 +97,9 @@ def _run_job(job: JobSpec, claimed_at: datetime | None) -> None:
         )
     finally:
         if claimed_at is not None:
-            ScheduledJob.objects.filter(name=job.name, last_started_at__lte=claimed_at).update(
-                locked_until=None
-            )
+            ScheduledJob.objects.filter(
+                name=job.name, last_started_at__lt=claimed_at + _CLAIM_TOLERANCE
+            ).update(locked_until=None)
 
 
 def run_due_jobs() -> list[str]:

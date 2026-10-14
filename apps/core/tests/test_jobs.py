@@ -147,6 +147,18 @@ def test_purge_old_task_results_deletes_only_old_finished_rows():
     assert not DBTaskResult.objects.filter(pk__in=[old_ok.pk, old_failed.pk]).exists()
 
 
+def test_purge_old_task_results_runs_every_batch(monkeypatch):
+    monkeypatch.setattr('apps.core.jobs.PURGE_BATCH', 1)
+    old = TASK_RESULT_RETENTION + timedelta(days=1)
+    for status in ('SUCCESSFUL', 'FAILED', 'SUCCESSFUL'):
+        _task_result(status, old)
+    recent = _task_result('SUCCESSFUL', timedelta(days=1))
+
+    purge_old_task_results()
+
+    assert list(DBTaskResult.objects.values_list('pk', flat=True)) == [recent.pk]
+
+
 def test_clear_expired_sessions_deletes_only_expired_sessions():
     now = timezone.now()
     Session.objects.create(

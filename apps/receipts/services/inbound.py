@@ -111,9 +111,15 @@ POLL_BATCH = 100
 PENDING_STALE_AFTER = timedelta(minutes=10)
 
 #: A `done` message that produced no `InboundEmail` (mail for an unknown or retired code, a
-#: message nobody wanted) is only a bookkeeping row; it is deleted after this long. One that did
-#: produce an email stays, since the user sees that email (and deleting the message would cascade).
+#: message nobody wanted) is only a bookkeeping row; it is deleted after this long, measured from
+#: when it went `done` (`processed_at`). One that did produce an email stays, since the user sees
+#: that email (and deleting the message would cascade).
+#: **Keep this well above the 14-day expiry the `infra` repo puts on `receipts/inbound/`.** `poll`
+#: registers any key under that prefix it has no row for, so a row may only go once its object is
+#: gone. `purge_done_messages` deletes the object itself before the row; the expiry is the second
+#: guard, for an object that is somehow still there.
 DONE_MESSAGE_RETENTION = timedelta(days=30)
+#: Rows per batch: short transactions and small WAL bursts on a table that was never pruned.
 PURGE_BATCH = 1000
 #: Don't queue the same message again within this window (a slow queue would otherwise collect a
 #: duplicate task per message per poll).
@@ -184,22 +190,33 @@ def poll() -> None:
 
 
 def purge_done_messages() -> int:
-    """Delete `done` messages older than `DONE_MESSAGE_RETENTION` that have no `InboundEmail`, in
-    batches. `pending` and `failed` ones are never touched (a failed one is parked for the admin to
-    retry). Idempotent; returns how many rows went."""
+    """Delete `done` messages older than `DONE_MESSAGE_RETENTION` (from `processed_at`, else
+    `created_at` for a row without one) that have no `InboundEmail`, in batches. `pending` and
+    `failed` ones are never touched (a failed one is parked for the admin to retry).
+
+    A batch's S3 objects are deleted before its rows (a missing key is a no-op): a row that is gone
+    while its object is not would be registered and ingested again by `poll`. A storage error
+    propagates, leaving the rows for the next run, and the scheduler records it as the job's
+    `last_error`. Idempotent; returns how many rows went."""
     cutoff = timezone.now() - DONE_MESSAGE_RETENTION
     total = 0
     while True:
-        ids = list(
+        batch = list(
             InboundMessage.objects.filter(
-                status=InboundMessageStatus.DONE, created_at__lte=cutoff, emails__isnull=True
-            ).values_list('pk', flat=True)[:PURGE_BATCH]
+                Q(processed_at__lte=cutoff) | Q(processed_at__isnull=True, created_at__lte=cutoff),
+                status=InboundMessageStatus.DONE,
+                emails__isnull=True,
+            ).values_list('pk', 's3_key', 'failed_key')[:PURGE_BATCH]
         )
-        if not ids:
+        if not batch:
             return total
+        keys = [key for _, s3_key, failed_key in batch for key in (s3_key, failed_key) if key]
+        get_storage().delete_objects(keys)
         # Re-check "no emails" in the delete itself: the FK cascades, and a row that gained an
         # email since the read above must not take it along.
-        total += InboundMessage.objects.filter(pk__in=ids, emails__isnull=True).delete()[0]
+        total += InboundMessage.objects.filter(
+            pk__in=[pk for pk, _, _ in batch], emails__isnull=True
+        ).delete()[0]
 
 
 def _register(key: str) -> None:
