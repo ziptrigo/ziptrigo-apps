@@ -5,9 +5,9 @@ import pytest
 from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
-from apps.billing.services import get_balance, spend_credits
+from apps.billing.services import add_credits, get_balance, spend_credits
 
-from ..models import TransferStatus
+from ..models import Transfer, TransferStatus
 from ..services import metering
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -202,3 +202,68 @@ def test_meter_transfer_uses_the_price_it_is_given(draft_transfer, billing_setti
     assert draft_transfer.credits_charged == 2
     assert draft_transfer.accrued == Decimal('0')
     assert get_balance(draft_transfer.owner) == balance_before - 2
+
+
+def _suspend(transfer, *, size_bytes, suspended_at=None):
+    _make_active(transfer, size_bytes=size_bytes)
+    transfer.status = TransferStatus.SUSPENDED
+    transfer.suspended_at = suspended_at or timezone.now()
+    transfer.save()
+    return transfer
+
+
+def test_daily_cost_rounds_up_with_a_minimum_of_one(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.5')
+    billing_settings.save()
+    draft_transfer.size_bytes = _ONE_GB
+    assert metering.daily_cost(draft_transfer) == 2
+    draft_transfer.size_bytes = 0
+    assert metering.daily_cost(draft_transfer) == 1
+
+
+def test_reenable_requires_balance_to_cover_the_transfers_day(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('3.0')
+    billing_settings.save()
+    _suspend(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner) - 2, source='test')
+
+    assert metering.reenable_suspended_transfers_for_user(draft_transfer.owner) == 0
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED
+
+    add_credits(draft_transfer.owner, 1, description='top up', source='test')
+    assert metering.reenable_suspended_transfers_for_user(draft_transfer.owner) == 1
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.ACTIVE
+
+
+def test_reenable_takes_oldest_first_while_the_balance_covers_the_running_sum(
+    draft_transfer, billing_settings
+):
+    billing_settings.storage_price_per_gb_per_day = Decimal('2.0')
+    billing_settings.save()
+    older = _suspend(
+        draft_transfer, size_bytes=_ONE_GB, suspended_at=timezone.now() - timedelta(days=2)
+    )
+    newer = Transfer.objects.create(
+        owner=older.owner,
+        status=TransferStatus.SUSPENDED,
+        size_bytes=_ONE_GB,
+        suspended_at=timezone.now() - timedelta(days=1),
+    )
+    spend_credits(older.owner, get_balance(older.owner) - 3, source='test')
+
+    # 3 credits cover the older one's 2-credit day, but not the newer one's on top of it.
+    assert metering.reenable_suspended_transfers_for_user(older.owner) == 1
+    older.refresh_from_db()
+    newer.refresh_from_db()
+    assert older.status == TransferStatus.ACTIVE
+    assert newer.status == TransferStatus.SUSPENDED
+
+
+def test_reenable_limited_to_given_transfer_ids(draft_transfer):
+    _suspend(draft_transfer, size_bytes=_ONE_GB)
+
+    assert metering.reenable_suspended_transfers_for_user(draft_transfer.owner, []) == 0
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED

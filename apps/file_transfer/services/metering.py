@@ -2,11 +2,18 @@
 per day, spend whole credits once `accrued` reaches 1, suspend a transfer that runs out of
 credits, and re-enable one that's topped back up.
 
+Re-enabling (the daily fallback, the `credits_added` receiver and the dashboard/API action) needs
+the balance to cover that transfer's own next day (`daily_cost`), not a flat 1 credit: otherwise a
+transfer costing 3 a day for an owner holding 2 would be suspended and re-enabled with its day
+forgiven on every run, i.e. stored for free. `reenable_suspended_transfers_for_user` applies that
+rule to a user's suspended transfers; `actions.reenable_transfer_action` uses `daily_cost` for one.
+
 `meter_transfer` is called once per transfer by the `meter_transfers` job (`apps/file_transfer/jobs.py`)
 and does the actual charging; `reenable_if_topped_up` is called both by that job (as a fallback)
 and by the `credits_added` signal receiver in `apps/file_transfer/apps.py` (the fast path).
 """
 
+from collections.abc import Collection
 from datetime import timedelta
 from decimal import Decimal
 
@@ -21,6 +28,7 @@ from apps.billing.services import (
     get_storage_price_per_gb_per_day,
     spend_credits,
     storage_charge,
+    storage_day_cost,
 )
 
 from ..models import FileTransferSettings, Transfer, TransferStatus
@@ -28,10 +36,18 @@ from .emails import send_suspended_notification
 from .lifecycle import end_transfer
 from .naming import transfer_display_name
 
-#: Minimum balance to re-enable a suspended transfer (spec section 7).
+#: Minimum balance to re-enable a suspended transfer (spec section 7); `daily_cost` is never less.
 MIN_BALANCE_TO_REENABLE = 1
 
 _BILLING_PERIOD = timedelta(hours=24)
+
+
+def daily_cost(transfer: Transfer, price_per_gb_per_day: Decimal | None = None) -> int:
+    """The balance an owner needs to re-enable `transfer`: one day of its storage in whole credits,
+    rounded up, at least `MIN_BALANCE_TO_REENABLE`."""
+    if price_per_gb_per_day is None:
+        price_per_gb_per_day = get_storage_price_per_gb_per_day()
+    return max(storage_day_cost(transfer.size_bytes, price_per_gb_per_day), MIN_BALANCE_TO_REENABLE)
 
 
 def meter_transfer(transfer: Transfer, price_per_gb_per_day: Decimal | None = None) -> None:
@@ -135,17 +151,33 @@ def reenable_transfer(transfer: Transfer) -> None:
     transfer.last_billed_at = now
 
 
-def reenable_suspended_transfers_for_user(user: User) -> int:
-    """Re-enable every one of `user`'s suspended transfers, now that they've topped up (called
-    from the `credits_added` signal receiver, and as the daily job's fallback). Only re-enables
-    when the balance covers the 1-credit minimum; returns the number re-enabled."""
-    if get_balance(user) < MIN_BALANCE_TO_REENABLE:
+def reenable_suspended_transfers_for_user(
+    user: User, transfer_ids: Collection[object] | None = None
+) -> int:
+    """Re-enable `user`'s suspended transfers that the balance can pay a day for (called from the
+    `credits_added` signal receiver, and as the daily job's fallback); returns the number re-enabled.
+
+    Oldest suspension first, each needing its own `daily_cost` on top of those already re-enabled
+    in this call, stopping at the first the balance can't cover. `transfer_ids` limits it to those
+    transfers: the daily job passes the ones suspended *before* its metering pass, so a transfer
+    suspended in that very run isn't re-enabled at once with the day it couldn't pay forgiven.
+    """
+    balance = get_balance(user)
+    if balance < MIN_BALANCE_TO_REENABLE:
         return 0
 
-    suspended = list(Transfer.objects.filter(owner=user, status=TransferStatus.SUSPENDED))
-    for transfer in suspended:
+    suspended = Transfer.objects.filter(owner=user, status=TransferStatus.SUSPENDED)
+    if transfer_ids is not None:
+        suspended = suspended.filter(pk__in=transfer_ids)
+    price = get_storage_price_per_gb_per_day()
+    count = 0
+    for transfer in suspended.order_by('suspended_at', 'created_at'):
+        balance -= daily_cost(transfer, price)
+        if balance < 0:
+            break
         reenable_transfer(transfer)
-    return len(suspended)
+        count += 1
+    return count
 
 
 def delete_files_past_grace_period(settings_row: FileTransferSettings | None = None) -> int:

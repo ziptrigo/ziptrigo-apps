@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -279,3 +280,22 @@ def test_add_recipients_not_blocked_when_sender_is_clean(draft_transfer):
     _active(draft_transfer)
     created = actions.add_recipients(draft_transfer, ['a@example.com'], ip='203.0.113.1')
     assert [r.email for r in created] == ['a@example.com']
+
+
+def test_reenable_suspended_refused_when_balance_below_a_days_cost(
+    draft_transfer, billing_settings
+):
+    """The finding's case: a 3-credit-a-day transfer and a 2-credit balance used to re-enable."""
+    billing_settings.storage_price_per_gb_per_day = Decimal('3.0')
+    billing_settings.save()
+    _active(
+        draft_transfer,
+        status=TransferStatus.SUSPENDED,
+        suspended_at=timezone.now(),
+        size_bytes=1024**3,
+    )
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner) - 2, source='test')
+
+    with pytest.raises(InsufficientCreditsError, match='at least 3 credits'):
+        actions.reenable_transfer_action(draft_transfer)
+    assert draft_transfer.status == TransferStatus.SUSPENDED

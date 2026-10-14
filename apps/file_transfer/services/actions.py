@@ -16,7 +16,7 @@ from .blocklist import check_not_blocked
 from .emails import send_transfer_notification
 from .expiry_choices import resolve_expiry
 from .lifecycle import end_transfer
-from .metering import MIN_BALANCE_TO_REENABLE, reenable_transfer
+from .metering import daily_cost, reenable_transfer
 from .password import hash_password
 
 
@@ -58,11 +58,12 @@ def disable_transfer(transfer: Transfer) -> Transfer:
 
 
 def reenable_transfer_action(transfer: Transfer, *, ip: str | None = None) -> Transfer:
-    """Resume a disabled or suspended transfer. Either way needs the same 1-credit minimum as
-    starting a transfer (spec section 7: "Minimum balance to start a transfer or to re-enable
-    one: 1 credit") -- a disabled transfer resumes being metered the moment it's re-enabled, so
-    an owner with zero credits shouldn't be able to un-pause one just to have it immediately
-    suspended again on the next metering tick. The billing clock resets to now either way.
+    """Resume a disabled or suspended transfer. Either way needs a balance that covers one day of
+    this transfer's storage (`metering.daily_cost`, at least spec section 7's 1-credit minimum) --
+    a disabled transfer resumes being metered the moment it's re-enabled, so an owner who can't
+    pay for it shouldn't be able to un-pause one just to have it suspended again on the next
+    metering tick, and (suspended) have the day it couldn't pay forgiven every time. The billing
+    clock resets to now either way.
 
     Blocked (issue #59 code review) the same as re-adding recipients or resending: re-enabling is
     itself a send path (the link starts working, and delivering to it again, again), and refused
@@ -72,10 +73,13 @@ def reenable_transfer_action(transfer: Transfer, *, ip: str | None = None) -> Tr
     _require_not_held(transfer)
     if transfer.owner is not None:
         check_not_blocked(email=transfer.owner.email, ip=ip)
-    if transfer.owner is not None and get_balance(transfer.owner) < MIN_BALANCE_TO_REENABLE:
-        raise InsufficientCreditsError(
-            f'You need at least {MIN_BALANCE_TO_REENABLE} credit to re-enable this transfer.'
-        )
+    if transfer.owner is not None:
+        needed = daily_cost(transfer)
+        if get_balance(transfer.owner) < needed:
+            raise InsufficientCreditsError(
+                f'You need at least {needed} {"credit" if needed == 1 else "credits"} '
+                'to re-enable this transfer (one day of storage).'
+            )
     reenable_transfer(transfer)
     return transfer
 
