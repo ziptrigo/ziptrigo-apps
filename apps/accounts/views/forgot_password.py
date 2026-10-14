@@ -31,8 +31,8 @@ def forgot_password_page(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             email = form.cleaned_data['email']
             # Rate-limit keys are case-insensitively normalised (like `routers.auth.forgot_password`
-            # does), but the service itself is called with the address exactly as submitted, since
-            # `User.email` lookups are case-sensitive.
+            # does), but the service is called with the address as the form normalized it (domain
+            # lower-cased, as accounts are stored), since `User.email` lookups are case-sensitive.
             rate_limit_key = email.lower()
             limited = ratelimit.hit_ip(request, 'FORGOT_PASSWORD_IP')
             if limited.allowed:

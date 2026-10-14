@@ -3,9 +3,10 @@ from django.contrib.auth import authenticate
 from django.http import HttpRequest
 
 from ..models import User
+from .email import NormalizedEmailMixin
 
 
-class LoginForm(forms.Form):
+class LoginForm(NormalizedEmailMixin, forms.Form):
     """Email/password login for the web UI. Same rules as `POST /api/auth/login`."""
 
     email = forms.EmailField()
