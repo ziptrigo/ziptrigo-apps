@@ -52,7 +52,7 @@ def test_get_shows_a_button_and_does_not_confirm(client, unconfirmed, token):
     assert client.post(url).status_code == 302
 
 
-def test_get_with_a_bogus_token_does_not_touch_the_token(client):
+def test_get_does_not_validate_the_token(client):
     response = client.get(reverse('accounts:confirm-email', args=['not-a-real-token']))
 
     assert response.status_code == 200
@@ -101,10 +101,37 @@ def test_post_with_csrf_token_from_the_page_confirms(unconfirmed, token):
     assert unconfirmed.email_confirmed
 
 
-def test_post_with_an_invalid_token_shows_the_expired_page(client, unconfirmed):
-    response = client.post(reverse('accounts:confirm-email', args=['not-a-real-token']))
+def test_post_with_an_invalid_token_redirects_to_the_expired_page(client, unconfirmed):
+    response = client.post(
+        reverse('accounts:confirm-email', args=['not-a-real-token']), follow=True
+    )
+
+    assert response.redirect_chain == [(reverse('accounts:email-confirmation-expired'), 302)]
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert 'Link Expired' in html
+    # The resend form works from here.
+    assert reverse('accounts:resend-confirmation') in html
+    unconfirmed.refresh_from_db()
+    assert not unconfirmed.email_confirmed
+
+
+def test_expired_page_renders_on_get(client):
+    response = client.get(reverse('accounts:email-confirmation-expired'))
 
     assert response.status_code == 200
     assert 'Link Expired' in response.content.decode()
-    unconfirmed.refresh_from_db()
-    assert not unconfirmed.email_confirmed
+
+
+def test_post_is_rate_limited_per_ip_and_get_is_not(client, unconfirmed, token, settings):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'CONFIRM_EMAIL_IP': (1, 300)}
+    url = reverse('accounts:confirm-email', args=[token])
+
+    assert client.get(url).status_code == 200
+    assert client.get(url).status_code == 200
+    assert client.post(url).status_code == 302
+    response = client.post(url)
+
+    assert response.status_code == 429
+    assert 'Retry-After' in response

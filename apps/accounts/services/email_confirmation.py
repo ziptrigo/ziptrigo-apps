@@ -218,13 +218,13 @@ def render_email_confirmation_email(
 
     text_body = f"""Hi {user.name or user.email},
 
-Thank you for creating an account! Please confirm your email address by clicking the link below:
+Please confirm the email address of your ZipTrigo account. Open the link below and press "Confirm my email":
 
 {confirmation_url}
 
 This link will expire in {expiry_text}.
 
-If you did not create this account, please ignore this email.
+If you did not expect this email, please ignore it.
 
 --
 The ZipTrigo Team

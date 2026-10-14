@@ -21,7 +21,9 @@ def test_get_is_not_allowed(client):
 
 
 def test_expired_confirmation_link_page_includes_the_resend_form(client):
-    response = client.post(reverse('accounts:confirm-email', args=['not-a-real-token']))
+    response = client.post(
+        reverse('accounts:confirm-email', args=['not-a-real-token']), follow=True
+    )
 
     assert response.status_code == 200
     assert f'hx-post="{reverse("accounts:resend-confirmation")}"' in response.content.decode()

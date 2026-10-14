@@ -294,6 +294,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # by `EMAIL_VERIFICATION_START_EMAIL` below (every caller of
     # `apps.core.services.email_verification.start` shares it, including this endpoint).
     'RESEND_CONFIRMATION_IP': (10, 60 * 60),
+    # The "Confirm my email" button the emailed link lands on (`POST /account/confirm-email/<token>/`).
+    # Only the POST costs anything (a token lookup and one conditional write); the GET that shows
+    # the button is cheap and unmetered. Generous: a real person clicks once, perhaps twice, and an
+    # office/CGNAT address may see a whole team confirm at once.
+    'CONFIRM_EMAIL_IP': (30, 10 * 60),
     # "Sign in with Google" callback (issue #91): every real sign-in is one hit, so this is
     # headroom for a shared NAT/office IP signing in at the same time, not a per-user quota. The
     # callback does an outbound token exchange with Google per call, which is what this protects.
