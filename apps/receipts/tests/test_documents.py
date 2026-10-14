@@ -1,7 +1,8 @@
 import io
+import tracemalloc
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageOps
 
 from ..services import documents
 from . import samples
@@ -100,6 +101,64 @@ class TestImages:
         assert max(width, height) <= documents.MAX_IMAGE_SIDE_PX
         assert width > height  # the aspect ratio is kept
 
+    def test_a_large_image_is_shrunk_before_it_is_rotated_or_converted(self, monkeypatch):
+        """The rotation and the RGBA flattening each copy the bitmap, so they must see the small
+        one, not the full-size image (a hostile 7000x7000 PNG used to need ~800 MB)."""
+        seen = []
+        exif_transpose, convert = ImageOps.exif_transpose, Image.Image.convert
+        thumbnail = Image.Image.thumbnail
+        shrunk = []
+
+        def spy_thumbnail(image, *args, **kwargs):
+            thumbnail(image, *args, **kwargs)
+            shrunk.append(True)
+
+        def spy_transpose(image, *args, **kwargs):
+            seen.append(('exif_transpose', image.size))
+            return exif_transpose(image, *args, **kwargs)
+
+        def spy_convert(image, *args, **kwargs):
+            if shrunk:  # (the resampling itself converts the full-size image internally)
+                seen.append(('convert', image.size))
+            return convert(image, *args, **kwargs)
+
+        monkeypatch.setattr(Image.Image, 'thumbnail', spy_thumbnail)
+        monkeypatch.setattr(ImageOps, 'exif_transpose', spy_transpose)
+        monkeypatch.setattr(Image.Image, 'convert', spy_convert)
+        out = io.BytesIO()
+        Image.new('RGBA', (4000, 3000), (255, 255, 255, 128)).save(out, format='PNG')
+
+        prepared = documents.prepare_input(out.getvalue(), documents.PNG)
+
+        assert max(Image.open(io.BytesIO(prepared.images[0])).size) == documents.MAX_IMAGE_SIDE_PX
+        assert {name for name, _ in seen} == {'exif_transpose', 'convert'}
+        assert all(max(size) <= documents.MAX_IMAGE_SIDE_PX for _, size in seen)
+
+    @pytest.mark.parametrize('size', [(300, 200), (4000, 3000)])
+    @pytest.mark.parametrize('fmt', ['JPEG', 'PNG'])
+    def test_the_exif_orientation_is_applied_to_small_and_large_images(self, size, fmt):
+        """Orientation 6 = displayed rotated 90 degrees clockwise: a landscape file becomes
+        portrait, and its top-left corner moves to the top-right."""
+        exif = Image.Exif()
+        exif[0x0112] = 6
+        source = Image.new('RGB', size, (255, 255, 255))
+        source.paste((255, 0, 0), (0, 0, size[0] // 4, size[1] // 4))  # a red top-left block
+        out = io.BytesIO()
+        source.save(out, format=fmt, exif=exif)
+
+        prepared = documents.prepare_input(
+            out.getvalue(), documents.JPEG if fmt == 'JPEG' else documents.PNG
+        )
+
+        result = Image.open(io.BytesIO(prepared.images[0]))
+        assert result.height > result.width
+        assert max(result.size) == min(max(size), documents.MAX_IMAGE_SIDE_PX)
+        corner = result.getpixel((result.width - 5, 5))
+        assert isinstance(corner, tuple)
+        red, green, blue = corner
+        assert red > 200 and green < 80 and blue < 80
+        assert result.getpixel((5, result.height - 5)) == (255, 255, 255)
+
     def test_transparency_is_flattened_onto_white(self):
         prepared = documents.prepare_input(samples.png_with_alpha_bytes(), documents.PNG)
 
@@ -145,8 +204,71 @@ class TestPdf:
 
         assert len(prepared.images) == 2
 
-    def test_a_normal_page_renders_at_the_full_scale(self):
-        assert documents._render_scale(612, 792) == documents.PDF_RENDER_SCALE
+    @pytest.mark.parametrize('size', [(612, 792), (595, 842), (612, 1008), (200, 300)])
+    def test_a_normal_page_renders_at_the_full_scale(self, size):
+        """Letter, A4, Legal and smaller: unchanged by the longer-side cap."""
+        assert documents._render_scale(*size) == documents.PDF_RENDER_SCALE
+
+    @pytest.mark.parametrize('size', [(1224, 1584), (3000, 100), (100, 14_400), (14_400, 14_400)])
+    def test_a_page_whose_render_would_be_over_the_ai_size_is_rendered_smaller(self, size):
+        """All the AI receives is `MAX_IMAGE_SIDE_PX` on a side, so a poster is rendered at that."""
+        scale = documents._render_scale(*size)
+
+        assert 0 < scale < documents.PDF_RENDER_SCALE
+        assert max(size) * scale <= documents.MAX_IMAGE_SIDE_PX + 1e-6
+
+    def test_a_pdf_with_huge_pages_is_rendered_no_larger_than_the_ai_size(self, monkeypatch):
+        import pypdfium2 as pdfium
+
+        sizes = []
+        render = pdfium.PdfPage.render
+
+        def spy_render(page, *args, **kwargs):
+            bitmap = render(page, *args, **kwargs)
+            sizes.append((bitmap.width, bitmap.height))
+            return bitmap
+
+        monkeypatch.setattr(pdfium.PdfPage, 'render', spy_render)
+
+        prepared = documents.prepare_input(samples.blank_pages_pdf_bytes(2, 5000), documents.PDF)
+
+        assert len(prepared.images) == 2
+        assert sizes
+        assert all(max(size) <= documents.MAX_IMAGE_SIDE_PX for size in sizes)
+
+    def test_a_pdf_stream_that_inflates_far_beyond_a_receipt_is_refused_cheaply(self, monkeypatch):
+        """A few-KB PDF whose content stream inflates to 8 MB used to need ~400 MB to read (a
+        17 MB one, ~1 GB); under the cap pypdf gives up after 2 MB and nothing is rendered either
+        (pdfium decodes such a stream without any limit of its own)."""
+        data = samples.inflating_pdf_bytes(8_000_000)
+        assert len(data) < 25_000
+        monkeypatch.setattr(
+            documents, '_render_pdf_pages', lambda *a, **k: pytest.fail('should not render')
+        )
+
+        tracemalloc.start()
+        try:
+            with pytest.raises(documents.UnreadableDocumentError, match='too complex'):
+                documents.prepare_input(data, documents.PDF)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        assert peak < 25_000_000
+
+    def test_the_decompression_cap_is_only_in_force_while_a_pdfs_text_is_read(self):
+        from pypdf import get_configuration
+
+        before = get_configuration().zlib_maximum_output_length
+        documents._pdf_text(samples.text_pdf_bytes())
+
+        assert before > documents.PDF_TEXT_LIMITS['zlib_maximum_output_length']
+        assert get_configuration().zlib_maximum_output_length == before
+
+    def test_a_content_stream_within_the_cap_is_still_read(self):
+        text = documents._pdf_text(samples.inflating_pdf_bytes(1_000_000))
+
+        assert text.startswith('x')
 
     def test_a_big_page_is_rendered_at_a_lower_scale_that_fits_the_pixel_cap(self):
         scale = documents._render_scale(10_000, 10_000)

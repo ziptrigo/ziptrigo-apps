@@ -2,6 +2,7 @@
 so `pypdf` finds a text layer in one and `pypdfium2` has pixels to render in the other."""
 
 import io
+import zlib
 from functools import cache
 
 import pillow_heif
@@ -55,18 +56,8 @@ def scanned_pdf_bytes() -> bytes:
     return _encode(_image((300, 400)), 'PDF')
 
 
-@cache
-def text_pdf_bytes(text: str = 'Staples receipt. Total 42.10 USD. Visa 4242. 2026-10-09') -> bytes:
-    """A one-page PDF with `text` in its text layer."""
-    stream = f'BT /F1 12 Tf 50 700 Td ({text}) Tj ET'.encode('latin-1')
-    objects = [
-        b'<< /Type /Catalog /Pages 2 0 R >>',
-        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
-        b'/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
-        b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'\nendstream',
-        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    ]
+def _assemble_pdf(objects: list[bytes]) -> bytes:
+    """A PDF from its numbered objects (object 1 is the catalog), with a correct xref table."""
     out = bytearray(b'%PDF-1.4\n')
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -82,6 +73,55 @@ def text_pdf_bytes(text: str = 'Staples receipt. Total 42.10 USD. Visa 4242. 202
         xref,
     )
     return bytes(out)
+
+
+@cache
+def text_pdf_bytes(text: str = 'Staples receipt. Total 42.10 USD. Visa 4242. 2026-10-09') -> bytes:
+    """A one-page PDF with `text` in its text layer."""
+    stream = f'BT /F1 12 Tf 50 700 Td ({text}) Tj ET'.encode('latin-1')
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+            b'/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+            b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'\nendstream',
+            b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        ]
+    )
+
+
+@cache
+def inflating_pdf_bytes(decompressed_bytes: int) -> bytes:
+    """A one-page PDF of a few KB whose one Flate content stream inflates to `decompressed_bytes`
+    of (harmless, but numerous) text operators."""
+    operator = b'BT /F1 1 Tf (x) Tj ET\n'
+    stream = zlib.compress(operator * (decompressed_bytes // len(operator)), 9)
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+            b'/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+            b'<< /Length %d /Filter /FlateDecode >>\nstream\n' % len(stream)
+            + stream
+            + b'\nendstream',
+            b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        ]
+    )
+
+
+@cache
+def blank_pages_pdf_bytes(pages: int, side_pt: int) -> bytes:
+    """A tiny PDF of `pages` empty `side_pt` x `side_pt` point pages (no text layer)."""
+    kids = b' '.join(b'%d 0 R' % (3 + i) for i in range(pages))
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [' + kids + b'] /Count %d >>' % pages,
+        ]
+        + [b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %d %d] >>' % (side_pt, side_pt)] * pages
+    )
 
 
 HTML_BODY = (

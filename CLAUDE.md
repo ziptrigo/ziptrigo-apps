@@ -1264,10 +1264,14 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   in the same `atomic()` it charges `price_per_file` **once per `attempt_id`** (`charged_attempt_id`;
   a price of 0 skips `spend_credits`). A frozen account or `InsufficientCreditsError` parks the
   receipt in `waiting_for_credits`. Input preparation (`services.documents`: HEIC -> JPEG via
-  `pillow-heif` with the JPEG kept as the preview, downscale, an explicit `MAX_IMAGE_PIXELS` check (Pillow's process-wide limit is left alone), PDF
-  text via `pypdf` or rendered pages via `pypdfium2` -- each page is sized with `get_size()` first
-  and rendered at a scale that keeps its bitmap under `MAX_IMAGE_PIXELS` (a page over 14,400 pt on a
-  side is unreadable), the PIL image going straight to the JPEG encoder -- HTML -> text with the stdlib parser) and the AI call
+  `pillow-heif` with the JPEG kept as the preview, downscale, an explicit `MAX_IMAGE_PIXELS` check
+  (Pillow's process-wide limit is left alone) and an image shrunk to `MAX_IMAGE_SIDE_PX` *before* the EXIF rotation and the RGBA flattening copy it,
+  PDF text via `pypdf` under `PDF_TEXT_LIMITS` (2 MB decompressed per stream instead of its 75 MB
+  default, `pypdf.apply_configuration`, per call; a PDF over it is `Unreadable`, not rendered, since
+  pdfium decodes the same stream with no limit of its own) or rendered pages via `pypdfium2` --
+  each page is sized with `get_size()` first and rendered at a scale that keeps its longer side
+  within `MAX_IMAGE_SIDE_PX` (a page over 14,400 pt on a side is unreadable), the PIL image going
+  straight to the JPEG encoder -- HTML -> text with the stdlib parser) and the AI call
   (`services.ai`) happen outside any transaction; the result is applied under a row lock only if
   the receipt is still `processing` for the same `attempt_id`. A HEIC preview is
   written before its conditional `UPDATE`; if that matches nothing and no row references the key

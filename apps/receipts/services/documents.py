@@ -10,20 +10,25 @@ client claimed. HEIC and HEIF are both reported as `image/heic`.
   opener), rotated by its EXIF orientation, flattened onto white if it has transparency and
   downscaled to `MAX_IMAGE_SIDE_PX` on its long side, then re-encoded as JPEG. For a HEIC original
   that JPEG is also returned as the `preview_jpeg` to store, since browsers can't show HEIC.
-- A PDF's text layer is read with `pypdf`; a scan (almost no text) is instead rendered with
-  `pypdfium2`, the first `max_pdf_pages` pages only, and sent as images.
+- A PDF's text layer is read with `pypdf` under a low decompression cap (`PDF_TEXT_LIMITS`; a PDF
+  over it is refused as unreadable); a scan (almost no text) is instead rendered with `pypdfium2`,
+  the first `max_pdf_pages` pages only, and sent as images.
 - An HTML or plain-text email body is converted to text with the stdlib parser (scripts, styles
   and other non-content elements dropped).
 
 Anything that can't be decoded raises `UnreadableDocumentError`; a type with no preparation raises
 `UnsupportedDocumentError`. An image whose header claims more than `MAX_IMAGE_PIXELS` is refused
 before its pixel data is ever loaded (a decompression-bomb guard; Pillow's own process-wide limit
-is left alone), and a PDF page is rendered at a scale that keeps its bitmap under the same cap --
-before anything is allocated -- and refused outright if its page size is absurd.
+is left alone) and is shrunk to `MAX_IMAGE_SIDE_PX` *before* it is rotated or converted, so those
+steps never copy the full-size bitmap. A PDF page is rendered at a scale that keeps its longer side
+within `MAX_IMAGE_SIDE_PX` -- before anything is allocated -- and refused outright if its page size
+is absurd.
+
+All of this runs in the receipts worker, where an out-of-memory kill restarts the whole container,
+so a small hostile file must not be able to make it allocate much more than its output.
 """
 
 import io
-import math
 import re
 import warnings
 from dataclasses import dataclass, field
@@ -44,6 +49,18 @@ MAX_TEXT_CHARS = 30_000
 MIN_PDF_TEXT_CHARS = 40
 #: Pages whose text is read from a PDF (the AI only needs the first ones of a long document).
 MAX_PDF_TEXT_PAGES = 20
+#: pypdf's limits on what a stream may decompress to, for reading a PDF's text. Its defaults allow
+#: 75 MB per stream, and extracting text from one such stream took ~1 GB of memory; a real
+#: receipt's content stream is a few KB. A PDF over these is refused (`LimitReachedError`), not
+#: rendered instead: pdfium decodes the same stream with no limit of its own (a 300 MB one took
+#: ~6 GB). Applied per call, for the current context only (`pypdf.apply_configuration`).
+PDF_TEXT_LIMITS = {
+    'zlib_maximum_output_length': 2_000_000,
+    'lzw_maximum_output_length': 2_000_000,
+    'run_length_maximum_output_length': 2_000_000,
+    'brotli_maximum_output_length': 2_000_000,
+    'array_based_stream_maximum_output_length': 2_000_000,
+}
 #: `pypdfium2` render scale: 1 is 72 dpi, so 2 is 144 dpi (a Letter page is ~1224x1584).
 PDF_RENDER_SCALE = 2
 #: A PDF page bigger than this on a side, in points (14400 pt is 200 inches, the PDF spec's own
@@ -186,15 +203,22 @@ def image_dimensions(data: bytes) -> tuple[int, int] | None:
 
 def _encode_jpeg(image: Image.Image) -> bytes:
     """Orient, flatten and downscale an already decoded image, and encode it as a JPEG."""
+    if image.mode in ('1', 'P', 'PA'):
+        # Palette images can't be resampled with a real filter; expand them (<= 4 bytes a pixel).
+        has_alpha = image.mode == 'PA' or 'transparency' in image.info
+        image = image.convert('RGBA' if has_alpha else 'RGB')
+    # Shrink first, in place (it keeps `info`, so the EXIF orientation survives): the rotation and
+    # the conversions below then copy a bitmap of at most `MAX_IMAGE_SIDE_PX` on a side, not the
+    # full-size one. The box is square, so rotating afterwards doesn't change what fits.
+    image.thumbnail((MAX_IMAGE_SIDE_PX, MAX_IMAGE_SIDE_PX), Image.Resampling.LANCZOS)
     image = ImageOps.exif_transpose(image) or image
-    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+    if image.mode in ('RGBA', 'LA'):
         rgba = image.convert('RGBA')
         flattened = Image.new('RGB', rgba.size, (255, 255, 255))
         flattened.paste(rgba, mask=rgba.getchannel('A'))
         image = flattened
     elif image.mode != 'RGB':
         image = image.convert('RGB')
-    image.thumbnail((MAX_IMAGE_SIDE_PX, MAX_IMAGE_SIDE_PX), Image.Resampling.LANCZOS)
     out = io.BytesIO()
     image.save(out, format='JPEG', quality=JPEG_QUALITY, optimize=True)
     return out.getvalue()
@@ -204,38 +228,39 @@ def _encode_jpeg(image: Image.Image) -> bytes:
 
 
 def _pdf_text(data: bytes) -> str:
-    from pypdf import PdfReader
+    from pypdf import PdfReader, apply_configuration
+    from pypdf.errors import LimitReachedError
 
     try:
-        reader = PdfReader(io.BytesIO(data), strict=False)
-        if reader.is_encrypted and not reader.decrypt(''):
-            raise UnreadableDocumentError('The PDF is password protected.')
-        parts: list[str] = []
-        total = 0
-        for page in reader.pages[:MAX_PDF_TEXT_PAGES]:
-            text = (page.extract_text() or '').strip()
-            if text:
-                parts.append(text)
-                total += len(text)
-            if total >= MAX_TEXT_CHARS:
-                break
-        return '\n\n'.join(parts)[:MAX_TEXT_CHARS]
+        with apply_configuration(None, **PDF_TEXT_LIMITS):
+            reader = PdfReader(io.BytesIO(data), strict=False)
+            if reader.is_encrypted and not reader.decrypt(''):
+                raise UnreadableDocumentError('The PDF is password protected.')
+            parts: list[str] = []
+            total = 0
+            for page in reader.pages[:MAX_PDF_TEXT_PAGES]:
+                text = (page.extract_text() or '').strip()
+                if text:
+                    parts.append(text)
+                    total += len(text)
+                if total >= MAX_TEXT_CHARS:
+                    break
+            return '\n\n'.join(parts)[:MAX_TEXT_CHARS]
     except UnreadableDocumentError:
         raise
+    except LimitReachedError as exc:  # a stream far bigger than any receipt's
+        raise UnreadableDocumentError('The PDF is too complex to read.') from exc
     except Exception as exc:  # pypdf raises a wide variety of errors on damaged files
         raise UnreadableDocumentError(f'The PDF could not be read: {exc}') from exc
 
 
 def _render_scale(width_pt: float, height_pt: float) -> float:
     """The scale to render a `width_pt` x `height_pt` page at: `PDF_RENDER_SCALE`, lowered so the
-    bitmap stays within `MAX_IMAGE_PIXELS`. Refuses a page of absurd (or nonsensical) size."""
+    longer side of the bitmap is at most `MAX_IMAGE_SIDE_PX` (all the AI receives, so rendering
+    more would only allocate it to throw it away). Refuses a page of absurd (or nonsensical) size."""
     if not (0 < width_pt <= MAX_PDF_PAGE_POINTS and 0 < height_pt <= MAX_PDF_PAGE_POINTS):
         raise UnreadableDocumentError('The PDF page size is not supported.')
-    scale = float(PDF_RENDER_SCALE)
-    if width_pt * height_pt * scale * scale > MAX_IMAGE_PIXELS:
-        # (A hair under, so rounding up to whole pixels can't tip it over.)
-        scale = math.sqrt(MAX_IMAGE_PIXELS / (width_pt * height_pt)) * 0.99
-    return scale
+    return min(float(PDF_RENDER_SCALE), MAX_IMAGE_SIDE_PX / max(width_pt, height_pt))
 
 
 def _render_pdf_pages(data: bytes, max_pages: int) -> list[bytes]:
