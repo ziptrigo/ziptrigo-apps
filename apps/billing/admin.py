@@ -6,6 +6,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.urls import path
 
+from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.models import User
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
@@ -43,13 +44,30 @@ class CreditAdjustmentForm(forms.Form):
 
 
 class CreditTransactionAdmin(admin.ModelAdmin):
-    """Admin interface for CreditTransaction, with a page to adjust a user's credits."""
+    """Read-only ledger, with a page to adjust a user's credits.
+
+    Rows are never added, edited or deleted by hand: the ledger must add up to the balance, and
+    both only change through `apps.billing.services`. The adjustment tool is the way in.
+    """
 
     list_display = ['id', 'user', 'amount', 'type', 'source', 'description', 'created_at']
     list_filter = ['type', 'source', 'created_at']
     search_fields = ['user__email', 'user__name', 'description']
     readonly_fields = ['id', 'created_at']
     date_hierarchy = 'created_at'
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(
+        self, request: HttpRequest, obj: CreditTransaction | None = None
+    ) -> bool:
+        return False
+
+    def has_delete_permission(
+        self, request: HttpRequest, obj: CreditTransaction | None = None
+    ) -> bool:
+        return False
 
     def get_urls(self):
         custom_urls = [
@@ -61,9 +79,15 @@ class CreditTransactionAdmin(admin.ModelAdmin):
         ]
         return custom_urls + super().get_urls()
 
-    def adjust_credits_view(self, request: HttpRequest) -> HttpResponse:
+    def adjust_credits_view(self, request: AuthenticatedHttpRequest) -> HttpResponse:
         """Manually add or spend a user's credits, always recorded as an `adjustment`."""
-        if not self.has_add_permission(request):
+        # The tool writes ledger rows, so it needs the permission to add them. That is checked
+        # with `has_perm` directly rather than `has_add_permission`, which is False on purpose
+        # (the change form must not create rows by hand) and would lock out everyone, superusers
+        # included. Follow-up: a dedicated `adjust_credits` permission (as file_transfer has
+        # `takedown_transfer`) would stop overloading `add_credittransaction`; it needs a data
+        # migration to grant it to whoever holds the add permission today, so it isn't done here.
+        if not request.user.has_perm('billing.add_credittransaction'):
             messages.error(request, 'You do not have permission to adjust credits.')
             status = 403
             credit_form = CreditAdjustmentForm()
@@ -135,6 +159,9 @@ class CreditAccountAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request: HttpRequest, obj: CreditAccount | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: CreditAccount | None = None) -> bool:
         return False
 
 

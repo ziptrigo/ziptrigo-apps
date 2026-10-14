@@ -10,16 +10,13 @@ dependencies = [
     'authlib>=1.6,<2.0',
     'boto3>=1.34,<2.0',
     'dj-database-url>=3.1,<4.0',
-    'django-cors-headers>=4.3,<5.0',
     'django-jazzmin>=3.0,<4.0',
     'django-ninja-extra>=0.30,<1.0',
     'django-ninja-jwt>=5.4,<6.0',
     'django-ninja>=1.5,<2.0',
-    'django-ses>=4.0,<5.0',
     'django-tasks-db>=0.13,<1.0',
     'django>=6.1,<6.2',
     'gunicorn>=26.2,<27.0',
-    'jinja2>=3.1,<4.0',
     # OpenAI-compatible client for receipt extraction (issue #98); used with an explicit timeout
     # and a bounded `max_retries` (`apps.receipts.services.ai`).
     'openai>=2.0,<3.0',
@@ -44,9 +41,10 @@ dev = [
     # annotation in `apps/core/services/email.py` and in `admin/email.py`. The import of
     # `mypy_boto3_ses` itself never runs outside of type checking: it's behind `if TYPE_CHECKING:`
     # in `apps/core/services/email.py`, and function-local (so lazily deferred) in
-    # `admin/email.py`. That's deliberate, not incidental -- Docker builds run `uv sync` without
-    # the dev group, so an unguarded top-level import in `apps/core/services/email.py` would raise
-    # `ImportError` as soon as production code imported that module.
+    # `admin/email.py`. That's deliberate, not incidental --
+    # the Docker build runs `uv sync --no-dev`, so this group is not in the image and an unguarded
+    # top-level import in `apps/core/services/email.py` would raise `ImportError` as soon as
+    # production code imported that module.
     # Don't drop this dependency without also checking those guards.
     'boto3-stubs[s3,ses]',
     'factory-boy',
@@ -63,7 +61,6 @@ dev = [
     'pyzipper',
     'ruff',
     's3fs>=2026.4.0',
-    'textual-searchable-selectionlist',
     'ty',
     'typer',
     'typer-invoke',

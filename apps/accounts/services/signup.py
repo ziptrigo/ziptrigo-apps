@@ -9,9 +9,9 @@ to the caller as `EmailAlreadyRegistered`, not to the user: the register view an
 either way and emails the address's owner instead (issue #125,
 `apps.accounts.services.existing_account`). The email is normalized (`User.objects.normalize_email`,
 which lower-cases only the domain) before that check, since `UserManager.create_user` normalizes it
-too when it actually saves the row -- comparing the raw, un-normalized address here would let e.g.
-`user@Example.COM` slip past this pre-check when `user@example.com` is already registered, only to
-then hit the model's unique constraint. That case, and the ordinary race between this call's
+too when it actually saves the row. The check itself ignores case altogether (`email__iexact`), so
+`Alice@gmail.com` is the existing `alice@gmail.com` account too, not a second row the database's
+case-sensitive unique constraint would let through. The ordinary race between this call's
 pre-check and a concurrent signup for the same address, both funnel into the same
 `EmailAlreadyRegistered`: `create_user` runs inside `transaction.atomic()`, and a
 `django.db.utils.IntegrityError` from the constraint is caught and converted rather than left to
@@ -45,7 +45,9 @@ def create_account(*, name: str, email: str, password: str) -> User:
             from an existing account by domain case -- see module docstring).
     """
     email = User.objects.normalize_email(email)
-    if User.objects.filter(email=email).exists():
+    # Case-insensitive: `Alice@gmail.com` next to `alice@gmail.com` would be two rows that
+    # Google sign-in (which matches `iexact`) then refuses as a conflict forever.
+    if User.objects.filter(email__iexact=email).exists():
         raise EmailAlreadyRegistered(email)
 
     try:

@@ -274,6 +274,35 @@ non-local `BASE_URL` triggers `accounts.W003` (shown by `manage.py check` and th
 `migrate` step). Login, and "Sign up with Google", have no captcha. README's "Signup captcha" has
 the Cloudflare setup.
 
+**Email case** (audit #15): `User.email` is stored with `normalize_email` (domain lower-cased, local
+part as typed) and its unique constraint is **case-sensitive**, so the database alone does not stop
+`Alice@gmail.com` next to `alice@gmail.com`; only application checks do, and not everywhere:
+
+- *Web forms.* The login, forgot-password, resend-confirmation and register forms share
+  `forms.email.NormalizedEmailMixin.clean_email` (like the API's `EmailStr`), so a mixed-case
+  *domain* finds the account on every surface. Login and the reset/resend lookups stay **exact on
+  the local part, on purpose**: the local part is the stored spelling, legacy rows may differ only by
+  case (so a case-folded lookup could hit the wrong one of two, or several), and a case-insensitive
+  lookup on those paths would also make them behave differently from the API's.
+- *Checks that ignore case entirely* (`email__iexact`): `create_account`,
+  `handle_signup_for_existing_email`, `PUT /api/account` and the admin user forms
+  (`forms/admin.py`: `UserAdminCreationForm` and `UserAdminChangeForm` refuse another account's
+  address in any case and normalize the domain; an unchanged address isn't re-checked, so one of two
+  legacy rows stays editable). A case-variant signup takes the existing-account path (see "Auth"),
+  never a second row (Google linking matches `iexact` and refuses two rows as `AccountConflict`).
+  Where legacy case-duplicates exist, that path picks the row spelled exactly like the signup
+  address, else the oldest (`created_at`, `pk`), and locks down / mails the *stored* spelling.
+- *Not covered:* `createsuperuser` (`create_user`) and the Django shell still rely on the
+  case-sensitive constraint alone. **Open race:** two concurrent signups of a *new* address in
+  different case both pass the `iexact` pre-check and both insert; only a database constraint
+  closes it. `UniqueConstraint(Lower('email'))` is deliberately not added yet: prod data needs
+  checking for existing duplicates first (`SELECT lower(email), count(*) FROM accounts_user GROUP BY
+  1 HAVING count(*) > 1`), and they need resolving, since the migration would fail on them.
+  **Index caveat:** Django compiles `email__iexact` on Postgres to `UPPER(email) = UPPER(%s)`, so an
+  index only helps if it is on `Upper('email')` (or the lookups are switched to a `Lower`
+  annotation to match a `Lower('email')` index); until then the `iexact` checks are a sequential
+  scan over `accounts_user`. Check with `EXPLAIN` when the table is large enough to matter.
+
 **No page or endpoint reveals whether an email address has an account** (issue #125; forgot-password
 and resend-confirmation already worked this way). The register page gives the same answer for every
 valid submission that passed the captcha and `SIGNUP_IP`: the same redirect to `accounts:created`
@@ -696,7 +725,8 @@ nested path parameter like `/transfers/{id}/files/...`. `TransferSchema.recipien
 `{id, email, last_sent_at}` objects (not bare email strings), so a caller can resend to one without
 a separate lookup (`POST /transfers/{id}/recipients/{recipient_id}/resend`, `admin/filetransfer.py
 resend`). Status codes: 400 for a service `ValidationError` (including a malformed `PATCH` --
-`expiry_date` without `expiry_choice`, or `?filter=` outside `active`/`ended`/`all`), **402** for
+`expiry_date` without `expiry_choice`, or `?filter=` outside `active`/`ended`/`all`; an `expiry_date`
+with no UTC offset is read in `TIME_ZONE` by `resolve_expiry`, not a 500; a date alone, `2027-12-31`, means the end of that day like the web date picker -- `schemas.transfer.ExpiryDate`), **402** for
 `InsufficientCreditsError` (a documented choice over 400 -- the request is well-formed, the account
 just can't cover it right now), 404 for another user's transfer (never 403, so it doesn't confirm
 the id exists), 429 via the site-wide rate-limit handler (`FT_UPLOAD_USER`, same rule and budget as
@@ -861,6 +891,21 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
 `apps/core/admin_site.py` owns `custom_admin_site` (mounted at `/admin/`) and the tools page (test
 email, masked environment). Every app registers its `ModelAdmin`s on it from its own `admin.py`.
 The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/billing/credittransaction/adjust/`).
+The ledger is read-only in the admin (no add/change/delete, so no `delete_selected`; the same for
+`CreditAccountAdmin`), because the balance only changes through `apps.billing.services`. The tool
+checks `billing.add_credittransaction` itself with `has_perm` (not `has_add_permission`, which is
+False on purpose), the changelist shows its link only to users with it, and
+`POST /api/billing/users/{id}/credits` (`AdminAuth` is only `is_staff`) requires the same
+permission (403 otherwise). A dedicated `adjust_credits` permission, with a data migration granting
+it to whoever holds the add permission, would be cleaner and is a follow-up. `readonly_fields` on
+both admins is what shows `id`/`created_at`/`updated_at` on the detail page: those are
+non-editable, so without it the page omits them. **Deleting a user still works with a credit
+history:** `CreditAccount`/`CreditTransaction` cascade from the user and Django asks each cascaded
+row's admin `has_delete_permission`, so `UserAdmin.get_deleted_objects` (`apps/accounts/admin.py`,
+`CASCADE_WITH_USER_APP_LABELS`) drops a billing model from `perms_needed` when the caller holds its
+`delete_<model>` permission (what the default check asked before): superusers pass, staff still
+need it granted. The receipts and file_transfer read-only admins already refuse delete the same way,
+so a user with receipts or transfers still can't be deleted from the admin (not changed here).
 The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
 so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
 and to the admin tools page.
@@ -2023,11 +2068,12 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 
 ### Docker
 
-One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`),
-shared by every service in `docker-compose.yml`: `web`, `worker`, `worker-receipts`, `scheduler` and `db` (that
-split is the local-development layout only; a deployment runs one container, below). The build
-runs `collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.local` is mounted
-into `web`, `worker`, `worker-receipts` and `scheduler` because settings require an env file.
+One `Dockerfile` (multi-stage: `uv sync --frozen --no-dev` in a builder, so no dev tools ship;
+venv copied to `python:3.14-slim`), shared by every service in `docker-compose.yml`: `web`,
+`worker`, `worker-receipts`, `scheduler` and `db` (that split is the local-development layout
+only; a deployment runs one container, below). The build runs `collectstatic` so WhiteNoise can
+serve static files with `DEBUG=False`. `.env.local` is mounted into `web`, `worker`,
+`worker-receipts` and `scheduler` because settings require an env file.
 
 - The image's `CMD` is `python supervise.py` (stdlib only, PID 1 after the entrypoint's `migrate`).
   It starts gunicorn (`config.wsgi`, `-c gunicorn.conf.py`, which starts the scheduler thread in

@@ -40,8 +40,8 @@ def update_account(request, payload: AccountUpdateRequest):
         # A 429 refuses the whole request on purpose: a name sent along with the email is not
         # saved either (nothing has been written yet), rather than half-applying an update.
         ratelimit.enforce(ratelimit.hit_user(user, 'ACCOUNT_EMAIL_CHANGE_USER'))
-        # Check if email already exists
-        if User.objects.filter(email=payload.email).exclude(id=user.id).exists():
+        # Check if email already exists, ignoring case (see `signup.create_account`).
+        if User.objects.filter(email__iexact=payload.email).exclude(id=user.id).exists():
             raise HttpError(400, 'Email already in use')
         user.email = payload.email
         user.email_confirmed = False

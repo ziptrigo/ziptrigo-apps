@@ -16,7 +16,7 @@ RUN python -m pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock /app/
 
 # Install Python dependencies (runtime only; no dev group)
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project
 
 
 # Stage 2: Runtime

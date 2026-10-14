@@ -126,8 +126,12 @@ def _sync_command(
         args.append('--all-groups')
         return args
 
-    for group in _selected_groups(requirements):
+    groups = _selected_groups(requirements)
+    for group in groups:
         args.extend(['--group', group])
+    if Requirements.DEV.value not in groups:
+        # uv includes the `dev` group by default; without this `main` would still install it.
+        args.append('--no-dev')
 
     return args
 

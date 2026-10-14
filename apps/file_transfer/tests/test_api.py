@@ -7,8 +7,12 @@ Exercises the same services the web send/dashboard flow does, just through
 import base64
 import hashlib
 import json
+from datetime import UTC, date, datetime, time, timedelta
+from datetime import timezone as dt_timezone
+from zoneinfo import ZoneInfo
 
 import pytest
+from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.tokens import CustomAccessToken
@@ -146,6 +150,188 @@ def test_finalize_validation_error_returns_400(client, draft_transfer, uploaded_
     )
     assert response.status_code == 400
     assert response.json()['detail']
+
+
+def test_finalize_rejects_a_recipient_that_is_not_an_email(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    response = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/send',
+        {'recipients': ['not an email'], 'expiry_choice': 'none'},
+        auth_headers,
+    )
+
+    assert response.status_code == 400
+
+
+def _future(**kwargs) -> datetime:
+    """An aware moment `kwargs` from now, whole seconds."""
+    return (timezone.now() + timedelta(**kwargs)).replace(microsecond=0)
+
+
+def _end_of(day: date) -> datetime:
+    return datetime.combine(day, time(23, 59, 59), tzinfo=UTC)
+
+
+def _send(client, auth_headers, transfer, **options):
+    return _post(
+        client,
+        f'/api/ft/transfers/{transfer.id}/send',
+        {'recipients': ['a@example.com'], 'expiry_choice': 'custom', **options},
+        auth_headers,
+    )
+
+
+def test_finalize_custom_expiry_without_a_timezone_is_read_in_the_current_time_zone(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    """pydantic parses "2027-12-31T00:00:00" as a naive datetime; comparing it with an aware
+    `now` used to raise `TypeError` (a 500)."""
+    naive = _future(days=10).replace(tzinfo=None)
+
+    response = _send(client, auth_headers, draft_transfer, expiry_date=naive.isoformat())
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == naive.replace(tzinfo=UTC)
+
+
+def test_finalize_naive_custom_expiry_follows_settings_time_zone(
+    client, draft_transfer, uploaded_file, auth_headers, settings
+):
+    settings.TIME_ZONE = 'America/New_York'
+    naive = _future(days=10).replace(tzinfo=None)
+
+    response = _send(client, auth_headers, draft_transfer, expiry_date=naive.isoformat())
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == naive.replace(tzinfo=ZoneInfo('America/New_York'))
+
+
+def test_finalize_custom_expiry_in_the_past_without_a_timezone_returns_400(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    naive = _future(days=-1).replace(tzinfo=None)
+
+    response = _send(client, auth_headers, draft_transfer, expiry_date=naive.isoformat())
+
+    assert response.status_code == 400
+    assert 'future' in response.json()['detail']
+
+
+def test_finalize_date_only_expiry_means_the_end_of_that_day(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    """The web date picker expires a transfer at the end of the chosen day; so does the API."""
+    day = _future(days=10).date()
+
+    response = _send(client, auth_headers, draft_transfer, expiry_date=day.isoformat())
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == _end_of(day)
+
+
+def test_finalize_date_only_expiry_follows_settings_time_zone(
+    client, draft_transfer, uploaded_file, auth_headers, settings
+):
+    settings.TIME_ZONE = 'America/New_York'
+    day = _future(days=10).date()
+
+    response = _send(client, auth_headers, draft_transfer, expiry_date=day.isoformat())
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == datetime.combine(
+        day, time(23, 59, 59), tzinfo=ZoneInfo('America/New_York')
+    )
+
+
+def test_finalize_date_only_expiry_in_the_past_returns_400(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    day = _future(days=-2).date()
+
+    response = _send(client, auth_headers, draft_transfer, expiry_date=day.isoformat())
+
+    assert response.status_code == 400
+    assert 'future' in response.json()['detail']
+
+
+def test_finalize_today_as_a_date_only_expiry_is_still_in_the_future(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    """ "Today" as a date means the end of today, not midnight that has already passed."""
+    today = timezone.localdate()
+
+    response = _send(client, auth_headers, draft_transfer, expiry_date=today.isoformat())
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == _end_of(today)
+
+
+def test_finalize_rejects_an_unparseable_expiry_date(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    response = _send(client, auth_headers, draft_transfer, expiry_date='2027-13-45')
+
+    assert response.status_code == 422
+
+
+def test_update_custom_expiry_naive_date_only_and_aware(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    url = f'/api/ft/transfers/{draft_transfer.id}'
+
+    naive = _future(days=20).replace(tzinfo=None)
+    response = _patch(
+        client,
+        url,
+        {'expiry_choice': 'custom', 'expiry_date': naive.isoformat()},
+        auth_headers,
+    )
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == naive.replace(tzinfo=UTC)
+
+    day = _future(days=25).date()
+    response = _patch(
+        client,
+        url,
+        {'expiry_choice': 'custom', 'expiry_date': day.isoformat()},
+        auth_headers,
+    )
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == _end_of(day)
+
+    aware = _future(days=30).astimezone(dt_timezone(timedelta(hours=2)))
+    response = _patch(
+        client,
+        url,
+        {'expiry_choice': 'custom', 'expiry_date': aware.isoformat()},
+        auth_headers,
+    )
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == aware
+
+    for past in (
+        _future(days=-1).replace(tzinfo=None).isoformat(),
+        _future(days=-2).date().isoformat(),
+    ):
+        response = _patch(
+            client, url, {'expiry_choice': 'custom', 'expiry_date': past}, auth_headers
+        )
+        assert response.status_code == 400
+        draft_transfer.refresh_from_db()
+        assert draft_transfer.expires_at == aware
 
 
 def test_finalize_insufficient_credits_returns_402(
@@ -527,8 +713,6 @@ def test_add_recipients_and_resend(client, draft_transfer, uploaded_file, auth_h
 
     from datetime import timedelta
 
-    from django.utils import timezone
-
     from ..services.actions import RESEND_COOLDOWN
 
     recipient.last_sent_at = timezone.now() - RESEND_COOLDOWN - timedelta(seconds=1)
@@ -543,7 +727,6 @@ def test_add_recipients_and_resend(client, draft_transfer, uploaded_file, auth_h
 
 
 def test_add_recipients_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
-    from django.utils import timezone
 
     from ..services.send import SendOptions, finalize_send
 
@@ -562,7 +745,6 @@ def test_add_recipients_returns_409_when_held(client, draft_transfer, uploaded_f
 
 
 def test_resend_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
-    from django.utils import timezone
 
     from ..models import TransferRecipient
     from ..services.send import SendOptions, finalize_send
@@ -608,7 +790,6 @@ def test_update_reenable_returns_402_below_a_days_cost(
 
 
 def test_update_reenable_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
-    from django.utils import timezone
 
     from ..services.send import SendOptions, finalize_send
 
@@ -667,7 +848,6 @@ def test_delete_active_transfer(client, draft_transfer, uploaded_file, auth_head
 
 
 def test_delete_returns_409_when_held(client, draft_transfer, uploaded_file, auth_headers):
-    from django.utils import timezone
 
     from ..services.send import SendOptions, finalize_send
 
