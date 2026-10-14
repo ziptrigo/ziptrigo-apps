@@ -306,6 +306,71 @@ class TestUpdateReceiptVendor:
         assert Vendor.objects.filter(name__iexact='staples').count() == 1
 
 
+class TestLockOrder:
+    """Rename and merge lock the vendor and then update its receipts; saving a receipt used to lock
+    the receipt and then update the vendor (vetting it), which can deadlock on Postgres. The deadlock
+    cannot be reproduced on SQLite (which has no row locks, and drops `FOR UPDATE`), so these record
+    the order `select_for_update` is asked for instead: the vendor, then the receipt."""
+
+    @pytest.fixture
+    def receipt(self, make_receipt, fake_ai):
+        read_as(fake_ai, 'ACME Industries, LLC')
+        return run(make_receipt())
+
+    @pytest.fixture
+    def locks(self, monkeypatch) -> list[tuple[str, bool]]:
+        """Every `select_for_update` as `(model name, no_key)`, in the order asked."""
+        from django.db.models import QuerySet
+
+        recorded: list[tuple[str, bool]] = []
+        real = QuerySet.select_for_update
+
+        def recording(self, *args, **kwargs):
+            recorded.append((self.model.__name__, bool(kwargs.get('no_key'))))
+            return real(self, *args, **kwargs)
+
+        monkeypatch.setattr(QuerySet, 'select_for_update', recording)
+        return recorded
+
+    def test_a_typed_vendor_is_locked_before_the_receipt(self, receipt, funded_user, locks):
+        create_vendor(funded_user, 'Blue Bottle')
+
+        actions.update_receipt(receipt, {'vendor': 'Blue Bottle'})
+
+        assert locks.index(('Vendor', True)) < locks.index(('Receipt', False))
+
+    def test_a_chosen_vendor_id_is_locked_before_the_receipt(self, receipt, funded_user, locks):
+        chosen = create_vendor(funded_user, 'Blue Bottle')
+
+        actions.update_receipt(receipt, {'vendor_id': chosen.pk})
+
+        assert locks.index(('Vendor', True)) < locks.index(('Receipt', False))
+
+    def test_a_name_no_vendor_has_needs_no_vendor_lock(self, receipt, locks):
+        """The vendor does not exist yet, so nobody else can be holding it."""
+        actions.update_receipt(receipt, {'vendor': 'Brand New Vendor'})
+
+        assert ('Vendor', True) not in locks
+        assert ('Receipt', False) in locks
+
+    def test_saving_other_fields_or_the_same_vendor_takes_no_vendor_lock(self, receipt, locks):
+        actions.update_receipt(receipt, {'vendor': receipt.vendor, 'amount': '42.10'})
+        actions.update_receipt(receipt, {'vendor_id': receipt.vendor_ref.pk})
+        actions.update_receipt(receipt, {'notes': 'x'})
+
+        assert ('Vendor', True) not in locks
+
+    def test_the_locked_vendor_is_still_vetted_and_the_receipt_moved(self, receipt, funded_user):
+        chosen = create_vendor(funded_user, 'Blue Bottle')
+
+        actions.update_receipt(receipt, {'vendor': 'Blue Bottle'})
+
+        receipt.refresh_from_db()
+        chosen.refresh_from_db()
+        assert receipt.vendor_ref == chosen
+        assert chosen.vetted_at is not None
+
+
 class TestTheIssuesExample:
     def test_receipt_one_is_renamed_receipt_two_is_matched_and_a_later_rename_shows_everywhere(
         self, make_receipt, fake_ai

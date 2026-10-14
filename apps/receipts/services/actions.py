@@ -47,7 +47,7 @@ from .currencies import normalize_currency
 from .duplicates import refresh_duplicate
 from .errors import AccountFrozenError
 from .processing import enqueue_processing
-from .vendors import assign_vendor, clear_vendor
+from .vendors import assign_vendor, clear_vendor, lock_vendor_for_assignment
 
 #: Fields `update_receipt` accepts: the extracted ones, plus the user-only `notes` and `vendor_id`
 #: (an alternative to `vendor`: one of the user's own vendors, by id).
@@ -202,6 +202,13 @@ def update_receipt(receipt: Receipt, changes: Mapping[str, Any]) -> Receipt:
     """
     cleaned = clean_changes(receipt.user, changes)
     with transaction.atomic():
+        # The vendor the receipt is moving to is locked first: a rename or merge of it locks the
+        # vendor and then its receipts, so the receipt lock below must not come before it (see
+        # `lock_vendor_for_assignment`).
+        if 'vendor' in cleaned or 'vendor_ref' in cleaned:
+            lock_vendor_for_assignment(
+                receipt, vendor=cleaned.get('vendor_ref'), name=cleaned.get('vendor')
+            )
         locked = (
             Receipt.objects.select_for_update(of=('self',))
             .select_related('user')

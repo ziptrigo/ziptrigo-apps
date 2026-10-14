@@ -1595,7 +1595,11 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     filed under the vendor) and then update their receipts, while processing holds a receipt lock and
     may then drop an orphan vendor; `drop_if_orphan` therefore locks the vendor `skip_locked` and
     leaves it for the next orphan check or the user when someone has it, instead of waiting (the
-    other order would deadlock on Postgres).
+    other order would deadlock on Postgres). Saving a receipt that moves it to a vendor vets that
+    vendor (an `UPDATE`) under the receipt's lock, so `update_receipt` first takes the target
+    vendor's `FOR NO KEY UPDATE` (`lock_vendor_for_assignment`, before locking the receipt): vendor
+    then receipt on every path. SQLite can't show a deadlock, so `TestLockOrder` asserts the order
+    `select_for_update` is called in.
   - **Duplicates and search.** `find_duplicate` compares `vendor_ref` (or the text for a receipt
     without one); `ReceiptFilters.vendor` filters by vendor id; `q` also matches `vendor_extracted`
     (so a renamed vendor's receipts are still found by the old name); the CSV has a trailing
