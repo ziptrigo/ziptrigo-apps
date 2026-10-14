@@ -1701,8 +1701,11 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `filter_receipts` and `dashboard_counts` (the tab and Trash numbers, one query) never include a
   receipt with `uploaded=False` (a direct upload still in flight or abandoned).
 - **Jobs** (`apps/receipts/jobs.py`, registered in `ready()`): `receipts.meter_storage` (daily),
-  `receipts.purge_trash` (daily; deletes S3 objects, then rows, past `trash_days`, and the stripped
-  `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
+  `receipts.purge_trash` (daily; deletes S3 objects and rows past `trash_days`, and the stripped
+  `.eml` with the email's last receipt. `lifecycle.purge_receipt` decides from the row as it is now,
+  under its lock and before any S3 delete: still trashed, not `processing` and, for the job, trashed before the
+  cutoff -- else it returns `False` and leaves a receipt restored meanwhile alone --, and the
+  `.eml` under a row lock on the `InboundEmail` too), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
   `receipts.cleanup_uploads` (hourly), `receipts.poll_inbound` (every minute, 2 min lease; see
   "Email intake" below), `receipts.purge_inbound_messages` (daily; deletes `done` `InboundMessage`

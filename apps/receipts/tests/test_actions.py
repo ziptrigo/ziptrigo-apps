@@ -539,6 +539,39 @@ class TestTrash:
         assert Receipt.objects.filter(pk=receipt.pk).exists()
         assert receipt.file_key in fake_storage.objects
 
+    def test_delete_forever_leaves_a_receipt_restored_in_another_tab(
+        self, make_receipt, fake_storage
+    ):
+        """The page's instance still says "trashed"; the row, under its lock, says restored."""
+        receipt = make_receipt(status=ReceiptStatus.PROCESSED, deleted_at=timezone.now())
+        Receipt.objects.filter(pk=receipt.pk).update(deleted_at=None)
+
+        with pytest.raises(ValidationError, match='no longer in the Trash'):
+            actions.delete_forever(receipt)
+
+        assert Receipt.objects.filter(pk=receipt.pk).exists()
+        assert receipt.file_key in fake_storage.objects
+
+    def test_restoring_a_receipt_purged_meanwhile_is_a_404_not_a_crash(self, make_receipt):
+        from django.http import Http404
+
+        receipt = make_receipt(status=ReceiptStatus.PROCESSED, deleted_at=timezone.now())
+        Receipt.objects.filter(pk=receipt.pk).delete()  # purged before the restore got its turn
+
+        with pytest.raises(Http404):
+            actions.restore(receipt)
+
+    def test_a_trashed_receipt_that_started_processing_is_not_purged(
+        self, make_receipt, fake_storage
+    ):
+        from ..services import lifecycle
+
+        receipt = make_receipt(status=ReceiptStatus.PROCESSING, deleted_at=timezone.now())
+
+        assert lifecycle.purge_receipt(receipt) is False
+        assert Receipt.objects.filter(pk=receipt.pk).exists()
+        assert receipt.file_key in fake_storage.objects
+
     def test_delete_forever_removes_the_files_the_row_and_the_bytes(
         self, make_receipt, fake_storage, funded_user
     ):
