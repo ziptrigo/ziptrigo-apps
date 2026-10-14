@@ -1,4 +1,4 @@
-"""Unit tests for password reset email rendering using Jinja2 template."""
+"""Unit tests for password reset email rendering using a Django template."""
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
