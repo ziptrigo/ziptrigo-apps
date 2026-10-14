@@ -1,6 +1,7 @@
 """Fixtures shared by every app's tests."""
 
 import logging
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -38,6 +39,10 @@ class RateLimitClock:
     def advance(self, seconds: float) -> None:
         self.now += seconds
 
+    def __getattr__(self, name: str):
+        # It replaces the limiter's whole `time` module, so anything but `time()` is the real one.
+        return getattr(time, name)
+
 
 @pytest.fixture
 def ratelimit_clock(monkeypatch):
@@ -53,9 +58,11 @@ def ratelimit_clock(monkeypatch):
     rule, 20 s for a one-minute one. `advance()` moves it deliberately.
 
     Only the limiter's own clock is replaced (its module-level `time`), not `time.time`
-    globally, so nothing else (sessions, token expiry, the database) sees the frozen time. Not
-    autouse: `core`'s limiter tests pass `now=` themselves, and the storage-error and cache
-    paths would not want it.
+    globally, so nothing else (sessions, token expiry, the database) sees the frozen time. It
+    works with both storage backends. One caveat on the cache one: an entry's TTL (`retry_after`,
+    relative) runs on the real clock, so a test that takes longer than that (20 s for a
+    one-minute rule) between two hits would lose its count. Not autouse: `core`'s limiter tests
+    pass `now=` themselves.
     """
     clock = RateLimitClock(RateLimitClock.EPOCH + 1000)
     monkeypatch.setattr(limiter, 'time', clock)

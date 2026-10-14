@@ -25,7 +25,12 @@ from .api_support import (  # noqa: F401 -- the fixtures are used by name
 from .factories import create_receipt
 from .fakes import b64_sha256
 
-pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.unit,
+    # Two requests per fixed rate-limit window: a real clock crossing a boundary breaks them.
+    pytest.mark.usefixtures('ratelimit_clock'),
+]
 
 
 def start_body(data=None, **overrides):
