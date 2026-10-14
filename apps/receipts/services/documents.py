@@ -10,31 +10,58 @@ client claimed. HEIC and HEIF are both reported as `image/heic`.
   opener), rotated by its EXIF orientation, flattened onto white if it has transparency and
   downscaled to `MAX_IMAGE_SIDE_PX` on its long side, then re-encoded as JPEG. For a HEIC original
   that JPEG is also returned as the `preview_jpeg` to store, since browsers can't show HEIC.
-- A PDF's text layer is read with `pypdf` under a low decompression cap (`PDF_TEXT_LIMITS`; a PDF
-  over it is refused as unreadable); a scan (almost no text) is instead rendered with `pypdfium2`,
-  the first `max_pdf_pages` pages only, and sent as images.
+- A PDF's text layer is read with `pypdf` under a low decompression cap (`PDF_TEXT_LIMITS`, **per
+  stream**; a PDF over it is refused as too complex); a scan (almost no text) is instead rendered
+  with `pypdfium2`, the first `max_pdf_pages` pages only, and sent as images.
 - An HTML or plain-text email body is converted to text with the stdlib parser (scripts, styles
   and other non-content elements dropped).
 
 Anything that can't be decoded raises `UnreadableDocumentError`; a type with no preparation raises
-`UnsupportedDocumentError`. An image whose header claims more than `MAX_IMAGE_PIXELS` is refused
-before its pixel data is ever loaded (a decompression-bomb guard; Pillow's own process-wide limit
-is left alone) and is shrunk to `MAX_IMAGE_SIDE_PX` *before* it is rotated or converted, so those
-steps never copy the full-size bitmap. A PDF page is rendered at a scale that keeps its longer side
-within `MAX_IMAGE_SIDE_PX` -- before anything is allocated -- and refused outright if its page size
-is absurd.
+`UnsupportedDocumentError`; a file that needs more memory or time than the budget below allows (or
+is plainly absurd: a header claiming more than `MAX_IMAGE_PIXELS`, a PDF page of absurd size, a
+stream over the cap) raises `DocumentTooComplexError`, a subclass of `UnreadableDocumentError`
+that the caller can tell apart because "try a sharper photo" is the wrong advice for it. An image
+header claiming more than `MAX_IMAGE_PIXELS` is refused before its pixel data is loaded, and an
+image is shrunk to `MAX_IMAGE_SIDE_PX` *before* it is rotated or converted, so those steps never
+copy the full-size bitmap. A PDF page is rendered at a scale that keeps its longer side within
+`MAX_IMAGE_SIDE_PX`.
 
-All of this runs in the receipts worker, where an out-of-memory kill restarts the whole container,
-so a small hostile file must not be able to make it allocate much more than its output.
+**The budget** (the point of this module's shape). All of this runs in the receipts worker, where
+an out-of-memory kill restarts the whole container, and the checks above only bound *one* thing
+each: the decompression cap is per stream, and pdfium has no budget at all (a 5 KB PDF whose page
+draws one 1.9 MB Form XObject 40 times needs 1.4 GB, because the renderer decodes the form again
+for every use; 40 different forms do the same; and many big streams cost pypdf minutes of CPU).
+No per-object cap can bound a renderer, so `prepare_input` runs the whole preparation in a child
+process (`_prepare_in_child`) with a hard address-space limit (`RLIMIT_AS`, `DOCUMENT_MEMORY_MB`,
+Linux only) and a wall-clock timeout (`DOCUMENT_TIMEOUT_SECONDS`). A child that runs out of
+memory, is killed, crashes or is still running at the deadline (it is killed) becomes a
+`DocumentTooComplexError`, and the worker's own memory is never at risk. The child is this very
+file run as a script (`python -I documents.py`): importing `apps.receipts.services.documents`
+would import the whole Django-dependent services package, so the file has no relative imports and
+needs none of it. It takes the bytes on stdin and answers JSON on stdout, never touches the
+database, and runs with a minimal environment (no keys or credentials) because it parses hostile
+files. Where `RLIMIT_AS` isn't enforced (macOS, so a developer machine) only the timeout bounds it.
+
+`RECEIPTS_DOCUMENT_SANDBOX` (settings; off under pytest so unit tests stay in-process and can
+monkeypatch internals) switches the child off, `_prepare_unsandboxed` being the in-process path.
 """
 
+import base64
 import io
+import json
+import logging
+import os
 import re
+import subprocess
+import sys
 import warnings
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+
+logger = logging.getLogger(__name__)
 
 #: Longest side, in pixels, of an image sent to the AI (and of a stored HEIC preview).
 MAX_IMAGE_SIDE_PX = 2048
@@ -52,8 +79,9 @@ MAX_PDF_TEXT_PAGES = 20
 #: pypdf's limits on what a stream may decompress to, for reading a PDF's text. Its defaults allow
 #: 75 MB per stream, and extracting text from one such stream took ~1 GB of memory; a real
 #: receipt's content stream is a few KB. A PDF over these is refused (`LimitReachedError`), not
-#: rendered instead: pdfium decodes the same stream with no limit of its own (a 300 MB one took
-#: ~6 GB). Applied per call, for the current context only (`pypdf.apply_configuration`).
+#: rendered instead: pdfium decodes the same stream with no limit of its own. **Per stream**: many
+#: streams under it add up, which is what the child process's budget below is for. Applied per
+#: call, for the current context only (`pypdf.apply_configuration`).
 PDF_TEXT_LIMITS = {
     'zlib_maximum_output_length': 2_000_000,
     'lzw_maximum_output_length': 2_000_000,
@@ -66,6 +94,17 @@ PDF_RENDER_SCALE = 2
 #: A PDF page bigger than this on a side, in points (14400 pt is 200 inches, the PDF spec's own
 #: maximum), is refused as unreadable instead of rendered.
 MAX_PDF_PAGE_POINTS = 14_400
+
+#: The budget of the child process `prepare_input` runs in (see the module docstring); the
+#: settings `RECEIPTS_DOCUMENT_MEMORY_MB` and `RECEIPTS_DOCUMENT_TIMEOUT_SECONDS` override them.
+#: Address space, not resident memory (that is what `RLIMIT_AS` counts). Measured on Linux with
+#: pillow 12.3, pypdfium2 5.14 and pillow-heif 1.8: the interpreter and libraries map under 96 MB,
+#: an ordinary receipt needs 96-128 MB, and the worst legitimate inputs, a 48-megapixel HEIC or a
+#: 50-megapixel PNG, pass at 512 MB. So this leaves 2x over the worst; the shared-form PDF needs
+#: 1.4 GB and is refused. Lower it (setting) if the container has less room than that to spare.
+DOCUMENT_MEMORY_MB = 1024
+#: Preparing a receipt takes a second or so; a few pages of a big scan, ten.
+DOCUMENT_TIMEOUT_SECONDS = 60.0
 
 PDF = 'application/pdf'
 JPEG = 'image/jpeg'
@@ -90,6 +129,12 @@ class DocumentError(Exception):
 
 class UnreadableDocumentError(DocumentError):
     """The file is corrupt, encrypted, too large to decode, or otherwise can't be read."""
+
+
+class DocumentTooComplexError(UnreadableDocumentError):
+    """The file needs more memory or time than preparing a receipt may use (or exceeds a hard
+    size limit): not corrupt, just too much. Unlike a plain unreadable file, a sharper photo
+    would not help; a smaller or simpler version would."""
 
 
 class UnsupportedDocumentError(DocumentError):
@@ -165,7 +210,7 @@ def _normalize_image(data: bytes) -> bytes:
         image = Image.open(io.BytesIO(data))
         width, height = image.size
         if width * height > MAX_IMAGE_PIXELS:
-            raise UnreadableDocumentError('The image is too large to read.')
+            raise DocumentTooComplexError('The image is too large to read.')
         if image.format == 'JPEG':
             # Lets libjpeg decode at a reduced size, which keeps a big photo's memory use down.
             image.draft('RGB', (MAX_IMAGE_SIDE_PX, MAX_IMAGE_SIDE_PX))
@@ -204,7 +249,10 @@ def image_dimensions(data: bytes) -> tuple[int, int] | None:
 def _encode_jpeg(image: Image.Image) -> bytes:
     """Orient, flatten and downscale an already decoded image, and encode it as a JPEG."""
     if image.mode in ('1', 'P', 'PA'):
-        # Palette images can't be resampled with a real filter; expand them (<= 4 bytes a pixel).
+        # A bilevel or palette image can only be resampled with NEAREST. Shrink it that way to at
+        # most twice the target first (the expansion below, up to 4 bytes a pixel, is then small
+        # whatever the image's size) and let the real filter below finish the job.
+        image.thumbnail((2 * MAX_IMAGE_SIDE_PX, 2 * MAX_IMAGE_SIDE_PX), Image.Resampling.NEAREST)
         has_alpha = image.mode == 'PA' or 'transparency' in image.info
         image = image.convert('RGBA' if has_alpha else 'RGB')
     # Shrink first, in place (it keeps `info`, so the EXIF orientation survives): the rotation and
@@ -249,7 +297,7 @@ def _pdf_text(data: bytes) -> str:
     except UnreadableDocumentError:
         raise
     except LimitReachedError as exc:  # a stream far bigger than any receipt's
-        raise UnreadableDocumentError('The PDF is too complex to read.') from exc
+        raise DocumentTooComplexError('The PDF is too complex to read.') from exc
     except Exception as exc:  # pypdf raises a wide variety of errors on damaged files
         raise UnreadableDocumentError(f'The PDF could not be read: {exc}') from exc
 
@@ -259,7 +307,7 @@ def _render_scale(width_pt: float, height_pt: float) -> float:
     longer side of the bitmap is at most `MAX_IMAGE_SIDE_PX` (all the AI receives, so rendering
     more would only allocate it to throw it away). Refuses a page of absurd (or nonsensical) size."""
     if not (0 < width_pt <= MAX_PDF_PAGE_POINTS and 0 < height_pt <= MAX_PDF_PAGE_POINTS):
-        raise UnreadableDocumentError('The PDF page size is not supported.')
+        raise DocumentTooComplexError('The PDF page size is not supported.')
     return min(float(PDF_RENDER_SCALE), MAX_IMAGE_SIDE_PX / max(width_pt, height_pt))
 
 
@@ -359,9 +407,32 @@ def html_to_text(html: bytes | str) -> str:
 
 # -- Entry point --------------------------------------------------------------------------------
 
+_SUPPORTED_TYPES = IMAGE_TYPES | {PDF, HTML, PLAIN}
+
 
 def prepare_input(data: bytes, content_type: str, *, max_pdf_pages: int = 5) -> PreparedInput:
-    """Prepare `data` (of the detected `content_type`) for the AI. See the module docstring."""
+    """Prepare `data` (of the detected `content_type`) for the AI. See the module docstring: unless
+    `settings.RECEIPTS_DOCUMENT_SANDBOX` is off it runs in a child process under a memory and time
+    budget, and a file that exceeds it raises `DocumentTooComplexError`."""
+    if content_type not in _SUPPORTED_TYPES:
+        raise UnsupportedDocumentError(f'Cannot read {content_type or "this file type"}.')
+    from django.conf import settings
+
+    if not getattr(settings, 'RECEIPTS_DOCUMENT_SANDBOX', True):
+        return _prepare_unsandboxed(data, content_type, max_pdf_pages=max_pdf_pages)
+    return _prepare_in_child(
+        data,
+        content_type,
+        max_pdf_pages=max_pdf_pages,
+        memory_mb=getattr(settings, 'RECEIPTS_DOCUMENT_MEMORY_MB', DOCUMENT_MEMORY_MB),
+        timeout=getattr(settings, 'RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', DOCUMENT_TIMEOUT_SECONDS),
+    )
+
+
+def _prepare_unsandboxed(
+    data: bytes, content_type: str, *, max_pdf_pages: int = 5
+) -> PreparedInput:
+    """The work of `prepare_input`, in this process and under no budget."""
     if content_type in IMAGE_TYPES:
         jpeg = _normalize_image(data)
         return PreparedInput(images=[jpeg], preview_jpeg=jpeg if content_type == HEIC else None)
@@ -384,3 +455,194 @@ def prepare_input(data: bytes, content_type: str, *, max_pdf_pages: int = 5) -> 
     if not text:
         raise UnreadableDocumentError('The message body is empty.')
     return PreparedInput(text=text)
+
+
+# -- The child process --------------------------------------------------------------------------
+#
+# Protocol: the parent writes one JSON line (`content_type`, `max_pdf_pages`, `memory_mb`,
+# `timeout`) and then the file's bytes to the child's stdin; the child answers one JSON document
+# on stdout: `{"ok": {"text", "images": [base64], "preview_jpeg": base64 | null}}` or
+# `{"error": "unreadable" | "too_complex" | "unsupported", "message"}`. Anything else (a non-zero
+# exit, a signal, no or malformed output) means the child died: it was killed for using too much
+# memory, crashed in native code, or hit the CPU limit.
+
+_CHILD_ENV_KEYS = ('PATH', 'LANG', 'LC_ALL', 'LD_LIBRARY_PATH', 'SYSTEMROOT')
+_STDERR_LOGGED_CHARS = 300
+
+
+def _prepare_in_child(
+    data: bytes,
+    content_type: str,
+    *,
+    max_pdf_pages: int,
+    memory_mb: int,
+    timeout: float,
+    command: list[str] | None = None,
+) -> PreparedInput:
+    """Run `_prepare_unsandboxed` in a child process; see the module docstring. `command` replaces
+    the child's command line (tests only)."""
+    request = {
+        'content_type': content_type,
+        'max_pdf_pages': max_pdf_pages,
+        'memory_mb': memory_mb,
+        'timeout': timeout,
+    }
+    command = command or [sys.executable, '-I', str(Path(__file__).resolve())]
+    # Only what the interpreter and its libraries need: no keys, tokens or database credentials in
+    # a process that decodes files strangers sent.
+    env = {key: os.environ[key] for key in _CHILD_ENV_KEYS if key in os.environ}
+    try:
+        # On a timeout, `run` kills the child and waits for it before raising.
+        result = subprocess.run(
+            command,
+            input=json.dumps(request).encode() + b'\n' + data,
+            capture_output=True,
+            timeout=timeout,
+            env=env,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        logger.warning(
+            'Preparing a %s file took more than %s s; child killed', content_type, timeout
+        )
+        raise DocumentTooComplexError('The file took too long to read.') from exc
+
+    reply = _parse_reply(result.stdout) if result.returncode == 0 else None
+    if reply is None:
+        stderr = result.stderr.decode(errors='replace').strip()[-_STDERR_LOGGED_CHARS:]
+        logger.warning(
+            'The child preparing a %s file (%d bytes) died with exit status %s (negative: signal) '
+            'under a %d MB limit; stderr: %s',
+            content_type,
+            len(data),
+            result.returncode,
+            memory_mb,
+            stderr,
+        )
+        raise DocumentTooComplexError('The file needs more memory or time than is allowed.')
+
+    if 'ok' in reply:
+        ok = reply['ok']
+        return PreparedInput(
+            text=ok['text'],
+            images=[base64.b64decode(image) for image in ok['images']],
+            preview_jpeg=(
+                base64.b64decode(ok['preview_jpeg']) if ok['preview_jpeg'] is not None else None
+            ),
+        )
+    error = _REPLY_ERRORS.get(reply.get('error'), UnreadableDocumentError)
+    raise error(str(reply.get('message', 'The file could not be read.')))
+
+
+_REPLY_ERRORS: dict[object, type[DocumentError]] = {
+    'unreadable': UnreadableDocumentError,
+    'too_complex': DocumentTooComplexError,
+    'unsupported': UnsupportedDocumentError,
+}
+
+
+def _parse_reply(stdout: bytes) -> dict | None:
+    """The child's answer if it is well formed, else `None`."""
+    try:
+        reply = json.loads(stdout)
+        if isinstance(reply, dict):
+            ok = reply.get('ok')
+            if ok is None and isinstance(reply.get('error'), str):
+                return reply
+            if (
+                isinstance(ok, dict)
+                and isinstance(ok.get('text'), str)
+                and isinstance(ok.get('images'), list)
+                and all(isinstance(image, str) for image in ok['images'])
+                and isinstance(ok.get('preview_jpeg'), str | None)
+            ):
+                return reply
+    except ValueError:
+        pass
+    return None
+
+
+def _limit_resources(memory_mb: int, timeout: float) -> None:
+    """In the child: cap the address space (Linux; elsewhere `RLIMIT_AS` isn't enforced and macOS
+    even rejects it) and the CPU time (so a child orphaned by a killed worker ends by itself)."""
+    import resource
+
+    limits = [(resource.RLIMIT_CPU, int(timeout) + 1)]
+    if sys.platform.startswith('linux'):
+        limits.append((resource.RLIMIT_AS, memory_mb * 1024 * 1024))
+    for which, value in limits:
+        try:
+            resource.setrlimit(which, (value, value))
+        except ValueError, OSError:
+            pass
+
+
+def _peak_address_space() -> int | None:
+    """The most address space this process has had mapped, in bytes (Linux; else `None`)."""
+    try:
+        with open('/proc/self/status') as status:
+            for line in status:
+                if line.startswith('VmPeak:'):
+                    return int(line.split()[1]) * 1024
+    except OSError, ValueError, IndexError:
+        pass
+    return None
+
+
+def _handle_request(payload: bytes) -> dict:
+    """The child's work: `payload` is the request line and the file; returns the reply."""
+    header, _, data = payload.partition(b'\n')
+    request = json.loads(header)
+    reply = _reply_for(data, request)
+    if reply.get('error') == 'unreadable':
+        # Hitting `RLIMIT_AS` mostly shows up as a `MemoryError`, but a library may turn a failed
+        # allocation into its own exception (pdfium: "could not be rendered"), which is not the
+        # file being corrupt. A failure after the process has used over half its budget is
+        # reported as the budget's.
+        peak = _peak_address_space()
+        if peak is not None and peak * 2 >= request['memory_mb'] * 1024 * 1024:
+            return {'error': 'too_complex', 'message': 'The file needs more memory than allowed.'}
+    return reply
+
+
+def _reply_for(data: bytes, request: dict) -> dict:
+    try:
+        prepared = _prepare_unsandboxed(
+            data, request['content_type'], max_pdf_pages=request['max_pdf_pages']
+        )
+    except UnsupportedDocumentError as exc:
+        return {'error': 'unsupported', 'message': str(exc)}
+    except DocumentTooComplexError as exc:
+        return {'error': 'too_complex', 'message': str(exc)}
+    except UnreadableDocumentError as exc:
+        return {'error': 'unreadable', 'message': str(exc)}
+    except MemoryError:
+        return {'error': 'too_complex', 'message': 'The file needs more memory than allowed.'}
+    except Exception as exc:  # a library failing in a way nobody foresaw: the file is the cause
+        return {'error': 'unreadable', 'message': f'The file could not be read: {exc}'}
+    return {
+        'ok': {
+            'text': prepared.text,
+            'images': [base64.b64encode(image).decode('ascii') for image in prepared.images],
+            'preview_jpeg': (
+                base64.b64encode(prepared.preview_jpeg).decode('ascii')
+                if prepared.preview_jpeg is not None
+                else None
+            ),
+        }
+    }
+
+
+def _child_main() -> None:
+    # Keep anything a library prints to stdout out of the reply.
+    reply_stream = os.fdopen(os.dup(1), 'wb')
+    os.dup2(2, 1)
+    payload = sys.stdin.buffer.read()
+    request = json.loads(payload.partition(b'\n')[0])
+    _limit_resources(request['memory_mb'], request['timeout'])
+    reply_stream.write(json.dumps(_handle_request(payload)).encode())
+    reply_stream.flush()
+
+
+if __name__ == '__main__':
+    _child_main()

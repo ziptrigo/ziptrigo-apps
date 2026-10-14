@@ -583,6 +583,16 @@ OPENAI_RECEIPTS_MODEL = os.getenv('OPENAI_RECEIPTS_MODEL', '')
 RECEIPTS_AI_TIMEOUT_SECONDS = float(os.getenv('RECEIPTS_AI_TIMEOUT_SECONDS', '60'))
 RECEIPTS_AI_MAX_RETRIES = int(os.getenv('RECEIPTS_AI_MAX_RETRIES', '2'))
 
+# Reading a stored receipt (PDF/image/HTML -> text and JPEGs) runs in a child process with a
+# hard address-space limit (Linux only) and a wall-clock timeout, so a hostile file can't make the
+# `receipts` worker allocate until the container is OOM-killed (see `apps.receipts.services.
+# documents`). Off under pytest: unit tests prepare documents in-process and monkeypatch inside.
+RECEIPTS_DOCUMENT_SANDBOX = os.getenv(
+    'RECEIPTS_DOCUMENT_SANDBOX', 'False' if _RUNNING_TOOLING else 'True'
+).lower() in ('true', '1')
+RECEIPTS_DOCUMENT_MEMORY_MB = int(os.getenv('RECEIPTS_DOCUMENT_MEMORY_MB', '1024'))
+RECEIPTS_DOCUMENT_TIMEOUT_SECONDS = float(os.getenv('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', '60'))
+
 RECEIPTS_S3_BUCKET = os.getenv('RECEIPTS_S3_BUCKET', '')
 RECEIPTS_S3_REGION = os.getenv('RECEIPTS_S3_REGION', AWS_REGION)
 RECEIPTS_S3_ENDPOINT_URL = os.getenv('RECEIPTS_S3_ENDPOINT_URL') or None

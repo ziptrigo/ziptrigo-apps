@@ -12,8 +12,10 @@ backends don't retry, so everything here is written to be re-run safely:
    parks the receipt in `waiting_for_credits`; `services.metering.resume_account` picks it up on a
    top-up.
 2. **Prepare the input** (outside any transaction): read the object from S3, `documents.
-   prepare_input` (HEIC to JPEG, downscale, PDF text or rendered pages, HTML to text). A HEIC
-   original also gets its JPEG preview stored.
+   prepare_input` (HEIC to JPEG, downscale, PDF text or rendered pages, HTML to text), which runs
+   in a child process under a memory and time budget. A HEIC original also gets its JPEG preview
+   stored. A file over that budget fails as `too_large` (and is refunded, logged with the receipt
+   id): not corrupt, so "try a sharper scan" would be wrong.
 3. **Call the AI** (outside any transaction, `services.ai`).
 4. **Apply the result** under a row lock, only if the receipt is still `processing` for the same
    `attempt_id` (a trash/re-run in the meantime wins):
@@ -226,6 +228,13 @@ def _run(receipt: Receipt) -> None:
         )
     except documents.UnsupportedDocumentError as exc:
         _fail(receipt.pk, attempt_id, FailureReason.UNSUPPORTED_TYPE, str(exc))
+        return
+    except documents.DocumentTooComplexError as exc:
+        # Over the memory/time budget of `documents.prepare_input` (or a hard size limit): reported
+        # as too large (nothing to retry, a smaller or simpler file is the way out) and refunded
+        # like any file that could not be read. Never log content, only who and why.
+        logger.warning('Receipt %s is too complex to read: %s', receipt.pk, exc)
+        _fail(receipt.pk, attempt_id, FailureReason.TOO_LARGE, str(exc))
         return
     except documents.UnreadableDocumentError as exc:
         _fail(receipt.pk, attempt_id, FailureReason.UNREADABLE, str(exc))

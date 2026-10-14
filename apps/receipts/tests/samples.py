@@ -112,6 +112,41 @@ def inflating_pdf_bytes(decompressed_bytes: int) -> bytes:
 
 
 @cache
+def shared_form_pdf_bytes(
+    uses: int, form_bytes: int = 1_900_000, distinct_forms: bool = False
+) -> bytes:
+    """A tiny PDF whose one page draws a Form XObject `uses` times, the form's Flate stream
+    inflating to `form_bytes` of path operators (no text, so a renderer has real work to do and
+    a text extractor has none). Each stream is under any per-stream cap, but a renderer decodes
+    the form again for every use, so the memory needed grows with `uses`. With `distinct_forms`
+    the page draws `uses` different forms (each its own stream) once each instead."""
+    operator = b'0 0 m 1 1 l S\n'
+    body = operator * (form_bytes // len(operator))
+    form_count = uses if distinct_forms else 1
+    forms = []
+    for index in range(form_count):
+        # A comment line makes each stream different, so nothing can share them.
+        stream = zlib.compress(b'%% form %d\n' % index + body, 9)
+        forms.append(
+            b'<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Length %d '
+            b'/Filter /FlateDecode >>\nstream\n' % len(stream) + stream + b'\nendstream'
+        )
+    names = [b'X%d' % index for index in range(form_count)]
+    page_stream = b''.join(b'/%s Do\n' % names[index % form_count] for index in range(uses))
+    xobjects = b' '.join(b'/%s %d 0 R' % (name, 5 + i) for i, name in enumerate(names))
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R '
+            b'/Resources << /XObject << ' + xobjects + b' >> >> >>',
+            b'<< /Length %d >>\nstream\n' % len(page_stream) + page_stream + b'\nendstream',
+            *forms,
+        ]
+    )
+
+
+@cache
 def blank_pages_pdf_bytes(pages: int, side_pt: int) -> bytes:
     """A tiny PDF of `pages` empty `side_pt` x `side_pt` point pages (no text layer)."""
     kids = b' '.join(b'%d 0 R' % (3 + i) for i in range(pages))
