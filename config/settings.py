@@ -342,6 +342,13 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # -- file_transfer: logged-in sending --
     # Generous: a real multi-file upload legitimately calls this often in a short span.
     'FT_UPLOAD_USER': (120, 60),
+    # Emails sent from an *existing* transfer: "Resend" to one recipient and "Add recipients"
+    # (web dashboard and `/api/ft/`, one shared budget; each call counts once). Both email the
+    # sender's free-text message, so uncapped they turn our SES account into a spam cannon aimed
+    # at anyone (a transfer costs one credit). A real sender resends or adds a handful of
+    # addresses per transfer; 30 an hour is generous for that. Adding is further bounded by the
+    # per-transfer recipient cap, so a single call emails at most that many new addresses.
+    'FT_RECIPIENT_EMAIL_USER': (30, 60 * 60),
     # -- file_transfer: public download page (`/t/<slug>/`) --
     'FT_DOWNLOAD_IP': (120, 60),
     # Password attempts (issue #53 code review, same split as login): `FT_UNLOCK_IP` stays a

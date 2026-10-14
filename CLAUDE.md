@@ -589,7 +589,10 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   password attempts on it -- per IP *and* per transfer, so brute-forcing one transfer is throttled
   even from many IPs -- and the manage link), plus abuse reports (issue #59: `FT_REPORT_IP` strict
   per IP, `FT_REPORT_TRANSFER` a looser per-transfer ceiling, same split reasoning as the download
-  password). `LOGIN_IP` (20/5 min) and `SIGNUP_IP` (5/hour) can
+  password), and `FT_RECIPIENT_EMAIL_USER` (30/hour per user: "Resend" and "Add recipients" on an
+  existing transfer, web and `/api/ft/` sharing one budget, one hit per call, charged after the
+  form/ownership checks and before the service so a 429 queues no email; the htmx 429 re-renders the
+  dashboard row with the message rather than replacing it). `LOGIN_IP` (20/5 min) and `SIGNUP_IP` (5/hour) can
   still legitimately bite a shared NAT/CGNAT/office IP; the `logger.info` above is there so that's
   visible if it becomes a real complaint, rather than tuned blind up front.
 - **The per-email-address-per-day cap** on email verification (`EMAIL_VERIFICATION_START_EMAIL`) is

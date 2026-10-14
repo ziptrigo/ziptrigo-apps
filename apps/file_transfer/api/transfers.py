@@ -223,6 +223,7 @@ def delete_transfer(request, transfer_id: UUID):
 @router.post('/transfers/{transfer_id}/recipients', response=TransferSchema, auth=auth)
 def add_recipients(request, transfer_id: UUID, payload: AddRecipientsSchema):
     transfer = _owned_transfer(request, transfer_id)
+    ratelimit.enforce(ratelimit.hit_user(request.auth, 'FT_RECIPIENT_EMAIL_USER'))
     try:
         services.add_recipients(transfer, payload.recipients, ip=client_ip(request))
     except TransferHeldError as exc:
@@ -243,6 +244,7 @@ def add_recipients(request, transfer_id: UUID, payload: AddRecipientsSchema):
 def resend_recipient(request, transfer_id: UUID, recipient_id: UUID):
     transfer = _owned_transfer(request, transfer_id)
     recipient = get_object_or_404(TransferRecipient, id=recipient_id, transfer=transfer)
+    ratelimit.enforce(ratelimit.hit_user(request.auth, 'FT_RECIPIENT_EMAIL_USER'))
     try:
         services.resend_recipient_email(recipient, ip=client_ip(request))
     except TransferHeldError as exc:

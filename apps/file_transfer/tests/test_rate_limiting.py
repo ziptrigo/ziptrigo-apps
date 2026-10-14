@@ -4,6 +4,7 @@ transfer), and the anonymous manage link.
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from django.urls import reverse
@@ -328,3 +329,131 @@ class TestManageLinkRateLimit:
         response = client.get(url)
 
         assert response.status_code == 429
+
+
+class TestRecipientEmailRateLimit:
+    """Resend and add-recipients email the sender's message to a third party, so they share one
+    per-user budget (`FT_RECIPIENT_EMAIL_USER`) across the dashboard and `/api/ft/`."""
+
+    @pytest.fixture
+    def active(self, draft_transfer):
+        from ..models import TransferRecipient
+
+        _active(draft_transfer)
+        recipient = TransferRecipient.objects.create(transfer=draft_transfer, email='a@example.com')
+        return draft_transfer, recipient
+
+    @pytest.fixture
+    def queued(self, monkeypatch):
+        from ..services import actions
+
+        calls: list[tuple] = []
+        fake_task = SimpleNamespace(enqueue=lambda *args, **kwargs: calls.append(args))
+        monkeypatch.setattr(actions, 'send_transfer_notification', fake_task)
+        return calls
+
+    def test_web_resend_429_after_user_limit_and_no_email_queued(
+        self, client, active, queued, settings
+    ):
+        transfer, recipient = active
+        _enable(settings, 'FT_RECIPIENT_EMAIL_USER', limit=2)
+        client.force_login(transfer.owner)
+        url = reverse('file_transfer:resend-recipient', args=[transfer.id, recipient.id])
+        hx = {'HTTP_HX_REQUEST': 'true'}
+
+        assert client.post(url, **hx).status_code == 200
+        assert client.post(url, **hx).status_code == 200
+        response = client.post(url, **hx)
+
+        assert response.status_code == 429
+        assert 'Retry-After' in response
+        assert 'a@example.com' in response.content.decode()  # the row is kept, not replaced
+        assert len(queued) == 2
+
+    def test_web_non_htmx_gets_the_429_page(self, client, active, queued, settings):
+        transfer, recipient = active
+        _enable(settings, 'FT_RECIPIENT_EMAIL_USER', limit=1)
+        client.force_login(transfer.owner)
+        url = reverse('file_transfer:resend-recipient', args=[transfer.id, recipient.id])
+
+        client.post(url)
+        response = client.post(url)
+
+        assert response.status_code == 429
+        assert len(queued) == 1
+
+    def test_api_resend_429_after_user_limit_and_no_email_queued(
+        self, client, active, queued, settings, funded_user
+    ):
+        from apps.accounts.tokens import CustomAccessToken
+
+        transfer, recipient = active
+        _enable(settings, 'FT_RECIPIENT_EMAIL_USER', limit=2)
+        headers = {'HTTP_AUTHORIZATION': f'Bearer {CustomAccessToken.for_user(funded_user)}'}
+        url = f'/api/ft/transfers/{transfer.id}/recipients/{recipient.id}/resend'
+
+        assert client.post(url, **headers).status_code == 200
+        assert client.post(url, **headers).status_code == 200
+        response = client.post(url, **headers)
+
+        assert response.status_code == 429
+        assert 'Retry-After' in response
+        assert len(queued) == 2
+
+    def test_add_recipients_shares_the_budget_across_web_and_api(
+        self, client, active, queued, settings, funded_user
+    ):
+        from apps.accounts.tokens import CustomAccessToken
+
+        transfer, recipient = active
+        _enable(settings, 'FT_RECIPIENT_EMAIL_USER', limit=2)
+        client.force_login(transfer.owner)
+        hx = {'HTTP_HX_REQUEST': 'true'}
+
+        # One resend and one add on the web spend the whole budget ...
+        client.post(
+            reverse('file_transfer:resend-recipient', args=[transfer.id, recipient.id]), **hx
+        )
+        web_add = client.post(
+            reverse('file_transfer:add-recipients', args=[transfer.id]),
+            data={'recipients': 'b@example.com'},
+            **hx,
+        )
+        assert web_add.status_code == 200
+        assert len(queued) == 2
+
+        # ... so adding through the API, or on the web, is now refused with nothing queued.
+        headers = {'HTTP_AUTHORIZATION': f'Bearer {CustomAccessToken.for_user(funded_user)}'}
+        api_add = client.post(
+            f'/api/ft/transfers/{transfer.id}/recipients',
+            data=json.dumps({'recipients': ['c@example.com']}),
+            content_type='application/json',
+            **headers,
+        )
+        web_add_again = client.post(
+            reverse('file_transfer:add-recipients', args=[transfer.id]),
+            data={'recipients': 'd@example.com'},
+            **hx,
+        )
+        assert api_add.status_code == 429
+        assert web_add_again.status_code == 429
+        assert len(queued) == 2
+        assert not transfer.recipients.filter(email__in=['c@example.com', 'd@example.com']).exists()
+
+    def test_invalid_add_does_not_spend_the_budget(self, client, active, queued, settings):
+        transfer, recipient = active
+        _enable(settings, 'FT_RECIPIENT_EMAIL_USER', limit=1)
+        client.force_login(transfer.owner)
+        hx = {'HTTP_HX_REQUEST': 'true'}
+
+        invalid = client.post(
+            reverse('file_transfer:add-recipients', args=[transfer.id]),
+            data={'recipients': 'not-an-email'},
+            **hx,
+        )
+        assert invalid.status_code == 422
+
+        resend = client.post(
+            reverse('file_transfer:resend-recipient', args=[transfer.id, recipient.id]), **hx
+        )
+        assert resend.status_code == 200
