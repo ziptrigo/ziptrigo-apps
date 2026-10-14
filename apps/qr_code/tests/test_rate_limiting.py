@@ -9,7 +9,12 @@ from django.urls import reverse
 from apps.accounts.tokens import CustomAccessToken
 from apps.qr_code.models import QRCode, QRCodeType
 
-pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.unit,
+    # Two requests per fixed rate-limit window: a real clock crossing a boundary breaks them.
+    pytest.mark.usefixtures('ratelimit_clock'),
+]
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
 

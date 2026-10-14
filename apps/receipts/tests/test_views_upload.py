@@ -14,7 +14,12 @@ from . import samples
 from .factories import create_receipt
 from .fakes import b64_sha256
 
-pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.unit,
+    # Two requests per fixed rate-limit window: a real clock crossing a boundary breaks them.
+    pytest.mark.usefixtures('ratelimit_clock'),
+]
 
 
 def post_json(client, url, body):

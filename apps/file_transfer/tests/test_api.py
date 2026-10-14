@@ -20,7 +20,12 @@ from apps.billing.services import get_balance, spend_credits
 
 from ..models import TransferFile, TransferStatus
 
-pytestmark = [pytest.mark.django_db, pytest.mark.unit]
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.unit,
+    # Two requests per fixed rate-limit window: a real clock crossing a boundary breaks them.
+    pytest.mark.usefixtures('ratelimit_clock'),
+]
 
 _CHECKSUM = base64.b64encode(b'\x00' * 32).decode()
 
