@@ -1,6 +1,6 @@
 /*
- * Drag & drop target for files *and* folders, shared by the file transfer send pages
- * (`file_transfer/js/resumable_upload.js`) and the Receipts upload page (`receipts/js/upload.js`).
+ * Drag & drop target for files *and* folders, shared by the templates `file_transfer/send.html`,
+ * `file_transfer/anon_send.html` and `receipts/upload.html`.
  * Loaded as a classic script before the page script, so `initDropZone` is a global.
  */
 

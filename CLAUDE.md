@@ -1878,8 +1878,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     `tests_e2e/receipts_e2e_settings.py`: the real site with an `INSTALLED_APPS` entry that swaps
     the receipts storage and AI for the unit tests' fakes, an extra URL (`/__e2e__/s3/<key>`) acting
     as the bucket the fake presigned URLs point at (it checks `x-amz-checksum-sha256` like S3),
-    inline tasks, and its own `db.e2e.sqlite3` -- no test switch in production code. Run it with
-    `inv test e2e` (needs `.env.local`).
+    inline tasks, and its own `db.e2e.sqlite3` -- no test switch in production code. The same
+    server also swaps in file transfer's in-memory `FakeS3Storage`, for `tests_e2e/test_drop_zone.py`
+    (a file and a folder dropped on the shared drop zone of the Receipts upload and the file transfer
+    send pages). Run it with `inv test e2e` (needs `.env.local`).
 - **API and CLI** (phase 4). The endpoints, status codes (400/402/404/429) and shared rate-limit
   budgets are in "API" above. Two service additions came with it: `services.forwarding`
   (`forwarding_confirmation(user)`, the Gmail confirmation code/link of the last 7 days, moved out of
