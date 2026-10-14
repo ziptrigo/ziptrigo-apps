@@ -75,13 +75,15 @@ def purge_trash() -> None:
     """Daily: delete the S3 objects and rows of receipts trashed more than `trash_days` ago (and
     the stripped `.eml` along with an email's last receipt)."""
     cutoff = timezone.now() - timedelta(days=ReceiptsSettings.load().trash_days)
-    # (One still being processed is left for the next run: see `actions.delete_forever`.)
+    # (One still being processed is left for the next run: see `actions.delete_forever`.) The batch
+    # is a snapshot: `purge_receipt` re-checks each against the cutoff under its lock, so one the
+    # user restores while the job runs is left alone.
     expired = Receipt.objects.filter(deleted_at__lte=cutoff).exclude(
         status=ReceiptStatus.PROCESSING
     )
-    for receipt in expired.select_related('inbound_email'):
+    for receipt in expired:
         try:
-            purge_receipt(receipt)
+            purge_receipt(receipt, trashed_before=cutoff)
         except Exception:
             logger.exception('Failed to purge receipt %s', receipt.pk)
 

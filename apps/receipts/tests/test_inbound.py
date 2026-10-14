@@ -1041,7 +1041,8 @@ class TestDailyCap:
         self.set_cap(1)
         first = one_email(deliver(build_email(attachments=[pdf()], ses=Ses(recipient=inbox))))
         for receipt in first.receipts.all():
-            purge_receipt(receipt)
+            Receipt.objects.filter(pk=receipt.pk).update(deleted_at=timezone.now())
+            assert purge_receipt(receipt)
 
         message = deliver(build_email(attachments=[pdf()], ses=Ses(recipient=inbox)))
 
@@ -1203,7 +1204,8 @@ class TestStoredCopyAndAccounting:
         message = deliver(build_email(attachments=[pdf(), jpeg()], ses=Ses(recipient=inbox)))
 
         for receipt in list(one_email(message).receipts.all()):
-            purge_receipt(receipt)
+            Receipt.objects.filter(pk=receipt.pk).update(deleted_at=timezone.now())
+            assert purge_receipt(receipt)
 
         assert get_account(funded_user).stored_bytes == 0
         assert not [k for k in fake_storage.objects if k.startswith(user_prefix(funded_user.pk))]

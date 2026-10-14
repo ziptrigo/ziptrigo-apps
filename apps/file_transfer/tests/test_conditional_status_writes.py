@@ -140,6 +140,30 @@ def test_end_transfer_respects_only_if(draft_transfer, uploaded_file, fake_stora
     )
 
 
+def test_a_per_key_s3_delete_error_leaves_the_files_for_the_sweep(draft_transfer, uploaded_file):
+    """`DeleteObjects` answers 200 with an `Errors` list; that must not read as "deleted"."""
+    from unittest.mock import MagicMock
+
+    from apps.core.services.storage import S3Storage
+
+    _active(draft_transfer)
+    client = MagicMock()
+    client.get_paginator.return_value.paginate.return_value = [
+        {'Contents': [{'Key': uploaded_file.storage_key}]}
+    ]
+    client.delete_objects.return_value = {
+        'Errors': [{'Key': uploaded_file.storage_key, 'Code': 'AccessDenied'}]
+    }
+    storage = S3Storage(bucket='b', client=client)
+
+    with pytest.raises(RuntimeError, match='AccessDenied'):
+        lifecycle.end_transfer(draft_transfer, TransferStatus.EXPIRED, storage=storage)
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.EXPIRED
+    assert draft_transfer.files_deleted_at is None  # expire_transfers' sweep retries it
+
+
 # --- grace-period job -------------------------------------------------------------------------
 
 
@@ -421,7 +445,7 @@ def test_cleanup_drafts_does_not_delete_a_draft_sent_during_the_run(
     draft_transfer, uploaded_file, fake_storage, monkeypatch
 ):
     Transfer.objects.filter(pk=draft_transfer.pk).update(
-        created_at=timezone.now() - timedelta(hours=30)
+        last_activity_at=timezone.now() - timedelta(hours=30)
     )
     real = jobs.abort_draft
 

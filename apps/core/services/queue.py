@@ -15,12 +15,14 @@ def enqueue_after_commit(task, *args) -> None:
     would only turn a committed change (a new password, a feedback message, an upload) into an
     error page the user would probably retry. Callers whose task matters more than a notification
     need their own safety net (receipts' `retry_due` job re-queues receipts nobody picked up; its
-    daily job resumes frozen accounts)."""
+    daily job resumes frozen accounts). Only the task's name is logged, never its arguments."""
 
     def _enqueue() -> None:
         try:
             task.enqueue(*args)
         except Exception:
-            logger.exception('Could not queue %s%r', getattr(task, 'name', task), args)
+            # The task name only: its arguments can be an address someone typed into a form (the
+            # forgot-password and resend-confirmation tasks), which is never logged (issue #125).
+            logger.exception('Could not queue %s', getattr(task, 'name', task))
 
     transaction.on_commit(_enqueue)

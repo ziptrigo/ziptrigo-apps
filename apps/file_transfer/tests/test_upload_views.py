@@ -245,3 +245,68 @@ class TestResumeFile:
         assert complete_response.status_code == 200
         file.refresh_from_db()
         assert file.uploaded is True
+
+
+# JSON `1e400` parses as infinity, which `int()` turns into an OverflowError (a 500, once).
+_HUGE = '1e400'
+
+
+def _post_raw(client, url, body: str):
+    return client.post(url, data=body, content_type='application/json')
+
+
+@pytest.mark.parametrize('size', [_HUGE, '1.5', 'true', 'null', '[1]'])
+def test_add_file_rejects_a_size_that_is_not_a_whole_number(
+    size, client, draft_transfer, fake_storage
+):
+    client.force_login(draft_transfer.owner)
+    url = reverse('file_transfer:send-add-file', args=[draft_transfer.id])
+
+    response = _post_raw(client, url, '{"name": "a.bin", "size": ' + size + '}')
+
+    assert response.status_code == 422
+    assert response.json()['error'] == 'size must be an integer.'
+
+
+def test_add_file_ignores_an_unusable_client_last_modified(client, draft_transfer, fake_storage):
+    from ..models import TransferFile
+
+    client.force_login(draft_transfer.owner)
+    url = reverse('file_transfer:send-add-file', args=[draft_transfer.id])
+
+    response = _post_raw(
+        client, url, '{"name": "a.bin", "size": 10, "client_last_modified": ' + _HUGE + '}'
+    )
+
+    assert response.status_code == 201
+    assert TransferFile.objects.get(id=response.json()['file_id']).client_last_modified is None
+
+
+@pytest.mark.parametrize('number', [_HUGE, '1.5', 'null'])
+def test_part_urls_rejects_a_part_number_that_is_not_a_whole_number(
+    number, client, draft_transfer, fake_storage
+):
+    client.force_login(draft_transfer.owner)
+    add_url = reverse('file_transfer:send-add-file', args=[draft_transfer.id])
+    added = _post_json(client, add_url, {'name': 'a.bin', 'size': 10}).json()
+    parts_url = reverse('file_transfer:send-part-urls', args=[draft_transfer.id, added['file_id']])
+
+    response = _post_raw(
+        client,
+        parts_url,
+        '{"parts": [{"part_number": ' + number + ', "checksum_sha256": "x"}]}',
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize('parts', ['5', '[1]', '[{"part_number": 1}]', '{"a": 1}'])
+def test_part_urls_rejects_a_malformed_parts_list(parts, client, draft_transfer, fake_storage):
+    client.force_login(draft_transfer.owner)
+    add_url = reverse('file_transfer:send-add-file', args=[draft_transfer.id])
+    added = _post_json(client, add_url, {'name': 'a.bin', 'size': 10}).json()
+    parts_url = reverse('file_transfer:send-part-urls', args=[draft_transfer.id, added['file_id']])
+
+    response = _post_raw(client, parts_url, '{"parts": ' + parts + '}')
+
+    assert response.status_code == 422

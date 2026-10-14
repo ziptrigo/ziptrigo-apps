@@ -1,7 +1,10 @@
 """The QR code JWT API (`/api/qr/`), as used by external clients."""
 
+import uuid
+
 import pytest
 
+from apps.accounts.models import User
 from apps.accounts.tokens import CustomAccessToken
 from apps.qr_code.models import QRCode
 
@@ -101,3 +104,47 @@ def test_create_rejects_empty_content(client, auth_headers):
 
 def test_requires_token(client):
     assert client.get('/api/qr/').status_code == 401
+
+
+def _body_kwargs(method, auth_headers):
+    kwargs = {'content_type': 'application/json', **auth_headers}
+    if method in ('put', 'patch'):
+        kwargs['data'] = {'name': 'new'}
+    return kwargs
+
+
+@pytest.mark.parametrize('method', ['get', 'put', 'patch', 'delete'])
+def test_unknown_id_is_404(client, auth_headers, method):
+    response = getattr(client, method)(
+        f'/api/qr/{uuid.uuid4()}', **_body_kwargs(method, auth_headers)
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {'detail': 'QR code not found.'}
+
+
+@pytest.mark.parametrize('method', ['get', 'put', 'patch', 'delete'])
+def test_another_users_qr_code_is_404(client, auth_headers, method):
+    other = User.objects.create_user(email='other@example.com', password='testpass123')
+    foreign = QRCode.objects.create(
+        content='x', created_by=other, qr_type='text', qr_format='png', image_file='x.png'
+    )
+    original_name = foreign.name
+
+    response = getattr(client, method)(
+        f'/api/qr/{foreign.id}', **_body_kwargs(method, auth_headers)
+    )
+
+    assert response.status_code == 404
+    foreign.refresh_from_db()
+    assert foreign.deleted_at is None
+    assert foreign.name == original_name
+
+
+def test_deleting_twice_is_404_the_second_time(client, qr_code, auth_headers):
+    first = client.delete(f'/api/qr/{qr_code.id}', **auth_headers)
+    second = client.delete(f'/api/qr/{qr_code.id}', **auth_headers)
+
+    assert first.status_code == 204
+    assert second.status_code == 404
+    assert client.get(f'/api/qr/{qr_code.id}', **auth_headers).status_code == 404

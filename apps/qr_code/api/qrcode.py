@@ -75,7 +75,7 @@ async def retrieve_qrcode(request, qr_id: uuid.UUID):
             id=qr_id, created_by=user, deleted_at__isnull=True
         )
     except QRCode.DoesNotExist:
-        return 404, {'detail': 'QR code not found.'}
+        raise HttpError(404, 'QR code not found.')
 
     # Add computed fields (dynamic attributes for serialization)
     qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)
@@ -94,7 +94,7 @@ async def update_qrcode(request, qr_id: uuid.UUID, payload: QRCodeUpdateSchema):
             id=qr_id, created_by=user, deleted_at__isnull=True
         )
     except QRCode.DoesNotExist:
-        return 404, {'detail': 'QR code not found.'}
+        raise HttpError(404, 'QR code not found.')
 
     # Extract name from payload dict
     payload_dict = payload.dict()
@@ -125,7 +125,7 @@ async def delete_qrcode(request, qr_id: uuid.UUID):
             id=qr_id, created_by=user, deleted_at__isnull=True
         )
     except QRCode.DoesNotExist:
-        return 404, {'detail': 'QR code not found.'}
+        raise HttpError(404, 'QR code not found.')
 
     await qrcode.asoft_delete()
     return 204, None

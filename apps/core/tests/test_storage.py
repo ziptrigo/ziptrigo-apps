@@ -257,9 +257,31 @@ def test_delete_prefix_deletes_every_listed_key(stubbed):
     stubber.add_response(
         'delete_objects',
         {},
-        {'Bucket': BUCKET, 'Delete': {'Objects': [{'Key': 'p/1'}, {'Key': 'p/2'}]}},
+        {'Bucket': BUCKET, 'Delete': {'Objects': [{'Key': 'p/1'}, {'Key': 'p/2'}], 'Quiet': True}},
     )
     assert storage.delete_prefix('p/') == 2
+
+
+def test_delete_prefix_raises_when_s3_reports_a_per_key_error(stubbed):
+    # `DeleteObjects` answers 200 with an `Errors` list rather than failing the call.
+    storage, stubber = stubbed
+    stubber.add_response('list_objects_v2', _list_response(['p/1', 'p/2']), None)
+    stubber.add_response(
+        'delete_objects',
+        {'Errors': [{'Key': 'p/2', 'Code': 'AccessDenied', 'Message': 'no'}]},
+        {
+            'Bucket': BUCKET,
+            'Delete': {'Objects': [{'Key': 'p/1'}, {'Key': 'p/2'}], 'Quiet': True},
+        },
+    )
+    with pytest.raises(RuntimeError, match='p/2: AccessDenied'):
+        storage.delete_prefix('p/')
+
+
+def test_delete_prefix_with_nothing_listed_makes_no_delete_call(stubbed):
+    storage, stubber = stubbed
+    stubber.add_response('list_objects_v2', _list_response([]), None)
+    assert storage.delete_prefix('p/') == 0
 
 
 def test_delete_objects_sends_every_key_in_one_request(stubbed):

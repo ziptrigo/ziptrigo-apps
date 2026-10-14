@@ -300,6 +300,45 @@ class TestPurgeTrash:
 
         assert get_account(funded_user).stored_bytes == 0
 
+    def test_a_receipt_restored_while_the_job_runs_is_left_alone(self, funded_user, fake_storage):
+        """The job loads the batch first and purges one at a time: a restore in between wins."""
+        receipt = create_receipt(
+            funded_user, fake_storage, deleted_at=timezone.now() - timedelta(days=40)
+        )
+        real = jobs.purge_receipt
+
+        def restored_meanwhile(stale, **kwargs):
+            Receipt.objects.filter(pk=stale.pk).update(deleted_at=None)
+            return real(stale, **kwargs)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(jobs, 'purge_receipt', restored_meanwhile)
+            jobs.purge_trash()
+
+        receipt.refresh_from_db()
+        assert receipt.deleted_at is None
+        assert receipt.file_key in fake_storage.objects
+        assert get_account(funded_user).stored_bytes == receipt.size_bytes
+
+    def test_a_receipt_trashed_again_after_the_cutoff_is_left_alone(
+        self, funded_user, fake_storage
+    ):
+        receipt = create_receipt(
+            funded_user, fake_storage, deleted_at=timezone.now() - timedelta(days=40)
+        )
+        real = jobs.purge_receipt
+
+        def trashed_again_meanwhile(stale, **kwargs):
+            Receipt.objects.filter(pk=stale.pk).update(deleted_at=timezone.now())
+            return real(stale, **kwargs)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(jobs, 'purge_receipt', trashed_again_meanwhile)
+            jobs.purge_trash()
+
+        assert Receipt.objects.filter(pk=receipt.pk).exists()
+        assert receipt.file_key in fake_storage.objects
+
     def test_duplicates_flagged_against_a_purged_receipt_are_unflagged(
         self, funded_user, fake_storage
     ):

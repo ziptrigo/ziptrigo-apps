@@ -5,17 +5,33 @@ by the `cleanup_drafts` job.
 """
 
 import math
+from datetime import timedelta
 
 from botocore.exceptions import ClientError
 from django.contrib.auth.models import AbstractBaseUser
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
 from . import anon_limits, limits
 from .storage import PART_SIZE_BYTES, S3Storage, get_storage, storage_key, transfer_prefix
+
+#: An empty draft is reused by the next visit to the send page only while it is this young. An
+#: older one is left for `cleanup_drafts`: `cleanup_drafts` measures a draft's age from its
+#: last file (or its creation), so reusing a day-old empty draft would hand the sender a draft the
+#: hourly job may abort mid-upload, and S3 aborts a multipart upload after a day (the bucket's
+#: lifecycle rule), which would leave the resume-after-expiry path unreachable.
+DRAFT_REUSE_WINDOW = timedelta(hours=1)
+
+
+def touch_draft(transfer_id) -> None:
+    """Record that the sender just did something to this draft, so `cleanup_drafts` (which deletes
+    a draft idle for a day) leaves one that is being worked on alone: adding a file, requesting
+    part URLs, asking what is already uploaded, completing or removing a file all count -- a single
+    large file can take longer than a day to upload without a new file ever being added."""
+    Transfer.objects.filter(pk=transfer_id).update(last_activity_at=timezone.now())
 
 
 def create_draft(owner: AbstractBaseUser) -> Transfer:
@@ -30,10 +46,14 @@ def get_or_create_draft(owner: AbstractBaseUser) -> Transfer:
     to the 24h `cleanup_drafts` grace period. A draft that already has files is left alone and a
     fresh one is created instead -- the send page's file list is only tracked in the browser, so
     reusing one that already has files would silently attach new uploads to files the page has no
-    record of.
+    record of. Nor is one older than `DRAFT_REUSE_WINDOW`.
     """
     existing = (
-        Transfer.objects.filter(owner=owner, status=TransferStatus.DRAFT)
+        Transfer.objects.filter(
+            owner=owner,
+            status=TransferStatus.DRAFT,
+            created_at__gte=timezone.now() - DRAFT_REUSE_WINDOW,
+        )
         .annotate(_file_count=Count('files'))
         .filter(_file_count=0)
         .order_by('-created_at')
@@ -99,6 +119,7 @@ def add_file(
     file.storage_key = key
     file.upload_id = storage.create_multipart_upload(key)
     file.save()
+    touch_draft(transfer.pk)
     return file
 
 
@@ -148,6 +169,7 @@ def presign_parts(
     if not file.upload_id:
         raise ValidationError('File has no upload in progress.')
 
+    touch_draft(file.transfer_id)
     part_count = part_count_for(file)
     storage = storage or get_storage()
     urls: dict[int, str] = {}
@@ -187,6 +209,7 @@ def complete_file_upload(
     if not file.upload_id:
         raise ValidationError('File has no upload in progress.')
 
+    touch_draft(file.transfer_id)
     storage = storage or get_storage()
     try:
         storage.complete_multipart_upload(file.storage_key, file.upload_id, parts)
@@ -234,6 +257,7 @@ def list_uploaded_parts(file: TransferFile, *, storage: S3Storage | None = None)
     if not file.upload_id:
         raise ValidationError('File has no upload in progress.')
 
+    touch_draft(file.transfer_id)
     storage = storage or get_storage()
     try:
         return storage.list_parts(file.storage_key, file.upload_id)
@@ -258,6 +282,7 @@ def restart_upload(file: TransferFile, *, storage: S3Storage | None = None) -> T
     calls this. Without the guard, tab B's write would land after tab A's and silently flip the
     now-completed file back to an empty, `uploaded=False` upload, orphaning the object tab A just
     finished uploading (spec: resumable uploads, issue #55 phase 3 review)."""
+    touch_draft(file.transfer_id)
     storage = storage or get_storage()
     old_upload_id = file.upload_id
     if old_upload_id:
@@ -286,6 +311,7 @@ def restart_upload(file: TransferFile, *, storage: S3Storage | None = None) -> T
 def remove_file(file: TransferFile, *, storage: S3Storage | None = None) -> None:
     """Remove a file from a draft transfer: abort its multipart upload (if still in progress),
     delete its object from S3 (if the upload had completed), then drop the row."""
+    touch_draft(file.transfer_id)
     storage = storage or get_storage()
     if file.upload_id:
         storage.abort_multipart_upload(file.storage_key, file.upload_id)
@@ -294,13 +320,17 @@ def remove_file(file: TransferFile, *, storage: S3Storage | None = None) -> None
     file.delete()
 
 
-def abort_draft(transfer: Transfer, *, storage: S3Storage | None = None) -> bool:
+def abort_draft(
+    transfer: Transfer, *, storage: S3Storage | None = None, only_if: Q | None = None
+) -> bool:
     """Abandon an entire draft (or unconfirmed) transfer: abort every file's in-progress
     multipart upload, sweep every object under the transfer's S3 prefix (rather than trusting
     each file's `uploaded` flag, which is one more place a bug could leave an orphan), then
     soft-delete the transfer. Used by `cleanup_drafts` and the API's delete of a draft.
 
-    Returns whether this call aborted it. The soft delete is a conditional write claimed *first*
+    Returns whether this call aborted it. `only_if` is an extra `Q` ANDed into the claim (as for
+    `lifecycle.end_transfer`): `cleanup_drafts` passes the idleness it decided on, so a draft whose
+    sender added a file after the job's snapshot is left alone. The soft delete is a conditional write claimed *first*
     (`DRAFT` / `PENDING_CONFIRMATION` only), so a stale instance of a draft that `finalize_send`
     (which holds the row lock while it flips the status) or the anonymous confirmation has since
     activated is left alone: its files are not touched and it is not marked `DELETED`. The claim
@@ -322,10 +352,13 @@ def abort_draft(transfer: Transfer, *, storage: S3Storage | None = None) -> bool
     storage = storage or get_storage()
     with transaction.atomic():
         now = timezone.now()
-        claimed = Transfer.objects.filter(
+        claim = Transfer.objects.filter(
             pk=transfer.pk,
             status__in=(TransferStatus.DRAFT, TransferStatus.PENDING_CONFIRMATION),
-        ).update(status=TransferStatus.DELETED, deleted_at=now)
+        )
+        if only_if is not None:
+            claim = claim.filter(only_if)
+        claimed = claim.update(status=TransferStatus.DELETED, deleted_at=now)
         if not claimed:
             return False
         for file in transfer.files.all():

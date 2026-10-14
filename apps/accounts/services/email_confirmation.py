@@ -52,6 +52,7 @@ from apps.core.services.email_verification import (
     invalidate,
     start,
 )
+from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
 
@@ -117,17 +118,14 @@ class EmailConfirmationService:
             logger.warning('Confirmation email could not be delivered to %s', user.email)
 
     def resend_if_unconfirmed(self, email: str) -> None:
-        """Resend the confirmation email for `email` if it belongs to an unconfirmed account;
-        otherwise do nothing -- including when no account has that address at all. Shared (issue
-        #52) by the web `resend-confirmation` view and `POST /api/auth/resend-confirmation`,
-        neither of which may reveal whether the address is registered (CLAUDE.md).
+        """Queue a resend of the confirmation email for `email` if it belongs to an unconfirmed
+        account; the task (`resend_confirmation_email`) does nothing otherwise -- including when no
+        account has that address at all. Shared (issue #52) by the web `resend-confirmation` view
+        and `POST /api/auth/resend-confirmation`, neither of which may reveal whether the address
+        is registered (CLAUDE.md): the email is sent off the request for every address, known or
+        not, so the response time says nothing either (issue #125).
         """
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return
-        if not user.email_confirmed:
-            self.send_confirmation_email(user)
+        enqueue_after_commit(resend_confirmation_email, email)
 
     def invalidate_pending_for_email(self, email: str) -> None:
         """Invalidate any still-pending confirmation for `email` (issue #58 follow-up): called
@@ -192,6 +190,20 @@ def send_signup_confirmation_email(user_id: str, email: str) -> None:
     if user.email_confirmed:
         return
     get_email_confirmation_service().send_confirmation_email(user)
+
+
+@task
+def resend_confirmation_email(email: str) -> None:
+    """Send a fresh confirmation email to the unconfirmed account with this address, if there is
+    one; queued by `EmailConfirmationService.resend_if_unconfirmed` for every address submitted to
+    the resend surfaces, so it looks the account up itself. The shared resend cooldown and the
+    per-address daily cap still apply (`send_confirmation_email` swallows them)."""
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return
+    if not user.email_confirmed:
+        get_email_confirmation_service().send_confirmation_email(user)
 
 
 def format_validity_minutes(minutes: int) -> str:

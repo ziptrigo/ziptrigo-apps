@@ -324,3 +324,56 @@ def test_sent_page_404s_for_an_unrelated_session(
     unrelated_client = Client()
     response = unrelated_client.get(reverse('file_transfer:anon-sent', args=[transfer.id]))
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize('size', ['1e400', '1.5', 'true', 'null'])
+def test_anonymous_add_file_rejects_a_size_that_is_not_a_whole_number(
+    size, client, anon_enabled, fake_storage
+):
+    """`1e400` parses as infinity; `int()` of it used to raise OverflowError (a 500) here, on an
+    endpoint anyone can reach."""
+    client.get(reverse('file_transfer:anon-send'))
+    transfer = Transfer.objects.get(owner__isnull=True, status=TransferStatus.DRAFT)
+    url = reverse('file_transfer:anon-send-add-file', args=[transfer.id])
+
+    response = client.post(
+        url, data='{"name": "a.bin", "size": ' + size + '}', content_type='application/json'
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error'] == 'size must be an integer.'
+
+
+def test_anonymous_add_file_ignores_an_unusable_client_last_modified(
+    client, anon_enabled, fake_storage
+):
+    client.get(reverse('file_transfer:anon-send'))
+    transfer = Transfer.objects.get(owner__isnull=True, status=TransferStatus.DRAFT)
+    url = reverse('file_transfer:anon-send-add-file', args=[transfer.id])
+
+    response = client.post(
+        url,
+        data='{"name": "a.bin", "size": 10, "client_last_modified": 1e400}',
+        content_type='application/json',
+    )
+
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize('number', ['1e400', '1.5', 'null'])
+def test_anonymous_part_urls_rejects_a_part_number_that_is_not_a_whole_number(
+    number, client, anon_enabled, fake_storage
+):
+    client.get(reverse('file_transfer:anon-send'))
+    transfer = Transfer.objects.get(owner__isnull=True, status=TransferStatus.DRAFT)
+    add_url = reverse('file_transfer:anon-send-add-file', args=[transfer.id])
+    added = _post_json(client, add_url, {'name': 'a.bin', 'size': 10}).json()
+    url = reverse('file_transfer:anon-send-part-urls', args=[transfer.id, added['file_id']])
+
+    response = client.post(
+        url,
+        data='{"parts": [{"part_number": ' + number + ', "checksum_sha256": "x"}]}',
+        content_type='application/json',
+    )
+
+    assert response.status_code == 422

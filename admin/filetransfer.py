@@ -10,7 +10,6 @@ downloads/password, add recipients, resend).
 
 import base64
 import hashlib
-import os
 import time
 from pathlib import Path
 
@@ -18,7 +17,15 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .utils import EnvironmentAnnotation, logger, set_environment, write_private_file
+from .utils import (
+    EnvironmentAnnotation,
+    api_url,
+    get_headers,
+    logger,
+    password_from_prompt_or_env,
+    save_token,
+    select_environment,
+)
 
 app = typer.Typer(
     help=__doc__,
@@ -27,12 +34,10 @@ app = typer.Typer(
     rich_markup_mode='markdown',
 )
 
-# Configuration
-API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
-# A separate token file from `admin/qrcode.py`'s `.qrcode_token`: each CLI logs in independently
-# (possibly as a different account), so sharing one file would mean the last `login` of either
-# command silently signs the other one out too.
-TOKEN_FILE = Path.home() / '.filetransfer_token'
+# The token lives in `~/.filetransfer_token.<environment>` (`admin.utils.token_file`), separate from
+# the other CLIs' (each logs in independently, possibly as another account); the single
+# `~/.filetransfer_token` of earlier versions is no longer read: log in again, then delete it.
+CLI = 'filetransfer'
 
 # Ordinary API calls; not the PUT of a (possibly large) file part -- see `PART_UPLOAD_TIMEOUT`.
 REQUEST_TIMEOUT_SECONDS = 30
@@ -47,44 +52,6 @@ MAX_RATE_LIMIT_RETRIES = 5
 # (`services.storage.PUT_URL_EXPIRES_SECONDS`), so on a slow connection a large file's later parts
 # could still be waiting when their URL expires if every URL were requested at time zero.
 PART_URL_BATCH_SIZE = 8
-
-
-def get_token() -> str | None:
-    """Retrieve stored authentication token."""
-    if TOKEN_FILE.exists():
-        return TOKEN_FILE.read_text().strip()
-    return None
-
-
-def save_token(token: str) -> None:
-    """Save the authentication token to file with `0600` permissions, also when the file already
-    exists with a looser mode (see `write_private_file`)."""
-    write_private_file(TOKEN_FILE, token)
-
-
-def get_headers() -> dict:
-    """Get headers with authentication token."""
-    token = get_token()
-    if not token:
-        logger.error('Not authenticated. Please login first.')
-        raise typer.Exit(1)
-    return {'Authorization': f'Bearer {token}'}
-
-
-def _password_from_prompt_or_env(
-    password: str | None, env_var: str = 'FILETRANSFER_PASSWORD'
-) -> str:
-    """A password argument that defaults to `None` (rather than being required positionally) is
-    entered with the terminal's echo hidden when omitted -- typing it in the clear as a plain CLI
-    argument leaves it sitting in the shell's history and briefly visible to anyone on the same
-    machine running `ps`. `env_var` keeps non-interactive use (scripts, CI) working without either
-    of those: `login`/`set-password` check it before falling back to an interactive prompt."""
-    if password is not None:
-        return password
-    from_env = os.environ.get(env_var)
-    if from_env:
-        return from_env
-    return typer.prompt('Password', hide_input=True)
 
 
 def _retry_after_seconds(response) -> float:
@@ -146,16 +113,16 @@ def filetransfer_login(
     """
     import requests
 
-    set_environment(environment)
-    password = _password_from_prompt_or_env(password)
+    select_environment(environment)
+    password = password_from_prompt_or_env(password, 'FILETRANSFER_PASSWORD')
 
     try:
         response = _request(
-            'post', f'{API_BASE_URL}/api/auth/login', json={'email': email, 'password': password}
+            'post', api_url('/auth/login'), json={'email': email, 'password': password}
         )
         response.raise_for_status()
         token = response.json()['access_token']
-        save_token(token)
+        save_token(CLI, token)
         logger.info('Successfully authenticated!')
     except (requests.exceptions.RequestException, OSError) as e:
         logger.error(f'Login failed: {e}')
@@ -250,7 +217,7 @@ def _upload_file(
     """
     size = path.stat().st_size
     client_last_modified = int(path.stat().st_mtime * 1000)
-    base = f'{API_BASE_URL}/api/ft/transfers/{transfer_id}/files'
+    base = api_url(f'/ft/transfers/{transfer_id}/files')
     match = _find_resumable(existing_files, name, size, client_last_modified, matched_ids)
 
     if match is not None and match['uploaded']:
@@ -378,8 +345,8 @@ def filetransfer_send(
     """
     import requests
 
-    set_environment(environment)
-    headers = get_headers()
+    select_environment(environment)
+    headers = get_headers(CLI)
 
     files = _collect_files(list(paths))
     if not files:
@@ -387,7 +354,7 @@ def filetransfer_send(
         raise typer.Exit(1)
 
     if draft_id:
-        response = _request('get', f'{API_BASE_URL}/api/ft/transfers/{draft_id}', headers=headers)
+        response = _request('get', api_url(f'/ft/transfers/{draft_id}'), headers=headers)
         _raise_for_api_error(response)
         transfer = response.json()
         if transfer['status'] != 'draft':
@@ -397,7 +364,7 @@ def filetransfer_send(
         existing_files = transfer['files']
         logger.info(f'Resuming draft {transfer_id}')
     else:
-        response = _request('post', f'{API_BASE_URL}/api/ft/transfers/', json={}, headers=headers)
+        response = _request('post', api_url('/ft/transfers/'), json={}, headers=headers)
         _raise_for_api_error(response)
         transfer_id = response.json()['id']
         existing_files = []
@@ -413,7 +380,7 @@ def filetransfer_send(
 
         response = _request(
             'post',
-            f'{API_BASE_URL}/api/ft/transfers/{transfer_id}/send',
+            api_url(f'/ft/transfers/{transfer_id}/send'),
             json={
                 'recipients': to,
                 'message': message,
@@ -454,12 +421,12 @@ def filetransfer_list(
         filetransfer list --filter ended
         filetransfer list --limit 50 --offset 50
     """
-    set_environment(environment)
+    select_environment(environment)
     response = _request(
         'get',
-        f'{API_BASE_URL}/api/ft/transfers/',
+        api_url('/ft/transfers/'),
         params={'filter': filter, 'limit': limit, 'offset': offset},
-        headers=get_headers(),
+        headers=get_headers(CLI),
     )
     _raise_for_api_error(response)
     body = response.json()
@@ -503,11 +470,9 @@ def filetransfer_show(environment: EnvironmentAnnotation, transfer_id: str):
     Example:
         filetransfer show 1b6e2f4a-...
     """
-    set_environment(environment)
+    select_environment(environment)
 
-    response = _request(
-        'get', f'{API_BASE_URL}/api/ft/transfers/{transfer_id}', headers=get_headers()
-    )
+    response = _request('get', api_url(f'/ft/transfers/{transfer_id}'), headers=get_headers(CLI))
     _raise_for_api_error(response)
     transfer = response.json()
 
@@ -539,9 +504,9 @@ def filetransfer_show(environment: EnvironmentAnnotation, transfer_id: str):
 def _update(transfer_id: str, payload: dict) -> dict:
     response = _request(
         'patch',
-        f'{API_BASE_URL}/api/ft/transfers/{transfer_id}',
+        api_url(f'/ft/transfers/{transfer_id}'),
         json=payload,
-        headers=get_headers(),
+        headers=get_headers(CLI),
     )
     _raise_for_api_error(response)
     return response.json()
@@ -550,7 +515,7 @@ def _update(transfer_id: str, payload: dict) -> dict:
 @app.command(name='disable')
 def filetransfer_disable(environment: EnvironmentAnnotation, transfer_id: str):
     """Disable a transfer: its link stops working, and it stops being metered."""
-    set_environment(environment)
+    select_environment(environment)
     _update(transfer_id, {'disabled': True})
     logger.info(f'{transfer_id} disabled.')
 
@@ -558,7 +523,7 @@ def filetransfer_disable(environment: EnvironmentAnnotation, transfer_id: str):
 @app.command(name='enable')
 def filetransfer_enable(environment: EnvironmentAnnotation, transfer_id: str):
     """Re-enable a disabled or suspended transfer."""
-    set_environment(environment)
+    select_environment(environment)
     _update(transfer_id, {'disabled': False})
     logger.info(f'{transfer_id} re-enabled.')
 
@@ -586,7 +551,7 @@ def filetransfer_set_expiry(
         filetransfer set-expiry 1b6e2f4a-... none
         filetransfer set-expiry 1b6e2f4a-... custom --date 2026-12-31T00:00:00Z
     """
-    set_environment(environment)
+    select_environment(environment)
     payload = {'expiry_choice': expiry}
     if date:
         payload['expiry_date'] = date
@@ -607,7 +572,7 @@ def filetransfer_set_max_downloads(
         filetransfer set-max-downloads 1b6e2f4a-... 5
         filetransfer set-max-downloads 1b6e2f4a-...
     """
-    set_environment(environment)
+    select_environment(environment)
     _update(transfer_id, {'max_downloads': max_downloads})
     logger.info(f'{transfer_id} max downloads updated.')
 
@@ -627,8 +592,8 @@ def filetransfer_set_password(
         filetransfer set-password 1b6e2f4a-...
         filetransfer set-password 1b6e2f4a-... sekret
     """
-    set_environment(environment)
-    password = _password_from_prompt_or_env(password)
+    select_environment(environment)
+    password = password_from_prompt_or_env(password, 'FILETRANSFER_PASSWORD')
     _update(transfer_id, {'password': password})
     logger.info(f'{transfer_id} password set.')
 
@@ -641,7 +606,7 @@ def filetransfer_remove_password(environment: EnvironmentAnnotation, transfer_id
     Example:
         filetransfer remove-password 1b6e2f4a-...
     """
-    set_environment(environment)
+    select_environment(environment)
     _update(transfer_id, {'remove_password': True})
     logger.info(f'{transfer_id} password removed.')
 
@@ -658,13 +623,13 @@ def filetransfer_add_recipients(
     Example:
         filetransfer add-recipients 1b6e2f4a-... --to a@example.com --to b@example.com
     """
-    set_environment(environment)
+    select_environment(environment)
 
     response = _request(
         'post',
-        f'{API_BASE_URL}/api/ft/transfers/{transfer_id}/recipients',
+        api_url(f'/ft/transfers/{transfer_id}/recipients'),
         json={'recipients': to},
-        headers=get_headers(),
+        headers=get_headers(CLI),
     )
     _raise_for_api_error(response)
     emails = ', '.join(r['email'] for r in response.json()['recipients'])
@@ -683,12 +648,12 @@ def filetransfer_resend(
     Example:
         filetransfer resend 1b6e2f4a-... 9c3d1e2b-...
     """
-    set_environment(environment)
+    select_environment(environment)
 
     response = _request(
         'post',
-        f'{API_BASE_URL}/api/ft/transfers/{transfer_id}/recipients/{recipient_id}/resend',
-        headers=get_headers(),
+        api_url(f'/ft/transfers/{transfer_id}/recipients/{recipient_id}/resend'),
+        headers=get_headers(CLI),
     )
     _raise_for_api_error(response)
     logger.info('Email resent.')
@@ -702,11 +667,9 @@ def filetransfer_delete(environment: EnvironmentAnnotation, transfer_id: str):
     Example:
         filetransfer delete 1b6e2f4a-...
     """
-    set_environment(environment)
+    select_environment(environment)
 
-    response = _request(
-        'delete', f'{API_BASE_URL}/api/ft/transfers/{transfer_id}', headers=get_headers()
-    )
+    response = _request('delete', api_url(f'/ft/transfers/{transfer_id}'), headers=get_headers(CLI))
     if response.status_code != 204:
         _raise_for_api_error(response)
     logger.info(f'{transfer_id} deleted.')

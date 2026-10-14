@@ -172,8 +172,9 @@ class TestStartUpload:
         receipts_settings.save()
         first = start(funded_user).receipt
         second = start(funded_user).receipt
-        lifecycle.purge_receipt(first)
-        lifecycle.purge_receipt(second)
+        Receipt.objects.update(deleted_at=timezone.now())
+        assert lifecycle.purge_receipt(first)
+        assert lifecycle.purge_receipt(second)
         assert not Receipt.objects.filter(user=funded_user).exists()
 
         with pytest.raises(DailyLimitExceededError):

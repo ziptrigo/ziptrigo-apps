@@ -34,8 +34,8 @@ _EXPIRY_REMINDER_WINDOW = timedelta(hours=24)
 #: tick after sending.
 _MIN_LIFETIME_FOR_REMINDER = timedelta(hours=24)
 
-#: How old a draft (or, in phase 2, unconfirmed) transfer needs to be before cleanup deletes it
-#: (spec section 2 defaults).
+#: How long a draft (or unconfirmed) transfer must have been idle (`Transfer.last_activity_at`)
+#: before cleanup deletes it (spec section 2 defaults).
 _DRAFT_MAX_AGE = timedelta(hours=24)
 
 #: How long a download event keeps its IP before it's purged (spec section 12).
@@ -183,16 +183,19 @@ def expire_transfers() -> None:
 
 
 def cleanup_drafts() -> None:
-    """Hourly: delete drafts (and, in phase 2, unconfirmed transfers) older than 24 hours,
-    aborting their multipart uploads."""
+    """Hourly: delete drafts (and unconfirmed transfers) idle for 24 hours, aborting their
+    multipart uploads. Idle is `Transfer.last_activity_at`, bumped by every upload action
+    (`uploads.touch_draft`) -- not creation, which would abort a draft opened yesterday while its
+    sender is still adding files to it or one large file is still going up."""
     cutoff = timezone.now() - _DRAFT_MAX_AGE
+    idle = Q(last_activity_at__lte=cutoff)
     stale = Transfer.objects.filter(
-        status__in=[TransferStatus.DRAFT, TransferStatus.PENDING_CONFIRMATION],
-        created_at__lte=cutoff,
+        idle, status__in=[TransferStatus.DRAFT, TransferStatus.PENDING_CONFIRMATION]
     )
     for transfer in stale:
         try:
-            abort_draft(transfer)
+            # Re-checked in the claim: the sender may have added a file since the query ran.
+            abort_draft(transfer, only_if=idle)
         except Exception:
             logger.exception('Failed to abort draft transfer %s', transfer.pk)
 

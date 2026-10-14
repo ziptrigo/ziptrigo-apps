@@ -44,14 +44,6 @@ class FakeResponse:
 
 
 @pytest.fixture(autouse=True)
-def _no_env_file(monkeypatch):
-    """Every command calls `set_environment(environment)` first, which reads a real `.env.*` file
-    off disk -- irrelevant to what these tests check (the CLI's own logic and HTTP calls), and this
-    worktree/CI may not have one at all. Neutralized once, for every test in this module."""
-    monkeypatch.setattr(filetransfer, 'set_environment', lambda *args, **kwargs: None)
-
-
-@pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch):
     """Neutralize the 429-retry backoff (`_request`'s `time.sleep`) so a rate-limit test doesn't
     actually wait in real time."""
@@ -59,10 +51,10 @@ def _no_sleep(monkeypatch):
 
 
 @pytest.fixture
-def token_file(tmp_path, monkeypatch):
-    path = tmp_path / 'token'
-    monkeypatch.setattr(filetransfer, 'TOKEN_FILE', path)
-    return path
+def token_file(token_dir):
+    """The `local` environment's token file (the default); it does not exist until a test writes
+    it."""
+    return token_dir / '.filetransfer_token.local'
 
 
 def _checksum(data: bytes) -> str:
@@ -169,34 +161,6 @@ def test_raise_for_api_error_exits_on_error_response():
 def test_raise_for_api_error_handles_non_json_body():
     with pytest.raises(typer.Exit):
         filetransfer._raise_for_api_error(FakeResponse(500, text='<html>gateway error</html>'))
-
-
-def test_get_headers_requires_login(token_file):
-    with pytest.raises(typer.Exit):
-        filetransfer.get_headers()
-
-
-def test_get_headers_returns_bearer_token(token_file):
-    token_file.write_text('abc123')
-
-    assert filetransfer.get_headers() == {'Authorization': 'Bearer abc123'}
-
-
-def test_save_token_creates_file_with_owner_only_permissions(token_file):
-    filetransfer.save_token('secret')
-
-    assert token_file.read_text() == 'secret'
-    assert (token_file.stat().st_mode & 0o777) == 0o600
-
-
-def test_save_token_tightens_a_file_that_already_exists_with_looser_permissions(token_file):
-    token_file.write_text('old')
-    token_file.chmod(0o644)
-
-    filetransfer.save_token('secret')
-
-    assert token_file.read_text() == 'secret'
-    assert (token_file.stat().st_mode & 0o777) == 0o600
 
 
 # -- `_request`: timeout + bounded 429 retry --
@@ -563,6 +527,45 @@ def test_list_passes_limit_and_offset(token_file, monkeypatch):
 
     assert result.exit_code == 0
     assert seen['params'] == {'filter': 'active', 'limit': 5, 'offset': 10}
+
+
+def test_commands_talk_to_the_selected_environments_site_with_its_token(
+    token_dir, loads_base_url, monkeypatch
+):
+    """The site URL and the token are both the selected environment's, read after its `.env.*`
+    file is loaded -- not the local server's, as when `API_BASE_URL` was read at import time."""
+    (token_dir / '.filetransfer_token.local').write_text('local-token')
+    (token_dir / '.filetransfer_token.prod').write_text('prod-token')
+    seen = {}
+
+    def fake_get(url, params=None, headers=None, **kwargs):
+        seen.update(url=url, headers=headers)
+        return FakeResponse(200, {'count': 0, 'limit': 20, 'offset': 0, 'results': []})
+
+    monkeypatch.setattr('requests.get', fake_get)
+
+    assert runner.invoke(filetransfer.app, ['list', 'prod']).exit_code == 0
+
+    assert seen['url'] == 'https://prod.example/api/ft/transfers/'
+    assert seen['headers'] == {'Authorization': 'Bearer prod-token'}
+
+
+def test_login_saves_the_token_for_the_selected_environment_only(token_dir, monkeypatch):
+    monkeypatch.setattr(
+        'requests.post', lambda *a, **k: FakeResponse(200, {'access_token': 'new-prod'})
+    )
+
+    result = runner.invoke(filetransfer.app, ['login', 'prod', 'me@example.com', 'pw'])
+
+    assert result.exit_code == 0
+    assert (token_dir / '.filetransfer_token.prod').read_text() == 'new-prod'
+    assert not (token_dir / '.filetransfer_token.local').exists()
+
+
+def test_a_token_from_an_older_version_is_ignored(token_dir):
+    (token_dir / '.filetransfer_token').write_text('legacy')
+
+    assert runner.invoke(filetransfer.app, ['list', 'local']).exit_code == 1
 
 
 def test_list_hints_at_more_pages(token_file, monkeypatch, capsys):

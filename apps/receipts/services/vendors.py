@@ -355,6 +355,32 @@ def assign_vendor(
     return vendor
 
 
+def lock_vendor_for_assignment(
+    receipt: Receipt, *, vendor: Vendor | None = None, name: str | None = None
+) -> None:
+    """Take the vendor row lock `assign_vendor` is about to need, **before** the caller locks the
+    receipt. `assign_vendor` vets the chosen vendor with an `UPDATE` while `update_receipt` holds
+    the receipt's lock; a rename or merge of that vendor holds the vendor's lock and then updates
+    its receipts, including this one. Taking the two in opposite orders is a deadlock on Postgres
+    (one request is aborted with an error). So both take the vendor first (see "Lock order" in
+    CLAUDE.md), with the same `FOR NO KEY UPDATE` rename and merge use.
+
+    `vendor` is one of the user's vendors the receipt is being moved to, or `name` is what was typed
+    and is resolved the way `assign_vendor` will (a name no vendor has needs no lock: the vendor
+    does not exist yet for anyone else to lock). The receipt is read unlocked, to skip the lock for
+    a vendor it already has (which `assign_vendor` leaves alone too); a change in between only
+    means `assign_vendor` locks in its own order, as before. Call it inside the transaction the
+    receipt lock will be taken in, as the lock lasts until that ends."""
+    if vendor is None:
+        cleaned = clean_name(name)
+        if not cleaned or cleaned == receipt.vendor:
+            return
+        vendor = _find(receipt.user, cleaned, normalize_key(cleaned), VendorAliasSource.USER)
+    if vendor is None or vendor.user_id != receipt.user_id or vendor.pk == receipt.vendor_ref_id:
+        return
+    Vendor.objects.select_for_update(no_key=True).filter(pk=vendor.pk).first()
+
+
 def clear_vendor(receipt: Receipt) -> None:
     """Take the vendor off `receipt` (the user cleared the field). The vendor it leaves goes if it
     is unvetted and has no receipts left."""

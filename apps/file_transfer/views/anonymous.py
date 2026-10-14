@@ -22,6 +22,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.accounts.models import User
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect
+from apps.core.json_numbers import whole_number
 from apps.core.services.client_ip import client_ip
 from apps.core.services.email_verification import (
     EmailVerificationError,
@@ -35,6 +36,7 @@ from ..forms import AnonymousSendOptionsForm, ConfirmCodeForm
 from ..models import FileTransferSettings, Transfer, TransferStatus
 from ..services.blocklist import is_blocked
 from ..services.storage import PART_SIZE_BYTES
+from .uploads import parse_parts
 
 
 class AnonymousHttpRequest(HttpRequest):
@@ -377,9 +379,8 @@ def add_file(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     transfer = _owned_draft(request, draft_id)
     body = _json_body(request)
     name = str(body.get('name', ''))[:255].strip()
-    try:
-        size = int(body.get('size', 0))
-    except TypeError, ValueError:
+    size = whole_number(body.get('size', 0))
+    if size is None:
         return _finish(
             request, JsonResponse({'error': 'size must be an integer.'}, status=422), cookie_id
         )
@@ -387,13 +388,7 @@ def add_file(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     if not name:
         return _finish(request, JsonResponse({'error': 'name is required.'}, status=422), cookie_id)
 
-    client_last_modified = body.get('client_last_modified')
-    try:
-        client_last_modified = (
-            int(client_last_modified) if client_last_modified is not None else None
-        )
-    except TypeError, ValueError:
-        client_last_modified = None
+    client_last_modified = whole_number(body.get('client_last_modified'))
 
     try:
         file = services.add_file(
@@ -427,13 +422,8 @@ def part_urls(request: AnonymousHttpRequest, draft_id: str, file_id: str) -> Htt
     transfer = _owned_draft(request, draft_id)
     file = get_object_or_404(transfer.files, id=file_id)
     body = _json_body(request)
-    raw_parts = body.get('parts', [])
-    try:
-        parts = [
-            {'part_number': int(p['part_number']), 'checksum_sha256': str(p['checksum_sha256'])}
-            for p in raw_parts
-        ]
-    except TypeError, ValueError, KeyError:
+    parts = parse_parts(body.get('parts', []))
+    if parts is None:
         response = JsonResponse(
             {'error': 'parts must be a list of {part_number, checksum_sha256}.'}, status=422
         )

@@ -53,7 +53,7 @@ inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
 inv server run [local|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv openapi generate --format json --file <path>
-inv qrcode login local <email> <password>       # JWT CLIs over /api/qr/, /api/ft/ and /api/receipts/
+inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/ and /api/receipts/
 inv filetransfer send local report.pdf --to a@example.com
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
 inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported types are skipped
@@ -203,6 +203,9 @@ The S3 wrapper itself is generic and lives in `core`: `apps.core.services.storag
 dataclass over a `bucket` and a boto3 client (`build_client(region, endpoint_url, access_key_id,
 secret_access_key)` builds one; an app wires its own settings into it, so apps can use different
 buckets/credentials). Besides the multipart methods it has `put_object`, `copy_object`,
+`delete_objects` / `delete_prefix` (both raise `RuntimeError` naming the keys when `DeleteObjects`
+answers 200 with per-key `Errors`, after deleting the rest, so a caller retries instead of
+recording the files as gone),
 `get_object_bytes` (optional `max_bytes`), `list_keys` (returns a plain list that may be truncated
 at `max_keys`; pass `None` when completeness matters), `presigned_put_url` (a single PUT with
 `Content-Length` and `x-amz-checksum-sha256` signed in; it raises
@@ -395,9 +398,13 @@ password once and discards it (`make_password`, like `ModelBackend` does for an 
 new-account path hashes it in `create_user`, and both then queue exactly one email with
 `enqueue_after_commit` -- a new account's confirmation is the `send_signup_confirmation_email` task
 (`services.email_confirmation`, skipped if the address moved or was confirmed; a queue failure is
-logged and the page's resend-confirmation is the recovery), not an inline send. Resend-confirmation
-and `PUT /api/account` still call `send_confirmation_email` inline. What's left is a database round
-trip or two, not the SES latency or a password hash. The confirmation email itself now renders from
+logged and the page's resend-confirmation is the recovery), not an inline send. Forgot-password
+and resend-confirmation (web views and `/api/auth/...` alike) queue a task for **every** submitted
+address, known or not -- `send_password_reset_email(email)` and `resend_confirmation_email(email)`,
+which look the account up by that address when they run (nothing is sent for an unknown one, one
+the account has since left, or an already confirmed one) -- so the request does the same work
+either way. `PUT /api/account` (logged-in) still calls `send_confirmation_email` inline. What's
+left is a database round trip or two, not the SES latency or a password hash. The confirmation email itself now renders from
 an autoescaped template (`accounts/emails/email_confirmation.html`, as does the password-reset
 one): `user.name` is free text, an attacker's on an account they created.
 Not covered by this rule, on purpose: `PUT /api/account` still answers `400 Email already in use`
@@ -408,7 +415,13 @@ acceptable next to an anonymous page; hiding it would mean redesigning the email
 (see below) links an existing confirmed account or refuses with a specific message, which needs an
 identity Google has verified, so it is no free oracle either; left as is.
 
-Changing the email through `PUT /api/account` un-confirms the account and sends a new
+Changing the email through `PUT /api/account` needs `current_password` (a stolen bearer token
+alone would otherwise be the first step of a takeover: change the address, then forgot-password):
+400 if it is missing or wrong -- a wrong guess is charged to `ACCOUNT_EMAIL_CHANGE_USER` like any
+attempted change, and the password is checked before the "Email already in use" probe -- and 400
+for an account with no usable password (Google-only: nothing to re-authenticate with; it can create
+one via forgot-password). A name-only update needs none; `name` is capped at the model's 255
+characters (422). It un-confirms the account and sends a new
 confirmation email. If the address being left had been confirmed, it also gets a notice
 (`services.email_change`, "your email address was changed from X to Y"). It's a notice only, with
 no "do this if it wasn't you" step (a product decision): the old owner can't use forgot-password
@@ -875,8 +888,9 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
   the script asks for confirmation before letting the options form's htmx submit through
   (`htmx:confirm`) whenever one exists. The logged-in send page additionally has to solve
   identifying the *same draft* again across a reload -- `get_or_create_draft` deliberately never
-  reuses a draft that already has files (see its own docstring: that behaviour predates hydration
-  and stays as the default for a fresh, un-parameterized visit), so the moment a draft's first file
+  reuses a draft that already has files, nor an empty one older than `DRAFT_REUSE_WINDOW` (1 h; the
+  anonymous twin the same) -- see its own docstring: that behaviour predates hydration and stays as
+  the default for a fresh, un-parameterized visit, so the moment a draft's first file
   lands, the page adds `?resume=<draft id>` to its own URL with `history.replaceState` (no
   navigation); `send_page` picks that query param up and fetches that specific draft, files and
   all, serialized into the page (`{% ... |json_script %}`) for the script to rebuild its file list
@@ -1385,7 +1399,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `receipts/failed/` for inbound messages that failed to ingest (see "Email intake").
   Everything of a user sits under one prefix so deleting an account is one `delete_prefix`: the
   `pre_delete(User)` receiver (`apps/receipts/apps.py`, `weak=False`) queues `delete_user_storage`
-  on commit. Tests swap in `FakeReceiptsStorage` (autouse in `apps/receipts/tests/conftest.py`).
+  on commit; `delete_prefix` raises on a per-key S3 error and the user row is gone, so the task
+  queues itself again (`attempt` + 1, `run_after` a backoff when the backend can defer, else at
+  once) up to `len(USER_STORAGE_RETRY_DELAYS)` times, then logs the prefix at error level and gives
+  up. Tests swap in `FakeReceiptsStorage` (autouse in `apps/receipts/tests/conftest.py`).
 - **Uploads** (`services.uploads`): `start_upload` validates (frozen account, size, allowed type --
   the claimed type is normalized, falling back to the extension for browsers that send none -- a
   base64 SHA-256, and the daily cap), creates a `Receipt(uploaded=False)` and presigns a single PUT with the exact
@@ -1578,7 +1595,11 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     filed under the vendor) and then update their receipts, while processing holds a receipt lock and
     may then drop an orphan vendor; `drop_if_orphan` therefore locks the vendor `skip_locked` and
     leaves it for the next orphan check or the user when someone has it, instead of waiting (the
-    other order would deadlock on Postgres).
+    other order would deadlock on Postgres). Saving a receipt that moves it to a vendor vets that
+    vendor (an `UPDATE`) under the receipt's lock, so `update_receipt` first takes the target
+    vendor's `FOR NO KEY UPDATE` (`lock_vendor_for_assignment`, before locking the receipt): vendor
+    then receipt on every path. SQLite can't show a deadlock, so `TestLockOrder` asserts the order
+    `select_for_update` is called in.
   - **Duplicates and search.** `find_duplicate` compares `vendor_ref` (or the text for a receipt
     without one); `ReceiptFilters.vendor` filters by vendor id; `q` also matches `vendor_extracted`
     (so a renamed vendor's receipts are still found by the old name); the CSV has a trailing
@@ -1684,8 +1705,11 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `filter_receipts` and `dashboard_counts` (the tab and Trash numbers, one query) never include a
   receipt with `uploaded=False` (a direct upload still in flight or abandoned).
 - **Jobs** (`apps/receipts/jobs.py`, registered in `ready()`): `receipts.meter_storage` (daily),
-  `receipts.purge_trash` (daily; deletes S3 objects, then rows, past `trash_days`, and the stripped
-  `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
+  `receipts.purge_trash` (daily; deletes S3 objects and rows past `trash_days`, and the stripped
+  `.eml` with the email's last receipt. `lifecycle.purge_receipt` decides from the row as it is now,
+  under its lock and before any S3 delete: still trashed, not `processing` and, for the job, trashed before the
+  cutoff -- else it returns `False` and leaves a receipt restored meanwhile alone --, and the
+  `.eml` under a row lock on the `InboundEmail` too), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
   `receipts.cleanup_uploads` (hourly), `receipts.poll_inbound` (every minute, 2 min lease; see
   "Email intake" below), `receipts.purge_inbound_messages` (daily; deletes `done` `InboundMessage`
@@ -1996,7 +2020,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     core's shared `initDropZone`, `core/js/drop_zone.js`, with the empty-drop alert turned off), "Choose files" and "Take photo" (`accept="image/*"
     capture="environment"`). Per file: refuse an unsupported type/size/empty file in the row; the
     browser computes SHA-256 (base64); `POST upload/start/` (session + CSRF, JSON in/out,
-    `RECEIPTS_UPLOAD_USER`; 422 rejected, 402 frozen, 429 waits for `Retry-After` up to 3 times) ->
+    `RECEIPTS_UPLOAD_USER`; a `size` that isn't a whole number of bytes, `1e400` included, is a 422 -- every JSON size,
+    timestamp and part number in the web upload views, file transfer's too, goes through
+    `apps.core.json_numbers.whole_number`, never a bare `int()`; 422 rejected, 402 frozen, 429 waits for `Retry-After` up to 3 times) ->
     XHR `PUT` to the presigned URL with exactly the headers the server returned (never
     `Content-Length`, which the browser sets) and a type-less Blob so no `Content-Type` is sent (it
     would otherwise need to be in the bucket's CORS `AllowedHeaders`) -> `POST upload/<id>/complete/`.
@@ -2060,21 +2086,27 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   exit code is 1 if any failed) and `vendor-merge <keep> <id>...` (unless `--yes`, it first `GET`s
   every vendor so the prompt shows which is kept and which are merged away -- and a wrong id fails
   before the question --, then `POST /vendors/merge`; the kept id and repeats are dropped from the
-  list). Its token is **per environment**, `~/.receipts_token.<env>` (so the prod JWT is
-  never sent to the local server; the single `~/.receipts_token` of earlier versions is ignored --
-  log in again, then delete it), written by `admin.utils.write_private_file` (mode 0600 set on the
-  open descriptor so a pre-existing looser file is tightened, `O_NOFOLLOW`; `filetransfer` and
-  `qrcode` use it too). Every request goes through `_request`: default timeout; a 429 is retried
+  list). The three JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
+  is **per CLI and environment**, `~/.<cli>_token.<env>` (`token_file`, so the prod JWT is never
+  sent to the local server; the single `~/.<cli>_token` of earlier versions is ignored -- log in
+  again, then delete it), written by `write_private_file` (mode 0600 set on the open descriptor so
+  a pre-existing looser file is tightened, `O_NOFOLLOW`); `get_headers(cli)`,
+  `password_from_prompt_or_env` (`QRCODE_PASSWORD` / `FILETRANSFER_PASSWORD` /
+  `RECEIPTS_PASSWORD`, else a hidden prompt: no CLI takes the password on the command line any
+  more) and `select_environment` (loads the env file and remembers which, for `token_file`; prints
+  `Site: <url> (<env>)` to stderr and warns when `API_BASE_URL` differs from the file's `BASE_URL`,
+  since the token is chosen by environment but sent wherever the URL points). Every request goes through `_request`: default timeout; a 429 is retried
   after its `Retry-After` only when that is <= 60 s (`MAX_RETRY_AFTER_SECONDS`) and the call's total
   wait stays within `MAX_TOTAL_RETRY_WAIT_SECONDS` -- the hourly rules (export, regenerate, re-run,
   login) are not slept on, the error says "rate limited, try again in N minutes" instead; and any
   `requests` exception exits 1 with a message (or raises `NetworkError` for the upload loop, which
   carries on with the next file). Errors print the API's `detail`, a ninja 422 list flattened to
-  `field: message`. The site URL is read
-  when a command runs, after `set_environment` has loaded the env file: `API_BASE_URL`, else the
-  file's `BASE_URL`, else `http://localhost:8000` (the older CLIs read `API_BASE_URL` at import
-  time, before that file is loaded). Unit tests: `admin/tests/test_receipts.py`, HTTP mocked, no
-  Django.
+  `field: message`. The site URL (`utils.site_url` /
+  `api_url`) is read when a command runs, after `select_environment` has loaded the env file:
+  `API_BASE_URL`, else the file's `BASE_URL`, else `http://localhost:8000` (`qrcode` and
+  `filetransfer` used to read `API_BASE_URL` at import time, before that file was loaded, so
+  `<cli> prod ...` talked to localhost). Unit tests: `admin/tests/` (`test_receipts.py`,
+  `test_cli_utils.py`, ...), HTTP mocked, no Django.
 - **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
   (status/reason/source filters; `VendorAdmin`, see "Vendors"; no add/change/delete -- deleting a row would orphan its S3 objects
   and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, next attempt, last error; a "retry" action
@@ -2172,7 +2204,12 @@ the shared `BillingSettings` storage price, suspends, re-enables as a fallback -
 already suspended when the run started, never one it suspended itself --, deletes files past the
 suspension grace period),
 `expire_transfers` (every 5 min -- also finishes the deferred file deletion described above),
-`cleanup_drafts` (hourly), `purge_download_ips` (daily). Each wraps its per-transfer work in
+`cleanup_drafts` (hourly; deletes a draft or unconfirmed transfer idle for 24 h, i.e.
+`Transfer.last_activity_at`, which `uploads.touch_draft` bumps on add/presign/resume/complete/remove
+file -- a column with a `db_default`, so an old container keeps inserting; `abort_draft`'s claim
+re-checks the idleness via `only_if`, so a draft touched after the job's snapshot is kept),
+`purge_download_ips` (daily). Each wraps its
+per-transfer work in
 `try`/`except Exception: logger.exception(...)` so one bad row can't abort the rest of that run's
 batch the way an uncaught exception would (which, since `last_started_at` is already stamped by
 the time the job's `func` runs, would otherwise leave every other transfer waiting a full extra

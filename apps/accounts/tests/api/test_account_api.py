@@ -16,7 +16,11 @@ def sent_confirmations(monkeypatch) -> list[str]:
     return sent
 
 
-def _put(client, user, payload):
+def _put(client, user, payload, password='testpass123'):
+    """`PUT /api/account` as `user` (the `user` fixture's password by default, which a change of
+    email needs); `password=None` sends none."""
+    if password is not None:
+        payload = {**payload, 'current_password': password}
     return client.put(
         '/api/account',
         payload,
@@ -35,6 +39,124 @@ def test_email_change_requires_reconfirmation(client, user, sent_confirmations):
     assert user.email_confirmed_at is None
     assert sent_confirmations == ['new@example.com']
     assert 'confirm your new email' in response.json()['message']
+
+
+def test_email_change_requires_the_current_password(client, user, sent_confirmations):
+    """A stolen bearer token must not be enough to move the account to another address."""
+    missing = _put(client, user, {'email': 'new@example.com'}, password=None)
+    blank = _put(client, user, {'email': 'new@example.com'}, password='')
+    wrong = _put(client, user, {'email': 'new@example.com'}, password='not-the-password')
+
+    assert missing.status_code == blank.status_code == wrong.status_code == 400
+    assert 'required' in missing.json()['detail']
+    assert 'incorrect' in wrong.json()['detail']
+    user.refresh_from_db()
+    assert user.email == 'testuser@example.com'
+    assert user.email_confirmed
+    assert sent_confirmations == []
+
+
+def test_checking_the_password_does_not_rehash_it(client, user, settings, sent_confirmations):
+    """A rehash on success would change the `pwd` claim and so revoke the caller's own tokens."""
+    from django.contrib.auth.hashers import make_password
+
+    settings.PASSWORD_HASHERS = [
+        'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+        'django.contrib.auth.hashers.MD5PasswordHasher',  # an older hasher than the preferred
+    ]
+    user.password = make_password('testpass123', hasher='md5')
+    user.save(update_fields=['password'])
+    old_hash = user.password
+    token = CustomAccessToken.for_user(user)
+
+    response = client.put(
+        '/api/account',
+        {'email': 'new@example.com', 'current_password': 'testpass123'},
+        content_type='application/json',
+        HTTP_AUTHORIZATION=f'Bearer {token}',
+    )
+
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert user.password == old_hash
+    again = client.put(
+        '/api/account',
+        {'name': 'Still In'},
+        content_type='application/json',
+        HTTP_AUTHORIZATION=f'Bearer {token}',
+    )
+    assert again.status_code == 200
+
+
+def test_wrong_password_attempts_count_against_the_email_change_budget(
+    client, user, settings, sent_confirmations
+):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'ACCOUNT_EMAIL_CHANGE_USER': (2, 3600)}
+
+    assert _put(client, user, {'email': 'a@example.com'}, password='wrong1').status_code == 400
+    assert _put(client, user, {'email': 'a@example.com'}, password='wrong2').status_code == 400
+    # The budget is spent, so even the right password is refused for now.
+    assert _put(client, user, {'email': 'a@example.com'}).status_code == 429
+    user.refresh_from_db()
+    assert user.email == 'testuser@example.com'
+
+
+def test_a_wrong_password_does_not_reveal_whether_an_address_is_taken(
+    client, user, sent_confirmations
+):
+    User.objects.create_user(email='taken@example.com', password='password123')
+
+    response = _put(client, user, {'email': 'taken@example.com'}, password='wrong')
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'Your current password is incorrect.'
+
+
+def test_an_account_without_a_usable_password_cannot_change_its_email_here(
+    client, user, sent_confirmations
+):
+    """A Google-only account has no password to re-authenticate with, so the change is refused
+    instead of waved through. (Making the password unusable also revokes the tokens issued before
+    it, so the handler is reached with the user fetched directly, not through a token.)"""
+    from types import SimpleNamespace
+
+    from ninja.errors import HttpError
+
+    from apps.accounts.routers.account import update_account
+    from apps.accounts.schemas import AccountUpdateRequest
+
+    user.set_unusable_password()
+    user.save()
+    payload = AccountUpdateRequest(email='new@example.com', current_password='anything')
+
+    with pytest.raises(HttpError) as excinfo:
+        update_account(SimpleNamespace(auth=user), payload)
+
+    assert excinfo.value.status_code == 400
+    assert 'Set a password' in excinfo.value.message
+    user.refresh_from_db()
+    assert user.email == 'testuser@example.com'
+
+
+def test_name_only_change_needs_no_password(client, user, sent_confirmations):
+    response = _put(client, user, {'name': 'Renamed'}, password=None)
+
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert user.name == 'Renamed'
+
+
+def test_name_longer_than_the_model_field_is_a_422_not_a_500(client, user, sent_confirmations):
+    from apps.accounts.schemas.account import NAME_MAX_LENGTH
+
+    assert NAME_MAX_LENGTH == User._meta.get_field('name').max_length  # ty: ignore[unresolved-attribute]
+
+    ok = _put(client, user, {'name': 'x' * NAME_MAX_LENGTH}, password=None)
+    too_long = _put(client, user, {'name': 'x' * (NAME_MAX_LENGTH + 1)}, password=None)
+
+    assert ok.status_code == 200
+    assert too_long.status_code == 422
 
 
 def test_name_only_change_keeps_confirmation(client, user, sent_confirmations):
@@ -113,7 +235,10 @@ def test_email_change_rate_limit_is_per_user(client, user, settings, sent_confir
     assert _put(client, user, {'email': 'taken@example.com'}).status_code == 200
     assert _put(client, user, {'email': 'again@example.com'}).status_code == 429
 
-    assert _put(client, other, {'email': 'other2@example.com'}).status_code == 200
+    assert (
+        _put(client, other, {'email': 'other2@example.com'}, password='password123').status_code
+        == 200
+    )
 
 
 def test_updates_that_do_not_change_the_email_cost_no_budget(

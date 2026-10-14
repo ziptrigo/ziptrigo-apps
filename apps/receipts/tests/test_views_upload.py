@@ -120,6 +120,41 @@ class TestStart:
         assert message in response.json()['error']
         assert not Receipt.objects.exists()
 
+    @pytest.mark.parametrize(
+        'raw',
+        [
+            '1e400',  # infinity: int() raises OverflowError
+            '-1e400',
+            '1.5',
+            '-5',
+            'true',
+            'null',
+            '[1]',
+            '"1.5"',
+            '"abc"',
+            '{"a": 1}',
+        ],
+    )
+    def test_a_size_that_is_not_a_whole_number_of_bytes_is_a_422(self, web, raw):
+        body = json.dumps(start_body()).replace(
+            f'"size": {len(samples.jpeg_bytes())}', '"size": ' + raw
+        )
+        assert '"size": ' + raw in body
+
+        response = web.post(
+            reverse('receipts:upload-start'), data=body, content_type='application/json'
+        )
+
+        assert response.status_code == 422
+        assert 'file size' in response.json()['error']
+        assert not Receipt.objects.exists()
+
+    def test_a_huge_size_is_refused_as_too_large_not_crashed_on(self, web):
+        response = start(web, size=10**400)
+
+        assert response.status_code == 422
+        assert 'too large' in response.json()['error']
+
     def test_the_daily_limit_is_a_422(self, web, funded_user):
         ReceiptsSettings.load()
         ReceiptsSettings.objects.filter(pk=1).update(max_files_per_user_per_day=1)

@@ -3,6 +3,7 @@ every object under their S3 prefix -- through a queued task that takes the plain
 
 import pytest
 from django.db import transaction
+from django.utils import timezone
 
 from apps.accounts.models import User
 
@@ -103,3 +104,70 @@ def test_a_failure_queueing_the_cleanup_never_blocks_deleting_the_user(
 
     assert not User.objects.filter(pk=user_id).exists()
     assert 'Could not queue' in caplog.text
+
+
+class _FlakyDeletes:
+    """Make the fake's `delete_prefix` fail `failures` times (a per-key S3 error), then work."""
+
+    def __init__(self, fake_storage, monkeypatch, failures):
+        self.calls = 0
+        self.failures = failures
+        self.real = fake_storage.delete_prefix
+        monkeypatch.setattr(fake_storage, 'delete_prefix', self)
+
+    def __call__(self, prefix):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise RuntimeError('S3 could not delete 1 object(s): k: AccessDenied')
+        return self.real(prefix)
+
+
+def test_a_failed_cleanup_is_tried_again(funded_user, fake_storage, monkeypatch, caplog):
+    """`delete_prefix` raises on a per-key S3 error, the queue never retries a failed task and the
+    user row is gone, so the task queues itself again rather than leaking the objects."""
+    receipt = create_receipt(funded_user, fake_storage)
+    flaky = _FlakyDeletes(fake_storage, monkeypatch, failures=2)
+
+    lifecycle.delete_user_storage.call(str(funded_user.pk))
+
+    assert flaky.calls == 3
+    assert receipt.file_key not in fake_storage.objects
+    assert 'retrying' in caplog.text
+
+
+def test_the_retry_is_deferred_when_the_backend_can_defer(funded_user, fake_storage, monkeypatch):
+    from django.tasks.base import Task
+
+    create_receipt(funded_user, fake_storage)
+    _FlakyDeletes(fake_storage, monkeypatch, failures=1)
+    monkeypatch.setattr(
+        'django.tasks.backends.immediate.ImmediateBackend.supports_defer', True, raising=False
+    )
+    deferred = []
+    real_using = Task.using
+
+    def using(self, **kwargs):
+        deferred.append(kwargs.get('run_after'))
+        return real_using(self, **{k: v for k, v in kwargs.items() if k != 'run_after'})
+
+    monkeypatch.setattr(Task, 'using', using)
+
+    lifecycle.delete_user_storage.call(str(funded_user.pk))
+
+    [run_after] = deferred
+    delay = (run_after - timezone.now()).total_seconds()
+    assert 0 < delay <= lifecycle.USER_STORAGE_RETRY_DELAYS[0].total_seconds()
+
+
+def test_cleanup_gives_up_after_the_last_retry_and_says_where_the_objects_are(
+    funded_user, fake_storage, monkeypatch, caplog
+):
+    receipt = create_receipt(funded_user, fake_storage)
+    flaky = _FlakyDeletes(fake_storage, monkeypatch, failures=100)
+
+    lifecycle.delete_user_storage.call(str(funded_user.pk))
+
+    assert flaky.calls == len(lifecycle.USER_STORAGE_RETRY_DELAYS) + 1
+    assert receipt.file_key in fake_storage.objects
+    assert 'Giving up' in caplog.text
+    assert user_prefix(funded_user.pk) in caplog.text

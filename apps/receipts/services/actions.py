@@ -19,6 +19,7 @@ from typing import Any
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Max
+from django.http import Http404
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -46,7 +47,7 @@ from .currencies import normalize_currency
 from .duplicates import refresh_duplicate
 from .errors import AccountFrozenError
 from .processing import enqueue_processing
-from .vendors import assign_vendor, clear_vendor
+from .vendors import assign_vendor, clear_vendor, lock_vendor_for_assignment
 
 #: Fields `update_receipt` accepts: the extracted ones, plus the user-only `notes` and `vendor_id`
 #: (an alternative to `vendor`: one of the user's own vendors, by id).
@@ -201,6 +202,13 @@ def update_receipt(receipt: Receipt, changes: Mapping[str, Any]) -> Receipt:
     """
     cleaned = clean_changes(receipt.user, changes)
     with transaction.atomic():
+        # The vendor the receipt is moving to is locked first: a rename or merge of it locks the
+        # vendor and then its receipts, so the receipt lock below must not come before it (see
+        # `lock_vendor_for_assignment`).
+        if 'vendor' in cleaned or 'vendor_ref' in cleaned:
+            lock_vendor_for_assignment(
+                receipt, vendor=cleaned.get('vendor_ref'), name=cleaned.get('vendor')
+            )
         locked = (
             Receipt.objects.select_for_update(of=('self',))
             .select_related('user')
@@ -350,12 +358,20 @@ def trash(receipt: Receipt) -> Receipt:
 
 def restore(receipt: Receipt) -> Receipt:
     """Take a receipt back out of the Trash, re-checking it for duplicates, and queue it if it
-    was never processed."""
+    was never processed.
+
+    Raises:
+        Http404: it was purged for good in the meantime (a 404 on the page and the API).
+    """
     with transaction.atomic():
         won = Receipt.objects.filter(pk=receipt.pk, deleted_at__isnull=False).update(
             deleted_at=None, updated_at=timezone.now()
         )
-        receipt.refresh_from_db()
+        try:
+            receipt.refresh_from_db()
+        except Receipt.DoesNotExist:
+            # Purged (retention, or "delete forever" in another tab) before this got the lock.
+            raise Http404('This receipt no longer exists.') from None
         if won:
             if refresh_duplicate(receipt):
                 receipt.save(update_fields=['possible_duplicate_of', 'updated_at'])
@@ -372,7 +388,8 @@ def delete_forever(receipt: Receipt) -> None:
         raise ValidationError('Move the receipt to the Trash first.')
     if Receipt.objects.filter(pk=receipt.pk, status=ReceiptStatus.PROCESSING).exists():
         raise ValidationError('This receipt is being processed; try again in a minute.')
-    lifecycle.purge_receipt(receipt)
+    if not lifecycle.purge_receipt(receipt):
+        raise ValidationError('This receipt is no longer in the Trash.')
 
 
 def dismiss_duplicate(receipt: Receipt) -> Receipt:

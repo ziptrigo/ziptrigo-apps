@@ -18,6 +18,12 @@ practice also covers the "no address claim" case above: every link now carries b
 without the address claim is refused earlier, for having no `pwd`. (Any rewrite of `User.password`
 counts as a change, including Django rehashing it on login after a hasher upgrade.)
 
+The email itself is sent off the request, by the `send_password_reset_email` task (issue #125:
+sending inline only for an address that has an account made the response time say which ones do,
+and an SES call under a sync worker ties it up). `request_reset` queues the task for *every*
+submitted address, known or not, so both do the same work in the request; the task looks the
+account up by that address when it runs and sends nothing if there is none.
+
 "Works once" holds under concurrency too: `validate_token` only reads, so `reset_password` re-checks
 the token against the user row it locks before writing, and a request that lost that race gets
 `InvalidResetTokenError`.
@@ -28,12 +34,14 @@ from datetime import UTC, datetime
 
 from django.conf import settings
 from django.db import transaction
+from django.tasks import task
 from django.template.loader import render_to_string
 from django.urls import reverse
 from ninja_jwt.exceptions import TokenError
 from ninja_jwt.settings import api_settings
 
 from apps.core.services.email import EmailBackendClass, get_email_backend, send_email
+from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
 from ..tokens import RESET_EMAIL_CLAIM, PasswordResetToken, matches_password
@@ -53,29 +61,14 @@ class PasswordResetService:
 
     email_backend_classes: list[EmailBackendClass]
 
-    def request_reset(self, email: str):
-        """Create a reset token for the user with the given email and send email.
+    def request_reset(self, email: str) -> None:
+        """Queue the reset email for the account with this address (see the module docstring).
 
-        If the user does not exist, this method does nothing. This keeps behavior
-        indistinguishable from the caller's perspective.
+        Does the same thing whether or not an account has the address, so nothing about the
+        caller's response -- its content or its timing -- tells them. The task finds the account
+        when it runs and does nothing if there is none.
         """
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return
-
-        reset_url = self.reset_url_for(user)
-        subject, text_body, html_body = render_password_reset_email(
-            user=user,
-            reset_url=reset_url,
-        )
-        send_email(
-            to=user.email,
-            subject=subject,
-            text_body=text_body,
-            html_body=html_body,
-            backend_classes=self.email_backend_classes,
-        )
+        enqueue_after_commit(send_password_reset_email, email)
 
     def reset_url_for(self, user: User) -> str:
         """A fresh absolute reset link for `user`, bound to their current address."""
@@ -160,6 +153,29 @@ class PasswordResetService:
 
 def get_password_reset_service() -> PasswordResetService:
     return PasswordResetService(email_backend_classes=get_email_backend())
+
+
+@task
+def send_password_reset_email(email: str) -> None:
+    """Email a reset link to the account with this address, if there is one. Queued by
+    `PasswordResetService.request_reset`, off the request (see the module docstring); the link is
+    made now, when the email goes out, and is bound to the address it is sent to. A failure only
+    logs (`send_email` never raises on a delivery failure): forgot-password can be asked again."""
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return
+    service = get_password_reset_service()
+    subject, text_body, html_body = render_password_reset_email(
+        user=user, reset_url=service.reset_url_for(user)
+    )
+    send_email(
+        to=user.email,
+        subject=subject,
+        text_body=text_body,
+        html_body=html_body,
+        backend_classes=service.email_backend_classes,
+    )
 
 
 def render_password_reset_email(*, user: User, reset_url: str) -> tuple[str, str, str]:

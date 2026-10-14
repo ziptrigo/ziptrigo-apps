@@ -40,22 +40,25 @@ def test_web_login_accepts_a_mixed_case_domain(client, user):
     assert client.session[SESSION_KEY] == str(user.pk)
 
 
-def test_web_forgot_password_finds_the_account_by_a_mixed_case_domain(client, user, monkeypatch):
+def test_web_forgot_password_finds_the_account_by_a_mixed_case_domain(
+    client, user, monkeypatch, django_capture_on_commit_callbacks
+):
     sent: list[dict] = []
     monkeypatch.setattr(
         'apps.accounts.services.password_reset.send_email', lambda **kw: sent.append(kw)
     )
 
-    response = client.post(
-        reverse('accounts:forgot-password'), {'email': 'testuser@Example.COM'}, **HTMX
-    )
+    with django_capture_on_commit_callbacks(execute=True):
+        response = client.post(
+            reverse('accounts:forgot-password'), {'email': 'testuser@Example.COM'}, **HTMX
+        )
 
     assert response.status_code == 200
     assert [m['to'] for m in sent] == [user.email]
 
 
 def test_web_resend_confirmation_finds_the_account_by_a_mixed_case_domain(
-    client, user, monkeypatch
+    client, user, monkeypatch, django_capture_on_commit_callbacks
 ):
     user.email_confirmed = False
     user.save(update_fields=['email_confirmed'])
@@ -65,9 +68,10 @@ def test_web_resend_confirmation_finds_the_account_by_a_mixed_case_domain(
         lambda self, u: sent.append(u.email),
     )
 
-    response = client.post(
-        reverse('accounts:resend-confirmation'), {'email': 'testuser@Example.COM'}, **HTMX
-    )
+    with django_capture_on_commit_callbacks(execute=True):
+        response = client.post(
+            reverse('accounts:resend-confirmation'), {'email': 'testuser@Example.COM'}, **HTMX
+        )
 
     assert response.status_code == 200
     assert sent == [user.email]
@@ -301,7 +305,7 @@ def _put(client, user, payload):
 def test_email_change_to_a_case_variant_of_another_account_is_refused(client, user):
     User.objects.create_user(email='Taken@example.com', password='password123')
 
-    response = _put(client, user, {'email': 'taken@example.com'})
+    response = _put(client, user, {'email': 'taken@example.com', 'current_password': 'testpass123'})
 
     assert response.status_code == 400
     assert response.json()['detail'] == 'Email already in use'
