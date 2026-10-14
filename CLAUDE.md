@@ -376,8 +376,19 @@ links emailed since stay valid until one of them is used (or expires). Claim-on-
 `email_confirmed`, so it becomes possible at the next login after such a reset, the same as after a
 confirmation link.
 Residual, not new: the confirmation email sent to the victim at the attacker's *first* signup (and
-resend-confirmation) still confirms an account with its creator's password if the victim clicks it;
-that is inherent to confirming by link and password signup, and is not closed here.
+resend-confirmation) still confirms an account with its creator's password if the victim *clicks*
+it; that is inherent to confirming by link and password signup, and is not closed here. A mail
+scanner or link previewer no longer does it for them (audit #11): `GET /account/confirm-email/<token>/`
+(`views.pages.confirm_email_page`) only renders a CSRF-protected "Confirm my email" button, without
+reading the token, and only the **POST** from that button calls `confirm_token` (then redirects to
+the success page, or -- post/redirect/get -- to `accounts:email-confirmation-expired`, which shows
+the expired message and the resend form). The POST is rate limited per IP (`CONFIRM_EMAIL_IP`, 429
+page); the GET is not. The URL is unchanged, so links already sent work; file transfer's anonymous
+confirm link works the same way. `POST /api/auth/confirm-email` takes the token in a JSON body, which
+no scanner sends. The button stops prefetchers and link previewers, which only fetch; it does not
+stop every automated sandbox, since some mail-security products render the page and click buttons.
+The email's copy ("open the link below and press Confirm my email") is neutral between signup and
+an email change, as `send_confirmation_email` serves both.
 
 **Timing is roughly equalised** (review of #127): the existing-address path hashes the submitted
 password once and discards it (`make_password`, like `ModelBackend` does for an unknown user), the
@@ -637,7 +648,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address limits on the email an
   existing address gets, `SIGNUP_EXISTING_EMAIL` and `SIGNUP_EXISTING_EMAIL_DAY`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
   `PUT /api/account`, per user), forgot-password (as above,
-  and its response shape never changes so existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
+  and its response shape never changes so existence still isn't leaked), resend-confirmation, `CONFIRM_EMAIL_IP` (the confirming POST of the emailed link, per IP, generous), QR preview/create (per user, shared between
   the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP,
   generous, charged *before* the code lookup so made-up codes spend the budget too -- over the limit
   a known code still redirects, only the scan-count write is skipped, protecting
