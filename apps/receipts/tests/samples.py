@@ -2,6 +2,7 @@
 so `pypdf` finds a text layer in one and `pypdfium2` has pixels to render in the other."""
 
 import io
+import zlib
 from functools import cache
 
 import pillow_heif
@@ -55,18 +56,8 @@ def scanned_pdf_bytes() -> bytes:
     return _encode(_image((300, 400)), 'PDF')
 
 
-@cache
-def text_pdf_bytes(text: str = 'Staples receipt. Total 42.10 USD. Visa 4242. 2026-10-09') -> bytes:
-    """A one-page PDF with `text` in its text layer."""
-    stream = f'BT /F1 12 Tf 50 700 Td ({text}) Tj ET'.encode('latin-1')
-    objects = [
-        b'<< /Type /Catalog /Pages 2 0 R >>',
-        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
-        b'/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
-        b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'\nendstream',
-        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    ]
+def _assemble_pdf(objects: list[bytes]) -> bytes:
+    """A PDF from its numbered objects (object 1 is the catalog), with a correct xref table."""
     out = bytearray(b'%PDF-1.4\n')
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -82,6 +73,90 @@ def text_pdf_bytes(text: str = 'Staples receipt. Total 42.10 USD. Visa 4242. 202
         xref,
     )
     return bytes(out)
+
+
+@cache
+def text_pdf_bytes(text: str = 'Staples receipt. Total 42.10 USD. Visa 4242. 2026-10-09') -> bytes:
+    """A one-page PDF with `text` in its text layer."""
+    stream = f'BT /F1 12 Tf 50 700 Td ({text}) Tj ET'.encode('latin-1')
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+            b'/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+            b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'\nendstream',
+            b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        ]
+    )
+
+
+@cache
+def inflating_pdf_bytes(decompressed_bytes: int) -> bytes:
+    """A one-page PDF of a few KB whose one Flate content stream inflates to `decompressed_bytes`
+    of (harmless, but numerous) text operators."""
+    operator = b'BT /F1 1 Tf (x) Tj ET\n'
+    stream = zlib.compress(operator * (decompressed_bytes // len(operator)), 9)
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+            b'/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+            b'<< /Length %d /Filter /FlateDecode >>\nstream\n' % len(stream)
+            + stream
+            + b'\nendstream',
+            b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        ]
+    )
+
+
+@cache
+def shared_form_pdf_bytes(
+    uses: int, form_bytes: int = 1_900_000, distinct_forms: bool = False
+) -> bytes:
+    """A tiny PDF whose one page draws a Form XObject `uses` times, the form's Flate stream
+    inflating to `form_bytes` of path operators (no text, so a renderer has real work to do and
+    a text extractor has none). Each stream is under any per-stream cap, but a renderer decodes
+    the form again for every use, so the memory needed grows with `uses`. With `distinct_forms`
+    the page draws `uses` different forms (each its own stream) once each instead."""
+    operator = b'0 0 m 1 1 l S\n'
+    body = operator * (form_bytes // len(operator))
+    form_count = uses if distinct_forms else 1
+    forms = []
+    for index in range(form_count):
+        # A comment line makes each stream different, so nothing can share them.
+        stream = zlib.compress(b'%% form %d\n' % index + body, 9)
+        forms.append(
+            b'<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Length %d '
+            b'/Filter /FlateDecode >>\nstream\n' % len(stream) + stream + b'\nendstream'
+        )
+    names = [b'X%d' % index for index in range(form_count)]
+    page_stream = b''.join(b'/%s Do\n' % names[index % form_count] for index in range(uses))
+    xobjects = b' '.join(b'/%s %d 0 R' % (name, 5 + i) for i, name in enumerate(names))
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R '
+            b'/Resources << /XObject << ' + xobjects + b' >> >> >>',
+            b'<< /Length %d >>\nstream\n' % len(page_stream) + page_stream + b'\nendstream',
+            *forms,
+        ]
+    )
+
+
+@cache
+def blank_pages_pdf_bytes(pages: int, side_pt: int) -> bytes:
+    """A tiny PDF of `pages` empty `side_pt` x `side_pt` point pages (no text layer)."""
+    kids = b' '.join(b'%d 0 R' % (3 + i) for i in range(pages))
+    return _assemble_pdf(
+        [
+            b'<< /Type /Catalog /Pages 2 0 R >>',
+            b'<< /Type /Pages /Kids [' + kids + b'] /Count %d >>' % pages,
+        ]
+        + [b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %d %d] >>' % (side_pt, side_pt)] * pages
+    )
 
 
 HTML_BODY = (

@@ -43,7 +43,7 @@ _FAILURE_TEXT = {
     FailureReason.NOT_A_RECEIPT: "doesn't look like a receipt or an invoice",
     FailureReason.UNREADABLE: "couldn't be read",
     FailureReason.UNSUPPORTED_TYPE: 'is not a supported file type',
-    FailureReason.TOO_LARGE: 'is too large',
+    FailureReason.TOO_LARGE: 'is too large or too complex to read',
     FailureReason.EXTRACTION_ERROR: "couldn't be processed; open it and run the extraction again",
 }
 

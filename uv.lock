@@ -2353,7 +2353,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3,<4.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.12,<3.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3.0" },
-    { name = "pypdf", specifier = ">=6.0,<7.0" },
+    { name = "pypdf", specifier = ">=6.20,<7.0" },
     { name = "pypdfium2", specifier = ">=5.0,<6.0" },
     { name = "python-dotenv", specifier = ">=1.0,<2.0" },
     { name = "requests", specifier = ">=2.32,<3.0" },

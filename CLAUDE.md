@@ -1321,11 +1321,39 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   in the same `atomic()` it charges `price_per_file` **once per `attempt_id`** (`charged_attempt_id`;
   a price of 0 skips `spend_credits`). A frozen account or `InsufficientCreditsError` parks the
   receipt in `waiting_for_credits`. Input preparation (`services.documents`: HEIC -> JPEG via
-  `pillow-heif` with the JPEG kept as the preview, downscale, an explicit `MAX_IMAGE_PIXELS` check (Pillow's process-wide limit is left alone), PDF
-  text via `pypdf` or rendered pages via `pypdfium2` -- each page is sized with `get_size()` first
-  and rendered at a scale that keeps its bitmap under `MAX_IMAGE_PIXELS` (a page over 14,400 pt on a
-  side is unreadable), the PIL image going straight to the JPEG encoder -- HTML -> text with the stdlib parser) and the AI call
-  (`services.ai`) happen outside any transaction; the result is applied under a row lock only if
+  `pillow-heif` with the JPEG kept as the preview, downscale, an explicit `MAX_IMAGE_PIXELS` check
+  (Pillow's process-wide limit is left alone) and an image shrunk to `MAX_IMAGE_SIDE_PX` *before*
+  the EXIF rotation and the RGBA flattening copy it (a palette or 1-bit one is cut down with NEAREST
+  to twice that first, before it is expanded to RGB), PDF text via `pypdf` under `PDF_TEXT_LIMITS`
+  (2 MB decompressed **per stream** instead of its 75 MB default, `pypdf.apply_configuration`, per
+  call; a PDF over it is refused, not rendered, since pdfium decodes the same stream with no limit of
+  its own) or rendered pages via `pypdfium2` -- each page is sized with `get_size()` first and
+  rendered at a scale that keeps its longer side within `MAX_IMAGE_SIDE_PX` (a page over 14,400 pt on
+  a side is refused), the PIL image going straight to the JPEG encoder -- HTML -> text with the
+  stdlib parser) **runs in a child process under a memory and time budget**, because a per-stream
+  cap bounds nothing else: a 5 KB PDF whose page draws one 1.9 MB Form XObject 40 times needs 1.4 GB
+  in pdfium (it decodes the form again for every use; 40 different forms do the same) and 40 big
+  streams cost pypdf minutes of CPU. `prepare_input` starts `python -I documents.py` (the module run
+  as a script: importing it as `apps.receipts.services.documents` would import the whole
+  Django-dependent package, so it keeps no relative imports) with bytes on stdin and JSON on stdout,
+  never touching the database, with an environment cut to `PATH`/locale (no keys), under
+  `RLIMIT_AS` = `RECEIPTS_DOCUMENT_MEMORY_MB` (default 1024; address space, not resident memory.
+  Measured on Linux: ordinary receipts need 96-128 MB, the worst legitimate input, a 48-megapixel
+  HEIC or a 50-megapixel PNG, passes at 512 MB, so the default leaves 2x; **Linux only**: macOS
+  ignores `RLIMIT_AS`, so a developer machine is bounded by the timeout alone). A library that turns
+  a failed allocation into its own exception (pdfium: "could not be rendered") is recognised by the
+  child having mapped over half its budget (`VmPeak`) and still reported as over the budget, `RLIMIT_CPU` and a
+  wall-clock `RECEIPTS_DOCUMENT_TIMEOUT_SECONDS` (default 60, the child is killed). One child at a
+  time per `receipts` worker, started per receipt (~0.2 s). A child that runs out of memory, is
+  killed, crashes or times out raises `DocumentTooComplexError` (a subclass of
+  `UnreadableDocumentError`, also raised for the per-stream cap, an image header over
+  `MAX_IMAGE_PIXELS` and an absurd page size); `processing._run` logs a warning with the receipt id
+  (never content) and fails it as **`too_large`** (reused rather than a new reason, so no migration;
+  its help text says "too large or too complex", and, like any `too_large`, it can't be re-run),
+  refunded like every file that could not be read. `RECEIPTS_DOCUMENT_SANDBOX` (default on; off
+  under pytest, which prepares in-process and monkeypatches inside; the `tests_e2e` server runs it
+  for real) switches the child off. Preparation
+  and the AI call (`services.ai`) happen outside any transaction; the result is applied under a row lock only if
   the receipt is still `processing` for the same `attempt_id`. A HEIC preview is
   written before its conditional `UPDATE`; if that matches nothing and no row references the key
   (the receipt was purged, or its user deleted, meanwhile) the object is deleted again. The AI client is
@@ -1902,6 +1930,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `services.inbound.reset_message_for_retry`), `InboundEmailAdmin`, `ReceiptsAccountAdmin` (codes inline, frozen state, stored bytes).
 - **Settings/env**: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (optional), `OPENAI_RECEIPTS_MODEL`,
   `RECEIPTS_AI_TIMEOUT_SECONDS`/`_MAX_RETRIES` (explicit timeout, bounded SDK retries),
+  `RECEIPTS_DOCUMENT_SANDBOX`/`_MEMORY_MB`/`_TIMEOUT_SECONDS` (the document-preparation budget),
   `RECEIPTS_S3_BUCKET`/`_REGION`/`_ENDPOINT_URL`, `RECEIPTS_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`,
   `RECEIPTS_INBOUND_ADDRESS`; the five required ones are checked in prod (see "Settings and
   environment"), `apps.receipts.checks` warns about a *partial* local configuration.
@@ -1924,6 +1953,10 @@ future app:
   install signal handlers, so they can't be threads); locally the `worker` and `worker-receipts`
   compose services run them. A task whose queue has no worker is never executed, so a new queue
   needs a worker added in both places.
+  Each `process_receipt` also starts one short-lived child process to read the file (see
+  "Receipts" > Processing): the `receipts` worker plus that child (up to
+  `RECEIPTS_DOCUMENT_MEMORY_MB` of address space, one at a time) is the memory the container must
+  have room for, and a killed or over-budget child fails the receipt, never the worker.
 - **Scheduler**: `apps.core.scheduler` -- a `JobSpec` registry (name, callable, interval, lease)
   filled by each app's `AppConfig.ready()` (`core` can't import a product, so it never discovers
   jobs itself), a `ScheduledJob` row per job whose claim is one conditional `UPDATE` guarded by the

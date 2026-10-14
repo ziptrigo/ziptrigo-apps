@@ -110,8 +110,8 @@ FAILURE_HELP = {
         'Upload a PDF, JPG, PNG, HEIC or WebP file instead.',
     ),
     FailureReason.TOO_LARGE: (
-        'This file is larger than the size limit.',
-        'Upload a smaller version of it.',
+        'This file is too large or too complex to read.',
+        'Upload a smaller or simpler version of it, or a photo or scan of the receipt.',
     ),
     FailureReason.EXTRACTION_ERROR: (
         "We couldn't process this receipt.",

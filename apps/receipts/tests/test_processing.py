@@ -605,6 +605,39 @@ class TestUnreadableInput:
         assert fake_ai.calls == []
         assert get_balance(funded_user) == 100  # no AI call, no charge
 
+    def test_a_file_over_the_budget_fails_as_too_large_is_refunded_and_logged(
+        self, make_receipt, fake_ai, funded_user, caplog, monkeypatch
+    ):
+        from ..services import documents
+
+        def over_the_budget(*args, **kwargs):
+            raise documents.DocumentTooComplexError('The file needs more memory or time.')
+
+        monkeypatch.setattr(documents, 'prepare_input', over_the_budget)
+        receipt = make_receipt(data=samples.text_pdf_bytes(), content_type='application/pdf')
+
+        with caplog.at_level('WARNING'):
+            run(receipt)
+
+        assert receipt.status == ReceiptStatus.FAILED
+        assert receipt.failure_reason == FailureReason.TOO_LARGE
+        assert receipt.refunded_at is not None
+        assert get_balance(funded_user) == 100
+        assert fake_ai.calls == []
+        assert f'Receipt {receipt.pk} is too complex to read' in caplog.text
+
+    def test_a_pdf_with_a_stream_far_bigger_than_a_receipts_fails_as_too_large(
+        self, make_receipt, fake_ai
+    ):
+        receipt = make_receipt(
+            data=samples.inflating_pdf_bytes(8_000_000), content_type='application/pdf'
+        )
+
+        run(receipt)
+
+        assert receipt.failure_reason == FailureReason.TOO_LARGE
+        assert fake_ai.calls == []
+
     def test_a_missing_object_fails_as_unreadable(self, make_receipt, fake_ai):
         receipt = make_receipt(store=False)
 
