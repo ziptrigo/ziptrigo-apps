@@ -1456,8 +1456,13 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   **Two kinds of failure.** Only outcomes that mean "this file is over the budget" raise
   `DocumentTooComplexError` (a subclass of `UnreadableDocumentError`, also raised for the per-stream
   cap, an image header over `MAX_IMAGE_PIXELS` and an absurd page size): the child ended with
-  SIGABRT (a failed allocation under `RLIMIT_AS`), SIGSEGV, SIGBUS or SIGXCPU, raised
-  `MemoryError`, or replied `too_complex`. **SIGKILL is not one of them**: with the limits a file
+  SIGABRT (a failed allocation under `RLIMIT_AS`), SIGSEGV, SIGBUS, SIGILL, SIGTRAP (native crashes;
+  pdfium's out-of-memory crash on x86-64 is `int3`/`ud2`) or SIGXCPU, **exit status
+  127 after the child announced it had started** (it writes `#started` to stdout once its limits are
+  set; on x86-64 glibc's dynamic loader can end a child that used up its address space with
+  `_exit(127)`, "cannot allocate memory for thread-local data", instead of SIGABRT -- found by CI;
+  127 *without* the marker is a broken install and is retried), raised `MemoryError`, or replied
+  `too_complex`. **SIGKILL is not one of them**: with the limits a file
   over its budget fails an allocation instead, so SIGKILL is the kernel's OOM killer, i.e. memory
   pressure on the container or host (the child is its first victim), and is retried.
   `processing._run` logs a warning with the receipt id (never content) and fails it as

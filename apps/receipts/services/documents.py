@@ -45,8 +45,11 @@ isn't enforced (macOS, so a developer machine) only the CPU limit and the timeou
 
 **Two kinds of failure** (`prepare_input`'s contract). Only an outcome that means *this file is
 over the budget* is a `DocumentTooComplexError` (a permanent `too_large`): the child died of
-SIGABRT (an allocation failed in native code), SIGSEGV, SIGBUS or SIGXCPU (the CPU limit), raised
-`MemoryError`, or said `too_complex`. Anything that says nothing about the file -- an ordinary
+SIGABRT (an allocation failed in native code), SIGSEGV, SIGBUS, SIGILL, SIGTRAP (native crashes)
+or SIGXCPU (the CPU limit), exited
+with status 127 after announcing that it had started (the dynamic loader giving up on a failed
+mapping, which is how x86-64 glibc can end it instead of SIGABRT), raised `MemoryError`, or said
+`too_complex`. Anything that says nothing about the file -- an ordinary
 non-zero exit, no or a malformed reply, SIGINT/SIGTERM/SIGHUP, **SIGKILL** (with `RLIMIT_AS` a
 file over its budget fails an allocation instead; SIGKILL is the kernel's OOM killer, i.e. memory
 pressure on the container or host whoever caused it), the wall-clock timeout, the child failing to
@@ -548,8 +551,8 @@ def _prepare_unsandboxed(
 # -- The child process --------------------------------------------------------------------------
 #
 # Protocol: the parent writes one JSON line (`content_type`, `max_pdf_pages`, `memory_mb`,
-# `cpu_seconds`) and then the file's bytes to the child's stdin; the child answers one JSON
-# document on stdout: `{"ok": {"text", "images": [base64], "preview_jpeg": base64 | null}}` or
+# `cpu_seconds`) and then the file's bytes to the child's stdin; once its limits are set the child
+# writes `_STARTED_MARKER`, and it then answers one JSON document on stdout: `{"ok": {"text", "images": [base64], "preview_jpeg": base64 | null}}` or
 # `{"error": "unreadable" | "too_complex" | "unsupported" | "failed", "message"}`. Anything else (a
 # non-zero exit, a signal, no or malformed output) means the child died; `_prepare_in_child` tells
 # a death that means "over the budget" from the rest.
@@ -564,7 +567,28 @@ CHILD_USER = 'nobody'
 #: container or host (the child is its first victim, `oom_score_adj`), which a retry may survive.
 #: Any other signal (SIGINT, SIGTERM, SIGHUP, ...) came from outside and says nothing about the
 #: file either.
-_BUDGET_SIGNALS = frozenset({signal.SIGABRT, signal.SIGSEGV, signal.SIGBUS, signal.SIGXCPU})
+_BUDGET_SIGNALS = frozenset(
+    {
+        signal.SIGABRT,
+        signal.SIGSEGV,
+        signal.SIGBUS,
+        signal.SIGXCPU,
+        # pdfium's own out-of-memory crash (`ud2` / `int3`) on x86-64, instead of an abort:
+        signal.SIGILL,
+        signal.SIGTRAP,
+    }
+)
+#: Exit statuses that mean the same, **but only from a child that had started** (see
+#: `_STARTED_MARKER`). 127 is glibc's dynamic loader giving up (`_exit(127)`) when a lazy `dlopen`
+#: or thread-local allocation fails because the address space is used up ("cannot allocate memory
+#: for thread-local data: ABORT"): on x86-64 that is how a file needing gigabytes of pdfium
+#: memory can end instead of SIGABRT. The same status before the marker is a broken install (a
+#: library the interpreter can't load), which is not the file's doing.
+_BUDGET_EXIT_STATUSES = frozenset({127})
+#: The first thing the child writes to stdout, once its limits are in force. It tells a child that
+#: ran out of memory while working (which can end with a plain exit status, above) from one that
+#: never got going.
+_STARTED_MARKER = b'#started\n'
 #: Reply kinds a child may send, and what each means to the caller.
 _REPLY_ERRORS: dict[object, type[DocumentError]] = {
     'unreadable': UnreadableDocumentError,
@@ -678,10 +702,13 @@ def _prepare_in_child(
         logger.error('Could not start the document child: %s', type(exc).__name__)
         raise DocumentChildError('Reading the file could not be started.') from exc
 
-    reply = _parse_reply(result.stdout) if result.returncode == 0 else None
+    started, stdout = _split_started(result.stdout)
+    reply = _parse_reply(stdout) if result.returncode == 0 else None
     if reply is None:
         exit_description = _describe_exit(result.returncode)
-        if result.returncode < 0 and -result.returncode in _BUDGET_SIGNALS:
+        if (result.returncode < 0 and -result.returncode in _BUDGET_SIGNALS) or (
+            started and result.returncode in _BUDGET_EXIT_STATUSES
+        ):
             logger.warning(
                 'The child preparing a %s file (%d bytes) ended with %s: over its budget '
                 '(%d MB, %s CPU s)',
@@ -725,6 +752,13 @@ def _prepare_in_child(
         )
         message = 'Reading the file failed.'
     raise error(message)
+
+
+def _split_started(stdout: bytes) -> tuple[bool, bytes]:
+    """Whether the child announced that it had started, and the rest of its output."""
+    if stdout.startswith(_STARTED_MARKER):
+        return True, stdout[len(_STARTED_MARKER) :]
+    return False, stdout
 
 
 def _parse_reply(stdout: bytes) -> dict | None:
@@ -857,6 +891,8 @@ def _child_main() -> None:
         payload = sys.stdin.buffer.read()
         request = json.loads(payload.partition(b'\n')[0])
         _limit_resources(request['memory_mb'], request['cpu_seconds'])
+        reply_stream.write(_STARTED_MARKER)
+        reply_stream.flush()
         reply = _handle_request(payload)
         out = json.dumps(reply).encode()
     except MemoryError:

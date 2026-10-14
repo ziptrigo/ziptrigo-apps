@@ -564,10 +564,23 @@ class TestChildProcess:
             'import os, signal; os.kill(os.getpid(), signal.SIGABRT)',  # a failed allocation
             'import os, signal; os.kill(os.getpid(), signal.SIGSEGV)',  # native code gone wrong
             'import os, signal; os.kill(os.getpid(), signal.SIGBUS)',
+            'import os, signal; os.kill(os.getpid(), signal.SIGILL)',  # pdfium's crash on x86-64
+            'import os, signal; os.kill(os.getpid(), signal.SIGTRAP)',
             'import os, signal; os.kill(os.getpid(), signal.SIGXCPU)',  # the CPU limit
             'import json; print(json.dumps({"error": "too_complex", "message": "x"}))',
+            # glibc's loader gives up on a failed mapping: x86-64's way of running out of memory
+            'import os, sys; sys.stdout.write("#started\\n"); sys.stdout.flush(); os._exit(127)',
         ],
-        ids=['SIGABRT', 'SIGSEGV', 'SIGBUS', 'SIGXCPU', 'says too_complex'],
+        ids=[
+            'SIGABRT',
+            'SIGSEGV',
+            'SIGBUS',
+            'SIGILL',
+            'SIGTRAP',
+            'SIGXCPU',
+            'says too_complex',
+            'exit 127 once started',
+        ],
     )
     def test_a_child_that_ends_over_its_budget_is_too_complex(self, code, caplog):
         with caplog.at_level(logging.WARNING), pytest.raises(documents.DocumentTooComplexError):
@@ -580,6 +593,9 @@ class TestChildProcess:
         [
             'import os; os._exit(3)',
             'import sys; sys.exit(1)',  # e.g. a traceback: an import error after a bad deploy
+            # 127 before the child announced itself: the interpreter can't load a library
+            'import os; os._exit(127)',
+            'import os, sys; sys.stdout.write("#started\\n"); sys.stdout.flush(); os._exit(1)',
             # The OOM killer: memory pressure on the container or host, not the file (with
             # RLIMIT_AS a file over its budget fails an allocation instead).
             'import os, signal; os.kill(os.getpid(), signal.SIGKILL)',
@@ -597,6 +613,8 @@ class TestChildProcess:
         ids=[
             'exit 3',
             'exit 1',
+            'exit 127 not started',
+            'exit 1 once started',
             'SIGKILL (OOM killer)',
             'SIGTERM',
             'SIGINT',
@@ -997,7 +1015,9 @@ class TestChildProcess:
             check=True,
         )
 
-        reply = documents._parse_reply(result.stdout)
+        started, stdout = documents._split_started(result.stdout)
+        assert not started  # it failed before its limits were set
+        reply = documents._parse_reply(stdout)
         assert reply == {'error': 'failed', 'message': 'JSONDecodeError'}
 
     def test_the_real_child_reads_a_file_with_warnings_and_logging_silenced(self):
@@ -1014,7 +1034,9 @@ class TestChildProcess:
             check=True,
         )
 
-        assert documents._parse_reply(result.stdout) is not None
+        started, stdout = documents._split_started(result.stdout)
+        assert started
+        assert documents._parse_reply(stdout) is not None
         assert result.stderr == b''
 
     @pytest.mark.parametrize('distinct_forms', [False, True], ids=['shared form', 'distinct forms'])
