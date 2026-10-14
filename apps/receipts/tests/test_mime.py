@@ -1400,10 +1400,138 @@ class TestLimits:
         for _ in range(3):
             mime.parse_message(raw)
 
+    # -- Header bytes -----------------------------------------------------------------------
+
+    @staticmethod
+    def header_of(name: bytes, size: int, *, fold: int = 0) -> bytes:
+        """A header (with its newline) of exactly `size` bytes; `fold` > 0 spreads it over
+        continuation lines of about that many bytes."""
+        filler = b'a' * (size - len(name) - 3)
+        if fold:
+            filler = b'\n '.join(filler[i : i + fold] for i in range(0, len(filler), fold))
+        # Folding adds 2 bytes per break; trim back to the exact size.
+        header = name + b': ' + filler
+        header = header[: size - 1]
+        return header + b'\n'
+
+    def test_a_header_over_the_byte_limit_is_refused(self):
+        raw = self.header_of(b'X-Big', mime.MAX_HEADER_BYTES + 1) + b'\nbody\n'
+
+        with pytest.raises(mime.HeadersTooLargeError, match='A header is over'):
+            mime.parse_message(raw)
+
+    def test_the_header_byte_limit_is_exact(self):
+        raw = self.header_of(b'X-Big', mime.MAX_HEADER_BYTES) + b'\nbody\n'
+
+        assert len(mime.parse_message(raw)['X-Big']) > mime.MAX_HEADER_BYTES - 20
+
+    def test_a_huge_content_type_is_refused_before_it_is_parsed(self):
+        params = '; '.join(f'p{i}="vvvvvvvvvvvvvvvvvvvv"' for i in range(3000))
+        raw = f'Content-Type: text/plain; {params}\nSubject: s\n\nbody\n'.encode()
+        assert len(raw) > mime.MAX_HEADER_BYTES
+
+        with pytest.raises(mime.HeadersTooLargeError):
+            mime.parse_message(raw)
+
+    def test_a_huge_to_is_refused_whether_or_not_it_is_folded(self):
+        addresses = ', '.join(f'user{i}@example.com' for i in range(4000))
+        folded = addresses.replace(', ', ',\n ')
+        for value in (addresses, folded):
+            raw = f'To: {value}\nSubject: s\n\nbody\n'.encode()
+            assert len(raw) > mime.MAX_HEADER_BYTES
+
+            with pytest.raises(mime.HeadersTooLargeError):
+                mime.parse_message(raw)
+
+    def test_a_continuation_line_does_not_start_a_new_header_budget(self):
+        line = b' ' + b'a' * 998 + b'\n'
+        raw = b'X-Big: x\n' + line * (mime.MAX_HEADER_BYTES // len(line) + 1) + b'\nbody\n'
+
+        with pytest.raises(mime.HeadersTooLargeError):
+            mime.parse_message(raw)
+
+    def test_the_header_bytes_are_counted_over_all_the_headers(self):
+        size = mime.MAX_HEADER_BYTES - 1000
+        count = mime.MAX_TOTAL_HEADER_BYTES // size + 1
+        headers = b''.join(self.header_of(f'X-{i}'.encode(), size) for i in range(count))
+
+        with pytest.raises(mime.HeadersTooLargeError, match='in total'):
+            mime.parse_message(headers + b'\nbody\n')
+        # One header fewer fits.
+        assert mime.parse_message(headers[:-size] + b'\nbody\n')
+
+    def test_the_header_bytes_are_counted_over_all_the_parts(self):
+        size = 8 * 1024
+        count = mime.MAX_TOTAL_HEADER_BYTES // size + 1
+        part = b'--b\n' + self.header_of(b'X-Pad', size) + b'\nbody\n'
+        raw = b'Content-Type: multipart/mixed; boundary=b\n\n' + part * count + b'--b--\n'
+
+        with pytest.raises(mime.HeadersTooLargeError, match='in total'):
+            mime.parse_message(raw)
+
+    def test_a_big_body_is_not_counted_as_headers(self):
+        raw = b'Subject: s\n\n' + b'Name: ' + b'v' * (4 * mime.MAX_TOTAL_HEADER_BYTES) + b'\n'
+
+        assert mime.parse_message(raw)['Subject'] == 's'
+
+    def test_ordinary_large_headers_are_well_under_the_limits(self):
+        references = b'References: ' + b'\n '.join(
+            f'<message-{i}@mail.example.com>'.encode() for i in range(600)
+        )  # ~25 KB
+        recipients = b'To: ' + b',\n '.join(
+            f'"Customer {i}" <customer{i}@example.com>'.encode() for i in range(400)
+        )  # ~16 KB
+        received = b''.join(
+            b'Received: from mail%d.example.com (mail%d.example.com [192.0.2.%d])\n'
+            b' by mx.example.net with ESMTPS id abc%d for <receipts+abcd1234@example.com>;\n'
+            b' Mon, 12 Oct 2026 10:00:00 +0000\n' % (i, i, i % 250, i)
+            for i in range(40)
+        )
+        dkim = b''.join(
+            b'DKIM-Signature: v=1; a=rsa-sha256; d=example.com; s=sel%d; h=from:to:subject;\n'
+            b' bh=' % i + b'A' * 44 + b'; b=\n ' + b'\n '.join([b'B' * 76] * 8) + b'\n'
+            for i in range(10)
+        )
+        raw = received + dkim + references + b'\n' + recipients + b'\nSubject: s\n\nbody\n'
+        assert 40_000 < len(raw) < mime.MAX_TOTAL_HEADER_BYTES / 4
+
+        msg = mime.parse_message(raw)
+
+        assert msg['Subject'] == 's'
+        assert len(mime.scan_recipients(msg).seen) >= 1
+
+    def test_the_line_source_is_the_one_the_parser_reads(self, monkeypatch):
+        """If a stdlib change made the parser stop reading through `_input.readline`, the limits
+        above would silently stop working; this is the test that says so."""
+        calls = []
+        original = mime._HeaderLineCounter.readline
+
+        def spy(self):
+            calls.append(self)
+            return original(self)
+
+        monkeypatch.setattr(mime._HeaderLineCounter, 'readline', spy)
+
+        mime.parse_message(b'A: 1\nB: 2\n\nbody\n')
+
+        assert calls
+        assert calls[0].lines == 2 and calls[0].total_bytes == len('A: 1\nB: 2\n')
+
+    def test_an_unexpected_parser_internals_fail_closed(self, monkeypatch):
+        class Changed(mime.BytesFeedParser):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._input = object()
+
+        monkeypatch.setattr(mime, 'BytesFeedParser', Changed)
+
+        with pytest.raises(RuntimeError, match='cannot bound'):
+            mime.parse_message(b'A: 1\n\nbody\n')
+
     def test_many_received_headers_are_read_from_the_topmost(self):
         top = b'Received: from a.example (a) by inbound-smtp.us-east-1.amazonaws.com with SMTP'
         top += b' id x for receipts+abcd1234@example.com; Mon, 12 Oct 2026 10:00:00 +0000\n'
-        raw = top + b'Received: from z.example by elsewhere for evil@example.com\n' * 5000
+        raw = top + b'Received: from z.example by elsewhere for evil@example.com\n' * 2000
         msg = mime.parse_message(raw + b'Subject: s\n\nx\n')
 
         assert mime._received_for_addresses(msg) == ['receipts+abcd1234@example.com']

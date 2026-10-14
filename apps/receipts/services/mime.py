@@ -53,8 +53,9 @@ parent of it (`strictly_aligned`; no organizational-domain list). A DMARC `fail`
 somebody else's address.
 
 Delivered mail is untrusted input, so the work is bounded while parsing and again afterwards.
-While parsing, `parse_message` refuses a message with more than `MAX_PARTS` parts or more than
-`MAX_HEADER_LINES` header lines, counting both as the parser reads them. Afterwards, `MAX_DEPTH`
+While parsing, `parse_message` refuses a message with more than `MAX_PARTS` parts, more than
+`MAX_HEADER_LINES` header lines, a header over `MAX_HEADER_BYTES` or headers over
+`MAX_TOTAL_HEADER_BYTES` in all, counting as the parser reads. Afterwards, `MAX_DEPTH`
 and `MAX_LEAVES` bound what the walkers visit, `build_stripped_eml` has its size limits, and
 readers that need only the first of a repeated header stop at it.
 
@@ -111,6 +112,20 @@ MAX_PARTS = 500
 #: lines in a list before it reads them, so without a bound one part with millions of `a:b` lines
 #: (they fit in `MAX_RAW_BYTES`) is hundreds of megabytes. A real message has a few hundred.
 MAX_HEADER_LINES = 10_000
+
+#: Most bytes one header (its continuation lines included) may have. Parsing and reading a header
+#: costs far more than its length -- 64 KB of `To` addresses or `Content-Type` parameters is about a
+#: second -- and grows with it (a megabyte is tens of seconds and hundreds of megabytes), and the
+#: header lines above are no bound on that. Real headers are small: SMTP servers cap a whole
+#: message's headers at 64-100 KB (Exchange, Gmail, Postfix), and the biggest single ones, a
+#: `References` chain or a `To` with hundreds of recipients, are a few tens of KB.
+MAX_HEADER_BYTES = 64 * 1024
+
+#: Most header bytes a message may have in total, over all of its parts (the nested headers of a
+#: forwarded message count too): 2.5 times Gmail's limit for the top-level headers alone. Without
+#: it, many headers just under `MAX_HEADER_BYTES` (or many parts, each with one) would still add
+#: up to a long parse.
+MAX_TOTAL_HEADER_BYTES = 256 * 1024
 
 #: A text part (an email body) kept in the stored copy is emptied above this many bytes, with
 #: `X-Receipts-Skipped: too large`. A receipt that *is* the body is emptied regardless (it is
@@ -187,18 +202,27 @@ class TooManyHeaderLinesError(MessageTooLargeError):
     """The message has more than `MAX_HEADER_LINES` header lines."""
 
 
+class HeadersTooLargeError(MessageTooLargeError):
+    """A header is over `MAX_HEADER_BYTES`, or the headers over `MAX_TOTAL_HEADER_BYTES`."""
+
+
 class _HeaderLineCounter(BufferedSubFile):
-    """The parser's line source, counting the lines it reads as headers.
+    """The parser's line source, counting the lines and bytes it reads as headers.
 
     Every part's parse starts by creating its message (the factory calls `start_block`) and then
     reads lines up to the first one that is not a header or continuation line -- the blank line
     ends the block, a body line without one. Only those lines are counted, so a body full of
-    `Name: value` lines or indented text is not.
+    `Name: value` lines or indented text is not. A header's bytes are those of its first line and
+    its continuation lines (a line starting with a space or tab); every header line's bytes also
+    count towards the total. The parser decodes the bytes it is fed one character per byte, so
+    `len(line)` is the byte count.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self.lines = 0
+        self.total_bytes = 0
+        self.header_bytes = 0
         self.in_headers = False
 
     def start_block(self) -> None:
@@ -213,17 +237,31 @@ class _HeaderLineCounter(BufferedSubFile):
                     raise TooManyHeaderLinesError(
                         f'The message has more than {MAX_HEADER_LINES} header lines.'
                     )
+                self._count_bytes(line)
             else:
                 self.in_headers = False
         return line
+
+    def _count_bytes(self, line: str) -> None:
+        size = len(line)
+        # A continuation line extends the header before it; anything else starts a new one.
+        self.header_bytes = self.header_bytes + size if line[0] in ' \t' else size
+        self.total_bytes += size
+        if self.header_bytes > MAX_HEADER_BYTES:
+            raise HeadersTooLargeError(f'A header is over {MAX_HEADER_BYTES} bytes.')
+        if self.total_bytes > MAX_TOTAL_HEADER_BYTES:
+            raise HeadersTooLargeError(
+                f'The headers are over {MAX_TOTAL_HEADER_BYTES} bytes in total.'
+            )
 
 
 def parse_message(raw: bytes) -> Message:
     """Parse with the modern `policy.default` (decoded headers, `EmailMessage` parts).
 
-    Raises `MessageTooLargeError` (`TooManyPartsError` or `TooManyHeaderLinesError`) as soon as the
-    parser creates more than `MAX_PARTS` parts or reads more than `MAX_HEADER_LINES` header lines,
-    whatever delimiters the message uses. The counts are local to the call (no shared state across
+    Raises `MessageTooLargeError` (`TooManyPartsError`, `TooManyHeaderLinesError` or
+    `HeadersTooLargeError`) as soon as the parser creates more than `MAX_PARTS` parts, reads more
+    than `MAX_HEADER_LINES` header lines or more header bytes than `MAX_HEADER_BYTES` (one header)
+    or `MAX_TOTAL_HEADER_BYTES` (all), whatever delimiters the message uses. The counts are local to the call (no shared state across
     threads) and live in the parser, not in the message or its policy, so copying, reading and
     re-serialising the result never trips them.
     """
@@ -240,7 +278,11 @@ def parse_message(raw: bytes) -> Message:
         return EmailMessage(*args, **kwargs)
 
     parser = BytesFeedParser(factory, policy=policy.default)
-    parser._input = lines  # ty: ignore[unresolved-attribute]  # no public hook for the line source
+    # There is no public hook for the line source, so replace the private one -- but only if it is
+    # what we expect; a stdlib that has changed must fail the ingest, not silently skip the limits.
+    if type(getattr(parser, '_input', None)) is not BufferedSubFile:
+        raise RuntimeError('The stdlib email parser has changed: cannot bound its header reads.')
+    parser._input = lines  # ty: ignore[unresolved-attribute]
     # In chunks, like `BytesParser.parsebytes` does, so only a chunk is split into lines at a time.
     for start in range(0, len(raw), 8192):
         parser.feed(raw[start : start + 8192])

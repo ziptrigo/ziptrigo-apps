@@ -1660,6 +1660,35 @@ class TestHostileMessages:
         assert_parked(fake_storage, message)
         assert InboundEmail.objects.count() == 0
 
+    @pytest.mark.parametrize(
+        'header',
+        [
+            b'Content-Type: text/plain; ' + b'p=v; ' * 15_000,
+            b'To: ' + b'a@example.com, ' * 6_000,
+        ],
+        ids=['content-type', 'to'],
+    )
+    def test_a_huge_header_fails_fast_and_for_good(self, fake_storage, inbox, header):
+        raw = (
+            (
+                f'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for {inbox};\r\n'
+            ).encode()
+            + header
+            + b'\r\n\r\nbody\r\n'
+        )
+        assert len(header) > mime.MAX_HEADER_BYTES
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, raw)
+        message = InboundMessage.objects.create(s3_key=key)
+
+        inbound.ingest(message.pk)
+
+        message.refresh_from_db()
+        assert message.attempts == 1  # no retries
+        assert 'A header is over' in message.last_error
+        assert_parked(fake_storage, message)
+        assert InboundEmail.objects.count() == 0
+
     def test_a_huge_html_body_next_to_a_pdf_does_not_inflate_the_stored_eml(
         self, deliver, inbox, fake_storage, funded_user
     ):
