@@ -411,7 +411,13 @@ acceptable next to an anonymous page; hiding it would mean redesigning the email
 (see below) links an existing confirmed account or refuses with a specific message, which needs an
 identity Google has verified, so it is no free oracle either; left as is.
 
-Changing the email through `PUT /api/account` un-confirms the account and sends a new
+Changing the email through `PUT /api/account` needs `current_password` (a stolen bearer token
+alone would otherwise be the first step of a takeover: change the address, then forgot-password):
+400 if it is missing or wrong -- a wrong guess is charged to `ACCOUNT_EMAIL_CHANGE_USER` like any
+attempted change, and the password is checked before the "Email already in use" probe -- and 400
+for an account with no usable password (Google-only: nothing to re-authenticate with; it can create
+one via forgot-password). A name-only update needs none; `name` is capped at the model's 255
+characters (422). It un-confirms the account and sends a new
 confirmation email. If the address being left had been confirmed, it also gets a notice
 (`services.email_change`, "your email address was changed from X to Y"). It's a notice only, with
 no "do this if it wasn't you" step (a product decision): the old owner can't use forgot-password

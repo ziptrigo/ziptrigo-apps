@@ -301,7 +301,7 @@ def _put(client, user, payload):
 def test_email_change_to_a_case_variant_of_another_account_is_refused(client, user):
     User.objects.create_user(email='Taken@example.com', password='password123')
 
-    response = _put(client, user, {'email': 'taken@example.com'})
+    response = _put(client, user, {'email': 'taken@example.com', 'current_password': 'testpass123'})
 
     assert response.status_code == 400
     assert response.json()['detail'] == 'Email already in use'

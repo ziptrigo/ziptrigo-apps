@@ -342,7 +342,7 @@ def test_callback_refuses_to_link_an_established_account_whose_email_was_changed
     token = CustomAccessToken.for_user(user)
     update = client.put(
         '/api/account',
-        {'email': 'victim@gmail.com'},
+        {'email': 'victim@gmail.com', 'current_password': 'testpass123'},
         content_type='application/json',
         HTTP_AUTHORIZATION=f'Bearer {token}',
     )
