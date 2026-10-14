@@ -1636,7 +1636,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
   `receipts.cleanup_uploads` (hourly), `receipts.poll_inbound` (every minute, 2 min lease; see
-  "Email intake" below), `receipts.link_vendors` (hourly; links receipts with a vendor text and no
+  "Email intake" below), `receipts.purge_inbound_messages` (daily; deletes `done` `InboundMessage`
+  rows that went `done` more than 30 days ago and have no `InboundEmail`, i.e. mail for
+  unknown/retired codes; `pending`/`failed` and ones with emails stay; see "Email intake"),
+  `receipts.link_vendors` (hourly; links receipts with a vendor text and no
   vendor, see "Vendors"). Idempotent, per-row `try/except` + `logger.exception`.
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
   `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
@@ -1708,6 +1711,18 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     listed). Admin "retry" (`reset_message_for_retry`) copies it back, resets the row and deletes
     the parked copy. Nothing expires `receipts/failed/` (the infra lifecycle rule only covers
     `receipts/inbound/`, and the IAM user is scoped to `receipts/*`, which includes it).
+  - **Old `done` messages are purged** (`inbound.purge_done_messages`, daily job
+    `receipts.purge_inbound_messages`, audit #18): a `done` row with no `InboundEmail` (mail for an
+    unknown or retired code) is deleted `DONE_MESSAGE_RETENTION` (30 days) after `processed_at`
+    (`created_at` for a row without one; `created_at` is not used because an admin retry leaves it
+    alone while the object copied back gets a fresh lifecycle clock), in batches of `PURGE_BATCH`.
+    `poll` registers any key under `receipts/inbound/` it has no row for, so a row may only go once
+    its object is gone: each batch's objects (`s3_key`, and `failed_key` if set) are deleted first
+    with `S3Storage.delete_objects` (batched `DeleteObjects`; a missing key is a no-op, a per-key
+    error raises), then the rows; a storage error propagates, leaving the rows for the next run, and
+    the runner records it as `last_error`. As a second guard `DONE_MESSAGE_RETENTION` must stay well
+    above the 14-day expiry the `infra` repo puts on `receipts/inbound/`, so an object whose delete
+    keeps failing is gone before its row is. `pending`/`failed` rows and ones with emails stay.
   - **Recipients.** One `InboundEmail` per recipient that is an *active* `InboxCode`
     (`receipts+<code>@<RECEIPTS_INBOUND_ADDRESS domain>`, case-insensitive, matched by
     `addresses.inbox_code_from_address`); unknown or retired codes, and inactive users, are logged
@@ -2075,7 +2090,9 @@ future app:
   A job that *finishes* (successfully or not) does release its lease (`runner._run_job`), so it is
   due again after its `interval` even when its `lease` is longer (`receipts.retry_due`: 5 min
   interval, 10 min lease) -- before that fix every job ran every max(interval, lease). The release
-  only applies while no later claim exists (`last_started_at <= ` this claim's), so a run that
+  only applies while no later claim exists (`last_started_at` below this claim's plus 1 ms --
+  not `<=`: SQLite stores `Now()` with milliseconds but renders a whole-second read-back without a
+  fraction, so a text `<=` missed one claim in a thousand and left the lease held), so a run that
   outlived its lease can't free the lease of the runner that took over.
   `gunicorn.conf.py`'s `worker_exit` stops the runner and joins `runner.thread` for up to 5 s, which
   only covers a thread idle between jobs. `SchedulerRunner.run_forever` calls
@@ -2085,6 +2102,13 @@ future app:
   Postgres connection** when the scheduler is enabled (3 by default).
   `./manage.py run_scheduler` remains for local development (the `scheduler` compose service) or a
   dedicated container; job status is a read-only `ScheduledJob` admin.
+
+`core`'s jobs (`apps/core/jobs.py`) let exceptions propagate (the runner records them in
+`ScheduledJob.last_error`; a swallowed one would show as a success). Besides the email-verification and
+rate-limit purges, two daily ones keep tables from growing forever (audit #18):
+`core.purge_old_task_results` (finished `DBTaskResult` rows past `TASK_RESULT_RETENTION`, 14 days,
+succeeded and failed alike, in batches; ready/running rows never) and `core.clear_expired_sessions` (`SESSION_ENGINE`'s
+`SessionStore.clear_expired()`; nothing else purges `django_session`).
 
 `file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers

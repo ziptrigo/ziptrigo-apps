@@ -1,4 +1,4 @@
-"""The six jobs `receipts` registers with `apps.core.scheduler`, wired up from
+"""The seven jobs `receipts` registers with `apps.core.scheduler`, wired up from
 `apps/receipts/apps.py`. The scheduler is at-least-once, so every job is idempotent, and each does
 its per-row work in a `try`/`except` that logs and carries on, so one bad row can't abort the rest
 of a run.
@@ -12,6 +12,8 @@ of a run.
 - `cleanup_uploads` (hourly): remove uploads never completed within 24 hours.
 - `poll_inbound` (every minute): find new emails SES left under `receipts/inbound/` and queue their
   ingest; re-queue ones that are due. See `services.inbound`.
+- `purge_inbound_messages` (daily): delete old `done` inbound messages that produced no email. See
+  `services.inbound.purge_done_messages`.
 - `link_vendors` (hourly): link receipts that have a vendor text and no vendor (ones a container
   of the previous release processed during the deploy that added vendors); a no-op once none are
   left. See `services.vendors.link_unlinked_receipts`.
@@ -139,3 +141,11 @@ def link_vendors() -> None:
         else:
             if linked:
                 logger.info('Linked %s receipts to vendors for user %s', linked, user_id)
+
+
+def purge_inbound_messages() -> None:
+    """Daily: delete old `done` inbound messages that have no `InboundEmail` (junk mail for unknown
+    inbox codes), see `services.inbound.purge_done_messages`."""
+    deleted = inbound.purge_done_messages()
+    if deleted:
+        logger.info('Deleted %s old inbound messages', deleted)

@@ -43,3 +43,19 @@ class CoreConfig(AppConfig):
                 lease=timedelta(minutes=30),
             )
         )
+        register_job(
+            JobSpec(
+                name='core.purge_old_task_results',
+                func=jobs.purge_old_task_results,
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+        register_job(
+            JobSpec(
+                name='core.clear_expired_sessions',
+                func=jobs.clear_expired_sessions,
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
