@@ -10,6 +10,10 @@ The link is bound to the address it was sent to (`tokens.RESET_EMAIL_CLAIM`): on
 moved to another address, a link for the old one is refused outright (it could also reset the
 password before this existed), and a link without the claim (sent before it was added) still
 resets the password but doesn't confirm anything -- it can't say which address it went to.
+
+It is also bound to the password the account had when it was sent (`tokens.PASSWORD_CLAIM`), so a
+link works once: setting a password -- by this link, another, or the account page -- refuses every
+link issued before it. A link without that claim (sent before it existed) is refused too.
 """
 
 from dataclasses import dataclass
@@ -25,7 +29,7 @@ from ninja_jwt.settings import api_settings
 from apps.core.services.email import EmailBackendClass, get_email_backend, send_email
 
 from ..models import User
-from ..tokens import RESET_EMAIL_CLAIM, PasswordResetToken
+from ..tokens import RESET_EMAIL_CLAIM, PasswordResetToken, matches_password
 from .email_confirmation import get_email_confirmation_service
 
 
@@ -72,7 +76,8 @@ class PasswordResetService:
     @staticmethod
     def validate_token(token: str) -> User | None:
         """Validate a password reset token and return user if valid. A token for an address the
-        account no longer has is not valid (see the module docstring)."""
+        account no longer has, or issued under a password it no longer has, is not valid (see the
+        module docstring)."""
         try:
             token_obj = PasswordResetToken(token)
             user_id = token_obj.get(api_settings.USER_ID_CLAIM)
@@ -80,6 +85,8 @@ class PasswordResetService:
                 return None
             user = User.objects.get(pk=user_id)
         except TokenError, User.DoesNotExist:
+            return None
+        if not matches_password(token_obj, user):
             return None
         sent_to = token_obj.get(RESET_EMAIL_CLAIM)
         if sent_to is not None and sent_to != user.email:

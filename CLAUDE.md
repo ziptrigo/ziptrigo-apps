@@ -314,8 +314,16 @@ address the link was *sent to*, the reset token carries it (`tokens.RESET_EMAIL_
 `PasswordResetToken.for_user`): a link for an address the account has since left is invalid (it used
 to be able to reset the password too), a link without the claim (sent before it existed) still
 resets the password but confirms nothing, and the confirming write is conditional on the address
-still being the one on the link. Claim-on-login (file transfer) needs `email_confirmed`, so it
-becomes possible at the next login after such a reset, the same as after a confirmation link.
+still being the one on the link. **A link works once** (audit #7): it also carries the `pwd`
+fingerprint of the password the account had when it was sent (`tokens.PASSWORD_CLAIM`, as login
+tokens do; checked by `validate_token`, so the reset page's GET and POST and the API all refuse
+it), so any password change -- this link, another link, the account page -- kills every link
+issued before it; a link without `pwd` (emailed before this shipped, which also covers the
+"without the address claim" case above in practice) is refused, like login tokens were. A later
+signup attempt on the unconfirmed address re-locks the account and so retires an earlier
+finish-setup link; the newest email is the one that works. Claim-on-login (file transfer) needs
+`email_confirmed`, so it becomes possible at the next login after such a reset, the same as after a
+confirmation link.
 Residual, not new: the confirmation email sent to the victim at the attacker's *first* signup (and
 resend-confirmation) still confirms an account with its creator's password if the victim clicks it;
 that is inherent to confirming by link and password signup, and is not closed here.

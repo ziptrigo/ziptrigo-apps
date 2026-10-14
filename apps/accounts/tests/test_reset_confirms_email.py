@@ -13,7 +13,7 @@ from ninja_jwt.settings import api_settings
 from apps.accounts.models import User
 from apps.accounts.services.email_confirmation import get_email_confirmation_service
 from apps.accounts.services.password_reset import PasswordResetService
-from apps.accounts.tokens import PasswordResetToken
+from apps.accounts.tokens import PASSWORD_CLAIM, PasswordResetToken, password_fingerprint
 from apps.core.models import EmailVerification
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -166,9 +166,12 @@ def test_address_changing_between_load_and_submit_is_not_confirmed(unconfirmed):
 
 
 def test_link_without_the_address_claim_resets_but_does_not_confirm(client, unconfirmed):
-    """A link sent before the claim existed can't say which address it went to."""
+    """A link without the address claim can't say which address it went to. (Every link sent
+    before that claim also predates the password binding and is refused; this is a second guard.)
+    """
     legacy = PasswordResetToken()
     legacy[api_settings.USER_ID_CLAIM] = str(unconfirmed.pk)
+    legacy[PASSWORD_CLAIM] = password_fingerprint(unconfirmed)
 
     client.post(_url(str(legacy)), NEW_PASSWORD, **HTMX)
 

@@ -108,6 +108,10 @@ class PasswordResetToken(Token):
     of that address, so a reset confirms the account's email -- but only while the account still
     has it (`PasswordResetService`): after an email change, a link sent to the old address must
     neither confirm the new, unproven one nor reset the password.
+
+    It is also bound to the password the account has when it is sent (`PASSWORD_CLAIM`, the same
+    fingerprint the login tokens carry), so it works once: the reset changes the password, and so
+    does any other change (the account page, a later reset), which kills every link still out.
     """
 
     token_type = 'password_reset'
@@ -120,4 +124,5 @@ class PasswordResetToken(Token):
         # See `CustomAccessToken.for_user` above for why this is suppressed rather than fixed.
         token = super().for_user(user)  # ty: ignore[invalid-argument-type]
         token[RESET_EMAIL_CLAIM] = user.email
+        token[PASSWORD_CLAIM] = password_fingerprint(user)
         return cast(PasswordResetToken, token)
