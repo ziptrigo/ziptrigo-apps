@@ -1847,7 +1847,11 @@ future app:
   the same handler, also `propagate: False`: Django's default config only prints with DEBUG=True and
   mails `ADMINS` (empty), and since that logger has handlers the last-resort stderr handler never
   fires, so every production 500 and `django.security` warning used to vanish. The root logger
-  (WARNING) covers everything else (`django_tasks`, `authlib`, `botocore`). `conftest.py` re-enables
+  (WARNING) covers everything else (`django_tasks`, `authlib`, `botocore`); `django_tasks_db`'s
+  `db_worker` therefore logs through root's console handler on stderr (it only adds its own stdout
+  handler when its logger has none). `django.request` is held at ERROR (Django logs every 4xx there
+  at WARNING; gunicorn's access log has them), `django.security.DisallowedHost` is dropped (scanner
+  noise) and `django.server` is re-declared with Django's own formatter. `conftest.py` re-enables
   propagation of `apps` and `django` under pytest so `caplog` still works;
   `apps/core/tests/test_logging.py` checks the real config in a subprocess.
   Jobs therefore run inside web workers, and **an interrupted job keeps its lease until the lease

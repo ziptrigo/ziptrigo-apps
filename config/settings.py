@@ -645,14 +645,39 @@ SCHEDULER_ENABLED = os.getenv('SCHEDULER_ENABLED', 'False').lower() in ('true', 
 # the rate limiter's "over limit" lines), and the root logger catches WARNING+ from everything
 # else (`django_tasks` worker failures, `authlib`, `botocore`, ...). `apps` also stops at its own
 # handler so root doesn't repeat it.
+#
+# Two `django` children are tuned. `django.request` is held at ERROR: Django logs *every* response
+# >= 400 there at WARNING (each htmx 422, 429, API 4xx and bot 404), which would bury the real
+# 500s, and gunicorn's access log already records those; ERROR keeps 5xx and unhandled exceptions
+# (no handler of its own, it propagates to `django`'s). `django.security.DisallowedHost` fires at
+# ERROR for every scanner sending a bad Host header, so it is dropped (the other
+# `django.security.*` loggers still print). `django.server` (local `runserver` request lines) is
+# re-declared with Django's own formatter, since configuring `django` resets that child logger.
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'formatters': {'plain': {'format': '%(levelname)s %(name)s: %(message)s'}},
-    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'plain'}},
+    'formatters': {
+        'plain': {'format': '%(levelname)s %(name)s: %(message)s'},
+        'django.server': {
+            '()': 'django.utils.log.ServerFormatter',
+            'format': '[{server_time}] {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'plain'},
+        'django.server': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'django.server',
+        },
+        'null': {'class': 'logging.NullHandler'},
+    },
     'loggers': {
         'apps': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
         'django': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'django.request': {'level': 'ERROR'},
+        'django.security.DisallowedHost': {'handlers': ['null'], 'propagate': False},
+        'django.server': {'handlers': ['django.server'], 'level': 'INFO', 'propagate': False},
     },
     'root': {'handlers': ['console'], 'level': 'WARNING'},
 }

@@ -25,7 +25,10 @@ try:
     1 / 0
 except ZeroDivisionError:
     logging.getLogger('django.request').error('request-boom', exc_info=True)
+logging.getLogger('django.request').warning('request-4xx')
 logging.getLogger('django.security.SuspiciousOperation').warning('security-warn')
+logging.getLogger('django.security.DisallowedHost').error('bad-host')
+logging.getLogger('django.server').info('server-line')
 logging.getLogger('botocore.third.party').warning('third-party-warn')
 logging.getLogger('botocore.third.party').info('third-party-info')
 logging.getLogger('apps.core.x').info('apps-info')
@@ -59,6 +62,13 @@ def test_errors_and_warnings_reach_the_console_once(debug):
     assert err.count('ERROR django.request: request-boom') == 1
     assert err.count('ZeroDivisionError') == 1  # the traceback
     assert err.count('security-warn') == 1
+    # A 4xx (django.request logs those at WARNING) is not printed; only 5xx/exceptions are.
+    assert 'request-4xx' not in err
+    # DisallowedHost (scanners) is dropped; other django.security.* stay.
+    assert 'bad-host' not in err
+    # django.server keeps Django's own format (timestamped, no level/name prefix), once.
+    assert err.count('server-line') == 1
+    assert 'django.server: server-line' not in err
     assert err.count('third-party-warn') == 1
     assert err.count('apps-info') == 1
     # Root only takes WARNING and up.
