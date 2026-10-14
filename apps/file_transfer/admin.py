@@ -162,6 +162,15 @@ class BlockSenderForm(forms.Form):
     )
 
 
+def _skipped_note(skipped: int) -> str:
+    """Tail for a takedown message when some transfers were not taken down: they ended (expired,
+    deleted by their owner, taken down by someone else) after the list was read, and
+    `services.take_down_transfer` leaves such a transfer alone."""
+    if skipped == 1:
+        return ' 1 was skipped because it had already ended.'
+    return f' {skipped} were skipped because they had already ended.'
+
+
 def _takedown_confirm_response(
     request: AuthenticatedHttpRequest,
     model_admin: admin.ModelAdmin,
@@ -182,7 +191,7 @@ def _takedown_confirm_response(
     if request.POST.get('apply') == 'yes':
         form = TakedownForm(request.POST)
         if form.is_valid():
-            for transfer in live_transfers:
+            taken_down = sum(
                 services.take_down_transfer(
                     transfer,
                     by=request.user,
@@ -190,7 +199,12 @@ def _takedown_confirm_response(
                     internal_note=form.cleaned_data['internal_note'],
                     notify=form.cleaned_data['notify_sender'],
                 )
-            messages.success(request, f'Took down {len(live_transfers)} transfer(s).')
+                for transfer in live_transfers
+            )
+            message = f'Took down {taken_down} transfer(s).'
+            if taken_down < len(live_transfers):
+                message += _skipped_note(len(live_transfers) - taken_down)
+            messages.success(request, message)
             return redirect(request.path)
     else:
         form = TakedownForm()
@@ -252,13 +266,12 @@ def _block_sender_confirm_response(
                     for other in services.blocklist.active_transfers_for_sender(transfer):
                         targets[other.pk] = other
                 for other in targets.values():
-                    services.take_down_transfer(
+                    taken_down_count += services.take_down_transfer(
                         other,
                         by=request.user,
                         reason=form.cleaned_data['reason'] or 'Sender blocked.',
                         notify=False,
                     )
-                    taken_down_count += 1
 
             deactivated_count = 0
             if form.cleaned_data['deactivate_account']:
@@ -272,6 +285,8 @@ def _block_sender_confirm_response(
             message = f'Added {len(created)} block-list entry/entries.'
             if form.cleaned_data['take_down_active_transfers']:
                 message += f' Took down {taken_down_count} active transfer(s).'
+                if taken_down_count < len(targets):
+                    message += _skipped_note(len(targets) - taken_down_count)
             if form.cleaned_data['deactivate_account']:
                 message += f' Deactivated {deactivated_count} account(s).'
             messages.success(request, message)

@@ -992,6 +992,32 @@ defers the deletion (`Transfer.files_deleted_at` stays null) because that downlo
 GET URL must still resolve -- `expire_transfers` sweeps up the objects (and fires the "files
 deleted" email) once `GET_URL_EXPIRES_SECONDS` has safely passed since `Transfer.ended_at`.
 
+**Status changes are conditional writes** (audit #16). `end_transfer` claims the move with
+`UPDATE ... WHERE status IN from_statuses` (default: any non-terminal status; the grace-period job
+passes `SUSPENDED`, the expiry job `ACTIVE`/`DISABLED`, delete-now the actionable ones, the
+anonymous activation failure `PENDING_CONFIRMATION`) and returns whether it won; only the winner
+runs `before_delete`, deletes S3 objects and notifies, so a stale instance never overwrites a
+newer state (a second call on an ended transfer is a no-op; a failed delete is retried by the
+deferred-deletion sweep). `take_down_transfer` and `abort_draft` return that bool too,
+`delete_transfer_now` raises "already ended" on a loss, and `disable_transfer` writes only
+`WHERE status = ACTIVE`. `abort_draft` claims `DRAFT`/`PENDING_CONFIRMATION` -> `DELETED` first, in
+one transaction with its S3 work (a storage error rolls the claim back so `cleanup_drafts`
+retries; `finalize_send`'s row lock serialises with it). That rollback cannot un-delete S3
+objects already removed, and the claim holds the row lock across the S3 calls (both accepted, see
+`abort_draft`'s docstring).
+
+Status is not the only precondition a caller acted on from a stale read, so `end_transfer` also
+takes `only_if`, a `Q` ANDed into the claim's `WHERE`: delete-now passes
+`held_for_review_at__isnull=True` (a hold applied after its check still freezes the transfer), the
+expiry job `expires_at__lte=now`, the grace-period job `suspended_at__lte=cutoff` and the
+max-downloads fallback `max_downloads__lte=<count it saw>`; an owner who extended, raised or
+re-enabled in the meantime wins. A service that loses a claim (`disable_transfer`,
+`delete_transfer_now`) refreshes the instance before raising, so the 422 row shows the state that
+won; the API's draft delete returns 204 when the draft was already `DELETED` and only falls through
+to delete-now when it became an actionable transfer. The admin takedown and block-sender messages
+count only transfers this call took down and say how many were skipped because they had already
+ended.
+
 **Anonymous sending** (`apps.file_transfer.services.anonymous`, spec section 2 phase 2): the same
 picker-then-options-then-send page a logged-in sender uses, session-owned instead of user-owned,
 gated by `FileTransferSettings.anonymous_enabled`, and free within its own (smaller) limits

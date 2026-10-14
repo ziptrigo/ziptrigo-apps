@@ -210,14 +210,20 @@ def delete_transfer(request, transfer_id: UUID):
     sent (`Transfer.is_actionable`)."""
     transfer = _owned_transfer(request, transfer_id, include_drafts=True)
     if transfer.status == TransferStatus.DRAFT:
-        services.abort_draft(transfer)
-    else:
-        try:
-            services.delete_transfer_now(transfer)
-        except TransferHeldError as exc:
-            raise HttpError(409, exc.messages[0])
-        except ValidationError as exc:
-            raise HttpError(400, exc.messages[0])
+        if services.abort_draft(transfer):
+            return 204, None
+        # Lost the claim: the draft changed between the lookup above and the abort.
+        transfer.refresh_from_db()
+        if transfer.status == TransferStatus.DELETED:
+            # `cleanup_drafts` (or a second request) got there first: deleting is idempotent.
+            return 204, None
+        # Sent meanwhile: delete it as the sent transfer it now is.
+    try:
+        services.delete_transfer_now(transfer)
+    except TransferHeldError as exc:
+        raise HttpError(409, exc.messages[0])
+    except ValidationError as exc:
+        raise HttpError(400, exc.messages[0])
     return 204, None
 
 
