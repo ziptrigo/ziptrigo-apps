@@ -862,8 +862,20 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
 email, masked environment). Every app registers its `ModelAdmin`s on it from its own `admin.py`.
 The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/billing/credittransaction/adjust/`).
 The ledger is read-only in the admin (no add/change/delete, so no `delete_selected`; the same for
-`CreditAccountAdmin`), because the balance only changes through `apps.billing.services`; the tool
-checks `billing.add_credittransaction` itself, and the changelist shows its link only to users with it.
+`CreditAccountAdmin`), because the balance only changes through `apps.billing.services`. The tool
+checks `billing.add_credittransaction` itself with `has_perm` (not `has_add_permission`, which is
+False on purpose), the changelist shows its link only to users with it, and
+`POST /api/billing/users/{id}/credits` (`AdminAuth` is only `is_staff`) requires the same
+permission (403 otherwise). A dedicated `adjust_credits` permission, with a data migration granting
+it to whoever holds the add permission, would be cleaner and is a follow-up. `readonly_fields` on
+both admins is what shows `id`/`created_at`/`updated_at` on the detail page: those are
+non-editable, so without it the page omits them. **Deleting a user still works with a credit
+history:** `CreditAccount`/`CreditTransaction` cascade from the user and Django asks each cascaded
+row's admin `has_delete_permission`, so `UserAdmin.get_deleted_objects` (`apps/accounts/admin.py`,
+`CASCADE_WITH_USER_APP_LABELS`) drops a billing model from `perms_needed` when the caller holds its
+`delete_<model>` permission (what the default check asked before): superusers pass, staff still
+need it granted. The receipts and file_transfer read-only admins already refuse delete the same way,
+so a user with receipts or transfers still can't be deleted from the admin (not changed here).
 The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
 so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
 and to the admin tools page.

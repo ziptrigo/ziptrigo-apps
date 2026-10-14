@@ -81,6 +81,12 @@ class CreditTransactionAdmin(admin.ModelAdmin):
 
     def adjust_credits_view(self, request: AuthenticatedHttpRequest) -> HttpResponse:
         """Manually add or spend a user's credits, always recorded as an `adjustment`."""
+        # The tool writes ledger rows, so it needs the permission to add them. That is checked
+        # with `has_perm` directly rather than `has_add_permission`, which is False on purpose
+        # (the change form must not create rows by hand) and would lock out everyone, superusers
+        # included. Follow-up: a dedicated `adjust_credits` permission (as file_transfer has
+        # `takedown_transfer`) would stop overloading `add_credittransaction`; it needs a data
+        # migration to grant it to whoever holds the add permission today, so it isn't done here.
         if not request.user.has_perm('billing.add_credittransaction'):
             messages.error(request, 'You do not have permission to adjust credits.')
             status = 403

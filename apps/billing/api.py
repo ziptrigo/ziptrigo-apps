@@ -26,8 +26,15 @@ admin_auth = AdminAuth()
 def create_credit_transaction(request, user_id: UUID, payload: CreditTransactionRequest):
     """Add or remove credits to/from a user account.
 
-    Creates a credit transaction and updates the user's credit balance atomically.
+    Creates a credit transaction and updates the user's credit balance atomically. Staff must
+    hold `billing.add_credittransaction`, the same permission the admin's adjustment tool needs
+    (superusers hold every permission); being staff alone is not enough.
     """
+    # `AdminAuth` only checks `is_staff`; `request.auth` is the authenticated user. Checked before
+    # the user lookup so a refusal says nothing about which ids exist.
+    if not request.auth.has_perm('billing.add_credittransaction'):
+        raise HttpError(403, 'You do not have permission to adjust credits.')
+
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:

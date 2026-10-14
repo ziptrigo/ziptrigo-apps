@@ -1,11 +1,14 @@
 """The manual credit adjustment page on the CreditTransaction admin."""
 
+from typing import cast
+
 import pytest
 from django.contrib.auth.models import Permission
 from django.urls import reverse
 
+from apps.accounts.models import User
 from apps.accounts.tests.factories import UserFactory
-from apps.billing.models import CreditTransaction, CreditTransactionType
+from apps.billing.models import CreditAccount, CreditTransaction, CreditTransactionType
 from apps.billing.services import add_credits, get_balance
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -177,3 +180,58 @@ def test_changelist_renders_for_superuser(client, admin_user):
     response = client.get(reverse('custom_admin:billing_credittransaction_changelist'))
 
     assert response.status_code == 200
+
+
+def test_superuser_cannot_delete_credit_account(client, admin_user, regular_user):
+    add_credits(regular_user, 5)
+    client.force_login(admin_user)
+    url = reverse('custom_admin:billing_creditaccount_delete', args=[regular_user.pk])
+
+    assert client.get(url).status_code == 403
+    assert client.post(url, {'post': 'yes'}).status_code == 403
+    assert CreditAccount.objects.filter(pk=regular_user.pk).exists()
+    assert get_balance(regular_user) == 5
+
+
+def test_superuser_can_delete_user_with_credit_history(client, admin_user, regular_user):
+    """The read-only billing admins must not block deleting the user: the cascade removes the
+    ledger and the balance together."""
+    add_credits(regular_user, 5)
+    add_credits(regular_user, 3)
+    user_id = regular_user.pk
+    client.force_login(admin_user)
+    url = reverse('custom_admin:accounts_user_delete', args=[user_id])
+
+    page = client.get(url)
+    assert page.status_code == 200
+    assert 'credit transaction' in page.content.decode().lower()
+
+    response = client.post(url, {'post': 'yes'})
+
+    assert response.status_code == 302
+    assert not User.objects.filter(pk=user_id).exists()
+    assert not CreditAccount.objects.filter(pk=user_id).exists()
+    assert not CreditTransaction.objects.filter(user_id=user_id).exists()
+
+
+def test_staff_needs_billing_delete_permission_to_delete_user_with_credit_history(client):
+    """Same as before the ledger was made read-only: the user's cascaded rows still need the
+    caller to hold their delete permission (only the admin's own refusal is bypassed)."""
+    target = cast(User, UserFactory())
+    add_credits(target, 5)
+    staff = _staff_with_perms(cast(User, UserFactory()), 'delete_user')
+    client.force_login(staff)
+    url = reverse('custom_admin:accounts_user_delete', args=[target.pk])
+
+    assert client.post(url, {'post': 'yes'}).status_code == 403
+    assert User.objects.filter(pk=target.pk).exists()
+
+    staff.user_permissions.add(
+        *Permission.objects.filter(
+            codename__in=['delete_credittransaction', 'delete_creditaccount']
+        )
+    )
+
+    assert client.post(url, {'post': 'yes'}).status_code == 302
+    assert not User.objects.filter(pk=target.pk).exists()
+    assert not CreditTransaction.objects.filter(user_id=target.pk).exists()
