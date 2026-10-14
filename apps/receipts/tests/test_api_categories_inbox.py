@@ -321,6 +321,17 @@ class TestInbox:
 
         assert confirmation['code'] == '111111' and confirmation['url'] == ''
 
+    def test_a_withheld_link_with_no_code_is_no_confirmation(self, client, auth, funded_user):
+        get_account(funded_user)
+        create_inbound_email(
+            funded_user,
+            status=InboundEmailStatus.FORWARDING_CONFIRMATION,
+            forwarding_confirmation_code='',
+            forwarding_confirmation_url='https://evil.example@mail-settings.google.com/x',
+        )
+
+        assert get(client, '/inbox', auth).json()['forwarding_confirmation'] is None
+
     def test_another_users_confirmation_is_not_shown(self, client, auth, other_user):
         get_account(other_user)
         create_inbound_email(

@@ -1730,8 +1730,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     in `forwarding_confirmation_code`/`_url` for the settings page to show later. The link is kept
     only if `mime.is_forwarding_link` accepts it (`https` and the *whole* authority is
     `mail-settings.google.com`: no userinfo, port, backslash or control character, since browsers
-    read `\` as `/`; a candidate that doesn't parse, like `https://[x`, is skipped); without that authentication the email is an ordinary one (the
-    allowlist applies and nothing is extracted).
+    read `\` as `/`; a candidate that doesn't parse, like `https://[x`, is skipped); without that
+    authentication the email is an ordinary one (the allowlist applies and nothing is extracted).
   - **What becomes a receipt** (`mime.analyze`). The tree is walked through `multipart/*` *and*
     `message/rfc822`, so a forward-as-attachment is searched too. Every non-text (or
     attachment-disposition) part is an attachment candidate: eligible when its **magic-byte** type
@@ -1862,11 +1862,12 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     left comes from `ReceiptsSettings.trash_days`.
   - **Settings**: the address (Copy; Regenerate in a modal, `RECEIPTS_REGENERATE_USER`, then redirect), the
     latest forwarding confirmation of the last 7 days (code, and an Open link only if it is https
-    to `mail-settings.google.com`, re-checked with `is_forwarding_link` before it becomes an `href`), accepted senders
-    (Anyone / Only these, `forms.InboxSettingsForm` over `addresses.parse_allowlist`) with the default
-    currency in one htmx form, the category editor (add, rename inline, move up/down, delete in a modal;
-    each action re-renders `#categories`; deleting names how many receipts become uncategorized) and
-    the 20 most recent inbound emails with their outcome and `note`.
+    to `mail-settings.google.com`, re-checked with `is_forwarding_link` before it becomes an
+    `href`; none at all when the code is empty and the link is withheld), accepted senders
+    (Anyone / Only these, `forms.InboxSettingsForm` over `addresses.parse_allowlist`) with the
+    default currency in one htmx form, the category editor (add, rename inline, move up/down, delete
+    in a modal; each action re-renders `#categories`; deleting names how many receipts become
+    uncategorized) and the 20 most recent inbound emails with their outcome and `note`.
   - **UI parts**: `{% status_pill receipt.status %}` (`receipts_ui`; colours in the design doc),
     `partials/confirm_modal.html` driven by the `confirmModal` Alpine component and the `copyText`
     component, both in `static/receipts/js/common.js` -- loaded as a *classic* script (not `defer`) so

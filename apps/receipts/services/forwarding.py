@@ -24,7 +24,7 @@ class ForwardingConfirmation(TypedDict):
 
 
 def safe_confirmation_url(url: str) -> str:
-    """`url` if it is an https link to Google's mail settings, else an empty string."""
+    """`url` if `mime.is_forwarding_link` accepts it, else an empty string."""
     return url if is_forwarding_link(url) else ''
 
 
@@ -42,8 +42,11 @@ def forwarding_confirmation(user: User) -> ForwardingConfirmation | None:
     )
     if email is None:
         return None
+    url = safe_confirmation_url(email.forwarding_confirmation_url)
+    if not email.forwarding_confirmation_code and not url:
+        return None  # only a withheld link: nothing to show
     return {
         'received_at': email.received_at or email.created_at,
         'code': email.forwarding_confirmation_code,
-        'url': safe_confirmation_url(email.forwarding_confirmation_url),
+        'url': url,
     }

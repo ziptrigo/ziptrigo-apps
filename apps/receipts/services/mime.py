@@ -859,6 +859,8 @@ _URL = re.compile(r'https://[^\s<>"\'\])]+', re.I)
 def is_forwarding_link(url: str) -> bool:
     """Whether `url` is an https link whose *whole* authority is Google's mail settings host: no
     userinfo, no port, no backslash or control character anywhere (see `_UNSAFE_URL_CHARS`)."""
+    # The exact `netloc` equality below is the guarantee; `_UNSAFE_URL_CHARS` is defence in depth
+    # (what `urlsplit` and browsers parse differently), not a complete blocklist.
     if _UNSAFE_URL_CHARS.search(url):
         return False
     try:
