@@ -42,6 +42,32 @@ logger = logging.getLogger(__name__)
 #: Upper bound for `amount`: fits `Receipt.amount` (12 digits, 2 decimal places).
 MAX_AMOUNT = Decimal('9999999999.99')
 
+_THOUSANDS_COMMAS = re.compile(r'\d{1,3}(,\d{3})+(\.\d*)?')
+_DECIMAL_COMMA = re.compile(r'\d*,\d{1,2}')
+
+
+def parse_amount(value: Any) -> Decimal:
+    """`value` as a finite Decimal, for a typed or AI-read amount. A comma is a thousands
+    separator only in groups of three (`1,234.5`, `12,345`); a single comma followed by one or two
+    digits and no dot is a decimal comma (`12,50`, what a phone in a European locale types, and
+    what search already reads it as). Any other comma (`1,23,4`, `1,234,5`) is ambiguous. Raises
+    `ValueError` for that and for anything that isn't a number; the range is the caller's."""
+    text = str(value).strip()
+    if _THOUSANDS_COMMAS.fullmatch(text):
+        text = text.replace(',', '')
+    elif _DECIMAL_COMMA.fullmatch(text):
+        text = text.replace(',', '.')
+    elif ',' in text:
+        raise ValueError('ambiguous comma')
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        raise ValueError('not a number') from None
+    if not amount.is_finite():
+        raise ValueError('not finite')
+    return amount
+
+
 #: A run of digits joined by single spaces or hyphens (`4111 1111 1111 1111`).
 _STRICT_RUN = re.compile(r'\d(?:[ \-]?\d){4,}')
 #: A run of digits joined by anything that separates digit groups -- whitespace in any amount,
@@ -110,10 +136,10 @@ class ExtractedReceipt(BaseModel):
         if isinstance(value, bool):
             return None
         try:
-            amount = Decimal(str(value).replace(',', '').strip())
-        except InvalidOperation, ValueError:
+            amount = parse_amount(value)
+        except ValueError:
             return None
-        if not amount.is_finite() or amount < 0 or amount > MAX_AMOUNT:
+        if amount < 0 or amount > MAX_AMOUNT:
             return None
         return amount.quantize(Decimal('0.01'))
 

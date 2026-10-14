@@ -201,6 +201,35 @@ class TestUpdateReceipt:
         assert receipt.currency == 'USD'
         assert receipt.document_type == 'invoice'
 
+    @pytest.mark.parametrize(
+        ('typed', 'saved'),
+        [
+            ('12,50', '12.50'),  # a decimal comma, not a thousands separator
+            ('12,5', '12.50'),
+            ('1,234.56', '1234.56'),
+            ('1,234', '1234.00'),  # three digits after the comma: thousands
+            ('12,345', '12345.00'),
+            ('1,234,567.8', '1234567.80'),
+        ],
+    )
+    def test_commas_in_an_amount(self, make_receipt, typed, saved):
+        receipt = make_receipt(status=ReceiptStatus.PROCESSED)
+
+        actions.update_receipt(receipt, {'amount': typed})
+
+        receipt.refresh_from_db()
+        assert receipt.amount == Decimal(saved)
+
+    @pytest.mark.parametrize('typed', ['1,23,4', '1,234,5', '12,50.5', '1234,567', '12,', ','])
+    def test_an_ambiguous_comma_in_an_amount_is_refused(self, make_receipt, typed):
+        receipt = make_receipt(status=ReceiptStatus.PROCESSED, amount=Decimal('5'))
+
+        with pytest.raises(ValidationError, match='Enter the amount as a number'):
+            actions.update_receipt(receipt, {'amount': typed})
+
+        receipt.refresh_from_db()
+        assert receipt.amount == Decimal('5')
+
     def test_a_card_number_with_dots_typed_by_hand_is_masked(self, make_receipt):
         receipt = make_receipt(status=ReceiptStatus.PROCESSED)
 

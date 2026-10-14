@@ -13,7 +13,7 @@ import unicodedata
 import uuid
 from collections.abc import Iterable, Mapping
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -41,7 +41,7 @@ from ..models import (
 from . import lifecycle
 from .accounts import get_account, is_frozen
 from .addresses import parse_allowlist
-from .ai import MAX_AMOUNT, mask_payment_method
+from .ai import MAX_AMOUNT, mask_payment_method, parse_amount
 from .currencies import normalize_currency
 from .duplicates import refresh_duplicate
 from .errors import AccountFrozenError
@@ -64,11 +64,9 @@ def _clean_amount(value: Any) -> Decimal | None:
     if value is None or value == '':
         return None
     try:
-        amount = Decimal(str(value).replace(',', '').strip())
-    except InvalidOperation, ValueError:
+        amount = parse_amount(value)
+    except ValueError:
         raise ValidationError('Enter the amount as a number.') from None
-    if not amount.is_finite():
-        raise ValidationError('Enter the amount as a number.')
     if amount < 0:
         raise ValidationError('The amount cannot be negative.')
     if amount > MAX_AMOUNT:

@@ -408,6 +408,13 @@ class TestUpdate:
 
         assert body['amount'] == '1234.50'
 
+    def test_a_decimal_comma_is_a_decimal_not_a_thousands_separator(self, client, auth, make):
+        receipt = make()
+
+        body = patch(client, f'/receipts/{receipt.pk}', auth, {'amount': '12,50'}).json()
+
+        assert body['amount'] == '12.50'
+
     def test_null_clears_a_field_and_omitting_does_not(self, client, auth, make, funded_user):
         category = ReceiptCategory.objects.create(user=funded_user, name='Conference travel')
         receipt = make(category=category, notes='x', currency='USD')

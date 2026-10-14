@@ -1438,7 +1438,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   an account frozen in that very run would be unfrozen again at once, its day forgiven and its
   owner told "paused" every day for nothing.
 - **Actions** (`services.actions`, shared by the web views and the API; `ValidationError` -> 422/400,
-  `AccountFrozenError`/`InsufficientCreditsError` -> 402): `update_receipt` (partial; records the
+  `AccountFrozenError`/`InsufficientCreditsError` -> 402): `update_receipt` (partial; an amount goes
+  through `ai.parse_amount`, also the AI reply's: a comma is thousands only in groups of three, a
+  lone `,` + 1-2 digits is a decimal comma (`12,50`), any other comma is refused; records the
   extracted fields that actually changed in `user_edited_fields`, `notes` aside; the vendor goes
   through `assign_vendor`, see "Vendors"; refuses extracted
   fields while the AI owns the receipt; moves `needs_review` <-> `processed` as the required fields

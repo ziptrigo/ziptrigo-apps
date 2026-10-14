@@ -423,6 +423,12 @@ class TestSave:
         assert response.status_code == 200
         assert response['HX-Redirect'] == url('detail', processed)
 
+    def test_a_decimal_comma_amount_is_saved_as_a_decimal(self, web, processed):
+        self.post(web, processed, amount='12,50')
+
+        processed.refresh_from_db()
+        assert processed.amount == Decimal('12.50')
+
     def test_filling_the_missing_fields_moves_needs_review_to_processed(self, web, make_receipt):
         receipt = make_receipt(status=ReceiptStatus.NEEDS_REVIEW, vendor='Staples')
 
