@@ -97,6 +97,26 @@ def assert_parked(fake_storage, message: InboundMessage) -> None:
     assert not fake_storage.list_keys(INBOUND_PREFIX)
 
 
+def _crafted_froms(address: str) -> list:
+    """`From:` lines whose local part holds `address` but whose domain is `evil.test`, as they
+    reach the parser. Only the `unquoted` one is not what a sender's mail client would send: the
+    quoted-string and the RFC 2047 encoded words are (`policy.default` decodes an encoded word
+    inside an addr-spec into a *quoted* local part, `"x<address>"@evil.test`)."""
+    local, _, domain = address.partition('@')
+    encoded = f'{local}=40{domain.replace(".", "=2E")}'
+    return [
+        pytest.param(f'x<{address}>@evil.test', id='unquoted (not valid RFC 5322, kept anyway)'),
+        pytest.param(f'"x<{address}>"@evil.test', id='quoted'),
+        pytest.param(f'"<{address}>"@evil.test', id='quoted, leading bracket'),
+        pytest.param(f'=?utf-8?q?x=3C{encoded}=3E?=@evil.test', id='rfc2047'),
+        pytest.param(f'=?utf-8?q?=3C{encoded}=3E?=@evil.test', id='rfc2047, leading bracket'),
+    ]
+
+
+CRAFTED_LISTED_FROMS = _crafted_froms('orders@staples.com') + _crafted_froms('anyone@acme.test')
+CRAFTED_GOOGLE_FROMS = _crafted_froms('forwarding-noreply@google.com')
+
+
 def one_email(message: InboundMessage) -> InboundEmail:
     [email] = list(message.emails.all())
     return email
@@ -399,6 +419,22 @@ class TestForwardingConfirmation:
         assert email.status == InboundEmailStatus.REJECTED_SENDER
         assert email.forwarding_confirmation_url == ''
 
+    @pytest.mark.parametrize('raw_from', CRAFTED_GOOGLE_FROMS)
+    def test_a_crafted_from_naming_google_inside_a_quoted_part_is_not_google(
+        self, deliver, inbox, account, raw_from
+    ):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
+        raw = build_email(
+            raw_from=raw_from,
+            text='Confirmation code: 123456\nhttps://mail-settings.google.com/mail/vf-x',
+            ses=Ses(recipient=inbox, return_path='bounce@evil.test'),
+        )
+
+        email = one_email(deliver(raw))
+
+        assert email.status == InboundEmailStatus.REJECTED_SENDER
+        assert email.forwarding_confirmation_url == ''
+
     def test_a_dmarc_pass_for_another_domain_does_not_make_it_google(self, deliver, inbox, account):
         ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
         raw = build_email(
@@ -602,8 +638,15 @@ class TestAllowlist:
             sender_allowlist=['orders@staples.com', '*@acme.test']
         )
 
-    def status(self, deliver, inbox, *, from_addr='orders@staples.com', **ses) -> str:
-        raw = build_email(from_addr=from_addr, attachments=[pdf()], ses=Ses(recipient=inbox, **ses))
+    def status(
+        self, deliver, inbox, *, from_addr='orders@staples.com', raw_from=None, **ses
+    ) -> str:
+        raw = build_email(
+            from_addr=from_addr,
+            raw_from=raw_from,
+            attachments=[pdf()],
+            ses=Ses(recipient=inbox, **ses),
+        )
         email = one_email(deliver(raw))
         return email.status
 
@@ -624,6 +667,19 @@ class TestAllowlist:
             return_path='attacker@evil.test',
             spf='PASS',
             dkim='FAIL',
+        )
+
+        assert status == 'rejected_sender'
+
+    @pytest.mark.parametrize('raw_from', CRAFTED_LISTED_FROMS)
+    def test_a_listed_address_inside_a_crafted_from_is_not_the_sender(
+        self, deliver, inbox, raw_from
+    ):
+        """The address written in `From` is the one authenticated (its domain must pass DMARC),
+        so a listed address tucked into a quoted local part must not count as listed. `raw_from`
+        is the exact `From:` line, so an encoded word reaches the parser as one (as on real mail)."""
+        status = self.status(
+            deliver, inbox, raw_from=raw_from, return_path='bounce@evil.test', spf='PASS'
         )
 
         assert status == 'rejected_sender'

@@ -8,6 +8,7 @@ import pytest
 
 from ..models import DEFAULT_ALLOWED_TYPES
 from ..services import mime
+from ..services.addresses import matches_allowlist
 from . import samples
 from .emails import (
     FIXED_ADDRESS,
@@ -928,6 +929,24 @@ class TestSenders:
 
         assert mime.from_address(msg) == 'Orders@Staples.com'
         assert mime.envelope_sender(msg) == 'bounce@x.com'
+
+    @pytest.mark.parametrize(
+        'header',
+        [
+            # RFC 2047 encoded words inside an addr-spec: `policy.default` decodes them into a
+            # *quoted* local part, `"x<orders@staples.com>"@evil.test`.
+            b'=?utf-8?q?x=3Corders=40staples=2Ecom=3E?=@evil.test',
+            b'=?utf-8?q?=3Corders=40staples=2Ecom=3E?=@evil.test',
+            b'"x<orders@staples.com>"@evil.test',
+        ],
+    )
+    def test_a_listed_address_inside_an_encoded_local_part_keeps_the_real_domain(self, header):
+        msg = mime.parse_message(b'From: ' + header + b'\r\n\r\n')
+
+        sender = mime.from_address(msg)
+
+        assert sender.rpartition('@')[2] == 'evil.test'
+        assert not matches_allowlist(['orders@staples.com', '*@staples.com'], sender)
 
     def test_the_null_envelope_sender(self):
         msg = mime.parse_message(b'Return-Path: <>\nFrom: a@b.com\n\nx\n')

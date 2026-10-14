@@ -1635,7 +1635,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   - **Allowlist** (`ReceiptsAccount.sender_allowlist`, exact addresses and `*@domain`): empty
     accepts anyone, with no authentication needed. Otherwise the `From` address **or** the envelope
     sender must match after `addresses.normalize_address` (lowercase, `+tag` stripped, so Gmail's
-    `orders+caf_=user=gmail.com@vendor.com` becomes `orders@vendor.com`), **and** SES must have
+    `orders+caf_=user=gmail.com@vendor.com` becomes `orders@vendor.com`; it takes a bare addr-spec
+    and removes angle brackets only around the *whole* value, so a quoted local part holding
+    `<listed@vendor.com>` is not "listed" while authentication vets the domain after the last
+    `@`), **and** SES must have
     authenticated *the address that matched* (`mime.Verdicts.vouches_for`):
     - a matching **envelope sender** needs an SPF pass for *that address's domain* with the
       `envelope-from` SES checked equal to the `Return-Path` (after `normalize_address`). An SPF
