@@ -3,7 +3,7 @@ product that charges for stored files (file transfer today, receipts later). The
 `BillingSettings`; `storage_charge` is the daily accrual arithmetic every such product shares.
 """
 
-from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
 
 from ..models import BillingSettings
 
@@ -38,3 +38,13 @@ def storage_charge(
     return whole_credits, (total - whole_credits).quantize(
         _REMAINDER_PRECISION, rounding=ROUND_HALF_EVEN
     )
+
+
+def storage_day_cost(size_bytes: int, price_per_gb_per_day: Decimal) -> int:
+    """The whole credits one day of storing `size_bytes` can cost, rounded up and at least 1: the
+    balance a product asks for before it resumes something it paused for lack of credits (a day's
+    charge is the floor of the running total, so this is its upper bound)."""
+    cost = (price_per_gb_per_day * (Decimal(size_bytes) / _BYTES_PER_GB)).to_integral_value(
+        rounding=ROUND_CEILING
+    )
+    return max(int(cost), 1)

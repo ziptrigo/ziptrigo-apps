@@ -5,7 +5,7 @@ from .credits import (
     get_balance,
     spend_credits,
 )
-from .storage import get_storage_price_per_gb_per_day, storage_charge
+from .storage import get_storage_price_per_gb_per_day, storage_charge, storage_day_cost
 
 __all__ = [
     'InsufficientCreditsError',
@@ -15,4 +15,5 @@ __all__ = [
     'get_storage_price_per_gb_per_day',
     'spend_credits',
     'storage_charge',
+    'storage_day_cost',
 ]

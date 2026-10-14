@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
-from apps.billing.services import get_balance, spend_credits
+from apps.billing.services import add_credits, get_balance, spend_credits
 
 from .. import jobs
 from ..models import DownloadEvent, Transfer, TransferStatus
@@ -381,3 +381,83 @@ def test_purge_download_ips_nulls_old_ips(draft_transfer, uploaded_file):
     recent_event.refresh_from_db()
     assert old_event.ip is None
     assert recent_event.ip == '2.2.2.2'
+
+
+def _set_balance(user, amount):
+    spend_credits(user, get_balance(user) - amount, source='test')
+    assert get_balance(user) == amount
+
+
+def _overdue_transfer(transfer, billing_settings, *, price='3.0'):
+    billing_settings.storage_price_per_gb_per_day = Decimal(price)
+    billing_settings.save()
+    transfer.status = TransferStatus.ACTIVE
+    transfer.size_bytes = _ONE_GB
+    transfer.last_billed_at = timezone.now() - timedelta(hours=25)
+    transfer.save()
+
+
+def test_balance_below_daily_cost_never_gets_free_storage(
+    draft_transfer, uploaded_file, fake_storage, ft_settings, billing_settings
+):
+    """A transfer costing 3 a day for an owner holding 2 used to be suspended and re-enabled (the
+    day forgiven) on every run. It must stay suspended and be deleted after the grace period."""
+    ft_settings.suspension_grace_days = 7
+    ft_settings.save()
+    _overdue_transfer(draft_transfer, billing_settings)
+    _set_balance(draft_transfer.owner, 2)
+
+    for _ in range(3):
+        jobs.meter_transfers()
+        draft_transfer.refresh_from_db()
+        assert draft_transfer.status == TransferStatus.SUSPENDED
+
+    assert get_balance(draft_transfer.owner) == 2
+    assert uploaded_file.storage_key in fake_storage.objects
+
+    Transfer.objects.filter(pk=draft_transfer.pk).update(
+        suspended_at=timezone.now() - timedelta(days=8)
+    )
+    jobs.meter_transfers()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DELETED
+    assert uploaded_file.storage_key not in fake_storage.objects
+
+
+def test_suspended_before_the_run_is_reenabled_once_balance_covers_a_day(
+    draft_transfer, billing_settings
+):
+    _overdue_transfer(draft_transfer, billing_settings)
+    _set_balance(draft_transfer.owner, 2)
+    jobs.meter_transfers()
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED
+
+    add_credits(draft_transfer.owner, 1, description='top up', source='test')
+    jobs.meter_transfers()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.ACTIVE
+    assert draft_transfer.suspended_at is None
+
+
+def test_transfer_suspended_in_this_run_is_not_reenabled_in_the_same_run(
+    draft_transfer, billing_settings, monkeypatch
+):
+    """Even if the cost rule were satisfied afterwards (credits arriving mid-run), a transfer this
+    run suspended is not an eligible re-enable candidate until the next run."""
+    _overdue_transfer(draft_transfer, billing_settings)
+    _set_balance(draft_transfer.owner, 2)
+    calls = []
+    monkeypatch.setattr(
+        jobs,
+        'reenable_suspended_transfers_for_user',
+        lambda user, transfer_ids: calls.append(list(transfer_ids)),
+    )
+
+    jobs.meter_transfers()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED
+    assert calls == []

@@ -133,8 +133,12 @@ def send_suspended_notification(transfer_id: str) -> None:
     if not transfer.owner or not transfer.owner.email:
         return
 
+    # Imported here: `metering` imports this module (it queues this task on suspension).
+    from .metering import daily_cost
+
     name = transfer_display_name(transfer)
     grace_days = FileTransferSettings.load().suspension_grace_days
+    needed = daily_cost(transfer)
     send_email(
         to=transfer.owner.email,
         subject=f'Your transfer "{name}" was suspended (out of credits)',
@@ -142,7 +146,9 @@ def send_suspended_notification(transfer_id: str) -> None:
             f'Your transfer "{name}" ran out of credits and has been suspended: the download '
             'link is no longer working.\n\n'
             f'Top up your credits within {grace_days} day(s) to automatically resume it, or its '
-            'files will be deleted.\n\n'
+            f'files will be deleted. You need a balance of at least {needed} '
+            f'{"credit" if needed == 1 else "credits"} (one day of storage for this transfer); '
+            'a smaller top-up will not resume it.\n\n'
             f'Manage this transfer: {dashboard_url()}'
         ),
     )

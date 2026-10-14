@@ -50,10 +50,19 @@ _EXPIRABLE_STATUSES = (TransferStatus.ACTIVE, TransferStatus.DISABLED)
 
 def meter_transfers() -> None:
     """Daily: charge one day per active transfer, suspend on insufficient credits, re-enable
-    transfers whose owner has topped up (fallback -- the `credits_added` signal is the fast
-    path), and delete files for transfers past their suspension grace period."""
+    transfers that were already suspended when the run started and whose owner has topped up
+    enough to cover a day (fallback -- the `credits_added` signal is the fast path), and delete
+    files for transfers past their suspension grace period."""
     settings_row = FileTransferSettings.load()
     price_per_gb_per_day = get_storage_price_per_gb_per_day()
+
+    # Snapshot before metering: a transfer this very run suspends couldn't pay for its day, and
+    # re-enabling it at once (which resets its clock) would forgive that day, every day.
+    already_suspended: dict[object, list[object]] = {}
+    for transfer_id, owner_id in Transfer.objects.filter(
+        status=TransferStatus.SUSPENDED, owner__isnull=False
+    ).values_list('pk', 'owner_id'):
+        already_suspended.setdefault(owner_id, []).append(transfer_id)
 
     # `held_for_review_at__isnull=True`: a transfer on hold pending abuse review (issue #59) is
     # never billed for the days it spends held -- `meter_transfer` re-checks this itself too
@@ -68,18 +77,13 @@ def meter_transfers() -> None:
         except Exception:
             logger.exception('meter_transfer failed for transfer %s', transfer.pk)
 
-    owner_ids = (
-        Transfer.objects.filter(status=TransferStatus.SUSPENDED, owner__isnull=False)
-        .values_list('owner_id', flat=True)
-        .distinct()
-    )
-    for owner_id in owner_ids:
+    for owner_id, transfer_ids in already_suspended.items():
         try:
             owner = User.objects.get(pk=owner_id)
         except User.DoesNotExist:
             continue
         try:
-            reenable_suspended_transfers_for_user(owner)
+            reenable_suspended_transfers_for_user(owner, transfer_ids)
         except Exception:
             logger.exception('reenable_suspended_transfers_for_user failed for user %s', owner_id)
 

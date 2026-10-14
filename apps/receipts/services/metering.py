@@ -28,7 +28,7 @@ again minutes later with that day forgiven.
 
 import logging
 from datetime import timedelta
-from decimal import ROUND_CEILING, Decimal
+from decimal import Decimal
 from uuid import UUID
 
 from django.db import transaction
@@ -43,6 +43,7 @@ from apps.billing.services import (
     get_storage_price_per_gb_per_day,
     spend_credits,
     storage_charge,
+    storage_day_cost,
 )
 
 from ..models import Receipt, ReceiptsAccount, ReceiptsSettings, ReceiptStatus
@@ -56,7 +57,6 @@ logger = logging.getLogger(__name__)
 MIN_BALANCE_TO_RESUME = 1
 
 _BILLING_PERIOD = timedelta(hours=24)
-_BYTES_PER_GB = Decimal(1024**3)
 
 
 def daily_storage_cost(stored_bytes: int, price_per_gb_per_day: Decimal | None = None) -> int:
@@ -64,10 +64,7 @@ def daily_storage_cost(stored_bytes: int, price_per_gb_per_day: Decimal | None =
     `MIN_BALANCE_TO_RESUME`: the balance an account needs to be unfrozen."""
     if price_per_gb_per_day is None:
         price_per_gb_per_day = get_storage_price_per_gb_per_day()
-    cost = (price_per_gb_per_day * (Decimal(stored_bytes) / _BYTES_PER_GB)).to_integral_value(
-        rounding=ROUND_CEILING
-    )
-    return max(int(cost), MIN_BALANCE_TO_RESUME)
+    return max(storage_day_cost(stored_bytes, price_per_gb_per_day), MIN_BALANCE_TO_RESUME)
 
 
 def meter_account(account_pk: object, price_per_gb_per_day: Decimal | None = None) -> None:
