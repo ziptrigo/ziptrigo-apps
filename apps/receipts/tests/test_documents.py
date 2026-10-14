@@ -456,6 +456,7 @@ class TestChildProcess:
             documents.PDF,
             max_pdf_pages=5,
             memory_mb=64,
+            cpu_seconds=10,
             timeout=timeout,
             command=[sys.executable, '-c', code],
         )
@@ -533,7 +534,11 @@ class TestChildProcess:
             '__CF_USER_TEXT_ENCODING',
         }
 
-    def test_a_child_still_running_at_the_deadline_is_killed(self, tmp_path, caplog):
+    def test_a_child_still_running_at_the_deadline_is_killed_and_the_try_is_retried(
+        self, tmp_path, caplog
+    ):
+        """The wall clock says nothing about the file (a busy host is slow too), so a timeout is a
+        `DocumentChildError`, not a permanent `too_large`."""
         pid_file = tmp_path / 'pid'
         code = (
             f'import os, time; open({str(pid_file)!r}, "w").write(str(os.getpid())); time.sleep(60)'
@@ -542,10 +547,11 @@ class TestChildProcess:
 
         with (
             caplog.at_level(logging.WARNING),
-            pytest.raises(documents.DocumentTooComplexError, match='too long'),
+            pytest.raises(documents.DocumentChildError, match='too long') as caught,
         ):
             self.run_command(code, timeout=1)
 
+        assert not isinstance(caught.value, documents.UnreadableDocumentError)
         assert time.monotonic() - started < 15
         assert 'child killed' in caplog.text
         pid = int(pid_file.read_text())
@@ -555,23 +561,203 @@ class TestChildProcess:
     @pytest.mark.parametrize(
         'code',
         [
-            'import os; os._exit(3)',
             'import os, signal; os.kill(os.getpid(), signal.SIGKILL)',  # e.g. the OOM killer
+            'import os, signal; os.kill(os.getpid(), signal.SIGABRT)',  # a failed allocation
             'import os, signal; os.kill(os.getpid(), signal.SIGSEGV)',  # native code gone wrong
+            'import os, signal; os.kill(os.getpid(), signal.SIGBUS)',
+            'import os, signal; os.kill(os.getpid(), signal.SIGXCPU)',  # the CPU limit
+            'import json; print(json.dumps({"error": "too_complex", "message": "x"}))',
+        ],
+        ids=['SIGKILL', 'SIGABRT', 'SIGSEGV', 'SIGBUS', 'SIGXCPU', 'says too_complex'],
+    )
+    def test_a_child_that_ends_over_its_budget_is_too_complex(self, code, caplog):
+        with caplog.at_level(logging.WARNING), pytest.raises(documents.DocumentTooComplexError):
+            self.run_command(code)
+
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    @pytest.mark.parametrize(
+        'code',
+        [
+            'import os; os._exit(3)',
+            'import sys; sys.exit(1)',  # e.g. a traceback: an import error after a bad deploy
+            'import os, signal; os.kill(os.getpid(), signal.SIGTERM)',  # e.g. an outside stop
+            'import os, signal; os.kill(os.getpid(), signal.SIGINT)',  # Ctrl-C reaching the group
+            'import os, signal; os.kill(os.getpid(), signal.SIGHUP)',
             'pass',  # no answer at all
             'print("not json")',
             'print("[1, 2]")',
             'print(\'{"ok": {"text": 1}}\')',
             'print(\'{"error": 5}\')',
+            'print(\'{"error": "something new"}\')',
+            'import json; print(json.dumps({"error": "failed", "message": "ImportError"}))',
+        ],
+        ids=[
+            'exit 3',
+            'exit 1',
+            'SIGTERM',
+            'SIGINT',
+            'SIGHUP',
+            'no output',
+            'not json',
+            'a list',
+            'bad ok',
+            'bad error',
+            'unknown error',
+            'says failed',
         ],
     )
-    def test_a_child_that_dies_or_answers_nonsense_is_too_complex(self, code, caplog):
-        with caplog.at_level(logging.WARNING), pytest.raises(documents.DocumentTooComplexError):
+    def test_a_child_that_fails_without_saying_anything_about_the_file_is_retried(
+        self, code, caplog
+    ):
+        """Nothing here is a reason to fail the receipt for good: it is a `DocumentChildError`
+        (which `processing` retries), logged as an error."""
+        with (
+            caplog.at_level(logging.WARNING),
+            pytest.raises(documents.DocumentChildError) as caught,
+        ):
             self.run_command(code)
 
-        assert 'died with exit status' in caplog.text
+        assert not isinstance(caught.value, documents.UnreadableDocumentError)
+        [record] = [r for r in caplog.records if r.name == documents.logger.name]
+        assert record.levelno == logging.ERROR
 
-    REQUEST = b'{"content_type": "text/plain", "max_pdf_pages": 5, "memory_mb": 1000}\nhello'
+    def test_the_log_names_the_signal_or_status_and_never_what_the_child_wrote(self, caplog):
+        code = (
+            'import os, signal, sys\n'
+            'sys.stderr.write("FILE-DERIVED SECRET TEXT " * 1000)\n'
+            'sys.stderr.flush()\n'
+            'os.kill(os.getpid(), signal.SIGTERM)'
+        )
+
+        with caplog.at_level(logging.WARNING), pytest.raises(documents.DocumentChildError):
+            self.run_command(code)
+
+        assert 'signal SIGTERM' in caplog.text
+        assert 'SECRET' not in caplog.text
+
+    def test_a_noisy_child_does_not_fill_the_workers_memory_or_get_in_the_way(self):
+        """stderr is not collected at all: a megabyte of warnings costs the parent nothing."""
+        code = (
+            'import json, sys\n'
+            'sys.stderr.write("x" * 5_000_000)\n'
+            'ok = {"text": "fine", "images": [], "preview_jpeg": None}\n'
+            'sys.stdout.write(json.dumps({"ok": ok}))'
+        )
+
+        assert self.run_command(code).text == 'fine'
+
+    def test_the_child_runs_in_its_own_session(self):
+        """A terminal's or process group's signal (Ctrl-C on a local worker) can't reach it."""
+        code = (
+            'import json, os, sys\n'
+            'ok = {"text": str(os.getsid(0) == os.getpid()), "images": [], "preview_jpeg": None}\n'
+            'sys.stdout.write(json.dumps({"ok": ok}))'
+        )
+
+        assert self.run_command(code).text == 'True'
+
+    def test_a_child_that_cannot_be_started_is_retried(self, caplog):
+        with caplog.at_level(logging.ERROR), pytest.raises(documents.DocumentChildError):
+            documents._prepare_in_child(
+                b'data',
+                documents.PDF,
+                max_pdf_pages=5,
+                memory_mb=64,
+                cpu_seconds=10,
+                timeout=5,
+                command=['/nonexistent/python'],
+            )
+
+        assert 'Could not start' in caplog.text
+
+    @pytest.mark.skipif(not sys.platform.startswith('linux'), reason='needs /proc and RLIMIT_CPU')
+    def test_a_child_over_its_cpu_limit_ends_with_sigxcpu_long_before_the_wall_clock(self):
+        """The CPU limit, not the wall clock, is what refuses a CPU-heavy file."""
+        code = (
+            'import importlib.util, sys\n'
+            f'spec = importlib.util.spec_from_file_location("d", {documents.__file__!r})\n'
+            'module = importlib.util.module_from_spec(spec)\n'
+            'spec.loader.exec_module(module)\n'
+            'module._limit_resources(1024, 1)\n'
+            'while True:\n    pass'
+        )
+        started = time.monotonic()
+
+        with pytest.raises(documents.DocumentTooComplexError):
+            documents._prepare_in_child(
+                b'data',
+                documents.PDF,
+                max_pdf_pages=5,
+                memory_mb=1024,
+                cpu_seconds=1,
+                timeout=30,
+                command=[sys.executable, '-c', code],
+            )
+
+        assert time.monotonic() - started < 15
+
+    @pytest.mark.skipif(not sys.platform.startswith('linux'), reason='needs /proc')
+    def test_the_child_asks_to_be_the_oom_killers_first_choice(self):
+        code = (
+            'import importlib.util\n'
+            f'spec = importlib.util.spec_from_file_location("d", {documents.__file__!r})\n'
+            'module = importlib.util.module_from_spec(spec)\n'
+            'spec.loader.exec_module(module)\n'
+            'module._prefer_to_be_oom_killed()\n'
+            'print(open("/proc/self/oom_score_adj").read().strip())'
+        )
+
+        result = subprocess.run(
+            [sys.executable, '-I', '-c', code], capture_output=True, text=True, check=True
+        )
+
+        assert result.stdout.strip() == '1000'
+
+    def test_not_being_able_to_set_the_oom_score_is_ignored(self, tmp_path):
+        documents._prefer_to_be_oom_killed(str(tmp_path / 'missing' / 'oom_score_adj'))
+
+        score = tmp_path / 'oom_score_adj'
+        score.write_text('0')
+        documents._prefer_to_be_oom_killed(str(score))
+        assert score.read_text() == '1000'
+
+    def test_the_child_is_started_as_an_unprivileged_user_only_by_root(self, monkeypatch):
+        import pwd
+
+        monkeypatch.setattr(os, 'geteuid', lambda: 1000)
+        assert documents._unprivileged_ids('nobody') == {}
+
+        monkeypatch.setattr(os, 'geteuid', lambda: 0)
+        assert documents._unprivileged_ids('') == {}
+        assert documents._unprivileged_ids('no-such-user-here') == {}
+        entry = pwd.getpwnam('root')  # any user that exists everywhere
+        assert documents._unprivileged_ids('root') == {
+            'user': entry.pw_uid,
+            'group': entry.pw_gid,
+            'extra_groups': [],
+        }
+
+    def test_the_user_is_passed_to_the_child(self, monkeypatch):
+        seen = {}
+
+        def fake_run(*args, **kwargs):
+            seen.update(kwargs)
+            raise subprocess.TimeoutExpired('x', 1)
+
+        monkeypatch.setattr(documents, '_unprivileged_ids', lambda user: {'user': 65534})
+        monkeypatch.setattr(subprocess, 'run', fake_run)
+
+        with pytest.raises(documents.DocumentChildError):
+            self.run_command('pass')
+
+        assert seen['user'] == 65534 and seen['start_new_session'] is True
+        assert seen['stderr'] == subprocess.DEVNULL
+
+    REQUEST = (
+        b'{"content_type": "text/plain", "max_pdf_pages": 5, "memory_mb": 1000, '
+        b'"cpu_seconds": 10}\nhello'
+    )
 
     def test_running_out_of_memory_in_the_child_is_too_complex(self, monkeypatch):
         def out_of_memory(*args, **kwargs):
@@ -581,32 +767,80 @@ class TestChildProcess:
 
         assert documents._handle_request(self.REQUEST)['error'] == 'too_complex'
 
-    @pytest.mark.parametrize(
-        ('peak_mb', 'expected'), [(900, 'too_complex'), (500, 'too_complex'), (100, 'unreadable')]
-    )
-    def test_a_library_failing_after_most_of_the_budget_was_used_is_reported_as_the_budget(
-        self, monkeypatch, peak_mb, expected
+    @pytest.mark.parametrize('link', ['__cause__', '__context__'])
+    def test_an_error_caused_by_a_memory_error_is_too_complex(self, monkeypatch, link):
+        """The readers wrap what a library raises, so the `MemoryError` is further down."""
+
+        def wrapped(*args, **kwargs):
+            try:
+                raise MemoryError
+            except MemoryError as memory_error:
+                outer = documents.UnreadableDocumentError('The PDF could not be read: ')
+                if link == '__cause__':
+                    raise outer from memory_error
+                raise outer
+
+        monkeypatch.setattr(documents, '_prepare_unsandboxed', wrapped)
+        monkeypatch.setattr(documents, '_peak_address_space', lambda: None)
+
+        assert documents._handle_request(self.REQUEST)['error'] == 'too_complex'
+
+    def test_a_cause_chain_that_loops_does_not_hang(self):
+        a, b = RuntimeError('a'), RuntimeError('b')
+        a.__cause__, b.__cause__ = b, a
+
+        assert documents._caused_by_memory_error(a) is False
+
+    def test_real_pypdf_and_pillow_failures_under_a_memory_error_are_too_complex(self, monkeypatch):
+        """`_pdf_text` wraps every exception in `UnreadableDocumentError`; the cause is kept."""
+        from pypdf import PdfReader
+
+        def out_of_memory(*args, **kwargs):
+            raise MemoryError
+
+        monkeypatch.setattr(PdfReader, 'pages', property(out_of_memory))
+
+        with pytest.raises(documents.DocumentTooComplexError):
+            documents._prepare_guarded(samples.text_pdf_bytes(), documents.PDF)
+
+    def test_a_pdfium_failure_after_nearly_all_of_the_budget_is_reported_as_the_budget(
+        self, monkeypatch
     ):
-        """pdfium reports a failed allocation as its own exception, not as a `MemoryError`."""
+        """pdfium reports a failed allocation as its own error, not as a `MemoryError`."""
 
-        def library_error(*args, **kwargs):
-            raise documents.UnreadableDocumentError('The PDF could not be rendered: no memory')
+        def render_failed(*args, **kwargs):
+            raise documents._RenderFailedError('The PDF could not be rendered: no memory')
 
-        monkeypatch.setattr(documents, '_prepare_unsandboxed', library_error)
-        monkeypatch.setattr(documents, '_peak_address_space', lambda: peak_mb * 1024 * 1024)
+        monkeypatch.setattr(documents, '_prepare_unsandboxed', render_failed)
 
-        assert documents._handle_request(self.REQUEST)['error'] == expected
+        for peak_mb, expected in [(1000, 'too_complex'), (900, 'too_complex'), (700, 'unreadable')]:
+            monkeypatch.setattr(documents, '_peak_address_space', lambda mb=peak_mb: mb << 20)
+            assert documents._handle_request(self.REQUEST)['error'] == expected, peak_mb
+
+    def test_the_peak_does_not_turn_other_unreadable_files_into_over_budget_ones(self, monkeypatch):
+        """A corrupt large image can map half the budget; only a pdfium failure near the whole
+        budget is taken for running out of it."""
+
+        def corrupt(*args, **kwargs):
+            raise documents.UnreadableDocumentError('The image could not be read: truncated')
+
+        monkeypatch.setattr(documents, '_prepare_unsandboxed', corrupt)
+        monkeypatch.setattr(documents, '_peak_address_space', lambda: 990 << 20)
+
+        assert documents._handle_request(self.REQUEST)['error'] == 'unreadable'
 
     def test_a_peak_that_cannot_be_read_does_not_change_the_answer(self, monkeypatch):
-        def library_error(*args, **kwargs):
-            raise documents.UnreadableDocumentError('corrupt')
+        def render_failed(*args, **kwargs):
+            raise documents._RenderFailedError('corrupt')
 
-        monkeypatch.setattr(documents, '_prepare_unsandboxed', library_error)
+        monkeypatch.setattr(documents, '_prepare_unsandboxed', render_failed)
         monkeypatch.setattr(documents, '_peak_address_space', lambda: None)
 
         assert documents._handle_request(self.REQUEST)['error'] == 'unreadable'
 
-    def test_an_unforeseen_error_in_the_child_is_the_files_fault(self, monkeypatch):
+    def test_an_unforeseen_error_is_the_files_fault_in_the_child_and_in_process_alike(
+        self, monkeypatch, settings
+    ):
         def broken(*args, **kwargs):
             raise RuntimeError('boom')
 
@@ -614,8 +848,65 @@ class TestChildProcess:
         monkeypatch.setattr(documents, '_peak_address_space', lambda: None)
 
         reply = documents._handle_request(self.REQUEST)
-
         assert reply['error'] == 'unreadable' and 'boom' in reply['message']
+
+        settings.RECEIPTS_DOCUMENT_SANDBOX = False
+        with pytest.raises(documents.UnreadableDocumentError, match='boom') as caught:
+            documents.prepare_input(b'Total: 42.10', documents.PLAIN)
+        assert not isinstance(caught.value, documents.DocumentTooComplexError)
+
+    def test_a_memory_error_is_too_complex_in_process_too(self, monkeypatch, settings):
+        def out_of_memory(*args, **kwargs):
+            raise MemoryError
+
+        monkeypatch.setattr(documents, '_prepare_unsandboxed', out_of_memory)
+        settings.RECEIPTS_DOCUMENT_SANDBOX = False
+
+        with pytest.raises(documents.DocumentTooComplexError):
+            documents.prepare_input(b'Total: 42.10', documents.PLAIN)
+
+    def test_a_library_that_cannot_be_imported_is_not_the_files_fault(self, monkeypatch, settings):
+        def missing(*args, **kwargs):
+            raise ModuleNotFoundError("No module named 'pypdfium2'")
+
+        monkeypatch.setattr(documents, '_prepare_unsandboxed', missing)
+
+        reply = documents._handle_request(self.REQUEST)
+        assert reply['error'] == 'failed' and 'pypdfium2' in reply['message']
+
+        settings.RECEIPTS_DOCUMENT_SANDBOX = False
+        with pytest.raises(documents.DocumentChildError):
+            documents.prepare_input(b'Total: 42.10', documents.PLAIN)
+
+    def test_the_child_as_a_whole_answers_failed_instead_of_dying_on_a_broken_request(self):
+        """The real child, fed a request it can't read: it still answers, with a reason that
+        names no file content."""
+        result = subprocess.run(
+            [sys.executable, '-I', documents.__file__],
+            input=b'this is not a request',
+            capture_output=True,
+            check=True,
+        )
+
+        reply = documents._parse_reply(result.stdout)
+        assert reply == {'error': 'failed', 'message': 'JSONDecodeError'}
+
+    def test_the_real_child_reads_a_file_with_warnings_and_logging_silenced(self):
+        """A PDF pypdf complains about (`strict=False` logs and warns instead of raising) reads
+        fine, and nothing it logs reaches the parent."""
+        data = b'%PDF-1.4\n' + b'1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' * 3
+        result = subprocess.run(
+            [sys.executable, '-I', documents.__file__],
+            input=(
+                b'{"content_type": "application/pdf", "max_pdf_pages": 1, "memory_mb": 1024, '
+                b'"cpu_seconds": 10}\n' + data
+            ),
+            capture_output=True,
+            check=True,
+        )
+
+        assert documents._parse_reply(result.stdout) is not None
+        assert result.stderr == b''
 
     @pytest.mark.parametrize('distinct_forms', [False, True], ids=['shared form', 'distinct forms'])
     def test_a_tiny_pdf_that_makes_the_renderer_allocate_gigabytes_is_refused(

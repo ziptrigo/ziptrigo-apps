@@ -1330,29 +1330,57 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   its own) or rendered pages via `pypdfium2` -- each page is sized with `get_size()` first and
   rendered at a scale that keeps its longer side within `MAX_IMAGE_SIDE_PX` (a page over 14,400 pt on
   a side is refused), the PIL image going straight to the JPEG encoder -- HTML -> text with the
-  stdlib parser) **runs in a child process under a memory and time budget**, because a per-stream
+  stdlib parser) **runs in a child process under a resource budget**, because a per-stream
   cap bounds nothing else: a 5 KB PDF whose page draws one 1.9 MB Form XObject 40 times needs 1.4 GB
   in pdfium (it decodes the form again for every use; 40 different forms do the same) and 40 big
   streams cost pypdf minutes of CPU. `prepare_input` starts `python -I documents.py` (the module run
   as a script: importing it as `apps.receipts.services.documents` would import the whole
   Django-dependent package, so it keeps no relative imports) with bytes on stdin and JSON on stdout,
-  never touching the database, with an environment cut to `PATH`/locale (no keys), under
-  `RLIMIT_AS` = `RECEIPTS_DOCUMENT_MEMORY_MB` (default 1024; address space, not resident memory.
-  Measured on Linux: ordinary receipts need 96-128 MB, the worst legitimate input, a 48-megapixel
-  HEIC or a 50-megapixel PNG, passes at 512 MB, so the default leaves 2x; **Linux only**: macOS
-  ignores `RLIMIT_AS`, so a developer machine is bounded by the timeout alone). A library that turns
-  a failed allocation into its own exception (pdfium: "could not be rendered") is recognised by the
-  child having mapped over half its budget (`VmPeak`) and still reported as over the budget, `RLIMIT_CPU` and a
-  wall-clock `RECEIPTS_DOCUMENT_TIMEOUT_SECONDS` (default 60, the child is killed). One child at a
-  time per `receipts` worker, started per receipt (~0.2 s). A child that runs out of memory, is
-  killed, crashes or times out raises `DocumentTooComplexError` (a subclass of
-  `UnreadableDocumentError`, also raised for the per-stream cap, an image header over
-  `MAX_IMAGE_PIXELS` and an absurd page size); `processing._run` logs a warning with the receipt id
-  (never content) and fails it as **`too_large`** (reused rather than a new reason, so no migration;
-  its help text says "too large or too complex", and, like any `too_large`, it can't be re-run),
-  refunded like every file that could not be read. `RECEIPTS_DOCUMENT_SANDBOX` (default on; off
-  under pytest, which prepares in-process and monkeypatches inside; the `tests_e2e` server runs it
-  for real) switches the child off. Preparation
+  never touching the database, with an environment cut to `PATH`/locale (no keys), in its own
+  session (`start_new_session`, so a Ctrl-C on a local worker doesn't reach it), with stderr dropped
+  (the child also silences `logging` and `warnings`; nothing it writes is kept or logged -- only
+  its exit status or signal name), under three limits: `RLIMIT_AS` = `RECEIPTS_DOCUMENT_MEMORY_MB`
+  (default 1024; address space, not resident memory. Measured on Linux: ordinary receipts need
+  96-128 MB, the worst legitimate input, a 48-megapixel HEIC or a 50-megapixel PNG, passes at 512
+  MB, so the default leaves 2x; **Linux only**: macOS ignores `RLIMIT_AS`), `RLIMIT_CPU` =
+  `RECEIPTS_DOCUMENT_CPU_SECONDS` (default 25; ordinary receipts measured 0.1-0.7 CPU s in the
+  image, the worst legitimate ones, a 48 MP noise PNG or a 12 MP HEIC, 1.7-2.6 s; SIGXCPU, with
+  `RLIMIT_CORE` 0) and a wall-clock `RECEIPTS_DOCUMENT_TIMEOUT_SECONDS` (default 60, 2-3x the CPU
+  limit on purpose: CPU time doesn't grow with host load, so it is what refuses a CPU-heavy file,
+  and the wall clock only catches a hang). `apps.receipts.checks` rejects absurd values
+  (`receipts.E001`-`E004`: memory under 384 MB, CPU under 1 s, a non-positive timeout, a timeout not
+  above the CPU limit; `W003`: under 1.5x). Before it sets its limits the child writes `1000` to
+  `/proc/self/oom_score_adj`, so if the container's cgroup limit is hit first (RLIMIT_AS counts
+  address space, not RSS) the kernel kills the child, not the worker (whose death restarts the
+  container). **Container headroom: the worker plus `RECEIPTS_DOCUMENT_MEMORY_MB`** (one child at a
+  time per `receipts` worker). A root worker starts the child as `RECEIPTS_DOCUMENT_CHILD_USER`
+  (default `nobody`, no supplementary groups; empty disables; skipped when not root or the user
+  doesn't exist), so it can't read a 0600 env file; verified in the image. One child per receipt
+  (~0.2-0.5 s). A pdfium failure (`_RenderFailedError`: pdfium reports a failed allocation as its
+  own error, not `MemoryError`) after the child had mapped over 85% of its budget (`VmPeak`) is
+  reported as over the budget; any other unreadable error whose `__cause__`/`__context__` chain
+  holds a `MemoryError` is too.
+  **Two kinds of failure.** Only outcomes that mean "this file is over the budget" raise
+  `DocumentTooComplexError` (a subclass of `UnreadableDocumentError`, also raised for the per-stream
+  cap, an image header over `MAX_IMAGE_PIXELS` and an absurd page size): the child ended with
+  SIGKILL, SIGABRT, SIGSEGV, SIGBUS or SIGXCPU, raised `MemoryError`, or replied `too_complex`.
+  `processing._run` logs a warning with the receipt id (never content) and fails it as
+  **`too_large`** (reused rather than a new reason, so no migration; its help text says "too large
+  or too complex", and, like any `too_large`, it can't be re-run), refunded like every file that
+  could not be read. Everything that says nothing about the file -- an ordinary non-zero exit, no or
+  a malformed reply, SIGINT/SIGTERM/SIGHUP, the wall-clock timeout, the child failing to start or to
+  import a library (reply `failed`) -- raises `DocumentChildError`, deliberately *not* an
+  `UnreadableDocumentError`: `_run` logs an **error** and treats it as a transient failure
+  (`_transient_failure`, backoff, `max_ai_attempts`), so a hostile file still ends after a few
+  budgets while a broken image or a mistaken setting doesn't permanently fail every receipt.
+  Both the child and the in-process path go through `documents._prepare_guarded`, which maps
+  unexpected exceptions (-> unreadable) and `MemoryError` (-> too complex) in one place, so unit
+  tests with the sandbox off exercise the production branches. **This is a resource budget, not an
+  isolation boundary**: the child has no keys in its environment and (as root's child) no root, but
+  can use the network and read what its user can read, and a memory-corruption bug in pdfium,
+  libheif or libde265 isn't contained by it; keep secret files 0600. `RECEIPTS_DOCUMENT_SANDBOX`
+  (default on; off under pytest, which prepares in-process and monkeypatches inside; the `tests_e2e`
+  server runs it for real) switches the child off. Preparation
   and the AI call (`services.ai`) happen outside any transaction; the result is applied under a row lock only if
   the receipt is still `processing` for the same `attempt_id`. A HEIC preview is
   written before its conditional `UPDATE`; if that matches nothing and no row references the key
@@ -1930,7 +1958,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `services.inbound.reset_message_for_retry`), `InboundEmailAdmin`, `ReceiptsAccountAdmin` (codes inline, frozen state, stored bytes).
 - **Settings/env**: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (optional), `OPENAI_RECEIPTS_MODEL`,
   `RECEIPTS_AI_TIMEOUT_SECONDS`/`_MAX_RETRIES` (explicit timeout, bounded SDK retries),
-  `RECEIPTS_DOCUMENT_SANDBOX`/`_MEMORY_MB`/`_TIMEOUT_SECONDS` (the document-preparation budget),
+  `RECEIPTS_DOCUMENT_SANDBOX`/`_MEMORY_MB`/`_CPU_SECONDS`/`_TIMEOUT_SECONDS`/`_CHILD_USER` (the document-preparation budget),
   `RECEIPTS_S3_BUCKET`/`_REGION`/`_ENDPOINT_URL`, `RECEIPTS_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`,
   `RECEIPTS_INBOUND_ADDRESS`; the five required ones are checked in prod (see "Settings and
   environment"), `apps.receipts.checks` warns about a *partial* local configuration.
@@ -1956,7 +1984,9 @@ future app:
   Each `process_receipt` also starts one short-lived child process to read the file (see
   "Receipts" > Processing): the `receipts` worker plus that child (up to
   `RECEIPTS_DOCUMENT_MEMORY_MB` of address space, one at a time) is the memory the container must
-  have room for, and a killed or over-budget child fails the receipt, never the worker.
+  have room for (the child asks the OOM killer to pick it first, `oom_score_adj` 1000; set the
+  container's memory limit in the `infra` compose to at least worker + that budget), and an
+  over-budget child fails the receipt, never the worker; a child that merely breaks is retried.
 - **Scheduler**: `apps.core.scheduler` -- a `JobSpec` registry (name, callable, interval, lease)
   filled by each app's `AppConfig.ready()` (`core` can't import a product, so it never discovers
   jobs itself), a `ScheduledJob` row per job whose claim is one conditional `UPDATE` guarded by the

@@ -626,6 +626,54 @@ class TestUnreadableInput:
         assert fake_ai.calls == []
         assert f'Receipt {receipt.pk} is too complex to read' in caplog.text
 
+    def test_a_child_failure_that_says_nothing_about_the_file_is_a_failed_try(
+        self, make_receipt, fake_ai, funded_user, caplog, monkeypatch
+    ):
+        """A broken child, a signal from outside or the wall-clock timeout must not fail every
+        receipt for good: the receipt is retried (and the failure is logged as an error)."""
+        from ..services import documents
+
+        def broken_child(*args, **kwargs):
+            raise documents.DocumentChildError('Reading the file failed.')
+
+        monkeypatch.setattr(documents, 'prepare_input', broken_child)
+        receipt = make_receipt(data=samples.text_pdf_bytes(), content_type='application/pdf')
+
+        with caplog.at_level('ERROR'):
+            run(receipt)
+
+        assert receipt.status == ReceiptStatus.RECEIVED
+        assert receipt.failure_reason == ''
+        assert receipt.attempts == 1
+        assert receipt.next_attempt_at is not None
+        assert receipt.last_error == 'Reading the file failed.'
+        assert receipt.refunded_at is None
+        assert get_balance(funded_user) == 99  # charged once; the retry does not charge again
+        assert fake_ai.calls == []
+        [record] = [r for r in caplog.records if str(receipt.pk) in r.getMessage()]
+        assert record.levelname == 'ERROR'
+
+    def test_a_file_that_keeps_breaking_the_child_ends_after_the_last_try_and_is_refunded(
+        self, make_receipt, fake_ai, funded_user, monkeypatch
+    ):
+        from ..services import documents
+
+        def broken_child(*args, **kwargs):
+            raise documents.DocumentChildError('Reading the file took too long.')
+
+        monkeypatch.setattr(documents, 'prepare_input', broken_child)
+        receipt = make_receipt(data=samples.text_pdf_bytes(), content_type='application/pdf')
+        max_attempts = ReceiptsSettings.load().max_ai_attempts
+
+        for _ in range(max_attempts):
+            Receipt.objects.filter(pk=receipt.pk).update(next_attempt_at=None)
+            run(receipt)
+
+        assert receipt.status == ReceiptStatus.FAILED
+        assert receipt.failure_reason == FailureReason.EXTRACTION_ERROR
+        assert receipt.refunded_at is not None
+        assert get_balance(funded_user) == 100
+
     def test_a_pdf_with_a_stream_far_bigger_than_a_receipts_fails_as_too_large(
         self, make_receipt, fake_ai
     ):

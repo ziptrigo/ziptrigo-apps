@@ -10,7 +10,7 @@ from django.db.models.signals import pre_delete
 from apps.billing.signals import credits_added
 from apps.core.products import get_products
 
-from ..checks import check_receipts_configuration
+from ..checks import check_document_budget, check_receipts_configuration
 
 pytestmark = [pytest.mark.unit]
 
@@ -109,3 +109,59 @@ class TestChecks:
         ids = [w.id for w in check_receipts_configuration()]
 
         assert ids == ['receipts.W002']
+
+
+class TestDocumentBudgetChecks:
+    @pytest.fixture(autouse=True)
+    def sandbox(self, settings):
+        settings.RECEIPTS_DOCUMENT_SANDBOX = True
+        settings.RECEIPTS_DOCUMENT_MEMORY_MB = 1024
+        settings.RECEIPTS_DOCUMENT_CPU_SECONDS = 25
+        settings.RECEIPTS_DOCUMENT_TIMEOUT_SECONDS = 60
+
+    def test_the_defaults_are_fine(self):
+        from ..services import documents
+
+        assert check_document_budget() == []
+        assert documents.DOCUMENT_TIMEOUT_SECONDS >= 2 * documents.DOCUMENT_CPU_SECONDS
+
+    def test_nothing_is_checked_with_the_sandbox_off(self, settings):
+        settings.RECEIPTS_DOCUMENT_SANDBOX = False
+        settings.RECEIPTS_DOCUMENT_MEMORY_MB = 1
+        settings.RECEIPTS_DOCUMENT_TIMEOUT_SECONDS = -1
+
+        assert check_document_budget() == []
+
+    @pytest.mark.parametrize(
+        ('name', 'value', 'expected_id'),
+        [
+            ('RECEIPTS_DOCUMENT_MEMORY_MB', 383, 'receipts.E001'),
+            ('RECEIPTS_DOCUMENT_MEMORY_MB', 0, 'receipts.E001'),
+            ('RECEIPTS_DOCUMENT_CPU_SECONDS', 0, 'receipts.E002'),
+            ('RECEIPTS_DOCUMENT_CPU_SECONDS', 0.5, 'receipts.E002'),
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 0, 'receipts.E003'),
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', -5, 'receipts.E003'),
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 25, 'receipts.E004'),  # wall == CPU
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 10, 'receipts.E004'),  # wall < CPU
+        ],
+    )
+    def test_an_absurd_value_is_an_error(self, settings, name, value, expected_id):
+        setattr(settings, name, value)
+
+        [problem] = check_document_budget()
+
+        assert problem.id == expected_id
+        assert problem.is_serious()
+
+    def test_the_lowest_memory_allowed_is_fine(self, settings):
+        settings.RECEIPTS_DOCUMENT_MEMORY_MB = 384
+
+        assert check_document_budget() == []
+
+    def test_a_wall_clock_barely_above_the_cpu_limit_warns(self, settings):
+        settings.RECEIPTS_DOCUMENT_TIMEOUT_SECONDS = 30  # 1.2x
+
+        [problem] = check_document_budget()
+
+        assert problem.id == 'receipts.W003'
+        assert not problem.is_serious()
