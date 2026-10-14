@@ -40,6 +40,13 @@ def test_normalize_address_does_not_pull_an_address_out_of_the_middle(raw):
     assert normalize_address(raw) != 'orders@vendor.com'
 
 
+def test_a_display_name_form_is_not_a_bare_address():
+    """`normalize_address` takes an addr-spec (what `getaddresses` returns), so `Name <addr>` is
+    not unwrapped to `addr`: only brackets around the whole value go. (`parse_allowlist` and the
+    callers that read a header run `parseaddr`/`getaddresses` first.)"""
+    assert normalize_address('Jane Doe <jane@example.com>') != 'jane@example.com'
+
+
 def test_a_crafted_local_part_does_not_match_a_listed_address():
     allow = ['orders@vendor.com', '*@vendor.com']
 

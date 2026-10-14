@@ -25,6 +25,7 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 FIXED_CODE = 'abcd2345'
 FIXED_ADDRESS = f'receipts+{FIXED_CODE}@ziptrigo.com'
 RECEIVED_DATE = datetime(2026, 10, 9, 12, 30, tzinfo=UTC)
+_RAW_FROM_PLACEHOLDER = 'raw-from-placeholder@placeholder.invalid'
 
 
 @dataclass
@@ -129,9 +130,17 @@ def build_email(
     ses: Ses | None = None,
     headers: list[tuple[str, str]] | None = None,
     nested: bytes | None = None,
+    raw_from: str | None = None,
 ) -> bytes:
+    """`raw_from`, if given, is written verbatim as the value of the `From:` line (it replaces
+    `from_addr`). Needed to put on the wire what `EmailMessage` would never write itself: setting
+    `msg['From']` decodes an RFC 2047 encoded word and writes it unquoted
+    (`x<a@b.test>@evil.test`), which is not what a sender's raw
+    `=?utf-8?q?x=3Ca=40b.test=3E?=@evil.test` looks like to the parser."""
     ses = ses or Ses()
     msg = EmailMessage()
+    if raw_from is not None:
+        from_addr = raw_from
     bare_from = from_addr.rpartition('<')[2].rstrip('>') or from_addr
     bare_return_path = ses.return_path if ses.return_path is not None else bare_from
     msg['Return-Path'] = f'<{bare_return_path}>'
@@ -155,7 +164,7 @@ def build_email(
     for name, value in ses.extra:
         msg[name] = value
 
-    msg['From'] = from_addr
+    msg['From'] = _RAW_FROM_PLACEHOLDER if raw_from is not None else from_addr
     msg['To'] = to or ses.recipient
     msg['Subject'] = subject
     msg['Date'] = format_datetime(RECEIVED_DATE)
@@ -195,7 +204,12 @@ def build_email(
     if nested is not None:
         # `add_attachment` wants a message object: re-parse the bytes.
         msg.add_attachment(BytesParser(policy=policy.default).parsebytes(nested))
-    return msg.as_bytes()
+    data = msg.as_bytes()
+    if raw_from is not None:
+        line = f'From: {_RAW_FROM_PLACEHOLDER}'.encode()
+        assert data.count(line) == 1
+        data = data.replace(line, f'From: {raw_from}'.encode('utf-8'))
+    return data
 
 
 HTML_RECEIPT = (

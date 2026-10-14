@@ -60,7 +60,9 @@ def parse_allowlist(value: str | Iterable[str] | None) -> list[str]:
             domain = entry[2:]
             normalized = entry if _DOMAIN.match(domain) else ''
         else:
-            # A typed entry may be `Name <addr>` (a list item can hold spaces).
+            # An entry may be `Name <addr>`. Only a list item (the API, a JSON list) can hold the
+            # spaces of a display name: typed text was split on whitespace above, so there each
+            # piece is `Name`, `<addr>`... and `Name` is rejected as invalid.
             normalized = normalize_address(parseaddr(entry)[1] or entry)
             try:
                 validate_email(normalized)
