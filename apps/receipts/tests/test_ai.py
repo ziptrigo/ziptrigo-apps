@@ -118,6 +118,27 @@ class TestExtractedReceipt:
     def test_amount_with_thousands_separator(self):
         assert ExtractedReceipt.model_validate({'amount': '1,234.5'}).amount == Decimal('1234.50')
 
+    @pytest.mark.parametrize(
+        ('amount', 'expected'),
+        [
+            ('12,50', Decimal('12.50')),
+            ('12,345', Decimal('12345.00')),
+            (12.5, Decimal('12.50')),
+            (1234.56, Decimal('1234.56')),
+            ('1,23,4', None),
+            ('0,500', None),
+            ('0,050', None),
+            ('1.234,56', None),
+            ('-12,50', None),
+            ('-1,234', None),
+            ('-12.5', None),
+            ('12.345', Decimal('12.35')),  # half up, like a typed amount
+            ('12.344', Decimal('12.34')),
+        ],
+    )
+    def test_amount_commas(self, amount, expected):
+        assert ExtractedReceipt.model_validate({'amount': amount}).amount == expected
+
     def test_confidence_is_clamped(self):
         assert ExtractedReceipt.model_validate({'confidence': 7}).confidence == 1.0
         assert ExtractedReceipt.model_validate({'confidence': -1}).confidence == 0.0
