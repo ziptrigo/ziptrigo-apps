@@ -2021,7 +2021,7 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 
 ### Docker
 
-One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`),
+One `Dockerfile` (multi-stage: `uv sync --frozen --no-dev` in a builder, so no dev tools ship; venv copied to `python:3.14-slim`),
 shared by every service in `docker-compose.yml`: `web`, `worker`, `worker-receipts`, `scheduler` and `db` (that
 split is the local-development layout only; a deployment runs one container, below). The build
 runs `collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.local` is mounted

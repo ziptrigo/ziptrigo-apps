@@ -132,55 +132,6 @@ def read_env_file(environment: Environment) -> dict[str, str]:
     return read_env_file_from_path(PROJECT_ROOT / f'.env.{environment.value}')
 
 
-def select_environment(
-    environment: Environment | None = None,
-    set_env: bool = True,
-    **select_enum_kwargs,
-) -> Environment:
-    """
-    Select an environment and load its `.env` file into `os.environ`.
-
-    This project used to rely on `python-dotenv` for this. We keep the behavior (populate
-    `os.environ`) without depending on `python-dotenv`.
-    """
-
-    from textual_searchable_selectionlist.options import SelectionStrategy
-    from textual_searchable_selectionlist.select import select_enum
-
-    if environment:
-        env = Environment(environment)
-    else:
-        try:
-            selected = select_enum(
-                Environment,
-                selection_strategy=SelectionStrategy.ONE,
-                title='Environment',
-                select_by='value',
-                **select_enum_kwargs,
-            )
-        except Exception as e:
-            logger.error(f'Error selecting environment: {type(e).__name__}: {e}')
-            raise typer.Exit(1)
-
-        if not selected:
-            logger.error('No environment selected.')
-            raise typer.Exit(1)
-
-        env = selected[0]
-
-    if set_env:
-        logger.debug(f'Setting environment `{env.value}`')
-        os.environ['ENVIRONMENT'] = env.value
-
-        resolved_env_path = PROJECT_ROOT / f'.env.{env.value}'
-        env_values = read_env_file_from_path(resolved_env_path)
-        os.environ.update(env_values)
-    else:
-        logger.debug(f'Selected environment `{env.value}`')
-
-    return env
-
-
 def set_environment(environment: Environment | str | None = None) -> Environment:
     """Load the selected environment file into `os.environ`."""
     from .environment import select_env
