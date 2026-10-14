@@ -3,12 +3,15 @@ concern, no service function needed), disable, re-enable, extend/shorten expiry,
 downloads, change/remove password, resend a recipient's email, add recipients, delete now.
 """
 
-from datetime import datetime
+import math
+from collections.abc import Callable
+from datetime import datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.billing.services import InsufficientCreditsError, get_balance
+from apps.core import ratelimit
 
 from ..models import FileTransferSettings, Transfer, TransferRecipient, TransferStatus
 from . import limits
@@ -18,6 +21,31 @@ from .expiry_choices import resolve_expiry
 from .lifecycle import end_transfer
 from .metering import MIN_BALANCE_TO_REENABLE, reenable_transfer
 from .password import hash_password
+
+#: How long after a recipient was last emailed (the initial send, an add or a resend) before
+#: "Resend" will email them again. The per-user `FT_RECIPIENT_EMAIL_USER` budget bounds how much
+#: one account can send in total, but not at whom; this keeps one account from mail-bombing a
+#: single address with it (at most 6 an hour, rather than the whole budget).
+RESEND_COOLDOWN = timedelta(minutes=10)
+
+#: Called by `add_recipients` / `resend_recipient_email` with the number of emails about to be
+#: queued, after every check that can refuse the call and before anything is written or queued;
+#: it raises to stop them (see `charge_recipient_emails`).
+ChargeEmails = Callable[[int], None]
+
+
+def charge_recipient_emails(user, count: int) -> None:
+    """Spend `count` hits (one per email about to go out) of the per-user
+    `FT_RECIPIENT_EMAIL_USER` budget, shared by the dashboard and `/api/ft/`. Raises
+    `ratelimit.RateLimitExceeded` (with how long to wait) at the first hit over the limit; the
+    ones already made stay spent. Pass it to the service functions as `charge`, which call it only
+    once nothing else can refuse the request, so a refused one costs no budget."""
+    for _ in range(count):
+        result = ratelimit.hit_user(user, 'FT_RECIPIENT_EMAIL_USER')
+        if not result.allowed:
+            raise ratelimit.RateLimitExceeded(
+                retry_after=result.retry_after, message=ratelimit.retry_message(result.retry_after)
+            )
 
 
 class TransferHeldError(ValidationError):
@@ -134,7 +162,11 @@ def set_notify_on_download(transfer: Transfer, notify_on_download: bool) -> Tran
 
 
 def add_recipients(
-    transfer: Transfer, emails: list[str], *, ip: str | None = None
+    transfer: Transfer,
+    emails: list[str],
+    *,
+    ip: str | None = None,
+    charge: ChargeEmails | None = None,
 ) -> list[TransferRecipient]:
     """Add recipients to an existing transfer, subject to the same per-transfer cap as sending
     (spec section 6). Emails already on the transfer are left alone (not re-added, not re-sent
@@ -145,6 +177,11 @@ def add_recipients(
     checked against the block list (the owner's email, plus `ip` when the caller has it) exactly
     like starting a new one -- and refused outright while the transfer is on hold pending abuse
     review.
+
+    `charge` (the dashboard and the API pass one) is called with the number of new addresses, one
+    email each, once every other check has passed and before anything is created or queued: an
+    invalid or capped list, a hold or a block costs no budget, and a call over the budget emails
+    nobody. The budget therefore bounds emails sent, not calls made.
     """
     _require_actionable(transfer)
     _require_not_held(transfer)
@@ -162,6 +199,9 @@ def add_recipients(
             f'A transfer can have at most {settings_row.logged_in_max_recipients} recipients.'
         )
 
+    if charge is not None and new_emails:
+        charge(len(new_emails))
+
     now = timezone.now()
     created = [
         TransferRecipient.objects.create(transfer=transfer, email=email, last_sent_at=now)
@@ -173,16 +213,30 @@ def add_recipients(
 
 
 def resend_recipient_email(
-    recipient: TransferRecipient, *, ip: str | None = None
+    recipient: TransferRecipient, *, ip: str | None = None, charge: ChargeEmails | None = None
 ) -> TransferRecipient:
     """Resend a transfer notification to one existing recipient. Same send-path block/hold checks
     as `add_recipients` (issue #59 code review): resending is another way a blocked sender could
-    otherwise keep delivering mail through a transfer they already had running."""
+    otherwise keep delivering mail through a transfer they already had running.
+
+    Refused while the recipient was emailed less than `RESEND_COOLDOWN` ago (`last_sent_at`: set
+    by the initial send, by adding them and by every resend). That check and the others come
+    before `charge`, so a refused resend spends no budget."""
     transfer = recipient.transfer
     _require_actionable(transfer)
     _require_not_held(transfer)
     if transfer.owner is not None:
         check_not_blocked(email=transfer.owner.email, ip=ip)
+    if recipient.last_sent_at is not None:
+        wait = recipient.last_sent_at + RESEND_COOLDOWN - timezone.now()
+        if wait > timedelta(0):
+            minutes = max(1, math.ceil(wait.total_seconds() / 60))
+            unit = 'minute' if minutes == 1 else 'minutes'
+            raise ValidationError(
+                f'This recipient was emailed recently; you can resend in {minutes} {unit}.'
+            )
+    if charge is not None:
+        charge(1)
     recipient.last_sent_at = timezone.now()
     recipient.save(update_fields=['last_sent_at'])
     send_transfer_notification.enqueue(str(recipient.transfer_id), recipient.email)

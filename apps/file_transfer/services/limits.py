@@ -8,6 +8,7 @@ import binascii
 import unicodedata
 
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 
 from ..models import FileTransferSettings, Transfer, TransferFile
 
@@ -106,6 +107,12 @@ def _validate_recipients(emails: list[str], *, max_recipients: int) -> list[str]
             continue
         seen.add(key)
         deduped.append(email.strip())
+        # The web forms validate the format already; the JWT API passes raw strings straight
+        # through, so the service is where the same rule has to hold for both.
+        try:
+            validate_email(deduped[-1])
+        except ValidationError:
+            raise ValidationError(f'"{deduped[-1][:80]}" is not a valid email address.')
 
     if len(deduped) > max_recipients:
         raise ValidationError(f'A transfer can have at most {max_recipients} recipients.')

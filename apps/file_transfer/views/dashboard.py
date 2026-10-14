@@ -6,6 +6,8 @@ row rather than per-field, since the row's inputs reflect the transfer's current
 state rather than the just-submitted one.
 """
 
+from functools import partial
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -20,7 +22,6 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
 from apps.core.htmx import is_htmx
-from apps.core.ratelimit.responses import DEFAULT_MESSAGE
 from apps.core.services.client_ip import client_ip
 
 from .. import services
@@ -150,18 +151,16 @@ def _respond(
 
 
 def _recipient_email_limited(
-    request: AuthenticatedHttpRequest, transfer: Transfer
-) -> HttpResponse | None:
-    """Charge `FT_RECIPIENT_EMAIL_USER` (shared with the API) for an action that emails a
-    recipient; the 429 response if over it, else `None`. An htmx request gets the row back with
-    the message in it, not the bare rate-limit partial, which would replace the whole row."""
-    result = ratelimit.hit_user(request.user, 'FT_RECIPIENT_EMAIL_USER')
-    if result.allowed:
-        return None
+    request: AuthenticatedHttpRequest, transfer: Transfer, exc: ratelimit.RateLimitExceeded
+) -> HttpResponse:
+    """The 429 for an action that emailed nobody because `FT_RECIPIENT_EMAIL_USER` (shared with the
+    API) is spent. An htmx request gets the row back with the message in it, not the bare
+    rate-limit partial, which would replace the whole row."""
+    result = ratelimit.RateLimitResult(allowed=False, remaining=0, retry_after=exc.retry_after)
     if not is_htmx(request):
-        return ratelimit.page_response(request, result)
-    response = _row_response(request, transfer, error=DEFAULT_MESSAGE, status=429)
-    response['Retry-After'] = str(result.retry_after)
+        return ratelimit.page_response(request, result, exc.message)
+    response = _row_response(request, transfer, error=exc.message, status=429)
+    response['Retry-After'] = str(exc.retry_after)
     return response
 
 
@@ -238,10 +237,15 @@ def add_recipients(request: AuthenticatedHttpRequest, transfer_id: str) -> HttpR
     if not form.is_valid():
         return _respond(request, transfer, error=_form_error_text(form), status=422)
 
-    if limited := _recipient_email_limited(request, transfer):
-        return limited
     try:
-        services.add_recipients(transfer, form.cleaned_data['recipients'], ip=client_ip(request))
+        services.add_recipients(
+            transfer,
+            form.cleaned_data['recipients'],
+            ip=client_ip(request),
+            charge=partial(services.charge_recipient_emails, request.user),
+        )
+    except ratelimit.RateLimitExceeded as exc:
+        return _recipient_email_limited(request, transfer, exc)
     except ValidationError as exc:
         return _respond(request, transfer, error=exc.messages[0], status=422)
 
@@ -255,10 +259,14 @@ def resend_recipient(
 ) -> HttpResponse:
     transfer = _owned_transfer(request, transfer_id)
     recipient = get_object_or_404(TransferRecipient, id=recipient_id, transfer=transfer)
-    if limited := _recipient_email_limited(request, transfer):
-        return limited
     try:
-        services.resend_recipient_email(recipient, ip=client_ip(request))
+        services.resend_recipient_email(
+            recipient,
+            ip=client_ip(request),
+            charge=partial(services.charge_recipient_emails, request.user),
+        )
+    except ratelimit.RateLimitExceeded as exc:
+        return _recipient_email_limited(request, transfer, exc)
     except ValidationError as exc:
         return _respond(request, transfer, error=exc.messages[0], status=422)
     return _respond(request, transfer)

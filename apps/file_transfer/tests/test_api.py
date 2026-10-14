@@ -518,12 +518,22 @@ def test_add_recipients_and_resend(client, draft_transfer, uploaded_file, auth_h
     from ..models import TransferRecipient
 
     recipient = TransferRecipient.objects.get(transfer=draft_transfer, email='b@example.com')
-    resend_resp = _post(
-        client,
-        f'/api/ft/transfers/{draft_transfer.id}/recipients/{recipient.id}/resend',
-        {},
-        auth_headers,
-    )
+    resend_url = f'/api/ft/transfers/{draft_transfer.id}/recipients/{recipient.id}/resend'
+
+    # Just added, so a resend is refused until the cooldown has passed ...
+    too_soon = _post(client, resend_url, {}, auth_headers)
+    assert too_soon.status_code == 400
+    assert 'emailed recently' in too_soon.json()['detail']
+
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from ..services.actions import RESEND_COOLDOWN
+
+    recipient.last_sent_at = timezone.now() - RESEND_COOLDOWN - timedelta(seconds=1)
+    recipient.save()
+    resend_resp = _post(client, resend_url, {}, auth_headers)
     assert resend_resp.status_code == 200
 
 

@@ -590,9 +590,21 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   even from many IPs -- and the manage link), plus abuse reports (issue #59: `FT_REPORT_IP` strict
   per IP, `FT_REPORT_TRANSFER` a looser per-transfer ceiling, same split reasoning as the download
   password), and `FT_RECIPIENT_EMAIL_USER` (30/hour per user: "Resend" and "Add recipients" on an
-  existing transfer, web and `/api/ft/` sharing one budget, one hit per call, charged after the
-  form/ownership checks and before the service so a 429 queues no email; the htmx 429 re-renders the
-  dashboard row with the message rather than replacing it). `LOGIN_IP` (20/5 min) and `SIGNUP_IP` (5/hour) can
+  existing transfer, web and `/api/ft/` sharing one budget). It is charged **one hit per email
+  queued** (a resend is 1, an add is one per new address), so 30 is the most such emails an account
+  sends an hour, not calls. The charge is a `charge=` callback
+  (`services.actions.charge_recipient_emails`, bound to the user by the dashboard view and the API
+  endpoint) that `add_recipients` / `resend_recipient_email` call only after every other check
+  (actionable, held, blocked, address format and recipient cap, cooldown, "anything new") and
+  before anything is created or queued: a refusal costs no budget, and a call that does not fit
+  the budget emails nobody (a `RateLimitExceeded` whose message says "try again in N minutes",
+  built by `ratelimit.retry_message`; the htmx 429 re-renders the dashboard row with it rather
+  than replacing it). So a held transfer is a 409 (422 on the web) even when the budget is spent.
+  The budget bounds how much one account sends, not at whom: `services.actions.RESEND_COOLDOWN`
+  (10 min) refuses a resend (a `ValidationError`, 422/400) while the recipient's `last_sent_at`
+  (set by the initial send, an add and every resend) is newer, so one address gets at most 6 an
+  hour from a resend. `limits.validate_recipients` also checks the address format now (the JWT API
+  passed raw strings through). `LOGIN_IP` (20/5 min) and `SIGNUP_IP` (5/hour) can
   still legitimately bite a shared NAT/CGNAT/office IP; the `logger.info` above is there so that's
   visible if it becomes a real complaint, rather than tuned blind up front.
 - **The per-email-address-per-day cap** on email verification (`EMAIL_VERIFICATION_START_EMAIL`) is

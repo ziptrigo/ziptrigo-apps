@@ -30,7 +30,7 @@ Every rule referenced above (`'QR_REDIRECT_IP'`, `'LOGIN_IP'`, ...) is a name in
 and the reasoning behind each limit. `settings.RATELIMIT_ENABLE` is the project-wide kill switch.
 """
 
-from .exceptions import RateLimitExceeded, enforce
+from .exceptions import RateLimitExceeded, enforce, retry_message
 from .keys import (
     ahit_ip,
     ahit_value,
@@ -63,5 +63,6 @@ __all__ = [
     'peek',
     'peek_value',
     'purge_expired',
+    'retry_message',
     'web_response',
 ]

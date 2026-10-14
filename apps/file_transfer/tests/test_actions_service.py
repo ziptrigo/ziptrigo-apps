@@ -173,6 +173,72 @@ def test_resend_recipient_email_updates_last_sent_at(draft_transfer):
     assert recipient.last_sent_at is not None
 
 
+def test_resend_refused_during_cooldown_and_before_charge(draft_transfer):
+    _active(draft_transfer)
+    sent_at = timezone.now() - timedelta(minutes=3)
+    recipient = TransferRecipient.objects.create(
+        transfer=draft_transfer, email='a@example.com', last_sent_at=sent_at
+    )
+    charged: list[int] = []
+
+    with pytest.raises(ValidationError, match='emailed recently'):
+        actions.resend_recipient_email(recipient, charge=charged.append)
+
+    recipient.refresh_from_db()
+    assert charged == []  # a refused resend spends no budget
+    assert recipient.last_sent_at == sent_at
+
+
+def test_resend_allowed_after_cooldown_and_charges_one(draft_transfer):
+    _active(draft_transfer)
+    recipient = TransferRecipient.objects.create(
+        transfer=draft_transfer,
+        email='a@example.com',
+        last_sent_at=timezone.now() - actions.RESEND_COOLDOWN - timedelta(seconds=1),
+    )
+    charged: list[int] = []
+
+    actions.resend_recipient_email(recipient, charge=charged.append)
+
+    assert charged == [1]
+
+
+def test_add_recipients_charges_once_per_new_address(draft_transfer):
+    _active(draft_transfer)
+    TransferRecipient.objects.create(transfer=draft_transfer, email='a@example.com')
+    charged: list[int] = []
+
+    actions.add_recipients(
+        draft_transfer, ['a@example.com', 'B@example.com', 'c@example.com'], charge=charged.append
+    )
+
+    assert charged == [2]  # the existing address isn't emailed, so isn't charged
+
+
+def test_add_recipients_charge_failure_creates_nothing(draft_transfer):
+    _active(draft_transfer)
+
+    def refuse(count: int) -> None:
+        raise RuntimeError('over budget')
+
+    with pytest.raises(RuntimeError):
+        actions.add_recipients(draft_transfer, ['a@example.com'], charge=refuse)
+
+    assert not TransferRecipient.objects.filter(transfer=draft_transfer).exists()
+
+
+def test_add_recipients_does_not_charge_when_nothing_is_new_or_invalid(draft_transfer):
+    _active(draft_transfer)
+    TransferRecipient.objects.create(transfer=draft_transfer, email='a@example.com')
+    charged: list[int] = []
+
+    assert actions.add_recipients(draft_transfer, ['a@example.com'], charge=charged.append) == []
+    with pytest.raises(ValidationError, match='not a valid email'):
+        actions.add_recipients(draft_transfer, ['not-an-email'], charge=charged.append)
+
+    assert charged == []
+
+
 def test_actions_reject_ended_transfer(draft_transfer):
     _active(draft_transfer, status=TransferStatus.EXPIRED)
     with pytest.raises(ValidationError):
