@@ -8,6 +8,8 @@ from uuid import UUID
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
+from django.db.models.functions import Now
+from django.utils import timezone
 from django.utils.crypto import get_random_string
 
 from apps.accounts.models import User
@@ -231,6 +233,18 @@ class Transfer(models.Model):
     )
 
     created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
+    last_activity_at = cast(
+        datetime,
+        models.DateTimeField(
+            default=timezone.now,
+            # A database default as well, so the container still serving while the migration
+            # runs (it doesn't know the column) can keep inserting transfers (the #102 lesson).
+            db_default=Now(),
+            help_text='When the sender last did something to this draft (added, uploaded to, '
+            'resumed or removed a file). `jobs.cleanup_drafts` deletes a draft or unconfirmed '
+            'transfer once this is a day old.',
+        ),
+    )
     deleted_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     ended_at = cast(
         datetime | None,

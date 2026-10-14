@@ -3,10 +3,12 @@ confirmation (by code and by link), activation, and the per-IP-per-day caps.
 """
 
 import re
+from datetime import timedelta
 
 import pytest
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.core.services.email_verification import (
     EmailVerificationError,
@@ -28,7 +30,7 @@ from ..services.anonymous import (
     start_confirmation,
     validate_anonymous_send_options,
 )
-from ..services.uploads import add_file, complete_file_upload
+from ..services.uploads import DRAFT_REUSE_WINDOW, add_file, complete_file_upload
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -107,6 +109,19 @@ def test_get_or_create_anonymous_draft_reuses_empty_draft(anon_enabled):
     assert first.sender_ip == IP
     assert first.anon_cookie_id == COOKIE
     assert anon_session.owns_draft(session, first)
+
+
+def test_get_or_create_anonymous_draft_does_not_reuse_an_old_empty_draft(anon_enabled):
+    session = _session()
+    first = get_or_create_anonymous_draft(session, IP, COOKIE)
+    Transfer.objects.filter(pk=first.pk).update(
+        created_at=timezone.now() - DRAFT_REUSE_WINDOW - timedelta(minutes=1)
+    )
+
+    second = get_or_create_anonymous_draft(session, IP, COOKIE)
+
+    assert second.pk != first.pk
+    assert anon_session.owns_draft(session, second)
 
 
 def test_get_or_create_anonymous_draft_does_not_reuse_a_draft_with_files(

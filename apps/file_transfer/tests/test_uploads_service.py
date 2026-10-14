@@ -1,11 +1,13 @@
 import base64
 import hashlib
+from datetime import timedelta
 
 import pytest
 from botocore.exceptions import ClientError
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
-from ..models import TransferFile, TransferStatus
+from ..models import Transfer, TransferFile, TransferStatus
 from ..services import uploads
 from ..services.storage import PART_SIZE_BYTES, S3_MIN_PART_SIZE_BYTES
 
@@ -36,6 +38,17 @@ def test_get_or_create_draft_reuses_empty_draft(funded_user):
     first = uploads.get_or_create_draft(funded_user)
     second = uploads.get_or_create_draft(funded_user)
     assert first.pk == second.pk
+
+
+def test_get_or_create_draft_skips_an_old_empty_draft(draft_transfer):
+    """Reusing a day-old draft would hand back one `cleanup_drafts` is about to age out."""
+    Transfer.objects.filter(pk=draft_transfer.pk).update(
+        created_at=timezone.now() - uploads.DRAFT_REUSE_WINDOW - timedelta(minutes=1)
+    )
+
+    fresh = uploads.get_or_create_draft(draft_transfer.owner)
+
+    assert fresh.pk != draft_transfer.pk
 
 
 def test_get_or_create_draft_skips_a_draft_that_already_has_files(draft_transfer, fake_storage):

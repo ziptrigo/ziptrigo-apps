@@ -323,19 +323,113 @@ def test_meter_transfers_continues_past_a_single_failing_transfer(
     assert other.billed_days == 1
 
 
+def _idle_for(transfer, hours):
+    Transfer.objects.filter(pk=transfer.pk).update(
+        last_activity_at=timezone.now() - timedelta(hours=hours)
+    )
+
+
 def test_cleanup_drafts_removes_stale_drafts(draft_transfer, fake_storage):
     from ..services import uploads
 
     file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
-    Transfer.objects.filter(pk=draft_transfer.pk).update(
-        created_at=timezone.now() - timedelta(hours=25)
-    )
+    _idle_for(draft_transfer, 25)
 
     jobs.cleanup_drafts()
 
     draft_transfer.refresh_from_db()
     assert draft_transfer.status == TransferStatus.DELETED
     assert file.upload_id in fake_storage.aborted_uploads
+
+
+def test_cleanup_drafts_keeps_a_draft_opened_yesterday_but_active_today(
+    draft_transfer, fake_storage
+):
+    """A draft opened yesterday that is still being filled today is not aborted mid-upload."""
+    from ..services import uploads
+
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    Transfer.objects.filter(pk=draft_transfer.pk).update(
+        created_at=timezone.now() - timedelta(hours=30)
+    )
+    _idle_for(draft_transfer, 2)
+
+    jobs.cleanup_drafts()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DRAFT
+    assert file.upload_id not in fake_storage.aborted_uploads
+
+
+@pytest.mark.parametrize('action', ['presign', 'resume', 'complete', 'remove'])
+def test_upload_activity_keeps_a_draft_alive(action, draft_transfer, fake_storage):
+    """One big file can take longer than a day to upload without a new file ever being added:
+    presigning, resuming, completing or removing a file all count as activity."""
+    from ..services import uploads
+
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    _idle_for(draft_transfer, 30)
+    fake_storage.seed_object(file.storage_key, 10)
+
+    if action == 'presign':
+        uploads.presign_parts(
+            file, [{'part_number': 1, 'checksum_sha256': 'A' * 43 + '='}], storage=fake_storage
+        )
+    elif action == 'resume':
+        uploads.list_uploaded_parts(file, storage=fake_storage)
+    elif action == 'complete':
+        uploads.complete_file_upload(file, [{'PartNumber': 1, 'ETag': 'e'}], storage=fake_storage)
+    else:
+        uploads.remove_file(file, storage=fake_storage)
+
+    jobs.cleanup_drafts()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DRAFT
+
+
+def test_adding_a_file_counts_as_activity(draft_transfer, fake_storage):
+    from ..services import uploads
+
+    _idle_for(draft_transfer, 30)
+
+    uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+
+    draft_transfer.refresh_from_db()
+    assert timezone.now() - draft_transfer.last_activity_at < timedelta(minutes=1)
+
+
+def test_cleanup_drafts_does_not_abort_a_draft_touched_after_its_snapshot(
+    draft_transfer, fake_storage, monkeypatch
+):
+    """The job reads the stale drafts first and aborts them one at a time (S3 work in between): a
+    sender who uploads in that window keeps the draft."""
+    from ..services import uploads
+
+    file = uploads.add_file(draft_transfer, 'a.bin', 10, storage=fake_storage)
+    _idle_for(draft_transfer, 30)
+    real = jobs.abort_draft
+
+    def touched_meanwhile(transfer, **kwargs):
+        uploads.touch_draft(transfer.pk)
+        return real(transfer, **kwargs)
+
+    monkeypatch.setattr(jobs, 'abort_draft', touched_meanwhile)
+
+    jobs.cleanup_drafts()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DRAFT
+    assert file.upload_id not in fake_storage.aborted_uploads
+
+
+def test_cleanup_drafts_removes_an_old_empty_draft(draft_transfer, fake_storage):
+    _idle_for(draft_transfer, 25)
+
+    jobs.cleanup_drafts()
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.DELETED
 
 
 def test_cleanup_drafts_leaves_recent_drafts_alone(draft_transfer):
@@ -354,7 +448,7 @@ def test_cleanup_drafts_removes_stale_unconfirmed_anonymous_transfers(fake_stora
     Transfer.objects.filter(pk=transfer.pk).update(
         status=TransferStatus.PENDING_CONFIRMATION,
         sender_email='sender@example.com',
-        created_at=timezone.now() - timedelta(hours=25),
+        last_activity_at=timezone.now() - timedelta(hours=25),
     )
 
     jobs.cleanup_drafts()

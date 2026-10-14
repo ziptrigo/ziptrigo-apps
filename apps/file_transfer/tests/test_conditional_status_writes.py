@@ -445,7 +445,7 @@ def test_cleanup_drafts_does_not_delete_a_draft_sent_during_the_run(
     draft_transfer, uploaded_file, fake_storage, monkeypatch
 ):
     Transfer.objects.filter(pk=draft_transfer.pk).update(
-        created_at=timezone.now() - timedelta(hours=30)
+        last_activity_at=timezone.now() - timedelta(hours=30)
     )
     real = jobs.abort_draft
 

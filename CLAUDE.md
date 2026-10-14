@@ -878,8 +878,9 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
   the script asks for confirmation before letting the options form's htmx submit through
   (`htmx:confirm`) whenever one exists. The logged-in send page additionally has to solve
   identifying the *same draft* again across a reload -- `get_or_create_draft` deliberately never
-  reuses a draft that already has files (see its own docstring: that behaviour predates hydration
-  and stays as the default for a fresh, un-parameterized visit), so the moment a draft's first file
+  reuses a draft that already has files, nor an empty one older than `DRAFT_REUSE_WINDOW` (1 h; the
+  anonymous twin the same) -- see its own docstring: that behaviour predates hydration and stays as
+  the default for a fresh, un-parameterized visit, so the moment a draft's first file
   lands, the page adds `?resume=<draft id>` to its own URL with `history.replaceState` (no
   navigation); `send_page` picks that query param up and fetches that specific draft, files and
   all, serialized into the page (`{% ... |json_script %}`) for the script to rebuild its file list
@@ -2178,7 +2179,12 @@ the shared `BillingSettings` storage price, suspends, re-enables as a fallback -
 already suspended when the run started, never one it suspended itself --, deletes files past the
 suspension grace period),
 `expire_transfers` (every 5 min -- also finishes the deferred file deletion described above),
-`cleanup_drafts` (hourly), `purge_download_ips` (daily). Each wraps its per-transfer work in
+`cleanup_drafts` (hourly; deletes a draft or unconfirmed transfer idle for 24 h, i.e.
+`Transfer.last_activity_at`, which `uploads.touch_draft` bumps on add/presign/resume/complete/remove
+file -- a column with a `db_default`, so an old container keeps inserting; `abort_draft`'s claim
+re-checks the idleness via `only_if`, so a draft touched after the job's snapshot is kept),
+`purge_download_ips` (daily). Each wraps its
+per-transfer work in
 `try`/`except Exception: logger.exception(...)` so one bad row can't abort the rest of that run's
 batch the way an uncaught exception would (which, since `last_started_at` is already stamped by
 the time the job's `func` runs, would otherwise leave every other transfer waiting a full extra

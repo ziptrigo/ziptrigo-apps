@@ -40,6 +40,7 @@ from .emails import send_transfer_notification
 from .expiry_choices import resolve_expiry_anonymous
 from .lifecycle import end_transfer
 from .password import hash_password
+from .uploads import DRAFT_REUSE_WINDOW
 
 
 @dataclass(slots=True)
@@ -56,11 +57,17 @@ class AnonymousSendOptions:
 def get_or_create_anonymous_draft(session: SessionBase, ip: str | None, cookie_id: str) -> Transfer:
     """Like `services.uploads.get_or_create_draft`, but session- rather than user-owned: reuse
     this session's current draft if it's still empty, otherwise start a new one (with its own
-    fresh per-draft token, remembered in `session` -- see `services.anon_session`)."""
+    fresh per-draft token, remembered in `session` -- see `services.anon_session`). Like the
+    logged-in one it is reused only while younger than `uploads.DRAFT_REUSE_WINDOW`."""
     current_id = anon_session.current_draft_id(session)
     if current_id:
         existing = (
-            Transfer.objects.filter(pk=current_id, owner__isnull=True, status=TransferStatus.DRAFT)
+            Transfer.objects.filter(
+                pk=current_id,
+                owner__isnull=True,
+                status=TransferStatus.DRAFT,
+                created_at__gte=timezone.now() - DRAFT_REUSE_WINDOW,
+            )
             .annotate(_file_count=Count('files'))
             .filter(_file_count=0)
             .first()
