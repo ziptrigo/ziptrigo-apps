@@ -5,6 +5,7 @@ from .management import (
     render_preview,
     short_url,
     validate_content,
+    validate_render_options,
 )
 from .qrcode import QRCodeGenerator
 
@@ -16,4 +17,5 @@ __all__ = [
     'render_preview',
     'short_url',
     'validate_content',
+    'validate_render_options',
 ]
