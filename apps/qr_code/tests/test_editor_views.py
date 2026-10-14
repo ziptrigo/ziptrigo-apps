@@ -235,3 +235,32 @@ class TestDelete:
         assert response.status_code == 404
         qr_code.refresh_from_db()
         assert qr_code.deleted_at is None
+
+
+class TestTooBigToEncode:
+    """1,000 emoji are within the character cap but fit no QR code (they are bytes)."""
+
+    def test_create_is_a_422_and_saves_nothing(self, logged_in_client):
+        response = logged_in_client.post(
+            reverse('qr_code:create-submit'), _create_data(url='😀' * 1000), **HTMX
+        )
+
+        assert response.status_code == 422
+        assert 'too long for a QR code' in response.content.decode()
+        assert not QRCode.objects.exists()
+
+    def test_preview_is_a_422(self, logged_in_client):
+        response = logged_in_client.post(
+            reverse('qr_code:preview'), _create_data(url='😀' * 1000), **HTMX
+        )
+
+        assert response.status_code == 422
+        assert 'too long for a QR code' in response.content.decode()
+
+    def test_shortened_preview_without_an_issued_code_is_a_422_not_a_500(self, logged_in_client):
+        data = _create_data(qr_type='url', url='https://example.com/' + '😀' * 900)
+        response = logged_in_client.post(
+            reverse('qr_code:preview'), data | {'use_url_shortening': 'true'}, **HTMX
+        )
+
+        assert response.status_code == 422

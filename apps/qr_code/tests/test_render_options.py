@@ -20,6 +20,14 @@ BAD_RENDER_OPTIONS = [
     {'foreground_color': '#GGGGGG'},
     {'foreground_color': '"><script>'},
     {'foreground_color': 'x' * 20},
+    {'foreground_color': '"><script>', 'qr_format': 'svg'},
+    # Each is fine alone; together segno raises while rendering a PNG.
+    {'foreground_color': 'transparent', 'background_color': 'transparent'},
+    # A PDF draws a transparent background but not a transparent foreground.
+    {'foreground_color': 'transparent', 'qr_format': 'pdf'},
+    # 4-byte characters: within the 1,000 character cap, but over every capacity.
+    {'data': '😀' * 1000},
+    {'data': '中' * 1000, 'error_correction': 'H'},
 ]
 
 
@@ -80,6 +88,58 @@ def test_services_raise_before_anything_is_saved(user, call):
     with pytest.raises(ValidationError):
         getattr(services, call)(
             user, qr_type=QRCodeType.TEXT, content='hello', qr_format='png', size=10_000
+        )
+
+    assert not QRCode.objects.exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('path', ['/api/qr/', '/api/qr/preview'])
+def test_pdf_with_a_transparent_background_works(client, auth_headers, path):
+    response = _post(client, auth_headers, path, qr_format='pdf', background_color='transparent')
+
+    assert response.status_code in (200, 201)
+
+
+@pytest.mark.integration
+def test_both_transparent_is_fine_where_segno_can_draw_it(client, auth_headers):
+    response = _post(
+        client,
+        auth_headers,
+        '/api/qr/',
+        qr_format='svg',
+        foreground_color='transparent',
+        background_color='transparent',
+    )
+
+    assert response.status_code == 201
+
+
+@pytest.mark.integration
+def test_a_long_url_fits_once_shortened(client, auth_headers):
+    """A shortened code encodes the short link, so only that has to fit."""
+    url = 'https://example.com/' + 'ü' * 900  # too big for H on its own
+    response = _post(
+        client,
+        auth_headers,
+        '/api/qr/',
+        qr_type='url',
+        data=url,
+        use_url_shortening=True,
+        error_correction='H',
+    )
+
+    assert response.status_code == 201
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('field', ['foreground_color', 'background_color'])
+def test_a_colour_longer_than_the_column_is_refused_by_the_service(user, field):
+    """The API schema stops it with a 422 first; the service must not rely on that."""
+    options: dict = {field: 'x' * 21}
+    with pytest.raises(ValidationError):
+        services.render_preview(
+            user, qr_type=QRCodeType.TEXT, content='hello', qr_format='png', **options
         )
 
     assert not QRCode.objects.exists()

@@ -8,6 +8,7 @@ session until the QR code is saved, so users can't pick their own.
 """
 
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -61,11 +62,17 @@ def qrcode_create_submit(request: AuthenticatedHttpRequest) -> HttpResponse:
     if not form.is_valid():
         return _errors(request, form)
 
-    services.create_qrcode(
-        request.user,
-        short_code=request.session.pop(SHORT_CODE_SESSION_KEY, None),
-        **form.qrcode_fields(),
-    )
+    try:
+        services.create_qrcode(
+            request.user,
+            short_code=request.session.get(SHORT_CODE_SESSION_KEY),
+            **form.qrcode_fields(),
+        )
+    except ValidationError as e:
+        # Something only the service can see, e.g. a payload that doesn't fit once encoded.
+        form.add_error(None, e)
+        return _errors(request, form)
+    request.session.pop(SHORT_CODE_SESSION_KEY, None)
     return hx_redirect(request, reverse('qr_code:dashboard'))
 
 
@@ -98,9 +105,13 @@ def qrcode_preview(request: AuthenticatedHttpRequest) -> HttpResponse:
     if not form.is_valid():
         return _errors(request, form)
 
-    image_url = services.render_preview(
-        request.user,
-        short_code=request.session.get(SHORT_CODE_SESSION_KEY),
-        **form.qrcode_fields(),
-    )
+    try:
+        image_url = services.render_preview(
+            request.user,
+            short_code=request.session.get(SHORT_CODE_SESSION_KEY),
+            **form.qrcode_fields(),
+        )
+    except ValidationError as e:
+        form.add_error(None, e)
+        return _errors(request, form)
     return render(request, 'qr_code/partials/preview_image.html', {'image_url': image_url})

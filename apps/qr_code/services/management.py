@@ -32,9 +32,11 @@ MAX_CONTENT_LENGTH = 1000
 # let one request use gigabytes. The editor and the model default use 10 and 4.
 MIN_SIZE, MAX_SIZE = 1, 50
 MIN_BORDER, MAX_BORDER = 0, 20
-MAX_COLOR_LENGTH = 20  # QRCode.background_color / foreground_color max_length
+# ty can't see Django's `_meta`; this is the colour columns' max_length.
+MAX_COLOR_LENGTH = QRCode._meta.get_field('foreground_color').max_length or 0  # ty: ignore[unresolved-attribute]
 
-SHORT_CODE_PATTERN = re.compile(r'^[A-Za-z0-9]{4,16}\Z')
+MAX_SHORT_CODE_LENGTH = 16
+SHORT_CODE_PATTERN = re.compile(rf'^[A-Za-z0-9]{{4,{MAX_SHORT_CODE_LENGTH}}}\Z')
 
 
 def validate_content(qr_type: str, content: str) -> None:
@@ -55,12 +57,16 @@ def validate_content(qr_type: str, content: str) -> None:
 
 
 def _check_color(color: str, field: str, qr_format: str, *, dark: bool) -> None:
-    """Raise unless segno can draw with ``color`` in ``qr_format`` (names, hex, `transparent`)."""
+    """Raise unless segno can draw with ``color`` in ``qr_format`` (names, hex, `transparent`).
+
+    Checked on its own, with the other colour fixed, only to name the offending field; the pair
+    is checked together by `validate_render_options`.
+    """
     if not isinstance(color, str) or not 0 < len(color) <= MAX_COLOR_LENGTH:
         raise ValidationError(f'Please choose a valid {field}.')
     # Ask segno itself (the same parsing the real render does) with a tiny code, so what passes
     # here is exactly what it will accept later.
-    value = None if color.lower() == 'transparent' else color
+    value = QRCodeGenerator._parse_color(color)
     colors = {'dark': value, 'light': 'white'} if dark else {'dark': 'black', 'light': value}
     try:
         segno.make('0', micro=False).save(io.BytesIO(), kind=qr_format, **colors)
@@ -68,13 +74,39 @@ def _check_color(color: str, field: str, qr_format: str, *, dark: bool) -> None:
         raise ValidationError(f'Please choose a valid {field} for a {qr_format.upper()} image.')
 
 
-def validate_render_options(qrcode: QRCode) -> None:
+def _make(content: str, error_correction: str) -> Any:
+    """`segno.make` exactly as the generator calls it; a too-big payload is a `ValidationError`.
+
+    `MAX_CONTENT_LENGTH` counts characters but a QR code holds bytes: 1,000 emoji (4 bytes each)
+    fit at no error-correction level.
+    """
+    try:
+        return segno.make(content, error=error_correction, micro=False)
+    except segno.DataOverflowError:
+        raise ValidationError(
+            'That is too long for a QR code at this error correction level. '
+            'Please shorten it or choose a lower error correction level.'
+        )
+
+
+def check_content_fits(content: str, error_correction: str) -> None:
+    """Raise `ValidationError` unless ``content`` fits a QR code at ``error_correction``."""
+    _make(content, error_correction)
+
+
+def validate_render_options(qrcode: QRCode, encoded: str | None = None) -> None:
     """Check the image options (size, border, format, error correction, colours) of ``qrcode``.
 
-    Checked before anything is saved or rendered, for the web editor and the API alike.
+    Checked before anything is saved or rendered, for the web editor and the API alike. Ends with
+    one dry render of what will really be encoded (``encoded``, default ``qrcode.content``; with
+    URL shortening that is the `/go/<code>` link, not the original URL) with the real format,
+    error correction and *both* colours, as the generator calls it (scale 1, no border: the
+    bounds above keep the real ones safe and this stays cheap), because some combinations fail
+    only together (both colours `transparent`) and the content may not fit at all.
 
     Raises:
-        ValidationError: If an option is out of range or not one segno can render.
+        ValidationError: If an option is out of range, not one segno can render, or the content
+            doesn't fit.
     """
     if qrcode.qr_format not in QRCodeFormat.values:
         raise ValidationError(f'Please choose a format: {", ".join(QRCodeFormat.values)}.')
@@ -88,6 +120,22 @@ def validate_render_options(qrcode: QRCode) -> None:
         raise ValidationError(f'Please keep the border between {MIN_BORDER} and {MAX_BORDER}.')
     _check_color(qrcode.background_color, 'background color', qrcode.qr_format, dark=False)
     _check_color(qrcode.foreground_color, 'foreground color', qrcode.qr_format, dark=True)
+
+    qr = _make(qrcode.content if encoded is None else encoded, qrcode.error_correction)
+    try:
+        qr.save(
+            io.BytesIO(),
+            kind=qrcode.qr_format,
+            scale=1,
+            border=0,
+            dark=QRCodeGenerator._parse_color(qrcode.foreground_color),
+            light=QRCodeGenerator._parse_color(qrcode.background_color),
+        )
+    except ValueError, TypeError, AttributeError, IndexError:
+        raise ValidationError(
+            f'Please choose colors that work together in a {qrcode.qr_format.upper()} image: '
+            'the foreground and the background can not both be transparent.'
+        )
 
 
 def is_short_code_available(short_code: str) -> bool:
@@ -151,7 +199,10 @@ def create_qrcode(
         use_url_shortening=use_url_shortening,
         **fields,
     )
-    validate_render_options(qrcode)
+    # The code encodes the short link, not the original URL. Its short code isn't chosen yet, so
+    # check against the longest one a request can name.
+    encoded = short_url('0' * MAX_SHORT_CODE_LENGTH) if use_url_shortening else content
+    validate_render_options(qrcode, encoded)
     requested = (
         short_code
         if use_url_shortening and short_code and is_short_code_available(short_code)
@@ -197,8 +248,8 @@ def render_preview(
     """
     validate_content(qr_type, content)
     qrcode = QRCode(id=uuid.uuid4(), created_by=user, qr_type=qr_type, content=content, **fields)
-    validate_render_options(qrcode)
     if use_url_shortening and qr_type == QRCodeType.URL and short_code:
         qrcode.content = short_url(short_code)
+    validate_render_options(qrcode)
 
     return QRCodeGenerator.render_png_data_uri(qrcode)

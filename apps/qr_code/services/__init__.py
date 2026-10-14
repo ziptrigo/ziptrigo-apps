@@ -1,4 +1,5 @@
 from .management import (
+    check_content_fits,
     create_qrcode,
     is_short_code_available,
     new_short_code,
@@ -10,6 +11,7 @@ from .management import (
 from .qrcode import QRCodeGenerator
 
 __all__ = [
+    'check_content_fits',
     'QRCodeGenerator',
     'create_qrcode',
     'is_short_code_available',
