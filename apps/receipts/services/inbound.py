@@ -109,6 +109,12 @@ logger = logging.getLogger(__name__)
 POLL_BATCH = 100
 #: A `pending` message nobody has claimed for this long was probably never queued.
 PENDING_STALE_AFTER = timedelta(minutes=10)
+
+#: A `done` message that produced no `InboundEmail` (mail for an unknown or retired code, a
+#: message nobody wanted) is only a bookkeeping row; it is deleted after this long. One that did
+#: produce an email stays, since the user sees that email (and deleting the message would cascade).
+DONE_MESSAGE_RETENTION = timedelta(days=30)
+PURGE_BATCH = 1000
 #: Don't queue the same message again within this window (a slow queue would otherwise collect a
 #: duplicate task per message per poll).
 REQUEUE_THROTTLE = timedelta(minutes=5)
@@ -175,6 +181,25 @@ def poll() -> None:
         except Exception:
             logger.exception('Could not handle inbound key %s', key)
     _requeue_due()
+
+
+def purge_done_messages() -> int:
+    """Delete `done` messages older than `DONE_MESSAGE_RETENTION` that have no `InboundEmail`, in
+    batches. `pending` and `failed` ones are never touched (a failed one is parked for the admin to
+    retry). Idempotent; returns how many rows went."""
+    cutoff = timezone.now() - DONE_MESSAGE_RETENTION
+    total = 0
+    while True:
+        ids = list(
+            InboundMessage.objects.filter(
+                status=InboundMessageStatus.DONE, created_at__lte=cutoff, emails__isnull=True
+            ).values_list('pk', flat=True)[:PURGE_BATCH]
+        )
+        if not ids:
+            return total
+        # Re-check "no emails" in the delete itself: the FK cascades, and a row that gained an
+        # email since the read above must not take it along.
+        total += InboundMessage.objects.filter(pk__in=ids, emails__isnull=True).delete()[0]
 
 
 def _register(key: str) -> None:

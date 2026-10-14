@@ -66,6 +66,14 @@ class ReceiptsConfig(AppConfig):
         )
         register_job(
             JobSpec(
+                name='receipts.purge_inbound_messages',
+                func=jobs.purge_inbound_messages,
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+        register_job(
+            JobSpec(
                 name='receipts.link_vendors',
                 func=jobs.link_vendors,
                 interval=timedelta(hours=1),

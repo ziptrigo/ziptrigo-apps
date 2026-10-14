@@ -1554,7 +1554,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
   `receipts.cleanup_uploads` (hourly), `receipts.poll_inbound` (every minute, 2 min lease; see
-  "Email intake" below), `receipts.link_vendors` (hourly; links receipts with a vendor text and no
+  "Email intake" below), `receipts.purge_inbound_messages` (daily; deletes `done` `InboundMessage` rows older than 30 days
+  that have no `InboundEmail`, i.e. mail for unknown/retired codes; `pending`/`failed` and ones with
+  emails stay), `receipts.link_vendors` (hourly; links receipts with a vendor text and no
   vendor, see "Vendors"). Idempotent, per-row `try/except` + `logger.exception`.
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
   `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
@@ -2001,6 +2003,13 @@ future app:
   Postgres connection** when the scheduler is enabled (3 by default).
   `./manage.py run_scheduler` remains for local development (the `scheduler` compose service) or a
   dedicated container; job status is a read-only `ScheduledJob` admin.
+
+`core`'s jobs (`apps/core/jobs.py`) let exceptions propagate (the runner records them in
+`ScheduledJob.last_error`; a swallowed one would show as a success). Besides the email-verification and
+rate-limit purges, two daily ones keep tables from growing forever (audit #18):
+`core.purge_old_task_results` (finished `DBTaskResult` rows past `TASK_RESULT_RETENTION`, 14 days,
+in batches; ready/running rows never) and `core.clear_expired_sessions` (`SESSION_ENGINE`'s
+`SessionStore.clear_expired()`; nothing else purges `django_session`).
 
 `file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers

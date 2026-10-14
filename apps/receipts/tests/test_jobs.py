@@ -10,10 +10,17 @@ from apps.billing.services import get_balance
 from apps.core.scheduler import get_jobs
 
 from .. import jobs
-from ..models import InboundEmail, Receipt, ReceiptsAccount, ReceiptStatus
+from ..models import (
+    InboundEmail,
+    InboundMessage,
+    InboundMessageStatus,
+    Receipt,
+    ReceiptsAccount,
+    ReceiptStatus,
+)
 from ..services import processing
 from ..services.accounts import get_account
-from .factories import create_inbound_email, create_receipt
+from .factories import create_inbound_email, create_receipt, make_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -33,6 +40,7 @@ def test_the_jobs_are_registered_with_the_scheduler():
         'receipts.cleanup_uploads',
         'receipts.poll_inbound',
         'receipts.link_vendors',
+        'receipts.purge_inbound_messages',
     }
     assert specs['receipts.meter_storage'].interval == timedelta(hours=24)
     assert specs['receipts.purge_trash'].interval == timedelta(hours=24)
@@ -504,3 +512,33 @@ class TestPollInbound:
 class _NoopTask:
     def enqueue(self, *args):
         pass
+
+
+def _message(status: str, age_days: int) -> InboundMessage:
+    message = InboundMessage.objects.create(
+        s3_key=f'receipts/inbound/{status}-{age_days}-{InboundMessage.objects.count()}',
+        status=status,
+    )
+    InboundMessage.objects.filter(pk=message.pk).update(
+        created_at=timezone.now() - timedelta(days=age_days)
+    )
+    return message
+
+
+def test_purge_inbound_messages_deletes_only_old_done_messages_without_emails():
+    old_done = _message(InboundMessageStatus.DONE, 31)
+    recent_done = _message(InboundMessageStatus.DONE, 5)
+    old_pending = _message(InboundMessageStatus.PENDING, 90)
+    old_failed = _message(InboundMessageStatus.FAILED, 90)
+    with_email = _message(InboundMessageStatus.DONE, 90)
+    email = InboundEmail.objects.create(
+        user=make_user(), message=with_email, recipient='receipts+abcd2345@ziptrigo.com'
+    )
+
+    jobs.purge_inbound_messages()
+    jobs.purge_inbound_messages()  # idempotent
+
+    assert not InboundMessage.objects.filter(pk=old_done.pk).exists()
+    kept = set(InboundMessage.objects.values_list('pk', flat=True))
+    assert kept == {recent_done.pk, old_pending.pk, old_failed.pk, with_email.pk}
+    assert InboundEmail.objects.filter(pk=email.pk).exists()
