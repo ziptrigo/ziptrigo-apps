@@ -7,6 +7,7 @@ Exercises the same services the web send/dashboard flow does, just through
 import base64
 import hashlib
 import json
+from datetime import timedelta, timezone
 
 import pytest
 
@@ -146,6 +147,108 @@ def test_finalize_validation_error_returns_400(client, draft_transfer, uploaded_
     )
     assert response.status_code == 400
     assert response.json()['detail']
+
+
+def test_finalize_rejects_a_recipient_that_is_not_an_email(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    response = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/send',
+        {'recipients': ['not an email'], 'expiry_choice': 'none'},
+        auth_headers,
+    )
+
+    assert response.status_code == 400
+
+
+def _future(**kwargs):
+    from django.utils import timezone as dj_timezone
+
+    return (dj_timezone.now() + timedelta(**kwargs)).replace(microsecond=0)
+
+
+def test_finalize_custom_expiry_without_a_timezone_is_read_as_utc(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    """pydantic parses "2027-12-31T00:00:00" as a naive datetime; comparing it with an aware
+    `now` used to raise `TypeError` (a 500)."""
+    naive = _future(days=10).replace(tzinfo=None)
+
+    response = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/send',
+        {
+            'recipients': ['a@example.com'],
+            'expiry_choice': 'custom',
+            'expiry_date': naive.isoformat(),
+        },
+        auth_headers,
+    )
+
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == naive.replace(tzinfo=timezone.utc)
+
+
+def test_finalize_custom_expiry_in_the_past_without_a_timezone_returns_400(
+    client, draft_transfer, uploaded_file, auth_headers
+):
+    naive = _future(days=-1).replace(tzinfo=None)
+
+    response = _post(
+        client,
+        f'/api/ft/transfers/{draft_transfer.id}/send',
+        {
+            'recipients': ['a@example.com'],
+            'expiry_choice': 'custom',
+            'expiry_date': naive.isoformat(),
+        },
+        auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert 'future' in response.json()['detail']
+
+
+def test_update_custom_expiry_naive_and_aware(client, draft_transfer, uploaded_file, auth_headers):
+    from ..services.send import SendOptions, finalize_send
+
+    finalize_send(draft_transfer, SendOptions(recipients=['a@example.com']))
+    url = f'/api/ft/transfers/{draft_transfer.id}'
+
+    naive = _future(days=20).replace(tzinfo=None)
+    response = _patch(
+        client,
+        url,
+        {'expiry_choice': 'custom', 'expiry_date': naive.isoformat()},
+        auth_headers,
+    )
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == naive.replace(tzinfo=timezone.utc)
+
+    aware = _future(days=30).astimezone(timezone(timedelta(hours=2)))
+    response = _patch(
+        client,
+        url,
+        {'expiry_choice': 'custom', 'expiry_date': aware.isoformat()},
+        auth_headers,
+    )
+    assert response.status_code == 200
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == aware
+
+    past = _future(days=-1).replace(tzinfo=None)
+    response = _patch(
+        client,
+        url,
+        {'expiry_choice': 'custom', 'expiry_date': past.isoformat()},
+        auth_headers,
+    )
+    assert response.status_code == 400
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.expires_at == aware
 
 
 def test_finalize_insufficient_credits_returns_402(

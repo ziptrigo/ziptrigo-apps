@@ -36,6 +36,10 @@ def resolve_expiry(choice: str, custom_date: datetime | None = None) -> datetime
     if choice == CUSTOM_CHOICE:
         if not custom_date:
             raise ValidationError('Provide an expiry date.')
+        if timezone.is_naive(custom_date):
+            # An API client's "2027-12-31T00:00:00" has no offset; read it in the current time
+            # zone (settings.TIME_ZONE, UTC) rather than failing to compare it with an aware now.
+            custom_date = timezone.make_aware(custom_date)
         if custom_date <= timezone.now():
             raise ValidationError('Expiry date must be in the future.')
         return custom_date
