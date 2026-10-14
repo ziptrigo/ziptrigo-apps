@@ -81,6 +81,7 @@ from django.tasks import task
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.core.services.queue import enqueue_after_commit
 from apps.core.services.storage import ObjectTooLargeError
 
 from ..models import (
@@ -100,7 +101,6 @@ from .accounts import add_stored_bytes, intake_slots_remaining, take_intake_slot
 from .addresses import matches_allowlist
 from .errors import DailyLimitExceededError
 from .processing import enqueue_processing
-from .queue import enqueue_after_commit
 from .storage import INBOUND_PREFIX, email_key, failed_key_for, file_key, get_storage
 
 logger = logging.getLogger(__name__)

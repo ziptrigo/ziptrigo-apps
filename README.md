@@ -87,7 +87,7 @@ apps/<app>/
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
-| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/users/…`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…` |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…` |
 | `/admin/` | Django admin (Jazzmin) |
 
 ### Dependency rules

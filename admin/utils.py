@@ -1,9 +1,7 @@
 import logging
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
-from enum import Enum
 from itertools import chain
 from pathlib import Path
 from typing import Annotated, Any
@@ -28,14 +26,6 @@ DryAnnotation = Annotated[
         show_default=False,
     ),
 ]
-
-
-class OS(str, Enum):
-    """Operating System."""
-
-    Linux = 'linux'
-    MacOS = 'mac'
-    Windows = 'win'
 
 
 class NoHighlightRichHandler(RichHandler):
@@ -128,10 +118,6 @@ def write_private_file(path: Path, text: str) -> None:
         fh.write(text)
 
 
-def read_env_file(environment: Environment) -> dict[str, str]:
-    return read_env_file_from_path(PROJECT_ROOT / f'.env.{environment.value}')
-
-
 def select_environment(
     environment: Environment | None = None,
     set_env: bool = True,
@@ -202,20 +188,6 @@ def set_environment(environment: Environment | str | None = None) -> Environment
     return selection.environment
 
 
-def get_os() -> OS:
-    """
-    Similar to `sys.platform` and `platform.system()`, but less ambiguous by returning an Enum
-    instead of a string.
-
-    Doesn't make granular distinctions of linux variants, OS versions, etc.
-    """
-    if sys.platform == 'darwin':
-        return OS.MacOS
-    if sys.platform == 'win32':
-        return OS.Windows
-    return OS.Linux
-
-
 def run(
     *args, dry: bool = False, strip_output: StripOutput | None = StripOutput(), **kwargs
 ) -> subprocess.CompletedProcess | None:
@@ -268,60 +240,6 @@ def run(
         result.stderr = strip_output.strip(result.stderr)
 
     return result
-
-
-def run_async(*args, dry: bool = False, **kwargs) -> subprocess.Popen | None:
-    """
-    Starts the process and continues code execution.
-
-    Use the following checks::
-
-        process.poll()              # Returns None if still running, else return code
-        process.wait()              # Wait for completion (blocking)
-        process.terminate()         # Send SIGTERM (graceful)
-        process.kill()              # Send SIGKILL (force)
-        process.returncode          # Access return code after completion
-
-    See `subprocess.Popen(...)` for more details.
-    """
-    logger.info(' '.join(map(str, args)))
-
-    if dry:
-        return None
-
-    defaults = dict(
-        cwd=PROJECT_ROOT,
-    )
-    # Same `dict`-merge overload-resolution limitation as `run()` above, not a real bug.
-    final_kwargs: dict[str, Any] = defaults | kwargs
-
-    try:
-        return subprocess.Popen(args, **final_kwargs)
-    except subprocess.CalledProcessError as e:
-        logger.error(e)
-        raise typer.Exit(1)
-
-
-def is_package_installed(package_name: str) -> bool:
-    """Check if a Python package is installed."""
-    import importlib.util
-
-    return importlib.util.find_spec(package_name) is not None
-
-
-def install_package(package: str, package_install: str | None = None, dry: bool = False):
-    """
-    Install a Python package if not already installed.
-
-    :param package: Name of the package to check/install.
-    :param package_install: Name of the package to install, if different from the name to check.
-    :param dry: Show the command that would be run without running it.
-    """
-    if is_package_installed(package):
-        logger.debug(f'Package `{package}` is already installed.')
-        return
-
-    run(sys.executable, '-m', 'pip', 'install', package_install or package, dry=dry)
 
 
 def multiple_parameters(parameter: str, *options) -> list[str]:

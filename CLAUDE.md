@@ -821,7 +821,7 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
 
 - **Web**: `send.html`/`anon_send.html` share one script,
   `apps/file_transfer/static/file_transfer/js/resumable_upload.js`, since both pages upload the
-  same way and need the same resume-matching logic. The same file's `initDropZone` makes each page's drop zone accept dropped files *and* folders (walked recursively, flat like the "Add folder" picker), feeding the same `handleFileSelection`. Presigned part URLs are requested a small batch
+  same way and need the same resume-matching logic. `initDropZone`, shared with the Receipts upload page and loaded before it from `apps/core/static/core/js/drop_zone.js`, makes each page's drop zone accept dropped files *and* folders (walked recursively, flat like the "Add folder" picker), feeding the same `handleFileSelection`. Presigned part URLs are requested a small batch
   at a time (`PART_URL_BATCH_SIZE`) rather than for the whole file up front, so a later part's URL
   on a slow connection doesn't sit long enough to expire before it's used; the same batching (plus
   streaming the file a part at a time rather than holding it all in memory) applies to the CLI's
@@ -1843,7 +1843,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     way. A frozen account gets a 402 notice (with the same headers), a missing object a 404 notice,
     a body over `MAX_BODY_BYTES` a 413.
   - **Upload** (`views/uploads.py`, `static/receipts/js/upload.js`): drop zone (files and folders,
-    copied from file_transfer's `initDropZone`), "Choose files" and "Take photo" (`accept="image/*"
+    core's shared `initDropZone`, `core/js/drop_zone.js`, with the empty-drop alert turned off), "Choose files" and "Take photo" (`accept="image/*"
     capture="environment"`). Per file: refuse an unsupported type/size/empty file in the row; the
     browser computes SHA-256 (base64); `POST upload/start/` (session + CSRF, JSON in/out,
     `RECEIPTS_UPLOAD_USER`; 422 rejected, 402 frozen, 429 waits for `Retry-After` up to 3 times) ->

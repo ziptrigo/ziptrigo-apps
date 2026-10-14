@@ -81,6 +81,7 @@
 </div>
 
 {{ existing_files|json_script:"existing-files-data" }}
+<script src="{% static 'core/js/drop_zone.js' %}"></script>
 <script src="{% static 'file_transfer/js/resumable_upload.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {

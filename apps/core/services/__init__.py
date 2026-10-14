@@ -1,5 +1,5 @@
 from .client_ip import client_ip
-from .email import asend_email, get_email_backend, send_email
+from .email import get_email_backend, send_email
 from .email_verification import (
     EmailVerificationAlreadyConfirmed,
     EmailVerificationBurned,
@@ -35,7 +35,6 @@ __all__ = [
     'EmailVerificationSuperseded',
     'IncorrectCode',
     'ResendTooSoon',
-    'asend_email',
     'client_ip',
     'confirm_by_code',
     'confirm_by_token',

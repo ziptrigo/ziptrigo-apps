@@ -53,6 +53,7 @@ from django.utils import timezone
 
 from apps.billing.models import CreditTransactionType
 from apps.billing.services import InsufficientCreditsError, add_credits, spend_credits
+from apps.core.services.queue import enqueue_after_commit
 from apps.core.services.storage import ObjectTooLargeError
 
 from ..models import (
@@ -69,7 +70,6 @@ from . import ai, documents
 from .accounts import add_stored_bytes, get_account
 from .duplicates import refresh_duplicate
 from .emails import lock_inbound_email, queue_attention_email_if_settled
-from .queue import enqueue_after_commit
 from .storage import get_storage
 from .vendors import clean_name, drop_if_orphan, match_vendor
 
