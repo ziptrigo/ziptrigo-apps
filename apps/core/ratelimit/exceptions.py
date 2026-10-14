@@ -6,9 +6,19 @@ this into a 429 with a `Retry-After` header, shared by every router.
 
 from __future__ import annotations
 
+import math
+
 from .limiter import RateLimitResult
 
 DEFAULT_MESSAGE = 'Too many requests. Please try again later.'
+
+
+def retry_message(retry_after: int) -> str:
+    """`DEFAULT_MESSAGE` with the wait spelled out ("try again in 42 minutes"), for a rule whose
+    window is long enough (an hour) that a bare "wait a moment" would mislead."""
+    minutes = max(1, math.ceil(retry_after / 60))
+    unit = 'minute' if minutes == 1 else 'minutes'
+    return f'Too many requests. Please try again in {minutes} {unit}.'
 
 
 class RateLimitExceeded(Exception):

@@ -555,3 +555,17 @@ def test_now_argument_is_not_wall_clock_dependent():
     import time
 
     assert abs(time.time() - timezone.now().timestamp()) < 5
+
+
+@pytest.mark.parametrize(
+    ('seconds', 'expected'),
+    [
+        (1, '1 minute'),
+        (60, '1 minute'),
+        (61, '2 minutes'),
+        (3000, '50 minutes'),
+        (3600, '60 minutes'),
+    ],
+)
+def test_retry_message_spells_out_the_wait(seconds, expected):
+    assert ratelimit.retry_message(seconds) == f'Too many requests. Please try again in {expected}.'

@@ -8,6 +8,7 @@ this API too, even though it isn't itself an HTMX form view).
 Only logged-in users get here (`auth=JWTAuth()`): anonymous sending is web-only (spec section 14).
 """
 
+from functools import partial
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
@@ -224,7 +225,12 @@ def delete_transfer(request, transfer_id: UUID):
 def add_recipients(request, transfer_id: UUID, payload: AddRecipientsSchema):
     transfer = _owned_transfer(request, transfer_id)
     try:
-        services.add_recipients(transfer, payload.recipients, ip=client_ip(request))
+        services.add_recipients(
+            transfer,
+            payload.recipients,
+            ip=client_ip(request),
+            charge=partial(services.charge_recipient_emails, request.auth),
+        )
     except TransferHeldError as exc:
         raise HttpError(409, exc.messages[0])
     except BlockedSenderError as exc:
@@ -244,7 +250,11 @@ def resend_recipient(request, transfer_id: UUID, recipient_id: UUID):
     transfer = _owned_transfer(request, transfer_id)
     recipient = get_object_or_404(TransferRecipient, id=recipient_id, transfer=transfer)
     try:
-        services.resend_recipient_email(recipient, ip=client_ip(request))
+        services.resend_recipient_email(
+            recipient,
+            ip=client_ip(request),
+            charge=partial(services.charge_recipient_emails, request.auth),
+        )
     except TransferHeldError as exc:
         raise HttpError(409, exc.messages[0])
     except BlockedSenderError as exc:

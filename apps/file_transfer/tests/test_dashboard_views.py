@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from django.urls import reverse
 from django.utils import timezone
@@ -6,6 +8,7 @@ from apps.accounts.tests.factories import UserFactory
 from apps.billing.services import get_balance, spend_credits
 
 from ..models import TransferRecipient, TransferStatus
+from ..services.actions import RESEND_COOLDOWN
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -285,13 +288,18 @@ def test_add_recipients_and_resend(client, draft_transfer):
     assert add_response.status_code == 200
     recipient = TransferRecipient.objects.get(transfer=draft_transfer, email='friend@example.com')
 
-    resend_response = client.post(
-        reverse('file_transfer:resend-recipient', args=[draft_transfer.id, recipient.id]),
-        **HX_HEADERS,
-    )
+    resend_url = reverse('file_transfer:resend-recipient', args=[draft_transfer.id, recipient.id])
+    # Just added, so a resend is refused (422, message in the row) until the cooldown has passed.
+    too_soon = client.post(resend_url, **HX_HEADERS)
+    assert too_soon.status_code == 422
+    assert 'emailed recently' in too_soon.content.decode()
+
+    recipient.last_sent_at = timezone.now() - RESEND_COOLDOWN - timedelta(seconds=1)
+    recipient.save()
+    resend_response = client.post(resend_url, **HX_HEADERS)
     assert resend_response.status_code == 200
     recipient.refresh_from_db()
-    assert recipient.last_sent_at is not None
+    assert recipient.last_sent_at > timezone.now() - timedelta(minutes=1)
 
 
 def test_add_recipients_refused_while_held(client, draft_transfer):

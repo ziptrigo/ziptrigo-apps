@@ -1,6 +1,7 @@
 from . import anon_limits, blocklist, limits
 from .actions import (
     add_recipients,
+    charge_recipient_emails,
     delete_transfer_now,
     disable_transfer,
     reenable_transfer_action,
@@ -76,6 +77,7 @@ __all__ = [
     'abort_draft',
     'add_file',
     'add_recipients',
+    'charge_recipient_emails',
     'anon_limits',
     'anonymous_expiry_choices',
     'blocklist',
