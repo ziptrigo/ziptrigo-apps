@@ -635,15 +635,26 @@ SCHEDULER_TICK_SECONDS = int(os.getenv('SCHEDULER_TICK_SECONDS', '30'))
 # `gunicorn.conf.py`). Off by default so a local checkout, `runserver` and pytest never run jobs.
 SCHEDULER_ENABLED = os.getenv('SCHEDULER_ENABLED', 'False').lower() in ('true', '1')
 
-# Python's default logging drops INFO from our own loggers. Send everything under `apps` at INFO
-# to the console so the scheduler's start/run lines, file_transfer job logs and the rate limiter's
-# "over limit" lines reach the container logs. `propagate: False` avoids duplicates should a root
-# handler ever be added.
+# Everything goes to the console (the container logs). Django's own default config sends the
+# `django` logger to a console handler that only runs with DEBUG=True and to `mail_admins`
+# (`ADMINS` is empty), and because that logger has handlers, Python's last-resort stderr handler
+# never fires: with DEBUG=False every unhandled view exception (`django.request`), `django.security`
+# warning and so on was silently dropped. So `django` is redirected to our console handler
+# (`propagate: False`: one line per record, also with DEBUG=True, where Django's handler would
+# otherwise print it a second time through root), `apps` logs at INFO (scheduler lines, job logs,
+# the rate limiter's "over limit" lines), and the root logger catches WARNING+ from everything
+# else (`django_tasks` worker failures, `authlib`, `botocore`, ...). `apps` also stops at its own
+# handler so root doesn't repeat it.
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'handlers': {'console': {'class': 'logging.StreamHandler'}},
-    'loggers': {'apps': {'handlers': ['console'], 'level': 'INFO', 'propagate': False}},
+    'formatters': {'plain': {'format': '%(levelname)s %(name)s: %(message)s'}},
+    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'plain'}},
+    'loggers': {
+        'apps': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'django': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+    },
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
 }
 
 

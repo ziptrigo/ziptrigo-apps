@@ -1843,8 +1843,13 @@ future app:
   `gunicorn.conf.py` imports the scheduler inside the hook (gunicorn loads that file in the master
   before Django is configured), and `settings.LOGGING` routes everything under the `apps` logger
   (INFO, console, `propagate: False`) to the container logs, so "Scheduler thread started", the
-  file_transfer job logs and the ratelimit "over limit" lines all show up (`conftest.py` re-enables
-  propagation under pytest so `caplog` still works).
+  file_transfer job logs and the ratelimit "over limit" lines all show up. `django` (INFO) goes to
+  the same handler, also `propagate: False`: Django's default config only prints with DEBUG=True and
+  mails `ADMINS` (empty), and since that logger has handlers the last-resort stderr handler never
+  fires, so every production 500 and `django.security` warning used to vanish. The root logger
+  (WARNING) covers everything else (`django_tasks`, `authlib`, `botocore`). `conftest.py` re-enables
+  propagation of `apps` and `django` under pytest so `caplog` still works;
+  `apps/core/tests/test_logging.py` checks the real config in a subprocess.
   Jobs therefore run inside web workers, and **an interrupted job keeps its lease until the lease
   expires**: a deploy, a SIGHUP reload or a worker timeout kill that lands mid-job leaves that
   job's `locked_until` set, so no runner picks it up before then (up to the job's lease, e.g. 1 h
