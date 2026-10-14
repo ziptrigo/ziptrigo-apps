@@ -38,3 +38,16 @@ def test_greeting_falls_back_to_the_address_without_a_name():
     assert 'Hi noname@example.com,' in text_body
     assert 'Hi noname@example.com,' in html_body
     assert '48 hours' in html_body
+
+
+def test_copy_tells_the_reader_to_press_the_button_and_fits_signup_and_email_change():
+    user = User(email='a@example.com', name='A')
+
+    _, text_body, html_body = render_email_confirmation_email(
+        user=user, confirmation_url='https://example.com/c/', validity_minutes=60
+    )
+
+    assert 'press "Confirm my email"' in text_body
+    assert 'press <strong>Confirm my email</strong>' in html_body
+    # Also sent after an email change, so it must not claim a new account was created.
+    assert 'creating an account' not in text_body + html_body

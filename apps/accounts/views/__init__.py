@@ -5,6 +5,7 @@ from .pages import (
     account_created_page,
     account_page,
     confirm_email_page,
+    email_confirmation_expired,
     email_confirmation_success,
 )
 from .password import password_change
@@ -17,6 +18,7 @@ __all__ = [
     'account_created_page',
     'account_page',
     'confirm_email_page',
+    'email_confirmation_expired',
     'email_confirmation_success',
     'forgot_password_page',
     'google_callback',

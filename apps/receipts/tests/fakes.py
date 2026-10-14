@@ -113,6 +113,18 @@ class FakeReceiptsStorage:
         self.objects.pop(key, None)
         self.deleted.append(key)
 
+    def delete_objects(self, keys) -> int:
+        """Like `S3Storage.delete_objects`: the rest of the batch goes, then a failure raises."""
+        key_list = list(keys)
+        failed = [key for key in key_list if key in self.failing_deletes]
+        for key in key_list:
+            if key not in self.failing_deletes:
+                self.objects.pop(key, None)
+                self.deleted.append(key)
+        if failed:
+            raise RuntimeError(f'S3 could not delete {len(failed)} object(s)')
+        return len(key_list)
+
     def delete_prefix(self, prefix: str) -> int:
         keys = [k for k in self.objects if k.startswith(prefix)]
         for key in keys:

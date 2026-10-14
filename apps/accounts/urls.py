@@ -4,6 +4,7 @@ from .views import (
     account_created_page,
     account_page,
     confirm_email_page,
+    email_confirmation_expired,
     email_confirmation_success,
     forgot_password_page,
     login_page,
@@ -29,5 +30,10 @@ urlpatterns = [
     path('reset-password/<str:token>/', reset_password_page, name='reset-password'),
     path('confirm-email/<str:token>/', confirm_email_page, name='confirm-email'),
     path('resend-confirmation/', resend_confirmation_page, name='resend-confirmation'),
+    path(
+        'email-confirmation-expired/',
+        email_confirmation_expired,
+        name='email-confirmation-expired',
+    ),
     path('email-confirmed/', email_confirmation_success, name='email-confirmed'),
 ]

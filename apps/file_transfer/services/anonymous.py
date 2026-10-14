@@ -252,7 +252,12 @@ def _activate(transfer: Transfer, confirmed_email: str, ip: str | None, cookie_i
         # It can never be sent today (the cap is exceeded, or the sender is blocked); end it
         # outright, same as any other transfer that's never going anywhere, so a retry gets a
         # clear, terminal answer rather than a transfer stuck `PENDING_CONFIRMATION` forever.
-        end_transfer(locked, TransferStatus.DELETED, delete_files=True)
+        end_transfer(
+            locked,
+            TransferStatus.DELETED,
+            delete_files=True,
+            from_statuses=(TransferStatus.PENDING_CONFIRMATION,),
+        )
         raise activation_error
 
     transaction.on_commit(lambda: _queue_send_emails(transfer.id))

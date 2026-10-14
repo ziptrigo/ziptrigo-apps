@@ -569,7 +569,13 @@ def filetransfer_set_expiry(
     transfer_id: str,
     expiry: str = typer.Argument(..., help='1, 5, 15, 30 (days), "custom" or "none".'),
     date: str | None = typer.Option(
-        None, '--date', help='ISO 8601 datetime, required when expiry is "custom".'
+        None,
+        '--date',
+        help=(
+            'ISO 8601 date-time, required when expiry is "custom". Without a UTC offset it is '
+            "read in the server's time zone (UTC by default); a date alone (2026-12-31) means "
+            'the end of that day.'
+        ),
     ),
 ):
     """

@@ -274,6 +274,35 @@ non-local `BASE_URL` triggers `accounts.W003` (shown by `manage.py check` and th
 `migrate` step). Login, and "Sign up with Google", have no captcha. README's "Signup captcha" has
 the Cloudflare setup.
 
+**Email case** (audit #15): `User.email` is stored with `normalize_email` (domain lower-cased, local
+part as typed) and its unique constraint is **case-sensitive**, so the database alone does not stop
+`Alice@gmail.com` next to `alice@gmail.com`; only application checks do, and not everywhere:
+
+- *Web forms.* The login, forgot-password, resend-confirmation and register forms share
+  `forms.email.NormalizedEmailMixin.clean_email` (like the API's `EmailStr`), so a mixed-case
+  *domain* finds the account on every surface. Login and the reset/resend lookups stay **exact on
+  the local part, on purpose**: the local part is the stored spelling, legacy rows may differ only by
+  case (so a case-folded lookup could hit the wrong one of two, or several), and a case-insensitive
+  lookup on those paths would also make them behave differently from the API's.
+- *Checks that ignore case entirely* (`email__iexact`): `create_account`,
+  `handle_signup_for_existing_email`, `PUT /api/account` and the admin user forms
+  (`forms/admin.py`: `UserAdminCreationForm` and `UserAdminChangeForm` refuse another account's
+  address in any case and normalize the domain; an unchanged address isn't re-checked, so one of two
+  legacy rows stays editable). A case-variant signup takes the existing-account path (see "Auth"),
+  never a second row (Google linking matches `iexact` and refuses two rows as `AccountConflict`).
+  Where legacy case-duplicates exist, that path picks the row spelled exactly like the signup
+  address, else the oldest (`created_at`, `pk`), and locks down / mails the *stored* spelling.
+- *Not covered:* `createsuperuser` (`create_user`) and the Django shell still rely on the
+  case-sensitive constraint alone. **Open race:** two concurrent signups of a *new* address in
+  different case both pass the `iexact` pre-check and both insert; only a database constraint
+  closes it. `UniqueConstraint(Lower('email'))` is deliberately not added yet: prod data needs
+  checking for existing duplicates first (`SELECT lower(email), count(*) FROM accounts_user GROUP BY
+  1 HAVING count(*) > 1`), and they need resolving, since the migration would fail on them.
+  **Index caveat:** Django compiles `email__iexact` on Postgres to `UPPER(email) = UPPER(%s)`, so an
+  index only helps if it is on `Upper('email')` (or the lookups are switched to a `Lower`
+  annotation to match a `Lower('email')` index); until then the `iexact` checks are a sequential
+  scan over `accounts_user`. Check with `EXPLAIN` when the table is large enough to matter.
+
 **No page or endpoint reveals whether an email address has an account** (issue #125; forgot-password
 and resend-confirmation already worked this way). The register page gives the same answer for every
 valid submission that passed the captcha and `SIGNUP_IP`: the same redirect to `accounts:created`
@@ -347,8 +376,19 @@ links emailed since stay valid until one of them is used (or expires). Claim-on-
 `email_confirmed`, so it becomes possible at the next login after such a reset, the same as after a
 confirmation link.
 Residual, not new: the confirmation email sent to the victim at the attacker's *first* signup (and
-resend-confirmation) still confirms an account with its creator's password if the victim clicks it;
-that is inherent to confirming by link and password signup, and is not closed here.
+resend-confirmation) still confirms an account with its creator's password if the victim *clicks*
+it; that is inherent to confirming by link and password signup, and is not closed here. A mail
+scanner or link previewer no longer does it for them (audit #11): `GET /account/confirm-email/<token>/`
+(`views.pages.confirm_email_page`) only renders a CSRF-protected "Confirm my email" button, without
+reading the token, and only the **POST** from that button calls `confirm_token` (then redirects to
+the success page, or -- post/redirect/get -- to `accounts:email-confirmation-expired`, which shows
+the expired message and the resend form). The POST is rate limited per IP (`CONFIRM_EMAIL_IP`, 429
+page); the GET is not. The URL is unchanged, so links already sent work; file transfer's anonymous
+confirm link works the same way. `POST /api/auth/confirm-email` takes the token in a JSON body, which
+no scanner sends. The button stops prefetchers and link previewers, which only fetch; it does not
+stop every automated sandbox, since some mail-security products render the page and click buttons.
+The email's copy ("open the link below and press Confirm my email") is neutral between signup and
+an email change, as `send_confirmation_email` serves both.
 
 **Timing is roughly equalised** (review of #127): the existing-address path hashes the submitted
 password once and discards it (`make_password`, like `ModelBackend` does for an unknown user), the
@@ -608,7 +648,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address limits on the email an
   existing address gets, `SIGNUP_EXISTING_EMAIL` and `SIGNUP_EXISTING_EMAIL_DAY`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
   `PUT /api/account`, per user), forgot-password (as above,
-  and its response shape never changes so existence still isn't leaked), resend-confirmation, QR preview/create (per user, shared between
+  and its response shape never changes so existence still isn't leaked), resend-confirmation, `CONFIRM_EMAIL_IP` (the confirming POST of the emailed link, per IP, generous), QR preview/create (per user, shared between
   the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP,
   generous, charged *before* the code lookup so made-up codes spend the budget too -- over the limit
   a known code still redirects, only the scan-count write is skipped, protecting
@@ -696,7 +736,8 @@ nested path parameter like `/transfers/{id}/files/...`. `TransferSchema.recipien
 `{id, email, last_sent_at}` objects (not bare email strings), so a caller can resend to one without
 a separate lookup (`POST /transfers/{id}/recipients/{recipient_id}/resend`, `admin/filetransfer.py
 resend`). Status codes: 400 for a service `ValidationError` (including a malformed `PATCH` --
-`expiry_date` without `expiry_choice`, or `?filter=` outside `active`/`ended`/`all`), **402** for
+`expiry_date` without `expiry_choice`, or `?filter=` outside `active`/`ended`/`all`; an `expiry_date`
+with no UTC offset is read in `TIME_ZONE` by `resolve_expiry`, not a 500; a date alone, `2027-12-31`, means the end of that day like the web date picker -- `schemas.transfer.ExpiryDate`), **402** for
 `InsufficientCreditsError` (a documented choice over 400 -- the request is well-formed, the account
 just can't cover it right now), 404 for another user's transfer (never 403, so it doesn't confirm
 the id exists), 429 via the site-wide rate-limit handler (`FT_UPLOAD_USER`, same rule and budget as
@@ -861,6 +902,21 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
 `apps/core/admin_site.py` owns `custom_admin_site` (mounted at `/admin/`) and the tools page (test
 email, masked environment). Every app registers its `ModelAdmin`s on it from its own `admin.py`.
 The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/billing/credittransaction/adjust/`).
+The ledger is read-only in the admin (no add/change/delete, so no `delete_selected`; the same for
+`CreditAccountAdmin`), because the balance only changes through `apps.billing.services`. The tool
+checks `billing.add_credittransaction` itself with `has_perm` (not `has_add_permission`, which is
+False on purpose), the changelist shows its link only to users with it, and
+`POST /api/billing/users/{id}/credits` (`AdminAuth` is only `is_staff`) requires the same
+permission (403 otherwise). A dedicated `adjust_credits` permission, with a data migration granting
+it to whoever holds the add permission, would be cleaner and is a follow-up. `readonly_fields` on
+both admins is what shows `id`/`created_at`/`updated_at` on the detail page: those are
+non-editable, so without it the page omits them. **Deleting a user still works with a credit
+history:** `CreditAccount`/`CreditTransaction` cascade from the user and Django asks each cascaded
+row's admin `has_delete_permission`, so `UserAdmin.get_deleted_objects` (`apps/accounts/admin.py`,
+`CASCADE_WITH_USER_APP_LABELS`) drops a billing model from `perms_needed` when the caller holds its
+`delete_<model>` permission (what the default check asked before): superusers pass, staff still
+need it granted. The receipts and file_transfer read-only admins already refuse delete the same way,
+so a user with receipts or transfers still can't be deleted from the admin (not changed here).
 The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
 so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
 and to the admin tools page.
@@ -946,6 +1002,32 @@ immediately (`services.lifecycle.end_transfer`). The one exception: reaching `ma
 defers the deletion (`Transfer.files_deleted_at` stays null) because that download's own presigned
 GET URL must still resolve -- `expire_transfers` sweeps up the objects (and fires the "files
 deleted" email) once `GET_URL_EXPIRES_SECONDS` has safely passed since `Transfer.ended_at`.
+
+**Status changes are conditional writes** (audit #16). `end_transfer` claims the move with
+`UPDATE ... WHERE status IN from_statuses` (default: any non-terminal status; the grace-period job
+passes `SUSPENDED`, the expiry job `ACTIVE`/`DISABLED`, delete-now the actionable ones, the
+anonymous activation failure `PENDING_CONFIRMATION`) and returns whether it won; only the winner
+runs `before_delete`, deletes S3 objects and notifies, so a stale instance never overwrites a
+newer state (a second call on an ended transfer is a no-op; a failed delete is retried by the
+deferred-deletion sweep). `take_down_transfer` and `abort_draft` return that bool too,
+`delete_transfer_now` raises "already ended" on a loss, and `disable_transfer` writes only
+`WHERE status = ACTIVE`. `abort_draft` claims `DRAFT`/`PENDING_CONFIRMATION` -> `DELETED` first, in
+one transaction with its S3 work (a storage error rolls the claim back so `cleanup_drafts`
+retries; `finalize_send`'s row lock serialises with it). That rollback cannot un-delete S3
+objects already removed, and the claim holds the row lock across the S3 calls (both accepted, see
+`abort_draft`'s docstring).
+
+Status is not the only precondition a caller acted on from a stale read, so `end_transfer` also
+takes `only_if`, a `Q` ANDed into the claim's `WHERE`: delete-now passes
+`held_for_review_at__isnull=True` (a hold applied after its check still freezes the transfer), the
+expiry job `expires_at__lte=now`, the grace-period job `suspended_at__lte=cutoff` and the
+max-downloads fallback `max_downloads__lte=<count it saw>`; an owner who extended, raised or
+re-enabled in the meantime wins. A service that loses a claim (`disable_transfer`,
+`delete_transfer_now`) refreshes the instance before raising, so the 422 row shows the state that
+won; the API's draft delete returns 204 when the draft was already `DELETED` and only falls through
+to delete-now when it became an actionable transfer. The admin takedown and block-sender messages
+count only transfers this call took down and say how many were skipped because they had already
+ended.
 
 **Anonymous sending** (`apps.file_transfer.services.anonymous`, spec section 2 phase 2): the same
 picker-then-options-then-send page a logged-in sender uses, session-owned instead of user-owned,
@@ -1597,7 +1679,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `.eml` with the email's last receipt, deciding that under a row lock on the `InboundEmail`), `receipts.retry_due` (5 min; due retries, `processing`
   stuck over 30 min counted as a failed try, `received` rows nobody queued for 15 min),
   `receipts.cleanup_uploads` (hourly), `receipts.poll_inbound` (every minute, 2 min lease; see
-  "Email intake" below), `receipts.link_vendors` (hourly; links receipts with a vendor text and no
+  "Email intake" below), `receipts.purge_inbound_messages` (daily; deletes `done` `InboundMessage`
+  rows that went `done` more than 30 days ago and have no `InboundEmail`, i.e. mail for
+  unknown/retired codes; `pending`/`failed` and ones with emails stay; see "Email intake"),
+  `receipts.link_vendors` (hourly; links receipts with a vendor text and no
   vendor, see "Vendors"). Idempotent, per-row `try/except` + `logger.exception`.
 - **Queue.** `TASKS['default']['QUEUES']` is `['default', 'receipts']`; every receipts task is
   `@task(queue_name='receipts')`, served by its own `db_worker --queue-name receipts` process (see
@@ -1669,6 +1754,18 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     listed). Admin "retry" (`reset_message_for_retry`) copies it back, resets the row and deletes
     the parked copy. Nothing expires `receipts/failed/` (the infra lifecycle rule only covers
     `receipts/inbound/`, and the IAM user is scoped to `receipts/*`, which includes it).
+  - **Old `done` messages are purged** (`inbound.purge_done_messages`, daily job
+    `receipts.purge_inbound_messages`, audit #18): a `done` row with no `InboundEmail` (mail for an
+    unknown or retired code) is deleted `DONE_MESSAGE_RETENTION` (30 days) after `processed_at`
+    (`created_at` for a row without one; `created_at` is not used because an admin retry leaves it
+    alone while the object copied back gets a fresh lifecycle clock), in batches of `PURGE_BATCH`.
+    `poll` registers any key under `receipts/inbound/` it has no row for, so a row may only go once
+    its object is gone: each batch's objects (`s3_key`, and `failed_key` if set) are deleted first
+    with `S3Storage.delete_objects` (batched `DeleteObjects`; a missing key is a no-op, a per-key
+    error raises), then the rows; a storage error propagates, leaving the rows for the next run, and
+    the runner records it as `last_error`. As a second guard `DONE_MESSAGE_RETENTION` must stay well
+    above the 14-day expiry the `infra` repo puts on `receipts/inbound/`, so an object whose delete
+    keeps failing is gone before its row is. `pending`/`failed` rows and ones with emails stay.
   - **Recipients.** One `InboundEmail` per recipient that is an *active* `InboxCode`
     (`receipts+<code>@<RECEIPTS_INBOUND_ADDRESS domain>`, case-insensitive, matched by
     `addresses.inbox_code_from_address`); unknown or retired codes, and inactive users, are logged
@@ -1771,9 +1868,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     allowlist and is stored as `forwarding_confirmation`: free, no receipts, no `.eml`, no cap slot,
     with the code (`Confirmation code: 123456789`, else `(#123456789)` in the subject) and the link
     in `forwarding_confirmation_code`/`_url` for the settings page to show later. The link is kept
-    only if it is `https` to `mail-settings.google.com` (a candidate that doesn't parse, like
-    `https://[x`, is skipped); without that authentication the email is an ordinary one (the
-    allowlist applies and nothing is extracted).
+    only if `mime.is_forwarding_link` accepts it (`https` and the *whole* authority is
+    `mail-settings.google.com`: no userinfo, port, backslash or control character, since browsers
+    read `\` as `/`; a candidate that doesn't parse, like `https://[x`, is skipped); without that
+    authentication the email is an ordinary one (the allowlist applies and nothing is extracted).
   - **What becomes a receipt** (`mime.analyze`). The tree is walked through `multipart/*` *and*
     `message/rfc822`, so a forward-as-attachment is searched too. Every non-text (or
     attachment-disposition) part is an attachment candidate: eligible when its **magic-byte** type
@@ -1904,11 +2002,12 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     left comes from `ReceiptsSettings.trash_days`.
   - **Settings**: the address (Copy; Regenerate in a modal, `RECEIPTS_REGENERATE_USER`, then redirect), the
     latest forwarding confirmation of the last 7 days (code, and an Open link only if it is https
-    to `mail-settings.google.com`, re-checked before it becomes an `href`), accepted senders
-    (Anyone / Only these, `forms.InboxSettingsForm` over `addresses.parse_allowlist`) with the default
-    currency in one htmx form, the category editor (add, rename inline, move up/down, delete in a modal;
-    each action re-renders `#categories`; deleting names how many receipts become uncategorized) and
-    the 20 most recent inbound emails with their outcome and `note`.
+    to `mail-settings.google.com`, re-checked with `is_forwarding_link` before it becomes an
+    `href`; none at all when the code is empty and the link is withheld), accepted senders
+    (Anyone / Only these, `forms.InboxSettingsForm` over `addresses.parse_allowlist`) with the
+    default currency in one htmx form, the category editor (add, rename inline, move up/down, delete
+    in a modal; each action re-renders `#categories`; deleting names how many receipts become
+    uncategorized) and the 20 most recent inbound emails with their outcome and `note`.
   - **UI parts**: `{% status_pill receipt.status %}` (`receipts_ui`; colours in the design doc),
     `partials/confirm_modal.html` driven by the `confirmModal` Alpine component and the `copyText`
     component, both in `static/receipts/js/common.js` -- loaded as a *classic* script (not `defer`) so
@@ -2037,7 +2136,9 @@ future app:
   A job that *finishes* (successfully or not) does release its lease (`runner._run_job`), so it is
   due again after its `interval` even when its `lease` is longer (`receipts.retry_due`: 5 min
   interval, 10 min lease) -- before that fix every job ran every max(interval, lease). The release
-  only applies while no later claim exists (`last_started_at <= ` this claim's), so a run that
+  only applies while no later claim exists (`last_started_at` below this claim's plus 1 ms --
+  not `<=`: SQLite stores `Now()` with milliseconds but renders a whole-second read-back without a
+  fraction, so a text `<=` missed one claim in a thousand and left the lease held), so a run that
   outlived its lease can't free the lease of the runner that took over.
   `gunicorn.conf.py`'s `worker_exit` stops the runner and joins `runner.thread` for up to 5 s, which
   only covers a thread idle between jobs. `SchedulerRunner.run_forever` calls
@@ -2047,6 +2148,13 @@ future app:
   Postgres connection** when the scheduler is enabled (3 by default).
   `./manage.py run_scheduler` remains for local development (the `scheduler` compose service) or a
   dedicated container; job status is a read-only `ScheduledJob` admin.
+
+`core`'s jobs (`apps/core/jobs.py`) let exceptions propagate (the runner records them in
+`ScheduledJob.last_error`; a swallowed one would show as a success). Besides the email-verification and
+rate-limit purges, two daily ones keep tables from growing forever (audit #18):
+`core.purge_old_task_results` (finished `DBTaskResult` rows past `TASK_RESULT_RETENTION`, 14 days,
+succeeded and failed alike, in batches; ready/running rows never) and `core.clear_expired_sessions` (`SESSION_ENGINE`'s
+`SessionStore.clear_expired()`; nothing else purges `django_session`).
 
 `file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers
@@ -2067,11 +2175,12 @@ htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `a
 
 ### Docker
 
-One `Dockerfile` (multi-stage: `uv sync --frozen` in a builder, venv copied to `python:3.14-slim`),
-shared by every service in `docker-compose.yml`: `web`, `worker`, `worker-receipts`, `scheduler` and `db` (that
-split is the local-development layout only; a deployment runs one container, below). The build
-runs `collectstatic` so WhiteNoise can serve static files with `DEBUG=False`. `.env.local` is mounted
-into `web`, `worker`, `worker-receipts` and `scheduler` because settings require an env file.
+One `Dockerfile` (multi-stage: `uv sync --frozen --no-dev` in a builder, so no dev tools ship;
+venv copied to `python:3.14-slim`), shared by every service in `docker-compose.yml`: `web`,
+`worker`, `worker-receipts`, `scheduler` and `db` (that split is the local-development layout
+only; a deployment runs one container, below). The build runs `collectstatic` so WhiteNoise can
+serve static files with `DEBUG=False`. `.env.local` is mounted into `web`, `worker`,
+`worker-receipts` and `scheduler` because settings require an env file.
 
 - The image's `CMD` is `python supervise.py` (stdlib only, PID 1 after the entrypoint's `migrate`).
   It starts gunicorn (`config.wsgi`, `-c gunicorn.conf.py`, which starts the scheduler thread in

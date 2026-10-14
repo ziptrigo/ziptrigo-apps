@@ -9,6 +9,7 @@ import math
 from botocore.exceptions import ClientError
 from django.contrib.auth.models import AbstractBaseUser
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
@@ -293,17 +294,45 @@ def remove_file(file: TransferFile, *, storage: S3Storage | None = None) -> None
     file.delete()
 
 
-def abort_draft(transfer: Transfer, *, storage: S3Storage | None = None) -> None:
+def abort_draft(transfer: Transfer, *, storage: S3Storage | None = None) -> bool:
     """Abandon an entire draft (or unconfirmed) transfer: abort every file's in-progress
     multipart upload, sweep every object under the transfer's S3 prefix (rather than trusting
     each file's `uploaded` flag, which is one more place a bug could leave an orphan), then
-    soft-delete the transfer. Used by `cleanup_drafts`."""
+    soft-delete the transfer. Used by `cleanup_drafts` and the API's delete of a draft.
+
+    Returns whether this call aborted it. The soft delete is a conditional write claimed *first*
+    (`DRAFT` / `PENDING_CONFIRMATION` only), so a stale instance of a draft that `finalize_send`
+    (which holds the row lock while it flips the status) or the anonymous confirmation has since
+    activated is left alone: its files are not touched and it is not marked `DELETED`. The claim
+    and the S3 work share one transaction, so a storage error rolls the status back and the next
+    `cleanup_drafts` run retries the draft.
+
+    Two limits of that, accepted rather than designed around:
+
+    - The rollback undoes the database only. If `delete_prefix` fails partway, the objects it
+      already deleted and the multipart uploads already aborted stay gone, yet the draft is back
+      to `DRAFT`; a `finalize_send` that was waiting on the row lock would then send a transfer
+      with missing files. (Before the claim there was no lock at all, so the window is not new.)
+    - The claim holds the row lock -- on SQLite, the database write lock -- across every S3 call
+      (one `abort_multipart_upload` per file, then the prefix sweep), so a sender's own request
+      on the same draft waits for all of it.
+
+    Committing the claim first and doing the S3 work after (retried by `cleanup_drafts`, like
+    `end_transfer`'s deferred deletion) would close both; it was left out on purpose."""
     storage = storage or get_storage()
-    for file in transfer.files.all():
-        if file.upload_id:
-            storage.abort_multipart_upload(file.storage_key, file.upload_id)
-    storage.delete_prefix(transfer_prefix(transfer.id))
-    transfer.files.all().delete()
+    with transaction.atomic():
+        now = timezone.now()
+        claimed = Transfer.objects.filter(
+            pk=transfer.pk,
+            status__in=(TransferStatus.DRAFT, TransferStatus.PENDING_CONFIRMATION),
+        ).update(status=TransferStatus.DELETED, deleted_at=now)
+        if not claimed:
+            return False
+        for file in transfer.files.all():
+            if file.upload_id:
+                storage.abort_multipart_upload(file.storage_key, file.upload_id)
+        storage.delete_prefix(transfer_prefix(transfer.id))
+        transfer.files.all().delete()
     transfer.status = TransferStatus.DELETED
-    transfer.deleted_at = timezone.now()
-    transfer.save(update_fields=['status', 'deleted_at'])
+    transfer.deleted_at = now
+    return True

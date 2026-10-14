@@ -1,6 +1,10 @@
+from typing import cast
+
 import pytest
+from django.contrib.auth.models import Permission
 
 from apps.accounts.models import User
+from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tokens import CustomAccessToken
 from apps.billing.models import CreditTransaction, CreditTransactionType
 from apps.billing.services import add_credits, get_balance
@@ -204,6 +208,56 @@ def test_non_admin_cannot_add_credits(client, regular_user):
     )
 
     assert response.status_code == 401
+
+
+def _staff_with_perms(*codenames: str) -> User:
+    staff = cast(User, UserFactory(is_staff=True))
+    perms = Permission.objects.filter(codename__in=codenames)
+    staff.user_permissions.add(*perms)  # ty: ignore[unresolved-attribute]
+    return staff
+
+
+def test_view_only_staff_cannot_add_credits(client, regular_user: User):
+    """`AdminAuth` only means staff; changing a balance needs the ledger add permission."""
+    staff = _staff_with_perms('view_credittransaction')
+
+    response = _post_credits(
+        client,
+        staff,
+        regular_user.id,
+        {'transaction_type': 'purchase', 'amount': 100, 'description': 'No'},
+    )
+
+    assert response.status_code == 403
+    assert get_balance(regular_user) == 0
+    assert not CreditTransaction.objects.exists()
+
+
+def test_staff_with_add_permission_can_add_credits(client, regular_user: User):
+    staff = _staff_with_perms('add_credittransaction')
+
+    response = _post_credits(
+        client,
+        staff,
+        regular_user.id,
+        {'transaction_type': 'adjustment', 'amount': 7, 'description': 'Allowed'},
+    )
+
+    assert response.status_code == 201
+    assert get_balance(regular_user) == 7
+
+
+def test_view_only_staff_refusal_does_not_reveal_unknown_users(client):
+    staff = _staff_with_perms('view_credittransaction')
+
+    response = _post_credits(
+        client,
+        staff,
+        '00000000-0000-0000-0000-000000000000',
+        {'transaction_type': 'purchase', 'amount': 1},
+    )
+
+    assert response.status_code == 403
 
 
 def test_multiple_transactions_update_balance_correctly(client, admin_user, regular_user: User):

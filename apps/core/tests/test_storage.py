@@ -262,6 +262,50 @@ def test_delete_prefix_deletes_every_listed_key(stubbed):
     assert storage.delete_prefix('p/') == 2
 
 
+def test_delete_objects_sends_every_key_in_one_request(stubbed):
+    storage, stubber = stubbed
+    stubber.add_response(
+        'delete_objects',
+        {},
+        {
+            'Bucket': BUCKET,
+            'Delete': {'Objects': [{'Key': 'a'}, {'Key': 'b'}], 'Quiet': True},
+        },
+    )
+    assert storage.delete_objects(['a', 'b']) == 2
+
+
+def test_delete_objects_batches_at_a_thousand_keys(stubbed):
+    storage, stubber = stubbed
+    keys = [f'k/{n}' for n in range(1001)]
+    for batch in (keys[:1000], keys[1000:]):
+        stubber.add_response(
+            'delete_objects',
+            {},
+            {
+                'Bucket': BUCKET,
+                'Delete': {'Objects': [{'Key': key} for key in batch], 'Quiet': True},
+            },
+        )
+    assert storage.delete_objects(keys) == 1001
+
+
+def test_delete_objects_with_no_keys_makes_no_request(stubbed):
+    storage, _ = stubbed
+    assert storage.delete_objects([]) == 0
+
+
+def test_delete_objects_raises_when_s3_reports_a_failed_key(stubbed):
+    storage, stubber = stubbed
+    stubber.add_response(
+        'delete_objects',
+        {'Errors': [{'Key': 'b', 'Code': 'AccessDenied', 'Message': 'no'}]},
+        None,
+    )
+    with pytest.raises(RuntimeError, match='b: AccessDenied'):
+        storage.delete_objects(['a', 'b'])
+
+
 def test_head_object_reports_size_and_checksum(stubbed):
     storage, stubber = stubbed
     stubber.add_response(

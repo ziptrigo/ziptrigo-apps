@@ -19,7 +19,7 @@ COPY pyproject.toml uv.lock /app/
 # document child runs as `nobody`, which cannot write __pycache__, and would recompile pypdf,
 # pypdfium2 and pillow-heif on every start.
 ENV UV_COMPILE_BYTECODE=1
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project
 
 
 # Stage 2: Runtime

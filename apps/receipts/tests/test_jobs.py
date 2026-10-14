@@ -10,10 +10,17 @@ from apps.billing.services import get_balance
 from apps.core.scheduler import get_jobs
 
 from .. import jobs
-from ..models import InboundEmail, Receipt, ReceiptsAccount, ReceiptStatus
-from ..services import processing
+from ..models import (
+    InboundEmail,
+    InboundMessage,
+    InboundMessageStatus,
+    Receipt,
+    ReceiptsAccount,
+    ReceiptStatus,
+)
+from ..services import inbound, processing
 from ..services.accounts import get_account
-from .factories import create_inbound_email, create_receipt
+from .factories import create_inbound_email, create_receipt, make_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -33,6 +40,7 @@ def test_the_jobs_are_registered_with_the_scheduler():
         'receipts.cleanup_uploads',
         'receipts.poll_inbound',
         'receipts.link_vendors',
+        'receipts.purge_inbound_messages',
     }
     assert specs['receipts.meter_storage'].interval == timedelta(hours=24)
     assert specs['receipts.purge_trash'].interval == timedelta(hours=24)
@@ -504,3 +512,76 @@ class TestPollInbound:
 class _NoopTask:
     def enqueue(self, *args):
         pass
+
+
+def _message(status: str, age_days: int, *, processed: bool = True) -> InboundMessage:
+    message = InboundMessage.objects.create(
+        s3_key=f'receipts/inbound/{status}-{age_days}-{InboundMessage.objects.count()}',
+        status=status,
+    )
+    then = timezone.now() - timedelta(days=age_days)
+    InboundMessage.objects.filter(pk=message.pk).update(
+        created_at=then, processed_at=then if processed else None
+    )
+    return message
+
+
+def test_purge_inbound_messages_deletes_only_old_done_messages_without_emails(fake_storage):
+    old_done = _message(InboundMessageStatus.DONE, 31)
+    recent_done = _message(InboundMessageStatus.DONE, 5)
+    old_pending = _message(InboundMessageStatus.PENDING, 90)
+    old_failed = _message(InboundMessageStatus.FAILED, 90)
+    with_email = _message(InboundMessageStatus.DONE, 90)
+    email = InboundEmail.objects.create(
+        user=make_user(), message=with_email, recipient='receipts+abcd2345@ziptrigo.com'
+    )
+
+    jobs.purge_inbound_messages()
+    jobs.purge_inbound_messages()  # idempotent
+
+    assert not InboundMessage.objects.filter(pk=old_done.pk).exists()
+    kept = set(InboundMessage.objects.values_list('pk', flat=True))
+    assert kept == {recent_done.pk, old_pending.pk, old_failed.pk, with_email.pk}
+    assert InboundEmail.objects.filter(pk=email.pk).exists()
+    assert fake_storage.deleted == [old_done.s3_key]
+
+
+def test_purge_done_messages_runs_every_batch_and_deletes_the_objects(fake_storage, monkeypatch):
+    monkeypatch.setattr(inbound, 'PURGE_BATCH', 1)
+    old = [_message(InboundMessageStatus.DONE, 40) for _ in range(3)]
+    recent = _message(InboundMessageStatus.DONE, 2)
+    for message in (*old, recent):
+        fake_storage.seed(message.s3_key, b'x')
+
+    assert inbound.purge_done_messages() == 3
+
+    assert list(InboundMessage.objects.values_list('pk', flat=True)) == [recent.pk]
+    assert sorted(fake_storage.deleted) == sorted(message.s3_key for message in old)
+    assert set(fake_storage.objects) == {recent.s3_key}
+
+
+def test_purge_done_messages_measures_age_from_processed_at(fake_storage):
+    # An admin retry leaves `created_at` alone: this one is old on paper, done just now.
+    retried = _message(InboundMessageStatus.DONE, 90)
+    InboundMessage.objects.filter(pk=retried.pk).update(processed_at=timezone.now())
+    # No `processed_at` (a row from before it was set): `created_at` decides.
+    legacy = _message(InboundMessageStatus.DONE, 40, processed=False)
+
+    assert inbound.purge_done_messages() == 1
+
+    assert list(InboundMessage.objects.values_list('pk', flat=True)) == [retried.pk]
+    assert fake_storage.deleted == [legacy.s3_key]
+
+
+def test_a_failing_object_delete_leaves_the_rows_and_raises(fake_storage):
+    message = _message(InboundMessageStatus.DONE, 40)
+    fake_storage.failing_deletes.add(message.s3_key)
+
+    with pytest.raises(RuntimeError):
+        inbound.purge_done_messages()
+
+    assert InboundMessage.objects.filter(pk=message.pk).exists()
+
+    fake_storage.failing_deletes.clear()
+    assert inbound.purge_done_messages() == 1
+    assert not InboundMessage.objects.filter(pk=message.pk).exists()
