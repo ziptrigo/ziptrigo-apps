@@ -977,6 +977,51 @@ class TestSenders:
         assert mime.received_at(mime.parse_message(b'\nx\n')).year >= 2026
 
 
+GOOD_LINK = 'https://mail-settings.google.com/mail/vf-abc'
+BAD_LINKS = [
+    'https://evil.test\\@mail-settings.google.com/mail/vf',  # browsers read `\` as `/`
+    'https://mail-settings.google.com\\@evil.test/x',
+    'https://mail-settings.google.com\\.evil.test/x',
+    'https://user@mail-settings.google.com/mail/vf',
+    'https://user:pw@mail-settings.google.com/mail/vf',
+    'https://evil.test@mail-settings.google.com/mail/vf',
+    'https://mail-settings.google.com:8443/mail/vf',
+    'https://mail-settings.google.com:443/mail/vf',
+    'https://mail-settings.google.com@evil.test/x',
+    'https://evil.test?@mail-settings.google.com/x',
+    'http://mail-settings.google.com/mail/vf',
+    'ftp://mail-settings.google.com/mail/vf',
+    'https://mail-settings.google.com.evil.test/x',
+    'https://mail-settings.google.com./mail/vf',
+    'https://evil.test\tmail-settings.google.com/x',
+    'https://evil.test\n.mail-settings.google.com/x',
+    'https://mail-settings.google.com/mail/vf\x00',
+    'https://mail-settings.google.com/mail/\x01vf',
+    'https://mail-settings.google.com/mail/vf\x7f',
+    'https://mail-settings.google.com/mail/ vf',
+    'https://[x',
+    '',
+]
+
+
+class TestIsForwardingLink:
+    @pytest.mark.parametrize('url', BAD_LINKS)
+    def test_anything_but_the_bare_host_is_refused(self, url):
+        assert mime.is_forwarding_link(url) is False
+
+    @pytest.mark.parametrize(
+        'url',
+        [
+            GOOD_LINK,
+            'https://mail-settings.google.com/mail/vf-%5BANGjdJ8Xk%5D-AbCdEf123?a=b#c',
+            'https://MAIL-SETTINGS.google.com/mail/vf-abc',
+            'https://mail-settings.google.com',
+        ],
+    )
+    def test_the_real_host_is_accepted(self, url):
+        assert mime.is_forwarding_link(url) is True
+
+
 class TestForwardingConfirmation:
     def test_gmails_code_and_link(self):
         from .emails import gmail_forwarding_confirmation
@@ -994,6 +1039,27 @@ class TestForwardingConfirmation:
             'http://mail-settings.google.com/not-https\n'
             'https://mail-settings.google.com.evil.test/x\n',
         )
+
+        code, link = mime.extract_forwarding_confirmation(mime.parse_message(raw))
+
+        assert (code, link) == ('123456', '')
+
+    # (a space ends a candidate in the text, so `.../mail/ vf` is the valid `.../mail/` there)
+    @pytest.mark.parametrize('bad', [b for b in BAD_LINKS if b and ' ' not in b])
+    def test_a_link_with_a_tricky_authority_is_skipped_for_the_next_good_one(self, bad):
+        raw = build_email(
+            text=f'Confirmation code: 123456\n{bad}\n{GOOD_LINK}\n',
+        )
+
+        code, link = mime.extract_forwarding_confirmation(mime.parse_message(raw))
+
+        assert (code, link) == ('123456', GOOD_LINK)
+
+    @pytest.mark.parametrize(
+        'bad', [b for b in BAD_LINKS if b.startswith('https://') and ' ' not in b]
+    )
+    def test_a_tricky_link_alone_leaves_no_link(self, bad):
+        raw = build_email(text=f'Confirmation code: 123456\n{bad}\n')
 
         code, link = mime.extract_forwarding_confirmation(mime.parse_message(raw))
 

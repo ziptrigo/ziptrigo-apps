@@ -79,6 +79,10 @@ class TestPage:
             'javascript:alert(1)',
             'https://mail-settings.google.com.evil.example/x',
             'https://[x',
+            'https://evil.example\\@mail-settings.google.com/mail/vf',
+            'https://evil.example@mail-settings.google.com/mail/vf',
+            'https://mail-settings.google.com:8443/mail/vf',
+            'https://mail-settings.google.com/mail/\x01vf',
         ],
     )
     def test_a_link_that_is_not_googles_is_never_rendered(self, web, funded_user, link):
