@@ -1,9 +1,11 @@
 import pytest
 from django.contrib.auth import SESSION_KEY
+from django.contrib.auth.hashers import get_hasher
 from django.urls import reverse
 
 from apps.accounts.backends import EmailBackend
 from apps.accounts.models import User
+from apps.accounts.tokens import CustomRefreshToken
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -52,13 +54,50 @@ def _deactivate(user: User) -> None:
     User.objects.filter(pk=user.pk).update(is_active=False)
 
 
-def test_unknown_email_still_runs_the_password_hasher(monkeypatch):
-    """Without it, the login's response time would reveal which addresses have an account."""
-    hashed: list[str] = []
-    monkeypatch.setattr(User, 'set_password', lambda self, raw: hashed.append(raw))
+@pytest.fixture
+def hash_calls(monkeypatch) -> list[str]:
+    """Every call to the default password hasher's `encode`, which both making and verifying a
+    password go through, so it counts the hashing work whichever way Django reaches it."""
+    hasher = get_hasher('default')
+    real_encode = hasher.encode
+    calls: list[str] = []
 
+    def encode(password, *args, **kwargs):
+        calls.append(password)
+        return real_encode(password, *args, **kwargs)
+
+    monkeypatch.setattr(hasher, 'encode', encode)
+    return calls
+
+
+def test_unknown_email_still_runs_the_password_hasher(hash_calls):
+    """Without it, the login's response time would reveal which addresses have an account."""
     assert EmailBackend().authenticate(None, email='nobody@example.com', password='x1') is None
-    assert hashed == ['x1']
+    assert len(hash_calls) == 1
+
+
+def test_known_email_with_a_wrong_password_hashes_once_too(regular_user: User, hash_calls):
+    assert EmailBackend().authenticate(None, email=regular_user.email, password='wrong') is None
+    assert len(hash_calls) == 1
+
+
+def test_unknown_email_reaches_the_hasher_on_the_api_login(api_client, hash_calls):
+    """Guards against an early return before `authenticate()` in the view."""
+    response = api_client.post(
+        '/auth/login', json={'email': 'nobody@example.com', 'password': 'x1'}
+    )
+
+    assert response.status_code == 400
+    assert len(hash_calls) == 1
+
+
+def test_unknown_email_reaches_the_hasher_on_the_web_login(client, hash_calls):
+    response = client.post(
+        reverse('accounts:login'), {'email': 'nobody@example.com', 'password': 'x1'}
+    )
+
+    assert response.status_code == 422
+    assert len(hash_calls) == 1
 
 
 def test_inactive_user_cannot_authenticate(regular_user: User):
@@ -100,3 +139,14 @@ def test_deactivating_a_user_ends_their_existing_session(client, user: User):
     response = client.get(reverse('accounts:account'))
     assert response.status_code == 302
     assert reverse('accounts:login') in response['Location']
+
+
+def test_refresh_refuses_an_inactive_user(api_client, regular_user: User):
+    refresh = str(CustomRefreshToken.for_user(regular_user))
+    assert api_client.post('/auth/refresh', json={'refresh_token': refresh}).status_code == 200
+
+    _deactivate(regular_user)
+
+    response = api_client.post('/auth/refresh', json={'refresh_token': refresh})
+    assert response.status_code == 403
+    assert response.json()['detail'] == 'User not active'

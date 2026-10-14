@@ -471,7 +471,9 @@ def test_callback_rejects_an_inactive_user(client, user, how, field):
 
     assert response.status_code == 302
     assert response['Location'] == reverse('accounts:login')
-    # The same words the password login uses.
+    # `status` is refused with the password login's words; for `is_active=False` the password
+    # login now says "Invalid credentials", but Google has verified the address, so telling the
+    # person why is no leak.
     assert _messages(response) == ['User not active']
     assert SESSION_KEY not in client.session
     user.refresh_from_db()
