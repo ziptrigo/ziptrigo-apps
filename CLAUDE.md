@@ -1486,10 +1486,12 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     ingest twice and a worker that dies mid-ingest just lets the lease run out (a message claimed
     more than 3 times is failed as "interrupted"). A failure records `last_error` and schedules the
     retry (1 min, then 5 min; `poll_inbound` re-queues it); the third failure sets `failed`. Over the
-    40 MB guard (`get_object_bytes(max_bytes)`), more than `mime.MAX_BOUNDARY_LINES` (500) MIME
-    boundary lines (checked on the raw bytes **before parsing**: `MAX_RAW_BYTES` caps bytes, not
-    parts, and millions of tiny parts are gigabytes of `Message` objects -- an OOM kill of
-    `db_worker` restarts the whole container), unparseable, or an object that is gone (with no
+    40 MB guard (`get_object_bytes(max_bytes)`), more than `mime.MAX_PARTS` (500) MIME parts
+    (`parse_message` counts the `Message` objects the parser creates and raises `TooManyPartsError`
+    on the 501st, so it works for any delimiter -- a `-`-leading or over-70-character boundary,
+    trailing whitespace, CR-only endings -- which a pre-scan of the raw bytes missed:
+    `MAX_RAW_BYTES` caps bytes, not parts, and millions of tiny parts are gigabytes of `Message`
+    objects -- an OOM kill of `db_worker` restarts the whole container), unparseable, or an object that is gone (with no
     work done) fail at once. The task never raises (the queue backends don't retry; the row *is*
     the retry mechanism). The object is deleted only after the row is marked `done`. The final
     writes (`done`, `failed`, the retry schedule) are conditional on `attempts` still being the

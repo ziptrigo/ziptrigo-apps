@@ -1,6 +1,7 @@
 """`services.mime`: reading a raw email. Pure functions over bytes (no database), except that the
 recipient match reads `settings.RECEIPTS_INBOUND_ADDRESS`."""
 
+import copy
 import logging
 from email.message import Message
 
@@ -1271,35 +1272,80 @@ class TestStrippedEml:
 
 
 class TestLimits:
-    def multipart(self, parts: int) -> bytes:
-        body = b''.join(b'--b\r\n\r\nx\r\n' for _ in range(parts))
+    def multipart(self, parts: int, boundary: bytes = b'b', delimiter_tail: bytes = b'') -> bytes:
+        """A multipart message with `parts` empty-ish parts. The delimiter lines are
+        `--<boundary><delimiter_tail>` and the header names the same boundary."""
+        delimiter = b'--' + boundary + delimiter_tail
+        body = b''.join(delimiter + b'\r\n\r\nx\r\n' for _ in range(parts))
         return (
-            b'Content-Type: multipart/mixed; boundary=b\r\nSubject: bomb\r\n\r\n'
+            b'Content-Type: multipart/mixed; boundary="'
+            + boundary
+            + b'"\r\nSubject: bomb\r\n\r\n'
             + body
-            + b'--b--\r\n'
+            + b'--'
+            + boundary
+            + b'--\r\n'
         )
 
-    def test_a_message_with_too_many_parts_is_refused_before_parsing(self):
-        assert mime.exceeds_part_limit(self.multipart(mime.MAX_BOUNDARY_LINES + 1))
-        assert not mime.exceeds_part_limit(self.multipart(mime.MAX_BOUNDARY_LINES - 10))
+    def test_a_message_with_too_many_parts_is_refused(self):
+        with pytest.raises(mime.TooManyPartsError):
+            mime.parse_message(self.multipart(mime.MAX_PARTS + 1))
 
-    def test_the_scan_is_fast_on_a_huge_bomb(self):
+    def test_a_message_below_the_limit_parses(self):
+        parsed = mime.parse_message(self.multipart(mime.MAX_PARTS - 10))
+
+        assert len(parsed.get_payload()) == mime.MAX_PARTS - 10
+
+    @pytest.mark.parametrize(
+        ('boundary', 'delimiter_tail'),
+        [
+            pytest.param(b'-', b'', id='dash-boundary'),
+            pytest.param(b'----=_Part_12_345.678', b'', id='javamail'),
+            pytest.param(b'x' * 100, b'', id='longer-than-70'),
+            pytest.param(b'b', b'   \t', id='trailing-whitespace'),
+        ],
+    )
+    def test_delimiters_a_scan_could_miss_still_count(self, boundary, delimiter_tail):
+        raw = self.multipart(mime.MAX_PARTS + 100, boundary, delimiter_tail)
+
+        with pytest.raises(mime.TooManyPartsError):
+            mime.parse_message(raw)
+
+    def test_cr_only_line_endings_still_count(self):
+        raw = self.multipart(mime.MAX_PARTS + 100).replace(b'\r\n', b'\r')
+
+        with pytest.raises(mime.TooManyPartsError):
+            mime.parse_message(raw)
+
+    def test_a_huge_bomb_is_refused_quickly(self):
         import time
 
-        raw = b'--b\r\n\r\nx\r\n' * 2_000_000  # ~20 MB of parts
+        raw = b'Content-Type: multipart/mixed; boundary=b\r\n\r\n' + b'--b\r\n\r\nx\r\n' * 1_000_000
 
         started = time.monotonic()
-        assert mime.exceeds_part_limit(raw)
+        with pytest.raises(mime.TooManyPartsError):
+            mime.parse_message(raw)
         assert time.monotonic() - started < 2
+
+    def test_the_count_is_per_call(self):
+        raw = self.multipart(mime.MAX_PARTS - 10)
+
+        for _ in range(3):
+            mime.parse_message(raw)
 
     def test_ordinary_dashes_are_not_parts(self):
         raw = b'Subject: report\n\n' + b'-----\n' * 5000 + b'-- \n' * 5000 + b'--- -- \n' * 5000
 
-        assert not mime.exceeds_part_limit(raw)
+        mime.parse_message(raw)
 
-    def test_the_fixtures_and_a_forward_are_far_below_the_limit(self):
+    def test_the_fixtures_and_a_forward_still_parse_and_can_be_copied(self):
         for name in ('pdf_attachment.eml', 'forward_as_attachment.eml', 'html_body.eml'):
-            assert not mime.exceeds_part_limit((FIXTURES / name).read_bytes())
+            parsed = mime.parse_message((FIXTURES / name).read_bytes())
+
+            assert copy.deepcopy(parsed).as_bytes() == parsed.as_bytes()
+
+    def test_a_nested_forward_chain_parses(self):
+        mime.parse_message(nested_forwards(25))
 
     def test_leaves_are_capped(self, monkeypatch):
         monkeypatch.setattr(mime, 'MAX_LEAVES', 5)

@@ -53,7 +53,8 @@ parent of it (`strictly_aligned`; no organizational-domain list). A DMARC `fail`
 somebody else's address.
 
 Delivered mail is untrusted input, so the work is bounded before and while parsing:
-`exceeds_part_limit` (MIME boundary lines in the raw bytes, checked before the parser runs),
+`parse_message` (it refuses a message that would make more than `MAX_PARTS` parts, counting them
+as the parser creates them),
 `MAX_DEPTH` and `MAX_LEAVES` (what the walkers visit), and `build_stripped_eml`'s size limits.
 
 The parsed tree is walked by `iter_leaves`, which descends into `multipart/*` **and**
@@ -71,9 +72,10 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email import policy
-from email.message import Message
+from email.message import EmailMessage, Message
 from email.parser import BytesParser
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from . import documents
@@ -87,13 +89,14 @@ logger = logging.getLogger(__name__)
 MAX_DEPTH = 30
 
 #: Most leaf parts (non-container parts) `iter_leaves` yields; the rest are ignored (and emptied in
-#: the stored copy). Together with `MAX_BOUNDARY_LINES` this bounds the work a message can cause.
+#: the stored copy). Together with `MAX_PARTS` this bounds the work a message can cause.
 MAX_LEAVES = 300
 
-#: A message whose raw bytes hold more MIME boundary-like lines than this is refused before it is
-#: parsed. `MAX_RAW_BYTES` alone caps bytes, not parts: a minimal part is ~10 bytes, so 40 MB could
-#: be millions of `Message` objects (gigabytes, minutes of CPU). No real receipt has hundreds.
-MAX_BOUNDARY_LINES = 500
+#: A message that would parse into more `Message` objects (parts) than this is refused: the parser
+#: counts them as it creates them (`parse_message`), so it stops at once. `MAX_RAW_BYTES` alone caps
+#: bytes, not parts: a minimal part is ~10 bytes, so 40 MB could be millions of `Message` objects
+#: (gigabytes, minutes of CPU). No real receipt has hundreds.
+MAX_PARTS = 500
 
 #: A text part (an email body) kept in the stored copy is emptied above this many bytes, with
 #: `X-Receipts-Skipped: too large`. A receipt that *is* the body is emptied regardless (it is
@@ -144,7 +147,6 @@ _DKIM_PROPERTIES = frozenset({'header.d', 'header.i', 'header.s', 'header.a', 'h
 _DMARC_PROPERTIES = frozenset({'header.from'})
 #: The methods SES writes, in the order it writes them (`spf`, then any `dkim`, then `dmarc`).
 _AUTH_METHODS = frozenset({'spf', 'dkim', 'dmarc'})
-_BOUNDARY_LINE = re.compile(rb"^--[A-Za-z0-9'()+_,./:=?][^\r\n]{0,69}\r?$", re.M)
 _CID_REFERENCE = re.compile(r"""cid:([^"'\s>)]+)""", re.I)
 
 # -- Skip reasons (the value of `X-Receipts-Skipped` on a part that did not become a receipt) --
@@ -159,21 +161,27 @@ RECEIPT_ID_HEADER = 'X-Receipts-Receipt-Id'
 SKIPPED_HEADER = 'X-Receipts-Skipped'
 
 
+class TooManyPartsError(ValueError):
+    """The message has more than `MAX_PARTS` MIME parts."""
+
+
 def parse_message(raw: bytes) -> Message:
-    """Parse with the modern `policy.default` (decoded headers, `EmailMessage` parts)."""
-    return BytesParser(policy=policy.default).parsebytes(raw)
+    """Parse with the modern `policy.default` (decoded headers, `EmailMessage` parts).
 
+    Raises `TooManyPartsError` as soon as the parser creates more than `MAX_PARTS` parts, whatever
+    delimiters the message uses. The count is local to the call (no shared state across threads).
+    """
+    # The parser calls the factory once when it is built, to find out whether it takes a `policy`.
+    created = -1
 
-def exceeds_part_limit(raw: bytes) -> bool:
-    """Whether `raw` has more MIME boundary-like lines (`--token`, optionally `--token--`) than
-    `MAX_BOUNDARY_LINES` -- a cheap scan, made before the parser builds a `Message` per part.
-    Lines that merely start with dashes (`-----`, a `-- ` signature) are not counted."""
-    count = 0
-    for _ in _BOUNDARY_LINE.finditer(raw):
-        count += 1
-        if count > MAX_BOUNDARY_LINES:
-            return True
-    return False
+    def factory(*args: Any, **kwargs: Any) -> EmailMessage:
+        nonlocal created
+        created += 1
+        if created > MAX_PARTS:
+            raise TooManyPartsError(f'The message has more than {MAX_PARTS} MIME parts.')
+        return EmailMessage(*args, **kwargs)
+
+    return BytesParser(_class=factory, policy=policy.default).parsebytes(raw)
 
 
 def _text(value: object) -> str:
