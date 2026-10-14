@@ -1,7 +1,7 @@
 from django import forms
 
 from ..models import QRCode, QRCodeFormat, QRCodeType
-from ..services import validate_content
+from ..services import check_content_fits, validate_content
 from ..services.management import MAX_CONTENT_LENGTH
 
 
@@ -28,6 +28,10 @@ class QRCodeCreateForm(forms.Form):
         if cleaned.get('qr_type') and cleaned.get('url'):
             try:
                 validate_content(cleaned['qr_type'], cleaned['url'])
+                # The editor can't set the error correction level; a tracked URL encodes the
+                # short link, which always fits.
+                if not (cleaned['qr_type'] == QRCodeType.URL and cleaned['use_url_shortening']):
+                    check_content_fits(cleaned['url'], QRCode().error_correction)
             except forms.ValidationError as e:
                 self.add_error('url', e)
         return cleaned

@@ -884,6 +884,18 @@ separate short-link setting), and prod's `BASE_URL` must never change once codes
 Previews are returned as PNG `data:` URIs and never written to disk. Short codes
 for tracked QR codes are issued by the server (`qr_code:short-code`) and kept in the session until
 the save, so users can't choose their own; a code taken in the meantime is replaced.
+The image options only the API sets (`size`, `border`, `qr_format`, `error_correction`, the two
+colours) are checked by `services.validate_render_options`, called by `create_qrcode` and
+`render_preview` before anything is saved or rendered (so a bad one is a 400 and leaves no row):
+`size` 1-50 (segno's pixels per module; the image is built in memory), `border` 0-20, the model's
+format and error-correction choices, and colours segno itself accepts for that format (a dry
+render of a tiny code per colour; `transparent` is allowed for either colour except a PDF's
+foreground, and not for both at once, which segno 1.6.6 cannot draw as a PNG). It ends with one dry render of
+the content that will really be encoded (the `/go/<code>` link under URL shortening, checked at the
+longest short code) with both colours together, scale 1 and no border, so a payload too big for
+a QR code (`MAX_CONTENT_LENGTH` counts characters, capacity is bytes: 1,000 emoji fit no level) is
+a 400 before anything is saved; the web editor's form calls `check_content_fits` for the same
+reason and its views turn a late `ValidationError` into a 422.
 
 File transfer specifics: the send page's file upload endpoints
 (`apps/file_transfer/views/uploads.py`, and their anonymous twins in `views/anonymous.py`) are a
