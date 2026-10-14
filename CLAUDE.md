@@ -861,6 +861,9 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
 `apps/core/admin_site.py` owns `custom_admin_site` (mounted at `/admin/`) and the tools page (test
 email, masked environment). Every app registers its `ModelAdmin`s on it from its own `admin.py`.
 The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/billing/credittransaction/adjust/`).
+The ledger is read-only in the admin (no add/change/delete, so no `delete_selected`; the same for
+`CreditAccountAdmin`), because the balance only changes through `apps.billing.services`; the tool
+checks `billing.add_credittransaction` itself, and the changelist shows its link only to users with it.
 The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
 so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
 and to the admin tools page.
