@@ -203,6 +203,9 @@ The S3 wrapper itself is generic and lives in `core`: `apps.core.services.storag
 dataclass over a `bucket` and a boto3 client (`build_client(region, endpoint_url, access_key_id,
 secret_access_key)` builds one; an app wires its own settings into it, so apps can use different
 buckets/credentials). Besides the multipart methods it has `put_object`, `copy_object`,
+`delete_objects` / `delete_prefix` (both raise `RuntimeError` naming the keys when `DeleteObjects`
+answers 200 with per-key `Errors`, after deleting the rest, so a caller retries instead of
+recording the files as gone),
 `get_object_bytes` (optional `max_bytes`), `list_keys` (returns a plain list that may be truncated
 at `max_keys`; pass `None` when completeness matters), `presigned_put_url` (a single PUT with
 `Content-Length` and `x-amz-checksum-sha256` signed in; it raises
@@ -1385,7 +1388,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `receipts/failed/` for inbound messages that failed to ingest (see "Email intake").
   Everything of a user sits under one prefix so deleting an account is one `delete_prefix`: the
   `pre_delete(User)` receiver (`apps/receipts/apps.py`, `weak=False`) queues `delete_user_storage`
-  on commit. Tests swap in `FakeReceiptsStorage` (autouse in `apps/receipts/tests/conftest.py`).
+  on commit; `delete_prefix` raises on a per-key S3 error and the user row is gone, so the task
+  queues itself again (`attempt` + 1, `run_after` a backoff when the backend can defer, else at
+  once) up to `len(USER_STORAGE_RETRY_DELAYS)` times, then logs the prefix at error level and gives
+  up. Tests swap in `FakeReceiptsStorage` (autouse in `apps/receipts/tests/conftest.py`).
 - **Uploads** (`services.uploads`): `start_upload` validates (frozen account, size, allowed type --
   the claimed type is normalized, falling back to the extension for browsers that send none -- a
   base64 SHA-256, and the daily cap), creates a `Receipt(uploaded=False)` and presigns a single PUT with the exact

@@ -480,21 +480,8 @@ class S3Storage:
         return len(key_list)
 
     def delete_prefix(self, prefix: str) -> int:
-        """Delete every object under `prefix`. Returns the number of objects deleted."""
-        deleted = 0
-        paginator = self.client.get_paginator('list_objects_v2')
-        keys: list[dict] = []
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for obj in page.get('Contents', []):
-                keys.append({'Key': obj['Key']})
-
-        for start in range(0, len(keys), _DELETE_BATCH_SIZE):
-            batch = keys[start : start + _DELETE_BATCH_SIZE]
-            # Same reasoning as `complete_multipart_upload` above: `batch` is a plain
-            # `list[dict]`, not boto3-stubs' `ObjectIdentifierTypeDef` TypedDict.
-            self.client.delete_objects(
-                Bucket=self.bucket,
-                Delete={'Objects': batch},  # ty: ignore[invalid-argument-type]
-            )
-            deleted += len(batch)
-        return deleted
+        """Delete every object under `prefix`. Returns the number of objects deleted. Raises
+        `RuntimeError` (naming the keys) if S3 refuses any of them -- `DeleteObjects` answers 200
+        with a per-key `Errors` list rather than failing -- after deleting the rest, so callers
+        retry later instead of recording the prefix as gone (see `delete_objects`)."""
+        return self.delete_objects(self.list_keys(prefix, max_keys=None))
