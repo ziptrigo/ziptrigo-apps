@@ -224,7 +224,9 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   and `JWTAuth`/`AsyncJWTAuth` (so `AdminAuth` too) and `POST /api/auth/refresh` reject a token
   whose `pwd` doesn't match the user's current password. Any password change -- the account page,
   a reset, the admin, `set_unusable_password` -- therefore revokes every token issued before it,
-  like Django's session auth hash does for sessions. A token without the claim is rejected, so
+  like Django's session auth hash does for sessions. So does anything else that rewrites
+  `User.password`, e.g. Django rehashing it on login after a hasher upgrade: it kills outstanding
+  JWTs and password reset links alike. A token without the claim is rejected, so
   tokens issued before this shipped stopped working and CLI users had to log in again once.
 
 `POST /api/auth/login` only issues JWTs; it never starts a session. Register, forgot-password,
@@ -319,9 +321,14 @@ fingerprint of the password the account had when it was sent (`tokens.PASSWORD_C
 tokens do; checked by `validate_token`, so the reset page's GET and POST and the API all refuse
 it), so any password change -- this link, another link, the account page -- kills every link
 issued before it; a link without `pwd` (emailed before this shipped, which also covers the
-"without the address claim" case above in practice) is refused, like login tokens were. A later
-signup attempt on the unconfirmed address re-locks the account and so retires an earlier
-finish-setup link; the newest email is the one that works. Claim-on-login (file transfer) needs
+"without the address claim" case above in practice) is refused, like login tokens were. The check
+is repeated inside `reset_password`'s transaction against the user row it locks
+(`select_for_update`), because `validate_token` only reads: two requests with the same link can
+both pass it, and the loser gets `InvalidResetTokenError` (the API answers 400, the page redirects
+to the expired-link page) with nothing written. For an unconfirmed account the first lockdown
+(`existing_account._lock_down_unconfirmed`) retires every reset link issued under the creator's
+password; later signup attempts don't change the (already unusable) hash, so all the finish-setup
+links emailed since stay valid until one of them is used (or expires). Claim-on-login (file transfer) needs
 `email_confirmed`, so it becomes possible at the next login after such a reset, the same as after a
 confirmation link.
 Residual, not new: the confirmation email sent to the victim at the attacker's *first* signup (and

@@ -18,7 +18,7 @@ from ..schemas import (
 )
 from ..services import login_throttle
 from ..services.email_confirmation import get_email_confirmation_service
-from ..services.password_reset import get_password_reset_service
+from ..services.password_reset import InvalidResetTokenError, get_password_reset_service
 from ..tokens import CustomAccessToken, CustomRefreshToken, matches_password
 
 # There is deliberately no signup endpoint (issue #117): accounts are created only through the web
@@ -90,7 +90,11 @@ def reset_password(request: HttpRequest, payload: PasswordResetConfirm):
         raise HttpError(400, 'Invalid or expired token.')
 
     # Also confirms the account's email: the link went to that address (see the service).
-    service.reset_password(user, payload.password, token=payload.token)
+    try:
+        service.reset_password(user, payload.password, token=payload.token)
+    except InvalidResetTokenError:
+        # Lost a race with another use of the same link.
+        raise HttpError(400, 'Invalid or expired token.') from None
 
     return 200, {'message': 'Password has been reset.'}
 

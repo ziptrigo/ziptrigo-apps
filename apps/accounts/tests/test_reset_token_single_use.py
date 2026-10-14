@@ -3,6 +3,7 @@ it was sent (`tokens.PASSWORD_CLAIM`), so setting a password -- by that link, an
 account page -- refuses every link issued before. Covers the reset page and the API, which share
 `PasswordResetService.validate_token`."""
 
+import re
 from urllib.parse import urlsplit
 
 import pytest
@@ -10,8 +11,9 @@ from django.urls import reverse
 from ninja_jwt.settings import api_settings
 
 from apps.accounts.models import User
+from apps.accounts.services.existing_account import handle_signup_for_existing_email
 from apps.accounts.services.password_change import change_password
-from apps.accounts.services.password_reset import PasswordResetService
+from apps.accounts.services.password_reset import InvalidResetTokenError, PasswordResetService
 from apps.accounts.tokens import PasswordResetToken
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -29,6 +31,12 @@ def _token(user: User) -> str:
 
 def _url(token: str) -> str:
     return reverse('accounts:reset-password', args=[token])
+
+
+def _link_path(message: dict) -> str:
+    match = re.search(r'https?://\S+/reset-password/[^/\s]+/', message['text_body'])
+    assert match is not None, message['text_body']
+    return urlsplit(match.group(0)).path
 
 
 def _api_reset(api_client, token: str, password: str):
@@ -115,24 +123,107 @@ def test_link_without_the_password_claim_is_refused(client, user):
     assert not User.objects.get(pk=user.pk).check_password('hijackpass123')
 
 
-def test_finish_setup_link_for_a_locked_down_account_works_once(client, user):
-    """The unconfirmed account's password is unusable (a random `!` hash, stable until set): the
-    link made against it must validate, and die when the password is chosen."""
+def test_same_link_validated_twice_then_reset_twice_only_the_first_wins(user):
+    """The race: two requests both pass `validate_token` before either writes. The loser's
+    `reset_password` re-checks under a lock and refuses; nothing of its is written."""
+    token = _token(user)
+    first_user = PasswordResetService.validate_token(token)
+    second_user = PasswordResetService.validate_token(token)
+    assert first_user is not None and second_user is not None
+
+    PasswordResetService.reset_password(first_user, 'firstpass123', token=token)
+    with pytest.raises(InvalidResetTokenError):
+        PasswordResetService.reset_password(second_user, 'secondpass123', token=token)
+
+    after = User.objects.get(pk=user.pk)
+    assert after.check_password('firstpass123')
+    assert not after.check_password('secondpass123')
+
+
+def test_losing_the_race_leaves_the_email_unconfirmed_and_the_other_effects_alone(user):
     user.email_confirmed = False
     user.email_confirmed_at = None
-    user.set_unusable_password()
     user.save()
-    assert not user.has_usable_password()
-    url = PasswordResetService(email_backend_classes=[]).reset_url_for(user)
-    link = urlsplit(url).path
+    token = _token(user)
+    stale = PasswordResetService.validate_token(token)
+    assert stale is not None
+    # Someone else changes the password after the page loaded (here: the account page).
+    change_password(User.objects.get(pk=user.pk), 'changedpass123')
 
-    first = client.post(link, _passwords('chosenpass123'), **HTMX)
-    again = client.post(link, _passwords('otherpass123'), **HTMX)
+    with pytest.raises(InvalidResetTokenError):
+        PasswordResetService.reset_password(stale, 'hijackpass123', token=token)
 
-    assert first['HX-Redirect'] == reverse('accounts:login')
-    assert again['HX-Redirect'] == link
+    after = User.objects.get(pk=user.pk)
+    assert after.check_password('changedpass123')
+    assert after.email_confirmed is False
+
+
+def test_a_garbled_token_is_refused_by_reset_password(user):
+    with pytest.raises(InvalidResetTokenError):
+        PasswordResetService.reset_password(user, 'newpass123', token='not-a-token')
+
+
+def test_page_and_api_answer_a_lost_race_like_an_invalid_link(
+    client, api_client, user, monkeypatch
+):
+    """The view and the endpoint pass `validate_token`, then lose the race inside
+    `reset_password`: the page bounces to the expired-link page, the API answers 400."""
+    real_reset = PasswordResetService.reset_password
+    winners = iter(['winnerpass123', 'winnertwo123'])
+
+    def racing(user_, password, *, token):
+        # Another request uses the same link between this one's validation and its write.
+        real_reset(user_, next(winners), token=token)
+        return real_reset(user_, password, token=token)
+
+    monkeypatch.setattr(PasswordResetService, 'reset_password', staticmethod(racing))
+
+    page_token = _token(user)
+    posted = client.post(_url(page_token), _passwords('loserpass123'), **HTMX)
+    assert posted['HX-Redirect'] == _url(page_token)
+    assert User.objects.get(pk=user.pk).check_password('winnerpass123')
+
+    api_token = _token(User.objects.get(pk=user.pk))
+    assert _api_reset(api_client, api_token, 'loserpass123').status_code == 400
+    after = User.objects.get(pk=user.pk)
+    assert after.check_password('winnertwo123')
+    assert not after.check_password('loserpass123')
+
+
+def test_finish_setup_links_from_repeated_signup_attempts(
+    user, monkeypatch, client, django_capture_on_commit_callbacks
+):
+    """Through the real path: someone signs up with an unconfirmed account's address twice. The
+    first attempt locks the account down (the password becomes unusable); the second doesn't
+    change the hash, so both emails' links stay valid until one is used -- and then both die."""
+    user.email_confirmed = False
+    user.email_confirmed_at = None
+    user.save()
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        'apps.accounts.services.existing_account.send_email',
+        lambda **kwargs: sent.append(kwargs) or (1, 0),
+    )
+
+    for _ in range(2):
+        with django_capture_on_commit_callbacks(execute=True):
+            handle_signup_for_existing_email(user.email, 'intruder123')
+
+    assert not User.objects.get(pk=user.pk).has_usable_password()
+    first, second = (_link_path(m) for m in sent)
+    assert first != second
+
+    # The first link still works after the second attempt ...
+    assert client.get(first).status_code == 200
+    # ... and using the second one is what kills the first.
+    done = client.post(second, _passwords('chosenpass123'), **HTMX)
+    assert done['HX-Redirect'] == reverse('accounts:login')
+    assert 'expired' in client.get(first).content.decode().lower()
+    again = client.post(first, _passwords('otherpass123'), **HTMX)
+    assert again['HX-Redirect'] == first
     after = User.objects.get(pk=user.pk)
     assert after.check_password('chosenpass123')
+    assert not after.check_password('otherpass123')
     assert after.email_confirmed is True
 
 

@@ -16,7 +16,7 @@ from django.views.decorators.http import require_http_methods
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import ResetPasswordForm
-from ..services.password_reset import get_password_reset_service
+from ..services.password_reset import InvalidResetTokenError, get_password_reset_service
 
 
 @require_http_methods(['GET', 'POST'])
@@ -39,7 +39,11 @@ def reset_password_page(request: HttpRequest, token: str) -> HttpResponse:
     if request.method == 'POST':
         form = ResetPasswordForm(request.POST)
         if form.is_valid():
-            service.reset_password(user, form.cleaned_data['password'], token=token)
+            try:
+                service.reset_password(user, form.cleaned_data['password'], token=token)
+            except InvalidResetTokenError:
+                # Lost a race with another use of the same link: it's the expired page now.
+                return hx_redirect(request, request.path)
             messages.success(request, 'Your password has been reset. You can now log in.')
             return hx_redirect(request, reverse('accounts:login'))
         status = 422

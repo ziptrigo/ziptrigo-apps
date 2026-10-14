@@ -13,7 +13,14 @@ resets the password but doesn't confirm anything -- it can't say which address i
 
 It is also bound to the password the account had when it was sent (`tokens.PASSWORD_CLAIM`), so a
 link works once: setting a password -- by this link, another, or the account page -- refuses every
-link issued before it. A link without that claim (sent before it existed) is refused too.
+link issued before it. A link without that claim (sent before it existed) is refused too, which in
+practice also covers the "no address claim" case above: every link now carries both claims, so one
+without the address claim is refused earlier, for having no `pwd`. (Any rewrite of `User.password`
+counts as a change, including Django rehashing it on login after a hasher upgrade.)
+
+"Works once" holds under concurrency too: `validate_token` only reads, so `reset_password` re-checks
+the token against the user row it locks before writing, and a request that lost that race gets
+`InvalidResetTokenError`.
 """
 
 from dataclasses import dataclass
@@ -31,6 +38,13 @@ from apps.core.services.email import EmailBackendClass, get_email_backend, send_
 from ..models import User
 from ..tokens import RESET_EMAIL_CLAIM, PasswordResetToken, matches_password
 from .email_confirmation import get_email_confirmation_service
+
+
+class InvalidResetTokenError(Exception):
+    """A reset link that is not valid (any more) for the account: raised by
+    `PasswordResetService.reset_password` when the token no longer matches what is stored, i.e.
+    it lost a race with another use of a link. Callers answer it like `validate_token` returning
+    `None`."""
 
 
 @dataclass(slots=True)
@@ -99,30 +113,49 @@ class PasswordResetService:
         email when the token proves they hold it (see the module docstring). Shared by the reset
         page and `POST /api/auth/reset-password`, so the two can't drift.
 
+        `validate_token` only looked: two requests with the same link can both pass it before
+        either writes. So the user is re-read under a row lock here and the token checked again
+        against what is stored *now*; the loser of that race gets `InvalidResetTokenError` (the
+        same answer as any other invalid link) and nothing is written.
+
         Changing the password also revokes every JWT and session issued under the old one
         (`tokens.password_fingerprint`; Django's session auth hash).
+
+        Raises:
+            InvalidResetTokenError: the token is not valid for the account as it is now.
         """
-        proves_email = False
         try:
-            proves_email = PasswordResetToken(token).get(RESET_EMAIL_CLAIM) == user.email
+            token_obj = PasswordResetToken(token)
         except TokenError:
-            pass
+            raise InvalidResetTokenError from None
 
         with transaction.atomic():
-            user.set_password(new_password)
-            user.save(update_fields=['password'])
-            if proves_email and not user.email_confirmed:
-                # Conditional on the address still being the one the link went to, so an email
-                # change that lands between the page load and this write can't be confirmed by it.
-                now = datetime.now(UTC)
-                confirmed = User.objects.filter(
-                    pk=user.pk, email=user.email, email_confirmed=False
-                ).update(email_confirmed=True, email_confirmed_at=now)
-                if confirmed:
-                    user.email_confirmed = True
-                    user.email_confirmed_at = now
-                    # Any confirmation link still out for the address is moot now.
-                    get_email_confirmation_service().invalidate_pending_for_email(user.email)
+            # `select_for_update` serialises concurrent resets on Postgres (a no-op on SQLite).
+            current = User.objects.select_for_update().filter(pk=user.pk).first()
+            sent_to = token_obj.get(RESET_EMAIL_CLAIM)
+            # Only the password binding is re-checked: an address that changed since the page was
+            # loaded still doesn't stop the reset, it just isn't confirmed (below).
+            valid = current is not None and matches_password(token_obj, current)
+            if valid:
+                assert current is not None
+                current.set_password(new_password)
+                current.save(update_fields=['password'])
+                user.password = current.password
+                if sent_to == current.email and not current.email_confirmed:
+                    # Conditional on the address still being the one the link went to, so an
+                    # email change that lands between the page load and this write can't be
+                    # confirmed by it.
+                    now = datetime.now(UTC)
+                    confirmed = User.objects.filter(
+                        pk=current.pk, email=current.email, email_confirmed=False
+                    ).update(email_confirmed=True, email_confirmed_at=now)
+                    if confirmed:
+                        user.email_confirmed = True
+                        user.email_confirmed_at = now
+                        # Any confirmation link still out for the address is moot now.
+                        get_email_confirmation_service().invalidate_pending_for_email(current.email)
+        if not valid:
+            raise InvalidResetTokenError
 
 
 def get_password_reset_service() -> PasswordResetService:
