@@ -61,9 +61,12 @@ def test_reset_confirms_an_unconfirmed_account(client, unconfirmed):
     assert after.email_confirmed_at is not None
 
 
-def test_forgot_password_works_for_an_unconfirmed_account_end_to_end(client, unconfirmed, sent):
+def test_forgot_password_works_for_an_unconfirmed_account_end_to_end(
+    client, unconfirmed, sent, django_capture_on_commit_callbacks
+):
     """The route an owner has when the finish-setup email never reached them."""
-    client.post(reverse('accounts:forgot-password'), {'email': unconfirmed.email}, **HTMX)
+    with django_capture_on_commit_callbacks(execute=True):
+        client.post(reverse('accounts:forgot-password'), {'email': unconfirmed.email}, **HTMX)
 
     (message,) = sent
     prefix = _url('x').removesuffix('x/')
@@ -180,8 +183,11 @@ def test_link_without_the_address_claim_resets_but_does_not_confirm(client, unco
     assert after.email_confirmed is False
 
 
-def test_reset_email_link_is_bound_to_the_address(unconfirmed, sent):
-    PasswordResetService(email_backend_classes=[]).request_reset(unconfirmed.email)
+def test_reset_email_link_is_bound_to_the_address(
+    unconfirmed, sent, django_capture_on_commit_callbacks
+):
+    with django_capture_on_commit_callbacks(execute=True):
+        PasswordResetService(email_backend_classes=[]).request_reset(unconfirmed.email)
 
     (message,) = sent
     prefix = _url('x').removesuffix('x/')

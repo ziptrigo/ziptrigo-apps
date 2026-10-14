@@ -398,9 +398,13 @@ password once and discards it (`make_password`, like `ModelBackend` does for an 
 new-account path hashes it in `create_user`, and both then queue exactly one email with
 `enqueue_after_commit` -- a new account's confirmation is the `send_signup_confirmation_email` task
 (`services.email_confirmation`, skipped if the address moved or was confirmed; a queue failure is
-logged and the page's resend-confirmation is the recovery), not an inline send. Resend-confirmation
-and `PUT /api/account` still call `send_confirmation_email` inline. What's left is a database round
-trip or two, not the SES latency or a password hash. The confirmation email itself now renders from
+logged and the page's resend-confirmation is the recovery), not an inline send. Forgot-password
+and resend-confirmation (web views and `/api/auth/...` alike) queue a task for **every** submitted
+address, known or not -- `send_password_reset_email(email)` and `resend_confirmation_email(email)`,
+which look the account up by that address when they run (nothing is sent for an unknown one, one
+the account has since left, or an already confirmed one) -- so the request does the same work
+either way. `PUT /api/account` (logged-in) still calls `send_confirmation_email` inline. What's
+left is a database round trip or two, not the SES latency or a password hash. The confirmation email itself now renders from
 an autoescaped template (`accounts/emails/email_confirmation.html`, as does the password-reset
 one): `user.name` is free text, an attacker's on an account they created.
 Not covered by this rule, on purpose: `PUT /api/account` still answers `400 Email already in use`
