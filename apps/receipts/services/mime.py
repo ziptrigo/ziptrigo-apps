@@ -52,10 +52,11 @@ parent of it (`strictly_aligned`; no organizational-domain list). A DMARC `fail`
 `permerror` is final. So passing SPF/DKIM for a domain of your own does not let you pose as
 somebody else's address.
 
-Delivered mail is untrusted input, so the work is bounded before and while parsing:
-`parse_message` (it refuses a message that would make more than `MAX_PARTS` parts, counting them
-as the parser creates them),
-`MAX_DEPTH` and `MAX_LEAVES` (what the walkers visit), and `build_stripped_eml`'s size limits.
+Delivered mail is untrusted input, so the work is bounded while parsing and again afterwards.
+While parsing, `parse_message` refuses a message with more than `MAX_PARTS` parts or more than
+`MAX_HEADER_LINES` header lines, counting both as the parser reads them. Afterwards, `MAX_DEPTH`
+and `MAX_LEAVES` bound what the walkers visit, `build_stripped_eml` has its size limits, and
+readers that need only the first of a repeated header stop at it.
 
 The parsed tree is walked by `iter_leaves`, which descends into `multipart/*` **and**
 `message/rfc822` (a message forwarded "as attachment"), so an invoice inside a forwarded email is
@@ -72,8 +73,15 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email import policy
+
+# Not in typeshed (they are public module-level names of the stdlib parser, just undeclared).
+from email.feedparser import (
+    BufferedSubFile,  # ty: ignore[unresolved-import]
+    NeedMoreData,  # ty: ignore[unresolved-import]
+    headerRE,  # ty: ignore[unresolved-import]
+)
 from email.message import EmailMessage, Message
-from email.parser import BytesParser
+from email.parser import BytesFeedParser
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -97,6 +105,12 @@ MAX_LEAVES = 300
 #: bytes, not parts: a minimal part is ~10 bytes, so 40 MB could be millions of `Message` objects
 #: (gigabytes, minutes of CPU). No real receipt has hundreds.
 MAX_PARTS = 500
+
+#: Most header lines (continuation lines included) a message may have in total, over all of its
+#: parts; a message with more is refused while it is parsed. The parser collects a part's header
+#: lines in a list before it reads them, so without a bound one part with millions of `a:b` lines
+#: (they fit in `MAX_RAW_BYTES`) is hundreds of megabytes. A real message has a few hundred.
+MAX_HEADER_LINES = 10_000
 
 #: A text part (an email body) kept in the stored copy is emptied above this many bytes, with
 #: `X-Receipts-Skipped: too large`. A receipt that *is* the body is emptied regardless (it is
@@ -161,16 +175,59 @@ RECEIPT_ID_HEADER = 'X-Receipts-Receipt-Id'
 SKIPPED_HEADER = 'X-Receipts-Skipped'
 
 
-class TooManyPartsError(ValueError):
+class MessageTooLargeError(ValueError):
+    """The message is built to cost more to parse than any real one: refused for good."""
+
+
+class TooManyPartsError(MessageTooLargeError):
     """The message has more than `MAX_PARTS` MIME parts."""
+
+
+class TooManyHeaderLinesError(MessageTooLargeError):
+    """The message has more than `MAX_HEADER_LINES` header lines."""
+
+
+class _HeaderLineCounter(BufferedSubFile):
+    """The parser's line source, counting the lines it reads as headers.
+
+    Every part's parse starts by creating its message (the factory calls `start_block`) and then
+    reads lines up to the first one that is not a header or continuation line -- the blank line
+    ends the block, a body line without one. Only those lines are counted, so a body full of
+    `Name: value` lines or indented text is not.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lines = 0
+        self.in_headers = False
+
+    def start_block(self) -> None:
+        self.in_headers = True
+
+    def readline(self) -> str:
+        line = super().readline()
+        if self.in_headers and line is not NeedMoreData:
+            if line and headerRE.match(line):
+                self.lines += 1
+                if self.lines > MAX_HEADER_LINES:
+                    raise TooManyHeaderLinesError(
+                        f'The message has more than {MAX_HEADER_LINES} header lines.'
+                    )
+            else:
+                self.in_headers = False
+        return line
 
 
 def parse_message(raw: bytes) -> Message:
     """Parse with the modern `policy.default` (decoded headers, `EmailMessage` parts).
 
-    Raises `TooManyPartsError` as soon as the parser creates more than `MAX_PARTS` parts, whatever
-    delimiters the message uses. The count is local to the call (no shared state across threads).
+    Raises `MessageTooLargeError` (`TooManyPartsError` or `TooManyHeaderLinesError`) as soon as the
+    parser creates more than `MAX_PARTS` parts or reads more than `MAX_HEADER_LINES` header lines,
+    whatever delimiters the message uses. The counts are local to the call (no shared state across
+    threads) and live in the parser, not in the message or its policy, so copying, reading and
+    re-serialising the result never trips them.
     """
+    lines = _HeaderLineCounter()
     # The parser calls the factory once when it is built, to find out whether it takes a `policy`.
     created = -1
 
@@ -179,9 +236,15 @@ def parse_message(raw: bytes) -> Message:
         created += 1
         if created > MAX_PARTS:
             raise TooManyPartsError(f'The message has more than {MAX_PARTS} MIME parts.')
+        lines.start_block()
         return EmailMessage(*args, **kwargs)
 
-    return BytesParser(_class=factory, policy=policy.default).parsebytes(raw)
+    parser = BytesFeedParser(factory, policy=policy.default)
+    parser._input = lines  # ty: ignore[unresolved-attribute]  # no public hook for the line source
+    # In chunks, like `BytesParser.parsebytes` does, so only a chunk is split into lines at a time.
+    for start in range(0, len(raw), 8192):
+        parser.feed(raw[start : start + 8192])
+    return parser.close()
 
 
 def _text(value: object) -> str:
@@ -195,8 +258,23 @@ def _all(msg: Message, name: str) -> list[str]:
     return [_text(value) for value in (msg.get_all(name) or [])]
 
 
+def _first_n(msg: Message, name: str, count: int) -> list[str]:
+    """The first `count` values of `name`, like `_all(msg, name)[:count]` but without making a
+    header object for every one of them (`get_all` does, before any slicing)."""
+    lowered = name.lower()
+    values: list[str] = []
+    if count <= 0:
+        return values
+    for key, raw in msg.raw_items():
+        if key.lower() == lowered:
+            values.append(_text(msg.policy.header_fetch_parse(key, raw)))
+            if len(values) >= count:
+                break
+    return values
+
+
 def _first(msg: Message, name: str) -> str:
-    values = _all(msg, name)
+    values = _first_n(msg, name, 1)
     return values[0].strip() if values else ''
 
 
@@ -233,7 +311,7 @@ def _received_for_addresses(msg: Message) -> list[str]:
     side, which may say anything -- including a header that looks just like SES's and says it
     received the message for somebody else."""
     found: list[str] = []
-    for value in _all(msg, 'Received')[:SES_RECEIVED_HEADER_COUNT]:
+    for value in _first_n(msg, 'Received', SES_RECEIVED_HEADER_COUNT):
         if not _SES_RECEIVED_BY.search(value):
             break
         match = _RECEIVED_FOR.search(value)
@@ -696,7 +774,7 @@ def received_at(msg: Message) -> datetime:
     """When SES got it (the date of the topmost `Received` header), else the `Date` header, else
     now. Never in the future: a bad clock must not put an email at the top of a list forever."""
     now = datetime.now(UTC)
-    candidates = [*_all(msg, 'Received')[:1], _first(msg, 'Date')]
+    candidates = [*_first_n(msg, 'Received', 1), _first(msg, 'Date')]
     for value in candidates:
         raw = value.rpartition(';')[2] if ';' in value else value
         try:

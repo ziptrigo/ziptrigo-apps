@@ -3,6 +3,7 @@ recipient match reads `settings.RECEIPTS_INBOUND_ADDRESS`."""
 
 import copy
 import logging
+from datetime import UTC, datetime
 from email.message import Message
 
 import pytest
@@ -1333,10 +1334,97 @@ class TestLimits:
         for _ in range(3):
             mime.parse_message(raw)
 
-    def test_ordinary_dashes_are_not_parts(self):
-        raw = b'Subject: report\n\n' + b'-----\n' * 5000 + b'-- \n' * 5000 + b'--- -- \n' * 5000
+    def test_the_part_limit_is_exact(self):
+        # MAX_PARTS - 1 subparts + the root = MAX_PARTS messages: allowed; one more is not.
+        parsed = mime.parse_message(self.multipart(mime.MAX_PARTS - 1))
+        assert len(parsed.get_payload()) == mime.MAX_PARTS - 1
 
-        mime.parse_message(raw)
+        with pytest.raises(mime.TooManyPartsError):
+            mime.parse_message(self.multipart(mime.MAX_PARTS))
+
+    def test_ordinary_dashes_are_not_parts(self):
+        dashes = b'-----\n' * 5000 + b'-- \n' * 5000 + b'--- -- \n' * 5000
+        raw = (
+            b'Content-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: text/plain\n\n'
+            + dashes
+            + b'--b--\n'
+        )
+
+        parsed = mime.parse_message(raw)
+
+        [part] = parsed.get_payload()
+        assert isinstance(part, Message)
+        assert (
+            part.get_payload() == dashes.decode()[:-1]
+        )  # the last newline belongs to the boundary
+
+    def test_too_many_header_lines_are_refused(self):
+        raw = b'a: b\n' * (mime.MAX_HEADER_LINES + 1) + b'\nbody\n'
+
+        with pytest.raises(mime.TooManyHeaderLinesError):
+            mime.parse_message(raw)
+
+    def test_the_header_line_limit_is_exact(self):
+        raw = b'a: b\n' * mime.MAX_HEADER_LINES + b'\nbody\n'
+
+        assert len(mime.parse_message(raw).items()) == mime.MAX_HEADER_LINES
+
+    def test_continuation_lines_count_as_header_lines(self):
+        raw = b'a: b\n' + b' c\n' * mime.MAX_HEADER_LINES + b'\nbody\n'
+
+        with pytest.raises(mime.TooManyHeaderLinesError):
+            mime.parse_message(raw)
+
+    def test_header_lines_are_counted_over_all_the_parts(self):
+        part = b'--b\n' + b'x: y\n' * 100 + b'\nbody\n'
+        raw = (
+            b'Content-Type: multipart/mixed; boundary=b\n\n'
+            + part * (mime.MAX_HEADER_LINES // 100 + 1)
+            + b'--b--\n'
+        )
+
+        with pytest.raises(mime.TooManyHeaderLinesError):
+            mime.parse_message(raw)
+
+    def test_a_header_looking_body_is_not_counted_as_headers(self):
+        body = b'Item: tea\n  indented\n' * mime.MAX_HEADER_LINES
+        raw = b'Subject: list\n\n' + body
+
+        parsed = mime.parse_message(raw)
+
+        assert parsed.get_payload() == body.decode()
+
+    def test_the_header_count_is_per_call(self):
+        raw = b'a: b\n' * (mime.MAX_HEADER_LINES - 10) + b'\nbody\n'
+
+        for _ in range(3):
+            mime.parse_message(raw)
+
+    def test_many_received_headers_are_read_from_the_topmost(self):
+        top = b'Received: from a.example (a) by inbound-smtp.us-east-1.amazonaws.com with SMTP'
+        top += b' id x for receipts+abcd1234@example.com; Mon, 12 Oct 2026 10:00:00 +0000\n'
+        raw = top + b'Received: from z.example by elsewhere for evil@example.com\n' * 5000
+        msg = mime.parse_message(raw + b'Subject: s\n\nx\n')
+
+        assert mime._received_for_addresses(msg) == ['receipts+abcd1234@example.com']
+        assert mime.received_at(msg) == datetime(2026, 10, 12, 10, 0, tzinfo=UTC)
+        assert mime.subject(msg) == 's'
+
+    def test_the_first_values_come_from_the_first_headers(self):
+        msg = mime.parse_message(b'X-A: 1\nx-a: 2\nX-B: 9\nX-A: 3\n\nx\n')
+
+        assert mime._first_n(msg, 'x-a', 2) == ['1', '2']
+        assert mime._first_n(msg, 'X-A', 10) == ['1', '2', '3']
+        assert mime._first_n(msg, 'X-C', 1) == []
+        assert mime._first_n(msg, 'X-A', 0) == []
+
+    def test_a_message_with_many_headers_under_the_limit_still_builds_a_stripped_eml(self):
+        raw = b'Received: x\n' * 2000 + b'Subject: s\n\nhello there, this is a body\n'
+
+        stripped = mime.build_stripped_eml(raw, mime.parse_message(raw), {})
+
+        assert stripped.count(b'Received: x') == 2000
+        assert b'X-Receipts-Stripped' not in stripped
 
     def test_the_fixtures_and_a_forward_still_parse_and_can_be_copied(self):
         for name in ('pdf_attachment.eml', 'forward_as_attachment.eml', 'html_body.eml'):

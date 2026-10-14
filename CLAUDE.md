@@ -1486,17 +1486,29 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     ingest twice and a worker that dies mid-ingest just lets the lease run out (a message claimed
     more than 3 times is failed as "interrupted"). A failure records `last_error` and schedules the
     retry (1 min, then 5 min; `poll_inbound` re-queues it); the third failure sets `failed`. Over the
-    40 MB guard (`get_object_bytes(max_bytes)`), more than `mime.MAX_PARTS` (500) MIME parts
-    (`parse_message` counts the `Message` objects the parser creates and raises `TooManyPartsError`
-    on the 501st, so it works for any delimiter -- a `-`-leading or over-70-character boundary,
-    trailing whitespace, CR-only endings -- which a pre-scan of the raw bytes missed:
-    `MAX_RAW_BYTES` caps bytes, not parts, and millions of tiny parts are gigabytes of `Message`
-    objects -- an OOM kill of `db_worker` restarts the whole container), unparseable, or an object that is gone (with no
-    work done) fail at once. The task never raises (the queue backends don't retry; the row *is*
-    the retry mechanism). The object is deleted only after the row is marked `done`. The final
-    writes (`done`, `failed`, the retry schedule) are conditional on `attempts` still being the
-    value the worker claimed with (a claim token), so a slow worker whose lease ran out can't
-    disturb the one that took over (and doesn't delete the object).
+    40 MB guard (`get_object_bytes(max_bytes)`), a message `mime.parse_message` refuses
+    (`MessageTooLargeError`: more than `mime.MAX_PARTS` (500) MIME parts, or more than
+    `mime.MAX_HEADER_LINES` (10,000) header lines in total, continuation lines included),
+    unparseable, or an object that is gone (with no work done) fail at once. The task never raises
+    (the queue backends don't retry; the row *is* the retry mechanism). The object is deleted only
+    after the row is marked `done`. The final writes (`done`, `failed`, the retry schedule) are
+    conditional on `attempts` still being the value the worker claimed with (a claim token), so a
+    slow worker whose lease ran out can't disturb the one that took over (and doesn't delete the
+    object).
+  - **Parser limits.** `MAX_RAW_BYTES` caps bytes, not parts or lines: 40 MB can be millions of
+    tiny `Message` objects, or one part with millions of `a:b` header lines (the parser holds a
+    part's header lines in a list before reading them), and either is gigabytes -- an OOM kill of
+    `db_worker` restarts the whole container. So `parse_message` counts both *as the parser reads*
+    and stops at once, per call (no shared state). Parts are the `Message` objects its factory
+    creates, so any delimiter shape counts (a `-`-leading or over-70-character boundary, trailing
+    whitespace, CR-only endings -- which a pre-scan of the raw bytes missed). Header lines are
+    counted by a `BufferedSubFile` subclass put in place of the `BytesFeedParser`'s private
+    `_input` (there is no public hook), and only the lines read between a part's creation and its
+    first non-header line count, so a body of `Name: value` or indented lines does not. Nothing is
+    stored on the message or its policy, so copying and re-serialising never trips a counter.
+    Readers that want only the topmost of a repeated header (`Received`, in `scan_recipients`,
+    `received_at`, `_first`) use `mime._first_n`: `get_all` builds a header object for every one
+    before any slicing.
   - **Failed messages are parked.** Anyone can make a message fail, and a failed object left under
     `receipts/inbound/` would stay in the poller's 100-key listing forever, crowding new mail out
     (the first version listed extra keys per failure as a workaround, which just moved the

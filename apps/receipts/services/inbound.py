@@ -395,7 +395,7 @@ def _ingest_claimed(message: InboundMessage, override: Sequence[str] | None) -> 
             else mime.scan_recipients(parsed)
         )
         context = _Context(message=message, raw=raw, parsed=parsed)
-    except mime.TooManyPartsError as exc:
+    except mime.MessageTooLargeError as exc:
         raise PermanentIngestError(str(exc)) from exc
     except Exception as exc:
         raise PermanentIngestError(f'The message could not be parsed: {exc}') from exc
