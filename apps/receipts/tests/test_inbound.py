@@ -1677,28 +1677,71 @@ class TestHostileMessages:
             InboundEmailStatus.NO_RECEIPT,
         )
 
-    def test_a_part_count_bomb_fails_fast_and_for_good(self, fake_storage, inbox, monkeypatch):
-        parts = b''.join(b'--b\r\n\r\nx\r\n' for _ in range(mime.MAX_BOUNDARY_LINES + 100))
+    def test_a_part_count_bomb_fails_fast_and_for_good(self, fake_storage, inbox):
+        # A boundary starting with `-` (like JavaMail's `----=_Part_`): a regex scan missed these.
+        parts = b''.join(b'---\r\n\r\nx\r\n' for _ in range(mime.MAX_PARTS + 100))
         raw = (
             (
                 f'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for {inbox};\r\n'
-                'Content-Type: multipart/mixed; boundary=b\r\n\r\n'
+                'Content-Type: multipart/mixed; boundary="-"\r\n\r\n'
             ).encode()
             + parts
-            + b'--b--\r\n'
+            + b'---\r\n'
         )
         key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
         fake_storage.seed(key, raw)
         message = InboundMessage.objects.create(s3_key=key)
-        monkeypatch.setattr(
-            mime, 'parse_message', lambda _raw: pytest.fail('a bomb must not reach the parser')
-        )
 
         inbound.ingest(message.pk)
 
         message.refresh_from_db()
         assert message.attempts == 1  # no retries
         assert 'MIME parts' in message.last_error
+        assert_parked(fake_storage, message)
+        assert InboundEmail.objects.count() == 0
+
+    def test_a_header_line_bomb_fails_fast_and_for_good(self, fake_storage, inbox):
+        raw = (
+            f'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for {inbox};\r\n'
+        ).encode() + b'a: b\r\n' * (mime.MAX_HEADER_LINES + 1)
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, raw + b'\r\nbody\r\n')
+        message = InboundMessage.objects.create(s3_key=key)
+
+        inbound.ingest(message.pk)
+
+        message.refresh_from_db()
+        assert message.attempts == 1  # no retries
+        assert 'header lines' in message.last_error
+        assert_parked(fake_storage, message)
+        assert InboundEmail.objects.count() == 0
+
+    @pytest.mark.parametrize(
+        'header',
+        [
+            b'Content-Type: text/plain; ' + b'p=v; ' * 15_000,
+            b'To: ' + b'a@example.com, ' * 6_000,
+        ],
+        ids=['content-type', 'to'],
+    )
+    def test_a_huge_header_fails_fast_and_for_good(self, fake_storage, inbox, header):
+        raw = (
+            (
+                f'Received: by inbound-smtp.us-east-1.amazonaws.com with SMTP id a for {inbox};\r\n'
+            ).encode()
+            + header
+            + b'\r\n\r\nbody\r\n'
+        )
+        assert len(header) > mime.MAX_HEADER_BYTES
+        key = f'{INBOUND_PREFIX}{uuid.uuid4()}'
+        fake_storage.seed(key, raw)
+        message = InboundMessage.objects.create(s3_key=key)
+
+        inbound.ingest(message.pk)
+
+        message.refresh_from_db()
+        assert message.attempts == 1  # no retries
+        assert 'A header is over' in message.last_error
         assert_parked(fake_storage, message)
         assert InboundEmail.objects.count() == 0
 

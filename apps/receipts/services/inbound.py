@@ -387,10 +387,6 @@ def _ingest_claimed(message: InboundMessage, override: Sequence[str] | None) -> 
             return
         raise PermanentIngestError('The inbound object is missing.') from exc
 
-    if mime.exceeds_part_limit(raw):
-        raise PermanentIngestError(
-            f'The message has more than {mime.MAX_BOUNDARY_LINES} MIME parts.'
-        )
     try:
         parsed = mime.parse_message(raw)
         scan = (
@@ -399,6 +395,8 @@ def _ingest_claimed(message: InboundMessage, override: Sequence[str] | None) -> 
             else mime.scan_recipients(parsed)
         )
         context = _Context(message=message, raw=raw, parsed=parsed)
+    except mime.MessageTooLargeError as exc:
+        raise PermanentIngestError(str(exc)) from exc
     except Exception as exc:
         raise PermanentIngestError(f'The message could not be parsed: {exc}') from exc
 

@@ -1548,15 +1548,46 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     ingest twice and a worker that dies mid-ingest just lets the lease run out (a message claimed
     more than 3 times is failed as "interrupted"). A failure records `last_error` and schedules the
     retry (1 min, then 5 min; `poll_inbound` re-queues it); the third failure sets `failed`. Over the
-    40 MB guard (`get_object_bytes(max_bytes)`), more than `mime.MAX_BOUNDARY_LINES` (500) MIME
-    boundary lines (checked on the raw bytes **before parsing**: `MAX_RAW_BYTES` caps bytes, not
-    parts, and millions of tiny parts are gigabytes of `Message` objects -- an OOM kill of
-    `db_worker` restarts the whole container), unparseable, or an object that is gone (with no
-    work done) fail at once. The task never raises (the queue backends don't retry; the row *is*
-    the retry mechanism). The object is deleted only after the row is marked `done`. The final
-    writes (`done`, `failed`, the retry schedule) are conditional on `attempts` still being the
-    value the worker claimed with (a claim token), so a slow worker whose lease ran out can't
-    disturb the one that took over (and doesn't delete the object).
+    40 MB guard (`get_object_bytes(max_bytes)`), a message `mime.parse_message` refuses
+    (`MessageTooLargeError`: more than `mime.MAX_PARTS` (500) MIME parts, more than
+    `mime.MAX_HEADER_LINES` (10,000) header lines in total, continuation lines included, a header
+    over `mime.MAX_HEADER_BYTES` (64 KB) or headers over `mime.MAX_TOTAL_HEADER_BYTES` (256 KB)),
+    unparseable, or an object that is gone (with no work done) fail at once. The task never raises
+    (the queue backends don't retry; the row *is* the retry mechanism). The object is deleted only
+    after the row is marked `done`. The final writes (`done`, `failed`, the retry schedule) are
+    conditional on `attempts` still being the value the worker claimed with (a claim token), so a
+    slow worker whose lease ran out can't disturb the one that took over (and doesn't delete the
+    object).
+  - **Parser limits.** `MAX_RAW_BYTES` caps bytes, not parts, lines or header sizes: 40 MB can be
+    millions of tiny `Message` objects, or one part with millions of `a:b` header lines (the parser
+    holds a part's header lines in a list before reading them), or one multi-megabyte `To` /
+    `Subject` / `Content-Type` (parsing and reading a header with `policy.default` costs far more
+    than its length: a 1.5 MB `To` of 80k addresses took 28 s and ~450 MB in `scan_recipients`, a
+    1.6 MB `Subject` 20 s, a 250 KB `Content-Type` 2.9 s inside `parse_message` itself, since
+    feedparser calls `get_content_type()` while parsing), and any of them is gigabytes or minutes
+    -- an OOM kill of `db_worker` restarts the whole container. So `parse_message` counts all of it
+    *as the parser reads* and stops at once, per call (no shared state). Parts are the `Message` objects its factory
+    creates, so any delimiter shape counts (a `-`-leading or over-70-character boundary, trailing
+    whitespace, CR-only endings -- which a pre-scan of the raw bytes missed). Header lines are
+    counted by a `BufferedSubFile` subclass put in place of the `BytesFeedParser`'s private
+    `_input` (there is no public hook), and only the lines read between a part's creation and its
+    first non-header line count, so a body of `Name: value` or indented lines does not. The same
+    counter budgets header **bytes**: one logical header (first line plus its continuation lines)
+    may have `MAX_HEADER_BYTES` = 64 KB and all header lines of the message, nested parts included,
+    `MAX_TOTAL_HEADER_BYTES` = 256 KB (`HeadersTooLargeError`). The margin: SMTP servers cap a
+    whole message's headers at 64-100 KB, a normal big message (30 `Received`, 10 DKIM, a
+    600-entry `References`, 400 recipients) is ~50 KB, and the cost is ~10-20 microseconds per
+    byte, so the worst message that passes is a few seconds of parsing. Because it replaces the
+    private `_input`, `parse_message` first checks that it is a plain `BufferedSubFile` and raises
+    `RuntimeError` otherwise (the ingest then fails permanently and the parked message can be
+    retried from the admin once fixed), and a test spies on `_HeaderLineCounter.readline` so a
+    CPython change that stops the parser reading through it fails the suite. The readers that still
+    use `get_all` (`_header_addresses`, `From`) are therefore bounded by `MAX_HEADER_LINES` and the
+    byte caps. Nothing is stored on the message or its policy, so copying and re-serialising never
+    trips a counter.
+    Readers that want only the topmost of a repeated header (`Received`, in `scan_recipients`,
+    `received_at`, `_first`) use `mime._first_n`: `get_all` builds a header object for every one
+    before any slicing.
   - **Failed messages are parked.** Anyone can make a message fail, and a failed object left under
     `receipts/inbound/` would stay in the poller's 100-key listing forever, crowding new mail out
     (the first version listed extra keys per failure as a workaround, which just moved the
