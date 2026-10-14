@@ -399,6 +399,28 @@ class TestForwardingConfirmation:
         assert email.status == InboundEmailStatus.REJECTED_SENDER
         assert email.forwarding_confirmation_url == ''
 
+    @pytest.mark.parametrize(
+        'crafted',
+        [
+            '"x<forwarding-noreply@google.com>"@evil.test',
+            '=?utf-8?q?x=3Cforwarding-noreply=40google=2Ecom=3E?=@evil.test',
+        ],
+    )
+    def test_a_crafted_from_naming_google_inside_a_quoted_part_is_not_google(
+        self, deliver, inbox, account, crafted
+    ):
+        ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
+        raw = build_email(
+            from_addr=crafted,
+            text='Confirmation code: 123456\nhttps://mail-settings.google.com/mail/vf-x',
+            ses=Ses(recipient=inbox, return_path='bounce@evil.test'),
+        )
+
+        email = one_email(deliver(raw))
+
+        assert email.status == InboundEmailStatus.REJECTED_SENDER
+        assert email.forwarding_confirmation_url == ''
+
     def test_a_dmarc_pass_for_another_domain_does_not_make_it_google(self, deliver, inbox, account):
         ReceiptsAccount.objects.filter(pk=account.pk).update(sender_allowlist=['me@example.com'])
         raw = build_email(
@@ -624,6 +646,25 @@ class TestAllowlist:
             return_path='attacker@evil.test',
             spf='PASS',
             dkim='FAIL',
+        )
+
+        assert status == 'rejected_sender'
+
+    @pytest.mark.parametrize(
+        'crafted',
+        [
+            '"x<orders@staples.com>"@evil.test',
+            '=?utf-8?q?x=3Corders=40staples=2Ecom=3E?=@evil.test',
+            '"x<anyone@acme.test>"@evil.test',
+        ],
+    )
+    def test_a_listed_address_inside_a_crafted_from_is_not_the_sender(
+        self, deliver, inbox, crafted
+    ):
+        """The address written in `From` is the one authenticated (its domain must pass DMARC),
+        so a listed address tucked into a quoted local part must not count as listed."""
+        status = self.status(
+            deliver, inbox, from_addr=crafted, return_path='bounce@evil.test', spf='PASS'
         )
 
         assert status == 'rejected_sender'

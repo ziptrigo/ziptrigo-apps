@@ -17,16 +17,20 @@ MAX_ALLOWLIST_ENTRIES = 100
 MAX_ADDRESS_LENGTH = 254
 
 _DOMAIN = re.compile(r'^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
-_ANGLE = re.compile(r'<([^<>]+)>')
 
 
 def normalize_address(address: str) -> str:
-    """Lowercase, without a display name or angle brackets, and without a `+tag` on the local part
-    (this also covers Gmail's auto-forward envelope senders, `...+caf_=user=example.com@gmail.com`)."""
+    """Lowercase, without wrapping angle brackets, and without a `+tag` on the local part (this
+    also covers Gmail's auto-forward envelope senders, `...+caf_=user=example.com@gmail.com`).
+
+    `address` must be a bare addr-spec (what `email.utils.getaddresses`/`parseaddr` return), not a
+    `Name <addr>` header value: brackets are removed only when they wrap the whole value. Looking for
+    `<...>` anywhere would let a quoted local part (`"x<listed@vendor.com>"@attacker.test`) read as
+    `listed@vendor.com` here while the authentication code, which takes the domain after the last
+    `@`, vets `attacker.test`."""
     address = address.strip()
-    match = _ANGLE.search(address)
-    if match:
-        address = match.group(1)
+    if address.startswith('<') and address.endswith('>'):
+        address = address[1:-1]
     address = address.strip().lower()
     local, at, domain = address.rpartition('@')
     if not at:
@@ -56,7 +60,8 @@ def parse_allowlist(value: str | Iterable[str] | None) -> list[str]:
             domain = entry[2:]
             normalized = entry if _DOMAIN.match(domain) else ''
         else:
-            normalized = normalize_address(entry)
+            # A typed entry may be `Name <addr>` (a list item can hold spaces).
+            normalized = normalize_address(parseaddr(entry)[1] or entry)
             try:
                 validate_email(normalized)
             except ValidationError:

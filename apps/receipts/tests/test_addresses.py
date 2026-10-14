@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.unit]
     [
         ('Me@Example.COM', 'me@example.com'),
         ('me+invoices@example.com', 'me@example.com'),
-        ('Jane Doe <Jane+x@Example.com>', 'jane@example.com'),
+        ('<Jane+x@Example.com>', 'jane@example.com'),
         ('  me@example.com ', 'me@example.com'),
         ('noreply+caf_=user=example.com@gmail.com', 'noreply@gmail.com'),
         ('not-an-address', 'not-an-address'),
@@ -25,6 +25,34 @@ pytestmark = [pytest.mark.unit]
 )
 def test_normalize_address(raw, expected):
     assert normalize_address(raw) == expected
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        '"x<orders@vendor.com>"@attacker.test',
+        'x<orders@vendor.com>@attacker.test',
+    ],
+)
+def test_normalize_address_does_not_pull_an_address_out_of_the_middle(raw):
+    """Only brackets around the whole value are removed; the domain stays the one after the last
+    `@`, the one authentication vets."""
+    assert normalize_address(raw) != 'orders@vendor.com'
+
+
+def test_a_crafted_local_part_does_not_match_a_listed_address():
+    allow = ['orders@vendor.com', '*@vendor.com']
+
+    assert not matches_allowlist(allow, '"x<orders@vendor.com>"@attacker.test')
+    assert not matches_allowlist(allow, 'x<orders@vendor.com>@attacker.test')
+
+
+def test_parse_allowlist_accepts_brackets_and_display_names():
+    assert parse_allowlist(['<A@b.com>', 'Jane Doe <Jane+x@Example.com>']) == [
+        'a@b.com',
+        'jane@example.com',
+    ]
+    assert parse_allowlist('<a@b.com>') == ['a@b.com']
 
 
 def test_parse_allowlist_from_text_splits_normalizes_and_dedupes():
