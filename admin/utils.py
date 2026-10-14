@@ -139,6 +139,118 @@ def set_environment(environment: Environment | str | None = None) -> Environment
     return selection.environment
 
 
+# -- The JWT HTTP-client CLIs (`qrcode`, `filetransfer`, `receipts`) --------------------------
+#
+# They talk to a running site over its API, so which site, which token and where the password
+# comes from are all decided here once. Everything below is read when a command runs, *after*
+# `select_environment` has loaded the `.env.<environment>` file, never at import time.
+
+#: Where the CLIs keep their token files (`token_file`); a test points it at a temp directory.
+TOKEN_DIR = Path.home()
+
+# The environment the running command selected (`select_environment`); it names the token file.
+_environment = 'local'
+
+
+def select_environment(environment: Environment | str | None) -> str:
+    """Load the selected environment file (`set_environment`) and remember which environment it
+    is, for `token_file` and `current_environment`. Every command of those CLIs calls this first."""
+    global _environment
+    selected = set_environment(environment)
+    _environment = str(selected or os.environ.get('ENVIRONMENT') or 'local')
+    _announce_site()
+    return _environment
+
+
+def _announce_site() -> None:
+    """Say on stderr which site the command is about to talk to, and warn when a stray
+    `API_BASE_URL` overrides the environment file's `BASE_URL`: the token file is chosen by
+    environment name, so the token would be sent to whatever host that variable names."""
+    site = site_url()
+    override = os.environ.get('API_BASE_URL', '').rstrip('/')
+    file_url = os.environ.get('BASE_URL', '').rstrip('/')
+    if override and file_url and override != file_url:
+        typer.echo(
+            f'Warning: API_BASE_URL ({override}) overrides the {_environment} environment '
+            f"file's BASE_URL ({file_url}); the {_environment} token will be sent to {override}.",
+            err=True,
+        )
+    typer.echo(f'Site: {site} ({_environment})', err=True)
+
+
+def current_environment() -> str:
+    """The environment `select_environment` last selected (`local` before any)."""
+    return _environment
+
+
+def site_url() -> str:
+    """The site the CLIs talk to: `API_BASE_URL`, else the selected environment file's `BASE_URL`,
+    else the local dev server -- so `<cli> prod ...` reaches prod, not localhost."""
+    base = os.environ.get('API_BASE_URL') or os.environ.get('BASE_URL') or 'http://localhost:8000'
+    return base.rstrip('/')
+
+
+def api_url(path: str) -> str:
+    """`<site>/api<path>`, e.g. `api_url('/ft/transfers/')`."""
+    return f'{site_url()}/api{path}'
+
+
+def _legacy_token_file(cli: str) -> Path:
+    return TOKEN_DIR / f'.{cli}_token'
+
+
+def token_file(cli: str) -> Path:
+    """`cli`'s token file for the selected environment, `~/.<cli>_token.<environment>`. One per
+    environment, and one per CLI: a token is only valid for the server that issued it, so a shared
+    file would send the prod token to the local server and the other way round, and each CLI logs
+    in independently (possibly as another account). The single `~/.<cli>_token` of earlier
+    versions is no longer read."""
+    legacy = _legacy_token_file(cli)
+    return legacy.with_name(f'{legacy.name}.{_environment}')
+
+
+def get_token(cli: str) -> str | None:
+    """The stored authentication token, if any."""
+    path = token_file(cli)
+    if path.exists():
+        return path.read_text().strip()
+    return None
+
+
+def save_token(cli: str, token: str) -> None:
+    """Save the authentication token with `0600` permissions, also when the file already exists
+    with a looser mode (see `write_private_file`)."""
+    write_private_file(token_file(cli), token)
+
+
+def get_headers(cli: str) -> dict:
+    """Headers carrying the stored token; exits with a hint to log in when there is none."""
+    token = get_token(cli)
+    if not token:
+        logger.error(f'Not authenticated on {_environment}. Please login first.')
+        if _legacy_token_file(cli).exists():
+            logger.warning(
+                f'{_legacy_token_file(cli)} is from an older version and no longer used: '
+                'login again, then delete it.'
+            )
+        raise typer.Exit(1)
+    return {'Authorization': f'Bearer {token}'}
+
+
+def password_from_prompt_or_env(password: str | None, env_var: str) -> str:
+    """A password argument that defaults to `None` (rather than being required positionally) is
+    entered with the terminal's echo hidden when omitted -- typing it in the clear as a plain CLI
+    argument leaves it sitting in the shell's history and briefly visible to anyone on the same
+    machine running `ps`. `env_var` keeps non-interactive use (scripts, CI) working without either
+    of those: `login` checks it before falling back to an interactive prompt."""
+    if password is not None:
+        return password
+    from_env = os.environ.get(env_var)
+    if from_env:
+        return from_env
+    return typer.prompt('Password', hide_input=True)
+
+
 def run(
     *args, dry: bool = False, strip_output: StripOutput | None = StripOutput(), **kwargs
 ) -> subprocess.CompletedProcess | None:

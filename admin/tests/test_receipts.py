@@ -83,33 +83,16 @@ class FakeResponse:
 
 
 @pytest.fixture(autouse=True)
-def _no_env_file(monkeypatch):
-    """Every command calls `set_environment(environment)` first, which reads a real `.env.*` file
-    off disk -- irrelevant to what these tests check, and CI may not have one at all."""
-    monkeypatch.setattr(
-        receipts, 'set_environment', lambda environment=None, *args, **kwargs: environment
-    )
-
-
-@pytest.fixture(autouse=True)
-def _site_url(monkeypatch):
-    monkeypatch.delenv('API_BASE_URL', raising=False)
-    monkeypatch.delenv('BASE_URL', raising=False)
-
-
-@pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch):
     """Neutralize the 429-retry backoff so a rate-limit test doesn't wait in real time."""
     monkeypatch.setattr(receipts.time, 'sleep', lambda *args, **kwargs: None)
 
 
 @pytest.fixture
-def token_file(tmp_path, monkeypatch):
+def token_file(token_dir):
     """The `local` environment's token file (the default), holding a token; the other
     environments' files sit next to it."""
-    monkeypatch.setattr(receipts, 'TOKEN_FILE_BASE', tmp_path / 'token')
-    monkeypatch.setattr(receipts, '_environment', 'local')
-    path = tmp_path / 'token.local'
+    path = token_dir / '.receipts_token.local'
     path.write_text('tok')
     return path
 
@@ -125,20 +108,6 @@ def _checksum(data: bytes) -> str:
 
 
 # -- Pure helpers --
-
-
-def test_api_url_defaults_to_the_local_server():
-    assert receipts._api_url('/receipts/inbox') == 'http://localhost:8000/api/receipts/inbox'
-
-
-def test_api_url_uses_the_environment_files_base_url(monkeypatch):
-    # Read at call time, so the value `set_environment` loads into `os.environ` is seen.
-    monkeypatch.setenv('BASE_URL', 'https://example.com/')
-
-    assert receipts._api_url('/receipts/inbox') == 'https://example.com/api/receipts/inbox'
-
-    monkeypatch.setenv('API_BASE_URL', 'http://override:9000')
-    assert receipts._api_url('/auth/login') == 'http://override:9000/api/auth/login'
 
 
 def test_sha256_base64_file_matches_hashlib_and_streams(tmp_path, monkeypatch):
@@ -256,60 +225,25 @@ def test_error_text_for_a_429_says_when_to_try_again():
     assert 'try again' not in receipts._error_text(FakeResponse(429, {'detail': 'Too many.'}))
 
 
-def test_get_headers_requires_login(logged_out):
-    with pytest.raises(typer.Exit):
-        receipts.get_headers()
+# -- One token file per environment (the helpers themselves: test_cli_utils.py) --
 
 
-def test_get_headers_returns_bearer_token(token_file):
-    token_file.write_text('abc123')
+def test_commands_talk_to_the_selected_environments_site(token_file, loads_base_url, monkeypatch):
+    (token_file.parent / '.receipts_token.prod').write_text('prod-token')
+    seen = {}
 
-    assert receipts.get_headers() == {'Authorization': 'Bearer abc123'}
+    def fake_get(url, params=None, headers=None, **kwargs):
+        seen.update(url=url)
+        return FakeResponse(200, {'count': 0, 'limit': 20, 'offset': 0, 'results': []})
 
+    monkeypatch.setattr('requests.get', fake_get)
 
-def test_save_token_creates_file_with_owner_only_permissions(logged_out):
-    receipts.save_token('secret')
-
-    assert logged_out.read_text() == 'secret'
-    assert (logged_out.stat().st_mode & 0o777) == 0o600
-
-
-def test_save_token_tightens_a_file_that_already_exists_with_looser_permissions(token_file):
-    token_file.chmod(0o644)
-
-    receipts.save_token('secret')
-
-    assert token_file.read_text() == 'secret'
-    assert (token_file.stat().st_mode & 0o777) == 0o600
-
-
-def test_save_token_will_not_write_through_a_symlink(logged_out, tmp_path):
-    target = tmp_path / 'elsewhere'
-    target.write_text('keep')
-    logged_out.symlink_to(target)
-
-    with pytest.raises(OSError):
-        receipts.save_token('secret')
-
-    assert target.read_text() == 'keep'
-
-
-# -- One token file per environment --
-
-
-def test_each_environment_has_its_own_token_file(token_file, tmp_path, monkeypatch):
-    token_file.write_text('local-token')
-    (tmp_path / 'token.prod').write_text('prod-token')
-
-    monkeypatch.setattr(receipts, '_environment', 'prod')
-    assert receipts.get_headers() == {'Authorization': 'Bearer prod-token'}
-
-    monkeypatch.setattr(receipts, '_environment', 'local')
-    assert receipts.get_headers() == {'Authorization': 'Bearer local-token'}
+    assert runner.invoke(receipts.app, ['list', 'prod']).exit_code == 0
+    assert seen['url'] == 'https://prod.example/api/receipts/receipts'
 
 
 def test_commands_use_the_selected_environments_token(token_file, tmp_path, monkeypatch):
-    (tmp_path / 'token.prod').write_text('prod-token')
+    (tmp_path / '.receipts_token.prod').write_text('prod-token')
     seen = {}
 
     def fake_get(url, params=None, headers=None, **kwargs):
@@ -332,15 +266,16 @@ def test_login_writes_only_the_selected_environments_file(token_file, tmp_path, 
     result = runner.invoke(receipts.app, ['login', 'prod', 'me@example.com', 'pw'])
 
     assert result.exit_code == 0
-    assert (tmp_path / 'token.prod').read_text() == 'new-prod'
+    assert (tmp_path / '.receipts_token.prod').read_text() == 'new-prod'
     assert token_file.read_text() == 'tok'
 
 
 def test_a_token_from_an_older_version_is_ignored(logged_out, tmp_path):
-    (tmp_path / 'token').write_text('legacy')
+    (tmp_path / '.receipts_token').write_text('legacy')
 
-    with pytest.raises(typer.Exit):
-        receipts.get_headers()
+    result = runner.invoke(receipts.app, ['list', 'local'])
+
+    assert result.exit_code == 1
 
 
 # -- `_request`: timeout + bounded 429 retry --
@@ -1055,7 +990,7 @@ def test_export_overwrites_an_existing_file_only_on_success(token_file, tmp_path
     assert result.exit_code == 1
     assert 'reset by peer' in result.output
     assert out.read_bytes() == b'old,good\r\n'  # the earlier file is untouched
-    assert sorted(p.name for p in tmp_path.iterdir()) == ['out.csv', 'token.local']
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['.receipts_token.local', 'out.csv']
     assert response.closed
 
 
@@ -1070,7 +1005,7 @@ def test_export_mid_stream_failure_leaves_no_partial_file(token_file, tmp_path, 
     result = runner.invoke(receipts.app, ['export', 'local', '--out', str(out)])
 
     assert result.exit_code == 1
-    assert sorted(p.name for p in tmp_path.iterdir()) == ['token.local']
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['.receipts_token.local']
 
 
 def test_export_leaves_no_temp_file_behind_on_success(token_file, tmp_path, monkeypatch):
@@ -1080,7 +1015,7 @@ def test_export_leaves_no_temp_file_behind_on_success(token_file, tmp_path, monk
     result = runner.invoke(receipts.app, ['export', 'local', '--out', str(out)])
 
     assert result.exit_code == 0
-    assert sorted(p.name for p in tmp_path.iterdir()) == ['out.csv', 'token.local']
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['.receipts_token.local', 'out.csv']
 
 
 def test_export_into_a_missing_folder_fails_before_asking_the_server(

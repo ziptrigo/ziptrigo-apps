@@ -12,7 +12,6 @@ emailed to.
 import base64
 import hashlib
 import math
-import os
 import shlex
 import time
 from pathlib import Path
@@ -21,7 +20,17 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .utils import EnvironmentAnnotation, logger, set_environment, write_private_file
+from .utils import (
+    EnvironmentAnnotation,
+    api_url,
+    current_environment,
+    get_headers,
+    logger,
+    password_from_prompt_or_env,
+    save_token,
+    select_environment,
+    token_file,
+)
 
 app = typer.Typer(
     help=__doc__,
@@ -30,13 +39,9 @@ app = typer.Typer(
     rich_markup_mode='markdown',
 )
 
-# A separate token file from `admin/qrcode.py` and `admin/filetransfer.py`: each CLI logs in
-# independently (possibly as a different account), so sharing one file would mean the last `login`
-# of any of them silently signs the others out too. And one per environment
-# (`~/.receipts_token.local`, `.prod`, ...; see `token_file`): a token is only valid for the server
-# that issued it, so a shared file would send the prod token to the local server and the other way
-# round. The single `~/.receipts_token` of earlier versions is no longer read: log in again.
-TOKEN_FILE_BASE = Path.home() / '.receipts_token'
+# The token lives in `~/.receipts_token.<environment>` (`admin.utils.token_file`); the single
+# `~/.receipts_token` of earlier versions is no longer read: log in again, then delete it.
+CLI = 'receipts'
 
 # Ordinary API calls; not the PUT of a file -- see `FILE_UPLOAD_TIMEOUT_SECONDS`.
 REQUEST_TIMEOUT_SECONDS = 30
@@ -66,73 +71,6 @@ CONTENT_TYPES = {
     '.heic': 'image/heic',
     '.heif': 'image/heic',
 }
-
-
-def _api_url(path: str) -> str:
-    """`<site>/api/receipts<path>`. The site comes from `API_BASE_URL`, else the selected
-    environment file's `BASE_URL` (both read now, after `set_environment` has loaded that file --
-    not at import time), else the local dev server."""
-    base = os.environ.get('API_BASE_URL') or os.environ.get('BASE_URL') or 'http://localhost:8000'
-    return f'{base.rstrip("/")}/api{path}'
-
-
-# The environment the running command selected (`_select_environment`); it names the token file.
-_environment = 'local'
-
-
-def _select_environment(environment) -> None:
-    """Load the selected environment file (`set_environment`) and remember which environment it
-    is, for `token_file`."""
-    global _environment
-    selected = set_environment(environment)
-    _environment = str(selected or os.environ.get('ENVIRONMENT') or 'local')
-
-
-def token_file() -> Path:
-    """This environment's token file, `~/.receipts_token.<environment>`."""
-    return TOKEN_FILE_BASE.with_name(f'{TOKEN_FILE_BASE.name}.{_environment}')
-
-
-def get_token() -> str | None:
-    """Retrieve stored authentication token."""
-    path = token_file()
-    if path.exists():
-        return path.read_text().strip()
-    return None
-
-
-def save_token(token: str) -> None:
-    """Save the authentication token to file with `0600` permissions, also when the file already
-    exists with a looser mode (see `write_private_file`)."""
-    write_private_file(token_file(), token)
-
-
-def get_headers() -> dict:
-    """Get headers with authentication token."""
-    token = get_token()
-    if not token:
-        logger.error(f'Not authenticated on {_environment}. Please login first.')
-        if TOKEN_FILE_BASE.exists():
-            logger.warning(
-                f'{TOKEN_FILE_BASE} is from an older version and no longer used: '
-                'login again, then delete it.'
-            )
-        raise typer.Exit(1)
-    return {'Authorization': f'Bearer {token}'}
-
-
-def _password_from_prompt_or_env(password: str | None, env_var: str = 'RECEIPTS_PASSWORD') -> str:
-    """A password argument that defaults to `None` (rather than being required positionally) is
-    entered with the terminal's echo hidden when omitted -- typing it in the clear as a plain CLI
-    argument leaves it sitting in the shell's history and briefly visible to anyone on the same
-    machine running `ps`. `env_var` keeps non-interactive use (scripts, CI) working without either
-    of those: `login` checks it before falling back to an interactive prompt."""
-    if password is not None:
-        return password
-    from_env = os.environ.get(env_var)
-    if from_env:
-        return from_env
-    return typer.prompt('Password', hide_input=True)
 
 
 def _parse_retry_after(response) -> float | None:
@@ -319,7 +257,7 @@ def _upload_receipt(headers: dict, path: Path) -> dict:
     size = path.stat().st_size
     start = _request(
         'post',
-        _api_url('/receipts/uploads'),
+        api_url('/receipts/uploads'),
         json={
             'filename': path.name,
             'size': size,
@@ -349,7 +287,7 @@ def _upload_receipt(headers: dict, path: Path) -> dict:
 
     complete = _request(
         'post',
-        _api_url(f'/receipts/uploads/{ticket["receipt_id"]}/complete'),
+        api_url(f'/receipts/uploads/{ticket["receipt_id"]}/complete'),
         headers=headers,
         exit_on_error=False,
     )
@@ -399,17 +337,15 @@ def receipts_login(
         receipts login local me@example.com
         receipts login prod me@example.com mypassword
     """
-    _select_environment(environment)
-    password = _password_from_prompt_or_env(password)
+    select_environment(environment)
+    password = password_from_prompt_or_env(password, 'RECEIPTS_PASSWORD')
 
-    response = _request(
-        'post', _api_url('/auth/login'), json={'email': email, 'password': password}
-    )
+    response = _request('post', api_url('/auth/login'), json={'email': email, 'password': password})
     _raise_for_api_error(response, hints=False)
     try:
-        save_token(response.json()['access_token'])
+        save_token(CLI, response.json()['access_token'])
     except OSError as e:
-        logger.error(f'Could not save the token to {token_file()}: {e}')
+        logger.error(f'Could not save the token to {token_file(CLI)}: {e}')
         raise typer.Exit(1) from e
     logger.info('Successfully authenticated!')
 
@@ -457,7 +393,7 @@ def receipts_list(
         receipts list local --vendor 12
         receipts list local --from 2026-10-01 --to 2026-10-31 --q staples --limit 50
     """
-    _select_environment(environment)
+    select_environment(environment)
     params: dict = {'sort': sort, 'limit': limit, 'offset': offset}
     for name, value in (
         ('status', status),
@@ -474,7 +410,9 @@ def receipts_list(
     if trashed:
         params['trashed'] = 'true'
 
-    response = _request('get', _api_url('/receipts/receipts'), params=params, headers=get_headers())
+    response = _request(
+        'get', api_url('/receipts/receipts'), params=params, headers=get_headers(CLI)
+    )
     _raise_for_api_error(response)
     body = response.json()
     receipts = body['results']
@@ -526,8 +464,8 @@ def receipts_upload(
         receipts upload local invoice.pdf photo.jpg
         receipts upload prod ./october-scans
     """
-    _select_environment(environment)
-    headers = get_headers()
+    select_environment(environment)
+    headers = get_headers(CLI)
 
     files = _collect_files(list(paths))
     if not files:
@@ -557,9 +495,11 @@ def receipts_get(environment: EnvironmentAnnotation, receipt_id: str):
     Example:
         receipts get local 1b6e2f4a-...
     """
-    _select_environment(environment)
+    select_environment(environment)
 
-    response = _request('get', _api_url(f'/receipts/receipts/{receipt_id}'), headers=get_headers())
+    response = _request(
+        'get', api_url(f'/receipts/receipts/{receipt_id}'), headers=get_headers(CLI)
+    )
     _raise_for_api_error(response)
     receipt = response.json()
 
@@ -614,7 +554,7 @@ def receipts_export(
         receipts export local --out q3.csv --from 2026-07-01 --to 2026-09-30 --status processed
         receipts export local --out acme.csv --vendor 12
     """
-    _select_environment(environment)
+    select_environment(environment)
     params: dict = {'sort': sort}
     for name, value in (
         ('status', status),
@@ -629,7 +569,7 @@ def receipts_export(
     if duplicates:
         params['duplicates'] = 'true'
 
-    headers = get_headers()
+    headers = get_headers(CLI)
     if not out.parent.is_dir():
         # Checked before the request: an export spends one of the few per-hour exports.
         logger.error(f'Not a folder: {out.parent}')
@@ -638,7 +578,7 @@ def receipts_export(
     import requests
 
     response = _request(
-        'get', _api_url('/receipts/export.csv'), params=params, headers=headers, stream=True
+        'get', api_url('/receipts/export.csv'), params=params, headers=headers, stream=True
     )
     try:
         _raise_for_api_error(response)
@@ -665,7 +605,7 @@ def receipts_export(
 
 
 def _vendor_url(vendor_id: int) -> str:
-    return _api_url(f'/receipts/vendors/{vendor_id}')
+    return api_url(f'/receipts/vendors/{vendor_id}')
 
 
 def _vendor_summary(vendor: dict) -> str:
@@ -706,12 +646,14 @@ def receipts_vendors(
         receipts vendors local --to-vet
         receipts vendors local --q acme
     """
-    _select_environment(environment)
+    select_environment(environment)
     params: dict = {'status': 'to_vet' if to_vet else 'all', 'limit': limit, 'offset': offset}
     if q:
         params['q'] = q
 
-    response = _request('get', _api_url('/receipts/vendors'), params=params, headers=get_headers())
+    response = _request(
+        'get', api_url('/receipts/vendors'), params=params, headers=get_headers(CLI)
+    )
     _raise_for_api_error(response)
     body = response.json()
     vendors = body['results']
@@ -762,12 +704,12 @@ def receipts_vendor_rename(
     Example:
         receipts vendor-rename local 12 "ACME, LTD"
     """
-    _select_environment(environment)
+    select_environment(environment)
     body: dict = {'name': name}
     if not_vetted:
         body['vetted'] = False
 
-    response = _request('patch', _vendor_url(vendor_id), json=body, headers=get_headers())
+    response = _request('patch', _vendor_url(vendor_id), json=body, headers=get_headers(CLI))
     clash = _conflict(response)
     if clash is not None:
         other_id = clash['conflicting_vendor_id']
@@ -776,11 +718,11 @@ def receipts_vendor_rename(
             f'Not renamed: you already have a vendor called {other_name!r} (id {other_id}).'
         )
         logger.error(
-            f'To combine them, run: receipts vendor-merge {_environment} {other_id} {vendor_id}'
+            f'To combine them, run: receipts vendor-merge {current_environment()} {other_id} {vendor_id}'
             f' (keeps vendor {other_id}).'
         )
         logger.error(
-            f'Then, to use the new spelling: receipts vendor-rename {_environment} {other_id} '
+            f'Then, to use the new spelling: receipts vendor-rename {current_environment()} {other_id} '
             f'{shlex.quote(name)}'
         )
         raise typer.Exit(1)
@@ -803,8 +745,8 @@ def receipts_vendor_vet(
         receipts vendor-vet local 12 13 14
         receipts vendor-vet local 12 --unvet
     """
-    _select_environment(environment)
-    headers = get_headers()
+    select_environment(environment)
+    headers = get_headers(CLI)
 
     failed = 0
     for vendor_id in dict.fromkeys(vendor_ids):
@@ -836,8 +778,8 @@ def receipts_vendor_merge(
         receipts vendor-merge local 12 13 14
         receipts vendor-merge local 12 13 --yes
     """
-    _select_environment(environment)
-    headers = get_headers()
+    select_environment(environment)
+    headers = get_headers(CLI)
     others = [vendor_id for vendor_id in dict.fromkeys(vendor_ids) if vendor_id != keep]
     if not others:
         logger.error('Give at least one vendor besides the one to keep.')
@@ -861,7 +803,7 @@ def receipts_vendor_merge(
 
     response = _request(
         'post',
-        _api_url('/receipts/vendors/merge'),
+        api_url('/receipts/vendors/merge'),
         json={'keep': keep, 'merge': others},
         headers=headers,
     )
@@ -877,9 +819,9 @@ def receipts_inbox(environment: EnvironmentAnnotation):
     Example:
         receipts inbox local
     """
-    _select_environment(environment)
+    select_environment(environment)
 
-    response = _request('get', _api_url('/receipts/inbox'), headers=get_headers())
+    response = _request('get', api_url('/receipts/inbox'), headers=get_headers(CLI))
     _raise_for_api_error(response)
     inbox = response.json()
 
@@ -914,15 +856,15 @@ def receipts_regenerate(
         receipts regenerate local
         receipts regenerate local --yes
     """
-    _select_environment(environment)
-    headers = get_headers()
+    select_environment(environment)
+    headers = get_headers(CLI)
     if not yes and not typer.confirm(
         'The current address stops working immediately. Generate a new one?'
     ):
         logger.info('Cancelled.')
         raise typer.Exit(1)
 
-    response = _request('post', _api_url('/receipts/inbox/regenerate'), headers=headers)
+    response = _request('post', api_url('/receipts/inbox/regenerate'), headers=headers)
     _raise_for_api_error(response)
     logger.info(f'New address: {response.json()["address"]}')
 

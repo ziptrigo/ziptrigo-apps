@@ -53,7 +53,7 @@ inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
 inv server run [local|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv openapi generate --format json --file <path>
-inv qrcode login local <email> <password>       # JWT CLIs over /api/qr/, /api/ft/ and /api/receipts/
+inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/ and /api/receipts/
 inv filetransfer send local report.pdf --to a@example.com
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
 inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported types are skipped
@@ -2067,21 +2067,27 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   exit code is 1 if any failed) and `vendor-merge <keep> <id>...` (unless `--yes`, it first `GET`s
   every vendor so the prompt shows which is kept and which are merged away -- and a wrong id fails
   before the question --, then `POST /vendors/merge`; the kept id and repeats are dropped from the
-  list). Its token is **per environment**, `~/.receipts_token.<env>` (so the prod JWT is
-  never sent to the local server; the single `~/.receipts_token` of earlier versions is ignored --
-  log in again, then delete it), written by `admin.utils.write_private_file` (mode 0600 set on the
-  open descriptor so a pre-existing looser file is tightened, `O_NOFOLLOW`; `filetransfer` and
-  `qrcode` use it too). Every request goes through `_request`: default timeout; a 429 is retried
+  list). The three JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
+  is **per CLI and environment**, `~/.<cli>_token.<env>` (`token_file`, so the prod JWT is never
+  sent to the local server; the single `~/.<cli>_token` of earlier versions is ignored -- log in
+  again, then delete it), written by `write_private_file` (mode 0600 set on the open descriptor so
+  a pre-existing looser file is tightened, `O_NOFOLLOW`); `get_headers(cli)`,
+  `password_from_prompt_or_env` (`QRCODE_PASSWORD` / `FILETRANSFER_PASSWORD` /
+  `RECEIPTS_PASSWORD`, else a hidden prompt: no CLI takes the password on the command line any
+  more) and `select_environment` (loads the env file and remembers which, for `token_file`; prints
+  `Site: <url> (<env>)` to stderr and warns when `API_BASE_URL` differs from the file's `BASE_URL`,
+  since the token is chosen by environment but sent wherever the URL points). Every request goes through `_request`: default timeout; a 429 is retried
   after its `Retry-After` only when that is <= 60 s (`MAX_RETRY_AFTER_SECONDS`) and the call's total
   wait stays within `MAX_TOTAL_RETRY_WAIT_SECONDS` -- the hourly rules (export, regenerate, re-run,
   login) are not slept on, the error says "rate limited, try again in N minutes" instead; and any
   `requests` exception exits 1 with a message (or raises `NetworkError` for the upload loop, which
   carries on with the next file). Errors print the API's `detail`, a ninja 422 list flattened to
-  `field: message`. The site URL is read
-  when a command runs, after `set_environment` has loaded the env file: `API_BASE_URL`, else the
-  file's `BASE_URL`, else `http://localhost:8000` (the older CLIs read `API_BASE_URL` at import
-  time, before that file is loaded). Unit tests: `admin/tests/test_receipts.py`, HTTP mocked, no
-  Django.
+  `field: message`. The site URL (`utils.site_url` /
+  `api_url`) is read when a command runs, after `select_environment` has loaded the env file:
+  `API_BASE_URL`, else the file's `BASE_URL`, else `http://localhost:8000` (`qrcode` and
+  `filetransfer` used to read `API_BASE_URL` at import time, before that file was loaded, so
+  `<cli> prod ...` talked to localhost). Unit tests: `admin/tests/` (`test_receipts.py`,
+  `test_cli_utils.py`, ...), HTTP mocked, no Django.
 - **Admin.** `ReceiptsSettingsAdmin` (singleton, superusers), read-only `ReceiptAdmin`
   (status/reason/source filters; `VendorAdmin`, see "Vendors"; no add/change/delete -- deleting a row would orphan its S3 objects
   and skew `stored_bytes`), `InboundMessageAdmin` (status, attempts, next attempt, last error; a "retry" action

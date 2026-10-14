@@ -7,15 +7,22 @@ QR Code CLI - Command line interface for QR code generation and management.
 This CLI provides commands to interact with the QR code service.
 """
 
-import os
-from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from .utils import EnvironmentAnnotation, logger, set_environment, write_private_file
+from .utils import (
+    EnvironmentAnnotation,
+    api_url,
+    get_headers,
+    logger,
+    password_from_prompt_or_env,
+    save_token,
+    select_environment,
+    site_url,
+)
 
 app = typer.Typer(
     help=__doc__,
@@ -25,52 +32,37 @@ app = typer.Typer(
 )
 
 
-# Configuration
-API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
-TOKEN_FILE = Path.home() / '.qrcode_token'
-
-
-def get_token() -> Optional[str]:
-    """Retrieve stored authentication token."""
-    if TOKEN_FILE.exists():
-        return TOKEN_FILE.read_text().strip()
-    return None
-
-
-def save_token(token: str):
-    """Save authentication token to file with `0600` permissions, also when the file already
-    exists with a looser mode (see `write_private_file`)."""
-    write_private_file(TOKEN_FILE, token)
-
-
-def get_headers() -> dict:
-    """Get headers with authentication token."""
-    token = get_token()
-    if not token:
-        logger.error('Not authenticated. Please login first.')
-        raise typer.Exit(1)
-    return {'Authorization': f'Bearer {token}'}
+# The token lives in `~/.qrcode_token.<environment>` (`admin.utils.token_file`); the single
+# `~/.qrcode_token` of earlier versions is no longer read: log in again, then delete it.
+CLI = 'qrcode'
 
 
 @app.command(name='login')
-def qrcode_login(environment: EnvironmentAnnotation, email: str, password: str):
+def qrcode_login(
+    environment: EnvironmentAnnotation,
+    email: str,
+    password: Optional[str] = typer.Argument(
+        None, help='Password. Omit to be prompted, or set QRCODE_PASSWORD.'
+    ),
+):
     """
     Authenticate with the API and store the token.
 
     Example:
-        qrcode login local me@example.com mypassword
+        qrcode login local me@example.com
     """
     import requests
 
-    set_environment(environment)
+    select_environment(environment)
+    password = password_from_prompt_or_env(password, 'QRCODE_PASSWORD')
 
     try:
         response = requests.post(
-            f'{API_BASE_URL}/api/auth/login', json={'email': email, 'password': password}
+            api_url('/auth/login'), json={'email': email, 'password': password}
         )
         response.raise_for_status()
         token = response.json()['access_token']
-        save_token(token)
+        save_token(CLI, token)
         logger.info('Successfully authenticated!')
     except (requests.exceptions.RequestException, OSError) as e:
         logger.error(f'Login failed: {e}')
@@ -101,7 +93,7 @@ def qrcode_create(
     """
     import requests
 
-    set_environment(environment)
+    select_environment(environment)
 
     if not url and not data:
         logger.error('Error: Either --url or --data must be provided')
@@ -123,14 +115,14 @@ def qrcode_create(
         payload['data'] = data
 
     try:
-        response = requests.post(f'{API_BASE_URL}/api/qr/', json=payload, headers=get_headers())
+        response = requests.post(api_url('/qr/'), json=payload, headers=get_headers(CLI))
         response.raise_for_status()
         result = response.json()
 
         logger.info('QR Code created successfully!')
         logger.info(f'ID: {result["id"]}')
         if result.get('short_code'):
-            logger.info(f'Short URL: {API_BASE_URL}/go/{result["short_code"]}/')
+            logger.info(f'Short URL: {site_url()}/go/{result["short_code"]}/')
 
     except requests.exceptions.RequestException as e:
         logger.error(f'Failed to create QR code: {e}')
@@ -151,10 +143,10 @@ def qrcode_list(
     """
     import requests
 
-    set_environment(environment)
+    select_environment(environment)
 
     try:
-        response = requests.get(f'{API_BASE_URL}/api/qr/', headers=get_headers())
+        response = requests.get(api_url('/qr/'), headers=get_headers(CLI))
         response.raise_for_status()
         qrcodes = response.json()
 
@@ -197,10 +189,10 @@ def qrcode_get(environment: EnvironmentAnnotation, qr_id: str):
     """
     import requests
 
-    set_environment(environment)
+    select_environment(environment)
 
     try:
-        response = requests.get(f'{API_BASE_URL}/api/qr/{qr_id}', headers=get_headers())
+        response = requests.get(api_url(f'/qr/{qr_id}'), headers=get_headers(CLI))
         response.raise_for_status()
         qr = response.json()
 
@@ -230,10 +222,10 @@ def qrcode_delete(environment: EnvironmentAnnotation, qr_id: str):
     """
     import requests
 
-    set_environment(environment)
+    select_environment(environment)
 
     try:
-        response = requests.delete(f'{API_BASE_URL}/api/qr/{qr_id}', headers=get_headers())
+        response = requests.delete(api_url(f'/qr/{qr_id}'), headers=get_headers(CLI))
         response.raise_for_status()
         logger.info(f'QR code {qr_id} deleted successfully')
 
