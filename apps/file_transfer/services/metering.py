@@ -221,13 +221,22 @@ def reenable_suspended_transfers_for_user(
 
 def delete_files_past_grace_period(settings_row: FileTransferSettings | None = None) -> int:
     """End (and delete the files of) every transfer suspended for longer than the grace period
-    without being topped up. Returns the number ended."""
+    without being topped up. Returns the number ended.
+
+    Ending is a claim on the `SUSPENDED` status, so a transfer a top-up re-enabled (or the owner
+    deleted) after the query above is skipped: no files deleted, no email, not counted."""
     settings_row = settings_row or FileTransferSettings.load()
     cutoff = timezone.now() - timedelta(days=settings_row.suspension_grace_days)
     transfers = Transfer.objects.filter(status=TransferStatus.SUSPENDED, suspended_at__lte=cutoff)
 
     count = 0
     for transfer in transfers:
-        end_transfer(transfer, TransferStatus.DELETED, delete_files=True, notify=True)
-        count += 1
+        if end_transfer(
+            transfer,
+            TransferStatus.DELETED,
+            delete_files=True,
+            notify=True,
+            from_statuses=(TransferStatus.SUSPENDED,),
+        ):
+            count += 1
     return count

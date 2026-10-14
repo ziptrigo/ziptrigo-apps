@@ -9,6 +9,7 @@ import math
 from botocore.exceptions import ClientError
 from django.contrib.auth.models import AbstractBaseUser
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
@@ -293,17 +294,32 @@ def remove_file(file: TransferFile, *, storage: S3Storage | None = None) -> None
     file.delete()
 
 
-def abort_draft(transfer: Transfer, *, storage: S3Storage | None = None) -> None:
+def abort_draft(transfer: Transfer, *, storage: S3Storage | None = None) -> bool:
     """Abandon an entire draft (or unconfirmed) transfer: abort every file's in-progress
     multipart upload, sweep every object under the transfer's S3 prefix (rather than trusting
     each file's `uploaded` flag, which is one more place a bug could leave an orphan), then
-    soft-delete the transfer. Used by `cleanup_drafts`."""
+    soft-delete the transfer. Used by `cleanup_drafts` and the API's delete of a draft.
+
+    Returns whether this call aborted it. The soft delete is a conditional write claimed *first*
+    (`DRAFT` / `PENDING_CONFIRMATION` only), so a stale instance of a draft that `finalize_send`
+    (which holds the row lock while it flips the status) or the anonymous confirmation has since
+    activated is left alone: its files are not touched and it is not marked `DELETED`. The claim
+    and the S3 work share one transaction, so a storage error rolls the status back and the next
+    `cleanup_drafts` run retries the draft."""
     storage = storage or get_storage()
-    for file in transfer.files.all():
-        if file.upload_id:
-            storage.abort_multipart_upload(file.storage_key, file.upload_id)
-    storage.delete_prefix(transfer_prefix(transfer.id))
-    transfer.files.all().delete()
+    with transaction.atomic():
+        now = timezone.now()
+        claimed = Transfer.objects.filter(
+            pk=transfer.pk,
+            status__in=(TransferStatus.DRAFT, TransferStatus.PENDING_CONFIRMATION),
+        ).update(status=TransferStatus.DELETED, deleted_at=now)
+        if not claimed:
+            return False
+        for file in transfer.files.all():
+            if file.upload_id:
+                storage.abort_multipart_upload(file.storage_key, file.upload_id)
+        storage.delete_prefix(transfer_prefix(transfer.id))
+        transfer.files.all().delete()
     transfer.status = TransferStatus.DELETED
-    transfer.deleted_at = timezone.now()
-    transfer.save(update_fields=['status', 'deleted_at'])
+    transfer.deleted_at = now
+    return True

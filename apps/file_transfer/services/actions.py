@@ -13,7 +13,13 @@ from django.utils import timezone
 from apps.billing.services import InsufficientCreditsError, get_balance
 from apps.core import ratelimit
 
-from ..models import FileTransferSettings, Transfer, TransferRecipient, TransferStatus
+from ..models import (
+    ACTIONABLE_STATUSES,
+    FileTransferSettings,
+    Transfer,
+    TransferRecipient,
+    TransferStatus,
+)
 from . import limits
 from .blocklist import check_not_blocked
 from .emails import send_transfer_notification
@@ -80,7 +86,13 @@ def disable_transfer(transfer: Transfer) -> Transfer:
     with `reenable_transfer_action`."""
     if transfer.status != TransferStatus.ACTIVE:
         raise ValidationError('Only an active transfer can be disabled.')
-    Transfer.objects.filter(pk=transfer.pk).update(status=TransferStatus.DISABLED)
+    # Conditional on the status read: a transfer that has since expired, been deleted or taken
+    # down must not be written back to DISABLED.
+    updated = Transfer.objects.filter(pk=transfer.pk, status=TransferStatus.ACTIVE).update(
+        status=TransferStatus.DISABLED
+    )
+    if not updated:
+        raise ValidationError('Only an active transfer can be disabled.')
     transfer.status = TransferStatus.DISABLED
     return transfer
 
@@ -120,7 +132,15 @@ def delete_transfer_now(transfer: Transfer) -> Transfer:
     """Dashboard "delete now": soft delete, files removed immediately, no grace period."""
     _require_actionable(transfer)
     _require_not_held(transfer)
-    return end_transfer(transfer, TransferStatus.DELETED, delete_files=True, notify=False)
+    if not end_transfer(
+        transfer,
+        TransferStatus.DELETED,
+        delete_files=True,
+        notify=False,
+        from_statuses=ACTIONABLE_STATUSES,
+    ):
+        raise ValidationError('This transfer has already ended.')
+    return transfer
 
 
 def set_expiry(

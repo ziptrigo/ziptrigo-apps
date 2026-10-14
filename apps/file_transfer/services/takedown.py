@@ -18,7 +18,7 @@ def take_down_transfer(
     reason: str,
     internal_note: str = '',
     notify: bool = False,
-) -> Transfer:
+) -> bool:
     """Take `transfer` down: ends it (deleting its S3 objects, including the "download all" zip,
     same as any other ended transfer -- `services.lifecycle.end_transfer`), records who did it and
     why, clears any abuse-review hold (moot once it's ended), and marks every pending report
@@ -39,6 +39,10 @@ def take_down_transfer(
     handle, but it must not leave the transfer stuck `ACTIVE` with its reports still `PENDING` --
     `files_deleted_at` simply stays null until a retry (or the deferred-deletion sweep) succeeds,
     same as any other transfer whose file deletion was deferred.
+
+    Returns whether this call took it down: a transfer that has already ended (expired, deleted by
+    its owner, taken down by someone else) since `transfer` was read is left alone, and nothing
+    is recorded or deleted.
     """
     now = timezone.now()
 
@@ -65,11 +69,10 @@ def take_down_transfer(
             resolution_note='Transfer taken down.',
         )
 
-    end_transfer(
+    return end_transfer(
         transfer,
         TransferStatus.TAKEN_DOWN,
         delete_files=True,
         notify=notify,
         before_delete=_mark_taken_down,
     )
-    return transfer

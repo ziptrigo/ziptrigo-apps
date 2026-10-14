@@ -105,7 +105,13 @@ def expire_transfers() -> None:
     expired = Transfer.objects.filter(status__in=_EXPIRABLE_STATUSES, expires_at__lte=now)
     for transfer in expired:
         try:
-            end_transfer(transfer, TransferStatus.EXPIRED, delete_files=True, notify=True)
+            end_transfer(
+                transfer,
+                TransferStatus.EXPIRED,
+                delete_files=True,
+                notify=True,
+                from_statuses=_EXPIRABLE_STATUSES,
+            )
         except Exception:
             logger.exception('Failed to expire transfer %s', transfer.pk)
 
@@ -115,7 +121,12 @@ def expire_transfers() -> None:
         try:
             remaining = downloads_remaining(transfer)
             if remaining is not None and remaining <= 0:
-                end_transfer(transfer, TransferStatus.EXPIRED, delete_files=False)
+                end_transfer(
+                    transfer,
+                    TransferStatus.EXPIRED,
+                    delete_files=False,
+                    from_statuses=(TransferStatus.ACTIVE,),
+                )
         except Exception:
             logger.exception('Failed to end transfer %s past its download limit', transfer.pk)
 

@@ -947,6 +947,18 @@ defers the deletion (`Transfer.files_deleted_at` stays null) because that downlo
 GET URL must still resolve -- `expire_transfers` sweeps up the objects (and fires the "files
 deleted" email) once `GET_URL_EXPIRES_SECONDS` has safely passed since `Transfer.ended_at`.
 
+**Status changes are conditional writes** (audit #16). `end_transfer` claims the move with
+`UPDATE ... WHERE status IN from_statuses` (default: any non-terminal status; the grace-period job
+passes `SUSPENDED`, the expiry job `ACTIVE`/`DISABLED`, delete-now the actionable ones, the
+anonymous activation failure `PENDING_CONFIRMATION`) and returns whether it won; only the winner
+runs `before_delete`, deletes S3 objects and notifies, so a stale instance never overwrites a
+newer state (a second call on an ended transfer is a no-op; a failed delete is retried by the
+deferred-deletion sweep). `take_down_transfer` and `abort_draft` return that bool too,
+`delete_transfer_now` raises "already ended" on a loss, and `disable_transfer` writes only
+`WHERE status = ACTIVE`. `abort_draft` claims `DRAFT`/`PENDING_CONFIRMATION` -> `DELETED` first, in
+one transaction with its S3 work (a storage error rolls the claim back so `cleanup_drafts`
+retries; `finalize_send`'s row lock serialises with it).
+
 **Anonymous sending** (`apps.file_transfer.services.anonymous`, spec section 2 phase 2): the same
 picker-then-options-then-send page a logged-in sender uses, session-owned instead of user-owned,
 gated by `FileTransferSettings.anonymous_enabled`, and free within its own (smaller) limits

@@ -182,7 +182,7 @@ def _takedown_confirm_response(
     if request.POST.get('apply') == 'yes':
         form = TakedownForm(request.POST)
         if form.is_valid():
-            for transfer in live_transfers:
+            taken_down = sum(
                 services.take_down_transfer(
                     transfer,
                     by=request.user,
@@ -190,7 +190,9 @@ def _takedown_confirm_response(
                     internal_note=form.cleaned_data['internal_note'],
                     notify=form.cleaned_data['notify_sender'],
                 )
-            messages.success(request, f'Took down {len(live_transfers)} transfer(s).')
+                for transfer in live_transfers
+            )
+            messages.success(request, f'Took down {taken_down} transfer(s).')
             return redirect(request.path)
     else:
         form = TakedownForm()
@@ -252,13 +254,12 @@ def _block_sender_confirm_response(
                     for other in services.blocklist.active_transfers_for_sender(transfer):
                         targets[other.pk] = other
                 for other in targets.values():
-                    services.take_down_transfer(
+                    taken_down_count += services.take_down_transfer(
                         other,
                         by=request.user,
                         reason=form.cleaned_data['reason'] or 'Sender blocked.',
                         notify=False,
                     )
-                    taken_down_count += 1
 
             deactivated_count = 0
             if form.cleaned_data['deactivate_account']:
