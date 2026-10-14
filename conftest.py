@@ -24,9 +24,13 @@ def _clear_ratelimit_cache():
 
 @pytest.fixture(autouse=True)
 def _apps_logs_reach_caplog(monkeypatch):
-    """`settings.LOGGING` sets `propagate=False` on the `apps` logger (console only, no duplicates
-    in production); `caplog` listens on the root logger, so let records through while testing."""
-    monkeypatch.setattr(logging.getLogger('apps'), 'propagate', True)
+    """`settings.LOGGING` sets `propagate=False` on the `apps` and `django` loggers (console only,
+    no duplicates in production); `caplog` listens on the root logger, so let records through
+    while testing. Cosmetic side effect: root keeps its console handler, so pytest's captured
+    stderr shows these records twice (once from `django`/`apps`' handler, once from root's);
+    `caplog` is unaffected."""
+    for name in ('apps', 'django'):
+        monkeypatch.setattr(logging.getLogger(name), 'propagate', True)
 
 
 @pytest.fixture()
