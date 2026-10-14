@@ -197,6 +197,8 @@ def test_search_covers_vendor_and_notes_case_insensitively(funded_user, library)
         ('275.50', '275.50', True),
         ('275.50', '275.5', True),
         ('275.50', '275,50', True),
+        ('1234.00', '1,234', True),  # three digits after a comma: thousands, as when typed
+        ('1.23', '1,234', False),
         ('275.50', '.50', True),
         ('275.50', '$275', True),
         ('275.50', '€ 75.5', True),

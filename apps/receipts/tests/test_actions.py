@@ -210,6 +210,8 @@ class TestUpdateReceipt:
             ('1,234', '1234.00'),  # three digits after the comma: thousands
             ('12,345', '12345.00'),
             ('1,234,567.8', '1234567.80'),
+            ('0,50', '0.50'),
+            ('12.345', '12.35'),  # half up, like the AI path
         ],
     )
     def test_commas_in_an_amount(self, make_receipt, typed, saved):
@@ -220,7 +222,22 @@ class TestUpdateReceipt:
         receipt.refresh_from_db()
         assert receipt.amount == Decimal(saved)
 
-    @pytest.mark.parametrize('typed', ['1,23,4', '1,234,5', '12,50.5', '1234,567', '12,', ','])
+    @pytest.mark.parametrize(
+        'typed',
+        [
+            '1,23,4',
+            '1,234,5',
+            '12,50.5',
+            '1234,567',
+            '12,',
+            ',',
+            '0,500',  # a decimal comma with three decimals, not 500
+            '0,050',
+            '00,500',
+            '1.234,56',  # European thousands dot: not understood
+            '1 234,50',
+        ],
+    )
     def test_an_ambiguous_comma_in_an_amount_is_refused(self, make_receipt, typed):
         receipt = make_receipt(status=ReceiptStatus.PROCESSED, amount=Decimal('5'))
 
@@ -229,6 +246,13 @@ class TestUpdateReceipt:
 
         receipt.refresh_from_db()
         assert receipt.amount == Decimal('5')
+
+    @pytest.mark.parametrize('typed', ['-12,50', '-1,234', '-1,234.5', '-12.5'])
+    def test_a_negative_amount_is_negative_not_unreadable(self, make_receipt, typed):
+        receipt = make_receipt(status=ReceiptStatus.PROCESSED)
+
+        with pytest.raises(ValidationError, match='cannot be negative'):
+            actions.update_receipt(receipt, {'amount': typed})
 
     def test_a_card_number_with_dots_typed_by_hand_is_masked(self, make_receipt):
         receipt = make_receipt(status=ReceiptStatus.PROCESSED)

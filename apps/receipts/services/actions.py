@@ -13,7 +13,7 @@ import unicodedata
 import uuid
 from collections.abc import Iterable, Mapping
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -71,7 +71,7 @@ def _clean_amount(value: Any) -> Decimal | None:
         raise ValidationError('The amount cannot be negative.')
     if amount > MAX_AMOUNT:
         raise ValidationError('That amount is too large.')
-    return amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return amount
 
 
 def _clean_date(value: Any) -> date | None:

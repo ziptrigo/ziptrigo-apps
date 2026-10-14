@@ -29,7 +29,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Literal, Protocol
 
 from django.conf import settings
@@ -42,18 +42,24 @@ logger = logging.getLogger(__name__)
 #: Upper bound for `amount`: fits `Receipt.amount` (12 digits, 2 decimal places).
 MAX_AMOUNT = Decimal('9999999999.99')
 
-_THOUSANDS_COMMAS = re.compile(r'\d{1,3}(,\d{3})+(\.\d*)?')
-_DECIMAL_COMMA = re.compile(r'\d*,\d{1,2}')
+#: Thousands commas: a leading group of 1-3 digits not starting with 0 (`0,500` is a decimal comma
+#: with three decimals, not 500), then groups of exactly three, then an optional fraction.
+THOUSANDS_COMMAS = re.compile(r'[-+]?[1-9]\d{0,2}(,\d{3})+(\.\d*)?')
+_DECIMAL_COMMA = re.compile(r'[-+]?\d*,\d{1,2}')
+_CENT = Decimal('0.01')
 
 
 def parse_amount(value: Any) -> Decimal:
-    """`value` as a finite Decimal, for a typed or AI-read amount. A comma is a thousands
-    separator only in groups of three (`1,234.5`, `12,345`); a single comma followed by one or two
-    digits and no dot is a decimal comma (`12,50`, what a phone in a European locale types, and
-    what search already reads it as). Any other comma (`1,23,4`, `1,234,5`) is ambiguous. Raises
-    `ValueError` for that and for anything that isn't a number; the range is the caller's."""
+    """`value` as a finite Decimal, for a typed or AI-read amount; the range is the caller's, but
+    an amount from 0 to `MAX_AMOUNT` comes back rounded to cents (half up), so every caller rounds
+    alike. A comma is a thousands separator only before groups of exactly three digits, and then
+    always (`1,234` is 1234; `1,234.5`, `12,345`); a single comma followed
+    by one or two digits and no dot is a decimal comma (`12,50`, what a phone in a European locale
+    types). Any other comma (`1,23,4`, `1,234,5`, `0,500`) is ambiguous, and space or dot
+    thousands separators (`1 234,50`, `1.234,56`) are not understood: all refused. Raises
+    `ValueError` for those and for anything that isn't a number."""
     text = str(value).strip()
-    if _THOUSANDS_COMMAS.fullmatch(text):
+    if THOUSANDS_COMMAS.fullmatch(text):
         text = text.replace(',', '')
     elif _DECIMAL_COMMA.fullmatch(text):
         text = text.replace(',', '.')
@@ -65,6 +71,8 @@ def parse_amount(value: Any) -> Decimal:
         raise ValueError('not a number') from None
     if not amount.is_finite():
         raise ValueError('not finite')
+    if 0 <= amount <= MAX_AMOUNT:
+        return amount.quantize(_CENT, rounding=ROUND_HALF_UP)
     return amount
 
 
@@ -141,7 +149,7 @@ class ExtractedReceipt(BaseModel):
             return None
         if amount < 0 or amount > MAX_AMOUNT:
             return None
-        return amount.quantize(Decimal('0.01'))
+        return amount
 
     @field_validator('receipt_date', mode='before')
     @classmethod

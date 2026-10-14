@@ -15,6 +15,7 @@ from django.db.models.functions import Abs, Cast, Concat, LPad, Mod, Round
 from apps.accounts.models import User
 
 from ..models import IN_PROGRESS_STATUSES, Receipt, ReceiptStatus
+from .ai import THOUSANDS_COMMAS
 
 DEFAULT_SORT = '-receipt_date'
 SORTS = ('receipt_date', '-receipt_date', 'created_at', '-created_at')
@@ -133,7 +134,10 @@ def _amount_term(term: str) -> str:
     match = _AMOUNT_TERM.fullmatch(term)
     if not match or not any(char.isdigit() for char in match[1]):
         return ''
-    return match[1].replace(',', '.')
+    text = match[1]
+    if THOUSANDS_COMMAS.fullmatch(text):  # as a typed amount reads it: `1,234` is 1234
+        return text.replace(',', '')
+    return text.replace(',', '.')
 
 
 def _amount_text() -> Concat:

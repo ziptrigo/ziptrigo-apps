@@ -126,6 +126,14 @@ class TestExtractedReceipt:
             (12.5, Decimal('12.50')),
             (1234.56, Decimal('1234.56')),
             ('1,23,4', None),
+            ('0,500', None),
+            ('0,050', None),
+            ('1.234,56', None),
+            ('-12,50', None),
+            ('-1,234', None),
+            ('-12.5', None),
+            ('12.345', Decimal('12.35')),  # half up, like a typed amount
+            ('12.344', Decimal('12.34')),
         ],
     )
     def test_amount_commas(self, amount, expected):
