@@ -842,13 +842,32 @@ def received_at(msg: Message) -> datetime:
 #: so there is nothing to match for it; add the sender here if one turns up.
 FORWARDING_CONFIRMATION_SENDERS = frozenset({'forwarding-noreply@google.com'})
 
-#: The only hosts a confirmation link may point at. The link is shown on the settings page, so an
+#: The only host a confirmation link may point at. The link is shown on the settings page, so an
 #: email that merely *claims* to be Google's must not be able to plant an arbitrary URL there.
-FORWARDING_LINK_HOSTS = frozenset({'mail-settings.google.com'})
+FORWARDING_LINK_HOST = 'mail-settings.google.com'
+
+#: ASCII control characters, space and DEL, plus `\`: `urlsplit` drops tabs and newlines and keeps a
+#: backslash, which browsers read as `/` (`https://evil.test\@mail-settings.google.com/` goes to
+#: `evil.test`), so a URL holding any of them is never trusted.
+_UNSAFE_URL_CHARS = re.compile(r'[\x00-\x20\x7f\\]')
 
 _CONFIRMATION_CODE = re.compile(r'confirmation\s+code\s*:?\s*(\d{4,12})', re.I)
 _SUBJECT_CODE = re.compile(r'\(#(\d{4,12})\)')
 _URL = re.compile(r'https://[^\s<>"\'\])]+', re.I)
+
+
+def is_forwarding_link(url: str) -> bool:
+    """Whether `url` is an https link whose *whole* authority is Google's mail settings host: no
+    userinfo, no port, no backslash or control character anywhere (see `_UNSAFE_URL_CHARS`)."""
+    # The exact `netloc` equality below is the guarantee; `_UNSAFE_URL_CHARS` is defence in depth
+    # (what `urlsplit` and browsers parse differently), not a complete blocklist.
+    if _UNSAFE_URL_CHARS.search(url):
+        return False
+    try:
+        parts = urlsplit(url)
+    except ValueError:  # e.g. `https://[x`
+        return False
+    return parts.scheme == 'https' and parts.netloc.lower() == FORWARDING_LINK_HOST
 
 
 def is_forwarding_confirmation_sender(*addresses: str) -> bool:
@@ -867,11 +886,7 @@ def extract_forwarding_confirmation(msg: Message) -> tuple[str, str]:
     link = ''
     for candidate in _URL.findall(blob):
         candidate = candidate.rstrip('.,;')
-        try:
-            host = urlsplit(candidate).hostname
-        except ValueError:  # e.g. `https://[x`: a malformed link is skipped, not a crash
-            continue
-        if host in FORWARDING_LINK_HOSTS:
+        if is_forwarding_link(candidate):
             link = candidate[:2000]
             break
     return code, link

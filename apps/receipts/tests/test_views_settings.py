@@ -79,6 +79,10 @@ class TestPage:
             'javascript:alert(1)',
             'https://mail-settings.google.com.evil.example/x',
             'https://[x',
+            'https://evil.example\\@mail-settings.google.com/mail/vf',
+            'https://evil.example@mail-settings.google.com/mail/vf',
+            'https://mail-settings.google.com:8443/mail/vf',
+            'https://mail-settings.google.com/mail/\x01vf',
         ],
     )
     def test_a_link_that_is_not_googles_is_never_rendered(self, web, funded_user, link):
@@ -94,6 +98,19 @@ class TestPage:
         assert '482913' in content  # the code still helps
         assert 'evil.example' not in content and 'javascript:' not in content
         assert '>Open<' not in content.replace(' ', '').replace('\n', '')
+
+    def test_a_withheld_link_with_no_code_shows_no_confirmation(self, web, funded_user):
+        create_inbound_email(
+            funded_user,
+            status='forwarding_confirmation',
+            forwarding_confirmation_code='',
+            forwarding_confirmation_url='https://evil.example\\@mail-settings.google.com/x',
+        )
+
+        content = web.get(reverse('receipts:settings')).content.decode()
+
+        assert 'Gmail forwarding confirmation received' not in content
+        assert 'evil.example' not in content
 
     def test_an_old_confirmation_is_not_shown(self, web, funded_user):
         email = create_inbound_email(

@@ -5,20 +5,16 @@ treating the message as a receipt. Shown on the settings page and returned by th
 
 from datetime import datetime, timedelta
 from typing import TypedDict
-from urllib.parse import urlsplit
 
 from django.utils import timezone
 
 from apps.accounts.models import User
 
 from ..models import InboundEmail, InboundEmailStatus
+from .mime import is_forwarding_link
 
 #: How long a forwarding confirmation stays visible (the codes expire at the provider).
 CONFIRMATION_SHOWN_FOR = timedelta(days=7)
-
-#: The only place a forwarding-confirmation link may point (what `services.mime` keeps), checked
-#: again before the link is ever handed out.
-CONFIRMATION_HOST = 'mail-settings.google.com'
 
 
 class ForwardingConfirmation(TypedDict):
@@ -28,12 +24,8 @@ class ForwardingConfirmation(TypedDict):
 
 
 def safe_confirmation_url(url: str) -> str:
-    """`url` if it is an https link to Google's mail settings, else an empty string."""
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return ''
-    return url if parts.scheme == 'https' and parts.hostname == CONFIRMATION_HOST else ''
+    """`url` if `mime.is_forwarding_link` accepts it, else an empty string."""
+    return url if is_forwarding_link(url) else ''
 
 
 def forwarding_confirmation(user: User) -> ForwardingConfirmation | None:
@@ -50,8 +42,11 @@ def forwarding_confirmation(user: User) -> ForwardingConfirmation | None:
     )
     if email is None:
         return None
+    url = safe_confirmation_url(email.forwarding_confirmation_url)
+    if not email.forwarding_confirmation_code and not url:
+        return None  # only a withheld link: nothing to show
     return {
         'received_at': email.received_at or email.created_at,
         'code': email.forwarding_confirmation_code,
-        'url': safe_confirmation_url(email.forwarding_confirmation_url),
+        'url': url,
     }
