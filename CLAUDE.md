@@ -347,8 +347,14 @@ links emailed since stay valid until one of them is used (or expires). Claim-on-
 `email_confirmed`, so it becomes possible at the next login after such a reset, the same as after a
 confirmation link.
 Residual, not new: the confirmation email sent to the victim at the attacker's *first* signup (and
-resend-confirmation) still confirms an account with its creator's password if the victim clicks it;
-that is inherent to confirming by link and password signup, and is not closed here.
+resend-confirmation) still confirms an account with its creator's password if the victim *clicks*
+it; that is inherent to confirming by link and password signup, and is not closed here. A mail
+scanner or link previewer no longer does it for them (audit #11): `GET /account/confirm-email/<token>/`
+(`views.pages.confirm_email_page`) only renders a CSRF-protected "Confirm my email" button, without
+reading the token, and only the **POST** from that button calls `confirm_token` (then redirects to
+the success page, or renders the expired page). The URL is unchanged, so links already sent work;
+file transfer's anonymous confirm link works the same way. `POST /api/auth/confirm-email` takes the
+token in a JSON body, which no scanner sends.
 
 **Timing is roughly equalised** (review of #127): the existing-address path hashes the submitted
 password once and discards it (`make_password`, like `ModelBackend` does for an unknown user), the

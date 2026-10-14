@@ -2,6 +2,7 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_http_methods
 
 from ..forms import ChangePasswordForm, ProfileForm, ResendConfirmationForm
 from ..http import AuthenticatedHttpRequest
@@ -29,8 +30,19 @@ def account_created_page(request: HttpRequest) -> HttpResponse:
     )
 
 
+@require_http_methods(['GET', 'POST'])
 def confirm_email_page(request: HttpRequest, token: str) -> HttpResponse:
-    """Validate email confirmation token and redirect accordingly."""
+    """The emailed confirmation link: GET shows a CSRF-protected button, only POST confirms.
+
+    Mail security filters and link previewers fetch a link's URL before the recipient ever clicks
+    it. If a bare GET confirmed, an attacker who registered someone else's address with a password
+    of their own could have the victim's mail provider confirm that account with no human click
+    (and resend the link at will). The page makes no state change and does not look at the token,
+    so a scanner learns nothing either; an invalid or expired one is reported after the click.
+    """
+    if request.method == 'GET':
+        return render(request, 'accounts/confirm_email.html', {'token': token})
+
     service = get_email_confirmation_service()
     user = service.confirm_token(token)
 
