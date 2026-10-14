@@ -596,7 +596,7 @@ RECEIPTS_AI_MAX_RETRIES = int(os.getenv('RECEIPTS_AI_MAX_RETRIES', '2'))
 # Reading a stored receipt (PDF/image/HTML -> text and JPEGs) runs in a child process under a
 # resource budget (address space on Linux, CPU seconds, a wall-clock timeout 2-3x the CPU one), so
 # a hostile file can't make the `receipts` worker allocate until the container is OOM-killed (see
-# `apps.receipts.services.documents`; `apps.receipts.checks` rejects absurd values). A worker
+# `apps.receipts.services.documents`; `apps.receipts.checks` flags odd values). A worker
 # running as root starts the child as `RECEIPTS_DOCUMENT_CHILD_USER` (empty: the worker's user).
 # Off under pytest: unit tests prepare documents in-process and monkeypatch inside.
 RECEIPTS_DOCUMENT_SANDBOX = os.getenv(

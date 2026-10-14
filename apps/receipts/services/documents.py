@@ -45,10 +45,12 @@ isn't enforced (macOS, so a developer machine) only the CPU limit and the timeou
 
 **Two kinds of failure** (`prepare_input`'s contract). Only an outcome that means *this file is
 over the budget* is a `DocumentTooComplexError` (a permanent `too_large`): the child died of
-SIGKILL (the OOM killer), SIGABRT (an allocation failed in native code), SIGSEGV, SIGBUS or
-SIGXCPU (the CPU limit), raised `MemoryError`, or said `too_complex`. Anything that says nothing
-about the file -- an ordinary non-zero exit, no or a malformed reply, SIGINT/SIGTERM/SIGHUP, the
-wall-clock timeout, the child failing to import a library -- is a `DocumentChildError`, which is
+SIGABRT (an allocation failed in native code), SIGSEGV, SIGBUS or SIGXCPU (the CPU limit), raised
+`MemoryError`, or said `too_complex`. Anything that says nothing about the file -- an ordinary
+non-zero exit, no or a malformed reply, SIGINT/SIGTERM/SIGHUP, **SIGKILL** (with `RLIMIT_AS` a
+file over its budget fails an allocation instead; SIGKILL is the kernel's OOM killer, i.e. memory
+pressure on the container or host whoever caused it), the wall-clock timeout, the child failing to
+start or to import a library -- is a `DocumentChildError`, which is
 *not* an `UnreadableDocumentError`: the caller treats it as a transient failure (retried, bounded
 by `max_ai_attempts`), so a broken image or a mistaken setting does not permanently fail every
 receipt, and a hostile file still costs only a few budgets. Both the child and the in-process path
@@ -57,7 +59,8 @@ the same way, so the unit tests exercise the production branches.
 
 **This is a resource budget, not an isolation boundary.** The child gets no keys in its
 environment, but it is an ordinary process: when the worker runs as root it drops to an
-unprivileged user (see `_unprivileged_ids`), and that is all. It can still use the network and read
+unprivileged user (see `_unprivileged_ids`; if it may not switch, it warns and runs the child as
+itself), and that is all. It can still use the network and read
 whatever that user can read; a memory-corruption bug in pdfium, libheif or libde265 is not
 contained by anything here. Keep secret files unreadable by other users (mode 0600).
 
@@ -555,18 +558,13 @@ _CHILD_ENV_KEYS = ('PATH', 'LANG', 'LC_ALL', 'LD_LIBRARY_PATH', 'SYSTEMROOT')
 #: Run the child as this user when the worker is root (settings: `RECEIPTS_DOCUMENT_CHILD_USER`;
 #: empty keeps the worker's own user).
 CHILD_USER = 'nobody'
-#: How the OS ends a child that is over the budget: the OOM killer (or the hard CPU limit), a
-#: failed allocation in native code, a crash, the memory/CPU limits. Any other signal (SIGINT,
-#: SIGTERM, SIGHUP, ...) came from outside and says nothing about the file.
-_BUDGET_SIGNALS = frozenset(
-    {
-        signal.SIGKILL,
-        signal.SIGABRT,
-        signal.SIGSEGV,
-        signal.SIGBUS,
-        signal.SIGXCPU,
-    }
-)
+#: How the OS ends a child that is over the budget: a failed allocation in native code under
+#: `RLIMIT_AS` (SIGABRT), a crash, the CPU limit. **Not SIGKILL**: with the limits above a file
+#: over its budget never reaches the OOM killer, so a SIGKILL means memory pressure on the
+#: container or host (the child is its first victim, `oom_score_adj`), which a retry may survive.
+#: Any other signal (SIGINT, SIGTERM, SIGHUP, ...) came from outside and says nothing about the
+#: file either.
+_BUDGET_SIGNALS = frozenset({signal.SIGABRT, signal.SIGSEGV, signal.SIGBUS, signal.SIGXCPU})
 #: Reply kinds a child may send, and what each means to the caller.
 _REPLY_ERRORS: dict[object, type[DocumentError]] = {
     'unreadable': UnreadableDocumentError,
@@ -579,10 +577,14 @@ _LOGGED_MESSAGE_CHARS = 200
 _CPU_GRACE_SECONDS = 2
 
 
+_warned_missing_user = False
+
+
 def _unprivileged_ids(user: str) -> dict:
     """`subprocess` arguments that run the child as `user` with no supplementary groups, when this
     process is root and `user` exists; `{}` (the child keeps our identity) otherwise, e.g. on a
     developer machine."""
+    global _warned_missing_user
     if not user or not hasattr(os, 'geteuid') or os.geteuid() != 0:
         return {}
     import pwd
@@ -590,6 +592,12 @@ def _unprivileged_ids(user: str) -> dict:
     try:
         entry = pwd.getpwnam(user)
     except KeyError:
+        if not _warned_missing_user:
+            _warned_missing_user = True
+            logger.warning(
+                'RECEIPTS_DOCUMENT_CHILD_USER %r does not exist; the document child runs as root',
+                user,
+            )
         return {}
     return {'user': entry.pw_uid, 'group': entry.pw_gid, 'extra_groups': []}
 
@@ -628,23 +636,41 @@ def _prepare_in_child(
     # Only what the interpreter and its libraries need: no keys, tokens or database credentials in
     # a process that decodes files strangers sent.
     env = {key: os.environ[key] for key in _CHILD_ENV_KEYS if key in os.environ}
-    try:
+    payload = json.dumps(request).encode() + b'\n' + data
+
+    def run(identity: dict) -> subprocess.CompletedProcess:
         # On a timeout, `run` kills the child and waits for it before raising. The child's own
         # session keeps a terminal's or process group's signals (Ctrl-C on a local worker) from
         # reaching it; `RLIMIT_CPU` still ends one whose worker is gone. Its stderr is dropped
         # (the child answers on stdout and silences its libraries): it is unbounded and can echo
         # the file, so nothing of it is kept or logged.
-        result = subprocess.run(
+        return subprocess.run(
             command,
-            input=json.dumps(request).encode() + b'\n' + data,
+            input=payload,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=timeout,
             env=env,
             check=False,
             start_new_session=True,
-            **_unprivileged_ids(child_user),
+            **identity,
         )
+
+    try:
+        identity = _unprivileged_ids(child_user)
+        try:
+            result = run(identity)
+        except PermissionError:
+            if not identity:
+                raise
+            # Not allowed to switch user (a container without CAP_SETUID/CAP_SETGID), or the
+            # user can't run the interpreter: better a child with the worker's own identity than
+            # every receipt failing to start one.
+            logger.warning(
+                "Could not start the document child as %r; running it as the worker's user",
+                child_user,
+            )
+            result = run({})
     except subprocess.TimeoutExpired as exc:
         logger.error('Preparing a %s file took more than %s s; child killed', content_type, timeout)
         raise DocumentChildError('Reading the file took too long.') from exc
@@ -674,15 +700,21 @@ def _prepare_in_child(
         )
         raise DocumentChildError('Reading the file failed.')
 
-    if 'ok' in reply:
+    if reply.get('ok') is not None:
         ok = reply['ok']
-        return PreparedInput(
-            text=ok['text'],
-            images=[base64.b64decode(image) for image in ok['images']],
-            preview_jpeg=(
-                base64.b64decode(ok['preview_jpeg']) if ok['preview_jpeg'] is not None else None
-            ),
-        )
+        try:
+            return PreparedInput(
+                text=ok['text'],
+                images=[base64.b64decode(image, validate=True) for image in ok['images']],
+                preview_jpeg=(
+                    base64.b64decode(ok['preview_jpeg'], validate=True)
+                    if ok['preview_jpeg'] is not None
+                    else None
+                ),
+            )
+        except ValueError as exc:  # invalid base64 (`binascii.Error` is one)
+            logger.error('The child preparing a %s file sent undecodable data', content_type)
+            raise DocumentChildError('Reading the file failed.') from exc
     error = _REPLY_ERRORS[reply['error']]
     message = str(reply.get('message', 'The file could not be read.'))
     if error is DocumentChildError:
@@ -766,7 +798,10 @@ def _peak_address_space() -> int | None:
 
 #: A pdfium failure after the child had mapped this fraction of its budget is reported as the
 #: budget's (see `_RenderFailedError`). High on purpose: a corrupt but large image or PDF can map
-#: a good part of the budget without having run out of it.
+#: a good part of the budget without having run out of it. A known limitation: `VmPeak` counts
+#: mappings that succeeded, so one big allocation that fails well below the limit (400 MB asked
+#: at 700 of 1024 MB mapped) leaves a peak under this and the file is called unreadable instead
+#: of too complex. Both are permanent and refunded; only the label and help text differ.
 _NEAR_BUDGET = 0.85
 
 

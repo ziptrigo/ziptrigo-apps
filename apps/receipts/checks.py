@@ -38,8 +38,8 @@ def check_receipts_configuration(*args, **kwargs):
 
 
 #: Below this a legitimate receipt can fail: ordinary files map 96-128 MB, a 48-megapixel HEIC or
-#: a 50-megapixel PNG up to ~430 MB (see `services.documents`).
-MIN_DOCUMENT_MEMORY_MB = 384
+#: a 50-megapixel PNG up to ~430 MB and pass at 512 (see `services.documents`).
+MIN_DOCUMENT_MEMORY_MB = 512
 #: The wall-clock timeout should be this many times the CPU limit or more: the CPU limit does not
 #: grow with the load on the host, so it should be what refuses a CPU-heavy file.
 MIN_TIMEOUT_TO_CPU_RATIO = 1.5
@@ -47,57 +47,88 @@ MIN_TIMEOUT_TO_CPU_RATIO = 1.5
 
 @register()
 def check_document_budget(*args, **kwargs):
-    """Reject an absurd budget for reading receipt files (`services.documents`). A budget that is
-    too small would fail ordinary receipts for good (`too_large`, a refund each) -- or, if the
-    child can't run at all, retry every one of them -- and the only sign would be log lines. Skipped
-    when the child is switched off (`RECEIPTS_DOCUMENT_SANDBOX`)."""
+    """Flag a bad budget for reading receipt files (`services.documents`). Skipped when the child
+    is switched off (`RECEIPTS_DOCUMENT_SANDBOX`).
+
+    Only a value that cannot work at all is an Error (memory or timeout not positive): an Error
+    stops `manage.py migrate`, i.e. the deployed container's start, over a receipts tuning
+    mistake. The rest are Warnings -- a budget that is too small fails or retries receipts, which
+    is refunded, but it is no reason to take QR codes and file transfer down."""
     if not getattr(settings, 'RECEIPTS_DOCUMENT_SANDBOX', True):
         return []
     memory = settings.RECEIPTS_DOCUMENT_MEMORY_MB
     cpu = settings.RECEIPTS_DOCUMENT_CPU_SECONDS
     timeout = settings.RECEIPTS_DOCUMENT_TIMEOUT_SECONDS
     problems: list[Error | Warning] = []
-    if memory < MIN_DOCUMENT_MEMORY_MB:
+    if memory <= 0:
         problems.append(
             Error(
-                f'RECEIPTS_DOCUMENT_MEMORY_MB is {memory}; it must be at least '
-                f'{MIN_DOCUMENT_MEMORY_MB}.',
+                f'RECEIPTS_DOCUMENT_MEMORY_MB is {memory}; it must be positive.',
                 hint='A large photo needs ~430 MB of address space; the default is 1024.',
                 id='receipts.E001',
             )
         )
-    if cpu < 1:
+    elif memory < MIN_DOCUMENT_MEMORY_MB:
         problems.append(
-            Error(
-                f'RECEIPTS_DOCUMENT_CPU_SECONDS is {cpu}; it must be at least 1.',
-                hint='Ordinary receipts take 0.1-1.5 CPU seconds; the default is 25.',
-                id='receipts.E002',
+            Warning(
+                f'RECEIPTS_DOCUMENT_MEMORY_MB is {memory}; below {MIN_DOCUMENT_MEMORY_MB} large '
+                'photos (48 MP) are refused for good as too large.',
+                hint='The default is 1024.',
+                id='receipts.W003',
             )
         )
     if timeout <= 0:
         problems.append(
             Error(
                 f'RECEIPTS_DOCUMENT_TIMEOUT_SECONDS is {timeout}; it must be positive.',
-                id='receipts.E003',
+                id='receipts.E002',
             )
         )
-    elif timeout <= cpu:
+    if cpu < 1:
         problems.append(
-            Error(
-                f'RECEIPTS_DOCUMENT_TIMEOUT_SECONDS ({timeout}) must be larger than '
-                f'RECEIPTS_DOCUMENT_CPU_SECONDS ({cpu}).',
-                hint='The wall-clock timeout would otherwise refuse files before the CPU limit.',
-                id='receipts.E004',
+            Warning(
+                f'RECEIPTS_DOCUMENT_CPU_SECONDS is {cpu}; it is treated as 1.',
+                hint='Ordinary receipts take 0.1-3 CPU seconds; the default is 25.',
+                id='receipts.W004',
             )
         )
-    elif timeout < MIN_TIMEOUT_TO_CPU_RATIO * cpu:
+    if timeout > 0 and cpu >= 1 and timeout < MIN_TIMEOUT_TO_CPU_RATIO * cpu:
         problems.append(
             Warning(
                 f'RECEIPTS_DOCUMENT_TIMEOUT_SECONDS ({timeout}) is less than '
                 f'{MIN_TIMEOUT_TO_CPU_RATIO}x RECEIPTS_DOCUMENT_CPU_SECONDS ({cpu}).',
-                hint='On a busy host the wall clock, not the CPU limit, would refuse files; '
-                'use 2-3x.',
-                id='receipts.W003',
+                hint='On a busy host the wall clock, not the CPU limit, would end the child and '
+                'the receipt would be retried instead of refused; use 2-3x.',
+                id='receipts.W005',
             )
         )
     return problems
+
+
+@register()
+def check_document_child(*args, **kwargs):
+    """Run the real document child on a tiny text payload and warn if it can't read it: a missing
+    capability for the user switch, an unreadable virtualenv or a broken library import would
+    otherwise show up only as every receipt being retried and finally failed. `migrate` (the
+    deployed container's entrypoint) runs the checks as the deployed user, so this is where it is
+    seen. Skipped when the child is off and under `DEBUG` (a child start costs ~0.3 s, which every
+    local `manage.py` command would pay)."""
+    if settings.DEBUG or not getattr(settings, 'RECEIPTS_DOCUMENT_SANDBOX', True):
+        return []
+    from .services import documents
+
+    try:
+        prepared = documents.prepare_input(b'Total: 42.10', documents.PLAIN)
+        if prepared.text != 'Total: 42.10':
+            raise ValueError('unexpected answer')
+    except Exception as exc:
+        return [
+            Warning(
+                f'The receipts document child could not read a test text ({type(exc).__name__}: '
+                f'{exc}).',
+                hint='Every receipt will be retried and finally fail. Check the log for the '
+                'reason, RECEIPTS_DOCUMENT_CHILD_USER and the memory/CPU settings.',
+                id='receipts.W006',
+            )
+        ]
+    return []

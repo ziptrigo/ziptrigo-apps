@@ -10,7 +10,11 @@ from django.db.models.signals import pre_delete
 from apps.billing.signals import credits_added
 from apps.core.products import get_products
 
-from ..checks import check_document_budget, check_receipts_configuration
+from ..checks import (
+    check_document_budget,
+    check_document_child,
+    check_receipts_configuration,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -135,33 +139,88 @@ class TestDocumentBudgetChecks:
     @pytest.mark.parametrize(
         ('name', 'value', 'expected_id'),
         [
-            ('RECEIPTS_DOCUMENT_MEMORY_MB', 383, 'receipts.E001'),
             ('RECEIPTS_DOCUMENT_MEMORY_MB', 0, 'receipts.E001'),
-            ('RECEIPTS_DOCUMENT_CPU_SECONDS', 0, 'receipts.E002'),
-            ('RECEIPTS_DOCUMENT_CPU_SECONDS', 0.5, 'receipts.E002'),
-            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 0, 'receipts.E003'),
-            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', -5, 'receipts.E003'),
-            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 25, 'receipts.E004'),  # wall == CPU
-            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 10, 'receipts.E004'),  # wall < CPU
+            ('RECEIPTS_DOCUMENT_MEMORY_MB', -5, 'receipts.E001'),
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 0, 'receipts.E002'),
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', -5, 'receipts.E002'),
         ],
     )
-    def test_an_absurd_value_is_an_error(self, settings, name, value, expected_id):
+    def test_a_value_that_cannot_work_is_an_error(self, settings, name, value, expected_id):
         setattr(settings, name, value)
 
-        [problem] = check_document_budget()
+        [problem] = [p for p in check_document_budget() if p.id == expected_id]
 
-        assert problem.id == expected_id
         assert problem.is_serious()
 
-    def test_the_lowest_memory_allowed_is_fine(self, settings):
-        settings.RECEIPTS_DOCUMENT_MEMORY_MB = 384
+    @pytest.mark.parametrize(
+        ('name', 'value', 'expected_id'),
+        [
+            ('RECEIPTS_DOCUMENT_MEMORY_MB', 511, 'receipts.W003'),
+            ('RECEIPTS_DOCUMENT_CPU_SECONDS', 0, 'receipts.W004'),
+            ('RECEIPTS_DOCUMENT_CPU_SECONDS', 0.5, 'receipts.W004'),
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 25, 'receipts.W005'),  # wall == CPU
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 10, 'receipts.W005'),  # wall < CPU
+            ('RECEIPTS_DOCUMENT_TIMEOUT_SECONDS', 30, 'receipts.W005'),  # 1.2x
+        ],
+    )
+    def test_a_tuning_mistake_only_warns_and_never_stops_the_container(
+        self, settings, name, value, expected_id
+    ):
+        setattr(settings, name, value)
+
+        problems = check_document_budget()
+
+        assert [p.id for p in problems] == [expected_id]
+        assert not any(p.is_serious() for p in problems)
+
+    def test_the_lowest_memory_without_a_warning_is_the_measured_one(self, settings):
+        settings.RECEIPTS_DOCUMENT_MEMORY_MB = 512
 
         assert check_document_budget() == []
 
-    def test_a_wall_clock_barely_above_the_cpu_limit_warns(self, settings):
-        settings.RECEIPTS_DOCUMENT_TIMEOUT_SECONDS = 30  # 1.2x
 
-        [problem] = check_document_budget()
+class TestDocumentChildCheck:
+    @pytest.fixture(autouse=True)
+    def sandbox(self, settings):
+        settings.RECEIPTS_DOCUMENT_SANDBOX = True
+        settings.DEBUG = False
 
-        assert problem.id == 'receipts.W003'
+    def test_a_working_child_is_fine(self):
+        assert check_document_child() == []
+
+    def test_a_child_that_cannot_run_is_a_warning(self, monkeypatch):
+        from ..services import documents
+
+        def broken(*args, **kwargs):
+            raise documents.DocumentChildError('Reading the file could not be started.')
+
+        monkeypatch.setattr(documents, 'prepare_input', broken)
+
+        [problem] = check_document_child()
+
+        assert problem.id == 'receipts.W006'
         assert not problem.is_serious()
+
+    def test_a_wrong_answer_is_a_warning_too(self, monkeypatch):
+        from ..services import documents
+
+        monkeypatch.setattr(
+            documents, 'prepare_input', lambda *a, **k: documents.PreparedInput(text='other')
+        )
+
+        assert [p.id for p in check_document_child()] == ['receipts.W006']
+
+    def test_it_does_not_start_a_child_with_the_sandbox_off_or_in_debug(
+        self, settings, monkeypatch
+    ):
+        import subprocess
+
+        monkeypatch.setattr(
+            subprocess, 'run', lambda *a, **k: pytest.fail('should not start a process')
+        )
+        settings.RECEIPTS_DOCUMENT_SANDBOX = False
+        assert check_document_child() == []
+
+        settings.RECEIPTS_DOCUMENT_SANDBOX = True
+        settings.DEBUG = True
+        assert check_document_child() == []

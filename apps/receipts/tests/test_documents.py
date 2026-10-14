@@ -561,14 +561,13 @@ class TestChildProcess:
     @pytest.mark.parametrize(
         'code',
         [
-            'import os, signal; os.kill(os.getpid(), signal.SIGKILL)',  # e.g. the OOM killer
             'import os, signal; os.kill(os.getpid(), signal.SIGABRT)',  # a failed allocation
             'import os, signal; os.kill(os.getpid(), signal.SIGSEGV)',  # native code gone wrong
             'import os, signal; os.kill(os.getpid(), signal.SIGBUS)',
             'import os, signal; os.kill(os.getpid(), signal.SIGXCPU)',  # the CPU limit
             'import json; print(json.dumps({"error": "too_complex", "message": "x"}))',
         ],
-        ids=['SIGKILL', 'SIGABRT', 'SIGSEGV', 'SIGBUS', 'SIGXCPU', 'says too_complex'],
+        ids=['SIGABRT', 'SIGSEGV', 'SIGBUS', 'SIGXCPU', 'says too_complex'],
     )
     def test_a_child_that_ends_over_its_budget_is_too_complex(self, code, caplog):
         with caplog.at_level(logging.WARNING), pytest.raises(documents.DocumentTooComplexError):
@@ -581,6 +580,9 @@ class TestChildProcess:
         [
             'import os; os._exit(3)',
             'import sys; sys.exit(1)',  # e.g. a traceback: an import error after a bad deploy
+            # The OOM killer: memory pressure on the container or host, not the file (with
+            # RLIMIT_AS a file over its budget fails an allocation instead).
+            'import os, signal; os.kill(os.getpid(), signal.SIGKILL)',
             'import os, signal; os.kill(os.getpid(), signal.SIGTERM)',  # e.g. an outside stop
             'import os, signal; os.kill(os.getpid(), signal.SIGINT)',  # Ctrl-C reaching the group
             'import os, signal; os.kill(os.getpid(), signal.SIGHUP)',
@@ -595,6 +597,7 @@ class TestChildProcess:
         ids=[
             'exit 3',
             'exit 1',
+            'SIGKILL (OOM killer)',
             'SIGTERM',
             'SIGINT',
             'SIGHUP',
@@ -754,6 +757,103 @@ class TestChildProcess:
         assert seen['user'] == 65534 and seen['start_new_session'] is True
         assert seen['stderr'] == subprocess.DEVNULL
 
+    def test_a_missing_child_user_is_warned_about_once(self, monkeypatch, caplog):
+        monkeypatch.setattr(os, 'geteuid', lambda: 0)
+        monkeypatch.setattr(documents, '_warned_missing_user', False)
+
+        with caplog.at_level(logging.WARNING):
+            assert documents._unprivileged_ids('no-such-user-here') == {}
+            assert documents._unprivileged_ids('no-such-user-here') == {}
+
+        assert caplog.text.count('does not exist') == 1
+
+    def test_a_child_that_may_not_switch_user_runs_as_the_worker_instead(self, monkeypatch, caplog):
+        """A container without CAP_SETUID/CAP_SETGID: `PermissionError` on the switch."""
+        calls = []
+        real_run = subprocess.run
+
+        def run(*args, **kwargs):
+            calls.append(kwargs.get('user'))
+            if 'user' in kwargs:
+                raise PermissionError(1, 'Operation not permitted')
+            return real_run(*args, **kwargs)
+
+        monkeypatch.setattr(documents, '_unprivileged_ids', lambda user: {'user': 65534})
+        monkeypatch.setattr(subprocess, 'run', run)
+        code = (
+            'import json, sys\n'
+            'ok = {"text": "fine", "images": [], "preview_jpeg": None}\n'
+            'sys.stdout.write(json.dumps({"ok": ok}))'
+        )
+
+        with caplog.at_level(logging.WARNING):
+            assert self.run_command(code).text == 'fine'
+
+        assert calls == [65534, None]
+        assert 'Could not start the document child' in caplog.text
+
+    def test_a_permission_error_without_a_user_switch_is_not_retried(self, monkeypatch):
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(1)
+            raise PermissionError(13, 'Permission denied')
+
+        monkeypatch.setattr(subprocess, 'run', run)
+
+        with pytest.raises(documents.DocumentChildError):
+            self.run_command('pass')
+
+        assert calls == [1]
+
+    @pytest.mark.skipif(
+        not (sys.platform.startswith('linux') and hasattr(os, 'geteuid') and os.geteuid() == 0),
+        reason='the user switch needs Linux and root (as in the deployed image)',
+    )
+    def test_a_root_worker_really_starts_the_child_as_nobody(self, sandbox):
+        import pwd
+
+        code = (
+            'import json, os, sys\n'
+            'text = f"{os.getuid()} {os.getgid()} {os.getgroups()}"\n'
+            'ok = {"text": text, "images": [], "preview_jpeg": None}\n'
+            'sys.stdout.write(json.dumps({"ok": ok}))'
+        )
+        nobody = pwd.getpwnam('nobody')
+
+        prepared = documents._prepare_in_child(
+            b'x',
+            documents.PLAIN,
+            max_pdf_pages=1,
+            memory_mb=256,
+            cpu_seconds=5,
+            timeout=10,
+            child_user='nobody',
+            command=[sys.executable, '-c', code],
+        )
+
+        assert prepared.text == f'{nobody.pw_uid} {nobody.pw_gid} []'
+        # and the real child, with the module, venv and libraries, works as that user
+        assert documents.prepare_input(b'Total: 42.10', documents.PLAIN).text == 'Total: 42.10'
+        assert len(documents.prepare_input(samples.scanned_pdf_bytes(), documents.PDF).images) == 1
+
+    @pytest.mark.parametrize(
+        'reply',
+        [
+            '{"ok": null, "error": "failed", "message": "x"}',
+            '{"ok": {"text": "t", "images": ["not base64!"], "preview_jpeg": null}}',
+            '{"ok": {"text": "t", "images": [], "preview_jpeg": "***"}}',
+        ],
+        ids=['ok null', 'bad image base64', 'bad preview base64'],
+    )
+    def test_a_reply_that_is_not_what_the_protocol_says_is_a_child_failure(self, reply, caplog):
+        code = f'import sys; sys.stdout.write({reply!r})'
+
+        with caplog.at_level(logging.ERROR), pytest.raises(documents.DocumentChildError):
+            self.run_command(code)
+
+        assert caplog.records
+
     REQUEST = (
         b'{"content_type": "text/plain", "max_pdf_pages": 5, "memory_mb": 1000, '
         b'"cpu_seconds": 10}\nhello'
@@ -791,7 +891,16 @@ class TestChildProcess:
 
         assert documents._caused_by_memory_error(a) is False
 
-    def test_real_pypdf_and_pillow_failures_under_a_memory_error_are_too_complex(self, monkeypatch):
+    def test_a_memory_error_inside_pillow_is_too_complex(self, monkeypatch):
+        def out_of_memory(*args, **kwargs):
+            raise MemoryError
+
+        monkeypatch.setattr(Image.Image, 'load', out_of_memory)
+
+        with pytest.raises(documents.DocumentTooComplexError):
+            documents._prepare_guarded(samples.png_bytes(), documents.PNG)
+
+    def test_a_memory_error_inside_pypdf_is_too_complex(self, monkeypatch):
         """`_pdf_text` wraps every exception in `UnreadableDocumentError`; the cause is kept."""
         from pypdf import PdfReader
 

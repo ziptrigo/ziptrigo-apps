@@ -1347,29 +1347,44 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   image, the worst legitimate ones, a 48 MP noise PNG or a 12 MP HEIC, 1.7-2.6 s; SIGXCPU, with
   `RLIMIT_CORE` 0) and a wall-clock `RECEIPTS_DOCUMENT_TIMEOUT_SECONDS` (default 60, 2-3x the CPU
   limit on purpose: CPU time doesn't grow with host load, so it is what refuses a CPU-heavy file,
-  and the wall clock only catches a hang). `apps.receipts.checks` rejects absurd values
-  (`receipts.E001`-`E004`: memory under 384 MB, CPU under 1 s, a non-positive timeout, a timeout not
-  above the CPU limit; `W003`: under 1.5x). Before it sets its limits the child writes `1000` to
-  `/proc/self/oom_score_adj`, so if the container's cgroup limit is hit first (RLIMIT_AS counts
-  address space, not RSS) the kernel kills the child, not the worker (whose death restarts the
-  container). **Container headroom: the worker plus `RECEIPTS_DOCUMENT_MEMORY_MB`** (one child at a
-  time per `receipts` worker). A root worker starts the child as `RECEIPTS_DOCUMENT_CHILD_USER`
-  (default `nobody`, no supplementary groups; empty disables; skipped when not root or the user
-  doesn't exist), so it can't read a 0600 env file; verified in the image. One child per receipt
-  (~0.2-0.5 s). A pdfium failure (`_RenderFailedError`: pdfium reports a failed allocation as its
+  and the wall clock only catches a hang). `apps.receipts.checks` flags bad values, but **only a
+  value that cannot work at all is an Error** (`receipts.E001` memory <= 0, `E002` timeout <= 0):
+  `migrate` runs the checks and the deployed entrypoint has `set -e`, so an Error stops the whole
+  site from starting. The rest are Warnings: `W003` memory under 512 MB (the measured value that
+  passes a 48 MP photo), `W004` CPU under 1 s, `W005` timeout under 1.5x the CPU limit (or not above
+  it). `W006` (`check_document_child`) runs the real child on a tiny text payload and warns if it
+  can't read it (a missing capability for the user switch, an unreadable venv, a broken import); it
+  is skipped with the sandbox off and under `DEBUG`, since a child start costs ~0.3 s. Before it
+  sets its limits the child writes `1000` to `/proc/self/oom_score_adj`, so if the container's
+  cgroup limit is hit first (RLIMIT_AS counts address space, not RSS) the kernel kills the child,
+  not the worker (whose death restarts the container). **Container headroom: the worker plus
+  `RECEIPTS_DOCUMENT_MEMORY_MB`** (one child at a time per `receipts` worker). A root worker starts
+  the child as `RECEIPTS_DOCUMENT_CHILD_USER` (default `nobody`, no supplementary groups; empty
+  disables; skipped when not root; a user that doesn't exist logs a warning once and runs it as
+  root; a `PermissionError` on the switch, e.g. a container with `cap_drop` SETUID/SETGID, logs a
+  warning and retries once as the worker's own user), so it can't read a 0600 env file; verified in
+  the image. **The deployed `.env` is bind-mounted from the host, so that depends on the host
+  file's mode: `chmod 600` it on the VPS** (`scp` without `-p` keeps an existing file's mode, and
+  Docker Desktop ignores bind-mount permissions, so only Linux proves it). The Dockerfile sets
+  `UV_COMPILE_BYTECODE=1` in the builder so the unprivileged child doesn't recompile pypdf and
+  friends on every start. One child per receipt (~0.1-0.5 s). A pdfium failure (`_RenderFailedError`: pdfium reports a failed allocation as its
   own error, not `MemoryError`) after the child had mapped over 85% of its budget (`VmPeak`) is
   reported as over the budget; any other unreadable error whose `__cause__`/`__context__` chain
   holds a `MemoryError` is too.
   **Two kinds of failure.** Only outcomes that mean "this file is over the budget" raise
   `DocumentTooComplexError` (a subclass of `UnreadableDocumentError`, also raised for the per-stream
   cap, an image header over `MAX_IMAGE_PIXELS` and an absurd page size): the child ended with
-  SIGKILL, SIGABRT, SIGSEGV, SIGBUS or SIGXCPU, raised `MemoryError`, or replied `too_complex`.
+  SIGABRT (a failed allocation under `RLIMIT_AS`), SIGSEGV, SIGBUS or SIGXCPU, raised
+  `MemoryError`, or replied `too_complex`. **SIGKILL is not one of them**: with the limits a file
+  over its budget fails an allocation instead, so SIGKILL is the kernel's OOM killer, i.e. memory
+  pressure on the container or host (the child is its first victim), and is retried.
   `processing._run` logs a warning with the receipt id (never content) and fails it as
   **`too_large`** (reused rather than a new reason, so no migration; its help text says "too large
   or too complex", and, like any `too_large`, it can't be re-run), refunded like every file that
   could not be read. Everything that says nothing about the file -- an ordinary non-zero exit, no or
-  a malformed reply, SIGINT/SIGTERM/SIGHUP, the wall-clock timeout, the child failing to start or to
-  import a library (reply `failed`) -- raises `DocumentChildError`, deliberately *not* an
+  a malformed or undecodable reply (the reply is untrusted: `ok: null`, bad base64),
+  SIGINT/SIGTERM/SIGHUP/SIGKILL, the wall-clock timeout, the child failing to start or to import a
+  library (reply `failed`) -- raises `DocumentChildError`, deliberately *not* an
   `UnreadableDocumentError`: `_run` logs an **error** and treats it as a transient failure
   (`_transient_failure`, backoff, `max_ai_attempts`), so a hostile file still ends after a few
   budgets while a broken image or a mistaken setting doesn't permanently fail every receipt.
@@ -1985,8 +2000,9 @@ future app:
   "Receipts" > Processing): the `receipts` worker plus that child (up to
   `RECEIPTS_DOCUMENT_MEMORY_MB` of address space, one at a time) is the memory the container must
   have room for (the child asks the OOM killer to pick it first, `oom_score_adj` 1000; set the
-  container's memory limit in the `infra` compose to at least worker + that budget), and an
-  over-budget child fails the receipt, never the worker; a child that merely breaks is retried.
+  container's memory limit in the `infra` compose to at least worker + that budget, or a legitimate
+  big photo is OOM-killed and retried), and an over-budget child fails the receipt, never the
+  worker; a child that merely breaks (including one the OOM killer took) is retried.
 - **Scheduler**: `apps.core.scheduler` -- a `JobSpec` registry (name, callable, interval, lease)
   filled by each app's `AppConfig.ready()` (`core` can't import a product, so it never discovers
   jobs itself), a `ScheduledJob` row per job whose claim is one conditional `UPDATE` guarded by the

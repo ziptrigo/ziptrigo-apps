@@ -15,7 +15,10 @@ RUN python -m pip install --no-cache-dir uv
 # Copy locked dependency metadata
 COPY pyproject.toml uv.lock /app/
 
-# Install Python dependencies (runtime only; no dev group)
+# Install Python dependencies (runtime only; no dev group). Compile bytecode now: the receipts
+# document child runs as `nobody`, which cannot write __pycache__, and would recompile pypdf,
+# pypdfium2 and pillow-heif on every start.
+ENV UV_COMPILE_BYTECODE=1
 RUN uv sync --frozen --no-install-project
 
 
