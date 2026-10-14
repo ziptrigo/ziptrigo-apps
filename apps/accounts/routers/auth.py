@@ -148,7 +148,9 @@ def refresh_token(request: HttpRequest, payload: RefreshRequest) -> TokenRespons
     except User.DoesNotExist:
         raise HttpError(401, 'User not found')
 
-    if user.status != User.STATUS_ACTIVE:
+    # `is_active` is the admin's "Active" box; `JWTAuth` refuses such a user's access tokens too,
+    # so don't hand one out.
+    if user.status != User.STATUS_ACTIVE or not user.is_active:
         raise HttpError(403, 'User not active')
 
     # A refresh token issued before the password last changed is revoked (see

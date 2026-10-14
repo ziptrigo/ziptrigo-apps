@@ -214,7 +214,11 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
 - **Django sessions** for the web UI: every page and every HTMX form view is `@login_required`
   (`LOGIN_URL='accounts:login'`). The login page is a session form view
   (`apps/accounts/views/login.py`, CSRF-protected, honours a same-site `next`); logout is
-  POST-only. The browser never holds a JWT.
+  POST-only. The browser never holds a JWT. `accounts.backends.EmailBackend` is plain
+  `ModelBackend` (no overrides; the class stays because sessions and `google_oauth.LOGIN_BACKEND`
+  name its path): it hashes once for an unknown email, so login timing doesn't reveal accounts,
+  and refuses `is_active=False` users at login and on every session load. Such a login answers
+  "Invalid credentials" (the `status` check, "User not active", comes after `authenticate`).
 - **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py`, `admin/filetransfer.py` and
   `admin/receipts.py`
   (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE`

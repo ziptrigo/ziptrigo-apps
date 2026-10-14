@@ -90,7 +90,12 @@ class UnverifiedEmail(GoogleSignInError):
 
 
 class InactiveAccount(GoogleSignInError):
-    """The matched account is not active -- refused like the password login refuses it."""
+    """The matched account is not active (`status` or `is_active`).
+
+    The password login words a `status` refusal the same way ("User not active") but, for
+    `is_active=False`, answers "Invalid credentials" (it never reaches the status check). Here
+    the address is one Google has verified, so saying why leaks nothing.
+    """
 
     user_message = INACTIVE_MESSAGE
 
