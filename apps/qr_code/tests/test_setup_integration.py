@@ -120,7 +120,7 @@ class TestSetupIntegration:
             password='testpass123',
             name='Dash Thumb',
         )
-        QRCode.objects.create(
+        qr = QRCode.objects.create(
             content='https://example.com/dashboard',
             created_by=user,
             qr_format=QRCodeFormat.PNG,
@@ -134,7 +134,8 @@ class TestSetupIntegration:
 
         assert response.status_code == 200
         content = response.content.decode('utf-8')
-        # Ensure we have the data-full-src attribute pointing at the media path
-        assert 'data-full-src="/media/qrcodes/example.png"' in content
+        # The modal's full-size image is the rendered-on-demand view, not a /media/ file (media
+        # isn't served with DEBUG off).
+        assert f'data-full-src="{reverse("qr_code:image", args=[qr.id])}"' in content
         # Ensure the modal container exists
         assert 'id="qr-modal-overlay"' in content

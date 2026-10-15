@@ -237,6 +237,43 @@ class TestDelete:
         assert qr_code.deleted_at is None
 
 
+class TestImage:
+    def test_dashboard_thumbnail_points_at_the_image_view_not_media(
+        self, logged_in_client, qr_code
+    ):
+        response = logged_in_client.get(reverse('qr_code:dashboard'))
+
+        url = reverse('qr_code:image', args=[qr_code.id])
+        assert f'src="{url}"' in response.content.decode()
+        assert '/media/' not in response.content.decode()
+
+    def test_renders_a_png_without_a_media_file(self, logged_in_client, qr_code, settings):
+        # `qr_code.image_file` names a file that isn't on disk, as on staging with DEBUG off.
+        settings.DEBUG = False
+
+        response = logged_in_client.get(reverse('qr_code:image', args=[qr_code.id]))
+
+        assert response.status_code == 200
+        assert response['Content-Type'] == 'image/png'
+        assert response.content.startswith(b'\x89PNG')
+
+    def test_other_users_and_deleted_qrcodes_are_not_found(self, client, logged_in_client, qr_code):
+        url = reverse('qr_code:image', args=[qr_code.id])
+        qr_code.soft_delete()
+        assert logged_in_client.get(url).status_code == 404
+
+        other = User.objects.create_user(email='other@example.com', password='password123')
+        client.force_login(other)
+        qr_code.deleted_at = None
+        qr_code.save(update_fields=['deleted_at'])
+        assert client.get(url).status_code == 404
+
+    def test_requires_login(self, client, qr_code):
+        response = client.get(reverse('qr_code:image', args=[qr_code.id]))
+
+        assert response.status_code == 302
+
+
 class TestTooBigToEncode:
     """1,000 emoji are within the character cap but fit no QR code (they are bytes)."""
 

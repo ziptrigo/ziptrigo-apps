@@ -4,6 +4,7 @@ from .pages import (
     dashboard,
     qrcode_duplicate,
     qrcode_editor,
+    qrcode_image,
 )
 from .redirect import redirect_short_url
 
@@ -14,6 +15,7 @@ __all__ = [
     'qrcode_duplicate',
     'qrcode_edit_submit',
     'qrcode_editor',
+    'qrcode_image',
     'qrcode_preview',
     'qrcode_short_code',
     'redirect_short_url',

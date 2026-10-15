@@ -7,6 +7,7 @@ from .views import (
     qrcode_duplicate,
     qrcode_edit_submit,
     qrcode_editor,
+    qrcode_image,
     qrcode_preview,
     qrcode_short_code,
 )
@@ -22,5 +23,6 @@ urlpatterns = [
     path('edit/<uuid:qr_id>/', qrcode_editor, name='edit'),
     path('edit/<uuid:qr_id>/submit/', qrcode_edit_submit, name='edit-submit'),
     path('duplicate/<uuid:qr_id>/', qrcode_duplicate, name='duplicate'),
+    path('image/<uuid:qr_id>/', qrcode_image, name='image'),
     path('delete/<uuid:qr_id>/', qrcode_delete, name='delete'),
 ]

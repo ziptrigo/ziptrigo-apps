@@ -57,11 +57,13 @@ class QRCodeGenerator:
         return f'qrcodes/{file_name}'
 
     @staticmethod
-    def render_png_data_uri(qr_code_instance: QRCode) -> str:
-        """Render the QR code as a PNG `data:` URI, without writing a file.
+    def render_png(qr_code_instance: QRCode) -> bytes:
+        """Render the QR code as PNG bytes, in memory.
 
-        Used for previews, which would otherwise leave a file behind on every click. Always PNG:
-        a preview only needs to show what the code looks like, and `<img>` can't show a PDF.
+        The dashboard and the API show the image from this rather than from `image_file`: that file
+        sits in `MEDIA_ROOT` on the container's own disk, which nothing serves with `DEBUG=False`
+        and which a redeploy empties. Always PNG: it only needs to show what the code looks like,
+        and `<img>` can't show a PDF.
         """
         qr = segno.make(
             qr_code_instance.content, error=qr_code_instance.error_correction, micro=False
@@ -75,7 +77,15 @@ class QRCodeGenerator:
             dark=QRCodeGenerator._parse_color(qr_code_instance.foreground_color),
             light=QRCodeGenerator._parse_color(qr_code_instance.background_color),
         )
-        encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
+        return buffer.getvalue()
+
+    @staticmethod
+    def render_png_data_uri(qr_code_instance: QRCode) -> str:
+        """Render the QR code as a PNG `data:` URI, without writing a file.
+
+        Used for previews, which would otherwise leave a file behind on every click.
+        """
+        encoded = base64.b64encode(QRCodeGenerator.render_png(qr_code_instance)).decode('ascii')
         return f'data:image/png;base64,{encoded}'
 
     @staticmethod
@@ -87,5 +97,5 @@ class QRCodeGenerator:
 
     @staticmethod
     def get_file_url(image_file: str) -> str:
-        """Get the full URL for accessing the QR code image."""
+        """Get the URL of the file `generate_qr_code` wrote (only served with `DEBUG=True`)."""
         return f'{settings.MEDIA_URL}{image_file}'

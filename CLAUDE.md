@@ -981,7 +981,11 @@ package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
 QR code specifics: a tracked code encodes `<BASE_URL>/go/<code>`, so in prod every printed code
 reads `https://app.ziptrigo.com/go/...` -- the chosen short-link host (issue #49; there is no
 separate short-link setting), and prod's `BASE_URL` must never change once codes are out.
-Previews are returned as PNG `data:` URIs and never written to disk. Short codes
+Previews are returned as PNG `data:` URIs and never written to disk. A saved code's image is
+rendered on demand from its row (`qr_code:image`, `/qr/image/<id>/`, and `GET /api/qr/{id}/image`
+for JWT clients; `QRCodeGenerator.render_png`), because the `image_file` that `create_qrcode` still
+writes lives in `MEDIA_ROOT` on the container's disk, which `static()` serves only with
+`DEBUG=True` and a redeploy empties: nothing displays it. Short codes
 for tracked QR codes are issued by the server (`qr_code:short-code`) and kept in the session until
 the save, so users can't choose their own; a code taken in the meantime is replaced.
 The image options only the API sets (`size`, `border`, `qr_format`, `error_correction`, the two

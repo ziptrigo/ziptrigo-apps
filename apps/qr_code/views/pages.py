@@ -1,11 +1,12 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AnonymousUser
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import render
 
 from apps.accounts.http import MaybeAuthenticatedHttpRequest
 
 from ..models import QRCode
+from ..services import QRCodeGenerator
 
 
 @login_required
@@ -101,3 +102,16 @@ def qrcode_duplicate(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> Http
         'prefill': prefill,
     }
     return render(request, 'qr_code/qrcode_editor.html', context)
+
+
+@login_required
+def qrcode_image(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> HttpResponse:
+    """Serve one of the user's QR codes as a PNG, rendered from its saved settings."""
+    try:
+        qrcode = QRCode.objects.get(id=qr_id, created_by=request.user, deleted_at__isnull=True)
+    except QRCode.DoesNotExist:
+        raise Http404('QR Code not found')
+
+    response = HttpResponse(QRCodeGenerator.render_png(qrcode), content_type='image/png')
+    response['Cache-Control'] = 'private, max-age=300'
+    return response
