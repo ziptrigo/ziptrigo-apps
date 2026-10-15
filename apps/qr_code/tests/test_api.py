@@ -40,7 +40,7 @@ def test_create_with_shortening_encodes_redirect_url(client, user, auth_headers)
     qrcode = QRCode.objects.get(id=data['id'], created_by=user)
     assert qrcode.original_url == 'https://example.com'
     assert qrcode.content == qrcode.get_redirect_url() == data['redirect_url']
-    assert data['image_url'].endswith('.png')
+    assert data['image_url'] == f'/api/qr/{data["id"]}/image'
 
 
 def test_preview_is_not_shadowed_by_detail_route(client, auth_headers):
@@ -148,3 +148,21 @@ def test_deleting_twice_is_404_the_second_time(client, qr_code, auth_headers):
     assert first.status_code == 204
     assert second.status_code == 404
     assert client.get(f'/api/qr/{qr_code.id}', **auth_headers).status_code == 404
+
+
+def test_image_endpoint_renders_a_png_without_a_media_file(client, user, auth_headers, qr_code):
+    # `qr_code.image_file` names a file that doesn't exist, as after a redeploy.
+    response = client.get(f'/api/qr/{qr_code.id}/image', **auth_headers)
+
+    assert response.status_code == 200
+    assert response['Content-Type'] == 'image/png'
+    assert response.content.startswith(b'\x89PNG')
+
+
+def test_image_endpoint_hides_other_users_and_deleted_codes(client, auth_headers, qr_code):
+    other = User.objects.create_user(email='other@example.com', password='x')
+    other_headers = {'HTTP_AUTHORIZATION': f'Bearer {CustomAccessToken.for_user(other)}'}
+    assert client.get(f'/api/qr/{qr_code.id}/image', **other_headers).status_code == 404
+
+    qr_code.soft_delete()
+    assert client.get(f'/api/qr/{qr_code.id}/image', **auth_headers).status_code == 404

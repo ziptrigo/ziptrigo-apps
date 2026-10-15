@@ -4,6 +4,7 @@ import uuid
 
 from asgiref.sync import sync_to_async
 from django.core.exceptions import ValidationError
+from django.http import HttpResponse
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -23,6 +24,11 @@ from ..services import QRCodeGenerator
 router = Router(tags=['QR Codes'])
 
 
+def _image_url(qrcode: QRCode) -> str:
+    """Where to fetch the QR code's PNG (`GET /api/qr/{id}/image`, same host, JWT required)."""
+    return f'/api/qr/{qrcode.id}/image'
+
+
 @router.get('/', response=list[QRCodeSchema], auth=AsyncJWTAuth())
 async def list_qrcodes(request):
     """List all QR codes for the authenticated user."""
@@ -34,7 +40,7 @@ async def list_qrcodes(request):
 
     # Add computed fields (dynamic attributes for serialization)
     for qr in qrcodes:
-        qr.image_url = QRCodeGenerator.get_file_url(qr.image_file)
+        qr.image_url = _image_url(qr)
         qr.redirect_url = qr.get_redirect_url()
 
     return qrcodes
@@ -59,7 +65,7 @@ async def create_qrcode(request, payload: QRCodeCreateSchema):
         raise HttpError(400, e.messages[0])
 
     # Add computed fields (dynamic attributes for serialization)
-    qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)
+    qrcode.image_url = _image_url(qrcode)
     qrcode.redirect_url = qrcode.get_redirect_url()
 
     return 201, qrcode
@@ -78,10 +84,24 @@ async def retrieve_qrcode(request, qr_id: uuid.UUID):
         raise HttpError(404, 'QR code not found.')
 
     # Add computed fields (dynamic attributes for serialization)
-    qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)
+    qrcode.image_url = _image_url(qrcode)
     qrcode.redirect_url = qrcode.get_redirect_url()
 
     return qrcode
+
+
+@router.get('/{uuid:qr_id}/image', response={200: None}, auth=AsyncJWTAuth())
+async def qrcode_image(request, qr_id: uuid.UUID):
+    """The QR code as a PNG image, rendered from its saved settings."""
+    try:
+        qrcode = await sync_to_async(QRCode.objects.get)(
+            id=qr_id, created_by=request.auth, deleted_at__isnull=True
+        )
+    except QRCode.DoesNotExist:
+        raise HttpError(404, 'QR code not found.')
+
+    png = await sync_to_async(QRCodeGenerator.render_png)(qrcode)
+    return HttpResponse(png, content_type='image/png')
 
 
 @router.put('/{uuid:qr_id}', response=QRCodeSchema, auth=AsyncJWTAuth())
@@ -103,7 +123,7 @@ async def update_qrcode(request, qr_id: uuid.UUID, payload: QRCodeUpdateSchema):
         await sync_to_async(qrcode.save)(update_fields=['name'])
 
     # Add computed fields (dynamic attributes for serialization)
-    qrcode.image_url = QRCodeGenerator.get_file_url(qrcode.image_file)
+    qrcode.image_url = _image_url(qrcode)
     qrcode.redirect_url = qrcode.get_redirect_url()
 
     return qrcode

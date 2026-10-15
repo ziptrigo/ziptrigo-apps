@@ -106,7 +106,7 @@
 
       <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-md p-2 min-h-[96px] min-w-[96px] self-start">
         <img id="qrcode-preview-img"
-             src="{% if qrcode and qrcode.image_file %}/media/{{ qrcode.image_file }}{% else %}{% static 'qr_code/images/logo_128x128.png' %}{% endif %}"
+             src="{% if qrcode %}{% url 'qr_code:image' qrcode.id %}{% else %}{% static 'qr_code/images/logo_128x128.png' %}{% endif %}"
              alt="QR code preview"
              class="h-24 w-24 object-contain">
       </div>
