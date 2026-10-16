@@ -99,6 +99,11 @@
                            class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">
                             <i class="fas fa-clone mr-2"></i>Duplicate
                         </a>
+                        <a href="{% url 'qr_code:image' qr.id %}?download=1"
+                           download
+                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">
+                            <i class="fas fa-download mr-2"></i>Download
+                        </a>
                         <button type="button"
                                 class="qr-delete-btn w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"
                                 data-qr-id="{{ qr.id }}"
