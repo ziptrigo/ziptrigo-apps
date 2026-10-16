@@ -920,6 +920,15 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
 
 `apps/core/admin_site.py` owns `custom_admin_site` (mounted at `/admin/`) and the tools page (test
 email, masked environment). Every app registers its `ModelAdmin`s on it from its own `admin.py`.
+"Show Environment" masks (`display_env_value`) any variable whose name has a `_`-separated word
+like SECRET, PASSWORD, TOKEN or KEY (so `*_ACCESS_KEY_ID` too) or starts with `AWS_`/`GCP_`/`AZURE_`,
+except a few harmless names and duration-named ones (`*_TTL_HOURS`, `*_SECONDS`), showing at most
+the last 4 characters of a long value; a password inside any URL value (`DATABASE_URL`,
+`CACHE_URL`) is masked whatever the name (E2E run #152 found both shown in clear).
+`core/templates/admin/login.html` overrides jazzmin's login template to add the hidden `next`
+field Django's own has (without it a login from a bare `/admin/login/` went to
+`LOGIN_REDIRECT_URL`'s default `/accounts/profile/`, a 404) and keep the email after a failed
+login; keep it in step with jazzmin's when upgrading.
 The manual credit adjustment tool lives on `CreditTransactionAdmin` (`/admin/billing/credittransaction/adjust/`).
 The ledger is read-only in the admin (no add/change/delete, so no `delete_selected`; the same for
 `CreditAccountAdmin`), because the balance only changes through `apps.billing.services`. The tool
@@ -950,7 +959,10 @@ products -- issue #98) and `FileTransferSettingsAdmin`
 exists, never delete, changelist redirects to the change form; the URL name is derived from the
 model), and each loads its row with the model's own `.load()` classmethod
 (`apps.core.models.singleton.load_singleton`, which re-reads the row if a concurrent first use
-loses the insert race) rather than a fixture.
+loses the insert race) rather than a fixture. The free-text fields are checked in the model's
+`clean()` (which the admin form runs): `FileTransferSettings.anonymous_allowed_expiry_days` must be
+whole days >= 1 (it is `int()`-parsed on every anonymous send) and `ReceiptsSettings.allowed_types`
+only the supported content types.
 
 `AbuseReportAdmin` (`/admin/file_transfer/abusereport/`, issue #59) is a read-only report list --
 filter by status/reason/date, a link to the reported transfer -- with three bulk actions: "Dismiss",
@@ -1980,7 +1992,9 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     calendar period --, or Custom, which alone shows and enables the `date_from`/`date_to` inputs;
     `forms.filters.resolve_date_range` turns a preset into dates against `timezone.localdate()` on
     every request, so a "This month" link stays relative, and ignores the date inputs; dates without
-    a `date_range` -- older links, and the canonical URL of a custom range -- mean Custom), sortable
+    a `date_range` -- older links, and the canonical URL of a custom range -- mean Custom, while
+    "Any date" sends an explicit `date_range=any` that wins over them: picking it fires the list
+    request before Alpine disables the date inputs, so the old dates still arrive), sortable
     Receipt date (default newest first, undated on top) and Added columns, 25 per page, a
     "Vendors" link (with the number to vet) next to Trash and the vendor filter chip (see "Vendors").
     `forms.parse_filters` reads the query string *leniently* (a bad value is dropped) into

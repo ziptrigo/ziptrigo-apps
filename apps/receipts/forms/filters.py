@@ -33,7 +33,10 @@ TABS = (
 
 #: The receipt-date dropdown. A preset is resolved against today on every request, so a link to
 #: "This month" stays this month; `custom` uses `date_from`/`date_to`, which are otherwise ignored.
-DATE_RANGE_ANY = ''
+#: "Any date" has a value of its own: picking it fires the list request before Alpine disables the
+#: date inputs, so the dates still arrive, and only an explicit `any` can win over them (no
+#: `date_range` at all with dates is an old link, read as Custom).
+DATE_RANGE_ANY = 'any'
 DATE_RANGE_CUSTOM = 'custom'
 DATE_RANGES = (
     (DATE_RANGE_ANY, 'Any date'),
@@ -134,11 +137,12 @@ def parse_filters(request: HttpRequest) -> ParsedFilters:
     q = (data.get('q') or '').strip()
     category = data.get('category') or ''
     vendor = str(int(data['vendor'])) if data.get('vendor') else ''
-    date_range = data.get('date_range') or DATE_RANGE_ANY
+    date_range = data.get('date_range') or ''
     date_from = data.get('date_from')
     date_to = data.get('date_to')
-    if date_range == DATE_RANGE_ANY and (date_from or date_to):
-        date_range = DATE_RANGE_CUSTOM  # a link from before the dropdown existed
+    if not date_range:
+        # Dates without a range: a link from before the dropdown existed.
+        date_range = DATE_RANGE_CUSTOM if date_from or date_to else DATE_RANGE_ANY
     if date_range not in (DATE_RANGE_ANY, DATE_RANGE_CUSTOM):
         date_from, date_to = resolve_date_range(date_range, timezone.localdate())
     elif date_range == DATE_RANGE_ANY:

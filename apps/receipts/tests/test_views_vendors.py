@@ -469,6 +469,26 @@ class TestRename:
         mine.refresh_from_db()
         assert mine.name == 'Blue Bottle'
 
+    def test_use_a_different_name_does_not_inherit_the_merge_forms_disabled_elt(
+        self, web, funded_user
+    ):
+        """The "Use a different name" button sits inside the merge form, whose
+        `hx-disabled-elt="find button[type='submit']"` it would inherit; with no such button inside
+        itself htmx 2.0 throws and the click does nothing (E2E run #152, RCPT-18)."""
+        create_vendor(funded_user, 'Blue Bottle Coffee, Inc.')
+        mine = create_vendor(funded_user, 'Blue Bottle')
+
+        response = web.post(
+            url('vendor-rename', mine.pk),
+            {'name': 'Blue Bottle Coffee', 'next': url('vendors')},
+            **HX,
+        )
+
+        content = response.content.decode()
+        button = content[content.index(f'hx-get="{url("vendor-rename", mine.pk)}') :]
+        button = button[: button.index('>')]
+        assert 'hx-disabled-elt="unset"' in button
+
     def test_without_htmx_a_clash_is_a_flash_and_a_redirect(self, web, funded_user):
         create_vendor(funded_user, 'Blue Bottle Coffee, Inc.')
         mine = create_vendor(funded_user, 'Blue Bottle')
