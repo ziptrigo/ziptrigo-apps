@@ -17,15 +17,25 @@ code free of test switches:
 Needs the same `.env.local` as the other e2e tests (the real settings are imported).
 """
 
+import os
+
 from config.settings import *  # noqa: F403
-from config.settings import INSTALLED_APPS, PROJECT_ROOT
+from config.settings import ALLOWED_HOSTS, INSTALLED_APPS, PROJECT_ROOT
 
 DEBUG = True  # so runserver serves the apps' static files (no `collectstatic` needed)
+
+# `<anything>.localhost` resolves to the loopback address in browsers, and cookies are per host
+# name (not per port): `tests_e2e/ai/serve.py --host qr.localhost` gives a server its own cookies.
+ALLOWED_HOSTS = [*ALLOWED_HOSTS, '.localhost']
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': PROJECT_ROOT / 'db.e2e.sqlite3',
+        # `tests_e2e/ai/serve.py` (the AI-agent tests' server) uses its own file.
+        'NAME': os.environ.get('E2E_DB_NAME') or PROJECT_ROOT / 'db.e2e.sqlite3',
+        # runserver is threaded: parallel uploads write at once. Take the write lock when a
+        # transaction starts and wait for it, instead of failing with "database is locked".
+        'OPTIONS': {'transaction_mode': 'IMMEDIATE', 'timeout': 20},
     }
 }
 
