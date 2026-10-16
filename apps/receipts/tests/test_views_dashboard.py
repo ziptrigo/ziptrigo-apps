@@ -271,6 +271,11 @@ class TestFilters:
             ({'date_range': 'this_month', 'date_from': '2026-10-05'}, {'Delta', 'Staples'}),
             ({'date_range': 'custom', 'date_from': '2026-10-05'}, {'Staples'}),
             ({'date_range': 'custom', 'date_to': '2026-09-30'}, {'September', 'March', 'Old'}),
+            # "Any date" wins over dates left in the form by a custom range (E2E run #152).
+            (
+                {'date_range': 'any', 'date_from': '2026-10-05', 'date_to': '2026-10-06'},
+                {'Delta', 'Staples', 'September', 'March', 'Old'},
+            ),
         ],
     )
     def test_date_ranges(self, web, library, make, monkeypatch, params, expected):
@@ -300,6 +305,11 @@ class TestFilters:
             ),
             ({'date_range': 'custom'}, '/receipts/'),
             ({'date_range': '', 'date_from': '2026-10-05'}, '/receipts/?date_from=2026-10-05'),
+            # "Any date" picked after a custom range: the dates still arrive with it (E2E #152).
+            (
+                {'date_range': 'any', 'date_from': '2026-10-05', 'date_to': '2026-10-31'},
+                '/receipts/',
+            ),
             ({'date_range': 'bogus'}, '/receipts/'),
         ],
     )

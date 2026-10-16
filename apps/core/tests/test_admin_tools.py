@@ -3,6 +3,7 @@ from django.urls import reverse
 
 from apps.accounts.models import User
 from apps.accounts.tests.factories import UserFactory
+from apps.core.admin_site import is_sensitive_env_name, mask_secret, mask_url_password
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -90,3 +91,78 @@ def test_admin_dashboard_shows_tools_link(client, admin_user: User):
     content = response.content.decode()
     assert 'Admin Tools' in content
     assert reverse('custom_admin:admin_tools') in content
+
+
+@pytest.mark.parametrize(
+    'key',
+    [
+        'JWT_SECRET',
+        'SECRET_KEY',
+        'FILE_TRANSFER_AWS_ACCESS_KEY_ID',
+        'RECEIPTS_AWS_SECRET_ACCESS_KEY',
+        'OPENAI_API_KEY',
+        'GOOGLE_CLIENT_SECRET',
+        'TURNSTILE_SECRET_KEY',
+        'AWS_SESSION_TOKEN',
+        'SOME_PRIVATE_THING',
+    ],
+)
+def test_secret_names_are_sensitive(key: str):
+    assert is_sensitive_env_name(key)
+
+
+@pytest.mark.parametrize(
+    'key',
+    [
+        'AWS_REGION',
+        'AWS_SES_SENDER',
+        'EMAIL_CONFIRMATION_TOKEN_TTL_HOURS',
+        'PASSWORD_RESET_TOKEN_TTL_HOURS',
+        'JWT_EXP_DELTA_SECONDS',
+        'JWT_ALGORITHM',
+        'KEYBOARD_LAYOUT',
+        'BASE_URL',
+    ],
+)
+def test_harmless_names_are_not_sensitive(key: str):
+    assert not is_sensitive_env_name(key)
+
+
+def test_mask_secret_shows_at_most_the_last_four_characters_of_a_long_value():
+    assert mask_secret('short') == '********'
+    assert mask_secret('fifteen-chars!!') == '********'
+    assert mask_secret('0123456789abcdefWXYZ') == '********WXYZ'
+
+
+@pytest.mark.parametrize(
+    ('value', 'expected'),
+    [
+        ('postgres://app:s3cret@db:5432/app', 'postgres://app:********@db:5432/app'),
+        ('redis://:s3cret@cache:6379/0', 'redis://:********@cache:6379/0'),
+        ('redis://token-only@cache:6379/0', 'redis://********@cache:6379/0'),
+        # An unencoded `@` or `/` in the password over-masks instead of leaking its tail.
+        ('postgres://app:pa@ss/w@db/app', 'postgres://app:********@db/app'),
+        ('https://app.ziptrigo.com/go/', 'https://app.ziptrigo.com/go/'),
+        ('local', 'local'),
+    ],
+)
+def test_mask_url_password(value: str, expected: str):
+    assert mask_url_password(value) == expected
+
+
+def test_show_environment_masks_credentials_in_urls_and_access_key_ids(
+    client, admin_user: User, monkeypatch
+):
+    client.force_login(admin_user)
+    monkeypatch.setenv('DATABASE_URL', 'postgres://ziptrigo:db-password-123@db:5432/ziptrigo')
+    monkeypatch.setenv('FILE_TRANSFER_AWS_ACCESS_KEY_ID', 'AKIAEXAMPLEEXAMPLE12')
+    monkeypatch.setenv('PASSWORD_RESET_TOKEN_TTL_HOURS', '4')
+
+    response = client.post(reverse('custom_admin:admin_tools'), {'show_environment': '1'})
+
+    env = dict(response.context['environment_variables'] or [])
+    assert env['DATABASE_URL'] == 'postgres://ziptrigo:********@db:5432/ziptrigo'
+    assert env['FILE_TRANSFER_AWS_ACCESS_KEY_ID'] == '********LE12'
+    assert env['PASSWORD_RESET_TOKEN_TTL_HOURS'] == '4'
+    assert 'db-password-123' not in response.content.decode()
+    assert 'AKIAEXAMPLEEXAMPLE12' not in response.content.decode()

@@ -1,6 +1,6 @@
 from typing import ClassVar, cast
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 
 from apps.core.models.singleton import load_singleton
@@ -88,6 +88,18 @@ class FileTransferSettings(models.Model):
     def load(cls) -> 'FileTransferSettings':
         """Return the singleton row, creating it with defaults on first use."""
         return load_singleton(cls)
+
+    def clean(self) -> None:
+        # Free text in the admin, parsed with `int()` by `anonymous_allowed_expiry_days_list`
+        # on every anonymous send: an unparseable value would turn that flow into a 500.
+        values = [v.strip() for v in self.anonymous_allowed_expiry_days.split(',') if v.strip()]
+        if not values or not all(v.isascii() and v.isdigit() and int(v) >= 1 for v in values):
+            raise ValidationError(
+                {
+                    'anonymous_allowed_expiry_days': 'Enter whole numbers of days of at least 1, '
+                    'separated by commas (e.g. 1,5,15,30).'
+                }
+            )
 
     def anonymous_allowed_expiry_days_list(self) -> list[int]:
         return [

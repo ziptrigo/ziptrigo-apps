@@ -1,6 +1,6 @@
 from typing import ClassVar, cast
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -11,6 +11,7 @@ _MB = 1024**2
 #: Content types the sniffer (`apps.receipts.services.documents.sniff_content_type`) can produce for
 #: an attachment or an upload. HEIC and HEIF share `image/heic`.
 DEFAULT_ALLOWED_TYPES = 'application/pdf,image/jpeg,image/png,image/webp,image/heic'
+SUPPORTED_TYPES = frozenset(DEFAULT_ALLOWED_TYPES.split(','))
 
 
 class ReceiptsSettings(models.Model):
@@ -122,6 +123,22 @@ class ReceiptsSettings(models.Model):
     def load(cls) -> 'ReceiptsSettings':
         """Return the singleton row, creating it with defaults on first use."""
         return load_singleton(cls)
+
+    def clean(self) -> None:
+        # Free text in the admin: a typo (`image/jpg`) would silently refuse every such file.
+        types = self.allowed_types_list()
+        unknown = [value for value in types if value not in SUPPORTED_TYPES]
+        if unknown or not types:
+            raise ValidationError(
+                {
+                    'allowed_types': (
+                        f'Unsupported type(s): {", ".join(unknown)}. ' if unknown else ''
+                    )
+                    + 'Use a comma-separated list of: '
+                    + ', '.join(sorted(SUPPORTED_TYPES))
+                    + '.'
+                }
+            )
 
     def allowed_types_list(self) -> list[str]:
         return [value.strip().lower() for value in self.allowed_types.split(',') if value.strip()]

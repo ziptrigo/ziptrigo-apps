@@ -42,6 +42,18 @@ def test_dashboard_lists_only_own_transfers(client, draft_transfer):
     assert draft_transfer.display_name not in response.content.decode()
 
 
+def test_dashboard_row_copy_link_has_its_url_and_a_handler(client, draft_transfer):
+    """The row's "Copy link" button carries the download URL, and the page binds a (delegated)
+    click handler for it: it used to render with nothing listening."""
+    transfer = _active(draft_transfer)
+    client.force_login(transfer.owner)
+
+    content = client.get(reverse('file_transfer:dashboard')).content.decode()
+
+    assert f'data-copy-url="{transfer.absolute_download_url}"' in content
+    assert "closest('.copy-link-btn')" in content
+
+
 def test_dashboard_offers_to_resume_a_draft_with_files(client, draft_transfer, fake_storage):
     """A draft is never listed as a transfer (`_UNLISTED_STATUSES`), so without this banner an
     unfinished upload started from the nav (no `?resume=` in the URL) would be stranded until

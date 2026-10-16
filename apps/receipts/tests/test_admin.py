@@ -1,4 +1,5 @@
 import pytest
+from django.core.exceptions import ValidationError
 from django.urls import reverse
 
 from ..models import InboundMessage, InboundMessageStatus, ReceiptsSettings, ReceiptStatus
@@ -44,6 +45,42 @@ class TestSettings:
         row.refresh_from_db()
         assert (row.price_per_file, row.trash_days, row.max_ai_attempts) == (3, 10, 4)
         assert row.max_inbound_rows_per_day == 50
+
+    def test_an_unsupported_type_is_refused(self, client, admin_user):
+        client.force_login(admin_user)
+        row = ReceiptsSettings.load()
+
+        response = client.post(
+            url('receipts_receiptssettings_change', row.pk),
+            {
+                'price_per_file': 1,
+                'max_file_bytes': 1000,
+                'allowed_types': 'application/pdf, image/jpg',
+                'min_inline_image_px': 100,
+                'max_files_per_user_per_day': 7,
+                'max_inbound_rows_per_day': 50,
+                'trash_days': 10,
+                'max_pdf_pages_to_ai': 2,
+                'max_ai_attempts': 4,
+            },
+        )
+
+        assert response.status_code == 200
+        assert 'Unsupported type(s): image/jpg.' in response.content.decode()
+        row.refresh_from_db()
+        assert row.allowed_types == 'application/pdf,image/jpeg,image/png,image/webp,image/heic'
+
+    @pytest.mark.parametrize('value', ['', ' , ', 'text/html', 'image/png,application/zip'])
+    def test_clean_refuses_unsupported_or_empty_types(self, value):
+        row = ReceiptsSettings(allowed_types=value)
+
+        with pytest.raises(ValidationError) as excinfo:
+            row.clean()
+
+        assert 'allowed_types' in excinfo.value.message_dict
+
+    def test_clean_accepts_supported_types_in_any_case_and_spacing(self):
+        ReceiptsSettings(allowed_types=' Application/PDF , image/heic ').clean()
 
     def test_forbidden_for_non_superuser_staff(self, client, regular_user):
         regular_user.is_staff = True

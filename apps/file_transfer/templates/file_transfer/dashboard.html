@@ -40,4 +40,37 @@
         {% include 'file_transfer/partials/transfer_list.html' %}
     </div>
 </div>
+<script>
+// Each row's "Copy link" button (`partials/transfer_row.html`). Delegated from the document, so
+// rows htmx swaps in (tab switch, actions) work too. `navigator.clipboard` only exists on a secure
+// origin; elsewhere fall back to copying from a temporary text area.
+document.addEventListener('click', function (event) {
+    const button = event.target.closest('.copy-link-btn');
+    if (!button) return;
+    const url = button.dataset.copyUrl;
+    const copied = function () {
+        const label = button.querySelector('.copy-link-label');
+        label.textContent = 'Copied';
+        clearTimeout(button._copyTimer);
+        button._copyTimer = setTimeout(function () { label.textContent = 'Copy link'; }, 2000);
+    };
+    const fallback = function () {
+        const area = document.createElement('textarea');
+        area.value = url;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        const ok = document.execCommand('copy');
+        area.remove();
+        if (ok) copied(); else window.prompt('Copy this link:', url);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(copied, fallback);
+    } else {
+        fallback();
+    }
+});
+</script>
 {% endblock %}

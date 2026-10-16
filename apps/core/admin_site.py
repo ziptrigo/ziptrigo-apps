@@ -7,7 +7,7 @@ only owns the site itself and the cross-cutting admin tools page.
 from __future__ import annotations
 
 import os
-from typing import Any
+import re
 
 from django import forms
 from django.contrib import admin, messages
@@ -18,6 +18,57 @@ from django.urls import path
 from django.utils import timezone
 
 from .services.email import send_email
+
+# "Show Environment" on the tools page. A name is sensitive if any of its `_`-separated words is
+# one of these (so `FILE_TRANSFER_AWS_ACCESS_KEY_ID` and `JWT_SECRET` are, `KEYBOARD_LAYOUT` is
+# not), unless it is a known harmless setting or ends in a duration/count word (the TTLs and
+# limits named after what they bound, like `PASSWORD_RESET_TOKEN_TTL_HOURS`).
+SENSITIVE_NAME_WORDS = frozenset(
+    {'SECRET', 'PASSWORD', 'PASSWD', 'TOKEN', 'KEY', 'CREDENTIAL', 'CREDENTIALS', 'PRIVATE'}
+)
+HARMLESS_NAME_SUFFIXES = ('_SECONDS', '_MINUTES', '_HOURS', '_DAYS', '_TTL', '_ALGORITHM')
+HARMLESS_NAMES = frozenset({'AWS_REGION', 'AWS_SES_SENDER', 'AWS_S3_URI'})
+# `scheme://<userinfo>@rest`, the userinfo running to the *last* `@`: an unencoded `@` or `/` in a
+# password then over-masks rather than leaking part of it.
+_URL_WITH_USERINFO = re.compile(r'^([a-z][a-z0-9+.-]*://)(.*)@(.*)$', re.IGNORECASE | re.DOTALL)
+
+
+def is_sensitive_env_name(key: str) -> bool:
+    name = key.upper()
+    if name in HARMLESS_NAMES or name.endswith(HARMLESS_NAME_SUFFIXES):
+        return False
+    if name.startswith(('AWS_', 'GCP_', 'AZURE_')):
+        return True
+    return any(word in SENSITIVE_NAME_WORDS for word in name.split('_'))
+
+
+def mask_secret(value: str) -> str:
+    """Hide a secret, keeping at most its last 4 characters (only for long values) so two
+    deployments' values can still be told apart. The mask has a fixed length, hiding the size."""
+    if len(value) < 16:
+        return '********'
+    return f'********{value[-4:]}'
+
+
+def mask_url_password(value: str) -> str:
+    """`scheme://user:password@host/...` with the password masked (a userinfo without a user name,
+    like `redis://token@host`, is masked whole); anything else unchanged."""
+    match = _URL_WITH_USERINFO.match(value)
+    if not match:
+        return value
+    scheme, userinfo, rest = match.groups()
+    user, colon, _ = userinfo.partition(':')
+    masked = f'{user}:********' if colon else '********'
+    return f'{scheme}{masked}@{rest}'
+
+
+def display_env_value(key: str, value: str) -> str:
+    """What the tools page shows for one environment variable: masked when the name looks like a
+    secret, and with any password embedded in a URL (`DATABASE_URL`, `CACHE_URL`) masked whatever
+    the name."""
+    if is_sensitive_env_name(key):
+        return mask_secret(value)
+    return mask_url_password(value)
 
 
 class AuthenticatedHttpRequest(HttpRequest):
@@ -119,36 +170,9 @@ class CustomAdminSite(admin.AdminSite):
             try:
                 raw_env = sorted(os.environ.items(), key=lambda it: it[0].lower())
 
-                excluded_keys = {'DJANGO_SECRET_KEY'}
-                white_listed_keys = {'AWS_REGION', 'AWS_SES_SENDER', 'AWS_S3_URI'}
-
-                def is_sensitive(key: str) -> bool:
-                    k = key.upper()
-                    if k in white_listed_keys:
-                        return False
-                    if any(flag in k for flag in ['SECRET', 'PASSWORD', 'TOKEN']):
-                        return True
-                    if k.endswith('_KEY'):
-                        return True
-                    if k.startswith(('AWS_', 'GCP_', 'AZURE_')):
-                        return True
-                    return False
-
-                def mask(value: Any) -> str:
-                    text = str(value)
-                    if len(text) <= 4:
-                        return '*' * len(text)
-                    segment = max(len(text) // 5, 2)
-                    hidden_len = max(len(text) - (segment * 2), 0)
-                    hidden = '*' * hidden_len
-                    return f'{text[:segment]}{hidden}{text[-segment:]}'
-
                 environment_variables = []
                 for key, value in raw_env:
-                    if key in excluded_keys:
-                        continue
-                    display_value = mask(value) if is_sensitive(key) else value
-                    environment_variables.append((key, display_value))
+                    environment_variables.append((key, display_env_value(key, value)))
                 messages.success(request, 'Environment variables loaded.')
             except Exception as exc:  # pragma: no cover
                 messages.error(request, f'Failed to load environment variables: {exc}')
