@@ -5,13 +5,17 @@ loaded yet when `INSTALLED_APPS` is being read."""
 
 import base64
 import hashlib
+from urllib.parse import quote
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.csrf import csrf_exempt
 
 from apps.receipts.services import documents, storage
 from apps.receipts.tests.fakes import FakeReceiptsStorage
+
+from .site_fakes import bucket_cors
 
 
 class E2EStorage(FakeReceiptsStorage):
@@ -26,10 +30,13 @@ class E2EStorage(FakeReceiptsStorage):
 
     def presigned_get_url(self, key: str, filename: str, *args, **kwargs) -> str:
         super().presigned_get_url(key, filename, *args, **kwargs)
-        return self._url(key, f'?disposition={kwargs.get("disposition", "attachment")}')
+        disposition = kwargs.get('disposition', 'attachment')
+        return self._url(key, f'?disposition={disposition}&filename={quote(filename or "")}')
 
 
 @csrf_exempt
+@bucket_cors
+@xframe_options_sameorigin  # the receipt page previews a PDF in an iframe, like S3 allows
 def fake_bucket(request: HttpRequest, key: str) -> HttpResponse:
     """PUT stores the body under `key` after checking the checksum header the way S3 would; GET
     returns it (`disposition=attachment` downloads, anything else shows inline)."""
@@ -50,6 +57,9 @@ def fake_bucket(request: HttpRequest, key: str) -> HttpResponse:
         )
         response = HttpResponse(data, content_type=content_type)
         if request.GET.get('disposition') == 'attachment':
-            response['Content-Disposition'] = 'attachment'
+            filename = request.GET.get('filename')
+            response['Content-Disposition'] = (
+                f'attachment; filename="{filename}"' if filename else 'attachment'
+            )
         return response
     return HttpResponse(status=405)

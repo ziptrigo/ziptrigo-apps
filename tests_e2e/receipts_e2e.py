@@ -9,14 +9,15 @@ class E2EConfig(AppConfig):
 
     def ready(self) -> None:
         from apps.file_transfer.services import storage as file_transfer_storage
-        from apps.file_transfer.tests.fakes import FakeS3Storage
         from apps.receipts.services import ai, storage
         from apps.receipts.tests.fakes import FakeAIClient
 
         from .receipts_fakes import E2EStorage
+        from .site_fakes import FileTransferE2EStorage, install_mailbox
 
         storage._storage = E2EStorage()
         ai._client = FakeAIClient()
-        # File transfer's send page talks to S3 when a file is added (a multipart upload); the
-        # drop zone test only needs that call to succeed, so it gets the unit tests' in-memory fake.
-        file_transfer_storage._storage = FakeS3Storage()
+        # File transfer's send page talks to S3 when a file is added (a multipart upload): an
+        # in-memory bucket whose presigned URLs point back at this server (`site_fakes`).
+        file_transfer_storage._storage = FileTransferE2EStorage()
+        install_mailbox()

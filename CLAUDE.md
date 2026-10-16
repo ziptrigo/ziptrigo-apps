@@ -28,7 +28,8 @@ apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted 
                       JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts").
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts.
                       Via `inv`.
-tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`).
+tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
+                      test plans run by an AI agent driving a browser, one per area (see its README).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
 pyproject.toml        Deps, ruff/ty/pytest/import-linter config, `inv` module registry.
 .github/workflows/    CI (`ci.yml`): `inv lint all --check` then `inv test unit` on every push/PR.
@@ -2060,9 +2061,15 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     the receipts storage and AI for the unit tests' fakes, an extra URL (`/__e2e__/s3/<key>`) acting
     as the bucket the fake presigned URLs point at (it checks `x-amz-checksum-sha256` like S3),
     inline tasks, and its own `db.e2e.sqlite3` -- no test switch in production code. The same
-    server also swaps in file transfer's in-memory `FakeS3Storage`, for `tests_e2e/test_drop_zone.py`
-    (a file and a folder dropped on the shared drop zone of the Receipts upload and the file transfer
-    send pages). Run it with `inv test e2e` (needs `.env.local`).
+    server also swaps in an in-memory file transfer bucket (`tests_e2e/site_fakes.py`: `FakeS3Storage`
+    with part and download URLs pointing back at `/__e2e__/ft-s3/<key>`, so a real browser send and
+    download work), for `tests_e2e/test_drop_zone.py` (a file and a folder dropped on the shared drop
+    zone of the Receipts upload and the file transfer send pages), keeps every email the site sends
+    at `/__e2e__/mail/`, answers CORS on both fake buckets, and opens SQLite with
+    `transaction_mode: IMMEDIATE` (threaded runserver, parallel uploads). Run it with `inv test e2e`
+    (needs `.env.local`). The AI-agent plans in `tests_e2e/ai/` use the same settings through
+    `tests_e2e/ai/serve.py` (own `db.e2e-ai*.sqlite3`, seeded accounts, `--port`/`--host
+    <name>.localhost` to run several at once).
 - **API and CLI** (phase 4). The endpoints, status codes (400/402/404/429) and shared rate-limit
   budgets are in "API" above. Two service additions came with it: `services.forwarding`
   (`forwarding_confirmation(user)`, the Gmail confirmation code/link of the last 7 days, moved out of
