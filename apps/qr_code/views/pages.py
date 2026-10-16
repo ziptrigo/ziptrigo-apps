@@ -2,6 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AnonymousUser
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
+from django.utils.text import slugify
 
 from apps.accounts.http import MaybeAuthenticatedHttpRequest
 
@@ -106,7 +107,11 @@ def qrcode_duplicate(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> Http
 
 @login_required
 def qrcode_image(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> HttpResponse:
-    """Serve one of the user's QR codes as a PNG, rendered from its saved settings."""
+    """Serve one of the user's QR codes as a PNG, rendered from its saved settings.
+
+    With `?download=1` the response is an attachment named after the code, so the browser saves it
+    instead of showing it (the dashboard's "Download" menu item).
+    """
     try:
         qrcode = QRCode.objects.get(id=qr_id, created_by=request.user, deleted_at__isnull=True)
     except QRCode.DoesNotExist:
@@ -114,4 +119,8 @@ def qrcode_image(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> HttpResp
 
     response = HttpResponse(QRCodeGenerator.render_png(qrcode), content_type='image/png')
     response['Cache-Control'] = 'private, max-age=300'
+    if request.GET.get('download'):
+        response['Content-Disposition'] = (
+            f'attachment; filename="{slugify(qrcode.name) or "qr-code"}.png"'
+        )
     return response

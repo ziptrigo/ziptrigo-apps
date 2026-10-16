@@ -257,6 +257,39 @@ class TestImage:
         assert response['Content-Type'] == 'image/png'
         assert response.content.startswith(b'\x89PNG')
 
+    def test_dashboard_menu_links_to_the_download(self, logged_in_client, qr_code):
+        response = logged_in_client.get(reverse('qr_code:dashboard'))
+
+        url = reverse('qr_code:image', args=[qr_code.id])
+        assert f'href="{url}?download=1"' in response.content.decode()
+
+    def test_download_is_a_named_attachment(self, logged_in_client, qr_code):
+        qr_code.name = 'Test QR'
+        qr_code.save(update_fields=['name'])
+
+        response = logged_in_client.get(
+            reverse('qr_code:image', args=[qr_code.id]), {'download': '1'}
+        )
+
+        assert response.status_code == 200
+        assert response['Content-Type'] == 'image/png'
+        assert response['Content-Disposition'] == 'attachment; filename="test-qr.png"'
+
+    def test_download_without_a_usable_name_falls_back(self, logged_in_client, qr_code):
+        qr_code.name = '!!!'
+        qr_code.save(update_fields=['name'])
+
+        response = logged_in_client.get(
+            reverse('qr_code:image', args=[qr_code.id]), {'download': '1'}
+        )
+
+        assert response['Content-Disposition'] == 'attachment; filename="qr-code.png"'
+
+    def test_image_without_download_is_not_an_attachment(self, logged_in_client, qr_code):
+        response = logged_in_client.get(reverse('qr_code:image', args=[qr_code.id]))
+
+        assert 'Content-Disposition' not in response
+
     def test_other_users_and_deleted_qrcodes_are_not_found(self, client, logged_in_client, qr_code):
         url = reverse('qr_code:image', args=[qr_code.id])
         qr_code.soft_delete()
