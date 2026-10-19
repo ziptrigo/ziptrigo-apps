@@ -25,11 +25,11 @@ def test_get_renders_form(client):
     assert f'hx-post="{reverse("accounts:login")}"' in response.content.decode()
 
 
-def test_login_starts_session_and_redirects_to_account(client, user):
+def test_login_starts_session_and_redirects_home(client, user):
     response = _login(client)
 
     assert response.status_code == 200
-    assert response['HX-Redirect'] == reverse('accounts:account')
+    assert response['HX-Redirect'] == reverse('core:home')
     assert client.session[SESSION_KEY] == str(user.pk)
 
 
@@ -37,7 +37,7 @@ def test_login_without_htmx_redirects(client, user):
     response = client.post(reverse('accounts:login'), {'email': user.email, 'password': PASSWORD})
 
     assert response.status_code == 302
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
 
 
 def test_login_follows_safe_next(client, user):
@@ -49,7 +49,7 @@ def test_login_follows_safe_next(client, user):
 def test_login_ignores_offsite_next(client, user):
     response = _login(client, next='https://evil.example/steal')
 
-    assert response['HX-Redirect'] == reverse('accounts:account')
+    assert response['HX-Redirect'] == reverse('core:home')
 
 
 @pytest.mark.parametrize(

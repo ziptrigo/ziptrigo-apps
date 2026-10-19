@@ -113,7 +113,7 @@ class TestLoginRateLimit:
             REMOTE_ADDR='10.0.0.2',
         )
         assert victim_response.status_code == 200
-        assert victim_response['HX-Redirect'] == reverse('accounts:account')
+        assert victim_response['HX-Redirect'] == reverse('core:home')
 
     def test_login_account_ceiling_ignores_successful_logins(self, client, user, settings):
         """A successful login must never add to the `LOGIN_ACCOUNT` ceiling -- only a failed
@@ -136,7 +136,7 @@ class TestLoginRateLimit:
         response = self._login(client)
 
         assert response.status_code == 200
-        assert response['HX-Redirect'] == reverse('accounts:account')
+        assert response['HX-Redirect'] == reverse('core:home')
 
     def test_api_login_429_after_shared_ip_budget(self, client, user, settings):
         """The web view and the API endpoint share one per-IP counter (`LOGIN_IP`) -- exhausting

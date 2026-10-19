@@ -258,7 +258,7 @@ def test_callback_creates_a_new_user_and_signs_them_in(client):
     response = _callback(client)
 
     assert response.status_code == 302
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     user = User.objects.get(email='new.person@outlook.com')
     assert user.microsoft_id == PERSONAL_ID
     assert user.google_sub is None
@@ -366,7 +366,7 @@ def test_callback_does_not_create_a_personal_account_on_another_domain(client):
 def test_callback_links_a_work_account_when_the_tenant_vouches_for_the_domain(client, user, flag):
     response = _callback(client, _work_claims(email=user.email, xms_edov=flag))
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     user.refresh_from_db()
     assert user.microsoft_id == WORK_ID
     assert user.check_password('testpass123')
@@ -436,7 +436,7 @@ def test_callback_matches_an_existing_user_by_tenant_and_object_id(client, user)
 
     response = _callback(client, _claims(email='different@outlook.com', name='Renamed'))
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert User.objects.count() == 1
     user.refresh_from_db()
     # The address and name on the token change nothing on the account.
@@ -455,7 +455,7 @@ def test_a_linked_user_signs_in_without_an_email_claim(client, user):
 
     response = _callback(client, claims)
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert _signed_in_as(client, user)
 
 
@@ -466,7 +466,7 @@ def test_a_linked_user_signs_in_after_their_email_was_unconfirmed(client, user):
 
     response = _callback(client, _claims())
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert _signed_in_as(client, user)
 
 
@@ -545,7 +545,7 @@ def test_a_new_app_registration_keeps_linked_users_signed_in(client, user):
 
     response = _callback(client, _claims(sub='a-sub-from-the-new-registration'))
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert _signed_in_as(client, user)
     assert User.objects.count() == 1
 
@@ -558,7 +558,7 @@ def test_the_same_object_id_in_another_tenant_is_another_account(client, user):
 
     response = _callback(client, _work_claims())
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     other = User.objects.get(email='new.person@contoso.com')
     assert other.pk != user.pk
     assert other.microsoft_id == WORK_ID
@@ -789,7 +789,7 @@ def test_an_offsite_next_is_ignored(client):
         client.get(reverse('microsoft_auth:login'), {'next': 'https://evil.example/steal'})
 
     assert 'microsoft_oauth_next' not in client.session
-    assert _callback(client)['Location'] == reverse('accounts:account')
+    assert _callback(client)['Location'] == reverse('core:home')
 
 
 def test_next_is_dropped_when_the_attempt_fails(client):
@@ -847,7 +847,7 @@ def test_a_real_id_token_from_the_common_authority_is_accepted(client, signing_k
     carries; Authlib would reject every sign-in unless the issuer check is ours."""
     response, fetch, state = _round_trip(client, signing_key)
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert User.objects.filter(microsoft_id=PERSONAL_ID).exists()
     assert fetch.call_args.kwargs['redirect_uri'] == REDIRECT_URI
     # State is single-use: replaying the callback is refused.

@@ -88,7 +88,7 @@ browser in this run would be locked out of sending.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | In Session B go to `/account/login/` and log in as `qa.user@example.com` / `QaE2e-Passw0rd!`. | Logged in to the site (lands on the account page). |
+| 1 | In Session B go to `/account/login/` and log in as `qa.user@example.com` / `QaE2e-Passw0rd!`. | Logged in to the site (lands on the home page). |
 | 2 | Go to `/admin/`. | Redirected to `/admin/login/?next=/admin/`, which shows "You are authenticated as qa.user@example.com, but are not authorized to access this page. Would you like to login to a different account?" above the login form. |
 | 3 | Go to `/admin/tools/` and `/admin/billing/credittransaction/adjust/`. | Both redirect to the admin login page with the same message; neither page's content is shown. |
 | 4 | Go to `/account/`. | Still logged in to the site as `qa.user` (being refused by the admin did not log you out). |

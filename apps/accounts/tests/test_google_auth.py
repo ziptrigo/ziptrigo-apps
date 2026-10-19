@@ -212,7 +212,7 @@ def test_callback_creates_a_new_user_and_signs_them_in(client):
     response = _callback(client)
 
     assert response.status_code == 302
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     user = User.objects.get(email='new.person@example.com')
     assert user.google_sub == SUB
     assert user.name == 'New Person'
@@ -249,7 +249,7 @@ def test_callback_links_an_existing_user_by_verified_email(client, user):
 
     response = _callback(client, _claims(email='TestUser@Gmail.com'))
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert User.objects.count() == 1
     user.refresh_from_db()
     assert user.google_sub == SUB
@@ -273,7 +273,7 @@ def test_callback_links_a_confirmed_account_on_a_google_hosted_domain(client, us
 def test_callback_links_a_confirmed_account_on_a_workspace_domain_with_hd(client, user):
     response = _callback(client, _claims(email=user.email, hd='example.com'))
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     user.refresh_from_db()
     assert user.google_sub == SUB
     assert user.check_password('testpass123')
@@ -302,7 +302,7 @@ def test_callback_refuses_to_link_a_confirmed_account_on_another_domain_without_
 def test_callback_still_creates_a_new_account_on_any_verified_domain(client):
     response = _callback(client, _claims(email='new.person@some-other-domain.org'))
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     created = User.objects.get(email='new.person@some-other-domain.org')
     assert created.google_sub == SUB
     assert created.email_confirmed
@@ -379,7 +379,7 @@ def test_callback_matches_an_existing_user_by_sub(client, user):
     # The Google account's address has changed since it was linked.
     response = _callback(client, _claims(email='changed.address@example.com'))
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert User.objects.count() == 1
     user.refresh_from_db()
     assert user.email == 'testuser@example.com'
@@ -577,7 +577,7 @@ def test_an_offsite_next_is_ignored(client):
         client.get(reverse('google_auth:login'), {'next': 'https://evil.example/steal'})
 
     assert 'google_oauth_next' not in client.session
-    assert _callback(client)['Location'] == reverse('accounts:account')
+    assert _callback(client)['Location'] == reverse('core:home')
 
 
 def test_next_is_dropped_when_the_attempt_fails(client):
@@ -607,7 +607,7 @@ def test_full_round_trip_validates_state_and_nonce(client):
     ):
         response = client.get(reverse('google_auth:callback'), {'code': 'abc', 'state': state})
 
-    assert response['Location'] == reverse('accounts:account')
+    assert response['Location'] == reverse('core:home')
     assert User.objects.filter(google_sub=SUB).exists()
     # The nonce Google was given is the one the ID token is checked against, and the code is
     # exchanged against the same redirect URI.
