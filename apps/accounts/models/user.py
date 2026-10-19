@@ -134,11 +134,18 @@ class User(AbstractBaseUser, PermissionsMixin):
         self.save(update_fields=['status', 'inactive_at', 'inactive_reason'])
 
     @property
-    def social_sign_in_provider(self) -> str:
-        """The provider an account without a password signed in with, for the note the account
-        page shows instead of the change-password form: Microsoft when the account is linked only
-        to Microsoft, Google otherwise. One place, so every view that renders the page agrees."""
-        return 'Microsoft' if self.microsoft_id and not self.google_sub else 'Google'
+    def social_sign_in_providers(self) -> str:
+        """The provider(s) an account without a password signs in with, named for the note the
+        account page shows instead of the change-password form: `Google`, `Microsoft`, or `Google
+        and Microsoft` when both are linked. An account linked to neither (an unusable password
+        set some other way) is shown as `Google`, the first one offered. One place, so every view
+        that renders the page agrees."""
+        providers = []
+        if self.google_sub:
+            providers.append('Google')
+        if self.microsoft_id:
+            providers.append('Microsoft')
+        return ' and '.join(providers) or 'Google'
 
     def __str__(self) -> str:
         return self.email

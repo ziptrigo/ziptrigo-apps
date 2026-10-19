@@ -106,20 +106,29 @@ def test_account_page_names_microsoft_for_a_microsoft_created_account(client, us
 
 
 @pytest.mark.parametrize(
-    ('sub_field', 'provider'), [('microsoft_id', 'Microsoft'), ('google_sub', 'Google')]
+    ('linked', 'provider'),
+    [
+        ({'microsoft_id': 'tid:oid'}, 'Microsoft'),
+        ({'google_sub': 'some-sub'}, 'Google'),
+        ({'google_sub': 'some-sub', 'microsoft_id': 'tid:oid'}, 'Google and Microsoft'),
+        ({}, 'Google'),
+    ],
 )
 def test_invalid_profile_post_without_htmx_still_names_the_right_provider(
-    client, user, sub_field, provider
+    client, user, linked, provider
 ):
     """The non-htmx 422 re-renders the whole account page from the profile view, which must say
-    the same thing the account page itself does."""
-    setattr(user, sub_field, 'some-identity')
+    the same thing the account page itself does: the provider(s) the account is linked to."""
+    for field, value in linked.items():
+        setattr(user, field, value)
     user.set_unusable_password()
     user.save()
     client.force_login(user)
 
+    page = client.get(reverse('accounts:account')).content.decode()
     response = client.post(reverse('accounts:profile-update'), {'name': 'x' * 300})
 
+    note = f"You signed in with {provider}, so this account doesn't have a password."
+    assert note in page
     assert response.status_code == 422
-    content = response.content.decode()
-    assert f"You signed in with {provider}, so this account doesn't have a password." in content
+    assert note in response.content.decode()
