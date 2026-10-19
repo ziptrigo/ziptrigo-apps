@@ -228,7 +228,9 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
 
 - **Django sessions** for the web UI: every page and every HTMX form view is `@login_required`
   (`LOGIN_URL='accounts:login'`). The login page is a session form view
-  (`apps/accounts/views/login.py`, CSRF-protected, honours a same-site `next`); logout is
+  (`apps/accounts/views/login.py`, CSRF-protected, honours a same-site `next`; without one every
+  sign-in -- password, Google, Microsoft -- lands on the home page, see
+  `redirects.redirect_target`); logout is
   POST-only. The browser never holds a JWT. `accounts.backends.EmailBackend` is plain
   `ModelBackend` (no overrides; the class stays because sessions and `google_oauth.LOGIN_BACKEND`
   name its path): it hashes once for an unknown email, so login timing doesn't reveal accounts,

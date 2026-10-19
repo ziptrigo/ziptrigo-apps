@@ -93,9 +93,9 @@ parameter, and signing in returns them to the product.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/account/login/` (no query string) and sign in as `qa.user@example.com`. | You land on `/account/` (title and heading **Account Settings**). |
-| 2 | Log out. Go to `/account/login/?next=https://evil.example.com/` and sign in as `qa.user@example.com`. | You land on `/account/`, **not** on `evil.example.com` (the browser never leaves `localhost:8765`). |
-| 3 | Log out. Go to `/account/login/?next=//evil.example.com/qr/` and sign in. | You land on `/account/`, still on `localhost:8765`. |
+| 1 | Go to `/account/login/` (no query string) and sign in as `qa.user@example.com`. | You land on `/`, the landing page (**Welcome to ZipTrigo**, as in CORE-01). The header shows the person icon, not **Login**. |
+| 2 | Log out. Go to `/account/login/?next=https://evil.example.com/` and sign in as `qa.user@example.com`. | You land on `/`, **not** on `evil.example.com` (the browser never leaves `localhost:8765`). |
+| 3 | Log out. Go to `/account/login/?next=//evil.example.com/qr/` and sign in. | You land on `/`, still on `localhost:8765`. |
 | 4 | Log out. | Back on `/`. |
 
 ### CORE-06 Logged-in header and account menu

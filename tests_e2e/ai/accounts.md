@@ -193,7 +193,7 @@ a made-up token lands on the expired page with a resend form.
 
 ### ACC-12 Sign in after confirmation
 
-**Purpose:** a confirmed account signs in and lands on the account page.
+**Purpose:** a confirmed account signs in and lands on the home page.
 **Preconditions:** ACC-10.
 
 | # | Action | Expected result |
@@ -257,7 +257,7 @@ a made-up token lands on the expired page with a resend form.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Sign in with `qa.user@EXAMPLE.COM` and SEED. | Signed in; lands on `/account/`; the Email field on the page shows `qa.user@example.com`. |
+| 1 | Sign in with `qa.user@EXAMPLE.COM` and SEED. | Signed in; lands on `/` (the landing page). Opening `/account/` shows the Email field as `qa.user@example.com`. |
 | 2 | Sign out. Sign in with `QA.User@example.com` and SEED. | `Invalid credentials` (the part before `@` is matched exactly, by design). |
 | 3 | Sign in with `qa.acc.<run>.main@Example.Com` and P1. | Signed in as MAIN. Then sign out. |
 
@@ -360,7 +360,7 @@ equal to the value given.
 |---|---|---|
 | 1 | In Context B, reload `/account/`. | Redirected to `/account/login/?next=/account/` (that session was signed out). |
 | 2 | In Context B, sign in with MAIN / P1. | `Invalid credentials`. |
-| 3 | In Context B, sign in with MAIN / P2. | Signed in, lands on `/account/`. Leave Context B signed in for ACC-30. |
+| 3 | In Context B, sign in with MAIN / P2. | Signed in, lands on `/`. Leave Context B signed in for ACC-30. |
 | 4 | In Context A, sign out. | Header shows `Login`. |
 
 ### ACC-26 Forgot-password page
@@ -418,7 +418,7 @@ still finds the account.
 |---|---|---|
 | 1 | New P3, Confirm P3, click `Save new password`. | Redirected to `/account/login/` with a green banner `Your password has been reset. You can now log in.` |
 | 2 | Sign in with MAIN / P2. | `Invalid credentials`. |
-| 3 | Sign in with MAIN / P3. | Signed in, lands on `/account/`. Then sign out. |
+| 3 | Sign in with MAIN / P3. | Signed in, lands on `/`. Then sign out. |
 | 4 | In Context B, reload `/account/`. | Redirected to `/account/login/?next=/account/` (the reset ended that session). Close Context B. |
 
 ### ACC-31 A reset link works only once
@@ -495,7 +495,7 @@ link instead.
 |---|---|---|
 | 1 | Open FINISH-1. | The `Set a new password` page with `New password` / `Confirm password` and `Save new password`. Note (copy observation): the page and the success banner speak of a reset, not of finishing a setup. |
 | 2 | Enter P-FINISH in both, save. | `/account/login/` with the banner `Your password has been reset. You can now log in.` |
-| 3 | Sign in with `qa.unconfirmed@example.com` / P-FINISH. | Signed in **without** the "please confirm" message (the reset confirmed the email); lands on `/account/`; Name shows `QA Unconfirmed`; Email `qa.unconfirmed@example.com`. |
+| 3 | Sign in with `qa.unconfirmed@example.com` / P-FINISH. | Signed in **without** the "please confirm" message (the reset confirmed the email); lands on `/`. On `/account/`, Name shows `QA Unconfirmed` and Email `qa.unconfirmed@example.com`. |
 | 4 | Open FINISH-1 again. | `Link Expired` (single use). |
 | 5 | Sign out. | Header shows `Login`. |
 
