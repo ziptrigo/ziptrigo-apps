@@ -1,0 +1,18 @@
+{% comment %}
+The "or" divider and the enabled social sign-in buttons (Google issue #91, Microsoft issue #156),
+shown by the login and register pages only when at least one is configured. `verb` is "Sign in" or
+"Sign up"; `next` (login only) is carried through by each button.
+{% endcomment %}
+<div class="my-4 flex items-center gap-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400" role="separator">
+  <span class="h-px flex-1 bg-gray-300 dark:bg-gray-600"></span>
+  <span>or</span>
+  <span class="h-px flex-1 bg-gray-300 dark:bg-gray-600"></span>
+</div>
+<div class="mb-8 flex flex-col gap-3">
+  {% if google_enabled %}
+    {% include 'accounts/partials/google_button.html' %}
+  {% endif %}
+  {% if microsoft_enabled %}
+    {% include 'accounts/partials/microsoft_button.html' %}
+  {% endif %}
+</div>

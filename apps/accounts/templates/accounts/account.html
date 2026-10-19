@@ -42,14 +42,14 @@
     </section>
     {% else %}
     {% comment %}
-    No usable password: the account was created with "Sign in with Google" (issue #91), so there's
+    No usable password: the account was created with "Sign in with Google" or "Sign in with Microsoft" (issues #91, #156), so there's
     nothing to change. The forgot-password flow sets one for such an account, should its owner want
     to sign in with their email too.
     {% endcomment %}
     <section class="mb-8" id="no-password-note">
       <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Password</h2>
       <p class="text-sm text-gray-600 dark:text-gray-300">
-        You signed in with Google, so this account doesn't have a password.
+        You signed in with {{ user.social_sign_in_providers }}, so this account doesn't have a password.
       </p>
       <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
         Want to sign in with your email too?

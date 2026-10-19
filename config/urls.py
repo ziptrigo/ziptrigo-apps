@@ -20,6 +20,9 @@ urlpatterns = [
     # "Sign in with Google" (issue #91): `/auth/google/login` and `/auth/google/callback`. The
     # callback is a registered redirect URI at Google, so the path must stay exactly as is.
     path('auth/google/', include('apps.accounts.google_urls')),
+    # "Sign in with Microsoft" (issue #156): `/auth/microsoft/login` and `/auth/microsoft/callback`,
+    # the latter a registered redirect URI at Microsoft, so its path must stay exactly as is.
+    path('auth/microsoft/', include('apps.accounts.microsoft_urls')),
     path('billing/', include('apps.billing.urls')),
     path('qr/', include('apps.qr_code.urls')),
     path('transfer/', include('apps.file_transfer.urls')),

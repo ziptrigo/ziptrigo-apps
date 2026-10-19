@@ -35,6 +35,29 @@ def check_google_oauth(*args, **kwargs):
     ]
 
 
+_MICROSOFT_SETTINGS = ('MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'MICROSOFT_REDIRECT_URI')
+
+
+@register()
+def check_microsoft_oauth(*args, **kwargs):
+    """Warn when "Sign in with Microsoft" is only partly configured (issue #156): the same rule
+    as `check_google_oauth` -- all three `MICROSOFT_*` settings empty or all set is fine."""
+    missing = [name for name in _MICROSOFT_SETTINGS if not getattr(settings, name, '')]
+    if not missing or len(missing) == len(_MICROSOFT_SETTINGS):
+        return []
+    return [
+        Warning(
+            f'Microsoft sign-in is only partly configured: {", ".join(missing)} not set.',
+            hint=(
+                'Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET and MICROSOFT_REDIRECT_URI to '
+                'enable it, or leave all three empty to disable it. Until then the "Sign in with '
+                'Microsoft" button is hidden.'
+            ),
+            id='accounts.W004',
+        )
+    ]
+
+
 _TURNSTILE_SETTINGS = ('TURNSTILE_SITE_KEY', 'TURNSTILE_SECRET_KEY')
 
 

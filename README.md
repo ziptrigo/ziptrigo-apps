@@ -80,6 +80,7 @@ apps/<app>/
 | `/` | core landing page |
 | `/account/…` | accounts (login, register, logout, password reset, email confirmation, settings) |
 | `/auth/google/login`, `/auth/google/callback` | accounts: "Sign in with Google" (the callback is the redirect URI registered with Google, so it never moves or gains a trailing slash) |
+| `/auth/microsoft/login`, `/auth/microsoft/callback` | accounts: "Sign in with Microsoft" (the callback is the redirect URI registered with Microsoft, same rule) |
 | `/billing/…` | billing (credits history) |
 | `/feedback/…` | feedback (the form, and the thank-you page) |
 | `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
@@ -270,6 +271,48 @@ existing account with that email -- only if that account's email is confirmed *a
 `gmail.com`/`googlemail.com` address or the Google account belongs to a Workspace domain (`hd`);
 otherwise it is refused and the user signs in with their password -- or else creates a new account
 (any verified email). See CLAUDE.md, "Auth".
+
+### Sign in with Microsoft
+
+Login and register pages also offer "Sign in with Microsoft" (the Microsoft identity platform,
+Entra ID; an OpenID Connect authorization code flow like Google's) when these variables are all
+set; leave them empty and the button is hidden and `/auth/microsoft/*` redirects to the login page
+with a message. A partial set triggers a warning at startup (`accounts.W004`).
+
+| Variable | Value |
+|---|---|
+| `MICROSOFT_CLIENT_ID` | the app registration's *Application (client) ID* |
+| `MICROSOFT_CLIENT_SECRET` | a client secret's **Value** (not its *Secret ID*; it is shown once) |
+| `MICROSOFT_REDIRECT_URI` | this site's `/auth/microsoft/callback`, e.g. `https://app-staging.ziptrigo.com/auth/microsoft/callback` (local: `http://localhost:8000/auth/microsoft/callback`) |
+| `MICROSOFT_TENANT` | optional: `common` (default), `consumers` (personal only), `organizations` (work/school only) or one Directory (tenant) ID |
+
+To get them, in the [Microsoft Entra admin center](https://entra.microsoft.com/) (a free Azure
+account gives a personal Microsoft account the tenant it needs), under *App registrations*:
+
+1. *New registration* -- one per environment (prod, staging), so a leaked secret only opens one.
+   Pick the **supported account types** (personal accounts only, or also work/school; this must
+   agree with `MICROSOFT_TENANT`). A registration created as "single tenant" has to be moved to
+   personal accounts in the *Manifest* (`signInAudience`, and `api.requestedAccessTokenVersion`
+   set to `2`) before the portal allows the change.
+2. Under *Authentication* add a **Web** redirect URI: `MICROSOFT_REDIRECT_URI` **exactly** as it
+   is in the env file (scheme, host, port and path; no trailing slash). A mismatch fails with
+   `AADSTS50011`.
+3. *Certificates & secrets* > *New client secret*: copy the **Value** at once and note the expiry
+   (at most 24 months). An expired secret turns the button into a failure page.
+4. If work/school accounts are allowed, under *Token configuration* add the optional claims
+   `email` and `xms_edov` to the **ID token**: without `xms_edov` such a user can still sign in
+   once linked, but cannot create or link an account by email.
+5. Copy the client ID and secret into the environment's env file, never into the repo.
+
+A Microsoft sign-in uses the same session as the password login (no JWT is issued). It signs in the
+account linked to the Microsoft account (its tenant and object id, `oid`, which survives
+recreating the app registration, unlike `sub`), or else links an existing account with the same
+email or creates a new one -- both only for an address Microsoft vouches for: a personal account
+on a Microsoft-hosted mailbox (`outlook.com`, `hotmail.com`, `live.com`, `msn.com` and their
+country variants, from an explicit list in `microsoft_oauth.py`; one missing there is refused, so
+extend it), or a work/school account with `xms_edov`; linking also needs the existing account's email
+to be confirmed. Otherwise it is refused and the user signs in with their password or Google. See
+CLAUDE.md, "Auth", for why Microsoft's `email` claim is not trusted like Google's.
 
 ### Signup captcha (Cloudflare Turnstile)
 

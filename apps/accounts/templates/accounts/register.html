@@ -15,8 +15,8 @@
 
     {% include 'accounts/partials/register_form.html' %}
 
-    {% if google_enabled %}
-      {% include 'accounts/partials/google_button.html' with label='Sign up with Google' %}
+    {% if google_enabled or microsoft_enabled %}
+      {% include 'accounts/partials/social_buttons.html' with verb='Sign up' %}
     {% endif %}
 
     <p class="mt-4 text-sm text-gray-600 dark:text-gray-300">

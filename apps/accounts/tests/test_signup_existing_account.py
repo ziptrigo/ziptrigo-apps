@@ -239,6 +239,33 @@ def test_google_account_that_also_has_a_password_gets_the_reset_link(user, outbo
     assert reverse('accounts:forgot-password') in notice['text_body']
 
 
+def test_microsoft_account_is_told_to_use_microsoft(user, outbox, register):
+    user.microsoft_id = 'microsoft-sub-1'
+    user.set_unusable_password()
+    user.save()
+
+    register(email=user.email)
+
+    (notice,) = _notices(outbox, user.email)
+    assert 'Sign in with Microsoft' in notice['text_body']
+    assert 'Sign in with Microsoft' in notice['html_body']
+    assert 'Google' not in notice['text_body']
+    assert reverse('accounts:forgot-password') not in notice['text_body']
+    assert reverse('accounts:forgot-password') not in notice['html_body']
+    assert reverse('accounts:login') in notice['text_body']
+
+
+def test_microsoft_account_that_also_has_a_password_gets_the_reset_link(user, outbox, register):
+    user.microsoft_id = 'microsoft-sub-1'
+    user.save()
+
+    register(email=user.email)
+
+    (notice,) = _notices(outbox, user.email)
+    assert 'Sign in with Microsoft' not in notice['text_body']
+    assert reverse('accounts:forgot-password') in notice['text_body']
+
+
 def test_unconfirmed_account_gets_the_finish_setup_email_instead(user, outbox, register):
     _unconfirm(user)
 
@@ -536,6 +563,20 @@ def test_unconfirmed_account_linked_to_google_is_left_alone(user, outbox, regist
     neither lock it nor mail a way in."""
     _unconfirm(user)
     user.google_sub = 'google-sub-1'
+    user.save()
+    before = User.objects.get(pk=user.pk).password
+
+    response = register(email=user.email)
+
+    assert response.status_code == 200
+    assert User.objects.get(pk=user.pk).password == before
+    assert outbox == []
+
+
+def test_unconfirmed_account_linked_to_microsoft_is_left_alone(user, outbox, register):
+    """Same as for Google: only an email change can produce one, and someone is using it."""
+    _unconfirm(user)
+    user.microsoft_id = 'microsoft-sub-1'
     user.save()
     before = User.objects.get(pk=user.pk).password
 

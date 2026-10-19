@@ -91,3 +91,44 @@ def test_account_page_explains_no_password_for_a_google_created_account(client, 
     assert "You signed in with Google, so this account doesn't have a password." in content
     assert f'href="{reverse("accounts:forgot-password")}"' in content
     assert 'Set a password' in content
+
+
+def test_account_page_names_microsoft_for_a_microsoft_created_account(client, user):
+    user.microsoft_id = 'microsoft-sub-1'
+    user.set_unusable_password()
+    user.save()
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert "You signed in with Microsoft, so this account doesn't have a password." in content
+    assert 'Google' not in content
+
+
+@pytest.mark.parametrize(
+    ('linked', 'provider'),
+    [
+        ({'microsoft_id': 'tid:oid'}, 'Microsoft'),
+        ({'google_sub': 'some-sub'}, 'Google'),
+        ({'google_sub': 'some-sub', 'microsoft_id': 'tid:oid'}, 'Google and Microsoft'),
+        ({}, 'Google'),
+    ],
+)
+def test_invalid_profile_post_without_htmx_still_names_the_right_provider(
+    client, user, linked, provider
+):
+    """The non-htmx 422 re-renders the whole account page from the profile view, which must say
+    the same thing the account page itself does: the provider(s) the account is linked to."""
+    for field, value in linked.items():
+        setattr(user, field, value)
+    user.set_unusable_password()
+    user.save()
+    client.force_login(user)
+
+    page = client.get(reverse('accounts:account')).content.decode()
+    response = client.post(reverse('accounts:profile-update'), {'name': 'x' * 300})
+
+    note = f"You signed in with {provider}, so this account doesn't have a password."
+    assert note in page
+    assert response.status_code == 422
+    assert note in response.content.decode()

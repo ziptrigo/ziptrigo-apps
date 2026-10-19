@@ -8,7 +8,7 @@ from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import LoginForm
-from ..services import google_oauth, login_throttle
+from ..services import google_oauth, login_throttle, microsoft_oauth
 from .redirects import redirect_target
 
 
@@ -49,6 +49,7 @@ def login_page(request: HttpRequest) -> HttpResponse:
                 'form': form,
                 'next': next_url,
                 'google_enabled': google_oauth.is_configured(),
+                'microsoft_enabled': microsoft_oauth.is_configured(),
             }
             response = render(request, template, context, status=429)
             response['Retry-After'] = str(limited.retry_after)
@@ -70,7 +71,12 @@ def login_page(request: HttpRequest) -> HttpResponse:
         if request.method == 'POST' and is_htmx(request)
         else 'accounts/login.html'
     )
-    context = {'form': form, 'next': next_url, 'google_enabled': google_oauth.is_configured()}
+    context = {
+        'form': form,
+        'next': next_url,
+        'google_enabled': google_oauth.is_configured(),
+        'microsoft_enabled': microsoft_oauth.is_configured(),
+    }
     return render(request, template, context, status=status)
 
 

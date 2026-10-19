@@ -78,6 +78,17 @@ class User(AbstractBaseUser, PermissionsMixin):
         str | None,
         models.CharField(max_length=255, null=True, blank=True, unique=True),
     )
+    # Microsoft's stable identifier for the user, `<tid>:<oid>` (the ID token's tenant and object
+    # id, lower-cased), set the first time the user signs in with Microsoft
+    # (`apps.accounts.services.microsoft_oauth`). Matched before the email, which in a work/school
+    # tenant is mutable and not proof of ownership. Not the `sub` claim: that is unique per user
+    # *and per app registration*, so recreating the registration would orphan every link, whereas
+    # `oid` is the same for every app. Null for accounts that never used Microsoft; unique so one
+    # Microsoft account can't be linked to two users.
+    microsoft_id = cast(
+        str | None,
+        models.CharField(max_length=255, null=True, blank=True, unique=True),
+    )
     status = cast(
         str,
         models.CharField(
@@ -121,6 +132,20 @@ class User(AbstractBaseUser, PermissionsMixin):
         self.inactive_at = None
         self.inactive_reason = ''
         self.save(update_fields=['status', 'inactive_at', 'inactive_reason'])
+
+    @property
+    def social_sign_in_providers(self) -> str:
+        """The provider(s) an account without a password signs in with, named for the note the
+        account page shows instead of the change-password form: `Google`, `Microsoft`, or `Google
+        and Microsoft` when both are linked. An account linked to neither (an unusable password
+        set some other way) is shown as `Google`, the first one offered. One place, so every view
+        that renders the page agrees."""
+        providers = []
+        if self.google_sub:
+            providers.append('Google')
+        if self.microsoft_id:
+            providers.append('Microsoft')
+        return ' and '.join(providers) or 'Google'
 
     def __str__(self) -> str:
         return self.email

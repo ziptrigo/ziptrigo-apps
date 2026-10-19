@@ -1,6 +1,7 @@
 from .forgot_password import forgot_password_page
 from .google import google_callback, google_login
 from .login import login_page, logout_page
+from .microsoft import microsoft_callback, microsoft_login
 from .pages import (
     account_created_page,
     account_page,
@@ -25,6 +26,8 @@ __all__ = [
     'google_login',
     'login_page',
     'logout_page',
+    'microsoft_callback',
+    'microsoft_login',
     'password_change',
     'profile_update',
     'register_page',
