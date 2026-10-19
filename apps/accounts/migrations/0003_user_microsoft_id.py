@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='user',
-            name='microsoft_sub',
+            name='microsoft_id',
             field=models.CharField(blank=True, max_length=255, null=True, unique=True),
         ),
     ]

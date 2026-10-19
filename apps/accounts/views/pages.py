@@ -14,13 +14,9 @@ from ..services.email_confirmation import format_validity_minutes, get_email_con
 @login_required
 def account_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render the account settings page for the authenticated user."""
-    user = request.user
     context = {
-        'form': ProfileForm(instance=user),
-        'password_form': ChangePasswordForm(user),
-        # Names the sign-in an account without a password was made with (the note shown instead
-        # of the change-password form). Google unless the account is linked only to Microsoft.
-        'social_provider': 'Microsoft' if user.microsoft_sub and not user.google_sub else 'Google',
+        'form': ProfileForm(instance=request.user),
+        'password_form': ChangePasswordForm(request.user),
     }
     return render(request, 'accounts/account.html', context)
 

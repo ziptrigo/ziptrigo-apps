@@ -46,6 +46,10 @@ MICROSOFT_METADATA = {
     'id_token_signing_alg_values_supported': ['RS256'],
 }
 SUB = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+OID = '00000000-0000-0000-1111-222222222222'
+#: What `User.microsoft_id` stores for the default personal / work claims below.
+PERSONAL_ID = f'{PERSONAL_ACCOUNT_TENANT_ID}:{OID}'
+WORK_ID = f'{WORK_TENANT_ID}:{OID}'
 
 
 @pytest.fixture(autouse=True)
@@ -76,6 +80,7 @@ def _claims(**overrides):
     """A personal account's ID token claims; `iss` follows `tid` unless given."""
     claims = {
         'sub': SUB,
+        'oid': OID,
         'tid': PERSONAL_ACCOUNT_TENANT_ID,
         'email': 'new.person@outlook.com',
         'name': 'New Person',
@@ -255,7 +260,7 @@ def test_callback_creates_a_new_user_and_signs_them_in(client):
     assert response.status_code == 302
     assert response['Location'] == reverse('accounts:account')
     user = User.objects.get(email='new.person@outlook.com')
-    assert user.microsoft_sub == SUB
+    assert user.microsoft_id == PERSONAL_ID
     assert user.google_sub is None
     assert user.name == 'New Person'
     assert user.email_confirmed
@@ -281,7 +286,7 @@ def test_callback_creates_a_work_account_when_the_tenant_vouches_for_the_domain(
     _callback(client, _work_claims())
 
     user = User.objects.get(email='new.person@contoso.com')
-    assert user.microsoft_sub == SUB
+    assert user.microsoft_id == WORK_ID
     assert _signed_in_as(client, user)
 
 
@@ -303,6 +308,7 @@ def test_callback_tolerates_a_missing_name(client):
         'live.com.au',
         'outlook.fr',
         'live.nl',
+        'windowslive.com',
     ],
 )
 def test_callback_links_a_confirmed_account_on_a_microsoft_hosted_domain(client, user, domain):
@@ -313,7 +319,7 @@ def test_callback_links_a_confirmed_account_on_a_microsoft_hosted_domain(client,
     _callback(client, _claims(email=f'Someone@{domain.swapcase()}'))
 
     user.refresh_from_db()
-    assert user.microsoft_sub == SUB
+    assert user.microsoft_id == PERSONAL_ID
     assert User.objects.count() == 1
     # A confirmed account keeps its password.
     assert user.check_password('testpass123')
@@ -329,6 +335,11 @@ def test_callback_links_a_confirmed_account_on_a_microsoft_hosted_domain(client,
         'outlook.attacker.co.uk',
         'notlive.com',
         'hotmail.com.evil.com',
+        # Not Microsoft mailbox domains, though they look like the pattern: the list is explicit.
+        'msn.cn',
+        'hotmail.xx',
+        'live.xx',
+        'outlook.co.uk',
     ],
 )
 def test_callback_refuses_to_link_a_personal_account_on_another_domain(client, user, domain):
@@ -340,7 +351,7 @@ def test_callback_refuses_to_link_a_personal_account_on_another_domain(client, u
 
     _refused(client, response, microsoft_oauth.UnverifiedEmail.user_message)
     user.refresh_from_db()
-    assert user.microsoft_sub is None
+    assert user.microsoft_id is None
     assert user.check_password('testpass123')
 
 
@@ -357,7 +368,7 @@ def test_callback_links_a_work_account_when_the_tenant_vouches_for_the_domain(cl
 
     assert response['Location'] == reverse('accounts:account')
     user.refresh_from_db()
-    assert user.microsoft_sub == SUB
+    assert user.microsoft_id == WORK_ID
     assert user.check_password('testpass123')
     assert _signed_in_as(client, user)
 
@@ -375,7 +386,7 @@ def test_callback_refuses_to_link_a_work_account_the_tenant_does_not_vouch_for(c
 
     _refused(client, response, microsoft_oauth.UnverifiedEmail.user_message)
     user.refresh_from_db()
-    assert user.microsoft_sub is None
+    assert user.microsoft_id is None
     assert user.check_password('testpass123')
 
 
@@ -401,7 +412,7 @@ def test_the_personal_tenant_id_is_what_marks_a_personal_account(client, user):
 
     _refused(client, response, microsoft_oauth.UnverifiedEmail.user_message)
     user.refresh_from_db()
-    assert user.microsoft_sub is None
+    assert user.microsoft_id is None
 
 
 def test_callback_refuses_to_link_an_unconfirmed_account(client, user):
@@ -414,14 +425,14 @@ def test_callback_refuses_to_link_an_unconfirmed_account(client, user):
 
     _refused(client, response, microsoft_oauth.UnconfirmedAccountConflict.user_message)
     user.refresh_from_db()
-    assert user.microsoft_sub is None
+    assert user.microsoft_id is None
     assert user.check_password('testpass123')
     assert not user.email_confirmed
 
 
-def test_callback_matches_an_existing_user_by_sub(client, user):
-    user.microsoft_sub = SUB
-    user.save(update_fields=['microsoft_sub'])
+def test_callback_matches_an_existing_user_by_tenant_and_object_id(client, user):
+    user.microsoft_id = PERSONAL_ID
+    user.save(update_fields=['microsoft_id'])
 
     response = _callback(client, _claims(email='different@outlook.com', name='Renamed'))
 
@@ -435,9 +446,9 @@ def test_callback_matches_an_existing_user_by_sub(client, user):
 
 
 def test_a_linked_user_signs_in_without_an_email_claim(client, user):
-    """The `email` claim is optional for work accounts; the `sub` is the proof."""
-    user.microsoft_sub = SUB
-    user.save(update_fields=['microsoft_sub'])
+    """The `email` claim is optional for work accounts; the tenant and object id are the proof."""
+    user.microsoft_id = WORK_ID
+    user.save(update_fields=['microsoft_id'])
     claims = _work_claims()
     del claims['email']
     del claims['xms_edov']
@@ -449,7 +460,7 @@ def test_a_linked_user_signs_in_without_an_email_claim(client, user):
 
 
 def test_a_linked_user_signs_in_after_their_email_was_unconfirmed(client, user):
-    user.microsoft_sub = SUB
+    user.microsoft_id = PERSONAL_ID
     user.email_confirmed = False
     user.save()
 
@@ -461,26 +472,26 @@ def test_a_linked_user_signs_in_after_their_email_was_unconfirmed(client, user):
 
 def test_sub_wins_over_a_different_account_with_the_same_email(client, user):
     other = User.objects.create_user(email='new.person@outlook.com', password='x' * 10)
-    user.microsoft_sub = SUB
-    user.save(update_fields=['microsoft_sub'])
+    user.microsoft_id = PERSONAL_ID
+    user.save(update_fields=['microsoft_id'])
 
     _callback(client, _claims(email=other.email))
 
     assert _signed_in_as(client, user)
     other.refresh_from_db()
-    assert other.microsoft_sub is None
+    assert other.microsoft_id is None
 
 
 def test_callback_refuses_an_email_linked_to_a_different_microsoft_account(client, user):
     user.email = 'someone@outlook.com'
-    user.microsoft_sub = 'a-different-sub'
+    user.microsoft_id = 'another-tenant:another-object'
     user.save()
 
     response = _callback(client, _claims(email='someone@outlook.com'))
 
     _refused(client, response, microsoft_oauth.AccountConflict.user_message)
     user.refresh_from_db()
-    assert user.microsoft_sub == 'a-different-sub'
+    assert user.microsoft_id == 'another-tenant:another-object'
 
 
 def test_callback_refuses_an_ambiguous_email_match(client):
@@ -491,7 +502,7 @@ def test_callback_refuses_an_ambiguous_email_match(client):
     response = _callback(client, _claims(email='dup@outlook.com'))
 
     _refused(client, response, microsoft_oauth.AccountConflict.user_message)
-    assert User.objects.filter(microsoft_sub__isnull=False).count() == 0
+    assert User.objects.filter(microsoft_id__isnull=False).count() == 0
 
 
 def test_callback_for_an_unknown_sub_without_an_email_cannot_create_an_account(client):
@@ -504,7 +515,7 @@ def test_callback_for_an_unknown_sub_without_an_email_cannot_create_an_account(c
     assert not User.objects.exists()
 
 
-@pytest.mark.parametrize('how', ['email', 'sub'])
+@pytest.mark.parametrize('how', ['email', 'identity'])
 @pytest.mark.parametrize('field', ['status', 'is_active'])
 def test_callback_rejects_an_inactive_user(client, user, how, field):
     user.email = 'someone@outlook.com'
@@ -512,15 +523,141 @@ def test_callback_rejects_an_inactive_user(client, user, how, field):
         user.status = User.STATUS_INACTIVE
     else:
         user.is_active = False
-    if how == 'sub':
-        user.microsoft_sub = SUB
+    if how == 'identity':
+        user.microsoft_id = PERSONAL_ID
     user.save()
 
     response = _callback(client, _claims(email='someone@outlook.com'))
 
     _refused(client, response, 'User not active')
     user.refresh_from_db()
-    assert user.microsoft_sub == (SUB if how == 'sub' else None)
+    assert user.microsoft_id == (PERSONAL_ID if how == 'identity' else None)
+
+
+# -- the identity key: tenant + object id, not `sub` -----------------------------------------
+
+
+def test_a_new_app_registration_keeps_linked_users_signed_in(client, user):
+    """`sub` is per app registration; `oid` is not. Recreating the registration (a new client id,
+    so a new `sub` for everyone) must not lock linked users out."""
+    user.microsoft_id = PERSONAL_ID
+    user.save(update_fields=['microsoft_id'])
+
+    response = _callback(client, _claims(sub='a-sub-from-the-new-registration'))
+
+    assert response['Location'] == reverse('accounts:account')
+    assert _signed_in_as(client, user)
+    assert User.objects.count() == 1
+
+
+def test_the_same_object_id_in_another_tenant_is_another_account(client, user):
+    """A guest has a different `oid` per tenant and `oid`s are only unique within one, so the
+    tenant is part of the key: the same `oid` under another tenant must not match."""
+    user.microsoft_id = PERSONAL_ID
+    user.save(update_fields=['microsoft_id'])
+
+    response = _callback(client, _work_claims())
+
+    assert response['Location'] == reverse('accounts:account')
+    other = User.objects.get(email='new.person@contoso.com')
+    assert other.pk != user.pk
+    assert other.microsoft_id == WORK_ID
+    assert _signed_in_as(client, other)
+
+
+def test_the_stored_identity_is_lower_cased_so_guid_case_does_not_matter(client):
+    _callback(client, _claims(oid=OID.upper(), tid=PERSONAL_ACCOUNT_TENANT_ID.upper()))
+    client.logout()
+
+    _callback(client, _claims(oid=OID.lower(), email='someone.else@outlook.com'))
+
+    (user,) = User.objects.all()
+    assert user.microsoft_id == PERSONAL_ID
+    assert user.email == 'new.person@outlook.com'
+
+
+# -- the email claim: well-formed, and the personal-account fallback -------------------------
+
+
+@pytest.mark.parametrize(
+    'email',
+    ['live.com', 'outlook.com\n', '@outlook.com', 'someone@', 'a@b@outlook.com', 'a b@outlook.com'],
+)
+def test_a_malformed_email_claim_is_no_email_at_all(client, email):
+    """`live.com` has no `@` and would have passed the mail-domain rule as the "domain"."""
+    response = _callback(client, _claims(email=email))
+
+    _refused(client, response, microsoft_oauth.NoEmail.user_message)
+    assert not User.objects.exists()
+
+
+def test_a_malformed_email_claim_never_links_an_account(client, user):
+    user.email = 'outlook.com'
+    user.save(update_fields=['email'])
+
+    response = _callback(client, _claims(email='outlook.com'))
+
+    _refused(client, response, microsoft_oauth.NoEmail.user_message)
+    user.refresh_from_db()
+    assert user.microsoft_id is None
+
+
+@pytest.mark.parametrize(
+    'identity_email',
+    ['live.com', 'someone@live.com\n', 'someone@live.com.evil.com', '', ' @live.com'],
+)
+def test_vouches_for_email_demands_a_whole_address_on_a_listed_domain(identity_email):
+    identity = microsoft_oauth.MicrosoftIdentity(
+        tenant_id=PERSONAL_ACCOUNT_TENANT_ID,
+        object_id=OID,
+        email=identity_email,
+        email_domain_verified=False,
+        name='',
+    )
+
+    assert microsoft_oauth._vouches_for_email(identity) is False
+
+
+def test_a_personal_account_without_an_email_claim_uses_its_sign_in_name(client):
+    """A personal account's token can carry its address only as `preferred_username`, which
+    Microsoft assigns (no tenant admin can set it); it still has to be a Microsoft-hosted
+    mailbox."""
+    claims = _claims(preferred_username='someone@hotmail.com')
+    del claims['email']
+
+    _callback(client, claims)
+
+    user = User.objects.get(email='someone@hotmail.com')
+    assert user.microsoft_id == PERSONAL_ID
+    assert _signed_in_as(client, user)
+
+
+def test_the_email_claim_wins_over_the_sign_in_name(client):
+    _callback(client, _claims(email='claim@outlook.com', preferred_username='name@hotmail.com'))
+
+    assert User.objects.filter(email='claim@outlook.com').exists()
+    assert not User.objects.filter(email='name@hotmail.com').exists()
+
+
+def test_a_personal_sign_in_name_on_another_domain_is_not_vouched_for(client):
+    claims = _claims(preferred_username='someone@gmail.com')
+    del claims['email']
+
+    response = _callback(client, claims)
+
+    _refused(client, response, microsoft_oauth.UnverifiedEmail.user_message)
+    assert not User.objects.exists()
+
+
+def test_a_work_account_never_falls_back_to_its_sign_in_name(client):
+    """A tenant admin sets `preferred_username` and `upn`; they prove nothing."""
+    claims = _work_claims(preferred_username='victim@contoso.com', upn='victim@contoso.com')
+    del claims['email']
+
+    response = _callback(client, claims)
+
+    _refused(client, response, microsoft_oauth.NoEmail.user_message)
+    assert not User.objects.exists()
 
 
 # -- /auth/microsoft/callback: the ID token's claims ------------------------------------------
@@ -529,14 +666,15 @@ def test_callback_rejects_an_inactive_user(client, user, how, field):
 @pytest.mark.parametrize(
     'claims',
     [
-        {'email': 'a@outlook.com', 'tid': PERSONAL_ACCOUNT_TENANT_ID},  # no sub
-        {'sub': SUB, 'email': 'a@outlook.com'},  # no tid
-        {'sub': '', 'tid': PERSONAL_ACCOUNT_TENANT_ID},
-        {'sub': 5, 'tid': PERSONAL_ACCOUNT_TENANT_ID},
+        {'email': 'a@outlook.com', 'tid': PERSONAL_ACCOUNT_TENANT_ID},  # no oid
+        {'sub': SUB, 'oid': OID, 'email': 'a@outlook.com'},  # no tid
+        {'oid': '', 'tid': PERSONAL_ACCOUNT_TENANT_ID},
+        {'oid': 5, 'tid': PERSONAL_ACCOUNT_TENANT_ID},
+        {'sub': SUB, 'tid': PERSONAL_ACCOUNT_TENANT_ID},  # a sub alone is not an identity
         {},
     ],
 )
-def test_callback_rejects_claims_without_a_sub_or_tid(client, claims):
+def test_callback_rejects_claims_without_an_oid_or_tid(client, claims):
     claims = {**claims, 'iss': f'https://login.microsoftonline.com/{claims.get("tid")}/v2.0'}
 
     response = _callback(client, claims)
@@ -710,7 +848,7 @@ def test_a_real_id_token_from_the_common_authority_is_accepted(client, signing_k
     response, fetch, state = _round_trip(client, signing_key)
 
     assert response['Location'] == reverse('accounts:account')
-    assert User.objects.filter(microsoft_sub=SUB).exists()
+    assert User.objects.filter(microsoft_id=PERSONAL_ID).exists()
     assert fetch.call_args.kwargs['redirect_uri'] == REDIRECT_URI
     # State is single-use: replaying the callback is refused.
     assert f'_state_microsoft_{state}' not in client.session
@@ -836,16 +974,16 @@ def test_check_is_registered_with_django(settings):
     assert 'accounts.W004' in {m.id for m in checks.run_checks()}
 
 
-def test_admin_shows_microsoft_sub_read_only(client, admin_user, user):
-    user.microsoft_sub = SUB
-    user.save(update_fields=['microsoft_sub'])
+def test_admin_shows_microsoft_id_read_only(client, admin_user, user):
+    user.microsoft_id = PERSONAL_ID
+    user.save(update_fields=['microsoft_id'])
     client.force_login(admin_user)
 
     response = client.get(reverse('custom_admin:accounts_user_change', args=[user.pk]))
 
     content = response.content.decode()
-    assert SUB in content
-    assert 'name="microsoft_sub"' not in content
+    assert PERSONAL_ID in content
+    assert 'name="microsoft_id"' not in content
 
 
 # -- the pieces -------------------------------------------------------------------------------
@@ -911,11 +1049,30 @@ def test_identity_from_claims_reads_the_tenant_and_the_domain_flag():
     assert upper.is_personal_account
 
 
-def test_identity_from_claims_never_uses_preferred_username_as_the_email():
-    """`preferred_username` / `upn` are mutable display values, not proof of anything."""
-    identity = identity_from_claims(
-        _work_claims(preferred_username='victim@contoso.com', upn='victim@contoso.com')
-        | {'email': None}
+def test_identity_from_claims_uses_preferred_username_for_a_personal_account_only():
+    personal = _claims(preferred_username='someone@outlook.com')
+    del personal['email']
+    assert identity_from_claims(personal).email == 'someone@outlook.com'
+
+    work = _work_claims(preferred_username='victim@contoso.com', upn='victim@contoso.com')
+    del work['email']
+    assert identity_from_claims(work).email == ''
+
+
+def test_account_id_is_the_tenant_and_object_id_lower_cased():
+    identity = identity_from_claims(_claims(oid='ABCDEF00-0000-0000-0000-000000000001'))
+
+    assert (
+        identity.account_id == f'{PERSONAL_ACCOUNT_TENANT_ID}:abcdef00-0000-0000-0000-000000000001'
     )
 
-    assert identity.email == ''
+
+def test_the_mail_domain_table_is_well_formed():
+    brands = {'outlook', 'hotmail', 'live', 'msn', 'windowslive'}
+    for domain in microsoft_oauth.MICROSOFT_MAIL_DOMAINS:
+        assert domain == domain.lower()
+        assert domain.split('.')[0] in brands
+        assert '.' in domain
+    # Deliberately not a pattern: a country suffix that is not listed does not match.
+    assert 'msn.cn' not in microsoft_oauth.MICROSOFT_MAIL_DOMAINS
+    assert 'hotmail.xx' not in microsoft_oauth.MICROSOFT_MAIL_DOMAINS

@@ -94,7 +94,7 @@ def test_account_page_explains_no_password_for_a_google_created_account(client, 
 
 
 def test_account_page_names_microsoft_for_a_microsoft_created_account(client, user):
-    user.microsoft_sub = 'microsoft-sub-1'
+    user.microsoft_id = 'microsoft-sub-1'
     user.set_unusable_password()
     user.save()
     client.force_login(user)
@@ -103,3 +103,23 @@ def test_account_page_names_microsoft_for_a_microsoft_created_account(client, us
 
     assert "You signed in with Microsoft, so this account doesn't have a password." in content
     assert 'Google' not in content
+
+
+@pytest.mark.parametrize(
+    ('sub_field', 'provider'), [('microsoft_id', 'Microsoft'), ('google_sub', 'Google')]
+)
+def test_invalid_profile_post_without_htmx_still_names_the_right_provider(
+    client, user, sub_field, provider
+):
+    """The non-htmx 422 re-renders the whole account page from the profile view, which must say
+    the same thing the account page itself does."""
+    setattr(user, sub_field, 'some-identity')
+    user.set_unusable_password()
+    user.save()
+    client.force_login(user)
+
+    response = client.post(reverse('accounts:profile-update'), {'name': 'x' * 300})
+
+    assert response.status_code == 422
+    content = response.content.decode()
+    assert f"You signed in with {provider}, so this account doesn't have a password." in content

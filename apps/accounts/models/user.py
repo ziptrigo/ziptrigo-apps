@@ -78,12 +78,14 @@ class User(AbstractBaseUser, PermissionsMixin):
         str | None,
         models.CharField(max_length=255, null=True, blank=True, unique=True),
     )
-    # Microsoft's stable identifier for the user (the OpenID Connect `sub` claim, which is unique
-    # per user *and per app registration*), set the first time the user signs in with Microsoft
+    # Microsoft's stable identifier for the user, `<tid>:<oid>` (the ID token's tenant and object
+    # id, lower-cased), set the first time the user signs in with Microsoft
     # (`apps.accounts.services.microsoft_oauth`). Matched before the email, which in a work/school
-    # tenant is mutable and not proof of ownership. Null for accounts that never used Microsoft;
-    # unique so one Microsoft account can't be linked to two users.
-    microsoft_sub = cast(
+    # tenant is mutable and not proof of ownership. Not the `sub` claim: that is unique per user
+    # *and per app registration*, so recreating the registration would orphan every link, whereas
+    # `oid` is the same for every app. Null for accounts that never used Microsoft; unique so one
+    # Microsoft account can't be linked to two users.
+    microsoft_id = cast(
         str | None,
         models.CharField(max_length=255, null=True, blank=True, unique=True),
     )
@@ -130,6 +132,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         self.inactive_at = None
         self.inactive_reason = ''
         self.save(update_fields=['status', 'inactive_at', 'inactive_reason'])
+
+    @property
+    def social_sign_in_provider(self) -> str:
+        """The provider an account without a password signed in with, for the note the account
+        page shows instead of the change-password form: Microsoft when the account is linked only
+        to Microsoft, Google otherwise. One place, so every view that renders the page agrees."""
+        return 'Microsoft' if self.microsoft_id and not self.google_sub else 'Google'
 
     def __str__(self) -> str:
         return self.email

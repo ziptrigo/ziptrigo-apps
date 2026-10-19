@@ -305,10 +305,12 @@ account gives a personal Microsoft account the tenant it needs), under *App regi
 5. Copy the client ID and secret into the environment's env file, never into the repo.
 
 A Microsoft sign-in uses the same session as the password login (no JWT is issued). It signs in the
-account linked to the Microsoft account (`sub`), or else links an existing account with the same
+account linked to the Microsoft account (its tenant and object id, `oid`, which survives
+recreating the app registration, unlike `sub`), or else links an existing account with the same
 email or creates a new one -- both only for an address Microsoft vouches for: a personal account
-on a Microsoft-hosted mailbox (`outlook.com`, `hotmail.com`, `live.com`, `msn.com` and country
-variants), or a work/school account with `xms_edov`; linking also needs the existing account's email
+on a Microsoft-hosted mailbox (`outlook.com`, `hotmail.com`, `live.com`, `msn.com` and their
+country variants, from an explicit list in `microsoft_oauth.py`; one missing there is refused, so
+extend it), or a work/school account with `xms_edov`; linking also needs the existing account's email
 to be confirmed. Otherwise it is refused and the user signs in with their password or Google. See
 CLAUDE.md, "Auth", for why Microsoft's `email` claim is not trusted like Google's.
 

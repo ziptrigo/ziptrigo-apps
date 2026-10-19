@@ -39,7 +39,7 @@ class UserAdmin(DjangoUserAdmin):
     ordering = ['email']
     readonly_fields = [
         'google_sub',
-        'microsoft_sub',
+        'microsoft_id',
         'email_confirmed_at',
         'created_at',
         'updated_at',
@@ -47,7 +47,7 @@ class UserAdmin(DjangoUserAdmin):
     fieldsets = (
         (
             'Authentication',
-            {'fields': ('email', 'password', 'google_sub', 'microsoft_sub')},
+            {'fields': ('email', 'password', 'google_sub', 'microsoft_id')},
         ),
         (
             'Personal info',

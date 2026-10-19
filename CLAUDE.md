@@ -509,32 +509,45 @@ registration, redirect URIs, secret, optional claims) is in README's "Sign in wi
 What is *different* from Google, and why: a Microsoft ID token has no `email_verified` claim, and
 in a work/school (Entra) tenant `email` is whatever a tenant admin set, so an attacker with their
 own tenant can put a victim's address on a user and sign in with it ("nOAuth"). Microsoft's own
-guidance is to identify users by `sub` (or `oid` + `tid`) and never by email. So
+guidance is to identify users by `sub` or `oid` and never by email. So
 `services.microsoft_oauth`:
 
-- **Matches `User.microsoft_sub` first** (nullable, unique; `sub` is unique per user *and per app
-  registration*, so prod and staging, which have separate registrations and databases, never
-  share one). This needs **neither an email nor `email_confirmed`**: a linked user keeps signing
-  in even if the token carries no email, the tenant stops vouching for it, or the address was
-  changed through `PUT /api/account`.
+- **Matches `User.microsoft_id` first** (nullable, unique): `<tid>:<oid>`, lower-cased
+  (`MicrosoftIdentity.account_id`), the ID token's tenant and object id. Not `sub`: that is unique
+  per user *and per app registration*, so recreating a registration (a new client id) would give
+  every linked user a new one, and the email path would then refuse them as "linked to a
+  different" identity, whereas `oid` (requested with the `profile` scope we ask for) is the same
+  for every app. The tenant is part of the key because an `oid` is only unique within its tenant
+  (a guest has a different one in each). A token without `oid` or `tid` is refused
+  (`InvalidClaims`). This needs **neither an email nor `email_confirmed`**: a linked user keeps
+  signing in even if the token carries no email, the tenant stops vouching for it, or the address
+  was changed through `PUT /api/account`.
 - **Creating an account and linking one by email both need an address Microsoft vouches for**
   (`_vouches_for_email`; stricter than Google, where any verified address may create). A *personal*
   account (`tid` = `9188040d-6c67-4c5b-b112-36a304b66dad`) counts only for a mailbox Microsoft
-  hosts (`outlook`/`hotmail`/`live`/`msn` under `.com` or a country suffix, nothing deeper:
-  `live.attacker.com` is no match), because a personal account can carry a third-party address
-  verified once, at signup, that may since have changed hands. A *work/school* account counts only
-  with the `xms_edov` claim true ("email domain owner verified"), an **optional ID-token claim that
-  has to be added to the app registration** (Token configuration); without it the email is just
-  text. `preferred_username` and `upn` are never used. A token with no email can only sign in a
-  linked user (`NoEmail` otherwise); an unvouched one is `UnverifiedEmail`; both write nothing.
+  hosts, from the explicit table `MICROSOFT_MAIL_DOMAINS` (`outlook.com`, `hotmail.com`,
+  `live.com`, `msn.com`, `windowslive.com` and their country variants; deliberately a list, not a
+  pattern over country suffixes, which would also match domains Microsoft doesn't run -- one
+  missing from it **fails closed**: such a user is told to use their password or Google, so add
+  it), because a personal account can carry a third-party address verified once, at signup, that
+  may since have changed hands. A *work/school* account counts only with the `xms_edov` claim true
+  ("email domain owner verified"), an **optional ID-token claim that has to be added to the app
+  registration** (Token configuration); without it the email is just text. The `email` claim must
+  be a well-formed address (`validate_email`; `live.com`, or one with whitespace, is treated as no
+  email at all). `identity_from_claims` falls back to `preferred_username` (a personal account's
+  sign-in name, which Microsoft assigns: no tenant admin can set it) **only for the personal
+  tenant and only when `email` is absent**, and it then still has to pass the mail-domain rule;
+  for a work/school account `preferred_username` and `upn` are never used. A token with no email
+  can only sign in a linked user (`NoEmail` otherwise); an unvouched one is `UnverifiedEmail`;
+  both write nothing.
   Why creating needs it too: the new account is confirmed and has no password, so an unproven
   address would be a pre-hijack of whoever owns it (the attacker's identity would stay linked after
   the owner reset the password).
 - **Linking** then follows Google's rules: only an account whose `email_confirmed` is true
-  (`UnconfirmedAccountConflict` otherwise, nothing written), changing nothing but `microsoft_sub`;
-  an account linked to a *different* `sub`, or two accounts matching the email, are refused
+  (`UnconfirmedAccountConflict` otherwise, nothing written), changing nothing but `microsoft_id`;
+  an account linked to a *different* Microsoft identity, or two accounts matching the email, are refused
   (`AccountConflict`); inactive users are refused before anything is written. An unconfirmed
-  account with a `microsoft_sub` is left alone by the signup-for-an-existing-address path, like a
+  account with a `microsoft_id` is left alone by the signup-for-an-existing-address path, like a
   Google one, and a password-less Microsoft account is told to "Sign in with Microsoft".
 - **The issuer is checked by us, not Authlib.** The `common`/`organizations`/`consumers`
   discovery documents name a *templated* issuer (`https://login.microsoftonline.com/{tenantid}/v2.0`)

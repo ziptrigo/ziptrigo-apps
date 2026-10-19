@@ -94,7 +94,7 @@ def handle_signup_for_existing_email(email: str, password: str) -> None:
             if _may_email(email):
                 enqueue_after_commit(send_account_exists_email, str(user.pk), user.email)
             return
-        if user.google_sub or user.microsoft_sub or user.is_staff or user.is_superuser:
+        if user.google_sub or user.microsoft_id or user.is_staff or user.is_superuser:
             # Not the creator-chose-the-password case this guards against: a staff account is made
             # by an admin or `createsuperuser` (which leaves the email unconfirmed), and locking
             # its password on a stranger's say-so would lock the admin out.
@@ -167,7 +167,7 @@ def render_account_exists_email(*, user: User) -> tuple[str, str, str]:
     # An account made with Google or Microsoft has no password to remember or reset.
     has_password = user.has_usable_password()
     google_only = bool(user.google_sub) and not has_password
-    microsoft_only = bool(user.microsoft_sub) and not user.google_sub and not has_password
+    microsoft_only = bool(user.microsoft_id) and not user.google_sub and not has_password
 
     if google_only:
         how_to_sign_in = (

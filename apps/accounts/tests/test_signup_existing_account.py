@@ -240,7 +240,7 @@ def test_google_account_that_also_has_a_password_gets_the_reset_link(user, outbo
 
 
 def test_microsoft_account_is_told_to_use_microsoft(user, outbox, register):
-    user.microsoft_sub = 'microsoft-sub-1'
+    user.microsoft_id = 'microsoft-sub-1'
     user.set_unusable_password()
     user.save()
 
@@ -256,7 +256,7 @@ def test_microsoft_account_is_told_to_use_microsoft(user, outbox, register):
 
 
 def test_microsoft_account_that_also_has_a_password_gets_the_reset_link(user, outbox, register):
-    user.microsoft_sub = 'microsoft-sub-1'
+    user.microsoft_id = 'microsoft-sub-1'
     user.save()
 
     register(email=user.email)
@@ -576,7 +576,7 @@ def test_unconfirmed_account_linked_to_google_is_left_alone(user, outbox, regist
 def test_unconfirmed_account_linked_to_microsoft_is_left_alone(user, outbox, register):
     """Same as for Google: only an email change can produce one, and someone is using it."""
     _unconfirm(user)
-    user.microsoft_sub = 'microsoft-sub-1'
+    user.microsoft_id = 'microsoft-sub-1'
     user.save()
     before = User.objects.get(pk=user.pk).password
 
