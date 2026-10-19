@@ -21,7 +21,7 @@ instead, which is the only channel an outsider can't read:
   (no name: on an unconfirmed account it is whatever its creator typed) or from the form. Locking
   down happens on every attempt, even when the email is rate limited; if the owner never gets the
   email, forgot-password works for an unconfirmed account too and does the same.
-- **Inactive or deleted account** (and an unconfirmed account linked to a Google identity, which
+- **Inactive or deleted account** (and an unconfirmed account linked to a Google or Microsoft identity, which
   only an email change can produce, or a staff account, which an admin made): nothing. It can't
   sign in, and mailing it directions would mislead or let a signup take over (or lock) an account
   someone is using.
@@ -94,7 +94,7 @@ def handle_signup_for_existing_email(email: str, password: str) -> None:
             if _may_email(email):
                 enqueue_after_commit(send_account_exists_email, str(user.pk), user.email)
             return
-        if user.google_sub or user.is_staff or user.is_superuser:
+        if user.google_sub or user.microsoft_sub or user.is_staff or user.is_superuser:
             # Not the creator-chose-the-password case this guards against: a staff account is made
             # by an admin or `createsuperuser` (which leaves the email unconfirmed), and locking
             # its password on a stranger's say-so would lock the admin out.
@@ -164,12 +164,19 @@ def render_account_exists_email(*, user: User) -> tuple[str, str, str]:
     login_url = base + reverse('accounts:login')
     forgot_password_url = base + reverse('accounts:forgot-password')
     greeting = f'Hi {user.name},' if user.name else 'Hi there,'
-    # An account made with Google has no password to remember or reset.
-    google_only = bool(user.google_sub) and not user.has_usable_password()
+    # An account made with Google or Microsoft has no password to remember or reset.
+    has_password = user.has_usable_password()
+    google_only = bool(user.google_sub) and not has_password
+    microsoft_only = bool(user.microsoft_sub) and not user.google_sub and not has_password
 
     if google_only:
         how_to_sign_in = (
             'You signed up with Google. Use "Sign in with Google" on the sign-in page:\n\n'
+            f'{login_url}\n\n'
+        )
+    elif microsoft_only:
+        how_to_sign_in = (
+            'You signed up with Microsoft. Use "Sign in with Microsoft" on the sign-in page:\n\n'
             f'{login_url}\n\n'
         )
     else:
@@ -191,6 +198,7 @@ def render_account_exists_email(*, user: User) -> tuple[str, str, str]:
         'greeting': greeting,
         'email': user.email,
         'google_only': google_only,
+        'microsoft_only': microsoft_only,
         'login_url': login_url,
         'forgot_password_url': forgot_password_url,
     }

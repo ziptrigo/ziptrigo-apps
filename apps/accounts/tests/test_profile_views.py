@@ -91,3 +91,15 @@ def test_account_page_explains_no_password_for_a_google_created_account(client, 
     assert "You signed in with Google, so this account doesn't have a password." in content
     assert f'href="{reverse("accounts:forgot-password")}"' in content
     assert 'Set a password' in content
+
+
+def test_account_page_names_microsoft_for_a_microsoft_created_account(client, user):
+    user.microsoft_sub = 'microsoft-sub-1'
+    user.set_unusable_password()
+    user.save()
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert "You signed in with Microsoft, so this account doesn't have a password." in content
+    assert 'Google' not in content

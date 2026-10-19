@@ -490,6 +490,63 @@ an account, which the no-enumeration rule above (issue #125) otherwise forbids; 
 purpose: they appear only after Google has verified the caller controls that very address, so
 nobody learns anything about an address they don't hold.
 
+**Sign in with Microsoft** (issue #156) is a fourth way in to the *web UI* and mirrors Google's in
+structure: a session login ending in `django.contrib.auth.login()` (so `user_logged_in` fires), an
+Authlib OpenID Connect authorization code flow against the Microsoft identity platform (Entra ID),
+`GET /auth/microsoft/login` and `GET /auth/microsoft/callback` (`apps/accounts/views/microsoft.py`,
+`microsoft_urls.py`, namespace `microsoft_auth:`, exact paths with no trailing slash since the
+callback is a registered redirect URI), a same-site `next` kept in the session, every failure a
+logged redirect to the login page with a `messages` banner, rate limited per IP
+(`MICROSOFT_LOGIN_IP`). The login always sends `prompt=select_account`. On only when
+`MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` and `MICROSOFT_REDIRECT_URI` are all set
+(`microsoft_oauth.is_configured()`, `microsoft_enabled` in the login/register context; unset, the
+button is hidden and both routes redirect with a message; `accounts.W004` warns about a *partial*
+configuration). `MICROSOFT_TENANT` (default `common`) is the sign-in authority: `common`,
+`consumers`, `organizations` or one tenant id; it must agree with the app registration's supported
+account types. The client is built with `client_secret_post` token auth. Setup (Entra app
+registration, redirect URIs, secret, optional claims) is in README's "Sign in with Microsoft".
+
+What is *different* from Google, and why: a Microsoft ID token has no `email_verified` claim, and
+in a work/school (Entra) tenant `email` is whatever a tenant admin set, so an attacker with their
+own tenant can put a victim's address on a user and sign in with it ("nOAuth"). Microsoft's own
+guidance is to identify users by `sub` (or `oid` + `tid`) and never by email. So
+`services.microsoft_oauth`:
+
+- **Matches `User.microsoft_sub` first** (nullable, unique; `sub` is unique per user *and per app
+  registration*, so prod and staging, which have separate registrations and databases, never
+  share one). This needs **neither an email nor `email_confirmed`**: a linked user keeps signing
+  in even if the token carries no email, the tenant stops vouching for it, or the address was
+  changed through `PUT /api/account`.
+- **Creating an account and linking one by email both need an address Microsoft vouches for**
+  (`_vouches_for_email`; stricter than Google, where any verified address may create). A *personal*
+  account (`tid` = `9188040d-6c67-4c5b-b112-36a304b66dad`) counts only for a mailbox Microsoft
+  hosts (`outlook`/`hotmail`/`live`/`msn` under `.com` or a country suffix, nothing deeper:
+  `live.attacker.com` is no match), because a personal account can carry a third-party address
+  verified once, at signup, that may since have changed hands. A *work/school* account counts only
+  with the `xms_edov` claim true ("email domain owner verified"), an **optional ID-token claim that
+  has to be added to the app registration** (Token configuration); without it the email is just
+  text. `preferred_username` and `upn` are never used. A token with no email can only sign in a
+  linked user (`NoEmail` otherwise); an unvouched one is `UnverifiedEmail`; both write nothing.
+  Why creating needs it too: the new account is confirmed and has no password, so an unproven
+  address would be a pre-hijack of whoever owns it (the attacker's identity would stay linked after
+  the owner reset the password).
+- **Linking** then follows Google's rules: only an account whose `email_confirmed` is true
+  (`UnconfirmedAccountConflict` otherwise, nothing written), changing nothing but `microsoft_sub`;
+  an account linked to a *different* `sub`, or two accounts matching the email, are refused
+  (`AccountConflict`); inactive users are refused before anything is written. An unconfirmed
+  account with a `microsoft_sub` is left alone by the signup-for-an-existing-address path, like a
+  Google one, and a password-less Microsoft account is told to "Sign in with Microsoft".
+- **The issuer is checked by us, not Authlib.** The `common`/`organizations`/`consumers`
+  discovery documents name a *templated* issuer (`https://login.microsoftonline.com/{tenantid}/v2.0`)
+  that no token carries, so Authlib's own `iss` check would reject every sign-in. The callback
+  passes `claims_options=CLAIMS_OPTIONS` (`iss` essential, no values) -- Authlib still validates
+  the signature, audience (the client id), expiry and nonce -- and `identity_from_claims` requires
+  `iss == https://login.microsoftonline.com/<tid>/v2.0` for the token's own `tid`.
+  `tests/test_microsoft_auth.py` signs a real JWT and runs Authlib's validation for this.
+- The login and register pages render one "or" divider and the enabled buttons through
+  `partials/social_buttons.html` (`google_button.html` and `microsoft_button.html` are the buttons
+  alone, each taking `verb`).
+
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.
 

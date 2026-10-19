@@ -16,7 +16,7 @@ from apps.core.htmx import hx_redirect, is_htmx
 from apps.core.services.client_ip import client_ip
 
 from ..forms import RegisterForm
-from ..services import captcha, google_oauth
+from ..services import captcha, google_oauth, microsoft_oauth
 from ..services.existing_account import handle_signup_for_existing_email
 from ..services.signup import EmailAlreadyRegistered, create_account
 
@@ -66,6 +66,7 @@ def register_page(request: HttpRequest) -> HttpResponse:
     context = {
         'form': form,
         'google_enabled': google_oauth.is_configured(),
+        'microsoft_enabled': microsoft_oauth.is_configured(),
         'turnstile_site_key': settings.TURNSTILE_SITE_KEY if captcha_enabled else '',
         'turnstile_action': captcha.ACTION,
     }

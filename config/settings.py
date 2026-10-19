@@ -303,6 +303,9 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # headroom for a shared NAT/office IP signing in at the same time, not a per-user quota. The
     # callback does an outbound token exchange with Google per call, which is what this protects.
     'GOOGLE_LOGIN_IP': (30, 5 * 60),
+    # "Sign in with Microsoft" callback (issue #156): the same reasoning and numbers as
+    # `GOOGLE_LOGIN_IP` (an outbound token exchange per call, headroom for a shared NAT/office IP).
+    'MICROSOFT_LOGIN_IP': (30, 5 * 60),
     # Change password on the account page: logged in, so keyed per user, and counts *every*
     # attempt before the current password is checked -- a stolen session can't brute-force the
     # password through it, even with parallel requests (a failed-only counter, checked with `peek`
@@ -471,6 +474,20 @@ LOGIN_URL = 'accounts:login'
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '').strip()
+
+# "Sign in with Microsoft" (issue #156), a server-side OpenID Connect authorization code flow
+# against the Microsoft identity platform (`apps.accounts.services.microsoft_oauth`). Same shape as
+# Google's: all three come from the environment and are never committed, the feature is on only
+# when all three are non-empty, and `apps.accounts.checks` warns about a partial configuration.
+# `MICROSOFT_REDIRECT_URI` must match, character for character, a Web redirect URI of the app
+# registration in the Microsoft Entra admin center, and be this site's `/auth/microsoft/callback`
+# (no trailing slash). `MICROSOFT_TENANT` is the sign-in authority: `common` (the default: work or
+# school and personal accounts), `consumers` (personal only), `organizations` (work or school only)
+# or one Directory (tenant) ID; it has to agree with the app registration's supported account types.
+MICROSOFT_CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID', '').strip()
+MICROSOFT_CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET', '').strip()
+MICROSOFT_REDIRECT_URI = os.getenv('MICROSOFT_REDIRECT_URI', '').strip()
+MICROSOFT_TENANT = os.getenv('MICROSOFT_TENANT', '').strip() or 'common'
 
 # Cloudflare Turnstile captcha on the register page (issue #117,
 # `apps.accounts.services.captcha`). On only when both keys are set; leaving both empty (the

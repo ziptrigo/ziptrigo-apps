@@ -13,13 +13,13 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
   like a new one; the owner is told by email. An *unconfirmed* account is locked down instead and
   its owner gets a "Finish setting up" set-password link.
 - **Sign in / sign out** (`/account/login/`, `POST /account/logout/`): error messages, `next=`,
-  mixed-case email domains, Google sign-in hidden when not configured.
+  mixed-case email domains, Google and Microsoft sign-in hidden when not configured.
 - **Forgot / reset password** (`/account/forgot-password/`, `/account/reset-password/<token>/`).
 - **Account page** (`/account/`): profile name, change password, the "password changed" email,
   other sessions signed out.
 - Accessibility and htmx behaviour of every form above.
 
-Out of scope: real Google sign-in, the Turnstile captcha (off on this server), rate limits (off on
+Out of scope: real Google and Microsoft sign-in, the Turnstile captcha (off on this server), rate limits (off on
 this server), the JWT API (`/api/auth/...`, `PUT /api/account`; covered by unit tests).
 
 ## Preconditions
@@ -87,7 +87,7 @@ errors in a red box above the fields, *without* the label prefix.
 |---|---|---|
 | 1 | From the login page click `Create one`. | URL `/account/register/`, tab title `Register`, heading `Create account`. |
 | 2 | Inspect the form. | Fields `Name` (text, `name="name"`), `Email` (`type="email"`), `Password` (`type="password"`, `minlength="6"`), all `required`. Under Password the hint `At least 6 characters with 1 digit`. Button `Create account`. |
-| 3 | Look for a captcha and Google. | No Cloudflare Turnstile widget and no `Sign up with Google` button. |
+| 3 | Look for a captcha, Google and Microsoft. | No Cloudflare Turnstile widget and no `Sign up with Google` or `Sign up with Microsoft` button. |
 | 4 | Look below the form. | `Already have an account? Sign in`, linking to `/account/login/`. |
 
 ### ACC-03 Register: required fields
@@ -261,16 +261,18 @@ a made-up token lands on the expired page with a resend form.
 | 2 | Sign out. Sign in with `QA.User@example.com` and SEED. | `Invalid credentials` (the part before `@` is matched exactly, by design). |
 | 3 | Sign in with `qa.acc.<run>.main@Example.Com` and P1. | Signed in as MAIN. Then sign out. |
 
-### ACC-18 Google sign-in is hidden when not configured
+### ACC-18 Google and Microsoft sign-in are hidden when not configured
 
-**Purpose:** with no Google client configured, nothing offers it and its URL fails gracefully.
+**Purpose:** with no Google or Microsoft client configured, nothing offers them and their URLs fail gracefully.
 **Preconditions:** signed out.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Check `/account/login/` and `/account/register/`. | No `Sign in with Google` / `Sign up with Google` button and no `or` divider on either. |
+| 1 | Check `/account/login/` and `/account/register/`. | No `Sign in with Google` / `Sign up with Google` / `Sign in with Microsoft` / `Sign up with Microsoft` button and no `or` divider on either. |
 | 2 | Navigate to `/auth/google/login`. | Redirected to `/account/login/` with a red banner at the top: `Google sign-in is not available right now.` |
 | 3 | Reload the login page. | The banner is gone (shown once). |
+| 4 | Navigate to `/auth/microsoft/login`. | Redirected to `/account/login/` with a red banner at the top: `Microsoft sign-in is not available right now.` |
+| 5 | Reload the login page. | The banner is gone (shown once). |
 
 ### ACC-19 Account page contents
 

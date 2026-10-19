@@ -78,6 +78,15 @@ class User(AbstractBaseUser, PermissionsMixin):
         str | None,
         models.CharField(max_length=255, null=True, blank=True, unique=True),
     )
+    # Microsoft's stable identifier for the user (the OpenID Connect `sub` claim, which is unique
+    # per user *and per app registration*), set the first time the user signs in with Microsoft
+    # (`apps.accounts.services.microsoft_oauth`). Matched before the email, which in a work/school
+    # tenant is mutable and not proof of ownership. Null for accounts that never used Microsoft;
+    # unique so one Microsoft account can't be linked to two users.
+    microsoft_sub = cast(
+        str | None,
+        models.CharField(max_length=255, null=True, blank=True, unique=True),
+    )
     status = cast(
         str,
         models.CharField(

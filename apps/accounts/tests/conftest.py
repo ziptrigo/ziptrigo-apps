@@ -43,3 +43,13 @@ def _turnstile_off(settings):
     """
     settings.TURNSTILE_SITE_KEY = ''
     settings.TURNSTILE_SECRET_KEY = ''
+
+
+@pytest.fixture(autouse=True)
+def _microsoft_off(settings):
+    """Sign in with Microsoft (issue #156) is off unless a test turns it on: pytest loads
+    `.env.local` when it exists, and a developer's own Microsoft app there mustn't add a button to
+    the pages these tests render."""
+    settings.MICROSOFT_CLIENT_ID = ''
+    settings.MICROSOFT_CLIENT_SECRET = ''
+    settings.MICROSOFT_REDIRECT_URI = ''

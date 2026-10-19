@@ -37,11 +37,17 @@ class UserAdmin(DjangoUserAdmin):
     list_filter = ['status', 'email_confirmed', 'is_staff', 'is_active']
     search_fields = ['email', 'name']
     ordering = ['email']
-    readonly_fields = ['google_sub', 'email_confirmed_at', 'created_at', 'updated_at']
+    readonly_fields = [
+        'google_sub',
+        'microsoft_sub',
+        'email_confirmed_at',
+        'created_at',
+        'updated_at',
+    ]
     fieldsets = (
         (
             'Authentication',
-            {'fields': ('email', 'password', 'google_sub')},
+            {'fields': ('email', 'password', 'google_sub', 'microsoft_sub')},
         ),
         (
             'Personal info',

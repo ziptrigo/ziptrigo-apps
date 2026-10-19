@@ -4,6 +4,9 @@
   {% if google_only %}
   <p>If it was you, there is nothing to set up again. You signed up with Google: use "Sign in with Google" on the sign-in page.</p>
   <p><a href="{{ login_url }}" style="color: #3b4a47;">{{ login_url }}</a></p>
+  {% elif microsoft_only %}
+  <p>If it was you, there is nothing to set up again. You signed up with Microsoft: use "Sign in with Microsoft" on the sign-in page.</p>
+  <p><a href="{{ login_url }}" style="color: #3b4a47;">{{ login_url }}</a></p>
   {% else %}
   <p>If it was you, there is nothing to set up again. You can sign in here:</p>
   <p><a href="{{ login_url }}" style="color: #3b4a47;">{{ login_url }}</a></p>
