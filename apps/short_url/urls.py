@@ -8,8 +8,10 @@ from .views import (
     link_disable,
     link_edit,
     link_enable,
+    link_enable_analytics,
     link_list,
     link_qr,
+    link_stats,
 )
 
 app_name = 'short_url'
@@ -21,6 +23,8 @@ urlpatterns = [
     path('<uuid:link_id>/', link_detail, name='detail'),
     path('<uuid:link_id>/edit/', link_edit, name='edit'),
     path('<uuid:link_id>/qr.png', link_qr, name='qr'),
+    path('<uuid:link_id>/stats/', link_stats, name='stats'),
+    path('<uuid:link_id>/stats/enable/', link_enable_analytics, name='enable-analytics'),
     path('<uuid:link_id>/enable/', link_enable, name='enable'),
     path('<uuid:link_id>/disable/', link_disable, name='disable'),
     path('<uuid:link_id>/delete/', link_delete, name='delete'),

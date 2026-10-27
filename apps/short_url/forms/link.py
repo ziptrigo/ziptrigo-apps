@@ -35,6 +35,15 @@ class LinkForm(forms.Form):
     max_clicks = forms.IntegerField(
         label='Click limit', required=False, min_value=1, max_value=MAX_CLICKS_LIMIT
     )
+    #: Blank when editing means "keep the current password" (the hash can't be shown again).
+    password = forms.CharField(
+        label='Password', required=False, strip=False, widget=forms.PasswordInput
+    )
+    #: Editing only: remove the password. Wins over a typed one.
+    clear_password = forms.BooleanField(label='Remove password', required=False)
+    #: An unchecked box is simply absent from a POST, so the option is phrased the way where
+    #: "absent" is the safe default: bots are filtered unless this is ticked.
+    include_bots = forms.BooleanField(label='Count bots', required=False)
 
     def __init__(self, *args, link: ShortLink | None = None, **kwargs):
         """`link`: the link being edited. Its alias can't be changed (that would free the old
@@ -44,6 +53,8 @@ class LinkForm(forms.Form):
         self.link = link
         if link is not None:
             del self.fields['alias']
+        else:
+            del self.fields['clear_password']
 
     def clean_destination(self) -> str:
         # Checked on its own (UTM comes after), so the message points at the address itself.
@@ -61,6 +72,14 @@ class LinkForm(forms.Form):
     def clean_tags(self) -> list[str]:
         return _validated('tags', services.normalize_tags, self.cleaned_data['tags'])
 
+    def clean_password(self) -> str:
+        password = self.cleaned_data['password']
+        return (
+            _validated('password', services.passwords.validate_password, password)
+            if password
+            else ''
+        )
+
     def clean_expires_at(self):
         value = self.cleaned_data['expires_at']
         if not value:
@@ -70,6 +89,18 @@ class LinkForm(forms.Form):
         if current is not None and value == current.replace(second=0, microsecond=0):
             return current
         return _validated('expires_at', services.validate_expiry, value)
+
+    @property
+    def password_change(self) -> str | None:
+        """What to do with the password when editing: `UNSET` (leave it), `None` (remove it) or
+        the new password. (For a new link, the typed password or '' is `cleaned_data['password']`.)"""
+        if self.cleaned_data.get('clear_password'):
+            return None
+        return self.cleaned_data.get('password') or services.UNSET
+
+    @property
+    def filter_bots(self) -> bool:
+        return not self.cleaned_data.get('include_bots')
 
     @property
     def utm(self) -> dict[str, str]:

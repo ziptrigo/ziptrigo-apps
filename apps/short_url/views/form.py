@@ -10,8 +10,8 @@ with a confirmation panel in `#cost-confirm` naming the total; its button re-sub
 with `confirm_cost=<total>`. The view passes that total to `create_link` as `expected_cost`, which
 recomputes the cost inside the transaction that charges (after the owner's row is locked) and raises
 `CostChangedError` when it differs, so a price or allowance changed in between (another tab, a
-concurrent request) asks again instead of charging unconfirmed. Editing charges nothing in this
-phase.
+concurrent request) asks again instead of charging unconfirmed. Editing works the same way for its
+one charge, setting a password the link has never had (`update_link`'s `expected_cost`).
 """
 
 from django.contrib import messages
@@ -39,6 +39,7 @@ from ..services import (
     create_link,
     is_extra_link,
     quote_create,
+    quote_update,
     short_url,
     update_link,
 )
@@ -65,6 +66,7 @@ def _initial(link: ShortLink) -> dict:
         if link.expires_at
         else '',
         'max_clicks': link.max_clicks or '',
+        'include_bots': not link.filter_bots,
     }
 
 
@@ -76,6 +78,9 @@ def _page_context(request: AuthenticatedHttpRequest, link: ShortLink | None) -> 
         'values': values,
         'link_base': short_url(''),
         'alias_price': price(Extra.ALIAS),
+        'password_price': price(Extra.PASSWORD),
+        'password_paid': link is not None and link.password_paid_at is not None,
+        'has_password': link is not None and bool(link.password_hash),
         'extra_link_price': price(Extra.EXTRA_LINK),
         'beyond_allowance': link is None and is_extra_link(request.user),
         'utm_fields': [(name, form_fields[name].label) for name in UTM_PARAMS],
@@ -100,6 +105,8 @@ def link_create(request: AuthenticatedHttpRequest) -> HttpResponse:
         expires_at=form.cleaned_data['expires_at'],
         max_clicks=form.cleaned_data['max_clicks'],
         utm=form.utm,
+        password=form.cleaned_data['password'],
+        filter_bots=form.filter_bots,
     )
 
     # The cap first: there is no point asking for credits for a link that can't be made.
@@ -107,7 +114,7 @@ def link_create(request: AuthenticatedHttpRequest) -> HttpResponse:
         check_can_create(request.user)
     except ValidationError as exc:
         return message_response(request, validation_lines(exc), retarget=_MSG)
-    cost = quote_create(request.user, data.alias)
+    cost = quote_create(request.user, data.alias, has_password=bool(data.password))
     if cost and parse_cost(request.POST.get('confirm_cost')) != cost.total:
         return _confirmation(request, cost, verb='Create the link')
 
@@ -159,6 +166,11 @@ def link_edit(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
     if not form.is_valid():
         return message_response(request, form_error_lines(form), retarget=_MSG)
 
+    password = form.password_change
+    cost = quote_update(link, password=password)
+    if cost and parse_cost(request.POST.get('confirm_cost')) != cost.total:
+        return _confirmation(request, cost, verb='Save changes')
+
     limited = ratelimit.hit_user(request.user, 'SU_EDIT_USER')
     if not limited.allowed:
         return ratelimit.web_response(request, limited, retarget=_MSG)
@@ -171,6 +183,20 @@ def link_edit(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
             tags=form.cleaned_data['tags'],
             expires_at=form.cleaned_data['expires_at'],
             max_clicks=form.cleaned_data['max_clicks'],
+            password=password,
+            filter_bots=form.filter_bots,
+            expected_cost=cost.total,
+        )
+    except CostChangedError as exc:
+        if exc.quote:
+            return _confirmation(request, exc.quote, verb='Save changes')
+        return message_response(request, 'The cost changed. Submit the form again.', retarget=_MSG)
+    except InsufficientCreditsError:
+        return message_response(
+            request,
+            "You don't have enough credits for the password.",
+            retarget=_MSG,
+            top_up=True,
         )
     except ValidationError as exc:
         return message_response(request, validation_lines(exc), retarget=_MSG)

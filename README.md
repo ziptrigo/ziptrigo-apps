@@ -85,6 +85,8 @@ apps/<app>/
 | `/feedback/…` | feedback (the form, and the thank-you page) |
 | `/qr/…` | qr_code (dashboard, create, edit, duplicate) |
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
+| `/links/…` | short_url: dashboard (`/links/`), create and edit, a link's page and its stats (`<id>/stats/`) |
+| `/s/<code>` | short_url short links (`/s/<code>+` previews one, `/s/<code>/unlock` is the password page of a protected one) — at the root because they're printed and shared |
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
@@ -341,6 +343,24 @@ step at every deploy.
 
 The check fails closed: if Cloudflare can't be reached, signup is refused until it can be. Login
 and "Sign up with Google" have no captcha.
+
+### Short URLs: country statistics (GeoLite2)
+
+Short links record the country of each click from a MaxMind **GeoLite2-Country** database. It is
+optional: without it every country is "unknown", `manage.py check` (and the container's `migrate`
+step) prints `short_url.W001`, and the rest of the statistics are unaffected.
+
+| Variable | Value |
+|---|---|
+| `GEOIP_PATH` | path to the `GeoLite2-Country.mmdb` file (unset: countries unknown) |
+
+To get the file, create a free [MaxMind account](https://www.maxmind.com/en/geolite2/signup),
+accept the GeoLite2 licence and download *GeoLite2 Country* (the `.mmdb` inside the tarball), or let
+`geoipupdate` keep it current. The file is opened once per process (memory-mapped), so a worker
+restart picks up a new one. In a deployment the file has to be in the container: mount it, or fetch
+it when the image is built; that lives in the `infra` repo, not here. Nothing about a visitor but
+the country is stored: a click keeps a keyed hash of the address that changes every day, never the
+address.
 
 ## Development Workflow
 

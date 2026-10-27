@@ -82,7 +82,6 @@ def _unavailable_links(user):
         'held': create_link(user, held_for_review_at=now),
         'expired': expired(user),
         'capped': create_link(user, max_clicks=2, click_count=2),
-        'password': create_link(user, password_hash='pbkdf2_sha256$1$x$y'),
     }
 
 
@@ -255,3 +254,74 @@ class TestPreview:
         link = create_link(user, destination='https://example.com/?a=<script>alert(1)</script>')
         content = client.get(f'/s/{link.code}+').content.decode()
         assert '<script>alert(1)</script>' not in content
+
+
+BOT_AGENT = 'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)'
+
+
+class TestAnalytics:
+    def test_a_click_records_an_event(self, client, link, settings):
+        from ..models import ClickEvent
+
+        settings.ALLOWED_HOSTS = ['testserver']
+        client.get(
+            '/s/Promo1',
+            HTTP_REFERER='https://www.reddit.com/r/something/comments/1',
+            HTTP_USER_AGENT=(
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+                '(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+            ),
+        )
+        event = ClickEvent.objects.get()
+        assert event.link_id == link.pk
+        assert (event.device, event.browser, event.referrer_host) == (
+            'mobile',
+            'Safari',
+            'reddit.com',
+        )
+        assert not event.is_bot
+
+    def test_a_head_records_no_event(self, client, link):
+        from ..models import ClickEvent
+
+        client.head('/s/Promo1')
+        assert not ClickEvent.objects.exists()
+
+    def test_a_link_preview_bot_is_redirected_but_not_counted_as_a_click(self, client, link):
+        from ..models import ClickEvent
+
+        response = client.get('/s/Promo1', HTTP_USER_AGENT=BOT_AGENT)
+        assert response.status_code == 302
+        link.refresh_from_db()
+        assert (link.click_count, link.bot_click_count) == (0, 1)
+        assert ClickEvent.objects.get().is_bot
+
+    def test_a_bot_does_not_use_up_a_click_limit(self, client, user):
+        link = create_link(user, max_clicks=1)
+        assert client.get(f'/s/{link.code}', HTTP_USER_AGENT=BOT_AGENT).status_code == 302
+        assert client.get(f'/s/{link.code}').status_code == 302
+        assert client.get(f'/s/{link.code}').status_code == 404
+
+    def test_over_the_limit_no_event_is_written(self, client, link, tight_limit):
+        from ..models import ClickEvent
+
+        for _ in range(5):
+            assert client.get('/s/Promo1').status_code == 302
+        assert ClickEvent.objects.count() == 2
+        assert clicks(link) == 2
+
+    def test_a_capped_link_over_the_limit_counts_without_an_event(self, client, user, tight_limit):
+        from ..models import ClickEvent
+
+        link = create_link(user, max_clicks=4)
+        for _ in range(4):
+            client.get(f'/s/{link.code}')
+        assert clicks(link) == 4
+        assert ClickEvent.objects.count() == 2, 'the counter moved, the extra insert was shed'
+
+    def test_an_unavailable_link_records_nothing(self, client, user):
+        from ..models import ClickEvent
+
+        gone = create_link(user, status=LinkStatus.DISABLED)
+        client.get(f'/s/{gone.code}')
+        assert not ClickEvent.objects.exists()

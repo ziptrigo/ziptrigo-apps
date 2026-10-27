@@ -16,14 +16,18 @@ from ..services import (
     CostChangedError,
     LimitReachedError,
     LinkInput,
+    analytics_unlocked,
     create_link,
     delete_link,
     display_state,
+    enable_analytics,
     enable_costs,
     is_available,
     normalize_tags,
+    quote_analytics,
     quote_create,
     quote_enable,
+    quote_update,
     set_enabled,
     short_url,
     update_link,
@@ -511,9 +515,12 @@ class TestAvailability:
             make_link(user, expires_at=now),
             make_link(user, max_clicks=3, click_count=3),
             make_link(user, max_clicks=3, click_count=4),
-            make_link(user, password_hash='pbkdf2_sha256$x'),
         ]
         assert not any(is_available(link) for link in cases)
+
+    def test_a_password_does_not_make_a_link_unavailable(self, user):
+        """The visitor is asked for it (`views.password`); the link itself still works."""
+        assert is_available(make_link(user, password_hash='pbkdf2_sha256$x'))
 
     def test_a_future_expiry_and_an_unreached_cap_are_available(self, user):
         link = make_link(
@@ -664,3 +671,143 @@ class TestUpdateAgainstTheLockedRow:
                 update_link(stale, destination='https://example.com/changed')
         task.enqueue.assert_not_called()
         assert stale.title == 'Typed elsewhere'
+
+
+class TestPasswordCharges:
+    """The password extra: charged once per link, whenever a password is first set."""
+
+    def test_creating_with_a_password_stores_a_hash_and_charges_once(self, funded_user):
+        from django.contrib.auth.hashers import check_password
+
+        link = new(funded_user, password='pw1')
+        assert check_password('pw1', link.password_hash) and 'pw1' != link.password_hash
+        assert link.password_paid_at is not None
+        assert balance(funded_user) == 9
+
+    def test_the_cost_is_confirmed_inside_the_transaction(self, funded_user):
+        with pytest.raises(CostChangedError) as exc:
+            create_link(
+                funded_user,
+                LinkInput(destination='https://example.com', password='pw1'),
+                expected_cost=0,
+            )
+        assert exc.value.quote.total == 1
+        assert balance(funded_user) == 10 and not ShortLink.objects.exists()
+
+    def test_alias_password_and_extra_link_add_up(self, funded_user):
+        create_link(funded_user, LinkInput(destination='https://a.example.com'))
+        create_link(funded_user, LinkInput(destination='https://b.example.com'))
+        quote = quote_create(funded_user, 'Sale', has_password=True)
+        assert quote.total == 3
+        link = create_link(
+            funded_user,
+            LinkInput(destination='https://c.example.com', alias='Sale', password='pw'),
+            expected_cost=3,
+        )
+        assert balance(funded_user) == 7
+        assert link.alias_paid_at and link.password_paid_at and link.extra_link_paid_at
+
+    def test_a_refused_charge_rolls_the_whole_creation_back(self, user, prices):
+        add_credits(user, 1, description='t', source='test')
+        with pytest.raises(InsufficientCreditsError):
+            create_link(
+                user, LinkInput(destination='https://example.com', alias='Sale', password='pw')
+            )
+        assert not ShortLink.objects.exists()
+        assert balance(user) == 1
+
+    def test_setting_one_later_charges_once_then_it_is_free(self, funded_user):
+        link = make_link(funded_user)
+        assert quote_update(link, password='x').total == 1
+        update_link(link, password='first', expected_cost=1)
+        assert balance(funded_user) == 9
+        assert quote_update(link, password='second').total == 0
+        update_link(link, password='second', expected_cost=0)
+        update_link(link, password=None)  # removed...
+        update_link(link, password='third', expected_cost=0)  # ...and set again: still free
+        assert balance(funded_user) == 9
+        link.refresh_from_db()
+        assert link.password_hash
+
+    def test_a_wrong_expected_cost_changes_nothing(self, funded_user):
+        link = make_link(funded_user)
+        with pytest.raises(CostChangedError):
+            update_link(link, title='New', password='first', expected_cost=0)
+        link.refresh_from_db()
+        assert not link.password_hash and link.title != 'New'
+        assert balance(funded_user) == 10
+
+    def test_an_edit_without_a_password_has_nothing_to_confirm(self, funded_user):
+        link = make_link(funded_user)
+        assert quote_update(link).total == 0
+        update_link(link, title='New', expected_cost=0)
+        assert balance(funded_user) == 10
+
+    def test_clearing_a_password_that_was_never_set_is_a_no_op(self, funded_user):
+        link = make_link(funded_user)
+        update_link(link, password=None, expected_cost=0)
+        assert link.password_hash is None and balance(funded_user) == 10
+
+    def test_insufficient_credits_roll_the_edit_back(self, user, prices):
+        link = make_link(user)
+        with pytest.raises(InsufficientCreditsError):
+            update_link(link, title='New', password='first')
+        link.refresh_from_db()
+        assert not link.password_hash and link.title != 'New' and link.password_paid_at is None
+
+    def test_a_bad_password_is_a_field_error_before_anything_is_charged(self, funded_user):
+        link = make_link(funded_user)
+        with pytest.raises(ValidationError) as exc:
+            update_link(link, password='   ')
+        assert 'password' in exc.value.error_dict
+        assert balance(funded_user) == 10
+
+    def test_the_bot_filter_can_be_changed(self, funded_user):
+        link = make_link(funded_user)
+        update_link(link, filter_bots=False)
+        link.refresh_from_db()
+        assert link.filter_bots is False
+
+    def test_a_new_link_can_start_with_bots_counted(self, funded_user):
+        link = create_link(
+            funded_user, LinkInput(destination='https://example.com', filter_bots=False)
+        )
+        assert link.filter_bots is False
+
+
+class TestAnalyticsCharge:
+    def test_it_is_charged_once(self, funded_user):
+        link = make_link(funded_user)
+        assert not analytics_unlocked(link)
+        assert quote_analytics(link).total == 1
+        assert enable_analytics(link, expected_cost=1) is True
+        assert analytics_unlocked(link) and quote_analytics(link).total == 0
+        assert enable_analytics(link, expected_cost=0) is False
+        assert balance(funded_user) == 9
+
+    def test_a_different_total_than_confirmed_changes_nothing(self, funded_user):
+        link = make_link(funded_user)
+        with pytest.raises(CostChangedError) as exc:
+            enable_analytics(link, expected_cost=5)
+        assert exc.value.quote.total == 1
+        assert not analytics_unlocked(link) and balance(funded_user) == 10
+
+    def test_without_credits_it_stays_closed(self, user, prices):
+        link = make_link(user)
+        with pytest.raises(InsufficientCreditsError):
+            enable_analytics(link)
+        link.refresh_from_db()
+        assert link.analytics_paid_at is None
+
+    def test_a_price_of_zero_is_open_without_paying(self, funded_user, prices):
+        prices.analytics_price = 0
+        prices.save()
+        link = make_link(funded_user)
+        assert analytics_unlocked(link) and quote_analytics(link).total == 0
+        enable_analytics(link, expected_cost=0)
+        assert balance(funded_user) == 10
+
+    def test_a_link_that_cannot_be_changed_cannot_buy_it(self, funded_user):
+        link = make_link(funded_user, status=LinkStatus.TAKEN_DOWN)
+        with pytest.raises(ValidationError):
+            enable_analytics(link)

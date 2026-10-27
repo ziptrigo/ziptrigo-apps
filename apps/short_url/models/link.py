@@ -91,12 +91,13 @@ class ShortLink(models.Model):
     )
     expires_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
     max_clicks = cast('int | None', models.PositiveIntegerField(null=True, blank=True))
-    #: A Django password hash, or null for a link without one (the password page and its price
-    #: come with the second phase of the app).
+    #: A Django password hash, or null for a link without one. Visitors are asked for it on
+    #: `/s/<code>/unlock` first (`views.password`); setting one is the paid `password` extra.
     password_hash = cast(
         'str | None', models.CharField(max_length=255, null=True, blank=True, editable=False)
     )
-    #: Whether the headline counts leave out clicks flagged as bots (the analytics phase).
+    #: Whether the headline counts, the click cap and the statistics leave out clicks flagged as
+    #: bots (crawlers, link previews). The events are recorded either way; see `services.clicks`.
     filter_bots = cast(bool, models.BooleanField(default=True))
 
     click_count = cast(int, models.PositiveBigIntegerField(default=0))
