@@ -7,9 +7,9 @@ again, or re-enabling a link that paid its way in, costs nothing more. There are
 
 `charge_extra` is the only place credits are spent; it raises `InsufficientCreditsError`
 (`apps.billing.services`), which the web shows as a 422 with a Top up link and the API will answer
-as a 402. Which extras this phase charges: the custom alias and the extra link. The password and
-detailed analytics prices exist in the settings and in `Extra`, and are wired in with those
-features.
+as a 402. All four extras are charged: the custom alias and the extra link when a link is created
+or enabled, the password the first time one is set on a link (`links.create_link` /
+`update_link`), and the detailed statistics when the owner opens them (`links.enable_analytics`).
 """
 
 from dataclasses import dataclass

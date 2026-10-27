@@ -22,6 +22,7 @@ FIELD_LABELS = {
     'tags': 'Tags',
     'expires_at': 'Expires',
     'max_clicks': 'Click limit',
+    'password': 'Password',
 }
 
 

@@ -80,6 +80,12 @@
             <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.max_clicks }}</dd>
         </div>
         {% endif %}
+        {% if link.password_hash %}
+        <div>
+            <dt class="text-gray-500 dark:text-gray-400">Password</dt>
+            <dd class="mt-1 text-gray-900 dark:text-gray-100"><i class="fas fa-lock mr-1" aria-hidden="true"></i>Protected</dd>
+        </div>
+        {% endif %}
     </dl>
 
     <div class="justify-self-start md:justify-self-end">
@@ -97,6 +103,10 @@
         <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit
     </a>
     {% endif %}
+    <a href="{% url 'short_url:stats' link.pk %}"
+       class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        <i class="fas fa-chart-simple mr-2" aria-hidden="true"></i>Stats
+    </a>
     <a href="{% url 's:redirect' link.code %}+" target="_blank" rel="noopener"
        class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
         <i class="fas fa-eye mr-2" aria-hidden="true"></i>Preview

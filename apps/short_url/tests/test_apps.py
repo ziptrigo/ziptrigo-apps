@@ -25,5 +25,12 @@ def test_the_redirect_lives_at_the_site_root():
     assert resolve('/s/abc/').kwargs == {'code': 'abc'}
 
 
+def test_the_password_page_has_its_own_route():
+    assert reverse('s:unlock', args=['abc']) == '/s/abc/unlock'
+    for path in ('/s/Abc-1/unlock', '/s/Abc-1/unlock/'):
+        match = resolve(path)
+        assert match.view_name == 's:unlock' and match.kwargs == {'code': 'Abc-1'}
+
+
 def test_the_qr_apps_links_are_untouched():
     assert resolve('/go/abc12345').view_name == 'go:redirect'

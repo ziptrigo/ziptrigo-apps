@@ -8,6 +8,7 @@ around anything queued on commit.
 """
 
 import pytest
+from django.test import Client
 
 from apps.billing.services import add_credits
 
@@ -23,6 +24,36 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr(titles, 'resolve_public', _refuse)
     monkeypatch.setattr(titles, 'http_get', _refuse)
+
+
+#: What a browser sends. A request with no `User-Agent` counts as a bot, which the test client
+#: would otherwise be, so every test client here introduces itself as a person.
+BROWSER_AGENT = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/120.0.0.0 Safari/537.36'
+)
+
+
+@pytest.fixture
+def client():
+    return Client(HTTP_USER_AGENT=BROWSER_AGENT)
+
+
+@pytest.fixture(autouse=True)
+def fast_password_hasher(settings):
+    """Link passwords are hashed with Django's hasher; a cheap one keeps the tests fast."""
+    settings.PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
+
+
+@pytest.fixture(autouse=True)
+def geoip_off(settings):
+    """No GeoIP database unless a test installs a fake reader."""
+    from ..services import geoip
+
+    settings.GEOIP_PATH = ''
+    geoip.reset()
+    yield
+    geoip.reset()
 
 
 @pytest.fixture(autouse=True)

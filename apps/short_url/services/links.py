@@ -28,7 +28,7 @@ from apps.accounts.models import User
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import LinkStatus, ShortLink, ShortUrlSettings
-from . import billing, codes, limits
+from . import billing, codes, limits, passwords
 from .destinations import apply_utm, validate_destination
 from .errors import AliasTakenError, CostChangedError, field_error
 from .titles import fetch_title
@@ -122,15 +122,12 @@ def _destination_with_utm(destination: str, utm: dict[str, str] | None) -> str:
 
 
 def is_available(link: ShortLink, *, now: datetime | None = None) -> bool:
-    """Whether `/s/<code>` redirects right now: active, not held for review, not expired and
-    not past its click cap. (Later phases add the blocked-destination check here, which is why
+    """Whether `/s/<code>` works right now: active, not held for review, not expired and not
+    past its click cap. A password doesn't make a link unavailable: the visitor is asked for it
+    first (`views.password`). (Later phases add the blocked-destination check here, which is why
     the redirect asks this one function and nothing else.)"""
     now = now or timezone.now()
     if link.status != LinkStatus.ACTIVE or link.held_for_review_at is not None:
-        return False
-    if link.password_hash:
-        # Reached only by a link someone gave a password outside the app: the password page
-        # arrives with the password feature, and until then such a link must not redirect.
         return False
     if link.expires_at is not None and link.expires_at <= now:
         return False
@@ -168,23 +165,31 @@ class LinkInput:
     expires_at: datetime | None = None
     max_clicks: int | None = None
     utm: dict[str, str] | None = None
+    #: A password visitors must enter first (empty: none); a paid extra.
+    password: str = ''
+    #: Whether clicks from bots and link previews are left out of the counts (see `clicks`).
+    filter_bots: bool = True
 
 
 def _create_extras(
-    owner: User, alias: str | None, settings_row: ShortUrlSettings
+    owner: User, alias: str | None, settings_row: ShortUrlSettings, *, has_password: bool = False
 ) -> list[billing.Extra]:
     extras: list[billing.Extra] = []
     if alias and alias.strip():
         extras.append(billing.Extra.ALIAS)
+    if has_password:
+        extras.append(billing.Extra.PASSWORD)
     if limits.is_extra_link(owner, settings=settings_row):
         extras.append(billing.Extra.EXTRA_LINK)
     return extras
 
 
-def quote_create(owner: User, alias: str | None) -> billing.Quote:
-    """What creating a link (with `alias`, if any) would charge, to show before it is."""
+def quote_create(owner: User, alias: str | None, *, has_password: bool = False) -> billing.Quote:
+    """What creating a link (with `alias` and a password, if any) would charge, to show before
+    it is."""
     settings_row = ShortUrlSettings.load()
-    return billing.quote(_create_extras(owner, alias, settings_row), settings_row)
+    extras = _create_extras(owner, alias, settings_row, has_password=has_password)
+    return billing.quote(extras, settings_row)
 
 
 def _lock_owner(owner: User) -> None:
@@ -209,12 +214,14 @@ def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = Non
     alias = (data.alias or '').strip()
     if alias:
         codes.validate_alias(alias)
+    # Hashed before the transaction: a slow hash must not hold the owner's lock.
+    password_hash = passwords.hash_password(data.password) if data.password else None
 
     with transaction.atomic():
         _lock_owner(owner)
         settings_row = ShortUrlSettings.load()
         limits.check_can_create(owner, settings=settings_row)
-        extras = _create_extras(owner, alias, settings_row)
+        extras = _create_extras(owner, alias, settings_row, has_password=bool(password_hash))
         if expected_cost is not None:
             cost = billing.quote(extras, settings_row)
             if cost.total != expected_cost:
@@ -233,6 +240,8 @@ def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = Non
             tags=tags,
             expires_at=expires_at,
             max_clicks=max_clicks,
+            password_hash=password_hash,
+            filter_bots=data.filter_bots,
         )
         # Not `objects.create`: two requests for the same alias race on the unique key, and the
         # loser must say "not available", not 500.
@@ -246,6 +255,8 @@ def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = Non
 
         if alias:
             billing.charge_extra(link, billing.Extra.ALIAS, settings=settings_row)
+        if password_hash:
+            billing.charge_extra(link, billing.Extra.PASSWORD, settings=settings_row)
         if billing.Extra.EXTRA_LINK in extras:
             billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
         if not title:
@@ -270,13 +281,24 @@ def update_link(
     tags: str | Iterable[str] | None = UNSET,
     expires_at: datetime | None = UNSET,
     max_clicks: int | None = UNSET,
+    password: str | None = UNSET,
+    filter_bots: bool = UNSET,
+    expected_cost: int | None = None,
 ) -> ShortLink:
-    """Change the given fields of `link` (a field left out is untouched; `None` clears an expiry
-    or a click cap), all or nothing. The code and the alias never change: that would free the old
-    code for someone else. `utm` is merged into the destination (given or current).
+    """Change the given fields of `link` (a field left out is untouched; `None` clears an expiry,
+    a click cap or the password), all or nothing. The code and the alias never change: that would
+    free the old code for someone else. `utm` is merged into the destination (given or current).
 
-    Only the fields that really differ are written. Raises `ValidationError`.
+    Only the fields that really differ are written (a new password always does: hashes are
+    salted). Setting a password the link has never had pays the `password` extra, once: this is
+    the only charge here, so `expected_cost` (see the module docstring; `None` accepts any) is
+    that price or 0. Raises `ValidationError` (`CostChangedError` among them) or
+    `InsufficientCreditsError`.
     """
+    new_hash: str | None = UNSET
+    if password is not UNSET:
+        # Hashed before the transaction: a slow hash must not hold the link's row lock.
+        new_hash = passwords.hash_password(password) if password is not None else None
     with transaction.atomic():
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
         _require_editable(locked)
@@ -301,19 +323,49 @@ def update_link(
                 changes['expires_at'] = validate_expiry(expires_at)
         if max_clicks is not UNSET:
             changes['max_clicks'] = validate_max_clicks(max_clicks)
+        if new_hash is not UNSET:
+            changes['password_hash'] = new_hash
+        if filter_bots is not UNSET:
+            changes['filter_bots'] = bool(filter_bots)
         changes = {name: value for name, value in changes.items() if getattr(locked, name) != value}
+
+        owes_password = isinstance(new_hash, str) and not billing.is_paid(
+            locked, billing.Extra.PASSWORD
+        )
+        if expected_cost is not None:
+            cost = billing.quote([billing.Extra.PASSWORD] if owes_password else [])
+            if cost.total != expected_cost:
+                raise CostChangedError(cost)
 
         if changes:
             ShortLink.objects.filter(pk=link.pk).update(updated_at=timezone.now(), **changes)
             for name, value in changes.items():
                 setattr(locked, name, value)
-        for name in ('destination', 'title', 'tags', 'expires_at', 'max_clicks'):
+        for name in (
+            'destination',
+            'title',
+            'tags',
+            'expires_at',
+            'max_clicks',
+            'password_hash',
+            'filter_bots',
+        ):
             setattr(link, name, getattr(locked, name))
+        if owes_password:
+            billing.charge_extra(link, billing.Extra.PASSWORD)
         # A new destination makes an automatically fetched title stale, so look again; a title
         # the owner typed is kept (it is set, so nothing is fetched).
         if 'destination' in changes and not locked.title:
             enqueue_after_commit(fetch_title, str(link.pk))
     return link
+
+
+def quote_update(link: ShortLink, *, password: str | None = UNSET) -> billing.Quote:
+    """What `update_link(link, password=...)` would charge, to show before it does: the
+    `password` price when a password is being set on a link that never paid for one."""
+    if not password or password is UNSET or billing.is_paid(link, billing.Extra.PASSWORD):
+        return billing.Quote()
+    return billing.quote([billing.Extra.PASSWORD])
 
 
 def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = None) -> bool:
@@ -381,6 +433,63 @@ def enable_costs(owner: User, links: Iterable[ShortLink]) -> dict[uuid.UUID, int
         else 0
         for link in links
     }
+
+
+def analytics_unlocked(link: ShortLink) -> bool:
+    """Whether the link's detailed statistics are open: paid for, or free (a price of 0)."""
+    return (
+        billing.is_paid(link, billing.Extra.ANALYTICS)
+        or billing.price(billing.Extra.ANALYTICS) == 0
+    )
+
+
+def unlock_free_analytics(link: ShortLink) -> bool:
+    """`analytics_unlocked`, and while the price is 0 also records the unlock: the first time a
+    free link's statistics are opened `analytics_paid_at` is stamped (a conditional update, so
+    idempotent and race-free), as `charge_extra` does for the other extras at a price of 0. A
+    later price increase then doesn't take away statistics the link already had."""
+    if billing.is_paid(link, billing.Extra.ANALYTICS):
+        return True
+    if billing.price(billing.Extra.ANALYTICS) != 0:
+        return False
+    now = timezone.now()
+    if ShortLink.objects.filter(pk=link.pk, analytics_paid_at__isnull=True).update(
+        analytics_paid_at=now
+    ):
+        link.analytics_paid_at = now
+    else:
+        link.refresh_from_db(fields=['analytics_paid_at'])
+    return True
+
+
+def quote_analytics(link: ShortLink) -> billing.Quote:
+    """What opening the detailed statistics would charge (nothing once paid, or when free)."""
+    if analytics_unlocked(link):
+        return billing.Quote()
+    return billing.quote([billing.Extra.ANALYTICS])
+
+
+def enable_analytics(link: ShortLink, *, expected_cost: int | None = None) -> bool:
+    """Pay for the link's detailed statistics, once. Returns whether anything was charged or
+    recorded (False when it was already open). Events are recorded from the first click, so the
+    history is there the moment it is enabled.
+
+    `expected_cost` is the total the caller confirmed (see the module docstring; `None` accepts
+    any). Raises `ValidationError` for a taken down or deleted link or `CostChangedError`, and
+    `InsufficientCreditsError`.
+    """
+    with transaction.atomic():
+        locked = ShortLink.objects.select_for_update().get(pk=link.pk)
+        _require_editable(locked)
+        if locked.analytics_paid_at is not None:
+            link.analytics_paid_at = locked.analytics_paid_at
+            return False
+        if expected_cost is not None:
+            cost = billing.quote([billing.Extra.ANALYTICS])
+            if cost.total != expected_cost:
+                raise CostChangedError(cost)
+        billing.charge_extra(link, billing.Extra.ANALYTICS)
+        return True
 
 
 def delete_link(link: ShortLink) -> bool:

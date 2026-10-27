@@ -1,0 +1,119 @@
+{% extends 'short_url/layout.html' %}
+{% load short_url_ui %}
+
+{% block title %}Stats for {% firstof link.title link.code %} - ZipTrigo{% endblock %}
+{% block page_width %}max-w-4xl{% endblock %}
+
+{% block su_content %}
+<div x-data="confirmModal">
+<div class="mb-6">
+    <a href="{% url 'short_url:detail' link.pk %}"
+       class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>{{ link.code }}</a>
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h1 class="min-w-0 break-words text-3xl font-bold text-gray-900 dark:text-gray-100">Stats</h1>
+        {% link_status_pill link %}
+    </div>
+    <p class="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">{{ short_url }}</p>
+</div>
+
+{% comment %} Totals: always shown, whatever the link has paid for. {% endcomment %}
+<dl class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+        <dt class="text-sm text-gray-500 dark:text-gray-400">Clicks</dt>
+        <dd class="mt-1 text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ totals.clicks }}</dd>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{% if link.max_clicks %}Every visit, bots included: the click limit counts them.{% elif totals.filter_bots %}People only: bots are left out.{% else %}Bots included.{% endif %}</p>
+    </div>
+    <div class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+        <dt class="text-sm text-gray-500 dark:text-gray-400">Unique visitors</dt>
+        <dd class="mt-1 text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ totals.uniques }}</dd>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Counted per day: someone back on another day counts again.</p>
+    </div>
+    <div class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+        <dt class="text-sm text-gray-500 dark:text-gray-400">Bot clicks</dt>
+        <dd class="mt-1 text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ totals.bot_clicks }}</dd>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Crawlers and link previews. {% if link.max_clicks or not totals.filter_bots %}Also in the clicks.{% else %}Not in the clicks.{% endif %}
+            <a href="{% url 'short_url:edit' link.pk %}" class="underline">Change</a></p>
+    </div>
+</dl>
+
+{% if not unlocked %}
+<section class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6" aria-labelledby="analytics-heading">
+    <h2 id="analytics-heading" class="text-lg font-semibold text-gray-900 dark:text-gray-100"><i class="fas fa-chart-simple mr-2 text-sage-400" aria-hidden="true"></i>Detailed analytics</h2>
+    <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">See clicks over time and where they come from: top referrers, countries, devices and browsers, for the last 7, 30 or 90 days or all time.</p>
+    <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">Every click has been recorded since the link was created, so you will see its whole history the moment you turn this on.</p>
+    {% if link.status == 'active' or link.status == 'disabled' %}
+    <button type="button" @click="show($el)"
+            data-url="{% url 'short_url:enable-analytics' link.pk %}" data-tone="primary" data-label="Turn on for {{ analytics_cost }} credit{{ analytics_cost|pluralize }}"
+            data-cost="{{ analytics_cost }}" data-title="Turn on detailed analytics?"
+            data-body="This costs {{ analytics_cost }} credit{{ analytics_cost|pluralize }}, once for this link. It won't be charged again."
+            class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        <i class="fas fa-unlock mr-2" aria-hidden="true"></i>Turn on for {{ analytics_cost }} credit{{ analytics_cost|pluralize }}
+    </button>
+    {% endif %}
+</section>
+{% else %}
+<nav class="mb-4 flex flex-wrap items-center gap-2" aria-label="Date range">
+    {% for key, label in range_choices %}
+    <a href="?range={{ key }}" {% if key == detail.key %}aria-current="true"{% endif %}
+       class="px-3 py-1.5 rounded-md text-sm font-medium border {% if key == detail.key %}border-sage-500 bg-sage-100 text-sage-800 dark:bg-gray-700 dark:text-gray-100 dark:border-sage-300{% else %}border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700{% endif %}">{{ label }}</a>
+    {% endfor %}
+</nav>
+
+<section class="mb-8 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4" aria-labelledby="chart-heading">
+    <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="chart-heading" class="text-lg font-semibold text-gray-900 dark:text-gray-100">Clicks over time</h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400"><strong class="tabular-nums text-gray-900 dark:text-gray-100">{{ detail.clicks }}</strong> click{{ detail.clicks|pluralize }},
+            <strong class="tabular-nums text-gray-900 dark:text-gray-100">{{ detail.uniques }}</strong> unique visitor{{ detail.uniques|pluralize }}
+            in {{ range_label|lower }}{% if detail.key == 'all' %} (since {{ detail.start|date:'M j, Y' }}){% endif %}</p>
+    </div>
+    {% if peak %}
+    <p class="text-xs text-gray-500 dark:text-gray-400">Tallest bar: {{ peak }} click{{ peak|pluralize }} in a {{ bucket_unit }}</p>
+    <svg viewBox="0 0 {{ chart_width }} {{ chart_height }}" preserveAspectRatio="none" class="mt-1 w-full h-40 overflow-visible"
+         role="img" aria-label="Clicks per {{ bucket_unit }} over {{ range_label|lower }}: {{ detail.clicks }} in total, at most {{ peak }} in a {{ bucket_unit }}">
+        <line x1="0" y1="{{ chart_height }}" x2="{{ chart_width }}" y2="{{ chart_height }}" class="stroke-gray-300 dark:stroke-gray-600" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+        {% for bar in bars %}{% if bar.clicks %}
+        <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}" class="fill-sage-500 dark:fill-sage-300"><title>{{ bar.label }}: {{ bar.clicks }} click{{ bar.clicks|pluralize }}</title></rect>
+        {% endif %}{% endfor %}
+    </svg>
+    <div class="mt-1 flex justify-between text-xs text-gray-500 dark:text-gray-400" aria-hidden="true">
+        <span>{{ first_label }}</span><span>{{ last_label }}</span>
+    </div>
+    <details class="mt-3 text-sm">
+        <summary class="cursor-pointer text-sage-600 dark:text-sage-300">Show as a table</summary>
+        <table class="mt-2 w-full text-left">
+            <thead><tr class="text-gray-500 dark:text-gray-400"><th scope="col" class="py-1 font-medium">{{ bucket_unit|capfirst }}</th><th scope="col" class="py-1 text-right font-medium">Clicks</th></tr></thead>
+            <tbody>{% for bucket in detail.buckets %}<tr class="border-t border-gray-100 dark:border-gray-700"><td class="py-1">{{ bucket.label }}</td><td class="py-1 text-right tabular-nums">{{ bucket.clicks }}</td></tr>{% endfor %}</tbody>
+        </table>
+    </details>
+    {% else %}
+    <p class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">No clicks in this period yet.</p>
+    {% endif %}
+</section>
+
+<div class="grid gap-6 md:grid-cols-2">
+    {% for table in detail.tables %}
+    <section class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4" aria-labelledby="top-{{ table.kind }}">
+        <h2 id="top-{{ table.kind }}" class="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">{{ table.title }}</h2>
+        {% if table.rows %}
+        <ul class="space-y-2">
+            {% for row in table.rows %}
+            <li>
+                <div class="flex items-baseline justify-between gap-3 text-sm">
+                    <span class="min-w-0 truncate text-gray-900 dark:text-gray-100" title="{{ row.label }}">{{ row.label }}</span>
+                    <span class="shrink-0 tabular-nums text-gray-600 dark:text-gray-400">{{ row.count }} <span class="text-xs">({{ row.percent }}%)</span></span>
+                </div>
+                <div class="mt-1 h-1.5 rounded bg-gray-100 dark:bg-gray-700" aria-hidden="true"><div class="h-1.5 rounded bg-sage-400" style="width: {{ row.percent }}%"></div></div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-sm text-gray-500 dark:text-gray-400">Nothing yet.</p>
+        {% endif %}
+    </section>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% include 'core/partials/confirm_modal.html' %}
+</div>
+{% endblock %}

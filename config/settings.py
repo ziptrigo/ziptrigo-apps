@@ -347,7 +347,7 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # Same behaviour over the limit (`apps/short_url/views/redirect.py`): charged *before* the
     # lookup, so made-up codes spend the budget too; a known link still redirects (a visitor behind
     # a busy shared IP must never see an error because others followed the same link) but its
-    # click write is skipped, and an unknown code is a 404, never a 429. The rule protects the
+    # click event is not recorded, and an unknown code is a 404, never a 429. The rule protects the
     # accuracy of the click counts, it doesn't shed load (nginx's looser `/s/` zone, an infra
     # follow-up, does that). One exception, deliberately unlike `/go/`: a link with a click cap
     # (`max_clicks`) is still counted over the limit, because there the counter is what ends the
@@ -362,6 +362,17 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # The QR image of a link (CPU-bound rendering): per user, shared by the dashboard and the
     # link page. Looser than creating: a page of rows can show several at once.
     'SU_QR_USER': (60, 60),
+    # The password page of a protected link (`/s/<code>/unlock`), the same split as file
+    # transfer's `FT_UNLOCK_*` (and for the same reason, see "Rate limiting" in CLAUDE.md):
+    # `SU_PASSWORD_IP` is strict and counts every attempt; `SU_PASSWORD_LINK` is a looser ceiling
+    # per link, across every IP, that counts only *wrong* passwords (peeked before the attempt,
+    # hit after it fails), so someone who merely knows a code can't lock the real recipients out
+    # while one password still can't be guessed from many addresses.
+    'SU_PASSWORD_IP': (15, 10 * 60),
+    'SU_PASSWORD_LINK': (30, 10 * 60),
+    # The preview page (`/s/<code>+`): a page someone opens deliberately, so far fewer than
+    # redirects; over the limit it is a plain 429 (unlike the redirect, which never errors).
+    'SU_PREVIEW_IP': (60, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -756,6 +767,11 @@ QR_CODE_REDIRECT_PATH = '/go/'
 # Short URLs (issue #162): a short link is `<BASE_URL>/s/<code>`. Like `/go/`, the path is
 # printed and shared, so it must never move.
 SHORT_URL_PATH = '/s/'
+
+# MaxMind GeoLite2-Country database (`.mmdb`) used to tell the country of a click
+# (`apps.short_url.services.geoip`). Empty or a missing file: every country is "unknown" and
+# `manage.py check` warns (`short_url.W001`); nothing else is affected. See README, "Short URLs".
+GEOIP_PATH = os.getenv('GEOIP_PATH', '')
 
 
 # Jazzmin configuration

@@ -49,6 +49,8 @@ class TestCreatePage:
             'utm_campaign',
             'utm_term',
             'utm_content',
+            'password',
+            'include_bots',
         ):
             assert f'name="{name}"' in content
         assert 'An alias costs 1 credit' in content
@@ -243,8 +245,8 @@ class TestCostConfirmation:
 
         create_link(funded_user)
 
-        def quote_then_use_the_last_slot(owner, alias):
-            result = real_quote(owner, alias)
+        def quote_then_use_the_last_slot(owner, alias, **kwargs):
+            result = real_quote(owner, alias, **kwargs)
             create_link(funded_user)  # a concurrent request fills the allowance
             return result
 
@@ -365,7 +367,7 @@ class TestEdit:
         link.refresh_from_db()
         assert (link.destination, link.title) == ('https://example.com/old', 'Old title')
 
-    def test_editing_never_charges(self, web, funded_user, link):
+    def test_editing_without_a_password_never_charges(self, web, funded_user, link):
         web.post(self.url(link), {'destination': 'https://example.com/new'}, **HX)
         assert balance(funded_user) == 10
 
@@ -433,3 +435,198 @@ class TestEdit:
         assert (
             client.post(self.url(link), {'destination': 'https://example.com/x'}).status_code == 302
         )
+
+
+def post_edit(client, link, **fields):
+    data = {'destination': link.destination}
+    data.update(fields)
+    return client.post(reverse('short_url:edit', args=[link.pk]), data, **HX)
+
+
+class TestPasswordOnTheForm:
+    def test_the_create_form_shows_the_password_price(self, web):
+        content = web.get(reverse(CREATE)).content.decode()
+        assert 'A password costs 1 credit, once per link.' in content
+        assert 'name="clear_password"' not in content
+
+    def test_a_free_password_is_announced_as_free(self, web, prices):
+        prices.password_price = 0
+        prices.save()
+        assert 'Passwords are free.' in web.get(reverse(CREATE)).content.decode()
+
+    def test_a_password_asks_before_charging(self, web, funded_user):
+        response = post_create(web, password='hunter2')
+        assert response.status_code == 422
+        assert response['HX-Retarget'] == '#cost-confirm'
+        assert 'password 1' in response.content.decode()
+        assert not ShortLink.objects.exists()
+        assert balance(funded_user) == 10
+
+    def test_confirming_creates_a_protected_link_and_charges_once(self, web, funded_user):
+        from django.contrib.auth.hashers import check_password
+
+        response = post_create(web, password='hunter2', confirm_cost='1')
+        assert response.status_code == 200
+        link = ShortLink.objects.get(owner=funded_user)
+        assert link.password_hash and 'hunter2' not in link.password_hash
+        assert check_password('hunter2', link.password_hash)
+        assert link.password_paid_at is not None
+        assert balance(funded_user) == 9
+
+    def test_an_alias_and_a_password_are_one_confirmation(self, web, funded_user):
+        content = post_create(web, alias='Sale', password='hunter2').content.decode()
+        assert 'value="2"' in content
+        assert 'custom alias 1' in content and 'password 1' in content
+        post_create(web, alias='Sale', password='hunter2', confirm_cost='2')
+        assert balance(funded_user) == 8
+
+    def test_a_free_password_needs_no_confirmation(self, web, funded_user, prices):
+        prices.password_price = 0
+        prices.save()
+        assert post_create(web, password='hunter2').status_code == 200
+        assert ShortLink.objects.get(owner=funded_user).password_hash
+        assert balance(funded_user) == 10
+
+    @pytest.mark.parametrize(
+        ('password', 'message'),
+        [('   ', 'Password: Enter a password.'), ('x' * 129, 'Password: Use at most 128')],
+    )
+    def test_a_bad_password_is_a_422(self, web, password, message):
+        response = post_create(web, password=password, confirm_cost='1')
+        assert response.status_code == 422
+        assert message in response.content.decode()
+        assert not ShortLink.objects.exists()
+
+    def test_a_password_with_spaces_is_kept_as_typed(self, web, funded_user):
+        from django.contrib.auth.hashers import check_password
+
+        post_create(web, password=' two words ', confirm_cost='1')
+        link = ShortLink.objects.get(owner=funded_user)
+        assert check_password(' two words ', link.password_hash)
+
+    def test_insufficient_credits_says_so_with_a_top_up_link(self, client, user, prices):
+        client.force_login(user)
+        response = post_create(client, password='hunter2', confirm_cost='1')
+        assert response.status_code == 422
+        assert reverse('billing:credits-history') in response.content.decode()
+        assert not ShortLink.objects.exists()
+
+
+class TestBotOptionOnTheForm:
+    def test_bots_are_filtered_by_default(self, web, funded_user):
+        post_create(web)
+        assert ShortLink.objects.get(owner=funded_user).filter_bots is True
+
+    def test_ticking_the_box_counts_bots(self, web, funded_user):
+        post_create(web, include_bots='on')
+        assert ShortLink.objects.get(owner=funded_user).filter_bots is False
+
+    def test_the_edit_form_reflects_and_changes_it(self, web, funded_user):
+        link = create_link(funded_user, filter_bots=False)
+        content = web.get(reverse('short_url:edit', args=[link.pk])).content.decode()
+        assert 'name="include_bots" value="on" checked' in content
+        assert post_edit(web, link).status_code == 200  # the box left unticked
+        link.refresh_from_db()
+        assert link.filter_bots is True
+        post_edit(web, link, include_bots='on')
+        link.refresh_from_db()
+        assert link.filter_bots is False
+
+
+class TestEditPassword:
+    @pytest.fixture
+    def link(self, funded_user):
+        return create_link(funded_user, code='Edit02', destination='https://example.com/old')
+
+    def test_setting_one_asks_then_charges_once(self, web, funded_user, link):
+        response = post_edit(web, link, password='hunter2')
+        assert response.status_code == 422
+        assert response['HX-Retarget'] == '#cost-confirm'
+        assert 'Save changes for 1 credit' in response.content.decode()
+        link.refresh_from_db()
+        assert not link.password_hash and balance(funded_user) == 10
+
+        assert post_edit(web, link, password='hunter2', confirm_cost='1').status_code == 200
+        link.refresh_from_db()
+        assert link.password_hash and link.password_paid_at is not None
+        assert balance(funded_user) == 9
+
+    def test_changing_it_later_is_free(self, web, funded_user, link):
+        post_edit(web, link, password='first', confirm_cost='1')
+        before = ShortLink.objects.get(pk=link.pk).password_hash
+        assert post_edit(web, link, password='second').status_code == 200
+        link.refresh_from_db()
+        assert link.password_hash != before
+        assert balance(funded_user) == 9
+
+    def test_blank_keeps_the_password(self, web, funded_user, link):
+        post_edit(web, link, password='first', confirm_cost='1')
+        before = ShortLink.objects.get(pk=link.pk).password_hash
+        post_edit(web, link, title='New title')
+        link.refresh_from_db()
+        assert link.password_hash == before and link.title == 'New title'
+
+    def test_removing_it_and_setting_it_again_is_free(self, web, funded_user, link):
+        post_edit(web, link, password='first', confirm_cost='1')
+        post_edit(web, link, clear_password='on')
+        link.refresh_from_db()
+        assert link.password_hash is None and link.password_paid_at is not None
+        assert post_edit(web, link, password='again').status_code == 200
+        link.refresh_from_db()
+        assert link.password_hash
+        assert balance(funded_user) == 9
+
+    def test_removing_wins_over_a_typed_password(self, web, funded_user, link):
+        post_edit(web, link, password='first', confirm_cost='1')
+        post_edit(web, link, password='second', clear_password='on')
+        assert ShortLink.objects.get(pk=link.pk).password_hash is None
+
+    def test_the_edit_form_offers_removal_only_when_there_is_a_password(self, web, link):
+        url = reverse('short_url:edit', args=[link.pk])
+        assert 'name="clear_password"' not in web.get(url).content.decode()
+        post_edit(web, link, password='first', confirm_cost='1')
+        content = web.get(url).content.decode()
+        assert 'name="clear_password"' in content
+        assert 'You already paid for this extra' in content
+
+    def test_a_wrong_confirmation_asks_again_and_changes_nothing(self, web, funded_user, link):
+        response = post_edit(web, link, password='hunter2', confirm_cost='0', title='Changed')
+        assert response.status_code == 422
+        assert response['HX-Retarget'] == '#cost-confirm'
+        link.refresh_from_db()
+        assert not link.password_hash and link.title != 'Changed'
+
+    def test_a_price_changed_after_the_quote_asks_instead_of_charging(
+        self, web, funded_user, link, monkeypatch, prices
+    ):
+        from ..services import quote_update as real_quote
+        from ..views import form as form_module
+
+        def quote_then_the_price_moves(link, **kwargs):
+            result = real_quote(link, **kwargs)
+            prices.password_price = 3
+            prices.save()
+            return result
+
+        monkeypatch.setattr(form_module, 'quote_update', quote_then_the_price_moves)
+        response = post_edit(web, link, password='hunter2', confirm_cost='1')
+        assert response.status_code == 422
+        assert (
+            response['HX-Retarget'] == '#cost-confirm' and 'value="3"' in response.content.decode()
+        )
+        assert balance(funded_user) == 10
+        assert not ShortLink.objects.get(pk=link.pk).password_hash
+
+    def test_without_enough_credits_nothing_is_saved(self, client, user, prices):
+        client.force_login(user)
+        link = create_link(user, destination='https://example.com/old')
+        response = post_edit(client, link, password='hunter2', title='Changed', confirm_cost='1')
+        assert response.status_code == 422
+        assert reverse('billing:credits-history') in response.content.decode()
+        link.refresh_from_db()
+        assert not link.password_hash and link.title != 'Changed'
+
+    def test_a_bad_password_is_a_422(self, web, link):
+        response = post_edit(web, link, password='x' * 200, confirm_cost='1')
+        assert response.status_code == 422
+        assert 'Password' in response.content.decode()

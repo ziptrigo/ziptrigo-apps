@@ -75,6 +75,31 @@
         </div>
     </div>
 
+    <div class="mb-4" x-data="{ clear: false }">
+        <label for="id_password" class="block mb-1 text-sm font-medium">Password <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
+        <input id="id_password" name="password" type="password" maxlength="128" autocomplete="new-password" aria-describedby="password-help"
+               :disabled="clear" placeholder="{% if has_password %}Leave empty to keep the current password{% endif %}"
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:opacity-60">
+        <p id="password-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Visitors must enter it before they are sent on. It is remembered for the link in their browser session.
+            {% if password_paid %}You already paid for this extra on this link, so changing the password is free.{% elif password_price %}A password costs {{ password_price }} credit{{ password_price|pluralize }}, once per link.{% else %}Passwords are free.{% endif %}
+        </p>
+        {% if has_password %}
+        <label class="mt-2 inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" name="clear_password" value="on" x-model="clear" class="rounded border-gray-300 dark:border-gray-600">
+            Remove the password
+        </label>
+        {% endif %}
+    </div>
+
+    <div class="mb-6">
+        <label class="inline-flex items-start gap-2 text-sm">
+            <input type="checkbox" name="include_bots" value="on" {% if values.include_bots %}checked{% endif %} class="mt-0.5 rounded border-gray-300 dark:border-gray-600" aria-describedby="bots-help">
+            <span>Count bots and link previews as clicks</span>
+        </label>
+        <p id="bots-help" class="mt-1 ml-6 text-xs text-gray-500 dark:text-gray-400">By default crawlers and the previews chat apps fetch are kept out of the click count and the statistics. They are still recorded. A click limit counts every visit, bots included, whatever this says.</p>
+    </div>
+
     <details class="mb-6 rounded border border-gray-200 dark:border-gray-700 px-4 py-3">
         <summary class="cursor-pointer text-sm font-medium">Campaign tracking (UTM)</summary>
         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Added to the destination's query string when you save. {% if link %}Leave a field empty to keep what the address already has; to remove a parameter, edit the destination above.{% endif %}</p>

@@ -11,7 +11,7 @@
     </button>
     <div x-show="menu" style="display: none" role="menu"
          class="absolute right-0 top-full mt-2 w-48 z-30 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700">
-        <a href="{% url 'short_url:detail' link.pk %}" role="menuitem"
+        <a href="{% url 'short_url:stats' link.pk %}" role="menuitem"
            class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
             <i class="fas fa-chart-simple mr-2 w-4 text-center" aria-hidden="true"></i>Stats</a>
         <a href="{% url 'short_url:edit' link.pk %}" role="menuitem"

@@ -2,16 +2,25 @@
 
 {% block title %}Where does this link go? - ZipTrigo{% endblock %}
 
-{% comment %} A minimal preview: where the link goes, without following it. The report form and the rest of
-   the page come with the preview phase. {% endcomment %}
+{% comment %} The preview of a link: where it goes, without following it. A protected link shows neither its destination
+   nor its title until the password was entered in this session. The report form comes with the abuse-tooling
+   phase. {% endcomment %}
 {% block content %}
 <div class="container mx-auto px-4 py-16 max-w-xl">
-    <h1 class="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">Where does this link go?</h1>
-    {% if link.title %}<p class="mb-2 font-medium text-gray-900 dark:text-gray-100">{{ link.title }}</p>{% endif %}
-    <p class="mb-6 break-all rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{{ link.destination }}</p>
-    <a href="{% url 's:redirect' link.code %}" rel="nofollow noopener"
-       class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
-        Continue<i class="fas fa-arrow-right ml-2" aria-hidden="true"></i>
-    </a>
+    <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6">
+        <h1 class="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">Where does this link go?</h1>
+        {% if locked %}
+        <p class="mb-6 text-sm text-gray-700 dark:text-gray-300"><i class="fas fa-lock mr-1 text-gray-400" aria-hidden="true"></i>This link is protected by a password. Its destination is shown once you have entered it.</p>
+        {% else %}
+        {% if link.title %}<p class="mb-2 font-medium text-gray-900 dark:text-gray-100">{{ link.title }}</p>{% endif %}
+        {% if host %}<p class="mb-2 text-sm text-gray-500 dark:text-gray-400">Goes to <strong class="text-gray-900 dark:text-gray-100">{{ host }}</strong></p>{% endif %}
+        <p class="mb-6 break-all rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{{ link.destination }}</p>
+        {% endif %}
+        <p class="mb-6 text-xs text-gray-500 dark:text-gray-400">Created {{ link.created_at|timesince }} ago. Only continue if you trust where it leads.</p>
+        <a href="{% url 's:redirect' link.code %}" rel="nofollow noopener"
+           class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            Continue<i class="fas fa-arrow-right ml-2" aria-hidden="true"></i>
+        </a>
+    </div>
 </div>
 {% endblock %}
