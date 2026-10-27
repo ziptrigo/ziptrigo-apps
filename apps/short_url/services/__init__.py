@@ -22,6 +22,7 @@ from .errors import (
     CostChangedError,
     LimitReachedError,
     LinkHeldError,
+    OwnerInactiveError,
 )
 from .limits import active_link_count, check_can_create, is_extra_link, link_count
 from .links import (
@@ -64,6 +65,7 @@ __all__ = [
     'LimitReachedError',
     'LinkHeldError',
     'LinkInput',
+    'OwnerInactiveError',
     'Quote',
     'active_link_count',
     'analytics_unlocked',

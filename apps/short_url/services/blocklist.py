@@ -14,6 +14,7 @@ It never says why a link is refused, or that a block list exists, like
 """
 
 import ipaddress
+from collections.abc import Iterable
 
 from django.db.models import Q
 from django.utils import timezone
@@ -53,6 +54,18 @@ def is_blocked(host: str) -> bool:
     now. One indexed query; an expired entry doesn't count."""
     candidates = _candidates(host)
     return bool(candidates) and _active().filter(value__in=candidates).exists()
+
+
+def blocked_hosts(hosts: Iterable[str]) -> set[str]:
+    """The subset of `hosts` that is on the block list right now, for a whole page of links at
+    once: one query for all of them (not one per host), then matched in Python with the same
+    rules as `is_blocked`."""
+    wanted = {host: _candidates(host) for host in set(hosts)}
+    every = {value for values in wanted.values() for value in values}
+    if not every:
+        return set()
+    blocked = set(_active().filter(value__in=every).values_list('value', flat=True))
+    return {host for host, values in wanted.items() if blocked.intersection(values)}
 
 
 def check_not_blocked(host: str) -> None:

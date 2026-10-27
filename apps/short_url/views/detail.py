@@ -21,8 +21,11 @@ from .common import owned_link, render_page
 def link_detail(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
     link = owned_link(request, link_id)
     link.enable_cost = quote_enable(link).total
-    # A database query, so only asked of a link that would otherwise be working.
-    blocked = link.status == LinkStatus.ACTIVE and is_destination_blocked(link)
+    # A database query, so only asked of a link that isn't already ended (a disabled one too: the
+    # owner should see "Not working" before paying to enable it).
+    blocked = link.status in (LinkStatus.ACTIVE, LinkStatus.DISABLED) and is_destination_blocked(
+        link
+    )
     return render_page(
         request,
         'short_url/detail.html',

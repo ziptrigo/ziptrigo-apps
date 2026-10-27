@@ -6,6 +6,8 @@
         Thank you, your report has been submitted.
     </div>
     {% else %}
+    {% comment %} A rate-limit 429 is retargeted here (innerHTML), so the form and what was typed stay. {% endcomment %}
+    <div id="report-msg" role="alert"></div>
     <form method="post" action="{% url 's:report' link.code %}"
           hx-post="{% url 's:report' link.code %}" hx-target="#report-box" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]"
           class="space-y-3">

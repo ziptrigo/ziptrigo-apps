@@ -40,10 +40,18 @@ def maybe_hold_for_reports(link: ShortLink, settings_row: ShortUrlSettings | Non
     if not threshold or link.held_for_review_at or link.status not in _HOLDABLE:
         return False
 
-    reporter_ips = link.reports.filter(
-        status=ReportStatus.PENDING, reporter_ip__isnull=False
-    ).values_list('reporter_ip', flat=True)
-    if len({normalize_ip_for_key(ip) for ip in reporter_ips}) < threshold:
+    reporter_ips = (
+        link.reports.filter(status=ReportStatus.PENDING, reporter_ip__isnull=False)
+        .values_list('reporter_ip', flat=True)
+        .iterator()
+    )
+    # Stops reading as soon as the threshold is reached: unreviewed reports can pile up.
+    distinct: set[str] = set()
+    for ip in reporter_ips:
+        distinct.add(normalize_ip_for_key(ip))
+        if len(distinct) >= threshold:
+            break
+    else:
         return False
 
     now = timezone.now()

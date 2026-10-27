@@ -48,6 +48,16 @@ class BlockedDomainError(ValidationError):
         super().__init__({'destination': self.MESSAGE})
 
 
+class OwnerInactiveError(ValidationError):
+    """The owner's account is not active (staff deactivated it): it can create, edit or enable
+    nothing, whether or not its web session is still alive. Disabling and deleting stay open."""
+
+    MESSAGE = 'Your account is not active, so links cannot be created, changed or enabled.'
+
+    def __init__(self) -> None:
+        super().__init__(self.MESSAGE)
+
+
 class LinkHeldError(ValidationError):
     """The link is held for abuse review: its owner can disable it and nothing else (the API
     answers 409). It says nothing about why."""

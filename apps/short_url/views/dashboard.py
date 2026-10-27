@@ -24,7 +24,7 @@ from apps.core.htmx import is_htmx
 
 from ..forms import PAGE_SIZE, STATUS_TABS, ParsedFilters, parse_filters
 from ..models import LinkStatus, ShortLink
-from ..services import enable_costs
+from ..services import blocklist, destination_host, display_state, enable_costs
 from .common import render_page
 
 #: What can be part of a tag (`services.normalize_tags`), case-insensitively for a search.
@@ -114,8 +114,14 @@ def _list_context(request: AuthenticatedHttpRequest, parsed: ParsedFilters) -> d
     links = list(page_obj.object_list)
     # What enabling each disabled row costs, so its menu can ask before charging.
     costs = enable_costs(request.user, links)
+    # One query for the page's distinct hosts, so a link whose destination was blocked after it
+    # was made shows "Not working" instead of "Active" (the same pill as its own page).
+    blocked = blocklist.blocked_hosts(destination_host(link.destination) for link in links)
     for link in links:
         link.enable_cost = costs[link.pk]
+        link.state = display_state(
+            link, now=now, destination_blocked=destination_host(link.destination) in blocked
+        )
 
     counts = tab_counts(request, now)
     tabs = []

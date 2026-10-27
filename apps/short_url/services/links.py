@@ -30,7 +30,13 @@ from apps.core.services.queue import enqueue_after_commit
 from ..models import LinkStatus, ShortLink, ShortUrlSettings
 from . import billing, blocklist, codes, limits, passwords
 from .destinations import apply_utm, destination_host, validate_destination
-from .errors import AliasTakenError, CostChangedError, LinkHeldError, field_error
+from .errors import (
+    AliasTakenError,
+    CostChangedError,
+    LinkHeldError,
+    OwnerInactiveError,
+    field_error,
+)
 from .titles import fetch_title
 
 MAX_TAGS = 20
@@ -140,7 +146,10 @@ def is_available(link: ShortLink, *, now: datetime | None = None) -> bool:
     function and nothing else, so each of those states renders the same neutral page.
 
     The block list is a database query, so it is asked last, only of a link that passed every
-    other check."""
+    other check. That is one indexed query on the hottest path of the app, deliberately uncached
+    for now (a cache would need invalidating on every `BlockedDomain` save and delete, or a block
+    would not take effect at once). If redirect volume makes it matter, cache the active block set
+    (or the answer per host) for a few seconds and clear it from `BlockedDomain.save`/`delete`."""
     now = now or timezone.now()
     if link.status != LinkStatus.ACTIVE or link.held_for_review_at is not None:
         return False
@@ -164,11 +173,15 @@ def display_state(
     `held`, `expired`, `capped`, `blocked` or `active`.
 
     `blocked` (the destination's host is on the block list) needs a database query, so it is
-    reported only when the caller asked and passes `destination_blocked` (the link's own page
-    does; the dashboard's rows don't, and the dashboard tabs count such a link as active)."""
+    reported only when the caller passes `destination_blocked` (the link's own page asks per link;
+    the dashboard asks once per page, `blocklist.blocked_hosts`; the dashboard *tabs* are database
+    filters and still count such a link under its stored status). A disabled link whose
+    destination is blocked is `blocked` too, so its owner sees why before paying to enable it."""
     now = now or timezone.now()
-    if link.status in (LinkStatus.TAKEN_DOWN, LinkStatus.DELETED, LinkStatus.DISABLED):
+    if link.status in (LinkStatus.TAKEN_DOWN, LinkStatus.DELETED):
         return str(link.status)
+    if link.status == LinkStatus.DISABLED:
+        return 'blocked' if destination_blocked else 'disabled'
     if link.held_for_review_at is not None:
         return 'held'
     if link.expires_at is not None and link.expires_at <= now:
@@ -223,8 +236,19 @@ def quote_create(owner: User, alias: str | None, *, has_password: bool = False) 
 
 def _lock_owner(owner: User) -> None:
     """Serialize one user's create/enable calls, so the active-link cap can't be raced past (a
-    row lock on Postgres; SQLite has one writer at a time anyway)."""
-    User.objects.select_for_update().filter(pk=owner.pk).first()
+    row lock on Postgres; SQLite has one writer at a time anyway). Also refuses an owner whose
+    account is not active (`OwnerInactiveError`), read from the locked row."""
+    status = User.objects.select_for_update().filter(pk=owner.pk).values_list('status', flat=True)
+    if status.first() != User.STATUS_ACTIVE:
+        raise OwnerInactiveError()
+
+
+def _require_active_owner(owner_id: Any) -> None:
+    """`OwnerInactiveError` unless the owner's account is active, read fresh and without a lock
+    (for the paths that already hold the link's row lock: the owner's lock must come first)."""
+    status = User.objects.filter(pk=owner_id).values_list('status', flat=True).first()
+    if status != User.STATUS_ACTIVE:
+        raise OwnerInactiveError()
 
 
 def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = None) -> ShortLink:
@@ -333,6 +357,7 @@ def update_link(
         # Hashed before the transaction: a slow hash must not hold the link's row lock.
         new_hash = passwords.hash_password(password) if password is not None else None
     with transaction.atomic():
+        _require_active_owner(link.owner_id)
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
         _require_editable(locked)
         # Diffed against the locked row, so "only write what differs" holds under concurrent
@@ -407,11 +432,18 @@ def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = N
     for the same link); a disabled link already counts toward the hard cap, so it needs no check.
 
     `expected_cost` is the total the caller confirmed (see the module docstring); `None` accepts
-    any cost. Raises `ValidationError` for a taken down or deleted link or `CostChangedError`,
-    and `InsufficientCreditsError`.
+    any cost. Raises `ValidationError` for a taken down or deleted link, an owner whose account
+    is not active (`OwnerInactiveError`) or a destination on the block list (`BlockedDomainError`,
+    checked before anything is charged), `CostChangedError`, and `InsufficientCreditsError`.
+    Disabling needs neither of the last two checks.
     """
     with transaction.atomic():
-        _lock_owner(link.owner)
+        if enabled:
+            _lock_owner(link.owner)
+        else:
+            # Disabling stays open to a deactivated owner (it only ever reduces what they run),
+            # but still takes the lock so it serializes with their other calls.
+            User.objects.select_for_update().filter(pk=link.owner_id).first()
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
         # Disabling is the one thing a hold still allows the owner.
         _require_editable(locked, allow_held=not enabled)
@@ -419,6 +451,9 @@ def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = N
         target = LinkStatus.ACTIVE if enabled else LinkStatus.DISABLED
         if locked.status == target:
             return False
+        if enabled:
+            # A blocked destination never works, so enabling would only charge for nothing.
+            blocklist.check_not_blocked(destination_host(locked.destination))
 
         settings_row = ShortUrlSettings.load()
         # Free for a link that already paid its way in (`charge_extra` skips it too).
@@ -513,6 +548,7 @@ def enable_analytics(link: ShortLink, *, expected_cost: int | None = None) -> bo
     `InsufficientCreditsError`.
     """
     with transaction.atomic():
+        _require_active_owner(link.owner_id)
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
         # Allowed while held: it changes nothing about the link, only what its owner can see.
         _require_editable(locked, allow_held=True)

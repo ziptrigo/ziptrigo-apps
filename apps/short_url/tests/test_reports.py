@@ -454,7 +454,7 @@ class TestReportRateLimits:
         blocked = post_report(client, '203.0.113.1')
         assert blocked.status_code == 429
         assert blocked['Retry-After']
-        assert blocked['HX-Retarget'] == '#report-box'
+        assert blocked['HX-Retarget'] == '#report-msg'
         assert LinkReport.objects.count() == 1
 
     def test_another_address_has_its_own_budget(self, client, link, limits):

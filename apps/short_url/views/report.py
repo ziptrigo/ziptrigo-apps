@@ -63,7 +63,7 @@ def _answer(
 def report_link(request: PublicHttpRequest, code: str) -> HttpResponse:
     limited = ratelimit.hit_ip(request, 'SU_REPORT_IP')
     if not limited.allowed:
-        return ratelimit.web_response(request, limited, retarget='#report-box')
+        return ratelimit.web_response(request, limited, retarget='#report-msg')
 
     link = find_link(code)
     if link is None or not is_available(link):
@@ -71,7 +71,7 @@ def report_link(request: PublicHttpRequest, code: str) -> HttpResponse:
 
     limited = ratelimit.peek_value(link.code_key, 'SU_REPORT_LINK')
     if not limited.allowed:
-        return ratelimit.web_response(request, limited, retarget='#report-box')
+        return ratelimit.web_response(request, limited, retarget='#report-msg')
 
     form = ReportForm(request.POST)
     if form.is_valid():

@@ -87,6 +87,16 @@ def _skipped_note(skipped: int) -> str:
     return f' {skipped} were skipped because they had already ended.'
 
 
+def _not_deactivated_note(*, already: int, skipped: int) -> str:
+    """Tail for the deactivate message: accounts that were not changed, and why."""
+    parts = []
+    if already:
+        parts.append(f'{already} already inactive')
+    if skipped:
+        parts.append(f'{skipped} not deactivated (staff or your own account)')
+    return ' Skipped: ' + ', '.join(parts) + '.'
+
+
 def _confirm_context(
     request: AuthenticatedHttpRequest,
     model_admin: admin.ModelAdmin,
@@ -196,6 +206,22 @@ def _block_domain_confirm_response(
     return render(request, 'admin/short_url/block_domain_confirm.html', context)
 
 
+def _split_owners(owners: list[User], acting: User) -> tuple[list[User], list[tuple[User, str]]]:
+    """The owners that may be deactivated, and those that may not with the reason: a staff or
+    superuser account (an admin's account is never a link owner's to be shut off from a report
+    list) and the moderator's own."""
+    eligible: list[User] = []
+    skipped: list[tuple[User, str]] = []
+    for owner in owners:
+        if owner.pk == acting.pk:
+            skipped.append((owner, 'it is your own account'))
+        elif owner.is_staff or owner.is_superuser:
+            skipped.append((owner, 'it is a staff account'))
+        else:
+            eligible.append(owner)
+    return eligible, skipped
+
+
 def _deactivate_owner_confirm_response(
     request: AuthenticatedHttpRequest,
     model_admin: admin.ModelAdmin,
@@ -207,16 +233,28 @@ def _deactivate_owner_confirm_response(
     """Shared two-step confirmation of "deactivate the owner's account": sets `User.status` to
     inactive, which session login and the JWT API already refuse on their own, like file
     transfer's block-sender form. Optionally takes the owner's other live links down too, since a
-    deactivated account's links keep redirecting."""
-    owners = list({link.owner_id: link.owner for link in links}.values())
+    deactivated account's links keep redirecting.
+
+    That only stops new sign-ins and the API: a web session that is already open keeps working,
+    which is why the link services themselves refuse an inactive owner (`OwnerInactiveError`).
+    Staff and superuser accounts and the moderator's own are never deactivated here (listed on
+    the page as skipped), and the message counts only accounts that actually changed."""
+    all_owners = list({link.owner_id: link.owner for link in links}.values())
+    owners, skipped = _split_owners(all_owners, request.user)
     if request.POST.get('apply') == 'yes':
         form = DeactivateOwnerForm(request.POST)
         if form.is_valid():
             reason = form.cleaned_data['reason']
+            changed = 0
             for owner in owners:
                 if owner.status != User.STATUS_INACTIVE:
                     owner.deactivate(reason=reason)
-            message = f'Deactivated {len(owners)} account(s).'
+                    changed += 1
+            message = f'Deactivated {changed} account(s).'
+            if changed < len(all_owners):
+                message += _not_deactivated_note(
+                    already=len(owners) - changed, skipped=len(skipped)
+                )
             if form.cleaned_data['take_down_links']:
                 targets = ShortLink.objects.filter(
                     owner__in=owners, status__in=(LinkStatus.ACTIVE, LinkStatus.DISABLED)
@@ -246,6 +284,7 @@ def _deactivate_owner_confirm_response(
         form=form,
     )
     context['owners'] = owners
+    context['skipped_owners'] = skipped
     return render(request, 'admin/short_url/deactivate_owner_confirm.html', context)
 
 

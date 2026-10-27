@@ -25,6 +25,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.accounts.models import User
 from apps.billing.services import InsufficientCreditsError, get_balance
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect
@@ -35,6 +36,7 @@ from ..services import (
     CostChangedError,
     LinkHeldError,
     LinkInput,
+    OwnerInactiveError,
     Quote,
     check_can_create,
     create_link,
@@ -92,6 +94,13 @@ def _page_context(request: AuthenticatedHttpRequest, link: ShortLink | None) -> 
 @require_http_methods(['GET', 'POST'])
 @ensure_csrf_cookie
 def link_create(request: AuthenticatedHttpRequest) -> HttpResponse:
+    # A deactivated owner's session can outlive the deactivation (it only stops new sign-ins and
+    # the API), so the page itself is refused; `create_link` checks again under the lock.
+    if request.user.status != User.STATUS_ACTIVE:
+        if request.method == 'GET':
+            messages.error(request, OwnerInactiveError.MESSAGE)
+            return redirect('short_url:dashboard')
+        return message_response(request, OwnerInactiveError.MESSAGE, retarget=_MSG)
     if request.method == 'GET':
         return render_page(request, 'short_url/link_form.html', _page_context(request, None))
 

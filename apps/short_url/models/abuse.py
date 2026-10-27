@@ -151,11 +151,11 @@ class BlockedDomain(models.Model):
         return self.value
 
     def save(self, *args, **kwargs) -> None:
-        # Normalised at write time so the check can compare plainly.
-        try:
-            self.value = normalize_blocked_value(self.value)
-        except ValidationError:
-            self.value = (self.value or '').strip().lower()
+        # Normalised at write time so the check can compare plainly. An invalid value raises
+        # (`ValidationError`) rather than being stored in a form no host can ever match, which
+        # would be a block that silently blocks nothing; the admin form shows `clean()`'s error
+        # before it ever gets here.
+        self.value = normalize_blocked_value(self.value)
         super().save(*args, **kwargs)
 
     def clean(self) -> None:
