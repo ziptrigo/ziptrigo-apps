@@ -12,8 +12,8 @@ from .models import User
 # Apps whose rows hang off a user with `on_delete=CASCADE` and are meant to go with it, although
 # their own admins refuse delete (a ledger row must not be removed by hand, but deleting the
 # account removes ledger and balance together, which keeps them consistent). Named by label because
-# `accounts` can't import them.
-CASCADE_WITH_USER_APP_LABELS = ('billing', 'short_url')
+# `accounts` can't import them. `core` is there for its notifications (read-only in the admin).
+CASCADE_WITH_USER_APP_LABELS = ('billing', 'short_url', 'core')
 
 
 class UserAdmin(DjangoUserAdmin):

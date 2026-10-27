@@ -2,10 +2,13 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import BillingSettings, CreditTransaction, CreditTransactionType
 from apps.billing.services import add_credits, get_balance, spend_credits
+from apps.core.models import Notification
 
 from ..models import Receipt, ReceiptsAccount, ReceiptStatus
 from ..services import metering
@@ -138,6 +141,60 @@ class TestMeterAccount:
         assert mail['to'] == funded_user.email
         assert mail['subject'] == 'Your receipts storage is paused'
         assert 'nothing was deleted' in mail['text_body']
+
+    def test_freezing_notifies_the_owner_in_the_app(self, stored, funded_user):
+        spend_credits(funded_user, 100, source='test')
+        account = stored(10)
+
+        metering.meter_account(account.pk)
+
+        notification = Notification.objects.get(user=funded_user)
+        assert notification.source == 'receipts'
+        assert notification.title == 'Receipts storage is paused'
+        assert notification.url == reverse('receipts:dashboard')
+        assert 'Nothing was deleted' in notification.body
+
+    def test_freezing_twice_notifies_once(self, stored, funded_user):
+        spend_credits(funded_user, 100, source='test')
+        account = stored(10)
+
+        metering.freeze_account(account)
+        metering.freeze_account(ReceiptsAccount.objects.get(pk=account.pk))
+
+        assert Notification.objects.filter(user=funded_user).count() == 1
+
+    def test_a_paid_day_creates_no_notification(self, stored, funded_user):
+        metering.meter_account(stored(10).pk)
+
+        assert not Notification.objects.exists()
+
+    def test_the_notification_is_part_of_the_callers_transaction(self, stored, funded_user):
+        spend_credits(funded_user, 100, source='test')
+        account = stored(10)
+
+        class Abort(Exception):
+            pass
+
+        with pytest.raises(Abort), transaction.atomic():
+            metering.freeze_account(account)
+            raise Abort
+
+        assert not Notification.objects.exists()
+
+    def test_a_failing_notification_does_not_stop_the_freeze(
+        self, stored, funded_user, monkeypatch
+    ):
+        def boom(*args, **kwargs):
+            raise RuntimeError('boom')
+
+        monkeypatch.setattr('apps.receipts.services.metering.notifications.notify', boom)
+        spend_credits(funded_user, 100, source='test')
+        account = stored(10)
+
+        metering.meter_account(account.pk)
+
+        account.refresh_from_db()
+        assert account.frozen_at is not None
 
     def test_a_frozen_account_is_not_metered(self, stored, funded_user):
         account = stored(10)

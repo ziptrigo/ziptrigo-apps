@@ -1,0 +1,22 @@
+{% load notification_tags %}{% comment %}The bell in the header of every page, for a signed-in user (issue #169). Opening the dropdown posts
+   to the server, which lists the latest notifications and marks them read; the badge is swapped out of
+   band by that response and polled every minute. On a phone the panel spans the header (the header is
+   `relative`); from `sm` it hangs under the bell. {% endcomment %}
+{% unread_notification_count as count %}
+<div class="sm:relative" x-data="notificationBell" @click.outside="close()"
+     @keydown.escape="if (open) { close(); $refs.trigger.focus() }">
+    <button type="button" x-ref="trigger" @click="toggle()" id="notification-bell"
+            aria-label="Notifications" title="Notifications" aria-haspopup="true" :aria-expanded="open"
+            class="relative block p-1 rounded text-2xl leading-none hover:text-sage-300">
+        <i class="fas fa-bell" aria-hidden="true"></i>
+        {% include 'core/partials/notification_badge.html' with count=count %}
+    </button>
+    <div x-ref="panel" x-show="open" style="display: none" id="notification-dropdown"
+         hx-post="{% url 'core:notification-dropdown' %}" hx-trigger="notifications-open"
+         hx-target="#notification-dropdown-body" hx-swap="innerHTML"
+         class="absolute inset-x-4 top-full z-50 mt-2 overflow-hidden rounded-md border border-gray-200 bg-white text-gray-900 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:inset-x-auto sm:right-0 sm:w-96">
+        <div id="notification-dropdown-body" aria-live="polite">
+            <p class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Loading&hellip;</p>
+        </div>
+    </div>
+</div>

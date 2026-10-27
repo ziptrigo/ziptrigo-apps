@@ -1,0 +1,50 @@
+{% comment %}The notifications page's list (design system 10.7): toolbar, rows, pagination. It is the content of
+   `#notification-list`, so every action and page link re-renders it in place. `oob_badge` also swaps
+   the bell's badge out of band (an htmx response; the full page already has the badge).
+   Context: `page_obj`, `new_ids`, `unread_count`, `oob_badge`. {% endcomment %}
+<div class="mb-4 flex items-center justify-between gap-4">
+    <p class="text-sm text-gray-500 dark:text-gray-400">
+        {% if unread_count %}{{ unread_count }} new{% else %}You're all caught up.{% endif %}
+    </p>
+    {% if unread_count %}
+    <form method="post" action="{% url 'core:notification-read-all' %}"
+          hx-post="{% url 'core:notification-read-all' %}" hx-target="#notification-list" hx-swap="innerHTML" hx-disabled-elt="find button">
+        {% include 'core/partials/notification_fields.html' with scope='page' page_number=page_obj.number %}
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            <i class="fas fa-check-double mr-2" aria-hidden="true"></i>Mark all as read
+        </button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+        {% for n in page_obj %}
+        {% include 'core/partials/notification_item.html' with scope='page' target='#notification-list' page_number=page_obj.number %}
+        {% empty %}
+        <li class="px-4 py-12 text-center sm:px-6">
+            <p class="text-sm text-gray-500 dark:text-gray-400">No notifications yet.</p>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="mt-6 flex items-center justify-between text-sm" aria-label="Pages">
+    <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="flex gap-4">
+        {% if page_obj.has_previous %}
+        <a class="text-sage-600 dark:text-sage-300 hover:underline" href="{% url 'core:notifications' %}?page={{ page_obj.previous_page_number }}"
+           hx-get="{% url 'core:notification-list' %}?page={{ page_obj.previous_page_number }}" hx-target="#notification-list" hx-swap="innerHTML"
+           hx-push-url="{% url 'core:notifications' %}?page={{ page_obj.previous_page_number }}">Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a class="text-sage-600 dark:text-sage-300 hover:underline" href="{% url 'core:notifications' %}?page={{ page_obj.next_page_number }}"
+           hx-get="{% url 'core:notification-list' %}?page={{ page_obj.next_page_number }}" hx-target="#notification-list" hx-swap="innerHTML"
+           hx-push-url="{% url 'core:notifications' %}?page={{ page_obj.next_page_number }}">Next</a>
+        {% endif %}
+    </div>
+</nav>
+{% endif %}
+{% if oob_badge %}{% include 'core/partials/notification_badge.html' with count=unread_count oob=True %}{% endif %}

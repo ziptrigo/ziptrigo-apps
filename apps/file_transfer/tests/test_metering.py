@@ -2,10 +2,12 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
 from apps.billing.services import add_credits, get_balance, spend_credits
+from apps.core.models import Notification
 
 from ..models import Transfer, TransferStatus
 from ..services import metering
@@ -114,6 +116,47 @@ def test_meter_transfer_suspends_when_insufficient_credits(draft_transfer, billi
     draft_transfer.refresh_from_db()
     assert draft_transfer.status == TransferStatus.SUSPENDED
     assert draft_transfer.suspended_at is not None
+
+
+def test_suspending_notifies_the_owner_in_the_app(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    metering.meter_transfer(draft_transfer)
+
+    notification = Notification.objects.get(user=draft_transfer.owner)
+    assert notification.source == 'file_transfer'
+    assert notification.title.startswith('Transfer suspended: ')
+    assert notification.url == reverse('file_transfer:dashboard')
+    assert 'ran out of credits' in notification.body
+
+
+def test_a_paid_day_creates_no_notification(draft_transfer):
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+
+    metering.meter_transfer(draft_transfer)
+
+    assert not Notification.objects.exists()
+
+
+def test_a_failing_notification_does_not_stop_the_suspension(
+    draft_transfer, billing_settings, monkeypatch
+):
+    def boom(*args, **kwargs):
+        raise RuntimeError('boom')
+
+    monkeypatch.setattr('apps.file_transfer.services.metering.notifications.notify', boom)
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    metering.meter_transfer(draft_transfer)
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED
 
 
 def test_meter_transfer_ignores_non_active_or_ownerless(draft_transfer):

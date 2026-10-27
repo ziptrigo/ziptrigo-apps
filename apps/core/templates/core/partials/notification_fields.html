@@ -1,0 +1,4 @@
+{% csrf_token %}{% comment %}The hidden fields of every notification action form: which list to hand back (`scope`:
+   `dropdown` or `page`) and, on the page, which page of it. Context: `scope`, `page_number`. {% endcomment %}
+<input type="hidden" name="scope" value="{{ scope }}">
+{% if scope == 'page' %}<input type="hidden" name="page" value="{{ page_number }}">{% endif %}

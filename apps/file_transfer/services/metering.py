@@ -14,12 +14,14 @@ and does the actual charging; `reenable_suspended_transfers_for_user` is called 
 fast path).
 """
 
+import logging
 from collections.abc import Collection
 from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import F, Q
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -31,11 +33,14 @@ from apps.billing.services import (
     storage_charge,
     storage_day_cost,
 )
+from apps.core.services import notifications
 
 from ..models import FileTransferSettings, Transfer, TransferStatus
 from .emails import send_suspended_notification
 from .lifecycle import end_transfer
 from .naming import transfer_display_name
+
+logger = logging.getLogger(__name__)
 
 #: Minimum balance to re-enable a suspended transfer (spec section 7); `daily_cost` is never less.
 MIN_BALANCE_TO_REENABLE = 1
@@ -142,6 +147,29 @@ def suspend_transfer(transfer: Transfer) -> None:
     transfer.status = TransferStatus.SUSPENDED
     transfer.suspended_at = now
     send_suspended_notification.enqueue(str(transfer.id))
+    _notify_suspended(transfer)
+
+
+def _notify_suspended(transfer: Transfer) -> None:
+    """The in-app twin of the suspension email (issue #169). Written in the caller's transaction
+    (`meter_transfer` suspends inside one), so it exists exactly when the suspension does; a
+    failure to write it is logged and must not undo the suspension or abort the metering run."""
+    if transfer.owner_id is None:
+        return
+    try:
+        grace_days = FileTransferSettings.load().suspension_grace_days
+        notifications.notify(
+            transfer.owner_id,
+            source='file_transfer',
+            title=f'Transfer suspended: {transfer_display_name(transfer)}',
+            body=(
+                'It ran out of credits and its download link no longer works. Add credits within '
+                f'{grace_days} day(s) to resume it, or its files will be deleted.'
+            ),
+            url=reverse('file_transfer:dashboard'),
+        )
+    except Exception:
+        logger.exception('Could not notify the owner that transfer %s was suspended', transfer.pk)
 
 
 def reenable_transfer(transfer: Transfer) -> bool:

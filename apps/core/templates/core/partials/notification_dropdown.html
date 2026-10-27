@@ -1,0 +1,24 @@
+{% comment %}The bell's dropdown (design system 10.8): the latest notifications that were not opened or dismissed,
+   newest first. The ones highlighted were new when it was opened (the view has just marked them read).
+   Ends with the badge, swapped out of band. Context: `notifications`, `new_ids`, `unread_count`. {% endcomment %}
+<div class="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+    <h2 class="text-sm font-semibold">Notifications</h2>
+    {% if unread_count %}
+    <form method="post" action="{% url 'core:notification-read-all' %}"
+          hx-post="{% url 'core:notification-read-all' %}" hx-target="#notification-dropdown-body" hx-swap="innerHTML" hx-disabled-elt="find button">
+        {% include 'core/partials/notification_fields.html' with scope='dropdown' %}
+        <button type="submit" class="text-xs text-sage-600 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary dark:text-sage-300">Mark all as read</button>
+    </form>
+    {% endif %}
+</div>
+<ul class="max-h-96 divide-y divide-gray-200 overflow-y-auto dark:divide-gray-700">
+    {% for n in notifications %}
+    {% include 'core/partials/notification_item.html' with scope='dropdown' target='#notification-dropdown-body' %}
+    {% empty %}
+    <li class="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No new notifications.</li>
+    {% endfor %}
+</ul>
+<div class="border-t border-gray-200 px-4 py-2 text-center text-sm dark:border-gray-700">
+    <a href="{% url 'core:notifications' %}" class="text-sage-600 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary dark:text-sage-300">View all notifications</a>
+</div>
+{% include 'core/partials/notification_badge.html' with count=unread_count oob=True %}

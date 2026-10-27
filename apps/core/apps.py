@@ -53,6 +53,14 @@ class CoreConfig(AppConfig):
         )
         register_job(
             JobSpec(
+                name='core.purge_old_notifications',
+                func=jobs.purge_old_notifications,
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+        register_job(
+            JobSpec(
                 name='core.clear_expired_sessions',
                 func=jobs.clear_expired_sessions,
                 interval=timedelta(hours=24),

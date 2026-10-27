@@ -1,3 +1,4 @@
+from . import notifications
 from .client_ip import client_ip
 from .email import get_email_backend, send_email
 from .email_verification import (
@@ -42,6 +43,7 @@ __all__ = [
     'enqueue_after_commit',
     'get_email_backend',
     'invalidate',
+    'notifications',
     'purge_old',
     'send_email',
     'start',

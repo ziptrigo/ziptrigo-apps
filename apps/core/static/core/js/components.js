@@ -31,6 +31,22 @@ document.addEventListener('alpine:init', function () {
         };
     });
 
+    // The notification bell of `core/partials/notification_bell.html`. Opening the dropdown asks
+    // the server for its content (an htmx POST on the panel, triggered by this event), which also
+    // marks what it lists as read; closing it asks for nothing.
+    Alpine.data('notificationBell', function () {
+        return {
+            open: false,
+            toggle() {
+                this.open = !this.open;
+                if (this.open) htmx.trigger(this.$refs.panel, 'notifications-open');
+            },
+            close() {
+                this.open = false;
+            },
+        };
+    });
+
     // The confirmation modal of `core/partials/confirm_modal.html`. A trigger button carries
     // `data-url` (where the form posts), `data-title`, `data-body` and `data-label`, and optionally
     // `data-tone="primary"` (a non-destructive action; the default is the red "danger" button) and

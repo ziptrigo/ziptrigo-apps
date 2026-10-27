@@ -34,6 +34,7 @@ from uuid import UUID
 from django.db import transaction
 from django.db.models import F
 from django.tasks import task
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -45,6 +46,7 @@ from apps.billing.services import (
     storage_charge,
     storage_day_cost,
 )
+from apps.core.services import notifications
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import Receipt, ReceiptsAccount, ReceiptsSettings, ReceiptStatus
@@ -120,6 +122,26 @@ def freeze_account(account: ReceiptsAccount) -> None:
     if frozen:
         user_id = str(account.user_id)
         enqueue_after_commit(send_storage_paused_email, user_id)
+        _notify_storage_paused(account.user_id)
+
+
+def _notify_storage_paused(user_id: UUID) -> None:
+    """The in-app twin of the "storage paused" email (issue #169). Written in the caller's
+    transaction, so it exists exactly when the freeze does; a failure to write it is logged and
+    must not undo the freeze or the metering run."""
+    try:
+        notifications.notify(
+            user_id,
+            source='receipts',
+            title='Receipts storage is paused',
+            body=(
+                "Your credit balance couldn't cover your receipts' storage. Nothing was deleted; "
+                'previews, downloads and processing are paused until you add credits.'
+            ),
+            url=reverse('receipts:dashboard'),
+        )
+    except Exception:
+        logger.exception('Could not notify user %s that receipts storage is paused', user_id)
 
 
 def unfreeze_account(account: ReceiptsAccount) -> bool:

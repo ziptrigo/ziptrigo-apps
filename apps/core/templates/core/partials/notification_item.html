@@ -1,0 +1,41 @@
+{% load notification_tags %}{% comment %}One notification, in the dropdown (`scope` = dropdown) or on the page (`scope` = page).
+   The row is a stretched link: the title's anchor covers it (`after:absolute after:inset-0`) and the
+   action buttons sit above it. Everything the caller wrote is escaped by the template engine.
+   Context: `n`, `new_ids`, `scope`, `target` (the element the actions swap), `page_number`. {% endcomment %}
+<li class="relative flex items-start gap-3 px-4 py-3 transition duration-150 ease-in-out hover:bg-gray-50 dark:hover:bg-gray-700 sm:px-6{% if n.pk in new_ids %} bg-sage-50 dark:bg-gray-700/40{% endif %}">
+    <span class="mt-0.5 w-5 shrink-0 text-center text-sage-400" aria-hidden="true"><i class="{{ n.source|source_icon }}"></i></span>
+    <div class="min-w-0 flex-1">
+        <p class="text-sm {% if n.pk in new_ids %}font-semibold text-gray-900 dark:text-gray-100{% else %}font-medium text-gray-700 dark:text-gray-300{% endif %}{% if scope == 'dropdown' %} truncate{% endif %}">
+            {% if n.pk in new_ids %}<span class="mr-1.5 inline-block h-2 w-2 rounded-full bg-sage-400 align-middle"><span class="sr-only">New: </span></span>{% endif %}
+            {% if n.url %}<a href="{% url 'core:notification-open' n.pk %}"
+                             class="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary after:absolute after:inset-0">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}
+        </p>
+        {% if n.body %}
+        <p class="mt-1 whitespace-pre-line text-sm text-gray-600 dark:text-gray-400{% if scope == 'dropdown' %} line-clamp-2{% endif %}">{{ n.body }}</p>
+        {% endif %}
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ n.source|source_label }} &middot;
+            <time datetime="{{ n.created_at|date:'c' }}" title="{{ n.created_at|date:'Y-m-d H:i' }}">{{ n.created_at|ago }}</time>
+        </p>
+    </div>
+    <div class="relative z-10 flex shrink-0 items-center gap-1">
+        {% if scope == 'page' and n.pk in new_ids %}
+        <form method="post" action="{% url 'core:notification-read' n.pk %}"
+              hx-post="{% url 'core:notification-read' n.pk %}" hx-target="{{ target }}" hx-swap="innerHTML" hx-disabled-elt="find button">
+            {% include 'core/partials/notification_fields.html' %}
+            <button type="submit" aria-label="Mark as read: {{ n.title }}" title="Mark as read"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors">
+                <i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+            </button>
+        </form>
+        {% endif %}
+        <form method="post" action="{% url 'core:notification-dismiss' n.pk %}"
+              hx-post="{% url 'core:notification-dismiss' n.pk %}" hx-target="{{ target }}" hx-swap="innerHTML" hx-disabled-elt="find button">
+            {% include 'core/partials/notification_fields.html' %}
+            <button type="submit" aria-label="Dismiss: {{ n.title }}" title="Dismiss"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors">
+                <i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+            </button>
+        </form>
+    </div>
+</li>

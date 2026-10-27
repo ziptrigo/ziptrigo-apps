@@ -1,0 +1,9 @@
+{% load notification_tags %}{% comment %}The bell's count (design system: icon-only control, so the number is also spoken). The element
+   polls itself every 60 s and replaces itself with the answer, so it must always be rendered, hidden when
+   there is nothing new. `oob` swaps it into the page out of band, from a response about something else.
+   Context: `count`, optionally `oob`. {% endcomment %}
+<span id="notification-badge" hx-get="{% url 'core:notification-bell' %}" hx-trigger="every 60s" hx-swap="outerHTML"
+      {% if oob %}hx-swap-oob="true"{% endif %}
+      class="pointer-events-none absolute -right-1 -top-1 min-w-[1.25rem] rounded-full bg-amber-400 px-1 text-center text-xs font-semibold leading-5 text-gray-900{% if not count %} hidden{% endif %}">
+    {% if count %}<span aria-hidden="true">{{ count|badge_text }}</span><span class="sr-only">{{ count }} new notification{{ count|pluralize }}</span>{% endif %}
+</span>
