@@ -310,10 +310,10 @@ def test_meter_transfers_continues_past_a_single_failing_transfer(
 
     original_meter_transfer = metering.meter_transfer
 
-    def _boom(transfer, price_per_gb_per_day=None):
+    def _boom(transfer, price_per_gb_per_day=None, suspension_grace_days=None):
         if transfer.pk == draft_transfer.pk:
             raise RuntimeError('boom')
-        return original_meter_transfer(transfer, price_per_gb_per_day)
+        return original_meter_transfer(transfer, price_per_gb_per_day, suspension_grace_days)
 
     monkeypatch.setattr(jobs, 'meter_transfer', _boom)
 

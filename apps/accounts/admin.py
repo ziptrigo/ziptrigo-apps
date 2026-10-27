@@ -14,6 +14,10 @@ from .models import User
 # account removes ledger and balance together, which keeps them consistent). Named by label because
 # `accounts` can't import them.
 CASCADE_WITH_USER_APP_LABELS = ('billing', 'short_url')
+# The same, for single models (`'<app label>.<model name>'`) of an app that has other models which
+# must keep asking: `core` is a grab bag, so only its notifications (read-only in the admin) are
+# listed, and a future `core` model with a user FK is not exempted without anyone deciding so.
+CASCADE_WITH_USER_MODELS = ('core.notification',)
 
 
 class UserAdmin(DjangoUserAdmin):
@@ -84,17 +88,20 @@ class UserAdmin(DjangoUserAdmin):
         `has_delete_permission(request, obj)` and refuses the whole delete when any says no.
         Billing's admins say no to everyone (the ledger is read-only), so deleting a user with
         credit history would be refused even for a superuser. For the models of
-        `CASCADE_WITH_USER_APP_LABELS` the question becomes whether the caller holds the model's
-        `delete_<model>` permission, which is what the default `has_delete_permission` asked
-        before they were made read-only: a superuser passes, staff still need it granted.
+        `CASCADE_WITH_USER_APP_LABELS` (and the single ones in `CASCADE_WITH_USER_MODELS`) the
+        question becomes whether the caller holds the model's `delete_<model>` permission, which is
+        what the default `has_delete_permission` asked before they were made read-only: a
+        superuser passes, staff still need it granted.
         """
         to_delete, model_count, perms_needed, protected = super().get_deleted_objects(objs, request)
         # `perms_needed` holds verbose names (see `django.contrib.admin.utils`), so map back.
         for model in django_apps.get_models():
             opts = model._meta
-            if opts.app_label in CASCADE_WITH_USER_APP_LABELS and request.user.has_perm(
-                f'{opts.app_label}.delete_{opts.model_name}'
-            ):
+            exempt = (
+                opts.app_label in CASCADE_WITH_USER_APP_LABELS
+                or f'{opts.app_label}.{opts.model_name}' in CASCADE_WITH_USER_MODELS
+            )
+            if exempt and request.user.has_perm(f'{opts.app_label}.delete_{opts.model_name}'):
                 perms_needed.discard(opts.verbose_name)
         return to_delete, model_count, perms_needed, protected
 

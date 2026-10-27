@@ -15,8 +15,9 @@ config/               The Django project: settings, urls, api (one NinjaAPI), en
 apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email,
                       email verification, rate limiting (`apps.core.ratelimit`), client IP,
                       generic S3 storage (`apps.core.services.storage`), a QR image helper
-                      (`apps.core.services.qr_image`), and the Alpine components every product
-                      shares (`core/js/components.js`: `copyText`, `confirmModal`).
+                      (`apps.core.services.qr_image`), in-app notifications (the header bell, issue
+                      #169), and the Alpine components every product shares
+                      (`core/js/components.js`: `copyText`, `confirmModal`, `notificationBell`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
                       shared storage price (BillingSettings).
@@ -168,7 +169,8 @@ Each app may import only from layers below it. Enforced by the import-linter con
   now; a disabled one keeps its `last_billed_at`, clamped to no earlier than 24h ago, so
   disable + re-enable can't dodge the day in progress and a long disabled stretch is still not a
   backlog. A transfer held for abuse review is re-enabled without counting toward the running sum.
-  The suspension email states the credits needed.
+  The suspension email states the credits needed; a suspension also creates an in-app notification
+  (see "Notifications").
 - The same shape covers background jobs: `core` can't import a product to discover its jobs, so
   `apps.core.scheduler` is a registry (like `apps.core.products`) that a product fills from its own
   `AppConfig.ready()`. See "Queue and scheduler" below.
@@ -680,6 +682,130 @@ transfer id only for routing, not as part of what proves the click legitimate). 
 the same `_activate` step: check the per-IP-per-day caps (see "File transfer specifics" below),
 then flip the transfer `ACTIVE` and queue the recipient + sender emails, exactly like
 `services.send.finalize_send` does for a logged-in sender.
+
+### Notifications
+
+`apps.core` has a site-wide **in-app notification system** (issue #169): a bell in the header of
+every page for a signed-in user, a dropdown, and a `/notifications/` page. A notification is
+generic because `core` cannot import a product: a product creates one through a `core` service and
+hands it plain text and a relative URL it built itself with `reverse(...)`.
+
+```python
+from apps.core.services import notifications
+
+notifications.notify(
+    user,  # a user, or just its id
+    source='file_transfer',  # the creating app's label
+    title='Transfer suspended: report.pdf',  # one line, <= 140 chars
+    body='It ran out of credits ...',  # optional plain text, <= 500 chars
+    url=reverse('file_transfer:dashboard'),  # optional, relative; where a click goes
+    key=f'transfer_suspended:{transfer.id}',  # optional; what the notice is about, to clear it later
+)
+```
+
+- **`notify`** writes one `core.Notification` row (UUID id, `user` FK with `CASCADE`, `source`,
+  `title`, `body`, `url`, `key`, `created_at`, `read_at`, `opened_at`, `dismissed_at`; indexes on
+  `(user, read_at)`, `(user, created_at)`, `(user, key)` and `created_at` for the retention job) inside a
+  savepoint in the caller's transaction, so it commits or rolls back with the caller's work and a
+  failed insert cannot poison it. It does not queue anything, and **there is no email channel in v1**:
+  products keep sending their own emails and call `notify` next to them. The title's whitespace is
+  collapsed and title/body are *truncated* (with an ellipsis) to the model's limits rather than
+  refused, because they often carry something a user typed (a file name) and the event reported must
+  not fail over it. No HTML: every template escapes everything (a test renders a `<script>` title). A
+  missing `source`/`title`, or a `url` that is not a **same-site path** (`is_safe_url`: one leading
+  `/`, so not `//host`; no scheme, backslash, space or control character; Django's
+  `url_has_allowed_host_and_scheme` with no host allowed) is a programming error and raises
+  `ValueError`. The open view checks the stored URL again, so even a row written another way can
+  never become an open redirect (it then sends the user to the notifications page).
+- **`key`** (optional, <= 200 characters, not shown, not unique) is a string the creating app
+  chooses to say *what the notice is about* (`transfer_suspended:<transfer id>`,
+  `receipts_account:frozen`), so the app can delete exactly that notice when the subject is fixed:
+  `delete_for_key(user, key, source=None)` (an empty key is a `ValueError`, since every keyless
+  notice carries one). It exists because `url` can't do that job: every suspended transfer of a
+  user links to the same dashboard, so `delete_for_url` would wipe the notices of the ones still
+  suspended. `delete_for_url` stays for a link that names one thing.
+- **Two products use it so far**, next to their existing emails and in the same transaction:
+  Receipts "storage paused" (`receipts.services.metering.freeze_account`, url: the Receipts
+  dashboard, key `receipts_account:frozen`) and file transfer "suspended"
+  (`file_transfer.services.metering.suspend_transfer`, url: the transfer dashboard, key
+  `transfer_suspended:<transfer id>`, from `metering.suspended_notice_key`; its body says how many
+  credits are needed, `daily_cost`, like the email). Each hook runs in **its own savepoint**
+  (`transaction.atomic()` around the whole body, inside a `try/except` that logs), not just
+  `notify`'s: on Postgres a database error that is merely caught still aborts the surrounding
+  transaction, and the commit would then roll the freeze or suspension back. For the same reason the
+  hook queries nothing it can be handed: `meter_transfers` loads `suspension_grace_days` and the
+  storage price once per run and passes them through `meter_transfer` -> `suspend_transfer`
+  (loaded in the hook only when a caller passes nothing).
+  **Both delete their notice when the subject is resumed**, in the resume's own transaction and
+  savepoint, logged and never raised, so tidying a notice can't undo or fail a resume: file
+  transfer in `metering.reenable_transfer`, only on a successful re-enable of a *suspended* transfer
+  (the credits receiver, the daily fallback and the dashboard/API action all go through it; a lost
+  race or a transfer that stays suspended keeps its notice, as does a disabled one's re-enable), and
+  Receipts in `metering.unfreeze_account` when it wins the write. A notice for a transfer that is
+  instead deleted at the end of its grace period stays, as a record of what happened.
+- **Read, opened, dismissed** (`apps.core.services.notifications`' module docstring is the long
+  version). *New* means `read_at` is null. The bell counts what is new and not dismissed
+  (`unread_count`, one indexed `COUNT`). The dropdown lists the latest 10 (`DROPDOWN_LIMIT`) that
+  are neither dismissed nor *opened*, newest first, and **rendering it marks the ones it lists
+  read** (so the badge clears when the user looks; the response still highlights the ones that were
+  new). A notification stays in the dropdown, read, until the user clicks it (`opened_at`) or
+  dismisses it (`dismissed_at`, which also counts as read). "Mark all as read" clears the *new*
+  state of everything, including what the 10-item cap left out, and leaves the notifications listed.
+  The page lists everything not dismissed, 20 per page, newest first; read ones are visibly
+  different (lighter weight, no dot, no "Mark as read" button), and looking at the page marks
+  nothing. One consequence of the rules: a notification **without a `url`** is not a link, so it can
+  only leave the dropdown by being dismissed.
+- **Scoping.** Every service function takes the requesting user and filters on it; someone else's
+  notification raises `Notification.DoesNotExist`, which the views turn into a **404, never a 403**.
+  `mark_read(user, ids)` ignores ids that are not the user's; `mark_all_read(user)`;
+  `mark_opened(user, id)`; `dismiss(user, id)` (idempotent); `get_notification`;
+  `dropdown_notifications`; `page_notifications`; and `delete_for_key(user, key, source=None)` /
+  `delete_for_url(user, url, source=None)`, for a product whose target no longer needs attention
+  (a stale notification).
+- **Views** (`apps/core/views/notifications.py`, mounted at the site root under `core:`):
+  `GET /notifications/` (page), `GET notifications/list/` (the page's list partial, htmx
+  pagination; opened directly it redirects to the page), `GET notifications/bell/` (the badge, polled),
+  `POST notifications/dropdown/` (opens the dropdown: a POST because it writes, `read_at`),
+  `POST notifications/read-all/`, `POST notifications/<id>/read/`, `POST notifications/<id>/dismiss/`
+  and `GET notifications/<id>/open/` (marks read and opened, then redirects to the stored URL, a
+  plain link so middle-click works; a write on a GET, the deliberate trade-off being that a link
+  previewer following it would take the item out of the dropdown). All are `@login_required` and session + CSRF; the actions follow
+  the htmx convention (an htmx request gets the list it came from back, chosen by the posted `scope`
+  of `dropdown` or `page`, plus the bell's badge out of band; without htmx they redirect to the
+  page). The two fragments htmx fetches in the background (the bell and the dropdown) answer an htmx
+  request with no session an empty **204** instead of the login redirect, so the login page is never
+  swapped into the header. `core`'s views use `apps.core.http.AuthenticatedHttpRequest`
+  (`user: PermissionsMixin`), since `core` can't import `accounts`. No rate-limit rule: the endpoints
+  are cheap, session-bound and covered by nginx's coarse limit.
+- **The bell** (`core/partials/notification_bell.html`, included by `core/base.html` inside
+  `{% if user.is_authenticated %}`, so an anonymous page does nothing and costs nothing). The count
+  comes from the `{% unread_notification_count %}` tag (`templatetags/notification_tags.py`), not a
+  context processor, so only a page that renders the bell pays for the one `COUNT`. The badge
+  (`#notification-badge`) polls `notifications/bell/` **every 60 seconds, only while the tab is
+  visible** (`every 60s [document.visibilityState === 'visible']`), and fetches once when a hidden
+  tab becomes visible again (`visibilitychange[...] from:document`), then replaces itself; it is
+  always rendered (hidden at 0) so the polling element persists, and the dropdown, list and action
+  responses swap it out of band to keep the count in step. It shows `99+` past 99 (the digits are
+  `aria-hidden`; an `sr-only` "N new notifications" carries the full count). **The button has no
+  `aria-label`**: that would replace the name made from its content and hide the badge, so its
+  accessible name is its `sr-only` "Notifications" plus the badge's sentence, which lives inside
+  the button and so survives every swap (`test_notification_bell.py` parses the rendered button
+  to check it). It uses `aria-controls="notification-dropdown"` and `aria-expanded`, not
+  `aria-haspopup` (the panel is not a `role="menu"`). The `notificationBell` Alpine component
+  (`core/js/components.js`) opens the panel and triggers its htmx POST (so closing asks for
+  nothing). The dropdown's "new" highlight lasts only for the response that opened it: an action
+  inside it re-renders the list after the opening request marked its rows read (accepted). On a phone the panel
+  spans the header (`<header class="relative">`, `inset-x-4`); from `sm` it hangs under the bell.
+- **Retention**: `NOTIFICATION_RETENTION` (90 days, `core/jobs.py`), applied to `created_at`
+  whatever the state, by the daily `core.purge_old_notifications` job in `PURGE_BATCH` batches
+  (registered from `CoreConfig._register_jobs`, like `core.purge_old_task_results`).
+- **Admin**: read-only `NotificationAdmin` (filter by source, read state, dismissed, date; search by
+  the user's email or name and by title). Deleting a user removes their notifications through the
+  cascade; `accounts`' `UserAdmin` lists `core.notification` in `CASCADE_WITH_USER_MODELS` (a
+  model-scoped twin of `CASCADE_WITH_USER_APP_LABELS`, so a future `core` model isn't exempted
+  silently) so the read-only admin doesn't refuse that.
+- **Not in v1**: an email or push channel, per-user preferences, grouping, a JWT API, websockets
+  (the count is polled), a browser-extension or mobile client.
 
 ### Rate limiting
 
@@ -1794,7 +1920,7 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   24h`, floor of `accrued`, like file transfer's per-transfer metering. `stored_bytes` changes only
   through `services.accounts.add_stored_bytes` (floored at 0; the billing clock restarts when an
   empty account gets its first bytes). `InsufficientCreditsError` **freezes** the account
-  (`frozen_at`) and emails the owner: nothing is deleted, but previews, downloads, new uploads,
+  (`frozen_at`), emails the owner and notifies them in-app (see "Notifications"): nothing is deleted, but previews, downloads, new uploads,
   re-runs and processing are refused (`AccountFrozenError`; the API answers 402), and the frozen
   days are never billed (unfreezing sets `last_billed_at = now`). The `credits_added` receiver
   (`weak=False`, wrapped in `try/except` because `send` would otherwise skip file transfer's
@@ -2638,7 +2764,8 @@ future app:
 rate-limit purges, two daily ones keep tables from growing forever (audit #18):
 `core.purge_old_task_results` (finished `DBTaskResult` rows past `TASK_RESULT_RETENTION`, 14 days,
 succeeded and failed alike, in batches; ready/running rows never) and `core.clear_expired_sessions` (`SESSION_ENGINE`'s
-`SessionStore.clear_expired()`; nothing else purges `django_session`).
+`SessionStore.clear_expired()`; nothing else purges `django_session`). A third daily one,
+`core.purge_old_notifications` (90 days, see "Notifications"), does the same for in-app notifications.
 
 `file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers

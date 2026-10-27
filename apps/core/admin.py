@@ -1,14 +1,15 @@
 """Admin registrations for `core`'s own models: the scheduler's job status, the singleton
 `CoreSettings` page (issue #58, mirrors `apps.file_transfer.admin.FileTransferSettingsAdmin`),
-a read-only `EmailVerification` admin for support, and a read-only `RateLimitCounter` admin
-(issue #53 code review) for debugging which rules are actually tripping.
+a read-only `EmailVerification` admin for support, a read-only `RateLimitCounter` admin
+(issue #53 code review) for debugging which rules are actually tripping, and a read-only
+`Notification` admin (issue #169).
 """
 
 from django.contrib import admin
 
 from .admin_singleton import SingletonSettingsAdmin
 from .admin_site import custom_admin_site
-from .models import CoreSettings, EmailVerification, RateLimitCounter, ScheduledJob
+from .models import CoreSettings, EmailVerification, Notification, RateLimitCounter, ScheduledJob
 
 #: Every field on `EmailVerification` except its code/token hashes -- spelled out rather than
 #: introspected from `EmailVerification._meta` (`ty` has no insight into that metaclass-populated
@@ -112,7 +113,76 @@ class RateLimitCounterAdmin(admin.ModelAdmin):
         return False
 
 
+class ReadStateFilter(admin.SimpleListFilter):
+    """New (never read) or read."""
+
+    title = 'read state'
+    parameter_name = 'read'
+
+    def lookups(self, request, model_admin):
+        return [('no', 'New (unread)'), ('yes', 'Read')]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'no':
+            return queryset.filter(read_at__isnull=True)
+        if self.value() == 'yes':
+            return queryset.filter(read_at__isnull=False)
+        return queryset
+
+
+class DismissedStateFilter(admin.SimpleListFilter):
+    """Dismissed by the user or still listed."""
+
+    title = 'dismissed'
+    parameter_name = 'dismissed'
+
+    def lookups(self, request, model_admin):
+        return [('no', 'Not dismissed'), ('yes', 'Dismissed')]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'no':
+            return queryset.filter(dismissed_at__isnull=True)
+        if self.value() == 'yes':
+            return queryset.filter(dismissed_at__isnull=False)
+        return queryset
+
+
+class NotificationAdmin(admin.ModelAdmin):
+    """Read-only (issue #169): notifications are created by products through
+    `apps.core.services.notifications.notify` and changed only by their recipient. Support can
+    look one up by who it was for. Deleting a user still removes theirs (the foreign key cascades;
+    `accounts`' `UserAdmin` accounts for that)."""
+
+    list_display = ['created_at', 'user', 'source', 'title', 'read_at', 'opened_at', 'dismissed_at']
+    list_filter = ['source', ReadStateFilter, DismissedStateFilter, 'created_at']
+    search_fields = ['user__email', 'user__name', 'title']
+    list_select_related = ['user']
+    ordering = ['-created_at']
+    readonly_fields = [
+        'id',
+        'user',
+        'source',
+        'title',
+        'body',
+        'url',
+        'created_at',
+        'read_at',
+        'opened_at',
+        'dismissed_at',
+    ]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+
 custom_admin_site.register(ScheduledJob, ScheduledJobAdmin)
 custom_admin_site.register(CoreSettings, CoreSettingsAdmin)
 custom_admin_site.register(EmailVerification, EmailVerificationAdmin)
 custom_admin_site.register(RateLimitCounter, RateLimitCounterAdmin)
+custom_admin_site.register(Notification, NotificationAdmin)

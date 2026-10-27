@@ -1,7 +1,8 @@
 """`core`'s own periodic jobs: purging old `EmailVerification` rows (issue #58), purging
-expired `RateLimitCounter` rows (issue #53 code review), and pruning finished task results and
-expired sessions (audit #18). A job lets its exceptions propagate: the scheduler's runner logs
-them and records the run as failed (`ScheduledJob.last_error`), which a swallowed one would hide.
+expired `RateLimitCounter` rows (issue #53 code review), pruning finished task results and
+expired sessions (audit #18), and deleting old notifications (issue #169). A job lets its
+exceptions propagate: the scheduler's runner logs them and records the run as failed
+(`ScheduledJob.last_error`), which a swallowed one would hide.
 Registered from `CoreConfig.ready()`, the same way each product registers its own jobs with
 `apps.core.scheduler` -- see CLAUDE.md, "Queue and scheduler". `core` has no product to belong to,
 so it registers these on itself.
@@ -15,6 +16,7 @@ from django.conf import settings
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResult
 
+from .models import Notification
 from .ratelimit import purge_expired
 from .services.email_verification import purge_old
 
@@ -24,6 +26,10 @@ logger = logging.getLogger(__name__)
 #: task's arguments, return value and traceback, so it holds personal data and grows by thousands a
 #: day; two weeks is plenty to look into a failure.
 TASK_RESULT_RETENTION = timedelta(days=14)
+
+#: How long a notification is kept, read or not, dismissed or not. It is a pointer to something
+#: that needs attention now, so three months is far past useful; the page lists them all until then.
+NOTIFICATION_RETENTION = timedelta(days=90)
 
 #: Rows deleted per statement: short transactions and small WAL bursts on a table that was never
 #: pruned (not a table lock; a `DELETE` doesn't block the workers' inserts or claims).
@@ -63,6 +69,25 @@ def purge_old_task_results() -> None:
         total += DBTaskResult.objects.filter(pk__in=ids).delete()[0]
     if total:
         logger.info('purge_old_task_results deleted %d row(s)', total)
+
+
+def purge_old_notifications() -> None:
+    """Daily: delete `Notification` rows created more than `NOTIFICATION_RETENTION` ago, in
+    batches. Idempotent and safe to run twice at once (a row already deleted is simply not
+    matched)."""
+    cutoff = timezone.now() - NOTIFICATION_RETENTION
+    total = 0
+    while True:
+        ids = list(
+            Notification.objects.filter(created_at__lte=cutoff).values_list('pk', flat=True)[
+                :PURGE_BATCH
+            ]
+        )
+        if not ids:
+            break
+        total += Notification.objects.filter(pk__in=ids).delete()[0]
+    if total:
+        logger.info('purge_old_notifications deleted %d row(s)', total)
 
 
 def clear_expired_sessions() -> None:

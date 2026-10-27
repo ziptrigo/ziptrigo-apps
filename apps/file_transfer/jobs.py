@@ -73,7 +73,7 @@ def meter_transfers() -> None:
         status=TransferStatus.ACTIVE, owner__isnull=False, held_for_review_at__isnull=True
     ):
         try:
-            meter_transfer(transfer, price_per_gb_per_day)
+            meter_transfer(transfer, price_per_gb_per_day, settings_row.suspension_grace_days)
         except Exception:
             logger.exception('meter_transfer failed for transfer %s', transfer.pk)
 

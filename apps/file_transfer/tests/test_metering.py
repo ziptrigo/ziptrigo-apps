@@ -1,11 +1,20 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
 import pytest
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import CreditTransaction
-from apps.billing.services import add_credits, get_balance, spend_credits
+from apps.billing.services import (
+    InsufficientCreditsError,
+    add_credits,
+    get_balance,
+    spend_credits,
+)
+from apps.core.models import Notification
+from apps.core.services import notifications
 
 from ..models import Transfer, TransferStatus
 from ..services import metering
@@ -114,6 +123,136 @@ def test_meter_transfer_suspends_when_insufficient_credits(draft_transfer, billi
     draft_transfer.refresh_from_db()
     assert draft_transfer.status == TransferStatus.SUSPENDED
     assert draft_transfer.suspended_at is not None
+
+
+def test_suspending_notifies_the_owner_in_the_app(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    metering.meter_transfer(draft_transfer)
+
+    notification = Notification.objects.get(user=draft_transfer.owner)
+    assert notification.source == 'file_transfer'
+    assert notification.title.startswith('Transfer suspended: ')
+    assert notification.url == reverse('file_transfer:dashboard')
+    assert 'ran out of credits' in notification.body
+
+
+def test_the_suspension_notice_says_how_many_credits_are_needed(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('3.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    metering.meter_transfer(draft_transfer)
+
+    body = Notification.objects.get(user=draft_transfer.owner).body
+    assert 'at least 3 credits' in body
+    assert 'smaller top-up will not resume' in body
+
+
+def test_the_suspension_notice_is_keyed_by_its_transfer(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    metering.meter_transfer(draft_transfer)
+
+    notification = Notification.objects.get(user=draft_transfer.owner)
+    assert notification.key == f'transfer_suspended:{draft_transfer.pk}'
+
+
+def test_the_notice_uses_the_price_and_grace_period_it_is_given(
+    draft_transfer, billing_settings, monkeypatch
+):
+    """`meter_transfers` loads both once per run and passes them, so the hook queries neither."""
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    def must_not_load(*args, **kwargs):
+        raise AssertionError('loaded again')
+
+    monkeypatch.setattr(metering.FileTransferSettings, 'load', must_not_load)
+    monkeypatch.setattr(metering, 'get_storage_price_per_gb_per_day', must_not_load)
+
+    metering.meter_transfer(draft_transfer, Decimal('1.0'), 9)
+
+    body = Notification.objects.get(user=draft_transfer.owner).body
+    assert 'within 9 day(s)' in body
+    assert 'at least 1 credit ' in body
+
+
+def test_the_daily_job_passes_its_settings_to_the_notice(draft_transfer, billing_settings):
+    from .. import jobs
+    from ..models import FileTransferSettings
+
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    row = FileTransferSettings.load()
+    row.suspension_grace_days = 12
+    row.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    jobs.meter_transfers()
+
+    assert 'within 12 day(s)' in Notification.objects.get(user=draft_transfer.owner).body
+
+
+def test_a_hook_that_fails_midway_leaves_nothing_behind_and_keeps_the_suspension(
+    draft_transfer, billing_settings, monkeypatch
+):
+    """The hook runs in its own savepoint: whatever it wrote before failing is rolled back, and
+    the surrounding transaction (which holds the suspension) is still usable and commits."""
+
+    def write_then_fail(user, **kwargs):
+        Notification.objects.create(user_id=user, source='x', title='half-written')
+        raise RuntimeError('boom')
+
+    monkeypatch.setattr(
+        'apps.file_transfer.services.metering.notifications.notify', write_then_fail
+    )
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    metering.meter_transfer(draft_transfer)
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED
+    assert not Notification.objects.exists()
+
+
+def test_a_paid_day_creates_no_notification(draft_transfer):
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+
+    metering.meter_transfer(draft_transfer)
+
+    assert not Notification.objects.exists()
+
+
+def test_a_failing_notification_does_not_stop_the_suspension(
+    draft_transfer, billing_settings, monkeypatch
+):
+    def boom(*args, **kwargs):
+        raise RuntimeError('boom')
+
+    monkeypatch.setattr('apps.file_transfer.services.metering.notifications.notify', boom)
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    spend_credits(draft_transfer.owner, get_balance(draft_transfer.owner), source='test')
+
+    metering.meter_transfer(draft_transfer)
+
+    draft_transfer.refresh_from_db()
+    assert draft_transfer.status == TransferStatus.SUSPENDED
 
 
 def test_meter_transfer_ignores_non_active_or_ownerless(draft_transfer):
@@ -395,3 +534,104 @@ def test_suspended_email_says_how_many_credits_are_needed(
     assert len(sent) == 1
     assert 'at least 3 credits' in sent[0]['text_body']
     assert 'smaller top-up will not resume' in sent[0]['text_body']
+
+
+def _suspended_with_notice(transfer, *, size_bytes=_ONE_GB):
+    """Suspend `transfer` through metering, so it has its real, keyed notice."""
+    _make_active(transfer, size_bytes=size_bytes)
+    with mock.patch.object(metering, 'spend_credits', side_effect=InsufficientCreditsError('no')):
+        metering.meter_transfer(transfer)
+    transfer.refresh_from_db()
+    assert transfer.status == TransferStatus.SUSPENDED
+    return transfer
+
+
+def test_reenabling_deletes_that_transfers_suspended_notice_only(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    first = _suspended_with_notice(draft_transfer)
+    second = Transfer.objects.create(owner=first.owner, status=TransferStatus.ACTIVE)
+    second = _suspended_with_notice(second)
+    assert Notification.objects.filter(user=first.owner).count() == 2
+
+    assert metering.reenable_transfer(first) is True
+
+    remaining = Notification.objects.get(user=first.owner)
+    assert remaining.key == f'transfer_suspended:{second.pk}'
+
+
+def test_a_top_up_that_resumes_a_transfer_clears_its_notice(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    transfer = _suspended_with_notice(draft_transfer)
+
+    assert metering.reenable_suspended_transfers_for_user(transfer.owner) == 1
+
+    assert not Notification.objects.filter(user=transfer.owner).exists()
+
+
+def test_a_transfer_that_stays_suspended_keeps_its_notice(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('3.0')
+    billing_settings.save()
+    transfer = _suspended_with_notice(draft_transfer)
+    spend_credits(transfer.owner, get_balance(transfer.owner) - 2, source='test')
+
+    assert metering.reenable_suspended_transfers_for_user(transfer.owner) == 0
+
+    assert Notification.objects.filter(user=transfer.owner).count() == 1
+
+
+def test_a_lost_reenable_race_keeps_the_notice(draft_transfer, billing_settings):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    transfer = _suspended_with_notice(draft_transfer)
+    Transfer.objects.filter(pk=transfer.pk).update(status=TransferStatus.DELETED)
+
+    assert metering.reenable_transfer(transfer) is False
+
+    assert Notification.objects.filter(user=transfer.owner).count() == 1
+
+
+def test_the_dashboard_reenable_action_clears_the_notice(draft_transfer, billing_settings):
+    from ..services import actions
+
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    transfer = _suspended_with_notice(draft_transfer)
+
+    actions.reenable_transfer_action(transfer)
+
+    assert not Notification.objects.filter(user=transfer.owner).exists()
+
+
+def test_a_failing_cleanup_never_undoes_the_resume(draft_transfer, billing_settings, monkeypatch):
+    billing_settings.storage_price_per_gb_per_day = Decimal('1.0')
+    billing_settings.save()
+    transfer = _suspended_with_notice(draft_transfer)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError('boom')
+
+    monkeypatch.setattr('apps.file_transfer.services.metering.notifications.delete_for_key', boom)
+
+    assert metering.reenable_transfer(transfer) is True
+
+    transfer.refresh_from_db()
+    assert transfer.status == TransferStatus.ACTIVE
+    assert Notification.objects.filter(user=transfer.owner).count() == 1  # left for the user
+
+
+def test_reenabling_a_disabled_transfer_leaves_other_notices_alone(draft_transfer):
+    _make_active(draft_transfer, size_bytes=_ONE_GB)
+    draft_transfer.status = TransferStatus.DISABLED
+    draft_transfer.save()
+    notifications.notify(
+        draft_transfer.owner,
+        source='file_transfer',
+        title='x',
+        key=metering.suspended_notice_key(draft_transfer.pk),
+    )
+
+    assert metering.reenable_transfer(draft_transfer) is True
+
+    assert Notification.objects.filter(user=draft_transfer.owner).count() == 1

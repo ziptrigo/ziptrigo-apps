@@ -474,6 +474,35 @@ chip sits inside the vendor field (`pointer-events-none absolute inset-y-0 right
 field is an ARIA combobox: `role="combobox"` on the input, a `role="listbox"` of `role="option"`
 entries that the arrow keys move through (`aria-activedescendant`), Enter picks, Escape closes.
 
+### 10.17 Notification bell and list
+
+The bell is the one icon in the header that carries state (`core/partials/notification_bell.html`,
+signed-in users only, between the theme toggle and the account menu). The dropdown follows 10.8 and
+the page follows the list (10.7); both render each notification with `partials/notification_item.html`.
+
+- **Bell**: `fas fa-bell` in an icon button (`p-1 rounded text-2xl leading-none hover:text-sage-300`)
+  with a count badge, `absolute -right-1 -top-1 rounded-full bg-amber-400 text-gray-900 text-xs
+  font-semibold` (amber is "needs attention", 10.13's table; `gray-900` on `amber-400` is high
+  contrast in both themes). Capped at `99+`, hidden at 0, and spoken in full (`sr-only` "N new
+  notifications"), since the button's own label can't change.
+- **Dropdown panel**: 10.8's menu surface, `sm:w-96` hanging under the bell from `sm`, and on a phone
+  spanning the header (`inset-x-4`, so the header is `relative`). Header row (title, "Mark all as
+  read" as a small sage link), a `max-h-96` scrolling list, and a "View all notifications" link as its
+  footer. Opens and closes on click, Esc and an outside click, like the account menu.
+- **Row** (list rows, 10.7): source icon, title (`text-sm`, `truncate` in the dropdown), optional body
+  (`text-sm text-gray-600 dark:text-gray-400`, two lines in the dropdown), then source name and
+  relative time as meta (`text-xs text-gray-500 dark:text-gray-400`). The title is a **stretched
+  link** (`after:absolute after:inset-0`) so the whole row opens the notification, with the dismiss
+  (`fa-times`) and "Mark as read" (`fa-check`) icon buttons above it (`relative z-10`). A notification
+  without a URL is plain text.
+- **New and read**: a new notification has a small `bg-sage-400` dot (with "New:" for screen readers),
+  `font-semibold text-gray-900 dark:text-gray-100` and a tinted background (`bg-sage-50
+  dark:bg-gray-700/40`); a read one is `font-medium text-gray-700 dark:text-gray-300` with none of
+  that. Colour is never the only signal: the dot and the weight carry it too.
+- **Page**: the list page pattern with `max-w-4xl`, a toolbar row ("5 new" or "You're all caught up."
+  on the left, the **Secondary** "Mark all as read" button on the right) and the pagination links of the
+  Trash page. Empty state: "No notifications yet."
+
 ---
 
 ## 11. Page templates
