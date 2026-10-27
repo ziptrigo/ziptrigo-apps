@@ -32,6 +32,7 @@ from apps.core.admin_site import custom_admin_site
 from .forms.admin import BlockDomainForm, DeactivateOwnerForm, TakedownForm
 from .models import (
     BlockedDomain,
+    DailyLinkStat,
     LinkReport,
     LinkStatus,
     ReportStatus,
@@ -500,7 +501,23 @@ class BlockedDomainAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 
+class DailyLinkStatAdmin(ReadOnlyModelAdmin):
+    """The daily rollups (`services.rollup`), for support: what each link's statistics page reads
+    for the days before today. Written only by the `short_url.rollup_clicks` job."""
+
+    list_display = ['link_code', 'date', 'clicks', 'uniques', 'bot_clicks', 'uniques_with_bots']
+    list_filter = ['date']
+    list_select_related = ['link']
+    search_fields = ['link__code_key', 'link__destination', 'link__owner__email']
+    date_hierarchy = 'date'
+
+    @admin.display(description='Link', ordering='link__code')
+    def link_code(self, obj: DailyLinkStat) -> str:
+        return obj.link.code
+
+
 custom_admin_site.register(ShortUrlSettings, ShortUrlSettingsAdmin)
 custom_admin_site.register(ShortLink, ShortLinkAdmin)
+custom_admin_site.register(DailyLinkStat, DailyLinkStatAdmin)
 custom_admin_site.register(LinkReport, LinkReportAdmin)
 custom_admin_site.register(BlockedDomain, BlockedDomainAdmin)
