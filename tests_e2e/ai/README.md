@@ -17,6 +17,7 @@ One file per area:
 | [`qr_code.md`](qr_code.md) | QR code dashboard, editor, preview, duplicate, delete, `/go/<code>` short links |
 | [`file_transfer.md`](file_transfer.md) | Sending files, dashboard actions, public download page, anonymous sending |
 | [`receipts.md`](receipts.md) | Upload, extraction, receipt page, vendors, trash, settings, CSV export |
+| [`short_url.md`](short_url.md) | Short links: dashboard, editor and costs, `/s/<code>` redirect and neutral page, password, preview and reports, stats, blocked domains, takedown |
 | [`admin.md`](admin.md) | The Django admin: tools page, credit adjustment, settings singletons, moderation |
 
 ## The test server
@@ -101,7 +102,7 @@ Each file starts with the area's scope and preconditions, then numbered cases:
 | 2 | ... | ... |
 ```
 
-IDs are `<AREA>-<NN>` (`CORE`, `ACC`, `BILL`, `FB`, `QR`, `FT`, `RCPT`, `ADM`).
+IDs are `<AREA>-<NN>` (`CORE`, `ACC`, `BILL`, `FB`, `QR`, `FT`, `RCPT`, `SU`, `ADM`).
 
 ## Out of scope here
 
