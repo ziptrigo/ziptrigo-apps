@@ -18,22 +18,25 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.timezone import localtime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.accounts.models import User
 from apps.billing.services import InsufficientCreditsError, get_balance
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect
 
 from ..forms import LinkForm
-from ..models import ShortLink
+from ..models import LinkStatus, ShortLink
 from ..services import (
     CostChangedError,
+    LinkHeldError,
     LinkInput,
+    OwnerInactiveError,
     Quote,
     check_can_create,
     create_link,
@@ -91,6 +94,13 @@ def _page_context(request: AuthenticatedHttpRequest, link: ShortLink | None) -> 
 @require_http_methods(['GET', 'POST'])
 @ensure_csrf_cookie
 def link_create(request: AuthenticatedHttpRequest) -> HttpResponse:
+    # A deactivated owner's session can outlive the deactivation (it only stops new sign-ins and
+    # the API), so the page itself is refused; `create_link` checks again under the lock.
+    if request.user.status != User.STATUS_ACTIVE:
+        if request.method == 'GET':
+            messages.error(request, OwnerInactiveError.MESSAGE)
+            return redirect('short_url:dashboard')
+        return message_response(request, OwnerInactiveError.MESSAGE, retarget=_MSG)
     if request.method == 'GET':
         return render_page(request, 'short_url/link_form.html', _page_context(request, None))
 
@@ -160,6 +170,15 @@ def _confirmation(request: AuthenticatedHttpRequest, cost: Quote, *, verb: str) 
 def link_edit(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
     link = owned_link(request, link_id)
     if request.method == 'GET':
+        if link.status not in (LinkStatus.ACTIVE, LinkStatus.DISABLED) or link.held_for_review_at:
+            # Taken down, or held for review: nothing can be saved, so don't show a form.
+            messages.error(
+                request,
+                LinkHeldError.MESSAGE
+                if link.held_for_review_at
+                else 'This link can no longer be changed.',
+            )
+            return redirect('short_url:detail', link_id=link.pk)
         return render_page(request, 'short_url/link_form.html', _page_context(request, link))
 
     form = LinkForm(request.POST, link=link)

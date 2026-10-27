@@ -28,9 +28,15 @@ from apps.accounts.models import User
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import LinkStatus, ShortLink, ShortUrlSettings
-from . import billing, codes, limits, passwords
-from .destinations import apply_utm, validate_destination
-from .errors import AliasTakenError, CostChangedError, field_error
+from . import billing, blocklist, codes, limits, passwords
+from .destinations import apply_utm, destination_host, validate_destination
+from .errors import (
+    AliasTakenError,
+    CostChangedError,
+    LinkHeldError,
+    OwnerInactiveError,
+    field_error,
+)
 from .titles import fetch_title
 
 MAX_TAGS = 20
@@ -113,19 +119,37 @@ def validate_expiry(expires_at: datetime | None, *, now: datetime | None = None)
     return expires_at
 
 
-def _destination_with_utm(destination: str, utm: dict[str, str] | None) -> str:
-    """Merge the UTM parameters first, then validate the result as a whole."""
-    return validate_destination(apply_utm(validate_destination(destination), **(utm or {})))
+def _destination_with_utm(
+    destination: str, utm: dict[str, str] | None, *, current: str | None = None
+) -> str:
+    """Merge the UTM parameters first, then validate the result as a whole, and refuse a host on
+    the block list (`BlockedDomainError`).
+
+    `current` is the destination the link already has, when editing: a destination that is
+    unchanged is not checked against the block list again, so an owner can still change the title
+    of a link whose destination was blocked after the fact (the link itself is already refused at
+    every public request, `is_available`). Pointing it somewhere new is checked.
+    """
+    result = validate_destination(apply_utm(validate_destination(destination), **(utm or {})))
+    if result != current:
+        blocklist.check_not_blocked(destination_host(result))
+    return result
 
 
 # -- state -----------------------------------------------------------------------------------
 
 
 def is_available(link: ShortLink, *, now: datetime | None = None) -> bool:
-    """Whether `/s/<code>` works right now: active, not held for review, not expired and not
-    past its click cap. A password doesn't make a link unavailable: the visitor is asked for it
-    first (`views.password`). (Later phases add the blocked-destination check here, which is why
-    the redirect asks this one function and nothing else.)"""
+    """Whether `/s/<code>` works right now: active, not held for review, not expired, not past
+    its click cap and not pointing at a blocked host. A password doesn't make a link unavailable:
+    the visitor is asked for it first (`views.password`). Every public view asks this one
+    function and nothing else, so each of those states renders the same neutral page.
+
+    The block list is a database query, so it is asked last, only of a link that passed every
+    other check. That is one indexed query on the hottest path of the app, deliberately uncached
+    for now (a cache would need invalidating on every `BlockedDomain` save and delete, or a block
+    would not take effect at once). If redirect volume makes it matter, cache the active block set
+    (or the answer per host) for a few seconds and clear it from `BlockedDomain.save`/`delete`."""
     now = now or timezone.now()
     if link.status != LinkStatus.ACTIVE or link.held_for_review_at is not None:
         return False
@@ -133,21 +157,39 @@ def is_available(link: ShortLink, *, now: datetime | None = None) -> bool:
         return False
     if link.max_clicks is not None and link.click_count >= link.max_clicks:
         return False
-    return True
+    return not blocklist.is_blocked(destination_host(link.destination))
 
 
-def display_state(link: ShortLink, *, now: datetime | None = None) -> str:
-    """The state shown on the dashboard, most specific first: `taken_down`, `deleted`,
-    `disabled`, `held`, `expired`, `capped` or `active`."""
+def is_destination_blocked(link: ShortLink) -> bool:
+    """Whether the link's destination host is on the block list (what the owner's page says when
+    the link doesn't work for that reason)."""
+    return blocklist.is_blocked(destination_host(link.destination))
+
+
+def display_state(
+    link: ShortLink, *, now: datetime | None = None, destination_blocked: bool = False
+) -> str:
+    """The state shown to the owner, most specific first: `taken_down`, `deleted`, `disabled`,
+    `held`, `expired`, `capped`, `blocked` or `active`.
+
+    `blocked` (the destination's host is on the block list) needs a database query, so it is
+    reported only when the caller passes `destination_blocked` (the link's own page asks per link;
+    the dashboard asks once per page, `blocklist.blocked_hosts`; the dashboard *tabs* are database
+    filters and still count such a link under its stored status). A disabled link whose
+    destination is blocked is `blocked` too, so its owner sees why before paying to enable it."""
     now = now or timezone.now()
-    if link.status in (LinkStatus.TAKEN_DOWN, LinkStatus.DELETED, LinkStatus.DISABLED):
+    if link.status in (LinkStatus.TAKEN_DOWN, LinkStatus.DELETED):
         return str(link.status)
+    if link.status == LinkStatus.DISABLED:
+        return 'blocked' if destination_blocked else 'disabled'
     if link.held_for_review_at is not None:
         return 'held'
     if link.expires_at is not None and link.expires_at <= now:
         return 'expired'
     if link.max_clicks is not None and link.click_count >= link.max_clicks:
         return 'capped'
+    if destination_blocked:
+        return 'blocked'
     return 'active'
 
 
@@ -194,8 +236,19 @@ def quote_create(owner: User, alias: str | None, *, has_password: bool = False) 
 
 def _lock_owner(owner: User) -> None:
     """Serialize one user's create/enable calls, so the active-link cap can't be raced past (a
-    row lock on Postgres; SQLite has one writer at a time anyway)."""
-    User.objects.select_for_update().filter(pk=owner.pk).first()
+    row lock on Postgres; SQLite has one writer at a time anyway). Also refuses an owner whose
+    account is not active (`OwnerInactiveError`), read from the locked row."""
+    status = User.objects.select_for_update().filter(pk=owner.pk).values_list('status', flat=True)
+    if status.first() != User.STATUS_ACTIVE:
+        raise OwnerInactiveError()
+
+
+def _require_active_owner(owner_id: Any) -> None:
+    """`OwnerInactiveError` unless the owner's account is active, read fresh and without a lock
+    (for the paths that already hold the link's row lock: the owner's lock must come first)."""
+    status = User.objects.filter(pk=owner_id).values_list('status', flat=True).first()
+    if status != User.STATUS_ACTIVE:
+        raise OwnerInactiveError()
 
 
 def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = None) -> ShortLink:
@@ -267,9 +320,13 @@ def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = Non
 # -- change ----------------------------------------------------------------------------------
 
 
-def _require_editable(link: ShortLink) -> None:
+def _require_editable(link: ShortLink, *, allow_held: bool = False) -> None:
+    """Refuse a link that is taken down or deleted, and (unless `allow_held`) one held for abuse
+    review: a hold freezes every owner action except disabling it (`services.hold`)."""
     if link.status not in (LinkStatus.ACTIVE, LinkStatus.DISABLED):
         raise ValidationError('This link can no longer be changed.')
+    if link.held_for_review_at is not None and not allow_held:
+        raise LinkHeldError()
 
 
 def update_link(
@@ -300,6 +357,7 @@ def update_link(
         # Hashed before the transaction: a slow hash must not hold the link's row lock.
         new_hash = passwords.hash_password(password) if password is not None else None
     with transaction.atomic():
+        _require_active_owner(link.owner_id)
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
         _require_editable(locked)
         # Diffed against the locked row, so "only write what differs" holds under concurrent
@@ -307,7 +365,7 @@ def update_link(
         changes: dict[str, Any] = {}
         if destination is not UNSET or utm:
             base = locked.destination if destination is UNSET else destination
-            new_destination = _destination_with_utm(base, utm)
+            new_destination = _destination_with_utm(base, utm, current=locked.destination)
             if new_destination != locked.destination:
                 changes['destination'] = new_destination
         if title is not UNSET:
@@ -374,17 +432,28 @@ def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = N
     for the same link); a disabled link already counts toward the hard cap, so it needs no check.
 
     `expected_cost` is the total the caller confirmed (see the module docstring); `None` accepts
-    any cost. Raises `ValidationError` for a taken down or deleted link or `CostChangedError`,
-    and `InsufficientCreditsError`.
+    any cost. Raises `ValidationError` for a taken down or deleted link, an owner whose account
+    is not active (`OwnerInactiveError`) or a destination on the block list (`BlockedDomainError`,
+    checked before anything is charged), `CostChangedError`, and `InsufficientCreditsError`.
+    Disabling needs neither of the last two checks.
     """
     with transaction.atomic():
-        _lock_owner(link.owner)
+        if enabled:
+            _lock_owner(link.owner)
+        else:
+            # Disabling stays open to a deactivated owner (it only ever reduces what they run),
+            # but still takes the lock so it serializes with their other calls.
+            User.objects.select_for_update().filter(pk=link.owner_id).first()
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
-        _require_editable(locked)
+        # Disabling is the one thing a hold still allows the owner.
+        _require_editable(locked, allow_held=not enabled)
         link.status = locked.status
         target = LinkStatus.ACTIVE if enabled else LinkStatus.DISABLED
         if locked.status == target:
             return False
+        if enabled:
+            # A blocked destination never works, so enabling would only charge for nothing.
+            blocklist.check_not_blocked(destination_host(locked.destination))
 
         settings_row = ShortUrlSettings.load()
         # Free for a link that already paid its way in (`charge_extra` skips it too).
@@ -479,8 +548,10 @@ def enable_analytics(link: ShortLink, *, expected_cost: int | None = None) -> bo
     `InsufficientCreditsError`.
     """
     with transaction.atomic():
+        _require_active_owner(link.owner_id)
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
-        _require_editable(locked)
+        # Allowed while held: it changes nothing about the link, only what its owner can see.
+        _require_editable(locked, allow_held=True)
         if locked.analytics_paid_at is not None:
             link.analytics_paid_at = locked.analytics_paid_at
             return False
@@ -495,17 +566,22 @@ def enable_analytics(link: ShortLink, *, expected_cost: int | None = None) -> bo
 def delete_link(link: ShortLink) -> bool:
     """Soft delete: the link stops working and leaves the owner's lists, but the row stays so its
     code is never issued again. Returns whether it was deleted (False if it already was). A link
-    taken down by staff can't be deleted by its owner."""
+    taken down by staff can't be deleted by its owner, nor can one held for abuse review
+    (`LinkHeldError`: it stays as it is until staff decide)."""
     if link.status == LinkStatus.DELETED:
         return False
     now = timezone.now()
     changed = ShortLink.objects.filter(
-        pk=link.pk, status__in=(LinkStatus.ACTIVE, LinkStatus.DISABLED)
+        pk=link.pk,
+        status__in=(LinkStatus.ACTIVE, LinkStatus.DISABLED),
+        held_for_review_at__isnull=True,
     ).update(status=LinkStatus.DELETED, deleted_at=now, updated_at=now)
     if not changed:
         link.refresh_from_db()
         if link.status == LinkStatus.DELETED:
             return False
+        if link.status in (LinkStatus.ACTIVE, LinkStatus.DISABLED):
+            raise LinkHeldError()
         raise ValidationError('This link can no longer be changed.')
     link.status = LinkStatus.DELETED
     link.deleted_at = now

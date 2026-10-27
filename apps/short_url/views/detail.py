@@ -10,7 +10,8 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
 from apps.core.services.qr_image import render_png
 
-from ..services import display_state, quote_enable, short_url
+from ..models import LinkStatus
+from ..services import display_state, is_destination_blocked, quote_enable, short_url
 from .common import owned_link, render_page
 
 
@@ -20,13 +21,21 @@ from .common import owned_link, render_page
 def link_detail(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
     link = owned_link(request, link_id)
     link.enable_cost = quote_enable(link).total
+    # A database query, so only asked of a link that isn't already ended (a disabled one too: the
+    # owner should see "Not working" before paying to enable it).
+    blocked = link.status in (LinkStatus.ACTIVE, LinkStatus.DISABLED) and is_destination_blocked(
+        link
+    )
     return render_page(
         request,
         'short_url/detail.html',
         {
             'link': link,
             'short_url': short_url(link.code),
-            'state': display_state(link, now=timezone.now()),
+            'state': display_state(link, now=timezone.now(), destination_blocked=blocked),
+            # Held for review or taken down: the owner can change nothing (a held link can still
+            # be disabled).
+            'frozen': link.status == LinkStatus.TAKEN_DOWN or link.held_for_review_at is not None,
         },
     )
 

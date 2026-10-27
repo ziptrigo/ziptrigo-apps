@@ -1,0 +1,47 @@
+{% comment %} The "report this link" form on the preview page, swapped as a whole by htmx. Needs `link` and either
+   `reported` (the thank-you) or `report_form`. Posts without htmx too (the view then renders the whole page). {% endcomment %}
+<div id="report-box">
+    {% if reported %}
+    <div class="rounded px-4 py-2 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 text-sm" role="status">
+        Thank you, your report has been submitted.
+    </div>
+    {% else %}
+    {% comment %} A rate-limit 429 is retargeted here (innerHTML), so the form and what was typed stay. {% endcomment %}
+    <div id="report-msg" role="alert"></div>
+    <form method="post" action="{% url 's:report' link.code %}"
+          hx-post="{% url 's:report' link.code %}" hx-target="#report-box" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]"
+          class="space-y-3">
+        {% csrf_token %}
+
+        {% if report_form.non_field_errors %}
+        <div class="rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm" role="alert">
+            {% for message in report_form.non_field_errors %}<p>{{ message }}</p>{% endfor %}
+        </div>
+        {% endif %}
+
+        <div>
+            <label for="{{ report_form.reason.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Reason</label>
+            {{ report_form.reason }}
+            {% for message in report_form.reason.errors %}<p class="text-sm text-red-600 dark:text-red-400">{{ message }}</p>{% endfor %}
+        </div>
+
+        <div>
+            <label for="{{ report_form.details.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ report_form.details.label }}</label>
+            {{ report_form.details }}
+            {% for message in report_form.details.errors %}<p class="text-sm text-red-600 dark:text-red-400">{{ message }}</p>{% endfor %}
+        </div>
+
+        <div>
+            <label for="{{ report_form.reporter_email.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ report_form.reporter_email.label }}</label>
+            {{ report_form.reporter_email }}
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ report_form.reporter_email.help_text }}</span>
+            {% for message in report_form.reporter_email.errors %}<p class="text-sm text-red-600 dark:text-red-400">{{ message }}</p>{% endfor %}
+        </div>
+
+        <button type="submit"
+                class="px-4 py-2 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            Submit report
+        </button>
+    </form>
+    {% endif %}
+</div>

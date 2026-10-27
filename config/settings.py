@@ -373,6 +373,15 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # The preview page (`/s/<code>+`): a page someone opens deliberately, so far fewer than
     # redirects; over the limit it is a plain 429 (unlike the redirect, which never errors).
     'SU_PREVIEW_IP': (60, 60),
+    # Abuse reports on a link (`/s/<code>/report`), the same split as file transfer's
+    # `FT_REPORT_*` and for the same reason. `SU_REPORT_IP`: strict, every submission counts, since
+    # a real visitor reports a handful of links, ever. `SU_REPORT_LINK`: a looser per-link
+    # ceiling, peeked before a report is tried and hit only once one was created, so many
+    # different people genuinely reporting one bad link aren't throttled by the IP rule alone,
+    # while the reports (admin noise, auto-hold triggers) one link can collect per hour are still
+    # bounded.
+    'SU_REPORT_IP': (5, 60 * 60),
+    'SU_REPORT_LINK': (20, 60 * 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),

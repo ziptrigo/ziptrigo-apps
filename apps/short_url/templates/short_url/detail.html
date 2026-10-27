@@ -11,13 +11,21 @@
        class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Short URLs</a>
     <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <h1 class="min-w-0 break-words text-3xl font-bold text-gray-900 dark:text-gray-100">{% firstof link.title link.code %}</h1>
-        {% link_status_pill link %}
+        {% link_status_pill link state %}
     </div>
 </div>
 
-{% if state == 'taken_down' and link.takedown_reason %}
+{% if state == 'taken_down' %}
 <div class="mb-6 rounded-md border border-red-600/40 dark:border-red-400/40 px-4 py-3 text-sm text-red-700 dark:text-red-400" role="alert">
-    <i class="fas fa-ban mr-1" aria-hidden="true"></i>This link was taken down: {{ link.takedown_reason }}
+    <i class="fas fa-ban mr-1" aria-hidden="true"></i>This link was taken down{% if link.takedown_reason %}: {{ link.takedown_reason }}{% else %}.{% endif %}
+</div>
+{% elif link.held_for_review_at %}
+<div class="mb-6 rounded-md border border-amber-600/40 dark:border-amber-400/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400" role="status">
+    <i class="fas fa-flag mr-1" aria-hidden="true"></i>This link is under review, so it doesn't work for visitors and can't be changed right now.{% if link.status == 'active' %} You can still disable it.{% endif %}
+</div>
+{% elif state == 'blocked' %}
+<div class="mb-6 rounded-md border border-amber-600/40 dark:border-amber-400/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400" role="status">
+    <i class="fas fa-ban mr-1" aria-hidden="true"></i>This link doesn't work because its destination can't be used. Edit it to point somewhere else.
 </div>
 {% endif %}
 
@@ -97,7 +105,7 @@
 </div>
 
 <div class="mt-8 flex flex-wrap items-center gap-3">
-    {% if link.status == 'active' or link.status == 'disabled' %}
+    {% if not frozen %}
     <a href="{% url 'short_url:edit' link.pk %}"
        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
         <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit
@@ -120,7 +128,7 @@
             <i class="fas fa-pause mr-2" aria-hidden="true"></i>Disable
         </button>
     </form>
-    {% elif link.status == 'disabled' %}
+    {% elif link.status == 'disabled' and not frozen %}
     {% if link.enable_cost %}
     <button type="button" @click="show($el)"
             data-url="{% url 'short_url:enable' link.pk %}?next={% url 'short_url:detail' link.pk %}" data-tone="primary" data-label="Enable for {{ link.enable_cost }} credit{{ link.enable_cost|pluralize }}"
@@ -140,7 +148,7 @@
     </form>
     {% endif %}
     {% endif %}
-    {% if link.status == 'active' or link.status == 'disabled' %}
+    {% if not frozen %}
     <button type="button" @click="show($el)"
             data-url="{% url 'short_url:delete' link.pk %}" data-title="Delete this link?" data-label="Delete"
             data-body="{{ link.code }} will stop working for good, and its code can never be used again."
