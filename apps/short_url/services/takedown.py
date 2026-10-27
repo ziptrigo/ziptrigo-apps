@@ -65,4 +65,5 @@ def take_down_link(
     link.takedown_reason = reason
     link.takedown_internal_note = internal_note
     link.held_for_review_at = None
+    link.updated_at = now
     return True

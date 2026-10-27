@@ -24,6 +24,12 @@ A single Django project (a "modular monolith") with one Django app per concern:
   list. Credit-metered per file and per GB stored. Built: models, uploads, the AI pipeline, email
   intake, billing, jobs, admin and the web pages (dashboard, upload, detail, trash, settings), plus a
   JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (#98 phase 4).
+- **short_url** — a URL shortener (#162): `<site>/s/<code>` redirects to a destination you can edit
+  later. Logged-in owners only. Free to create and follow; a custom alias, a password, the
+  detailed analytics and every active link beyond a free allowance cost credits once per link.
+  Click analytics (bots filtered, country from GeoLite2), a password page, a preview page with a
+  report form, blocked domains and takedown for staff, a QR image of every link, a JWT API
+  (`/api/s/`) and the `admin/shorturl.py` CLI.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -90,13 +96,13 @@ apps/<app>/
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
-| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…` |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…`, `/api/s/…` (short_url) |
 | `/admin/` | Django admin (Jazzmin) |
 
 ### Dependency rules
 
 ```
-qr_code, file_transfer, receipts   (products: may not import each other)
+qr_code, file_transfer, receipts, short_url   (products: may not import each other)
         ↓
  billing, feedback
         ↓
@@ -358,7 +364,7 @@ To get the file, create a free [MaxMind account](https://www.maxmind.com/en/geol
 accept the GeoLite2 licence and download *GeoLite2 Country* (the `.mmdb` inside the tarball), or let
 `geoipupdate` keep it current. The file is opened once per process (memory-mapped), so a worker
 restart picks up a new one. In a deployment the file has to be in the container: mount it, or fetch
-it when the image is built; that lives in the `infra` repo, not here. Nothing about a visitor but
+it when the image is built; that lives in the `infra` repo, not here (#171). Nothing about a visitor but
 the country is stored: a click keeps a keyed hash of the address that changes every day, never the
 address.
 
@@ -426,6 +432,8 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   coarse per-IP `limit_req` (20 r/s, `burst=100`; `/go/<code>` short links on their own looser
   zone, 50 r/s, `burst=500`; both answer 429 with a short plain-text body and `Retry-After: 1`) as
   defense-in-depth below the app's own rate limits (issue #119); those limits remain the real ones.
+  Short URLs' `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` belong in that looser zone too (#170,
+  not done yet): until then a burst of scans from one shared address can meet nginx's main zone.
 
 ## Design System
 

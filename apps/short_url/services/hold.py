@@ -60,12 +60,15 @@ def maybe_hold_for_reports(link: ShortLink, settings_row: ShortUrlSettings | Non
     ).update(held_for_review_at=now, updated_at=now)
     if held:
         link.held_for_review_at = now
+        link.updated_at = now
     return bool(held)
 
 
 def release_hold(link: ShortLink) -> ShortLink:
     """Release `link`'s hold (staff dismissed the reports behind it, or released it from the
     admin). Idempotent."""
-    ShortLink.objects.filter(pk=link.pk).update(held_for_review_at=None, updated_at=timezone.now())
+    now = timezone.now()
+    ShortLink.objects.filter(pk=link.pk).update(held_for_review_at=None, updated_at=now)
     link.held_for_review_at = None
+    link.updated_at = now
     return link

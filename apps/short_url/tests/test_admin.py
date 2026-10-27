@@ -139,3 +139,39 @@ class TestDeletingAUserWithLinks:
         staff.user_permissions.add(Permission.objects.get(codename='delete_shortlink'))
         assert client.post(url, {'post': 'yes'}).status_code == 302
         assert not ShortLink.objects.filter(code_key='del002').exists()
+
+
+class TestDailyLinkStatAdmin:
+    @pytest.fixture
+    def stat(self, user):
+        from datetime import date
+
+        from ..models import DailyLinkStat
+
+        link = create_link(user, code='Roll001')
+        return DailyLinkStat.objects.create(
+            link=link, date=date(2026, 10, 19), clicks=5, uniques=3, bot_clicks=1
+        )
+
+    def test_the_list_loads_and_shows_the_rollups(self, client, superuser, stat):
+        response = client.get(reverse('admin:short_url_dailylinkstat_changelist'))
+
+        assert response.status_code == 200
+        assert 'Roll001' in response.content.decode()
+
+    def test_search_by_code_and_by_owner(self, client, superuser, stat, user):
+        url = reverse('admin:short_url_dailylinkstat_changelist')
+
+        assert 'Roll001' in client.get(url, {'q': 'roll001'}).content.decode()
+        assert 'Roll001' in client.get(url, {'q': user.email}).content.decode()
+        assert 'Roll001' not in client.get(url, {'q': 'nothing-like-it'}).content.decode()
+
+    def test_it_is_read_only(self, client, superuser, stat):
+        from ..models import DailyLinkStat
+
+        assert client.get(reverse('admin:short_url_dailylinkstat_add')).status_code == 403
+        change = reverse('admin:short_url_dailylinkstat_change', args=[stat.pk])
+        assert client.post(change, {'clicks': 99}).status_code == 403
+        delete = reverse('admin:short_url_dailylinkstat_delete', args=[stat.pk])
+        assert client.post(delete, {'post': 'yes'}).status_code == 403
+        assert DailyLinkStat.objects.get(pk=stat.pk).clicks == 5

@@ -28,13 +28,12 @@ apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/do
 apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
                       uploads, email intake, AI extraction, billing, jobs, admin, the web pages, the
                       JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts").
-apps/short_url/       Short URLs (issue #162): `ShortLink` + `ShortUrlSettings`, the public `/s/<code>`
-                      redirect (root-mounted), dashboard / create-edit / link pages, QR image, and the
-                      one-off billing of its extras. Built in phases: this is the first (links,
-                      redirect, dashboard, alias and extra-link billing, title fetching); the full
-                      "Short URLs" section arrives with the last phase.
-admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts.
-                      Via `inv`.
+apps/short_url/       Short URLs (issue #162): links with editable destinations, the public `/s/<code>`
+                      redirect (root-mounted), click analytics, password and preview pages, abuse
+                      tooling, one-off billing of its extras, dashboard/stats pages, the JWT API
+                      (`/api/s/`) and the `admin/shorturl.py` CLI (see "Short URLs").
+admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts/
+                      shorturl. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
                       test plans run by an AI agent driving a browser, one per area (see its README).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
@@ -61,7 +60,7 @@ inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
 inv server run [local|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv openapi generate --format json --file <path>
-inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/ and /api/receipts/
+inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/, /api/receipts/, /api/s/
 inv filetransfer send local report.pdf --to a@example.com
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
 inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported types are skipped
@@ -74,10 +73,21 @@ inv receipts vendor-vet local <id>... [--unvet]
 inv receipts vendor-merge local <keep-id> <id>... [--yes]
 inv receipts inbox local                        # the address receipts can be emailed to
 inv receipts regenerate local [--yes]           # retire the address and issue a new one
+inv shorturl login local <email>                # password: prompt, or SHORTURL_PASSWORD
+inv shorturl create local https://example.com/long [--alias spring-sale --tag promo --max-clicks 100 --yes]
+inv shorturl quote local https://example.com --alias spring-sale   # what a create would cost
+inv shorturl list local [--status active --tag promo --q sale --sort=-click_count]
+inv shorturl get local <link-id>                 # also what its next paid actions would cost
+inv shorturl update local <link-id> [--destination ... --clear-expires --password --yes]
+inv shorturl enable|disable|delete local <link-id>   # enable and delete ask first (--yes skips)
+inv shorturl analytics local <link-id>           # open the detailed statistics (paid once per link)
+inv shorturl stats local <link-id> [--range 7|30|90|all]
+inv shorturl preview local <link-id>             # what /s/<code>+ shows, and whether it works now
+inv shorturl qr local <link-id> --out link.png
 ```
 
 Every command accepts `--dry` to print the shell command without running it (the JWT HTTP-client
-CLIs -- `qrcode`, `filetransfer`, `receipts` -- run no shell command, so they have no `--dry`). The app names `inv`
+CLIs -- `qrcode`, `filetransfer`, `receipts`, `shorturl` -- run no shell command, so they have no `--dry`). The app names `inv`
 accepts come from `admin/django_app.py`, which discovers them from `apps/*/apps.py`.
 
 `admin/server.py` and `admin/openapi.py` each define one typer command, which typer collapses away
@@ -89,7 +99,7 @@ when the module is run directly (`python3 -m admin.server`) but which `inv` pres
 Run pytest from the repo root; `DJANGO_SETTINGS_MODULE=config.settings` and
 `testpaths = ['apps', 'admin']` are set in `pyproject.toml`, and default addopts include
 `--reuse-db --no-migrations`. `admin` is there for `admin/tests/` (currently
-`admin/filetransfer.py`'s, `admin/receipts.py`'s and the token-file handling of `qrcode`/`utils`) -- plain HTTP-client CLI logic with no Django/database
+`admin/filetransfer.py`'s, `admin/receipts.py`'s, `admin/shorturl.py`'s and the token-file and request handling of `qrcode`/`utils`) -- plain HTTP-client CLI logic with no Django/database
 dependency of its own, picked up by the same `pytest`/`inv test unit` run as every app's tests:
 
 ```bash
@@ -243,8 +253,8 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   name its path): it hashes once for an unknown email, so login timing doesn't reveal accounts,
   and refuses `is_active=False` users at login and on every session load. Such a login answers
   "Invalid credentials" (the `status` check, "User not active", comes after `authenticate`).
-- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py`, `admin/filetransfer.py` and
-  `admin/receipts.py`
+- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py`, `admin/filetransfer.py`,
+  `admin/receipts.py` and `admin/shorturl.py`
   (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE`
   users). Claim `sub`, signed with `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
   **Tokens are bound to the password**: every access and refresh token carries `pwd`
@@ -838,7 +848,9 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
 
 `config/api.py` builds one `NinjaAPI`; each app exposes a `router` from its `api` module/package
 and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr/`, `/api/ft/` for
-file_transfer, `/api/receipts/` for receipts). Docs at `/api/docs`.
+file_transfer, `/api/receipts/` for receipts, `/api/s/` for short_url, described under "Short URLs"
+above, including how it handles credits for a client with no one to confirm with). Docs at
+`/api/docs`.
 
 `apps/file_transfer/api/` (issue #55 phase 3) is JWT-only (logged-in users; anonymous sending stays
 web-only) and mirrors the web send/dashboard flow endpoint-for-endpoint, calling the exact same
@@ -2215,13 +2227,14 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   exit code is 1 if any failed) and `vendor-merge <keep> <id>...` (unless `--yes`, it first `GET`s
   every vendor so the prompt shows which is kept and which are merged away -- and a wrong id fails
   before the question --, then `POST /vendors/merge`; the kept id and repeats are dropped from the
-  list). The three JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
+  list). The four JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
   is **per CLI and environment**, `~/.<cli>_token.<env>` (`token_file`, so the prod JWT is never
   sent to the local server; the single `~/.<cli>_token` of earlier versions is ignored -- log in
   again, then delete it), written by `write_private_file` (mode 0600 set on the open descriptor so
   a pre-existing looser file is tightened, `O_NOFOLLOW`); `get_headers(cli)`,
   `password_from_prompt_or_env` (`QRCODE_PASSWORD` / `FILETRANSFER_PASSWORD` /
-  `RECEIPTS_PASSWORD`, else a hidden prompt: no CLI takes the password on the command line any
+  `RECEIPTS_PASSWORD` / `SHORTURL_PASSWORD`, and `SHORTURL_LINK_PASSWORD` for the password of a
+  short link itself, else a hidden prompt: no CLI takes a password on the command line any
   more) and `select_environment` (loads the env file and remembers which, for `token_file`; prints
   `Site: <url> (<env>)` to stderr and warns when `API_BASE_URL` differs from the file's `BASE_URL`,
   since the token is chosen by environment but sent wherever the URL points). Every request goes through `_request`: default timeout; a 429 is retried
@@ -2248,6 +2261,305 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `RECEIPTS_S3_BUCKET`/`_REGION`/`_ENDPOINT_URL`, `RECEIPTS_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`,
   `RECEIPTS_INBOUND_ADDRESS`; the five required ones are checked in prod (see "Settings and
   environment"), `apps.receipts.checks` warns about a *partial* local configuration.
+
+### Short URLs
+
+`apps.short_url` (issue #162; app label `short_url`) is a URL shortener: `<BASE_URL>/s/<code>` redirects
+to a destination the owner can edit. A product (same layer as `qr_code`/`file_transfer`/`receipts`),
+**logged-in owners only** (no anonymous shortening). Creating and following a link is free; each
+extra costs credits once per link. Built in four phases (links and billing; password, preview and
+analytics; abuse tooling; API, CLI, docs and E2E). The QR app's `/go/<code>` links are untouched, and
+the two products share nothing: a link's QR image comes from the small `core` helper
+`apps.core.services.qr_image.render_png` (segno), not from `qr_code`.
+Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `schemas/`, `jobs.py`,
+`admin.py`, `checks.py`.
+
+- **Models** (`models/`). `ShortLink` (UUID pk, `owner` FK that cascades with the user, `code` as
+  displayed, `code_key` its lower-case form, **unique**, what every lookup uses, `is_alias`,
+  `destination` up to 2,048, `title`, `tags` JSON list, `status` `active`/`disabled`/`taken_down`/
+  `deleted`, `expires_at`, `max_clicks`, `password_hash`, `filter_bots` (default true), `click_count`,
+  `bot_click_count`, `last_clicked_at`, the four `*_paid_at` columns, `held_for_review_at`, the
+  takedown columns, `deleted_at`). The `status` is what the owner or staff did; whether the link
+  works *right now* is `services.is_available` (status `active`, no hold, not expired, not past its
+  cap, destination not blocked) and what the owner sees is `services.display_state` (`active`,
+  `disabled`, `expired`, `capped`, `held`, `blocked`, `taken_down`). `ShortUrlSettings` is a
+  `SingletonSettingsAdmin` singleton (`/admin/short_url/shorturlsettings/`): the four prices
+  (`custom_alias_price`, `password_price`, `analytics_price`, `extra_link_price`, default 1 credit
+  each; 0 makes an extra free), `free_active_links` (25), `max_active_links` (500, the hard cap),
+  `click_event_retention_days` (90) and `auto_hold_report_threshold` (0 = off). Click analytics:
+  `ClickEvent`, `DailyLinkStat`, `DailyLinkDimension`; abuse: `LinkReport`, `BlockedDomain`;
+  `RetiredCode`.
+- **Codes** (`services.codes`). A random code is 7 base62 characters (`secrets`); an alias is 3-32 of
+  `[A-Za-z0-9_-]`. Both live in one namespace compared **case-insensitively** (`/s/Sale` and `/s/sale`
+  can't both exist; the redirect accepts any case, the display keeps the case as typed). `RESERVED`
+  words (`admin`, `api`, `s`, `go`, `login`, ...) are refused as an alias. **A code is never issued
+  twice**: a deleted or taken-down link keeps its row, the alias can't be edited (changing it would
+  free the old code), and deleting the *user* (their links cascade) first copies their `code_key`s into
+  `RetiredCode` (a `pre_delete(User)` receiver in `apps.py`, `weak=False`), which `codes.is_available`
+  also checks. `AliasTakenError` (taken, reserved, retired) deliberately says nothing about whose.
+- **Destinations** (`services.destinations`, the one check every create and destination edit goes
+  through, web and API): `http`/`https` only, at most 2,048 characters, a syntactically valid public
+  host (IP literals in loopback/private/link-local/multicast/reserved ranges, `localhost`, `.local`/
+  `.internal` names and hosts a browser would read as an IP, like `2130706433`, are refused), no
+  credentials in the URL, and **no loops**: a destination on this site's own `/s/` or `/go/` paths is
+  refused after percent-decoding and resolving dot segments. Stored in normalized form (IDNA host,
+  percent-encoded path). The UTM builder (`apply_utm`) merges `utm_source/medium/campaign/term/content`
+  into the query first and the result is validated as a whole; an empty value never removes a
+  parameter. `services.blocklist` then refuses a **blocked domain** (below). This checks what is
+  written, not what a name resolves to; only `titles.fetch_title` resolves a host, and it checks.
+- **The redirect** (`views/redirect.py`, mounted at the site root by `redirect_urls.py`,
+  `app_name = 's'`: `^s/<code>(\+)?/?$` plus `/s/<code>/unlock` and `/s/<code>/report`, spelled
+  without a trailing slash everywhere in docs and links). `SU_REDIRECT_IP` is charged **before** the
+  lookup, so made-up codes spend the budget too. Every unavailable state (unknown, disabled, expired,
+  past its cap, deleted, taken down, held, destination blocked) renders the same neutral
+  `unavailable.html`, HTTP 404, `Cache-Control: no-store, private`; it never says why, and the
+  preview, password and report pages answer the same. A password link redirects to `/s/<code>/unlock`
+  first (not counted). Otherwise a **`GET` is a click** (a `HEAD` redirects without recording) and the
+  answer is a **`302`, never a `301`** (the destination can be edited) with `Cache-Control: no-store,
+  private`. **Over the rate limit** a known link still redirects and an unknown code is still a 404,
+  never a 429 (a visitor must never see an error because someone else used the same address): only the
+  click *event* is skipped. **The exception is a link with `max_clicks`**: it is still counted over
+  the limit (the counter without the event, `clicks.record(with_event=False)`), because there the
+  counter is what ends the link, not a statistic. Don't "fix" this back to `/go/`'s behaviour.
+- **Counting and bot filtering** (`services.clicks`, `services.useragents`). `record` bumps the
+  counters with one conditional `UPDATE` (the cap is in the same statement, so racing clicks can't
+  overshoot it; it returns False and the view answers the neutral page when the cap was reached
+  meanwhile) and inserts the `ClickEvent` in a savepoint (an analytics failure never breaks a redirect).
+  A click is a bot's when its `User-Agent` matches `BOT_PATTERN` (crawler words, link-preview fetchers,
+  scanners, headless browsers, HTTP libraries; a **missing `User-Agent` counts as a bot**) or
+  `ua-parser` calls the device `Spider`. It is a filter for statistics, not a security control. The
+  event is always recorded, with `is_bot`. The two counters: `click_count` is the headline number and
+  what `max_clicks` caps; `bot_click_count` is the clicks flagged as bots. With `filter_bots` on (the
+  default) a bot click adds only to `bot_click_count`; with it off every click adds to `click_count`
+  and a bot's also to `bot_click_count` ("of these, this many were bots"). **A link with `max_clicks`
+  counts every redirected click, bot or not**, whatever `filter_bots` says (otherwise anyone could
+  follow a "first 100 visitors" link without limit by setting a header); its `click_count` therefore
+  includes bots. The counters record the choice in force at the time; switching `filter_bots` later
+  doesn't rewrite them, while the stats page re-reads the events with the current choice. The bot list
+  only names crawler tokens, never a bare brand, so the DuckDuckGo, Pinterest, Flipboard and Yandex
+  in-app browsers count as people.
+- **Analytics** (`services.clicks`, `rollup`, `stats`, `geoip`, `jobs`). A `ClickEvent` holds the UTC
+  time, an **HMAC-SHA256 of the UTC day and the normalized client address keyed with `SECRET_KEY`**
+  (an IPv6 address as its /64, an IPv4-mapped one unwrapped: the rate limits' grouping; the address
+  itself is never stored, and the hash changes daily, so uniques are per day and nothing links a
+  visitor across days), the referrer **host** only (never path or query; own-site referrers are
+  dropped), the country, device class (`desktop`/`mobile`/`tablet`/`bot`), browser and OS family and
+  `is_bot`. Country comes from a MaxMind GeoLite2-Country database at `GEOIP_PATH` (`geoip2`, opened
+  once per process, memory-mapped); without it every country is unknown and `manage.py check` warns
+  `short_url.W001` (never an error: `migrate` runs the checks under `set -e`). Setup is in README's
+  "Short URLs: country statistics"; getting the file into the deployment is a follow-up (below). Two
+  scheduler jobs, both idempotent, errors propagating to `ScheduledJob.last_error`:
+  `short_url.rollup_clicks` (hourly) rewrites whole **complete UTC days** into `DailyLinkStat` (clicks,
+  uniques, bot clicks, uniques with bots) and `DailyLinkDimension` (referrer/country/device/browser
+  per day, a day's tail folded into one `(other)` row past 50 values so made-up referrers can't grow
+  the table), starting *at* the newest rolled-up day (repairing it) and stopping at the first day that
+  fails; `short_url.purge_click_events` (daily) deletes events of whole days older than
+  `click_event_retention_days`, **never a day that isn't rolled up yet nor the newest rolled-up
+  day** (the rollup rewrites that one). Rollups are kept forever. `services.stats` reads rollups up to
+  the watermark (`rolled_up_through`, read once per page/request so every figure splits at the same
+  day) and the raw events after it, with the same arithmetic, so the numbers are exact whatever the
+  rollup's lag. "Unique visitors" over a range is the sum of the days: someone back on another day
+  counts again.
+- **Password** (`services.passwords`, `views/password.py`). Set or cleared on the form (a paid extra,
+  charged once per link, `None` removes it). Stored with Django's hasher. `/s/<code>/unlock` shows a
+  form; a correct password is remembered in the session as a **fingerprint of the hash** per link (at
+  most 100 remembered), so changing or removing the password locks everyone out again, then goes
+  through the ordinary `/s/<code>` path, which counts the click. `SU_PASSWORD_IP` (strict, every
+  attempt) and `SU_PASSWORD_LINK` (looser, across IPs, **failed attempts only**, peeked before the
+  guess and hit after it fails) mirror `FT_UNLOCK_*`, so someone who merely knows a code can't lock
+  the real recipients out. An over-long guess is refused before hashing. Nothing on the page, nor on
+  the preview, says anything about the destination or title until unlocked.
+- **Preview** (`views/preview.py`, `/s/<code>+`): the destination's host, the title, "created N ago", a
+  Continue button, `noindex` and `no-store`, `SU_PREVIEW_IP` (a plain 429 over the limit: nobody
+  follows a printed code to it). A protected link's preview shows neither destination nor title before
+  unlock. It hosts the report form.
+- **Billing** (`services.billing`, `limits`; `source='short_url'`). Four extras, each charged **once
+  per link** by `charge_extra`: a compare-and-swap on `alias_paid_at`/`password_paid_at`/
+  `analytics_paid_at`/`extra_link_paid_at` under the link's row lock in the same transaction as
+  `spend_credits` (a refused spend rolls the claim back; a price of 0 still stamps it as paid). The alias
+  is charged at creation, the password the first time one is set, the detailed analytics when the
+  owner opens them (`enable_analytics`; **while the price is 0 the first view stamps it paid**, so a
+  later price rise doesn't take away what a link already had) and **an active link beyond
+  `free_active_links`** when it is created or enabled (`is_extra_link`: the *unpaid* active links;
+  a link that paid keeps its place for good, disabling and re-enabling it is free). Turning an extra
+  off and on, changing a paid password, or re-enabling are free; there are no refunds and no recurring
+  charge. The **hard cap** (`max_active_links`) counts active *and* disabled links, so disabling
+  doesn't free a slot; only deleting does. `InsufficientCreditsError` is a 422 with a Top up link on
+  the web and a 402 on the API.
+- **Cost confirmation and `expected_cost`.** Credits are never spent unseen. The web quotes the cost
+  (`quote_create`/`quote_update`/`quote_enable`/`quote_analytics`), answers a first POST with a
+  confirmation panel or the shared `confirmModal` (which posts `confirm_cost`), and passes the
+  confirmed total to the service as `expected_cost`; `create_link`, `update_link`, `set_enabled` and
+  `enable_analytics` **recompute the cost inside the charging transaction (after the owner's row is
+  locked) and raise `CostChangedError` (nothing charged or changed) when it differs**, so a free
+  allowance used up in another tab, or a price change, asks again. `expected_cost=None` means
+  "accept whatever it costs", for a caller with no one to ask. The API uses both: see "API" below.
+  The services leave what they charged on the link as `credits_spent` (not stored) so the API can
+  report it.
+- **Limits and validation** (`services.links`): `title` up to 255 characters; up to 20 `tags`, ASCII
+  `[a-z0-9_-]`, lower-cased, spaces turned into hyphens (so the tag filter works on SQLite and
+  Postgres); `max_clicks` 1 to 2,000,000,000; `expires_at` must be in the future when set or changed
+  (an unchanged one that has since passed is not an error); the cap on links above. `update_link` is
+  partial and all-or-nothing, diffed against the **locked** row; the code and alias never change. An
+  owner whose `User.status` isn't `ACTIVE` can create, edit or enable nothing (`OwnerInactiveError`,
+  checked under the lock, since a deactivated owner's web session outlives the deactivation); disabling
+  and deleting stay open.
+- **Title fetching** (`services.titles`, the `fetch_title` task, queued by `enqueue_after_commit` when
+  a link is created without a title, and again when the destination of a title-less link changes):
+  **the one place the server requests a URL a user chose**, so it has SSRF guards. Every host is
+  resolved and refused unless *all* its addresses are public; the connection then goes to the address
+  that was checked (not a second lookup: DNS rebinding) with the host kept for `Host`, SNI and
+  certificate verification; the same after each redirect (at most 3), every target also passing
+  `validate_destination`; 5 seconds in total (a watchdog timer, so a drip-feeding server can't stretch
+  it), at most 256 KB read, no compression, only `text/html` is parsed, the title is cut to 255
+  characters; any failure leaves the title empty and logs only the link's id. The final write is
+  conditional on the title still being empty **and the destination unchanged**, so a slow fetch can't
+  save a title for a page the link left. **Trade-off, accepted:** it runs on the `default` queue (no
+  `short_url` queue or worker) because a fetch is bounded to 5 s and a `default` worker is free right
+  after; Receipts has its own queue because its work is minutes long. If title fetching ever
+  starves file transfer's emails and zip builds, give it its own queue and `db_worker` in
+  `supervise.py` and compose.
+- **Abuse tooling**, modelled on file transfer's (#59) and written up in the same terms:
+  - **Blocked domains** (`BlockedDomain`, `services.blocklist`; admin CRUD with an optional
+    `expires_at`): an exact host, or `*.host`, which blocks the host **and every subdomain** (a wildcard
+    covers its own bare host; it needs two labels; an IP can only be blocked exactly). Refused at
+    create and destination edit (`BlockedDomainError`, the neutral "That address cannot be used.", an
+    unchanged destination stays editable) and checked by `is_available` **and by `set_enabled(True)`**
+    (so an owner can't pay to enable a link that can't work), which takes existing links offline too.
+    It costs one indexed query on every redirect, deliberately uncached for now.
+  - **Reports** (`services.reports`, `views/report.py`, `POST /s/<code>/report`): reason, optional
+    details (2,000) and reporter email, no login, no password (it works on a protected link without
+    unlocking it). `SU_REPORT_IP` strict per IP; `SU_REPORT_LINK` a looser per-link ceiling that is
+    *peeked* first and *hit* only once a report was created, with the link looked up before the key
+    is touched (a made-up code creates none). A repeat from the same normalized IP against the same
+    link within 10 minutes is a form error, not a second row. The htmx path answers `HX-Refresh`
+    when the link became unavailable (htmx doesn't swap a 404).
+  - **Auto-hold** (`services.hold`, off at `auto_hold_report_threshold` 0): `held_for_review_at`, a
+    plain flag (not a status) set once the link has that many pending reports from *distinct
+    normalized IPs* (the same /64 caveat as file transfer's: it raises the bar, it isn't a guarantee
+    of N people). A held link is unavailable and **frozen for its owner except disabling it**
+    (`LinkHeldError`; the API answers 409). Staff release it, or dismiss the last pending report.
+  - **Takedown** (`services.takedown.take_down_link`, only from the admin): a distinct terminal status
+    via one conditional `UPDATE ... WHERE status IN (active, disabled)`, recording who, when, the
+    `takedown_reason` (**always shown to the owner**, never who reported it) and a staff-only
+    `takedown_internal_note` (shown nowhere else), clearing a hold and marking pending reports
+    actioned, all in one transaction. The owner is emailed ("one of your links was removed",
+    `emails.send_link_taken_down_email`, autoescaped, no free text in the subject, confirmed address
+    of an active account only) **only if staff opt in** on the confirmation page.
+  - **Admin** (`admin.py`): read-only `ShortLinkAdmin` (search code/alias/destination/owner, state
+    filter, pending reports), `LinkReportAdmin`, `BlockedDomainAdmin` (CRUD), `ShortUrlSettingsAdmin`,
+    read-only `DailyLinkStatAdmin`. The abuse actions are admin *actions* (independent of
+    `has_change_permission`), so each names a permission: `short_url.takedown_link`
+    (`ShortLink.Meta.permissions`) for **Take down** (two-step page: reason, internal note, notify
+    toggle default off), **Release abuse-review hold** and **Dismiss**; `short_url.add_blockeddomain`
+    for **Block the destination domain** (two-step; subdomains toggle); `takedown_link` *and*
+    `accounts.change_user` for **Deactivate the owner's account** (two-step; skips staff and the
+    caller; optionally also takes down the owner's other active links). Deactivation sets
+    `User.status` inactive, which the API and new sign-ins refuse, and `create_link`/`set_enabled`
+    refuse for a session that outlived it. Superusers pass implicitly.
+- **Web** (`urls.py` under `/links/`, `views/`, `templates/short_url/`): the dashboard (`/links/`, tabs
+  All/Active/Disabled/Expired/Click limit reached/Taken down matching `display_state`, search over code,
+  destination, title and tags, tag filter, sort by created/clicks, 25 per page, htmx list with
+  `HX-Push-Url`: the receipts dashboard's pattern; the shared filtering is `services.filters`), create
+  and edit forms (422 convention; the "your link will be ..." line; the cost panel), the link page
+  (`/links/<id>/`, copy, QR from `/links/<id>/qr.png` rendered on demand with `SU_QR_USER`, never
+  stored), row actions (`enable`, `disable`, `delete`: plain POSTs with a flash message), and the stats
+  page (`/links/<id>/stats/?range=7|30|90|all`: totals always; a server-rendered SVG chart with a table
+  fallback and the four top lists behind the paid analytics extra). Another user's link, or one the
+  owner deleted, is a 404 on every page. `copyText`/`confirmModal` are the shared Alpine components in
+  `core/js/components.js`.
+- **Rate limits** (`RATELIMIT_RULES`): `SU_REDIRECT_IP` (120/min, also charged by `/unlock` GETs),
+  `SU_CREATE_USER` (30/h), `SU_EDIT_USER` (60/h), `SU_QR_USER` (60/min), `SU_PASSWORD_IP` (15/10 min),
+  `SU_PASSWORD_LINK` (30/10 min), `SU_PREVIEW_IP` (60/min), `SU_REPORT_IP` (5/h), `SU_REPORT_LINK`
+  (20/h), and `SU_QUOTE_USER` (120/min, API only: see "Status codes"). The web and the API share
+  the other user rules' budgets.
+- **API** (`apps/short_url/api/`, `schemas/`; mounted at `/api/s/`, JWT only: router-level
+  `auth=JWTAuth()` in `api/router.py`, so no endpoint can be added without it; `links.py` and
+  `stats.py` share that one `Router`). It calls the same `apps.short_url.services` as the web views.
+  Paths are relative to the mount: `GET /links` (`q`, `tag`, `status` = `all|active|disabled|expired|
+  capped|taken_down`, `sort` = `-created_at|created_at|-click_count|click_count`, `limit` 1-100 default
+  20, `offset`; answers `{count, limit, offset, results}`; the same `services.filters` as the
+  dashboard; an unknown `status` or `sort` is a 400), `POST /links`, `POST /links/quote`,
+  `GET|PATCH|DELETE /links/{id}`, `POST /links/{id}/enable|disable|analytics`, `GET
+  /links/{id}/stats?range=`, `GET /links/{id}/qr.png` (`image/png`, `SU_QR_USER`) and `GET
+  /links/{id}/preview` (what the public preview shows, plus `available`; the owner always gets the
+  destination). `PATCH` is partial via `model_dump(exclude_unset=True)`; both bodies are
+  `extra='forbid'` (an unknown key, including `alias` on a `PATCH`, is a 422); an explicit `null`
+  clears `expires_at`, `max_clicks` and `password` and is a 422 for the other fields; `utm_*` are flat
+  fields merged into the destination; an empty `PATCH` changes nothing and spends no rate-limit
+  budget. `expires_at` takes an ISO 8601 date-time (no offset: read in `TIME_ZONE`) or a bare date
+  (`2027-12-31`), which means the end of that day in `TIME_ZONE` -- `schemas.link.ExpiresAt`, like
+  file transfer's `ExpiryDate`, so every client means the same thing and the CLI sends the date as
+  it is. A `LinkSchema` is the link without the password (only `password_protected`), with `state`
+  (`display_state`, the block list queried once per page), `analytics_enabled` and `takedown_reason`
+  (only when taken down, never the internal note or the reporter); the single-link endpoints return
+  `LinkDetailSchema` (adds `costs` and `credits_spent`).
+  - **Costs for a client with no one to confirm with.** The API accepts whatever a request costs
+    **unless the client says what it expects**: `expected_cost` (the body of `POST /links` and
+    `PATCH`, a query parameter of `enable` and `analytics`) is passed to the services as their
+    `expected_cost`, so a mismatch is a **409** (nothing charged or changed) whose detail names the real
+    total. Every write reports **`credits_spent`**, what it actually charged (0 on a read, on a free
+    write, and on a no-op such as enabling an active link). `POST /links/quote` validates a create body
+    exactly like the create (`services.check_new_link`: fields, alias shape and availability, owner
+    status, the cap; no writes, no password hash) and answers `{credits, charges, balance,
+    affordable}`; it spends none of `SU_CREATE_USER` (only `SU_QUOTE_USER`). `GET /links/{id}` reports `costs`
+    (`{enable, analytics, password}`: what each paid action would cost that link now, or **`null`**
+    for an action the link's state would refuse: `enable` unless the link is disabled, not under
+    review and not pointing at a blocked destination; `analytics` for a taken-down link;
+    `password` for one under review or taken down. 0 still means free or already paid). The CLI
+    uses all of it: quote, ask, create with `expected_cost`; for a `null` it says "not possible
+    right now" instead of asking to pay (and enabling an already active link just says so).
+    Write responses carry the real `updated_at` (the services set it on the instance they write
+    through `QuerySet.update`, which skips `auto_now`).
+  - **Status codes** (`api/common.py`): **400** a service `ValidationError` (a bad field as `field:
+    message`, the cap on links, a link that can no longer be changed, an unknown `status`/`sort`/
+    `range`); **402** `InsufficientCreditsError` (one documented code, as in the other APIs);
+    **403** `BlockedDomainError` (the neutral "That address cannot be used.") or `OwnerInactiveError`;
+    **404** another user's link, or one the caller deleted (never 403; deleting twice is a 404 the
+    second time); **409** the alias is taken/reserved/once someone's (`AliasTakenError`, never saying
+    whose), a link held for review (`LinkHeldError`, only disabling works) or `CostChangedError`;
+    **422** ninja's own validation (a list-valued `detail`); **429** `RateLimitExceeded` with
+    `Retry-After`. `POST /links/quote` and every `POST /links` first charge the loose per-user
+    `SU_QUOTE_USER` (120/min), so polling a quote or retrying a refused create is bounded. A refused
+    create (400/403/409, anything `check_new_link` catches) spends none of `SU_CREATE_USER`: that
+    budget is charged after the check and before `create_link`. `PATCH` runs `services.check_update`
+    (not editable, held, inactive owner, any field that is invalid, a blocked destination: 404/409/
+    400/403) *before* it charges `SU_EDIT_USER`, so those refusals spend none of it; a 409 for a
+    changed cost needs the transaction and **does spend one edit**. Enable/disable/delete/
+    analytics/stats/preview have no rule, as on the web.
+    Tests: `apps/short_url/tests/test_api_*.py` (helpers in `api_support.py`) over Django's test
+    client.
+- **CLI** (`admin/shorturl.py`, `inv shorturl ...`; `SHORTURL_PASSWORD`, token `~/.shorturl_token.<env>`):
+  `login`, `create <url> [--alias --title --tag... --expires --max-clicks --password --include-bots
+  --utm-* --yes]`, `quote`, `list`, `get`, `update`, `enable`, `disable`, `delete`, `analytics`,
+  `stats [--range]`, `preview`, `qr --out`. It is the first CLI on the shared plumbing in
+  `admin/utils.py` (`api_request`: default timeout, a bounded 429 retry that doesn't sleep on an
+  hourly rule's `Retry-After`, a connection error exiting 1; `api_error_text`/`raise_for_api_error`
+  flattening ninja's 422 list; `receipts` and `filetransfer` still carry their own copies, to be moved
+  over). Anything that can charge **asks first and sends the confirmed amount as `expected_cost`**
+  (`create` quotes, `update --password`/`enable`/`analytics` read `costs` from `GET /links/{id}`; a
+  refused or unaffordable one exits 1 before charging); `--yes` skips the question and the guard and
+  accepts any cost; `delete` asks too. The link's own password is never an argument (shell history):
+  `--password` is a flag that reads `SHORTURL_LINK_PASSWORD` or prompts with echo hidden. `--expires`
+  takes an ISO date (the end of that day) or date-time; `update` has `--clear-tags|expires|max-clicks|
+  password` and `--include-bots/--filter-bots`. Tables show the full link id (what the other commands
+  take). Tests: `admin/tests/test_shorturl.py` (HTTP mocked) and the shared helpers in
+  `admin/tests/test_cli_utils.py`.
+- **Tests**: `apps/short_url/tests/` (the redirect matrix, every service, the web views, admin,
+  analytics, abuse, the API and the services' API support), `admin/tests/test_shorturl.py`, the
+  Playwright `tests_e2e/test_short_url.py` (create with an alias and the cost panel, follow, edit,
+  preview, stats, disable and the neutral page, enable; run on the same server as the Receipts test,
+  `receipts_server`, which hosts every product; a follow is Playwright's HTTP client with
+  `max_redirects=0` and a person's `User-Agent`, because the destination is a made-up public host a
+  browser couldn't load, and headless Chromium would count as a bot) and the AI plan
+  `tests_e2e/ai/short_url.md`. No `inv openapi` spec is committed in this repo, so there is none to
+  regenerate.
+- **Not done / follow-ups.** Safe Browsing (or similar) checking of destinations is issue #163 (label
+  `Url`): nothing checks what a destination serves. Two infra follow-ups: nginx's coarse `limit_req`
+  must put `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser `/go/`-style zone (#170), or
+  a burst of scans from one shared address would meet nginx's 429; and the GeoLite2 database and
+  `GEOIP_PATH` have to reach the containers (#171). A dedicated short domain, anonymous shortening,
+  bulk create, a trash with restore and device/geo routing are out of scope for v1.
 
 ### Queue and scheduler
 
@@ -2462,6 +2774,16 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   `--ehlo 'x;dkim=pass,header.i=@victim.com'`, then look at the stored `Authentication-Results`,
   `Return-Path` and `Received`) is recommended to confirm what SES writes, and that a legitimate
   EHLO or MAIL FROM it renders differently from what the grammars expect is not being rejected.
+- Short URLs (#162) is fully built (phases 1 to 4: links and billing, analytics, password and
+  preview, abuse tooling, the JWT API and CLI; see "Short URLs" above). Destinations are **not**
+  checked against Safe Browsing or any malware list: that is issue #163 (label `Url`), so the only
+  defences are the blocked-domain list, reports and takedown. Two infra follow-ups: nginx's coarse
+  `limit_req` has to put `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser `/go/`-style
+  zone (#170: until then a burst of scans from one shared address can get nginx's 429, which the
+  app itself never answers), and the GeoLite2-Country database plus `GEOIP_PATH` have to be provided
+  to the containers (#171: until then every click's country is unknown and `short_url.W001` shows at
+  every deploy). `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
+  `receipts.py` and `filetransfer.py` still carry their own copies of it.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set); the coarse nginx `limit_req`
   that backs it up as defense-in-depth is configured in the separate `infra` repo (#119), not
