@@ -6,6 +6,7 @@ from .profile import ProfileForm
 from .register import RegisterForm
 from .resend_confirmation import ResendConfirmationForm
 from .reset_password import ResetPasswordForm
+from .theme import ThemeForm
 
 __all__ = [
     'ChangePasswordForm',
@@ -15,6 +16,7 @@ __all__ = [
     'RegisterForm',
     'ResendConfirmationForm',
     'ResetPasswordForm',
+    'ThemeForm',
     'UserAdminChangeForm',
     'UserAdminCreationForm',
 ]

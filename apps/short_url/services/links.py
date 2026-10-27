@@ -9,7 +9,9 @@ raises Django's `ValidationError` (see `errors`), and `InsufficientCreditsError`
 showed the user and had confirmed. The cost is worked out again inside the transaction, after the
 owner's row is locked, and `CostChangedError` (nothing charged, nothing changed) is raised when it
 differs: another request may have used up the free allowance in between, or a price changed.
-`None` means "accept whatever it costs", for a caller with no one to confirm with (the API).
+`None` means "accept whatever it costs", for a caller with no one to confirm with (the API, unless
+the client sends its own `expected_cost`). The credits a call actually charged are left on the
+link as `credits_spent` (not stored; 0 when nothing was charged), so the API can report them.
 """
 
 import re
@@ -251,14 +253,20 @@ def _require_active_owner(owner_id: Any) -> None:
         raise OwnerInactiveError()
 
 
-def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = None) -> ShortLink:
-    """Create a link for `owner`: validate, pay for its extras and save it, in one transaction.
+@dataclass(frozen=True, slots=True)
+class _Prepared:
+    """A `LinkInput` checked and normalized, ready to be saved."""
 
-    `expected_cost` is the total the caller confirmed (see the module docstring); `None` accepts
-    any cost. Raises `ValidationError` (a bad field, `AliasTakenError`, `LimitReachedError`,
-    `CostChangedError`) or `InsufficientCreditsError`. A link made without a title gets one
-    fetched in the background.
-    """
+    destination: str
+    title: str
+    tags: list[str]
+    expires_at: datetime | None
+    max_clicks: int | None
+    alias: str
+
+
+def _prepare(data: LinkInput) -> _Prepared:
+    """Validate every field of a new link (no database writes), raising `ValidationError`."""
     destination = _destination_with_utm(data.destination, data.utm)
     title = validate_title(data.title)
     tags = normalize_tags(data.tags)
@@ -267,6 +275,36 @@ def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = Non
     alias = (data.alias or '').strip()
     if alias:
         codes.validate_alias(alias)
+    if data.password:
+        passwords.validate_password(data.password)
+    return _Prepared(destination, title, tags, expires_at, max_clicks, alias)
+
+
+def check_new_link(owner: User, data: LinkInput) -> billing.Quote:
+    """Everything `create_link` would refuse without saving or charging anything, and what it would
+    charge: the fields, the alias (shape, reserved, taken), the owner's status and the cap. A
+    dry run for a client that wants the cost, and any refusal, before it commits (the API's
+    `POST /links/quote`). Raises what `create_link` raises, except `InsufficientCreditsError`
+    (that is the caller's to compare with the balance) and the races only the real call can see."""
+    prepared = _prepare(data)
+    _require_active_owner(owner.pk)
+    settings_row = ShortUrlSettings.load()
+    limits.check_can_create(owner, settings=settings_row)
+    extras = _create_extras(owner, prepared.alias, settings_row, has_password=bool(data.password))
+    return billing.quote(extras, settings_row)
+
+
+def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = None) -> ShortLink:
+    """Create a link for `owner`: validate, pay for its extras and save it, in one transaction.
+
+    `expected_cost` is the total the caller confirmed (see the module docstring); `None` accepts
+    any cost. Raises `ValidationError` (a bad field, `AliasTakenError`, `LimitReachedError`,
+    `CostChangedError`) or `InsufficientCreditsError`. A link made without a title gets one
+    fetched in the background. The credits it charged are left on `link.credits_spent`.
+    """
+    prepared = _prepare(data)
+    destination, title, tags = prepared.destination, prepared.title, prepared.tags
+    expires_at, max_clicks, alias = prepared.expires_at, prepared.max_clicks, prepared.alias
     # Hashed before the transaction: a slow hash must not hold the owner's lock.
     password_hash = passwords.hash_password(data.password) if data.password else None
 
@@ -306,12 +344,14 @@ def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = Non
                 raise
             raise AliasTakenError() from None
 
+        spent = 0
         if alias:
-            billing.charge_extra(link, billing.Extra.ALIAS, settings=settings_row)
+            spent += billing.charge_extra(link, billing.Extra.ALIAS, settings=settings_row)
         if password_hash:
-            billing.charge_extra(link, billing.Extra.PASSWORD, settings=settings_row)
+            spent += billing.charge_extra(link, billing.Extra.PASSWORD, settings=settings_row)
         if billing.Extra.EXTRA_LINK in extras:
-            billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
+            spent += billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
+        link.credits_spent = spent
         if not title:
             enqueue_after_commit(fetch_title, str(link.pk))
     return link
@@ -349,9 +389,10 @@ def update_link(
     Only the fields that really differ are written (a new password always does: hashes are
     salted). Setting a password the link has never had pays the `password` extra, once: this is
     the only charge here, so `expected_cost` (see the module docstring; `None` accepts any) is
-    that price or 0. Raises `ValidationError` (`CostChangedError` among them) or
-    `InsufficientCreditsError`.
+    that price or 0 (left on `link.credits_spent`). Raises `ValidationError` (`CostChangedError`
+    among them) or `InsufficientCreditsError`.
     """
+    link.credits_spent = 0
     new_hash: str | None = UNSET
     if password is not UNSET:
         # Hashed before the transaction: a slow hash must not hold the link's row lock.
@@ -396,9 +437,12 @@ def update_link(
                 raise CostChangedError(cost)
 
         if changes:
-            ShortLink.objects.filter(pk=link.pk).update(updated_at=timezone.now(), **changes)
+            now = timezone.now()
+            ShortLink.objects.filter(pk=link.pk).update(updated_at=now, **changes)
             for name, value in changes.items():
                 setattr(locked, name, value)
+            # `update()` skips `auto_now`: keep what was written, so the caller shows it.
+            locked.updated_at = now
         for name in (
             'destination',
             'title',
@@ -407,15 +451,54 @@ def update_link(
             'max_clicks',
             'password_hash',
             'filter_bots',
+            'updated_at',
         ):
             setattr(link, name, getattr(locked, name))
+        link.credits_spent = 0
         if owes_password:
-            billing.charge_extra(link, billing.Extra.PASSWORD)
+            link.credits_spent = billing.charge_extra(link, billing.Extra.PASSWORD)
         # A new destination makes an automatically fetched title stale, so look again; a title
         # the owner typed is kept (it is set, so nothing is fetched).
         if 'destination' in changes and not locked.title:
             enqueue_after_commit(fetch_title, str(link.pk))
     return link
+
+
+def check_update(
+    link: ShortLink,
+    *,
+    destination: str = UNSET,
+    utm: dict[str, str] | None = None,
+    title: str = UNSET,
+    tags: str | Iterable[str] | None = UNSET,
+    expires_at: datetime | None = UNSET,
+    max_clicks: int | None = UNSET,
+    password: str | None = UNSET,
+) -> None:
+    """The refusals `update_link` would raise that need no transaction, without writing or
+    charging anything: a link that can't be changed (taken down, deleted), one held for review
+    (`LinkHeldError`), an owner whose account is not active, and a field that isn't valid
+    (including a destination on the block list). A dry run for a caller that wants to refuse
+    before it spends rate-limit budget (the API's `PATCH`). Races, and the cost check, stay with
+    `update_link`, which re-checks everything under the row lock."""
+    _require_editable(link)
+    _require_active_owner(link.owner_id)
+    if destination is not UNSET or utm:
+        base = link.destination if destination is UNSET else destination
+        _destination_with_utm(base, utm, current=link.destination)
+    if title is not UNSET:
+        validate_title(title)
+    if tags is not UNSET:
+        normalize_tags(tags)
+    # An unchanged expiry that has since passed is fine; only a new value is checked.
+    if expires_at is not UNSET and expires_at is not None:
+        aware = timezone.make_aware(expires_at) if timezone.is_naive(expires_at) else expires_at
+        if aware != link.expires_at:
+            validate_expiry(aware)
+    if max_clicks is not UNSET:
+        validate_max_clicks(max_clicks)
+    if password is not UNSET and password is not None:
+        passwords.validate_password(password)
 
 
 def quote_update(link: ShortLink, *, password: str | None = UNSET) -> billing.Quote:
@@ -435,8 +518,10 @@ def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = N
     any cost. Raises `ValidationError` for a taken down or deleted link, an owner whose account
     is not active (`OwnerInactiveError`) or a destination on the block list (`BlockedDomainError`,
     checked before anything is charged), `CostChangedError`, and `InsufficientCreditsError`.
-    Disabling needs neither of the last two checks.
+    Disabling needs neither of the last two checks. The credits charged are left on
+    `link.credits_spent`.
     """
+    link.credits_spent = 0
     with transaction.atomic():
         if enabled:
             _lock_owner(link.owner)
@@ -466,14 +551,18 @@ def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = N
             cost = billing.quote([billing.Extra.EXTRA_LINK] if owes else [], settings_row)
             if cost.total != expected_cost:
                 raise CostChangedError(cost)
+        now = timezone.now()
         changed = ShortLink.objects.filter(pk=link.pk, status=locked.status).update(
-            status=target, updated_at=timezone.now()
+            status=target, updated_at=now
         )
         if not changed:
             return False
         link.status = target
+        link.updated_at = now
         if owes:
-            billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
+            link.credits_spent = billing.charge_extra(
+                link, billing.Extra.EXTRA_LINK, settings=settings_row
+            )
         return True
 
 
@@ -545,8 +634,9 @@ def enable_analytics(link: ShortLink, *, expected_cost: int | None = None) -> bo
 
     `expected_cost` is the total the caller confirmed (see the module docstring; `None` accepts
     any). Raises `ValidationError` for a taken down or deleted link or `CostChangedError`, and
-    `InsufficientCreditsError`.
+    `InsufficientCreditsError`. The credits charged are left on `link.credits_spent`.
     """
+    link.credits_spent = 0
     with transaction.atomic():
         _require_active_owner(link.owner_id)
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
@@ -559,7 +649,7 @@ def enable_analytics(link: ShortLink, *, expected_cost: int | None = None) -> bo
             cost = billing.quote([billing.Extra.ANALYTICS])
             if cost.total != expected_cost:
                 raise CostChangedError(cost)
-        billing.charge_extra(link, billing.Extra.ANALYTICS)
+        link.credits_spent = billing.charge_extra(link, billing.Extra.ANALYTICS)
         return True
 
 
@@ -585,4 +675,5 @@ def delete_link(link: ShortLink) -> bool:
         raise ValidationError('This link can no longer be changed.')
     link.status = LinkStatus.DELETED
     link.deleted_at = now
+    link.updated_at = now
     return True

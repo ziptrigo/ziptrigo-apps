@@ -11,9 +11,10 @@ from django.views.decorators.http import require_POST
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
-from ..forms import ChangePasswordForm, ProfileForm
+from ..forms import ChangePasswordForm
 from ..http import AuthenticatedHttpRequest
 from ..services.password_change import change_password
+from .pages import account_page_context
 
 RATE_LIMITED_MESSAGE = 'Too many attempts. Please wait a while and try again.'
 
@@ -71,5 +72,5 @@ def _render(
     if is_htmx(request):
         context = {'password_form': form, 'password_changed': changed}
         return render(request, 'accounts/partials/password_form.html', context, status=status)
-    context = {'form': ProfileForm(instance=request.user), 'password_form': form}
+    context = account_page_context(request, password_form=form)
     return render(request, 'accounts/account.html', context, status=status)

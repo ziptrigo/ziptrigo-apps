@@ -61,6 +61,15 @@ class ShortLink(models.Model):
     # Set by the dashboard view on the links it lists (not stored): the credits enabling this
     # disabled link would cost, so its menu can ask first.
     enable_cost: int
+    # Set by the API (`api.common.prepare` / `detail`, not stored) for its schemas: what the link
+    # is doing now (`services.display_state`), whether its detailed statistics are open, and what
+    # its next paid actions would cost.
+    state: str
+    analytics_open: bool
+    costs: dict[str, int | None]
+    # Set by the services that charge (`create_link`, `update_link`, `set_enabled`,
+    # `enable_analytics`; not stored): the credits that call spent, for the API's response.
+    credits_spent: int = 0
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = cast(

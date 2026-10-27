@@ -44,6 +44,7 @@ class UserAdmin(DjangoUserAdmin):
     readonly_fields = [
         'google_sub',
         'microsoft_id',
+        'theme',
         'email_confirmed_at',
         'created_at',
         'updated_at',
@@ -55,7 +56,7 @@ class UserAdmin(DjangoUserAdmin):
         ),
         (
             'Personal info',
-            {'fields': ('name',)},
+            {'fields': ('name', 'theme')},
         ),
         (
             'Status',

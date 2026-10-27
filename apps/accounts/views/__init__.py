@@ -14,6 +14,7 @@ from .profile import profile_update
 from .register import register_page
 from .resend_confirmation import resend_confirmation_page
 from .reset_password import reset_password_page
+from .theme import theme_update
 
 __all__ = [
     'account_created_page',
@@ -33,4 +34,5 @@ __all__ = [
     'register_page',
     'resend_confirmation_page',
     'reset_password_page',
+    'theme_update',
 ]

@@ -27,7 +27,8 @@ Open them straight from disk; they need network access for the CDNs, same as the
 | [`reference/list-page.html`](reference/list-page.html) | Full list page (the QR dashboard pattern) |
 | [`reference/form-page.html`](reference/form-page.html) | Full create/edit page (the QR editor pattern), including the error state |
 
-The theme button in each page's header cycles system → light → dark, like the site's. Check both
+The theme button in each reference page's header cycles system → light → dark. (The site itself has
+no such button: its theme is chosen under Appearance on the account page, issue #166.) Check both
 themes before you ship a page.
 
 `reference/assets/reference.js` holds the Tailwind config (a copy of the one in `base.html`), the
@@ -145,8 +146,12 @@ WCAG 2.x ratios for the pairs that come up:
 
 - `tailwind.config.darkMode = 'class'`. The early-boot script in `base.html` adds `dark` to
   `<html>` before CSS loads to avoid a flash.
-- The user picks system / light / dark with the header toggle, stored in `localStorage.theme`.
-  "System" follows `prefers-color-scheme` live.
+- The user picks system / light / dark under **Appearance** on the account page; it is stored on
+  `User.theme` (so it follows the account across devices), and `base.html` renders it on `<html>`
+  (`data-theme`, plus the `dark` class for "dark"). "System" follows `prefers-color-scheme` live,
+  and so does a visitor without a session. Saving a new choice applies it at once, without a
+  reload: the server answers with an `HX-Trigger: themeChanged` event and `base.html` toggles the
+  class (Tailwind's CDN generates the `dark:` styles regardless of the class).
 - **Rule:** write the light class and its `dark:` twin next to each other, using the table
   above: `bg-white dark:bg-gray-800`, `text-gray-500 dark:text-gray-400`,
   `border-gray-300 dark:border-gray-600`.
@@ -537,7 +542,7 @@ creation become read-only, and create-only controls (Preview, Type/Format, Track
 - **Destructive actions** always go through the confirmation modal, then POST with the CSRF
   header, then reload or swap.
 - **Overlays** (menus, modals) close on Esc and on outside click; only one is open at a time.
-- **Theme** changes persist in `localStorage.theme` and apply to every page.
+- **Theme** changes are saved on the account (`User.theme`), apply at once and to every page.
 
 ## 13. Content and copy
 
@@ -585,7 +590,6 @@ as they are (no code changes in this document).
 | Delete failure | `alert(…)` | Inline error in the modal or the page's message slot |
 | Modals | No `role="dialog"` / focus handling | See [Accessibility](#14-accessibility) |
 | Accent class name | qr_code uses `brand-primary`, accounts uses `sage-300` (same colour) | `brand-primary` for action accents (primary button, focus ring, checkbox), `sage-*` elsewhere |
-| Theme toggle | Reloads the page to apply | Toggling the `dark` class works without a reload (the reference pages do this). Not a guideline change, just noted |
 
 ## 16. Checklist for a new page
 

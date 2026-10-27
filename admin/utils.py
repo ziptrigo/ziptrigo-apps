@@ -1,6 +1,8 @@
 import logging
+import math
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
@@ -249,6 +251,137 @@ def password_from_prompt_or_env(password: str | None, env_var: str) -> str:
     if from_env:
         return from_env
     return typer.prompt('Password', hide_input=True)
+
+
+# -- Calling the API (`shorturl`; `receipts` and `filetransfer` still carry their own copies) -----
+
+# Ordinary API calls.
+REQUEST_TIMEOUT_SECONDS = 30
+# Bounded retry for a 429 from the API's own rate limits: a short `Retry-After` (a per-minute rule)
+# is slept on; an hourly rule's is not (the command would hang for up to an hour), and the error
+# says when to try again instead. One call never sleeps more than `MAX_TOTAL_RETRY_WAIT_SECONDS`.
+MAX_RATE_LIMIT_RETRIES = 5
+MAX_RETRY_AFTER_SECONDS = 60
+MAX_TOTAL_RETRY_WAIT_SECONDS = 120
+
+
+class NetworkError(Exception):
+    """A request never got a response (refused connection, timeout, ...); the message says why.
+    Only raised for a call that asked for it (`api_request(..., exit_on_error=False)`)."""
+
+
+def parse_retry_after(response) -> float | None:
+    """The response's `Retry-After` in seconds, or `None` if it has none (or not a number)."""
+    try:
+        return max(0.0, float(response.headers.get('Retry-After')))
+    except TypeError, ValueError:
+        return None
+
+
+def format_wait(seconds: float) -> str:
+    """`45 seconds`, `1 minute`, `13 minutes` (rounded up)."""
+    if seconds < 60:
+        count, unit = math.ceil(seconds), 'second'
+    else:
+        count, unit = math.ceil(seconds / 60), 'minute'
+    return f'{count} {unit}{"" if count == 1 else "s"}'
+
+
+def api_request(method: str, url: str, *, exit_on_error: bool = True, **kwargs):
+    """`requests.<method>(url, **kwargs)` with a default timeout, a bounded retry on 429 and one
+    place that handles a request that never got an answer: every HTTP call a CLI makes goes through
+    here, so all three apply uniformly.
+
+    A 429 is retried after its `Retry-After` only when that is short (`MAX_RETRY_AFTER_SECONDS`)
+    and the call's total waiting stays within `MAX_TOTAL_RETRY_WAIT_SECONDS`; otherwise the 429
+    response is returned as it is, and `api_error_text` tells the user when to try again.
+
+    A `requests` exception exits 1 with a message, or with `exit_on_error=False` raises
+    `NetworkError` for a caller that carries on.
+    """
+    import requests
+
+    kwargs.setdefault('timeout', REQUEST_TIMEOUT_SECONDS)
+    func = getattr(requests, method)
+
+    def send():
+        try:
+            return func(url, **kwargs)
+        except requests.exceptions.RequestException as e:
+            if not exit_on_error:
+                raise NetworkError(str(e)) from e
+            logger.error(f'Request failed: {e}')
+            raise typer.Exit(1) from e
+
+    response = send()
+    waited = 0.0
+    for _attempt in range(MAX_RATE_LIMIT_RETRIES):
+        if response.status_code != 429:
+            return response
+        parsed = parse_retry_after(response)
+        wait = 1.0 if parsed is None else parsed
+        if wait > MAX_RETRY_AFTER_SECONDS or waited + wait > MAX_TOTAL_RETRY_WAIT_SECONDS:
+            return response
+        logger.info(f'Rate limited; waiting {wait:.0f}s before retrying...')
+        response.close()  # a streamed response holds its connection until it is closed
+        time.sleep(wait)
+        waited += wait
+        response = send()
+    return response
+
+
+def detail_text(detail) -> str:
+    """The API's `detail` as one readable line: a string as it is, and ninja's 422 list of
+    `{loc, msg, ...}` as `field: message` pairs (the `body`/`query`/`path` prefix dropped)."""
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if not (isinstance(item, dict) and 'msg' in item):
+                parts.append(str(item))
+                continue
+            loc = list(item.get('loc') or [])
+            if loc and loc[0] in ('body', 'query', 'path'):
+                was_body = loc.pop(0) == 'body'
+                if was_body and loc and loc[0] == 'payload':
+                    loc.pop(0)
+            where = '.'.join(str(part) for part in loc)
+            parts.append(f'{where}: {item["msg"]}' if where else str(item['msg']))
+        return '; '.join(parts)
+    return str(detail)
+
+
+def api_error_text(response, *, hints: bool = True) -> str:
+    """`<status>: <message>`, the message being the API's own `{"detail": ...}` (or the raw text of
+    a body that isn't one). `hints` adds what to do about a 401 or 402 (not wanted when logging in),
+    and a 429 says when to try again."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict) and 'detail' in body:
+        detail = detail_text(body['detail'])
+    else:
+        detail = response.text
+    text = f'{response.status_code}: {detail}'
+    if response.status_code == 429:
+        wait = parse_retry_after(response)
+        if wait is not None:
+            text += f' (rate limited, try again in {format_wait(wait)})'
+    elif hints and response.status_code == 401:
+        text += ' (run `login` again)'
+    elif hints and response.status_code == 402:
+        text += ' (top up your credits on the website)'
+    return text
+
+
+def raise_for_api_error(response, *, hints: bool = True) -> None:
+    """Exit non-zero with the API's own error message unless the response is a success."""
+    if response.ok:
+        return
+    logger.error(api_error_text(response, hints=hints))
+    raise typer.Exit(1)
 
 
 def run(

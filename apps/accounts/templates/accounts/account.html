@@ -34,6 +34,13 @@
       </div>
     </section>
 
+    <!-- Appearance Section -->
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Appearance</h2>
+
+      {% include 'accounts/partials/theme_form.html' %}
+    </section>
+
     {% if user.has_usable_password %}
     <section class="mb-8">
       <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Change Password</h2>

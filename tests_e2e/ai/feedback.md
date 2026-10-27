@@ -273,8 +273,8 @@ un-confirms the account but keeps the browser session valid. Setup, using the Sw
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Switch to dark mode with the header's theme toggle (click until the icon is the dark one) and open `/feedback/`. | The card, label, textarea (dark background, light text, readable placeholder), counter and button are readable. Trigger the whitespace error (FB-04 steps 1-2): the red error text and red border are readable on dark. |
-| 2 | Submit `FB-16 dark mode` and look at the thanks page. | Readable in dark mode; the check-mark circle is visible. Switch back to system mode. |
+| 1 | Switch to dark mode (choose **Dark** under Appearance on `/account/`) and open `/feedback/`. | The card, label, textarea (dark background, light text, readable placeholder), counter and button are readable. Trigger the whitespace error (FB-04 steps 1-2): the red error text and red border are readable on dark. |
+| 2 | Submit `FB-16 dark mode` and look at the thanks page. | Readable in dark mode; the check-mark circle is visible. Switch back to **System** under Appearance. |
 | 3 | Resize to 375 x 812 and open `/feedback/`. | No horizontal page scroll; the card fills the width with padding; the textarea and button are full width; the "A copy will be emailed to qa.user@example.com." line and the counter fit (the address may wrap; the counter stays on one line). |
 | 4 | Submit `FB-16 phone` and look at the thanks page. | The heading, text and both buttons fit; the buttons wrap onto two lines if needed rather than overflowing. |
 | 5 | Reset the viewport to desktop. | - |

@@ -1,0 +1,15 @@
+{% comment %}
+One choice of the account page's theme control: a radio styled as a segment. Takes `value`
+(`system`, `light` or `dark`), `label` and `icon` (a Font Awesome class). The checked one is the
+user's saved theme.
+{% endcomment %}
+<label class="cursor-pointer">
+  <input type="radio"
+         name="theme"
+         value="{{ value }}"
+         class="peer sr-only"
+         {% if request.user.theme == value %}checked{% endif %}>
+  <span class="flex items-center gap-2 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 peer-checked:border-sage-300 peer-checked:bg-sage-300 peer-checked:text-gray-900 peer-checked:hover:bg-sage-300 peer-focus-visible:ring-2 peer-focus-visible:ring-sage-300">
+    <i class="fas {{ icon }} w-4 text-center" aria-hidden="true"></i>{{ label }}
+  </span>
+</label>

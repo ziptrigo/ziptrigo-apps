@@ -357,6 +357,12 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # (and a background request to the destination page for its title), so hourly, but well above
     # what a person typing links in does.
     'SU_CREATE_USER': (30, 60 * 60),
+    # Pricing a create (`POST /api/s/links/quote`) and, before its own check, a create: per user.
+    # Neither writes or spends anything, but each runs a few lookups (owner, cap, alias, retired
+    # codes, block list), so this bounds a client that polls or retries a refused create. Loose on
+    # purpose: a refused create spends this and not `SU_CREATE_USER`, which stays the budget for
+    # real links, and a person or CLI never gets near it.
+    'SU_QUOTE_USER': (120, 60),
     # Editing a link (destination, title, tags, expiry, click cap): per user.
     'SU_EDIT_USER': (60, 60 * 60),
     # The QR image of a link (CPU-bound rendering): per user, shared by the dashboard and the
