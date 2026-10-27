@@ -1,7 +1,7 @@
 import pytest
 from django.urls import reverse
 
-from ..models import LinkStatus, ShortLink, ShortUrlSettings
+from ..models import LinkStatus, RetiredCode, ShortLink, ShortUrlSettings
 from .factories import create_link, make_user
 
 pytestmark = pytest.mark.django_db
@@ -113,3 +113,29 @@ class TestSettingsAdmin:
         url = reverse('admin:short_url_shorturlsettings_delete', args=[row.pk])
         assert client.post(url, {'post': 'yes'}).status_code == 403
         assert ShortUrlSettings.objects.exists()
+
+
+class TestDeletingAUserWithLinks:
+    def test_a_superuser_can_delete_a_user_who_has_links(self, client, superuser, user):
+        create_link(user, code='Del001')
+        url = reverse('admin:accounts_user_delete', args=[user.pk])
+        page = client.get(url)
+        assert page.status_code == 200
+        assert 'Cannot delete' not in page.content.decode()
+        response = client.post(url, {'post': 'yes'})
+        assert response.status_code == 302
+        assert not ShortLink.objects.filter(code_key='del001').exists()
+        assert RetiredCode.objects.filter(code_key='del001').exists()
+
+    def test_staff_need_the_short_link_delete_permission(self, client, staff, user):
+        from django.contrib.auth.models import Permission
+
+        create_link(user, code='Del002')
+        staff.user_permissions.add(Permission.objects.get(codename='delete_user'))
+        url = reverse('admin:accounts_user_delete', args=[user.pk])
+        assert client.post(url, {'post': 'yes'}).status_code == 403
+        assert ShortLink.objects.filter(code_key='del002').exists()
+
+        staff.user_permissions.add(Permission.objects.get(codename='delete_shortlink'))
+        assert client.post(url, {'post': 'yes'}).status_code == 302
+        assert not ShortLink.objects.filter(code_key='del002').exists()

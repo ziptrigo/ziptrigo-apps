@@ -151,13 +151,36 @@ class TestEnableCosts:
         assert "don't have enough credits" in flashes(response)[0]
         assert status_of(link) == LinkStatus.DISABLED
 
-    def test_the_hard_cap_refuses(self, web, funded_user):
-        for _ in range(5):
+    def test_a_cost_that_appeared_after_the_quote_is_not_charged(
+        self, web, funded_user, monkeypatch
+    ):
+        from ..services import quote_enable as real_quote
+        from ..views import actions as actions_module
+
+        create_link(funded_user)
+        link = create_link(funded_user, status=LinkStatus.DISABLED, code='Race01')
+
+        def quote_then_use_the_last_slot(target):
+            result = real_quote(target)
+            create_link(funded_user)  # the free allowance is gone before the charge
+            return result
+
+        monkeypatch.setattr(actions_module, 'quote_enable', quote_then_use_the_last_slot)
+        response = web.post(url('enable', link), {'confirm_cost': '0'})
+        assert flashes(response) == [
+            'Enabling this link now costs 1 credits. Confirm it from the menu to continue.'
+        ]
+        assert status_of(link) == LinkStatus.DISABLED
+        assert balance(funded_user) == 10
+
+    def test_enabling_is_not_blocked_by_the_cap_a_disabled_link_already_counts(
+        self, web, funded_user
+    ):
+        for _ in range(4):
             create_link(funded_user)
         link = create_link(funded_user, status=LinkStatus.DISABLED)
         response = web.post(url('enable', link), {'confirm_cost': '1'})
-        assert 'at most 5 active links' in flashes(response)[0]
-        assert status_of(link) == LinkStatus.DISABLED
+        assert flashes(response) == ['Link enabled.']
 
 
 class TestDelete:

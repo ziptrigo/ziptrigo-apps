@@ -163,7 +163,7 @@ class TestCreate:
             create_link(funded_user)
         response = post_create(web)
         assert response.status_code == 422
-        assert 'at most 5 active links' in response.content.decode()
+        assert 'at most 5 links' in response.content.decode()
 
     def test_the_title_is_fetched_in_the_background(
         self, web, funded_user, monkeypatch, django_capture_on_commit_callbacks
@@ -233,6 +233,28 @@ class TestCostConfirmation:
         create_link(funded_user)
         assert post_create(web).status_code == 422
         assert post_create(web, confirm_cost='1').status_code == 200
+
+    def test_an_allowance_used_up_after_the_quote_asks_instead_of_charging(
+        self, web, funded_user, monkeypatch
+    ):
+        """Quoted as free (nothing was asked), but the free slots are gone by the charge."""
+        from ..services import quote_create as real_quote
+        from ..views import form as form_module
+
+        create_link(funded_user)
+
+        def quote_then_use_the_last_slot(owner, alias):
+            result = real_quote(owner, alias)
+            create_link(funded_user)  # a concurrent request fills the allowance
+            return result
+
+        monkeypatch.setattr(form_module, 'quote_create', quote_then_use_the_last_slot)
+        response = post_create(web)
+        assert response.status_code == 422
+        assert response['HX-Retarget'] == '#cost-confirm'
+        assert 'value="1"' in response.content.decode()
+        assert ShortLink.objects.filter(owner=funded_user).count() == 2
+        assert balance(funded_user) == 10
 
     def test_a_free_link_needs_no_confirmation(self, web, funded_user):
         assert post_create(web).status_code == 200

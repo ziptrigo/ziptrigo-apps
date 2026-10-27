@@ -235,6 +235,12 @@ def fetch_page_title(url: str) -> str:
     return ''
 
 
+# Runs on the `default` queue, deliberately. A fetch is bounded (`TIMEOUT_SECONDS`, 5 s in all),
+# the volume is small (one per link created without a title, throttled by `SU_CREATE_USER`) and
+# a `default` worker is free again right after. Receipts got its own queue because its work is
+# minutes long and heavy; a `short_url` queue would need its own `db_worker --queue-name` in
+# `supervise.py` and the compose files for this, so revisit it if fetches ever crowd out file
+# transfer's emails and zip builds.
 @task
 def fetch_title(link_id: str) -> None:
     """Fill in the title of a link that has none from its destination page. Never replaces a
@@ -248,4 +254,8 @@ def fetch_title(link_id: str) -> None:
         logger.warning('Title fetch failed for short link %s', link_id, exc_info=True)
         return
     if title:
-        ShortLink.objects.filter(pk=link_id, title='').update(title=title)
+        # Only while the link still has the destination the title was read from: an edit during
+        # the fetch queues its own fetch, and this one's result is for a page the link left.
+        ShortLink.objects.filter(pk=link_id, title='', destination=link.destination).update(
+            title=title
+        )

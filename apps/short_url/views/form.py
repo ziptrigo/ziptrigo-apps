@@ -7,8 +7,11 @@ without htmx).
 **Credits are never spent without the user having seen the cost.** When a create would charge
 anything (a custom alias, an extra active link), the first POST charges nothing and answers 422
 with a confirmation panel in `#cost-confirm` naming the total; its button re-submits the form
-with `confirm_cost=<total>`. The service charges only when that number equals what it is about to
-spend, so a price changed in between asks again. Editing charges nothing in this phase.
+with `confirm_cost=<total>`. The view passes that total to `create_link` as `expected_cost`, which
+recomputes the cost inside the transaction that charges (after the owner's row is locked) and raises
+`CostChangedError` when it differs, so a price or allowance changed in between (another tab, a
+concurrent request) asks again instead of charging unconfirmed. Editing charges nothing in this
+phase.
 """
 
 from django.contrib import messages
@@ -29,9 +32,10 @@ from apps.core.htmx import hx_redirect
 from ..forms import LinkForm
 from ..models import ShortLink
 from ..services import (
+    CostChangedError,
     LinkInput,
     Quote,
-    check_can_activate,
+    check_can_create,
     create_link,
     is_extra_link,
     quote_create,
@@ -100,7 +104,7 @@ def link_create(request: AuthenticatedHttpRequest) -> HttpResponse:
 
     # The cap first: there is no point asking for credits for a link that can't be made.
     try:
-        check_can_activate(request.user)
+        check_can_create(request.user)
     except ValidationError as exc:
         return message_response(request, validation_lines(exc), retarget=_MSG)
     cost = quote_create(request.user, data.alias)
@@ -111,7 +115,11 @@ def link_create(request: AuthenticatedHttpRequest) -> HttpResponse:
     if not limited.allowed:
         return ratelimit.web_response(request, limited, retarget=_MSG)
     try:
-        link = create_link(request.user, data)
+        link = create_link(request.user, data, expected_cost=cost.total)
+    except CostChangedError as exc:
+        if exc.quote:
+            return _confirmation(request, exc.quote, verb='Create the link')
+        return message_response(request, 'The cost changed. Submit the form again.', retarget=_MSG)
     except InsufficientCreditsError:
         return message_response(
             request,

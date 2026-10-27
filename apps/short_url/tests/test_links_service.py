@@ -13,6 +13,7 @@ from ..models import LinkStatus, ShortLink
 from ..services import (
     UNSET,
     AliasTakenError,
+    CostChangedError,
     LimitReachedError,
     LinkInput,
     create_link,
@@ -198,13 +199,26 @@ class TestExtraLinks:
             new(funded_user)
         assert ShortLink.objects.filter(owner=funded_user).count() == 5
 
-    def test_disabled_and_deleted_links_do_not_count(self, funded_user):
+    def test_disabled_deleted_and_taken_down_links_do_not_use_the_free_allowance(self, funded_user):
         make_link(funded_user, status=LinkStatus.DISABLED)
         make_link(funded_user, status=LinkStatus.DELETED)
         make_link(funded_user, status=LinkStatus.TAKEN_DOWN)
         new(funded_user)
         new(funded_user)
         assert balance(funded_user) == 10
+
+    def test_disabled_links_count_toward_the_hard_cap(self, funded_user):
+        for _ in range(3):
+            make_link(funded_user)
+        for _ in range(2):
+            make_link(funded_user, status=LinkStatus.DISABLED)
+        with pytest.raises(LimitReachedError):
+            new(funded_user)
+
+    def test_deleted_links_make_room_under_the_hard_cap(self, funded_user):
+        for _ in range(5):
+            make_link(funded_user, status=LinkStatus.DELETED)
+        new(funded_user)
 
     def test_another_users_links_do_not_count(self, funded_user, other_user):
         for _ in range(4):
@@ -407,14 +421,11 @@ class TestEnableDisable:
         assert link.status == LinkStatus.DISABLED
         assert link.extra_link_paid_at is None
 
-    def test_the_hard_cap_refuses_enabling(self, funded_user):
-        for _ in range(5):
+    def test_a_disabled_link_already_counts_so_enabling_needs_no_cap_check(self, funded_user):
+        for _ in range(4):
             make_link(funded_user)
-        link = make_link(funded_user, status=LinkStatus.DISABLED)
-        with pytest.raises(LimitReachedError):
-            set_enabled(link, True)
-        link.refresh_from_db()
-        assert link.status == LinkStatus.DISABLED
+        link = make_link(funded_user, status=LinkStatus.DISABLED)  # the 5th and last slot
+        assert set_enabled(link, True) is True
 
     @pytest.mark.parametrize('status', [LinkStatus.DELETED, LinkStatus.TAKEN_DOWN])
     def test_a_deleted_or_taken_down_link_cannot_be_toggled(self, funded_user, status):
@@ -559,3 +570,97 @@ def test_the_users_of_two_accounts_do_not_interfere(funded_user):
     new(funded_user, alias='mine')
     assert balance(other) == 4
     assert balance(funded_user) == 9
+
+
+class TestExpectedCost:
+    """The cost is re-checked inside the transaction that charges, so a total confirmed against
+    an out-of-date quote never charges (the free allowance is 2 active links)."""
+
+    def test_a_confirmed_total_that_still_holds_creates_and_charges(self, funded_user):
+        make_link(funded_user)
+        make_link(funded_user)
+        new_link = create_link(
+            funded_user, LinkInput(destination='https://example.com/x'), expected_cost=1
+        )
+        assert new_link.extra_link_paid_at is not None
+        assert balance(funded_user) == 9
+
+    def test_none_accepts_any_cost(self, funded_user):
+        make_link(funded_user)
+        make_link(funded_user)
+        create_link(funded_user, LinkInput(destination='https://example.com/x', alias='Any001'))
+        assert balance(funded_user) == 8
+
+    def test_free_when_quoted_but_the_allowance_ran_out_before_the_charge(self, funded_user):
+        make_link(funded_user)
+        assert quote_create(funded_user, None).total == 0
+        make_link(funded_user)  # another tab used the last free slot
+        with pytest.raises(CostChangedError) as caught:
+            create_link(
+                funded_user, LinkInput(destination='https://example.com/x'), expected_cost=0
+            )
+        assert caught.value.quote.total == 1
+        assert balance(funded_user) == 10
+        assert ShortLink.objects.filter(owner=funded_user).count() == 2
+
+    def test_a_price_change_is_caught_too(self, funded_user, prices):
+        prices.custom_alias_price = 4
+        prices.save()
+        with pytest.raises(CostChangedError) as caught:
+            create_link(
+                funded_user,
+                LinkInput(destination='https://example.com/x', alias='Pri001'),
+                expected_cost=1,
+            )
+        assert caught.value.quote.total == 4
+        assert not ShortLink.objects.exists()
+        assert balance(funded_user) == 10
+
+    def test_enabling_whose_cost_appeared_since_the_quote(self, funded_user):
+        make_link(funded_user)
+        link = make_link(funded_user, status=LinkStatus.DISABLED)
+        assert quote_enable(link).total == 0
+        make_link(funded_user)  # the free allowance is gone now
+        with pytest.raises(CostChangedError) as caught:
+            set_enabled(link, True, expected_cost=0)
+        assert caught.value.quote.total == 1
+        link.refresh_from_db()
+        assert link.status == LinkStatus.DISABLED and link.extra_link_paid_at is None
+        assert balance(funded_user) == 10
+
+    def test_enabling_with_the_confirmed_cost(self, funded_user):
+        make_link(funded_user)
+        make_link(funded_user)
+        link = make_link(funded_user, status=LinkStatus.DISABLED)
+        assert set_enabled(link, True, expected_cost=1) is True
+        assert balance(funded_user) == 9
+
+    def test_a_paid_link_is_free_to_enable_again(self, funded_user):
+        make_link(funded_user)
+        make_link(funded_user)
+        link = make_link(funded_user, status=LinkStatus.DISABLED, extra_link_paid_at=timezone.now())
+        assert set_enabled(link, True, expected_cost=0) is True
+        assert balance(funded_user) == 10
+
+
+class TestUpdateAgainstTheLockedRow:
+    def test_an_edit_that_matches_the_fresh_row_writes_nothing(self, funded_user):
+        link = make_link(funded_user, destination='https://example.com/old', title='T')
+        stale = ShortLink.objects.get(pk=link.pk)
+        ShortLink.objects.filter(pk=link.pk).update(destination='https://example.com/new')
+        before = ShortLink.objects.get(pk=link.pk).updated_at
+        update_link(stale, destination='https://example.com/new')
+        assert ShortLink.objects.get(pk=link.pk).updated_at == before
+        assert stale.destination == 'https://example.com/new'
+
+    def test_the_fetch_decision_uses_the_fresh_title(
+        self, funded_user, django_capture_on_commit_callbacks
+    ):
+        link = make_link(funded_user)  # untitled in the caller's copy...
+        stale = ShortLink.objects.get(pk=link.pk)
+        ShortLink.objects.filter(pk=link.pk).update(title='Typed elsewhere')  # ...titled now
+        with mock.patch.object(links_module, 'fetch_title') as task:
+            with django_capture_on_commit_callbacks(execute=True):
+                update_link(stale, destination='https://example.com/changed')
+        task.enqueue.assert_not_called()
+        assert stale.title == 'Typed elsewhere'

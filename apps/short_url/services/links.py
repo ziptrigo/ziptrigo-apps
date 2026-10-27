@@ -4,6 +4,12 @@ The web views and (later) the JWT API call these, so both enforce the same rules
 raises Django's `ValidationError` (see `errors`), and `InsufficientCreditsError` from
 `apps.billing.services` when an extra can't be paid for; nothing is left half done in either case
 (each runs in one transaction).
+
+**Cost confirmation.** `create_link` and `set_enabled` take `expected_cost`, the total the caller
+showed the user and had confirmed. The cost is worked out again inside the transaction, after the
+owner's row is locked, and `CostChangedError` (nothing charged, nothing changed) is raised when it
+differs: another request may have used up the free allowance in between, or a price changed.
+`None` means "accept whatever it costs", for a caller with no one to confirm with (the API).
 """
 
 import re
@@ -24,7 +30,7 @@ from apps.core.services.queue import enqueue_after_commit
 from ..models import LinkStatus, ShortLink, ShortUrlSettings
 from . import billing, codes, limits
 from .destinations import apply_utm, validate_destination
-from .errors import AliasTakenError, field_error
+from .errors import AliasTakenError, CostChangedError, field_error
 from .titles import fetch_title
 
 MAX_TAGS = 20
@@ -164,15 +170,21 @@ class LinkInput:
     utm: dict[str, str] | None = None
 
 
-def quote_create(owner: User, alias: str | None) -> billing.Quote:
-    """What creating a link (with `alias`, if any) would charge, to show before it is."""
-    settings_row = ShortUrlSettings.load()
+def _create_extras(
+    owner: User, alias: str | None, settings_row: ShortUrlSettings
+) -> list[billing.Extra]:
     extras: list[billing.Extra] = []
     if alias and alias.strip():
         extras.append(billing.Extra.ALIAS)
     if limits.is_extra_link(owner, settings=settings_row):
         extras.append(billing.Extra.EXTRA_LINK)
-    return billing.quote(extras, settings_row)
+    return extras
+
+
+def quote_create(owner: User, alias: str | None) -> billing.Quote:
+    """What creating a link (with `alias`, if any) would charge, to show before it is."""
+    settings_row = ShortUrlSettings.load()
+    return billing.quote(_create_extras(owner, alias, settings_row), settings_row)
 
 
 def _lock_owner(owner: User) -> None:
@@ -181,11 +193,13 @@ def _lock_owner(owner: User) -> None:
     User.objects.select_for_update().filter(pk=owner.pk).first()
 
 
-def create_link(owner: User, data: LinkInput) -> ShortLink:
+def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = None) -> ShortLink:
     """Create a link for `owner`: validate, pay for its extras and save it, in one transaction.
 
-    Raises `ValidationError` (a bad field, `AliasTakenError`, `LimitReachedError`) or
-    `InsufficientCreditsError`. A link made without a title gets one fetched in the background.
+    `expected_cost` is the total the caller confirmed (see the module docstring); `None` accepts
+    any cost. Raises `ValidationError` (a bad field, `AliasTakenError`, `LimitReachedError`,
+    `CostChangedError`) or `InsufficientCreditsError`. A link made without a title gets one
+    fetched in the background.
     """
     destination = _destination_with_utm(data.destination, data.utm)
     title = validate_title(data.title)
@@ -199,8 +213,14 @@ def create_link(owner: User, data: LinkInput) -> ShortLink:
     with transaction.atomic():
         _lock_owner(owner)
         settings_row = ShortUrlSettings.load()
-        limits.check_can_activate(owner, settings=settings_row)
-        extra_link = limits.is_extra_link(owner, settings=settings_row)
+        limits.check_can_create(owner, settings=settings_row)
+        extras = _create_extras(owner, alias, settings_row)
+        if expected_cost is not None:
+            cost = billing.quote(extras, settings_row)
+            if cost.total != expected_cost:
+                raise CostChangedError(cost)
+        if alias and codes.is_retired(alias):
+            raise AliasTakenError()
 
         code = alias or codes.generate_code()
         link = ShortLink(
@@ -226,7 +246,7 @@ def create_link(owner: User, data: LinkInput) -> ShortLink:
 
         if alias:
             billing.charge_extra(link, billing.Extra.ALIAS, settings=settings_row)
-        if extra_link:
+        if billing.Extra.EXTRA_LINK in extras:
             billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
         if not title:
             enqueue_after_commit(fetch_title, str(link.pk))
@@ -257,47 +277,53 @@ def update_link(
 
     Only the fields that really differ are written. Raises `ValidationError`.
     """
-    changes: dict[str, Any] = {}
-    if destination is not UNSET or utm:
-        base = link.destination if destination is UNSET else destination
-        new_destination = _destination_with_utm(base, utm)
-        if new_destination != link.destination:
-            changes['destination'] = new_destination
-    if title is not UNSET:
-        changes['title'] = validate_title(title)
-    if tags is not UNSET:
-        changes['tags'] = normalize_tags(tags)
-    if expires_at is not UNSET:
-        if expires_at is not None and timezone.is_naive(expires_at):
-            expires_at = timezone.make_aware(expires_at)
-        # An unchanged expiry that has since passed is not an error: only a new value is checked.
-        if expires_at is None or expires_at != link.expires_at:
-            changes['expires_at'] = validate_expiry(expires_at)
-    if max_clicks is not UNSET:
-        changes['max_clicks'] = validate_max_clicks(max_clicks)
-    changes = {name: value for name, value in changes.items() if getattr(link, name) != value}
-
     with transaction.atomic():
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
         _require_editable(locked)
+        # Diffed against the locked row, so "only write what differs" holds under concurrent
+        # edits and the title decision below sees the fresh title.
+        changes: dict[str, Any] = {}
+        if destination is not UNSET or utm:
+            base = locked.destination if destination is UNSET else destination
+            new_destination = _destination_with_utm(base, utm)
+            if new_destination != locked.destination:
+                changes['destination'] = new_destination
+        if title is not UNSET:
+            changes['title'] = validate_title(title)
+        if tags is not UNSET:
+            changes['tags'] = normalize_tags(tags)
+        if expires_at is not UNSET:
+            if expires_at is not None and timezone.is_naive(expires_at):
+                expires_at = timezone.make_aware(expires_at)
+            # An unchanged expiry that has since passed is not an error: only a new value is
+            # checked.
+            if expires_at is None or expires_at != locked.expires_at:
+                changes['expires_at'] = validate_expiry(expires_at)
+        if max_clicks is not UNSET:
+            changes['max_clicks'] = validate_max_clicks(max_clicks)
+        changes = {name: value for name, value in changes.items() if getattr(locked, name) != value}
+
         if changes:
             ShortLink.objects.filter(pk=link.pk).update(updated_at=timezone.now(), **changes)
             for name, value in changes.items():
-                setattr(link, name, value)
+                setattr(locked, name, value)
+        for name in ('destination', 'title', 'tags', 'expires_at', 'max_clicks'):
+            setattr(link, name, getattr(locked, name))
         # A new destination makes an automatically fetched title stale, so look again; a title
         # the owner typed is kept (it is set, so nothing is fetched).
-        if 'destination' in changes and not link.title:
+        if 'destination' in changes and not locked.title:
             enqueue_after_commit(fetch_title, str(link.pk))
     return link
 
 
-def set_enabled(link: ShortLink, enabled: bool) -> bool:
+def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = None) -> bool:
     """Disable or enable `link`. Returns whether anything changed (a link already in that state
-    is a no-op). Enabling counts against the active-link cap and, beyond the free allowance,
-    pays the extra link price once (never again for the same link).
+    is a no-op). Enabling beyond the free allowance pays the extra link price once (never again
+    for the same link); a disabled link already counts toward the hard cap, so it needs no check.
 
-    Raises `ValidationError` for a taken down or deleted link or the cap, and
-    `InsufficientCreditsError`.
+    `expected_cost` is the total the caller confirmed (see the module docstring); `None` accepts
+    any cost. Raises `ValidationError` for a taken down or deleted link or `CostChangedError`,
+    and `InsufficientCreditsError`.
     """
     with transaction.atomic():
         _lock_owner(link.owner)
@@ -309,10 +335,16 @@ def set_enabled(link: ShortLink, enabled: bool) -> bool:
             return False
 
         settings_row = ShortUrlSettings.load()
-        owes = False
-        if enabled:
-            limits.check_can_activate(link.owner, settings=settings_row)
-            owes = limits.is_extra_link(link.owner, settings=settings_row)
+        # Free for a link that already paid its way in (`charge_extra` skips it too).
+        owes = (
+            enabled
+            and not billing.is_paid(locked, billing.Extra.EXTRA_LINK)
+            and limits.is_extra_link(link.owner, settings=settings_row)
+        )
+        if expected_cost is not None:
+            cost = billing.quote([billing.Extra.EXTRA_LINK] if owes else [], settings_row)
+            if cost.total != expected_cost:
+                raise CostChangedError(cost)
         changed = ShortLink.objects.filter(pk=link.pk, status=locked.status).update(
             status=target, updated_at=timezone.now()
         )
@@ -320,7 +352,6 @@ def set_enabled(link: ShortLink, enabled: bool) -> bool:
             return False
         link.status = target
         if owes:
-            # Free for a link that already paid its way in (`charge_extra` skips it too).
             billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
         return True
 

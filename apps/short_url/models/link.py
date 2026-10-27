@@ -24,6 +24,25 @@ class LinkStatus(models.TextChoices):
     DELETED = 'deleted', 'Deleted'
 
 
+class RetiredCode(models.Model):
+    """A code that may never be issued again, kept after the link that held it is gone.
+
+    A link's own row keeps its code reserved (a soft delete), but deleting the *owner* removes
+    their rows (`ShortLink.owner` cascades), which would free every code and alias for anyone to
+    take over, while printed and shared links still point at them. A `pre_delete(User)` receiver
+    (`apps.py`) therefore copies the owner's `code_key`s here first, and
+    `services.codes.is_available` refuses any key found here.
+    """
+
+    objects: ClassVar['Manager']
+
+    code_key = cast(str, models.CharField(max_length=32, unique=True))
+    retired_at = cast(datetime, models.DateTimeField(auto_now_add=True))
+
+    def __str__(self) -> str:
+        return self.code_key
+
+
 class ShortLink(models.Model):
     """One short link: `<BASE_URL>/s/<code>` redirects to `destination` (issue #162).
 

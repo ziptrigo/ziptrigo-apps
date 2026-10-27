@@ -15,8 +15,8 @@ from .destinations import (
     destination_host,
     validate_destination,
 )
-from .errors import AliasTakenError, LimitReachedError
-from .limits import active_link_count, check_can_activate, is_extra_link
+from .errors import AliasTakenError, CostChangedError, LimitReachedError
+from .limits import active_link_count, check_can_create, is_extra_link, link_count
 from .links import (
     UNSET,
     LinkInput,
@@ -44,6 +44,7 @@ __all__ = [
     'UTM_PARAMS',
     'AliasTakenError',
     'Charge',
+    'CostChangedError',
     'Extra',
     'LimitReachedError',
     'LinkInput',
@@ -51,7 +52,7 @@ __all__ = [
     'active_link_count',
     'apply_utm',
     'charge_extra',
-    'check_can_activate',
+    'check_can_create',
     'create_link',
     'delete_link',
     'destination_host',
@@ -63,6 +64,7 @@ __all__ = [
     'is_code_available',
     'is_extra_link',
     'is_reserved',
+    'link_count',
     'normalize_key',
     'normalize_tags',
     'quote',

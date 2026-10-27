@@ -2,8 +2,9 @@
 flash message, like the Receipts trash page).
 
 Enabling can cost credits (an active link beyond the free allowance, once per link). The row's
-menu opens a confirmation naming the cost and posts it as `confirm_cost`; nothing is charged
-unless that equals what the service is about to spend.
+menu opens a confirmation naming the cost and posts it as `confirm_cost`; the view passes the
+total to `set_enabled` as `expected_cost`, which recomputes it inside the charging transaction and
+refuses (`CostChangedError`) when it differs, so nothing is charged unconfirmed.
 """
 
 from django.contrib import messages
@@ -16,8 +17,7 @@ from django.views.decorators.http import require_POST
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import InsufficientCreditsError
 
-from ..models import LinkStatus
-from ..services import check_can_activate, delete_link, quote_enable, set_enabled
+from ..services import CostChangedError, delete_link, quote_enable, set_enabled
 from .common import owned_link, parse_cost, redirect_back
 
 
@@ -42,13 +42,6 @@ def link_disable(request: AuthenticatedHttpRequest, link_id: str) -> HttpRespons
 @require_POST
 def link_enable(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
     link = owned_link(request, link_id)
-    if link.status == LinkStatus.DISABLED:
-        # The cap first: there is no point asking for credits for a link that can't be enabled.
-        try:
-            check_can_activate(request.user)
-        except ValidationError as exc:
-            messages.error(request, ' '.join(exc.messages))
-            return _back(request)
     cost = quote_enable(link)
     if cost and parse_cost(request.POST.get('confirm_cost')) != cost.total:
         messages.error(
@@ -57,7 +50,15 @@ def link_enable(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse
         )
         return _back(request)
     try:
-        changed = set_enabled(link, True)
+        changed = set_enabled(link, True, expected_cost=cost.total)
+    except CostChangedError as exc:
+        messages.error(
+            request,
+            f'Enabling this link now costs {exc.quote.total} credits. '
+            'Confirm it from the menu to continue.'
+            if exc.quote
+            else 'The cost changed. Try again.',
+        )
     except InsufficientCreditsError:
         messages.error(request, "You don't have enough credits to enable this link. Top up first.")
     except ValidationError as exc:

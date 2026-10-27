@@ -21,9 +21,17 @@ class AliasTakenError(ValidationError):
 
 
 class LimitReachedError(ValidationError):
-    """The owner already has the most active links allowed."""
+    """The owner already has the most links allowed (active and disabled ones count)."""
 
     def __init__(self, limit: int) -> None:
-        super().__init__(
-            f'You can have at most {limit:,} active links. Disable or delete one to make room.'
-        )
+        super().__init__(f'You can have at most {limit:,} links. Delete one to make room.')
+
+
+class CostChangedError(ValidationError):
+    """What the action costs, worked out inside the transaction that would charge it, is not what
+    the caller confirmed (another request used up the free allowance, or a price changed).
+    Nothing was charged or changed; `quote` is the real cost, to confirm again."""
+
+    def __init__(self, quote) -> None:
+        super().__init__('The cost changed. Please confirm the new total.')
+        self.quote = quote

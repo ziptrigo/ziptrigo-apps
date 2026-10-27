@@ -67,8 +67,9 @@ class ShortUrlSettings(models.Model):
         models.PositiveIntegerField(
             default=500,
             validators=[MinValueValidator(1)],
-            verbose_name='Max active links (per user)',
-            help_text='A hard cap: no more links can be created or enabled beyond it.',
+            verbose_name='Max links (per user)',
+            help_text='A hard cap on non-deleted links (active and disabled): no more can be '
+            'created beyond it. Deleting a link makes room.',
         ),
     )
     click_event_retention_days = cast(

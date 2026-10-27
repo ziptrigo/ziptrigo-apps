@@ -416,6 +416,17 @@ class TestTask:
         fetch_title.call(str(link.pk))
         assert ShortLink.objects.get(pk=link.pk).title == 'Typed meanwhile'
 
+    def test_a_title_for_a_destination_the_link_left_is_dropped(self, web, user, monkeypatch):
+        link = create_link(user, destination='https://example.com/old')
+
+        def slow_fetch(url):
+            ShortLink.objects.filter(pk=link.pk).update(destination='https://example.com/new')
+            return 'Title of the old page'
+
+        monkeypatch.setattr(titles, 'fetch_page_title', slow_fetch)
+        fetch_title.call(str(link.pk))
+        assert ShortLink.objects.get(pk=link.pk).title == ''
+
     def test_a_failure_leaves_it_empty(self, web, user):
         link = create_link(user, destination='https://example.com/page')
         web.pages['https://example.com/page'] = TimeoutError('slow')

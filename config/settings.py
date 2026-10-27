@@ -349,7 +349,9 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # a busy shared IP must never see an error because others followed the same link) but its
     # click write is skipped, and an unknown code is a 404, never a 429. The rule protects the
     # accuracy of the click counts, it doesn't shed load (nginx's looser `/s/` zone, an infra
-    # follow-up, does that).
+    # follow-up, does that). One exception, deliberately unlike `/go/`: a link with a click cap
+    # (`max_clicks`) is still counted over the limit, because there the counter is what ends the
+    # link, not just a statistic; do not "fix" that to match.
     'SU_REDIRECT_IP': (120, 60),
     # Creating a link (web form and, later, `/api/s/`): per user. Each one is a database row
     # (and a background request to the destination page for its title), so hourly, but well above

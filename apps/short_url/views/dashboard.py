@@ -5,6 +5,7 @@ re-fetches the partial into `#link-list` and the response's `HX-Push-Url` puts t
 (not the partial's) in the address bar, so a reload or a shared link renders the full page.
 """
 
+import re
 from datetime import datetime
 
 from django.contrib.auth.decorators import login_required
@@ -25,6 +26,14 @@ from ..forms import PAGE_SIZE, STATUS_TABS, ParsedFilters, parse_filters
 from ..models import LinkStatus, ShortLink
 from ..services import enable_costs
 from .common import render_page
+
+#: What can be part of a tag (`services.normalize_tags`), case-insensitively for a search.
+_TAG_QUERY = re.compile(r'[a-zA-Z0-9_-]+')
+
+#: How many links `owner_tags` reads at most (the newest first), so the tag filter's cost stays
+#: bounded however many links a user has. The hard cap on links makes this a ceiling, not a
+#: usual limit.
+TAG_SCAN_LIMIT = 1000
 
 
 def _with_query(url: str, query: str) -> str:
@@ -65,12 +74,17 @@ def _filtered_links(
         # JSON field itself is not available on SQLite).
         queryset = queryset.filter(tags_text__contains=f'"{parsed.tag}"')
     if parsed.q:
-        queryset = queryset.filter(
+        match = (
             Q(code_key__icontains=parsed.q)
             | Q(destination__icontains=parsed.q)
             | Q(title__icontains=parsed.q)
-            | Q(tags_text__icontains=parsed.q)
         )
+        # The tags are searched as the JSON text of the list, which also holds `["`, `",` and `]`:
+        # only a query that could be (part of) a tag may look there, or `"` would match every
+        # tagged link. Tags are stored lower-cased.
+        if _TAG_QUERY.fullmatch(parsed.q):
+            match |= Q(tags_text__icontains=parsed.q.lower())
+        queryset = queryset.filter(match)
     return queryset.order_by(parsed.sort, '-created_at')
 
 
@@ -84,9 +98,10 @@ def tab_counts(request: AuthenticatedHttpRequest, now: datetime) -> dict[str, in
 
 
 def owner_tags(request: AuthenticatedHttpRequest) -> list[str]:
-    """Every tag the user has on a link, sorted, for the tag filter."""
+    """The tags on the user's newest `TAG_SCAN_LIMIT` links, sorted, for the tag filter."""
     tags: set[str] = set()
-    for value in _visible_links(request).values_list('tags', flat=True):
+    newest = _visible_links(request).order_by('-created_at').values_list('tags', flat=True)
+    for value in newest[:TAG_SCAN_LIMIT]:
         tags.update(value or [])
     return sorted(tags)
 

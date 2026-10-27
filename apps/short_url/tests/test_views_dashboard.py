@@ -152,6 +152,23 @@ class TestSearchAndFilters:
     def test_search_covers_code_destination_title_and_tags(self, web, links, q, expected):
         assert self.listed(web, q=q) == expected
 
+    @pytest.mark.parametrize('q', ['"', ',', '[', ']', '",', '["'])
+    def test_json_punctuation_does_not_match_every_tagged_link(self, web, links, q):
+        assert self.listed(web, q=q) == set()
+
+    def test_a_tag_search_ignores_case(self, web, links):
+        assert self.listed(web, q='SALE-2') == {'gam333'}
+
+    def test_the_tag_list_scan_is_bounded(self, web, funded_user, monkeypatch):
+        import sys
+
+        # `views.dashboard` the module is shadowed by the view function of the same name.
+        monkeypatch.setattr(sys.modules['apps.short_url.views.dashboard'], 'TAG_SCAN_LIMIT', 2)
+        for n in range(4):
+            create_link(funded_user, code=f'bound{n}', tags=[f'tag{n}'])
+        response = web.get(reverse('short_url:dashboard'))
+        assert len(response.context['tags']) == 2
+
     def test_filter_by_tag_is_exact(self, web, links):
         assert self.listed(web, tag='news') == {'Alpha1', 'beta22'}
         assert self.listed(web, tag='sale') == {'beta22'}

@@ -10,7 +10,7 @@ import re
 import secrets
 import string
 
-from ..models import ShortLink
+from ..models import RetiredCode, ShortLink
 from .errors import AliasTakenError, field_error
 
 ALPHABET = string.ascii_letters + string.digits
@@ -76,11 +76,29 @@ def is_reserved(code: str) -> bool:
     return normalize_key(code) in RESERVED
 
 
+def is_retired(code: str) -> bool:
+    """Whether `code` belonged to a user who has since been deleted."""
+    return RetiredCode.objects.filter(code_key=normalize_key(code)).exists()
+
+
+def retire_codes_of(owner) -> None:
+    """Keep every code (random ones and aliases) `owner` holds reserved for good, before their
+    links disappear with them. Idempotent."""
+    keys = ShortLink.objects.filter(owner=owner).values_list('code_key', flat=True)
+    RetiredCode.objects.bulk_create(
+        [RetiredCode(code_key=key) for key in keys.iterator()], ignore_conflicts=True
+    )
+
+
 def is_available(code: str) -> bool:
-    """Whether `code` can still be given to a new link: not reserved and not any link's code,
-    deleted ones included (a code is never issued twice)."""
+    """Whether `code` can still be given to a new link: not reserved, not any link's code
+    (deleted ones included) and not retired with a deleted owner: a code is never issued twice."""
     key = normalize_key(code)
-    return key not in RESERVED and not ShortLink.objects.filter(code_key=key).exists()
+    return (
+        key not in RESERVED
+        and not ShortLink.objects.filter(code_key=key).exists()
+        and not RetiredCode.objects.filter(code_key=key).exists()
+    )
 
 
 def generate_code() -> str:
