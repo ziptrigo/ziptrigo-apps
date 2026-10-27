@@ -147,6 +147,7 @@ modules = [
     'admin.receipts',
     'admin.secrets',
     'admin.server',
+    'admin.shorturl',
     'admin.test',
 ]
 

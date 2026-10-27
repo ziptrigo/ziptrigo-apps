@@ -1,4 +1,4 @@
-"""Unit tests for the helpers the JWT HTTP-client CLIs (`qrcode`, `filetransfer`, `receipts`)
+"""Unit tests for the helpers the JWT HTTP-client CLIs (`qrcode`, `filetransfer`, `receipts`, `shorturl`)
 share in `admin/utils.py`: the site URL, one token file per CLI and environment, the password
 prompt. Plain file-system and environment logic: no Django, no database, no network."""
 
@@ -9,7 +9,7 @@ from admin import utils
 
 pytestmark = pytest.mark.unit
 
-CLIS = ['qrcode', 'filetransfer', 'receipts']
+CLIS = ['qrcode', 'filetransfer', 'receipts', 'shorturl']
 
 
 # -- Site URL --
@@ -173,3 +173,155 @@ def test_password_is_prompted_for_with_echo_hidden_when_nothing_else(monkeypatch
 
     assert utils.password_from_prompt_or_env(None, 'X_PASSWORD') == 'typed-pw'
     assert seen == {'hide_input': True}
+
+
+# -- `api_request` and the error text (used by `shorturl`) --
+
+
+class _Response:
+    def __init__(self, status_code=200, json_data=None, headers=None, text=''):
+        self.status_code = status_code
+        self._json = json_data
+        self.headers = headers or {}
+        self.text = text
+        self.ok = 200 <= status_code < 400
+        self.closed = False
+
+    def json(self):
+        if self._json is None:
+            raise ValueError('no json')
+        return self._json
+
+    def close(self):
+        self.closed = True
+
+
+def test_api_request_passes_a_default_timeout(monkeypatch):
+    seen = {}
+
+    def fake_get(url, **kwargs):
+        seen.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr('requests.get', fake_get)
+
+    utils.api_request('get', 'https://example.com')
+    utils.api_request('get', 'https://example.com', timeout=5)
+
+    assert seen['timeout'] == 5
+
+
+def test_api_request_retries_a_short_429_and_closes_the_discarded_response(monkeypatch):
+    slept = []
+    monkeypatch.setattr(utils.time, 'sleep', lambda s: slept.append(s))
+    first, final = _Response(429, headers={'Retry-After': '3'}), _Response(200)
+    responses = iter([first, final])
+    monkeypatch.setattr('requests.post', lambda url, **kw: next(responses))
+
+    assert utils.api_request('post', 'https://example.com') is final
+    assert slept == [3.0] and first.closed and not final.closed
+
+
+def test_api_request_waits_one_second_when_retry_after_is_missing(monkeypatch):
+    slept = []
+    monkeypatch.setattr(utils.time, 'sleep', lambda s: slept.append(s))
+    responses = iter([_Response(429), _Response(200)])
+    monkeypatch.setattr('requests.get', lambda url, **kw: next(responses))
+
+    assert utils.api_request('get', 'https://example.com').status_code == 200
+    assert slept == [1.0]
+
+
+def test_api_request_gives_up_after_the_max_retries(monkeypatch):
+    calls = []
+    monkeypatch.setattr(utils.time, 'sleep', lambda s: None)
+    monkeypatch.setattr('requests.get', lambda url, **kw: calls.append(1) or _Response(429))
+
+    assert utils.api_request('get', 'https://example.com').status_code == 429
+    assert len(calls) == utils.MAX_RATE_LIMIT_RETRIES + 1
+
+
+def test_api_request_does_not_sleep_on_a_long_retry_after(monkeypatch):
+    slept = []
+    monkeypatch.setattr(utils.time, 'sleep', lambda s: slept.append(s))
+    monkeypatch.setattr(
+        'requests.get', lambda url, **kw: _Response(429, headers={'Retry-After': '3000'})
+    )
+
+    assert utils.api_request('get', 'https://example.com').status_code == 429
+    assert slept == []
+
+
+def test_api_request_stops_when_the_total_wait_budget_is_spent(monkeypatch):
+    slept = []
+    monkeypatch.setattr(utils.time, 'sleep', lambda s: slept.append(s))
+    monkeypatch.setattr(
+        'requests.get', lambda url, **kw: _Response(429, headers={'Retry-After': '55'})
+    )
+
+    utils.api_request('get', 'https://example.com')
+
+    assert slept == [55.0, 55.0]  # a third would pass the 120 s budget
+
+
+def test_api_request_exits_1_on_a_connection_error_or_raises_when_asked(monkeypatch):
+    import requests
+
+    def refuse(url, **kwargs):
+        raise requests.exceptions.ConnectionError('refused')
+
+    monkeypatch.setattr('requests.get', refuse)
+
+    with pytest.raises(typer.Exit):
+        utils.api_request('get', 'https://example.com')
+    with pytest.raises(utils.NetworkError, match='refused'):
+        utils.api_request('get', 'https://example.com', exit_on_error=False)
+
+
+@pytest.mark.parametrize(
+    ('response', 'expected'),
+    [
+        (_Response(400, {'detail': 'destination: bad'}), '400: destination: bad'),
+        (
+            _Response(422, {'detail': [{'loc': ['body', 'payload', 'max_clicks'], 'msg': 'nope'}]}),
+            '422: max_clicks: nope',
+        ),
+        (
+            _Response(422, {'detail': [{'loc': ['query', 'limit'], 'msg': 'nope'}]}),
+            '422: limit: nope',
+        ),
+        (_Response(500, text='<html>oops</html>'), '500: <html>oops</html>'),
+        (_Response(401, {'detail': 'x'}), '401: x (run `login` again)'),
+        (_Response(402, {'detail': 'x'}), '402: x (top up your credits on the website)'),
+        (
+            _Response(429, {'detail': 'x'}, headers={'Retry-After': '2400'}),
+            '429: x (rate limited, try again in 40 minutes)',
+        ),
+    ],
+)
+def test_api_error_text(response, expected):
+    assert utils.api_error_text(response) == expected
+
+
+def test_api_error_text_without_hints_leaves_a_401_alone():
+    assert utils.api_error_text(_Response(401, {'detail': 'x'}), hints=False) == '401: x'
+
+
+def test_raise_for_api_error(capsys):
+    utils.raise_for_api_error(_Response(200))
+    with pytest.raises(typer.Exit):
+        utils.raise_for_api_error(_Response(404, {'detail': 'Not Found'}))
+
+
+@pytest.mark.parametrize(
+    ('seconds', 'text'),
+    [
+        (1, '1 second'),
+        (45, '45 seconds'),
+        (60, '1 minute'),
+        (61, '2 minutes'),
+        (3600, '60 minutes'),
+    ],
+)
+def test_format_wait(seconds, text):
+    assert utils.format_wait(seconds) == text
