@@ -45,15 +45,18 @@ _PILLS = {
     'expired': ('Expired', 'fas fa-clock', 'amber'),
     'capped': ('Click limit reached', 'fas fa-hand', 'amber'),
     'held': ('Under review', 'fas fa-flag', 'amber'),
+    'blocked': ('Not working', 'fas fa-ban', 'amber'),
     'taken_down': ('Taken down', 'fas fa-ban', 'red'),
     'deleted': ('Deleted', 'fas fa-trash', 'gray'),
 }
 
 
 @register.simple_tag
-def link_status_pill(link: ShortLink) -> str:
-    """The coloured pill for what the link is doing right now (active, disabled, expired, ...)."""
-    label, icon, tone = _PILLS[display_state(link)]
+def link_status_pill(link: ShortLink, state: str | None = None) -> str:
+    """The coloured pill for what the link is doing right now (active, disabled, expired, ...).
+    `state` is a `display_state` the caller already worked out (the link's own page also knows
+    whether its destination is blocked); without it the pill works it out."""
+    label, icon, tone = _PILLS[state or display_state(link)]
     text, border, icon_color = _TONES[tone]
     return format_html(
         '<span class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border '

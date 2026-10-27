@@ -1,4 +1,4 @@
-from . import clicks, geoip, passwords, rollup, stats, useragents
+from . import blocklist, clicks, geoip, hold, passwords, reports, rollup, stats, useragents
 from .billing import Charge, Extra, Quote, charge_extra, quote
 from .codes import (
     ALIAS_PATTERN,
@@ -15,7 +15,14 @@ from .destinations import (
     destination_host,
     validate_destination,
 )
-from .errors import AliasTakenError, CostChangedError, LimitReachedError
+from .emails import send_link_taken_down_email
+from .errors import (
+    AliasTakenError,
+    BlockedDomainError,
+    CostChangedError,
+    LimitReachedError,
+    LinkHeldError,
+)
 from .limits import active_link_count, check_can_create, is_extra_link, link_count
 from .links import (
     UNSET,
@@ -27,6 +34,7 @@ from .links import (
     enable_analytics,
     enable_costs,
     is_available,
+    is_destination_blocked,
     normalize_tags,
     quote_analytics,
     quote_create,
@@ -40,6 +48,7 @@ from .links import (
     validate_max_clicks,
     validate_title,
 )
+from .takedown import take_down_link
 from .titles import fetch_title
 
 __all__ = [
@@ -48,15 +57,18 @@ __all__ = [
     'UNSET',
     'UTM_PARAMS',
     'AliasTakenError',
+    'BlockedDomainError',
     'Charge',
     'CostChangedError',
     'Extra',
     'LimitReachedError',
+    'LinkHeldError',
     'LinkInput',
     'Quote',
     'active_link_count',
     'analytics_unlocked',
     'apply_utm',
+    'blocklist',
     'charge_extra',
     'check_can_create',
     'clicks',
@@ -69,8 +81,10 @@ __all__ = [
     'fetch_title',
     'generate_code',
     'geoip',
+    'hold',
     'is_available',
     'is_code_available',
+    'is_destination_blocked',
     'is_extra_link',
     'is_reserved',
     'link_count',
@@ -82,10 +96,13 @@ __all__ = [
     'quote_create',
     'quote_enable',
     'quote_update',
+    'reports',
     'rollup',
+    'send_link_taken_down_email',
     'set_enabled',
     'short_url',
     'stats',
+    'take_down_link',
     'unlock_free_analytics',
     'update_link',
     'useragents',

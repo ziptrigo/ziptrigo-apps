@@ -5,6 +5,7 @@ from .form import link_create, link_edit
 from .password import unlock_link
 from .preview import preview_link
 from .redirect import redirect_link
+from .report import report_link
 from .stats import link_enable_analytics, link_stats
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     'link_stats',
     'preview_link',
     'redirect_link',
+    'report_link',
     'unlock_link',
 ]

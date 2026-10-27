@@ -2,16 +2,18 @@
 
 They are printed and shared, so they must stay short and never move. `/s/<code>`, with or without
 a trailing slash, follows the link; a trailing `+` (`/s/<code>+`) shows where it goes first, and
-`/s/<code>/unlock` is the password page of a protected one.
+`/s/<code>/unlock` is the password page of a protected one and `/s/<code>/report` is where the
+preview page's report form posts.
 """
 
 from django.urls import re_path
 
-from .views import redirect_link, unlock_link
+from .views import redirect_link, report_link, unlock_link
 
 app_name = 's'
 
 urlpatterns = [
     re_path(r'^s/(?P<code>[A-Za-z0-9_-]+)(?P<preview>\+)?/?$', redirect_link, name='redirect'),
     re_path(r'^s/(?P<code>[A-Za-z0-9_-]+)/unlock/?$', unlock_link, name='unlock'),
+    re_path(r'^s/(?P<code>[A-Za-z0-9_-]+)/report/?$', report_link, name='report'),
 ]

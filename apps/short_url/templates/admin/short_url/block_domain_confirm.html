@@ -1,0 +1,47 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <h1>{{ title }}</h1>
+
+    <div class="module">
+        <p>Block the destination host of the following link(s). New links to it are refused, and links that already point there stop working at once (they show the neutral "isn't available" page).</p>
+        <ul>
+            {% for link in links %}
+            <li>{{ link.code }} -- {{ link.destination }}</li>
+            {% endfor %}
+        </ul>
+
+        <form method="post" style="margin-top: 15px;">
+            {% csrf_token %}
+
+            <div>
+                {{ form.include_subdomains.errors }}
+                <label>{{ form.include_subdomains }} {{ form.include_subdomains.label }}</label>
+                {% if form.include_subdomains.help_text %}
+                <div style="font-size: 0.9em; color: #666;">{{ form.include_subdomains.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 10px;">
+                {{ form.reason.errors }}
+                <label for="id_reason" style="display: block; font-weight: bold;">{{ form.reason.label }}:</label>
+                {{ form.reason }}
+                {% if form.reason.help_text %}
+                <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ form.reason.help_text }}</div>
+                {% endif %}
+            </div>
+
+            <input type="hidden" name="action" value="{{ action_name }}">
+            <input type="hidden" name="apply" value="yes">
+            {% for obj in objects %}
+            <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}">
+            {% endfor %}
+
+            <div style="margin-top: 15px;">
+                <input type="submit" value="Block" class="button">
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

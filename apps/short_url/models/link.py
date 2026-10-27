@@ -53,6 +53,8 @@ class ShortLink(models.Model):
 
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+    #: The reverse accessor of `LinkReport.link`.
+    reports: ClassVar['Manager']
 
     # A foreign key's auto `_id` companion attribute, which `ty` can't see.
     owner_id: uuid.UUID
@@ -111,15 +113,19 @@ class ShortLink(models.Model):
     analytics_paid_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
     extra_link_paid_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
 
-    #: Abuse review (a later phase): a held link is unavailable and frozen for its owner.
+    #: Abuse review (`services.hold`): a held link is unavailable and frozen for its owner, who
+    #: can only disable it. A plain flag, not a status, so it survives whatever the owner does.
     held_for_review_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
     taken_down_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
-    taken_down_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='+',
+    taken_down_by = cast(
+        'User | None',
+        models.ForeignKey(
+            settings.AUTH_USER_MODEL,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='+',
+        ),
     )
     #: Shown to the owner, never who reported the link.
     takedown_reason = cast(str, models.TextField(blank=True))
@@ -135,6 +141,12 @@ class ShortLink(models.Model):
             models.Index(fields=['owner', 'status', '-created_at'], name='short_link_owner_idx'),
         ]
         ordering = ['-created_at']
+        permissions = [
+            (
+                'takedown_link',
+                'Can take down, hold and release short links, and review their reports',
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.code

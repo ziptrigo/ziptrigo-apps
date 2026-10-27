@@ -35,3 +35,24 @@ class CostChangedError(ValidationError):
     def __init__(self, quote) -> None:
         super().__init__('The cost changed. Please confirm the new total.')
         self.quote = quote
+
+
+class BlockedDomainError(ValidationError):
+    """The destination's host is on the block list. A `ValidationError` subclass so every
+    `except ValidationError` already handles it; the JWT API will catch this one first for a 403.
+    Deliberately says nothing about *why* or that a block list exists."""
+
+    MESSAGE = 'That address cannot be used.'
+
+    def __init__(self) -> None:
+        super().__init__({'destination': self.MESSAGE})
+
+
+class LinkHeldError(ValidationError):
+    """The link is held for abuse review: its owner can disable it and nothing else (the API
+    answers 409). It says nothing about why."""
+
+    MESSAGE = 'This link is under review, so it cannot be changed right now. You can disable it.'
+
+    def __init__(self) -> None:
+        super().__init__(self.MESSAGE)

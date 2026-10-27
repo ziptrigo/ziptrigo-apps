@@ -18,7 +18,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.timezone import localtime
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -30,9 +30,10 @@ from apps.core import ratelimit
 from apps.core.htmx import hx_redirect
 
 from ..forms import LinkForm
-from ..models import ShortLink
+from ..models import LinkStatus, ShortLink
 from ..services import (
     CostChangedError,
+    LinkHeldError,
     LinkInput,
     Quote,
     check_can_create,
@@ -160,6 +161,15 @@ def _confirmation(request: AuthenticatedHttpRequest, cost: Quote, *, verb: str) 
 def link_edit(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
     link = owned_link(request, link_id)
     if request.method == 'GET':
+        if link.status not in (LinkStatus.ACTIVE, LinkStatus.DISABLED) or link.held_for_review_at:
+            # Taken down, or held for review: nothing can be saved, so don't show a form.
+            messages.error(
+                request,
+                LinkHeldError.MESSAGE
+                if link.held_for_review_at
+                else 'This link can no longer be changed.',
+            )
+            return redirect('short_url:detail', link_id=link.pk)
         return render_page(request, 'short_url/link_form.html', _page_context(request, link))
 
     form = LinkForm(request.POST, link=link)
