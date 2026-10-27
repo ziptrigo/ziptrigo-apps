@@ -454,6 +454,21 @@ requests through before the first failure is recorded, and only the session's ow
 this budget, so there's no lockout of someone else to avoid. A "Sign in with Google" account with
 no usable password doesn't get the form (and a POST just redirects, `hx_redirect`).
 
+**Theme** (issue #166) is chosen under "Appearance" on the account page (system / light / dark;
+the header has no toggle) and stored on the account, `User.theme` (default `system`, with a
+`db_default` too: the #102 lesson), so it follows the user across devices instead of living in
+`localStorage` (the old key is simply ignored). It is a session form view like the two above
+(`POST /account/theme/`, `views/theme.py`, `forms.ThemeForm`, `services.theme.set_theme`; web only,
+no `/api/` endpoint, no rate limit: one column write per call). The three radios submit on
+`change` (htmx; a `<noscript>` Save button covers no JS); success answers `HX-Refresh: true`
+(plain redirect without htmx) because the Tailwind CDN only applies `dark:` styles when the page
+loads, a bad value is a 422 with `partials/theme_form.html` and saves nothing. `core/base.html`
+renders it for a signed-in user (`core` can't import `accounts`, but the template just reads
+`user.theme`): `<html data-theme="...">` plus `class="dark"` for "dark", server-side, so there is no
+flash; the early boot script in `<head>` only acts when `data-theme` is `system` (adds/removes
+`dark` from `prefers-color-scheme` and keeps following it live). A visitor without a session is
+rendered as `system`. The admin's own toggle (`core/js/admin_theme_toggle.js`) is separate.
+
 Tasks queued from inside a transaction go through `apps.core.services.queue.enqueue_after_commit`
 (on commit; a failure to enqueue is logged and swallowed, since the domain write is already
 committed and raising would only turn it into an error page). `accounts`, `feedback` and

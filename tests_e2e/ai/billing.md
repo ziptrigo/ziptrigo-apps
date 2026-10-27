@@ -165,6 +165,6 @@ is repetitive: it needs 25 more rows.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | At desktop width, look at the table. | Columns aligned; the Date and Change columns don't wrap; long descriptions wrap inside the Description column. Green/red amounts are readable. |
-| 2 | Switch to dark mode with the header's theme toggle (click until the icon is the dark one). | Card, table borders and text are readable on the dark background; green and red amounts remain readable. Switch back to system mode afterwards. |
+| 2 | Switch to dark mode: choose **Dark** under Appearance on `/account/`, then return to this page. | Card, table borders and text are readable on the dark background; green and red amounts remain readable. Switch back to **System** afterwards. |
 | 3 | Resize to 375 x 812. | The page itself has no horizontal scroll; if the table is wider than the card, it scrolls horizontally **inside** its box. The heading, balance and **Back to Account** link are visible (they may wrap). The pagination bar fits. |
 | 4 | Reset the viewport to desktop. | - |

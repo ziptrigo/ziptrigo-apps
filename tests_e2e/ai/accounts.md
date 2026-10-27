@@ -15,8 +15,8 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
 - **Sign in / sign out** (`/account/login/`, `POST /account/logout/`): error messages, `next=`,
   mixed-case email domains, Google and Microsoft sign-in hidden when not configured.
 - **Forgot / reset password** (`/account/forgot-password/`, `/account/reset-password/<token>/`).
-- **Account page** (`/account/`): profile name, change password, the "password changed" email,
-  other sessions signed out.
+- **Account page** (`/account/`): profile name, theme (Appearance), change password, the "password
+  changed" email, other sessions signed out.
 - Accessibility and htmx behaviour of every form above.
 
 Out of scope: real Google and Microsoft sign-in, the Turnstile captcha (off on this server), rate limits (off on
@@ -281,12 +281,13 @@ a made-up token lands on the expired page with a resend form.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/account/`. | Tab title and heading `Account Settings`. Sections in order: `Profile Information`, `Credits`, `Change Password`, then a `Back to Home` link. |
+| 1 | Go to `/account/`. | Tab title and heading `Account Settings`. Sections in order: `Profile Information`, `Credits`, `Appearance`, `Change Password`, then a `Back to Home` link. |
 | 2 | Profile section. | `Email` shows MAIN in a greyed, disabled field (not editable) with the hint `Email cannot be changed`; `Name` holds `Acc Main <run>`; button `Save Profile`. |
 | 3 | Credits section. | `Current balance` then `0 credits`; a `Usage History` link to `/billing/credits/`. |
-| 4 | Change Password section. | Fields `Current Password`, `New Password` (hint `At least 6 characters with one digit`), `Confirm New Password`, all `type="password"`, each with its own eye toggle; button `Change Password`. No `You signed in with Google` note. |
-| 5 | Click each eye toggle. | Each reveals only its own field and flips its own icon. |
-| 6 | Click `Back to Home`. | Goes to `/`. |
+| 4 | Appearance section. | A `Theme` group with three options, `System` (selected), `Light` and `Dark`, and a hint that System follows the device's setting. No Save button (see ACC-37). |
+| 5 | Change Password section. | Fields `Current Password`, `New Password` (hint `At least 6 characters with one digit`), `Confirm New Password`, all `type="password"`, each with its own eye toggle; button `Change Password`. No `You signed in with Google` note. |
+| 6 | Click each eye toggle. | Each reveals only its own field and flips its own icon. |
+| 7 | Click `Back to Home`. | Goes to `/`. |
 
 ### ACC-20 Update the profile name
 
@@ -508,7 +509,23 @@ link instead.
 |---|---|---|
 | 1 | On `/account/register/`, use only Tab / Shift+Tab. | Focus moves Name -> Email -> Password -> `Create account` -> `Sign in` link, with a visible focus ring on each field. |
 | 2 | Submit an invalid form (Name `   `, Email `foo@bar`, Password `abcdefg`). Then press Tab from the top of the card. | The swapped-in form is fully usable: fields keep their typed Name/Email, Tab order is the same, and submitting again works (htmx still bound after the swap; a second submit produces a fresh error list, not two stacked lists). |
-| 3 | Check the error block. | It sits directly above the first field, inside the card, red text, readable in both light and dark themes. To check the other theme, click the header's theme button: it **reloads the page** (by design, Tailwind CDN can't switch at runtime), which clears the form and its errors, so submit the same invalid form again after toggling. Restore the theme afterwards (the button cycles system -> light -> dark -> system). Record (observation) whether errors are announced to assistive tech (`role="alert"`/`aria-live`) and whether inputs get `aria-invalid`; currently they do not. |
+| 3 | Check the error block. | It sits directly above the first field, inside the card, red text, readable in both light and dark themes. To check the other theme while signed out, emulate the other `prefers-color-scheme` (a visitor without a session follows the system), then reload, which clears the form and its errors, so submit the same invalid form again. Restore the emulation afterwards. Record (observation) whether errors are announced to assistive tech (`role="alert"`/`aria-live`) and whether inputs get `aria-invalid`; currently they do not. |
 | 4 | On `/account/login/`, sign in with MAIN / `Wrong-0000` twice in a row quickly. | Each submit disables the button while pending (`hx-disabled-elt`), no duplicate error blocks, the eye toggle still works after the swap. |
 | 5 | Set the viewport to 375 px wide and visit `/account/login/`, `/account/register/`, `/account/forgot-password/`, `/account/created/`, `/account/email-confirmation-expired/`. | Each card fits the screen with side margins, no horizontal scroll, buttons fully visible. |
 | 6 | Sign in as MAIN / P3, visit `/account/` at 375 px. | All three sections fit; the eye buttons stay inside their fields. Sign out and restore the viewport. |
+
+### ACC-37 Theme setting
+
+**Purpose:** the Appearance section saves the theme on the account and applies it everywhere.
+**Preconditions:** sign in as MAIN / P1 (Context A) in a browser whose colour scheme is light.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Go to `/account/`. | The `Appearance` section sits between `Credits` and `Change Password`; `System` is selected; the page is light. |
+| 2 | Click `Dark`. | The page reloads without a Save click; it is dark; `Dark` is selected; `<html>` has `data-theme="dark"` and class `dark`. |
+| 3 | Use only the keyboard: Tab to the group, use the arrow keys to move to `Light`. | A visible focus ring shows on the focused option; the choice is applied (page reloads, light) when the selection changes. |
+| 4 | Open `/`, `/feedback/` and `/billing/credits/`. | All follow the saved theme. |
+| 5 | Sign out; the same browser's login page. | It follows the system (light), not the account's last choice. |
+| 6 | Sign in again from a different browser profile (another "device"). | The saved theme applies there too. |
+| 7 | Visit `/account/` as the no-password account (Context with a Google-created account, if available) or note it as not applicable. | The Appearance section is shown there too. |
+| 8 | Restore `System`. | - |

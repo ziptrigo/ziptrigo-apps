@@ -282,6 +282,7 @@ def test_admin_change_form_leaves_one_of_two_legacy_rows_editable(legacy_pair):
             'email': newer.email,
             'name': 'Renamed',
             'status': User.STATUS_ACTIVE,
+            'theme': User.THEME_SYSTEM,
             'is_active': 'on',
         },
         instance=newer,

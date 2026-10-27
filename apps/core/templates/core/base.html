@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="{{ user.theme|default:'system' }}"{% if user.theme == 'dark' %} class="dark"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,28 +9,19 @@
     {% load static %}
     <link rel="icon" type="image/png" href="{% static 'core/images/logo_32x32.png' %}">
 
-    <!-- Early theme boot: apply class before CSS to avoid FOUC -->
+    <!-- Early theme boot: the class is set before CSS to avoid FOUC. A signed-in user's saved theme
+         is rendered on <html> by the server (data-theme, and the dark class for "dark"); only
+         "system" needs the browser's colour scheme, and keeps following it live. Anyone without a
+         session follows the system. -->
     <script>
       (function () {
         try {
-          const mode = localStorage.getItem('theme') || 'system';
-          const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-          let wantDark = false;
-          
-          if (mode === 'dark') {
-            wantDark = true;
-          } else if (mode === 'light') {
-            wantDark = false;
-          } else {
-            // system
-            wantDark = prefersDark;
-          }
-          
-          if (wantDark) {
-            document.documentElement.classList.add('dark');
-          } else {
-            document.documentElement.classList.remove('dark');
-          }
+          const html = document.documentElement;
+          if (html.getAttribute('data-theme') !== 'system') return;
+          const mql = window.matchMedia('(prefers-color-scheme: dark)');
+          const apply = () => html.classList.toggle('dark', mql.matches);
+          apply();
+          mql.addEventListener('change', apply);
         } catch (_) { /* noop */ }
       })();
     </script>
@@ -115,20 +106,6 @@
                 {% endfor %}
             </div>
             <div class="flex items-center space-x-4 shrink-0">
-                <!-- Theme toggle button -->
-                <button
-                  id="theme-toggle"
-                  type="button"
-                  class="p-1 rounded shrink-0 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  aria-label="Toggle theme"
-                  title="Toggle theme"
-                  data-icon-light="{% static 'core/images/theme-light_128x128.png' %}"
-                  data-icon-dark="{% static 'core/images/theme-dark_128x128.png' %}"
-                  data-icon-system="{% static 'core/images/theme-system_128x128.png' %}"
-                >
-                  <img id="theme-icon" alt="Theme icon" class="h-6 w-6" src="{% static 'core/images/theme-system_128x128.png' %}">
-                </button>
-
                 <div id="auth-nav">
                     {% if user.is_authenticated %}
                     <div class="relative" x-data="{ open: false }" @click.outside="open = false"
@@ -188,103 +165,6 @@
             </div>
         </div>
     </footer>
-
-    <!-- Theme control script: cycles system -> light -> dark and persists to localStorage -->
-    <script>
-      (function () {
-        function getEls() {
-          const btn = document.getElementById('theme-toggle');
-          const icon = document.getElementById('theme-icon');
-          return { btn, icon };
-        }
-
-        function getIcons(btn) {
-          if (!btn) return {};
-          return {
-            light: btn.getAttribute('data-icon-light'),
-            dark: btn.getAttribute('data-icon-dark'),
-            system: btn.getAttribute('data-icon-system'),
-          };
-        }
-
-        const mql = window.matchMedia('(prefers-color-scheme: dark)');
-        let mqlHandlerAttached = false;
-
-        function applyTheme(mode) {
-          const html = document.documentElement;
-          
-          if (mode === 'light') {
-            html.classList.remove('dark');
-          } else if (mode === 'dark') {
-            html.classList.add('dark');
-          } else {
-            // system
-            if (mql.matches) {
-              html.classList.add('dark');
-            } else {
-              html.classList.remove('dark');
-            }
-          }
-          
-          const { btn, icon } = getEls();
-          const ICONS = getIcons(btn);
-          if (icon && ICONS) {
-            const newSrc = ICONS[mode] || ICONS.system;
-            try {
-              // Only same-origin URLs may be used as the icon source.
-              const parsed = new URL(newSrc, window.location.origin);
-              if (parsed.origin === window.location.origin) {
-                icon.src = parsed.href;
-              }
-            } catch (e) {
-              // Ignore malformed icon URLs.
-            }
-          }
-        }
-
-        function attachMqlIfNeeded(mode) {
-          if (mode === 'system' && !mqlHandlerAttached) {
-            mql.addEventListener('change', () => {
-              if ((localStorage.getItem('theme') || 'system') === 'system') {
-                applyTheme('system');
-              }
-            });
-            mqlHandlerAttached = true;
-          }
-        }
-
-        function currentMode() {
-          return localStorage.getItem('theme') || 'system';
-        }
-
-        function nextMode(mode) {
-          return mode === 'system' ? 'light' : (mode === 'light' ? 'dark' : 'system');
-        }
-
-        // Initialize icon and theme on load
-        const initial = currentMode();
-        applyTheme(initial);
-        attachMqlIfNeeded(initial);
-
-        // Delegated click handler works even if header gets re-rendered
-        document.addEventListener('click', function (e) {
-          const target = e.target instanceof Element ? e.target : null;
-          if (!target) return;
-          // Check if we clicked the button itself or any child (like the img)
-          const btn = target.id === 'theme-toggle' ? target : target.closest('#theme-toggle');
-          if (!btn) return;
-
-          e.preventDefault();
-          e.stopPropagation();
-          const cur = currentMode();
-          const nxt = nextMode(cur);
-          
-          try { localStorage.setItem('theme', nxt); } catch (_) { /* ignore */ }
-          // Reload page to apply new theme (Tailwind CDN doesn't support runtime dark mode changes)
-          window.location.reload();
-        });
-      })();
-    </script>
 
     {% block extra_js %}{% endblock %}
 </body>
