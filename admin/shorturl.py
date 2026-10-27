@@ -12,7 +12,7 @@ active link beyond the free allowance cost credits once per link. Commands that 
 and ask first (`--yes` skips the question, and then accepts whatever it costs).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -58,16 +58,21 @@ def _link_url(link_id: str, suffix: str = '') -> str:
 
 
 def _expiry(value: str) -> str:
-    """`--expires` as the API wants it: an ISO date-time (a bare date is the end of that day;
-    a time without an offset is read in the server's time zone)."""
+    """`--expires` as the API wants it, normalized to extended ISO 8601. A bare date is sent as a
+    date and the server reads it as the end of that day; a time without an offset is read in the
+    server's time zone."""
     value = value.strip()
     try:
-        datetime.fromisoformat(value)
+        # A date first: `datetime.fromisoformat` accepts a bare date too (as midnight).
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(value).isoformat()
     except ValueError:
         raise typer.BadParameter(
             'use an ISO date or date-time, like 2026-12-31 or 2026-12-31T18:00:00+00:00.'
         ) from None
-    return f'{value}T23:59:59' if len(value) == 10 else value
 
 
 def _link_password() -> str:
@@ -98,11 +103,16 @@ def _credits(amount: int) -> str:
     return f'{amount} credit{"" if amount == 1 else "s"}'
 
 
-def _confirm_spend(cost: int, what: str, yes: bool) -> int | None:
+def _confirm_spend(cost: int | None, what: str, yes: bool) -> int | None:
     """Ask before spending `cost` credits on `what`. Returns the `expected_cost` to send (the
-    confirmed amount), or `None` with `--yes` (accept any cost); exits 1 if declined."""
+    confirmed amount), or `None` with `--yes` (accept any cost); exits 1 if declined. A `cost` of
+    `None` is what the API reports for an action the link's state refuses: say so and exit 1
+    rather than ask to pay for something that can't happen."""
     if yes:
         return None
+    if cost is None:
+        logger.error(f'Not possible right now: {what[0].lower()}{what[1:]}.')
+        raise typer.Exit(1)
     if cost > 0 and not typer.confirm(f'{what} costs {_credits(cost)}. Continue?'):
         logger.error('Cancelled; nothing was charged.')
         raise typer.Exit(1)
@@ -130,17 +140,18 @@ def _print_link(link: dict) -> None:
         rows.append(('Taken down', link['takedown_reason']))
     costs = link.get('costs')
     if costs:
-        wanted = [
-            f'{name} {_credits(amount)}'
-            for name, amount in (
-                ('enable', costs['enable']),
-                ('analytics', costs['analytics']),
-                ('password', costs['password']),
-            )
-            if amount
-        ]
+        actions = (
+            ('enable', costs['enable']),
+            ('analytics', costs['analytics']),
+            ('password', costs['password']),
+        )
+        wanted = [f'{name} {_credits(amount)}' for name, amount in actions if amount]
         if wanted:
             rows.append(('Would cost', ', '.join(wanted)))
+        # `null`: the link's state refuses the action (not the same as free).
+        refused = [name for name, amount in actions if amount is None]
+        if refused:
+            rows.append(('Not possible now', ', '.join(refused)))
     table = Table(show_header=False, box=None)
     table.add_column(style='cyan', no_wrap=True)
     table.add_column()
@@ -463,15 +474,16 @@ def shorturl_update(
         payload['filter_bots'] = not include_bots
     if clear_password:
         payload['password'] = None
-    elif password:
-        payload['password'] = _link_password()
-    if not payload:
+    if not payload and not password:
         logger.error('Nothing to change: pass at least one option.')
         raise typer.Exit(1)
 
     if password and not yes:
         cost = _fetch_link(link_id)['costs']['password']
         payload['expected_cost'] = _confirm_spend(cost, 'Setting a password on this link', yes)
+    if password:
+        # Asked last, so declining the price never costs anyone a typed password.
+        payload['password'] = _link_password()
 
     response = api_request('patch', _link_url(link_id), json=payload, headers=get_headers(CLI))
     raise_for_api_error(response)
@@ -492,7 +504,11 @@ def shorturl_enable(environment: EnvironmentAnnotation, link_id: str, yes: YesAn
     select_environment(environment)
     params: dict = {}
     if not yes:
-        cost = _fetch_link(link_id)['costs']['enable']
+        link = _fetch_link(link_id)
+        if link['state'] == 'active':
+            logger.info(f'{link["short_url"]} is already active.')
+            return
+        cost = link['costs']['enable']
         params['expected_cost'] = _confirm_spend(cost, 'Enabling this link', yes)
     response = api_request(
         'post', _link_url(link_id, '/enable'), params=params or None, headers=get_headers(CLI)

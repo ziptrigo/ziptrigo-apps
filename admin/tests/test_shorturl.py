@@ -250,7 +250,7 @@ def test_every_option_reaches_the_payload(api, monkeypatch):
         'alias': 'Spring',
         'title': 'Spring sale',
         'tags': ['promo', 'spring'],
-        'expires_at': '2026-12-31T23:59:59',
+        'expires_at': '2026-12-31',
         'max_clicks': 100,
         'filter_bots': False,
         'password': 'open-sesame',
@@ -369,6 +369,24 @@ def test_a_bad_expiry_is_refused_before_any_request(api):
 
     assert result.exit_code != 0
     assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    'given, sent',
+    [
+        ('2026-12-31', '2026-12-31'),
+        ('20261231', '2026-12-31'),
+        ('2026-12-31T18:00:00', '2026-12-31T18:00:00'),
+        ('20261231T180000', '2026-12-31T18:00:00'),
+    ],
+)
+def test_a_bare_date_is_found_by_what_it_parses_to_not_by_its_length(api, given, sent):
+    api.on('post', '/s/links/quote', quote())
+    api.on('post', '/s/links', FakeResponse(201, LINK))
+
+    invoke('create', 'local', 'https://x.example', '--expires', given)
+
+    assert api.requests('post', '/s/links')[-1]['json']['expires_at'] == sent
 
 
 def test_a_date_time_expiry_is_sent_as_given(api):
@@ -550,6 +568,38 @@ def test_setting_a_password_asks_about_the_cost_first(api, monkeypatch):
     assert 'Charged 1 credit.' in result.output
 
 
+def test_the_password_is_asked_after_the_price(api, monkeypatch):
+    """Declining the cost must not have cost anyone a typed password."""
+    asked = []
+    monkeypatch.setattr('typer.prompt', lambda *a, **k: asked.append('prompt') or 'pw')
+    api.on('get', f'/s/links/{ID}', FakeResponse(200, LINK))
+
+    result = invoke('update', 'local', ID, '--password', input='n\n')
+
+    assert result.exit_code == 1 and asked == []
+
+    api.on('patch', f'/s/links/{ID}', FakeResponse(200, LINK))
+    assert invoke('update', 'local', ID, '--password', input='y\n').exit_code == 0
+    assert asked == ['prompt']
+
+
+def test_a_password_that_cannot_be_set_says_so_instead_of_asking_to_pay(api, monkeypatch):
+    asked = []
+    monkeypatch.setattr('typer.prompt', lambda *a, **k: asked.append('prompt') or 'pw')
+    api.on(
+        'get',
+        f'/s/links/{ID}',
+        FakeResponse(200, {**LINK, 'costs': {**LINK['costs'], 'password': None}}),
+    )
+
+    result = invoke('update', 'local', ID, '--password')
+
+    assert result.exit_code == 1
+    assert 'Not possible right now: setting a password on this link' in result.output
+    assert 'Continue?' not in result.output and asked == []
+    assert api.requests('patch') == []
+
+
 def test_a_password_already_paid_for_asks_nothing(api, monkeypatch):
     monkeypatch.setattr('typer.prompt', lambda *a, **k: 'pw')
     api.on(
@@ -590,7 +640,7 @@ def test_enable_asks_when_it_costs_and_confirms_the_amount(api):
     api.on(
         'get',
         f'/s/links/{ID}',
-        FakeResponse(200, {**LINK, 'costs': {**LINK['costs'], 'enable': 1}}),
+        FakeResponse(200, {**LINK, 'state': 'disabled', 'costs': {**LINK['costs'], 'enable': 1}}),
     )
     api.on('post', f'/s/links/{ID}/enable', FakeResponse(200, {**LINK, 'credits_spent': 1}))
 
@@ -603,13 +653,37 @@ def test_enable_asks_when_it_costs_and_confirms_the_amount(api):
 
 
 def test_a_free_enable_does_not_ask(api):
-    api.on('get', f'/s/links/{ID}', FakeResponse(200, LINK))
+    api.on('get', f'/s/links/{ID}', FakeResponse(200, {**LINK, 'state': 'disabled'}))
     api.on('post', f'/s/links/{ID}/enable', FakeResponse(200, LINK))
 
     result = invoke('enable', 'local', ID)
 
     assert result.exit_code == 0 and 'Continue?' not in result.output
     assert api.requests('post')[-1]['params'] == {'expected_cost': 0}
+
+
+def test_enabling_what_the_state_refuses_says_so_instead_of_asking_to_pay(api):
+    held = {**LINK, 'state': 'disabled', 'costs': {**LINK['costs'], 'enable': None}}
+    api.on('get', f'/s/links/{ID}', FakeResponse(200, held))
+
+    result = invoke('enable', 'local', ID)
+
+    assert result.exit_code == 1
+    assert 'Not possible right now: enabling this link' in result.output
+    assert 'Continue?' not in result.output and api.requests('post') == []
+
+
+def test_enabling_an_active_link_says_it_is_already_active(api):
+    api.on(
+        'get',
+        f'/s/links/{ID}',
+        FakeResponse(200, {**LINK, 'costs': {**LINK['costs'], 'enable': None}}),
+    )
+
+    result = invoke('enable', 'local', ID)
+
+    assert result.exit_code == 0 and 'already active' in result.output
+    assert api.requests('post') == []
 
 
 def test_enable_yes_makes_one_request_without_the_guard(api):
@@ -620,7 +694,7 @@ def test_enable_yes_makes_one_request_without_the_guard(api):
 
 
 def test_enable_a_blocked_destination_exits_1(api):
-    api.on('get', f'/s/links/{ID}', FakeResponse(200, LINK))
+    api.on('get', f'/s/links/{ID}', FakeResponse(200, {**LINK, 'state': 'disabled'}))
     api.on(
         'post',
         f'/s/links/{ID}/enable',
@@ -675,6 +749,31 @@ def test_a_held_link_cannot_be_deleted(api):
 
 
 # -- analytics / stats --
+
+
+def test_analytics_that_cannot_be_opened_says_so(api):
+    api.on(
+        'get',
+        f'/s/links/{ID}',
+        FakeResponse(200, {**LINK, 'costs': {**LINK['costs'], 'analytics': None}}),
+    )
+
+    result = invoke('analytics', 'local', ID)
+
+    assert result.exit_code == 1 and 'Not possible right now' in result.output
+    assert api.requests('post') == []
+
+
+def test_get_lists_what_is_not_possible(api):
+    api.on(
+        'get',
+        f'/s/links/{ID}',
+        FakeResponse(200, {**LINK, 'costs': {'enable': None, 'analytics': 0, 'password': None}}),
+    )
+
+    result = invoke('get', 'local', ID)
+
+    assert 'Not possible now' in result.output and 'enable, password' in result.output
 
 
 def test_analytics_confirms_the_price(api):

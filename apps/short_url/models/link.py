@@ -66,7 +66,7 @@ class ShortLink(models.Model):
     # its next paid actions would cost.
     state: str
     analytics_open: bool
-    costs: dict[str, int]
+    costs: dict[str, int | None]
     # Set by the services that charge (`create_link`, `update_link`, `set_enabled`,
     # `enable_analytics`; not stored): the credits that call spent, for the API's response.
     credits_spent: int = 0

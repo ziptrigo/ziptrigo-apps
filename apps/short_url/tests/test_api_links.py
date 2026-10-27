@@ -250,7 +250,7 @@ class TestGet:
         assert set(body) == DETAIL_FIELDS
         assert body['code'] == 'Get0001'
         assert body['credits_spent'] == 0
-        assert body['costs'] == {'enable': 0, 'analytics': 1, 'password': 1}
+        assert body['costs'] == {'enable': None, 'analytics': 1, 'password': 1}
 
     def test_the_password_is_never_returned(self, client, auth, funded_user):
         link = create_link(funded_user, password_hash='pbkdf2_sha256$secret')

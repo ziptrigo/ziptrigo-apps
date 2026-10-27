@@ -437,9 +437,12 @@ def update_link(
                 raise CostChangedError(cost)
 
         if changes:
-            ShortLink.objects.filter(pk=link.pk).update(updated_at=timezone.now(), **changes)
+            now = timezone.now()
+            ShortLink.objects.filter(pk=link.pk).update(updated_at=now, **changes)
             for name, value in changes.items():
                 setattr(locked, name, value)
+            # `update()` skips `auto_now`: keep what was written, so the caller shows it.
+            locked.updated_at = now
         for name in (
             'destination',
             'title',
@@ -448,6 +451,7 @@ def update_link(
             'max_clicks',
             'password_hash',
             'filter_bots',
+            'updated_at',
         ):
             setattr(link, name, getattr(locked, name))
         link.credits_spent = 0
@@ -458,6 +462,43 @@ def update_link(
         if 'destination' in changes and not locked.title:
             enqueue_after_commit(fetch_title, str(link.pk))
     return link
+
+
+def check_update(
+    link: ShortLink,
+    *,
+    destination: str = UNSET,
+    utm: dict[str, str] | None = None,
+    title: str = UNSET,
+    tags: str | Iterable[str] | None = UNSET,
+    expires_at: datetime | None = UNSET,
+    max_clicks: int | None = UNSET,
+    password: str | None = UNSET,
+) -> None:
+    """The refusals `update_link` would raise that need no transaction, without writing or
+    charging anything: a link that can't be changed (taken down, deleted), one held for review
+    (`LinkHeldError`), an owner whose account is not active, and a field that isn't valid
+    (including a destination on the block list). A dry run for a caller that wants to refuse
+    before it spends rate-limit budget (the API's `PATCH`). Races, and the cost check, stay with
+    `update_link`, which re-checks everything under the row lock."""
+    _require_editable(link)
+    _require_active_owner(link.owner_id)
+    if destination is not UNSET or utm:
+        base = link.destination if destination is UNSET else destination
+        _destination_with_utm(base, utm, current=link.destination)
+    if title is not UNSET:
+        validate_title(title)
+    if tags is not UNSET:
+        normalize_tags(tags)
+    # An unchanged expiry that has since passed is fine; only a new value is checked.
+    if expires_at is not UNSET and expires_at is not None:
+        aware = timezone.make_aware(expires_at) if timezone.is_naive(expires_at) else expires_at
+        if aware != link.expires_at:
+            validate_expiry(aware)
+    if max_clicks is not UNSET:
+        validate_max_clicks(max_clicks)
+    if password is not UNSET and password is not None:
+        passwords.validate_password(password)
 
 
 def quote_update(link: ShortLink, *, password: str | None = UNSET) -> billing.Quote:
@@ -510,12 +551,14 @@ def set_enabled(link: ShortLink, enabled: bool, *, expected_cost: int | None = N
             cost = billing.quote([billing.Extra.EXTRA_LINK] if owes else [], settings_row)
             if cost.total != expected_cost:
                 raise CostChangedError(cost)
+        now = timezone.now()
         changed = ShortLink.objects.filter(pk=link.pk, status=locked.status).update(
-            status=target, updated_at=timezone.now()
+            status=target, updated_at=now
         )
         if not changed:
             return False
         link.status = target
+        link.updated_at = now
         if owes:
             link.credits_spent = billing.charge_extra(
                 link, billing.Extra.EXTRA_LINK, settings=settings_row
@@ -632,4 +675,5 @@ def delete_link(link: ShortLink) -> bool:
         raise ValidationError('This link can no longer be changed.')
     link.status = LinkStatus.DELETED
     link.deleted_at = now
+    link.updated_at = now
     return True

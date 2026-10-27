@@ -22,7 +22,11 @@ Status codes (documented once, here):
   field, an unknown key in a body.
 - **429** the site-wide rate limiter (`ratelimit.enforce`), with `Retry-After`. The rules and
   budgets are the web's (`SU_CREATE_USER` for a create, `SU_EDIT_USER` for a `PATCH`,
-  `SU_QR_USER` for the QR image), so a client and the website share them.
+  `SU_QR_USER` for the QR image), so a client and the website share them. `SU_QUOTE_USER` (loose)
+  is charged by `POST /links/quote` and by every `POST /links`, before its checks: a refused
+  create spends that and not `SU_CREATE_USER`. A `PATCH` is checked (`check_update`) before it
+  spends `SU_EDIT_USER`, apart from a changed cost (409), which is only found inside the
+  transaction and does spend one edit.
 
 **Costs.** Creating and following a link is free; the extras (alias, password, detailed
 analytics, an active link beyond the free allowance) cost credits once per link. The web asks the
@@ -30,8 +34,8 @@ user to confirm the total first. The API has no one to ask, so it accepts whatev
 costs *unless the client says what it expects*: `expected_cost` (body of a create or a `PATCH`,
 query of `enable` and `analytics`) makes the call refuse with a 409 when the real total, worked
 out inside the charging transaction, differs. Every write reports `credits_spent`, the single
-link endpoints report what the next paid actions would cost (`costs`), and `POST /links/quote`
-prices a create without making it.
+link endpoints report what the next paid actions would cost (`costs`, `null` for an action the
+link's state would refuse), and `POST /links/quote` prices a create without making it.
 """
 
 from collections.abc import Iterable, Iterator
@@ -133,11 +137,23 @@ def prepare(links: Iterable[ShortLink], *, now: datetime | None = None) -> list[
 
 
 def detail(link: ShortLink) -> ShortLink:
-    """`prepare` for one link, plus what its next paid actions would cost (`CostsSchema`)."""
+    """`prepare` for one link, plus what its next paid actions would cost (`CostsSchema`): `None`
+    for an action the link's state would refuse, whatever it costs."""
     (link,) = prepare([link])
+    editable = link.status in (LinkStatus.ACTIVE, LinkStatus.DISABLED)
+    # `link.state` is `blocked` for a disabled link whose destination is on the block list.
+    can_enable = (
+        link.status == LinkStatus.DISABLED
+        and link.held_for_review_at is None
+        and link.state != 'blocked'
+    )
     link.costs = {
-        'enable': quote_enable(link).total,
-        'analytics': quote_analytics(link).total,
-        'password': quote_update(link, password='x').total,
+        'enable': quote_enable(link).total if can_enable else None,
+        'analytics': quote_analytics(link).total if editable else None,
+        'password': (
+            quote_update(link, password='x').total
+            if editable and link.held_for_review_at is None
+            else None
+        ),
     }
     return link

@@ -90,10 +90,12 @@ def create_link(request, payload: LinkCreateSchema):
     before the redirect (a paid extra). `expires_at` and `max_clicks` end the link; `filter_bots`
     (default true) leaves crawlers and link previews out of the click counts.
 
-    A refused create (400/403/409) spends none of the `SU_CREATE_USER` budget. 402 if the balance
-    can't cover it; 409 if `expected_cost` is sent and differs from what it would charge.
+    A refused create (400/403/409) spends none of the `SU_CREATE_USER` budget (only the much
+    looser `SU_QUOTE_USER`, shared with `POST /links/quote`). 402 if the balance can't cover it;
+    409 if `expected_cost` is sent and differs from what it would charge.
     """
     data = _input(payload)
+    ratelimit.enforce(ratelimit.hit_user(request.auth, 'SU_QUOTE_USER'))
     with mapped_errors():
         # Refuse a bad request before it spends any of the rate-limit budget, like the web form.
         services.check_new_link(request.auth, data)
@@ -107,7 +109,9 @@ def create_link(request, payload: LinkCreateSchema):
 def quote_link(request, payload: LinkCreateSchema):
     """What `POST /links` would charge for this body, without creating anything. The body is
     checked like a real create (so you learn about a taken alias or a bad destination now) and
-    `affordable` compares the total with your balance. The `credits` to send as `expected_cost`."""
+    `affordable` compares the total with your balance. The `credits` to send as `expected_cost`.
+    Costs nothing but is limited per user (`SU_QUOTE_USER`, a loose rule)."""
+    ratelimit.enforce(ratelimit.hit_user(request.auth, 'SU_QUOTE_USER'))
     with mapped_errors():
         quote = services.check_new_link(request.auth, _input(payload))
     balance = get_balance(request.auth)
@@ -134,6 +138,10 @@ def update_link(request, link_id: UUID, payload: LinkUpdateSchema):
     Setting a password on a link that never had one costs credits once (`credits_spent`;
     `expected_cost` guards it). A link under review can only be disabled (409), and one that was
     taken down can't be changed (400). A body with no field changes nothing and spends no budget.
+
+    What can be refused without a transaction (a link that isn't editable, a bad field, a blocked
+    destination) is refused *before* `SU_EDIT_USER` is charged, so it spends none of it; a 409
+    for a changed cost is only found inside the transaction and does spend one edit.
     """
     link = owned_link(request, link_id)
     changes = payload.model_dump(exclude_unset=True)
@@ -142,17 +150,23 @@ def update_link(request, link_id: UUID, payload: LinkUpdateSchema):
     if not changes and not utm:
         link.credits_spent = 0
         return detail(link)
+    fields = {
+        'destination': changes.get('destination', UNSET),
+        'utm': utm or None,
+        'title': changes.get('title', UNSET),
+        'tags': changes.get('tags', UNSET),
+        'expires_at': changes.get('expires_at', UNSET),
+        'max_clicks': changes.get('max_clicks', UNSET),
+        'password': changes.get('password', UNSET),
+    }
+    with mapped_errors():
+        # Refuse what needs no transaction before it spends any of the edit budget.
+        services.check_update(link, **fields)
     ratelimit.enforce(ratelimit.hit_user(request.auth, 'SU_EDIT_USER'))
     with mapped_errors():
         services.update_link(
             link,
-            destination=changes.get('destination', UNSET),
-            utm=utm or None,
-            title=changes.get('title', UNSET),
-            tags=changes.get('tags', UNSET),
-            expires_at=changes.get('expires_at', UNSET),
-            max_clicks=changes.get('max_clicks', UNSET),
-            password=changes.get('password', UNSET),
+            **fields,
             filter_bots=changes.get('filter_bots', UNSET),
             expected_cost=expected_cost,
         )

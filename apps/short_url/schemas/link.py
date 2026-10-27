@@ -1,11 +1,14 @@
 """Schemas for the link endpoints (`/api/s/links`): one link, a page of them, the create and
 partial-update bodies, the quote and the owner's preview."""
 
-from datetime import datetime
+import re
+from datetime import date, datetime, time
+from typing import Annotated, Any
 from uuid import UUID
 
+from django.utils import timezone
 from ninja import Schema
-from pydantic import ConfigDict, Field
+from pydantic import BeforeValidator, ConfigDict, Field
 
 from ..services import short_url as build_short_url
 
@@ -14,6 +17,34 @@ from ..services import short_url as build_short_url
 _DESTINATION_MAX = 4096
 _TEXT_MAX = 1000
 _UTM_MAX = 200
+
+
+_DATE_ONLY = re.compile(r'\d{4}-\d{2}-\d{2}')
+
+
+def _date_only_to_end_of_day(value: Any) -> Any:
+    """Read a bare date ("2027-12-31") as the end of that day in the server's time zone, as file
+    transfer's API and the web date picker do: pydantic would otherwise read it as midnight at
+    the *start* of the day, so the link would stop a day before its owner meant. Anything with a
+    time part passes through."""
+    if isinstance(value, str) and _DATE_ONLY.fullmatch(value.strip()):
+        value = date.fromisoformat(value.strip())
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return timezone.make_aware(datetime.combine(value, time.max.replace(microsecond=0)))
+    return value
+
+
+ExpiresAt = Annotated[
+    datetime | None,
+    BeforeValidator(_date_only_to_end_of_day),
+    Field(
+        description=(
+            'An ISO 8601 date-time; one without a UTC offset ("2027-12-31T18:00:00") is read in '
+            'the server\'s time zone (settings.TIME_ZONE). A date alone ("2027-12-31") means the '
+            'end of that day in that time zone. `null` means no expiry.'
+        ),
+    ),
+]
 
 
 class LinkSchema(Schema):
@@ -78,15 +109,20 @@ class LinkSchema(Schema):
 
 class CostsSchema(Schema):
     """What each action that can charge would cost this link right now, in credits (0: free, or
-    already paid for). A client that confirms prices with its user reads these, then sends the
-    number back as `expected_cost`."""
+    already paid for), or `null` when the link's state would refuse the action (it is not
+    possible, whatever it costs). A client that confirms prices with its user reads these, then
+    sends the number back as `expected_cost`."""
 
-    #: Enabling the link (an active link beyond the free allowance, once per link).
-    enable: int
-    #: Opening the detailed statistics (`POST /links/{id}/analytics`, once per link).
-    analytics: int
+    #: Enabling the link (an active link beyond the free allowance, once per link). `null` unless
+    #: the link is disabled and could be enabled: an active link has nothing to enable, and one
+    #: under review, taken down or pointing at a blocked destination is refused.
+    enable: int | None
+    #: Opening the detailed statistics (`POST /links/{id}/analytics`, once per link). `null` for
+    #: a taken-down link; 0 once open.
+    analytics: int | None
     #: Setting a password on a link that never had one (`PATCH` with `password`, once per link).
-    password: int
+    #: `null` for a link under review or taken down, which can't be edited.
+    password: int | None
 
 
 class LinkDetailSchema(LinkSchema):
@@ -144,7 +180,7 @@ class LinkCreateSchema(_UtmFields):
     alias: str = Field('', max_length=64)
     title: str = Field('', max_length=_TEXT_MAX)
     tags: list[str] = Field(default_factory=list, max_length=100)
-    expires_at: datetime | None = None
+    expires_at: ExpiresAt = None
     max_clicks: int | None = None
     password: str = Field('', max_length=256)
     filter_bots: bool = True
@@ -168,7 +204,7 @@ class LinkUpdateSchema(_UtmFields):
     destination: str = Field('', max_length=_DESTINATION_MAX)
     title: str = Field('', max_length=_TEXT_MAX)
     tags: list[str] = Field(default_factory=list, max_length=100)
-    expires_at: datetime | None = None
+    expires_at: ExpiresAt = None
     max_clicks: int | None = None
     password: str | None = Field(None, max_length=256)
     filter_bots: bool = True

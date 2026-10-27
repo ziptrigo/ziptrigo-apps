@@ -253,8 +253,8 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   name its path): it hashes once for an unknown email, so login timing doesn't reveal accounts,
   and refuses `is_active=False` users at login and on every session load. Such a login answers
   "Invalid credentials" (the `status` check, "User not active", comes after `authenticate`).
-- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py`, `admin/filetransfer.py` and
-  `admin/receipts.py`
+- **JWTs** for `/api/`, i.e. external clients like `admin/qrcode.py`, `admin/filetransfer.py`,
+  `admin/receipts.py` and `admin/shorturl.py`
   (`apps.accounts.auth.JWTAuth` / `AsyncJWTAuth` / `AdminAuth`, which also reject non-`ACTIVE`
   users). Claim `sub`, signed with `JWT_SECRET`, token classes in `apps/accounts/tokens.py`.
   **Tokens are bound to the password**: every access and refresh token carries `pwd`
@@ -2227,13 +2227,14 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   exit code is 1 if any failed) and `vendor-merge <keep> <id>...` (unless `--yes`, it first `GET`s
   every vendor so the prompt shows which is kept and which are merged away -- and a wrong id fails
   before the question --, then `POST /vendors/merge`; the kept id and repeats are dropped from the
-  list). The three JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
+  list). The four JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
   is **per CLI and environment**, `~/.<cli>_token.<env>` (`token_file`, so the prod JWT is never
   sent to the local server; the single `~/.<cli>_token` of earlier versions is ignored -- log in
   again, then delete it), written by `write_private_file` (mode 0600 set on the open descriptor so
   a pre-existing looser file is tightened, `O_NOFOLLOW`); `get_headers(cli)`,
   `password_from_prompt_or_env` (`QRCODE_PASSWORD` / `FILETRANSFER_PASSWORD` /
-  `RECEIPTS_PASSWORD`, else a hidden prompt: no CLI takes the password on the command line any
+  `RECEIPTS_PASSWORD` / `SHORTURL_PASSWORD`, and `SHORTURL_LINK_PASSWORD` for the password of a
+  short link itself, else a hidden prompt: no CLI takes a password on the command line any
   more) and `select_environment` (loads the env file and remembers which, for `token_file`; prints
   `Site: <url> (<env>)` to stderr and warns when `API_BASE_URL` differs from the file's `BASE_URL`,
   since the token is chosen by environment but sent wherever the URL points). Every request goes through `_request`: default timeout; a 429 is retried
@@ -2470,7 +2471,8 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
 - **Rate limits** (`RATELIMIT_RULES`): `SU_REDIRECT_IP` (120/min, also charged by `/unlock` GETs),
   `SU_CREATE_USER` (30/h), `SU_EDIT_USER` (60/h), `SU_QR_USER` (60/min), `SU_PASSWORD_IP` (15/10 min),
   `SU_PASSWORD_LINK` (30/10 min), `SU_PREVIEW_IP` (60/min), `SU_REPORT_IP` (5/h), `SU_REPORT_LINK`
-  (20/h). The web and the API share the user rules' budgets.
+  (20/h), and `SU_QUOTE_USER` (120/min, API only: see "Status codes"). The web and the API share
+  the other user rules' budgets.
 - **API** (`apps/short_url/api/`, `schemas/`; mounted at `/api/s/`, JWT only: router-level
   `auth=JWTAuth()` in `api/router.py`, so no endpoint can be added without it; `links.py` and
   `stats.py` share that one `Router`). It calls the same `apps.short_url.services` as the web views.
@@ -2485,7 +2487,10 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   `extra='forbid'` (an unknown key, including `alias` on a `PATCH`, is a 422); an explicit `null`
   clears `expires_at`, `max_clicks` and `password` and is a 422 for the other fields; `utm_*` are flat
   fields merged into the destination; an empty `PATCH` changes nothing and spends no rate-limit
-  budget. A `LinkSchema` is the link without the password (only `password_protected`), with `state`
+  budget. `expires_at` takes an ISO 8601 date-time (no offset: read in `TIME_ZONE`) or a bare date
+  (`2027-12-31`), which means the end of that day in `TIME_ZONE` -- `schemas.link.ExpiresAt`, like
+  file transfer's `ExpiryDate`, so every client means the same thing and the CLI sends the date as
+  it is. A `LinkSchema` is the link without the password (only `password_protected`), with `state`
   (`display_state`, the block list queried once per page), `analytics_enabled` and `takedown_reason`
   (only when taken down, never the internal note or the reporter); the single-link endpoints return
   `LinkDetailSchema` (adds `costs` and `credits_spent`).
@@ -2497,9 +2502,15 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
     write, and on a no-op such as enabling an active link). `POST /links/quote` validates a create body
     exactly like the create (`services.check_new_link`: fields, alias shape and availability, owner
     status, the cap; no writes, no password hash) and answers `{credits, charges, balance,
-    affordable}`; it spends none of `SU_CREATE_USER`. `GET /links/{id}` reports `costs`
-    (`{enable, analytics, password}`: what each paid action would cost that link now). The CLI uses
-    all of it: quote, ask, create with `expected_cost`.
+    affordable}`; it spends none of `SU_CREATE_USER` (only `SU_QUOTE_USER`). `GET /links/{id}` reports `costs`
+    (`{enable, analytics, password}`: what each paid action would cost that link now, or **`null`**
+    for an action the link's state would refuse: `enable` unless the link is disabled, not under
+    review and not pointing at a blocked destination; `analytics` for a taken-down link;
+    `password` for one under review or taken down. 0 still means free or already paid). The CLI
+    uses all of it: quote, ask, create with `expected_cost`; for a `null` it says "not possible
+    right now" instead of asking to pay (and enabling an already active link just says so).
+    Write responses carry the real `updated_at` (the services set it on the instance they write
+    through `QuerySet.update`, which skips `auto_now`).
   - **Status codes** (`api/common.py`): **400** a service `ValidationError` (a bad field as `field:
     message`, the cap on links, a link that can no longer be changed, an unknown `status`/`sort`/
     `range`); **402** `InsufficientCreditsError` (one documented code, as in the other APIs);
@@ -2508,9 +2519,14 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
     second time); **409** the alias is taken/reserved/once someone's (`AliasTakenError`, never saying
     whose), a link held for review (`LinkHeldError`, only disabling works) or `CostChangedError`;
     **422** ninja's own validation (a list-valued `detail`); **429** `RateLimitExceeded` with
-    `Retry-After`. A refused create (400/403/409, anything `check_new_link` catches) spends none of
-    `SU_CREATE_USER`: the budget is charged after that check and before `create_link`. `PATCH` spends
-    `SU_EDIT_USER`. Enable/disable/delete/analytics/stats/preview have no rule, as on the web.
+    `Retry-After`. `POST /links/quote` and every `POST /links` first charge the loose per-user
+    `SU_QUOTE_USER` (120/min), so polling a quote or retrying a refused create is bounded. A refused
+    create (400/403/409, anything `check_new_link` catches) spends none of `SU_CREATE_USER`: that
+    budget is charged after the check and before `create_link`. `PATCH` runs `services.check_update`
+    (not editable, held, inactive owner, any field that is invalid, a blocked destination: 404/409/
+    400/403) *before* it charges `SU_EDIT_USER`, so those refusals spend none of it; a 409 for a
+    changed cost needs the transaction and **does spend one edit**. Enable/disable/delete/
+    analytics/stats/preview have no rule, as on the web.
     Tests: `apps/short_url/tests/test_api_*.py` (helpers in `api_support.py`) over Django's test
     client.
 - **CLI** (`admin/shorturl.py`, `inv shorturl ...`; `SHORTURL_PASSWORD`, token `~/.shorturl_token.<env>`):
