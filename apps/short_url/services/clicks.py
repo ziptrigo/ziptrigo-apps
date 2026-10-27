@@ -8,11 +8,17 @@ single conditional `UPDATE` (so the click cap can't be overshot by racing clicks
 `max_clicks` caps; `bot_click_count` counts the clicks flagged as bots (crawlers, link-preview
 fetchers, HTTP libraries; see `useragents`).
 
-- `filter_bots` on (the default): a bot click only adds to `bot_click_count`. The headline count
-  and the cap are people's alone, so a chat app unfurling the link neither inflates the numbers
-  nor uses up a click limit. The bot is still redirected and still gets its event.
+- `filter_bots` on (the default) and no `max_clicks`: a bot click only adds to `bot_click_count`.
+  The headline count is people's alone, so a chat app unfurling the link doesn't inflate the
+  numbers. The bot is still redirected and still gets its event.
 - `filter_bots` off: every click adds to `click_count`, and a bot's also adds to
-  `bot_click_count`, which then reads "of these, this many were bots". Bots use up the cap.
+  `bot_click_count`, which then reads "of these, this many were bots".
+- **A link with `max_clicks` counts every redirected click**, bot or not, whatever `filter_bots`
+  says: the bot is still flagged (`bot_click_count`, `ClickEvent.is_bot`) so the statistics can
+  show it, but it adds to `click_count` and so uses up the cap. The bot classification is whatever
+  the client's `User-Agent` says (no header, `curl`, anything with "bot"), so if bots were exempt
+  from the cap anyone could follow a "first 100 visitors" or single-use link without limit just
+  by setting a header. On such a link `click_count` therefore includes bot visits.
 
 The counters record the choice in force at the time of the click; switching it later doesn't
 rewrite history (the stats page re-reads the events with the current choice, see `stats`).
@@ -100,8 +106,9 @@ def record(link: ShortLink, request: HttpRequest, *, with_event: bool = True) ->
     the same `UPDATE`). A failure to write the event is logged and swallowed: the visitor is
     redirected and the counters are right, only that one analytics row is lost."""
     agent = parse_user_agent(request.META.get('HTTP_USER_AGENT'))
-    # A bot's click is the headline's only when the owner chose to count bots.
-    counts_for_headline = not (agent.is_bot and link.filter_bots)
+    # A bot's click is the headline's only when the owner chose to count bots, except on a link
+    # with a click cap, where every redirect must count or the cap means nothing (see above).
+    counts_for_headline = not (agent.is_bot and link.filter_bots and link.max_clicks is None)
     now = dj_timezone.now()
 
     changes: dict[str, object] = {}

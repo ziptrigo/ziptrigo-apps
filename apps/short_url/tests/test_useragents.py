@@ -29,6 +29,35 @@ ANDROID_TABLET = (
 LINUX_FIREFOX = 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0'
 
 
+IN_APP_BROWSERS = [
+    # The DuckDuckGo browser, and the Pinterest, Flipboard and Tumblr apps' own browsers, carry
+    # their brand in the agent; they are people, not crawlers.
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Version/4.0 Chrome/120.0.6099.43 Mobile DuckDuckGo/5 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+    '(KHTML, like Gecko) Version/17.0 Mobile/15E148 DuckDuckGo/7 Safari/605.1.15',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/120.0.6099.43 Mobile Safari/537.36 [Pinterest/Android]',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+    '(KHTML, like Gecko) Mobile/15E148 [Pinterest/iOS]',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+    '(KHTML, like Gecko) Mobile/15E148 Flipboard/4.3.20',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+    '(KHTML, like Gecko) Mobile/15E148 Tumblr/iPhone/33.1',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/120.0.6099.43 Mobile Safari/537.36 YandexSearch/23.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/120.0.0.0 YaBrowser/23.11.0 Yowser/2.5 Safari/537.36',
+]
+
+
+@pytest.mark.parametrize('header', IN_APP_BROWSERS)
+def test_in_app_browsers_with_a_brand_name_are_not_bots(header):
+    parsed = parse_user_agent(header)
+    assert not parsed.is_bot, header
+    assert parsed.device in ('desktop', 'mobile', 'tablet')
+
+
 @pytest.mark.parametrize(
     ('header', 'device', 'browser', 'os'),
     [
@@ -70,6 +99,15 @@ def test_a_person_gets_a_device_browser_and_os(header, device, browser, os):
         'Java/17.0.1',
         'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)',
         'Mozilla/5.0 (compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)',
+        'Mozilla/5.0 (compatible; DuckDuckBot-Https/1.1; https://duckduckgo.com/duckduckbot)',
+        'DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)',
+        'Pinterest/0.2 (+http://www.pinterest.com/bot.html)',
+        'Pinterestbot/1.0 (+http://www.pinterest.com/bot.html)',
+        'FlipboardProxy/1.2 (+http://flipboard.com/browserproxy)',
+        'FlipboardRSS/1.2 (+http://flipboard.com/browserproxy)',
+        'Tumblr/14.0.835.186',
+        'Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)',
+        'Mozilla/5.0 (compatible; YandexImages/3.0; +http://yandex.com/bots)',
     ],
 )
 def test_crawlers_and_link_preview_fetchers_are_bots(header):

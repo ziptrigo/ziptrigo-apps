@@ -30,6 +30,7 @@ from ..services import (
     quote_update,
     set_enabled,
     short_url,
+    unlock_free_analytics,
     update_link,
 )
 from ..services import links as links_module
@@ -806,6 +807,29 @@ class TestAnalyticsCharge:
         assert analytics_unlocked(link) and quote_analytics(link).total == 0
         enable_analytics(link, expected_cost=0)
         assert balance(funded_user) == 10
+
+    def test_free_analytics_are_recorded_so_a_later_price_does_not_take_them_back(
+        self, funded_user, prices
+    ):
+        prices.analytics_price = 0
+        prices.save()
+        link = make_link(funded_user)
+        assert link.analytics_paid_at is None
+        assert unlock_free_analytics(link) is True
+        assert link.analytics_paid_at is not None
+        stamped = ShortLink.objects.get(pk=link.pk).analytics_paid_at
+        assert stamped == link.analytics_paid_at
+        assert unlock_free_analytics(link) is True  # idempotent: the stamp doesn't move
+        assert ShortLink.objects.get(pk=link.pk).analytics_paid_at == stamped
+        prices.analytics_price = 5
+        prices.save()
+        assert analytics_unlocked(link) and quote_analytics(link).total == 0
+        assert balance(funded_user) == 10
+
+    def test_a_priced_extra_is_not_unlocked_by_the_free_path(self, funded_user):
+        link = make_link(funded_user)
+        assert unlock_free_analytics(link) is False
+        assert ShortLink.objects.get(pk=link.pk).analytics_paid_at is None
 
     def test_a_link_that_cannot_be_changed_cannot_buy_it(self, funded_user):
         link = make_link(funded_user, status=LinkStatus.TAKEN_DOWN)

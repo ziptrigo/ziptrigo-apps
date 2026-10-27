@@ -1,4 +1,4 @@
-"""The password page of a protected link (`/s/<code>/unlock/`).
+"""The password page of a protected link (`/s/<code>/unlock`).
 
 `GET` shows the form; `POST` checks the password. A correct one is remembered in the session for
 that link (`services.passwords`) and the visitor is sent through the ordinary `/s/<code>` path,

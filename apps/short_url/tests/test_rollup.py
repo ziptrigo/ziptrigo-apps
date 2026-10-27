@@ -216,27 +216,50 @@ class TestPurge:
         assert ClickEvent.objects.count() == 1
 
     def test_days_after_the_newest_rollup_are_kept_even_when_old(self, link):
+        add_event(link, at_day(days_ago(250)))
         add_event(link, at_day(days_ago(200)))
-        rollup.rollup_clicks(NOW - timedelta(days=150))
+        rollup.rollup_clicks(NOW - timedelta(days=150))  # newest rolled-up day: 200 days ago
         add_event(link, at_day(days_ago(120)))  # never rolled up: the job was down
         rollup.purge_click_events(NOW)
-        assert [e.date() for e in ClickEvent.objects.values_list('at', flat=True)] == [
-            days_ago(120)
+        assert sorted(e.date() for e in ClickEvent.objects.values_list('at', flat=True)) == [
+            days_ago(200),  # the newest rolled-up day itself stays too
+            days_ago(120),
         ]
+
+    def test_the_newest_rolled_up_day_is_never_purged(self, link):
+        """With a retention of 1 day, just after midnight and before the first rollup of the new
+        day, the cutoff reaches the day the rollup rewrites: it must keep its events, or the
+        rewrite would undercount it for good."""
+        row = ShortUrlSettings.load()
+        row.click_event_retention_days = 1
+        row.save()
+        add_event(link, at_day(days_ago(3)))
+        add_event(link, at_day(days_ago(2)))
+        add_event(link, at_day(days_ago(2), 15))
+        early = at_day(TODAY, 0).replace(minute=5)
+        rollup.rollup_clicks(early - timedelta(days=1))  # watermark: the day before yesterday
+        assert DailyLinkStat.objects.latest('date').date == days_ago(2)
+        rollup.purge_click_events(early)
+        days = sorted(e.date() for e in ClickEvent.objects.values_list('at', flat=True))
+        assert days == [days_ago(2), days_ago(2)], 'only the older, safely rolled-up day went'
+        rollup.rollup_clicks(early)
+        assert stat(link, days_ago(2)).clicks == 2
 
     def test_it_deletes_in_batches(self, link, monkeypatch):
         monkeypatch.setattr(rollup, 'PURGE_BATCH', 2)
         for _ in range(5):
             add_event(link, at_day(days_ago(100)))
+        add_event(link, at_day(days_ago(50)))  # a later rolled-up day, so day -100 is safe
         rollup.rollup_clicks(NOW)
         assert rollup.purge_click_events(NOW) == 5
-        assert not ClickEvent.objects.exists()
+        assert ClickEvent.objects.count() == 1  # the day -50 event is inside the retention
 
     def test_a_run_is_bounded_and_the_next_one_carries_on(self, link, monkeypatch):
         monkeypatch.setattr(rollup, 'PURGE_BATCH', 2)
         monkeypatch.setattr(rollup, 'PURGE_MAX_BATCHES', 1)
         for _ in range(5):
             add_event(link, at_day(days_ago(100)))
+        add_event(link, at_day(days_ago(50)))  # a later rolled-up day, so day -100 is safe
         rollup.rollup_clicks(NOW)
         assert rollup.purge_click_events(NOW) == 2
         assert rollup.purge_click_events(NOW) == 2

@@ -13,10 +13,13 @@ runner records the error in `ScheduledJob.last_error`).
 
 **Reading.** Everything up to `rolled_up_through` is in the rollup tables; the days after it
 (yesterday, until the next run, and today) are read from the raw events (`stats`). That is why
-the purge must never delete an event of a day that isn't rolled up yet.
+the purge must never delete an event of a day that isn't rolled up yet, nor of the newest
+rolled-up day (the rollup rewrites it).
 
 **Purge.** `purge_click_events` deletes, in batches, the events of whole UTC days older than
-`ShortUrlSettings.click_event_retention_days` (and only days already rolled up).
+`ShortUrlSettings.click_event_retention_days`, and only days *before* the newest rolled-up day:
+that day is rewritten by every rollup run, so its events must survive until a later day is
+rolled up.
 """
 
 import logging
@@ -158,7 +161,7 @@ def rollup_clicks(now: datetime | None = None) -> int:
 
 
 def purge_click_events(now: datetime | None = None) -> int:
-    """Delete the events of whole UTC days older than the retention that are already rolled up,
+    """Delete the events of whole UTC days older than the retention that are rolled up for good,
     in batches. Returns how many were deleted (at most `PURGE_BATCH * PURGE_MAX_BATCHES` a run)."""
     now = now or dj_timezone.now()
     retention = ShortUrlSettings.load().click_event_retention_days
@@ -166,7 +169,9 @@ def purge_click_events(now: datetime | None = None) -> int:
     watermark = rolled_up_through()
     if watermark is None:
         return 0  # nothing is rolled up, so nothing may go
-    cutoff = min(cutoff, day_start(watermark + timedelta(1)))
+    # Never the watermark day itself: the rollup rewrites it from whatever events exist, so a
+    # partial purge of it would leave a permanently short total.
+    cutoff = min(cutoff, day_start(watermark))
 
     deleted = 0
     for _ in range(PURGE_MAX_BATCHES):

@@ -97,6 +97,16 @@ class TestPaywall:
         prices.save()
         assert 'Clicks over time' in web.get(stats_url(link)).content.decode()
 
+    def test_opening_free_stats_keeps_them_when_the_price_rises(self, web, link, prices):
+        prices.analytics_price = 0
+        prices.save()
+        web.get(stats_url(link))
+        link.refresh_from_db()
+        assert link.analytics_paid_at is not None
+        prices.analytics_price = 5
+        prices.save()
+        assert 'Clicks over time' in web.get(stats_url(link)).content.decode()
+
     def test_a_taken_down_link_cannot_buy_it(self, web, funded_user):
         taken = create_link(funded_user, status=LinkStatus.TAKEN_DOWN)
         content = web.get(stats_url(taken)).content.decode()

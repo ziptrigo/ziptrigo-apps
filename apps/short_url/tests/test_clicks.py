@@ -101,13 +101,34 @@ class TestBotFiltering:
         clicks.record(link, request_for(agent=None))
         assert (fresh(link).click_count, fresh(link).bot_click_count) == (0, 1)
 
-    def test_bots_do_not_use_up_the_click_cap_when_filtered(self, user):
-        link = create_link(user, max_clicks=1)
-        for _ in range(5):
-            assert clicks.record(link, request_for(agent=BOT))
+    @pytest.mark.parametrize(
+        'agent',
+        [BOT, None, 'curl/8.1.2', 'python-requests/2.31.0'],
+        ids=['bot', 'none', 'curl', 'py'],
+    )
+    def test_on_a_capped_link_every_click_uses_the_cap_bot_or_not(self, user, agent):
+        link = create_link(user, max_clicks=2)  # filter_bots is on
+        assert link.filter_bots
+        assert clicks.record(link, request_for(agent=agent))
+        assert clicks.record(link, request_for(agent=agent))
+        assert not clicks.record(link, request_for(agent=agent)), 'the cap is used up'
+        link = fresh(link)
+        assert (link.click_count, link.bot_click_count) == (2, 2)  # still flagged as bots
+        assert link.last_clicked_at is not None
+        assert ClickEvent.objects.filter(is_bot=True).count() == 2
+
+    def test_on_a_capped_link_people_and_bots_share_the_cap(self, user):
+        link = create_link(user, max_clicks=2)
+        assert clicks.record(link, request_for(agent=BOT))
         assert clicks.record(link, request_for())
         assert not clicks.record(link, request_for())
-        assert (fresh(link).click_count, fresh(link).bot_click_count) == (1, 5)
+        assert (fresh(link).click_count, fresh(link).bot_click_count) == (2, 1)
+
+    def test_without_a_cap_bots_still_stay_out_of_the_headline(self, user):
+        link = create_link(user)
+        for _ in range(5):
+            clicks.record(link, request_for(agent=BOT))
+        assert (fresh(link).click_count, fresh(link).bot_click_count) == (0, 5)
 
     def test_bots_use_up_the_cap_when_not_filtered(self, user):
         link = create_link(user, max_clicks=2, filter_bots=False)

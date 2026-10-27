@@ -21,12 +21,12 @@ from apps.billing.services import InsufficientCreditsError
 
 from ..services import (
     CostChangedError,
-    analytics_unlocked,
     display_state,
     enable_analytics,
     quote_analytics,
     short_url,
     stats,
+    unlock_free_analytics,
 )
 from .common import owned_link, parse_cost, render_page
 
@@ -36,17 +36,21 @@ from .common import owned_link, parse_cost, render_page
 @ensure_csrf_cookie
 def link_stats(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse:
     link = owned_link(request, link_id)
+    through = stats.watermark()  # once, so every figure on the page splits at the same day
+    unlocked = unlock_free_analytics(link)
     context = {
         'link': link,
         'short_url': short_url(link.code),
         'state': display_state(link),
-        'totals': stats.totals(link),
-        'unlocked': analytics_unlocked(link),
+        'totals': stats.totals(link, through=through),
+        'unlocked': unlocked,
         'analytics_cost': quote_analytics(link).total,
         'range_choices': list(stats.RANGE_LABELS.items()),
     }
     if context['unlocked']:
-        detail = stats.range_stats(link, stats.parse_range(request.GET.get('range')))
+        detail = stats.range_stats(
+            link, stats.parse_range(request.GET.get('range')), through=through
+        )
         context.update(
             detail=detail,
             range_label=stats.RANGE_LABELS[detail.key],

@@ -2,7 +2,7 @@
 
 They are printed and shared, so they must stay short and never move. `/s/<code>`, with or without
 a trailing slash, follows the link; a trailing `+` (`/s/<code>+`) shows where it goes first, and
-`/s/<code>/unlock/` is the password page of a protected one.
+`/s/<code>/unlock` is the password page of a protected one.
 """
 
 from django.urls import re_path

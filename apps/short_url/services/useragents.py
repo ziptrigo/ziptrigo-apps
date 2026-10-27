@@ -31,12 +31,18 @@ BOT_PATTERN = re.compile(
     # Generic: "...bot/1.0", "bot;", "crawler", "spider" ("Cubot" is a phone brand, not a crawler).
     r'(?<!cu)bot(?:\b|[/ ;)_-])|crawl|spider|slurp|scrap(?:er|y)|fetcher|'
     # Link previews: what a chat or social app fetches when a link is pasted.
-    r'slackbot|slack-imgproxy|twitterbot|facebookexternalhit|facebot|whatsapp/|discordbot|'
-    r'telegrambot|linkedinbot|pinterest/|skypeuripreview|embedly|quora link preview|redditbot|'
-    r'vkshare|flipboard|tumblr/|google-safety|google-inspectiontool|googleother|apis-google|'
-    r'mediapartners|bingpreview|'
-    # Search and SEO engines that do not say "bot".
-    r'yandex|baiduspider|duckduck|applebot|petalbot|semrush|ahrefs|'
+    # Only crawler tokens, never a bare brand: the DuckDuckGo, Pinterest, Flipboard, Tumblr and
+    # Yandex apps all have in-app browsers whose agents carry the brand name. WhatsApp's and
+    # Tumblr's fetchers send just `WhatsApp/x.y` / `Tumblr/x.y` as the whole header, so those two
+    # are matched at the start only (`DuckDuckBot` and `Pinterestbot` are caught by "bot" above).
+    r'slackbot|slack-imgproxy|twitterbot|facebookexternalhit|facebot|^whatsapp/|discordbot|'
+    r'telegrambot|linkedinbot|skypeuripreview|embedly|quora link preview|redditbot|'
+    r'vkshare|flipboardproxy|flipboardrss|^tumblr/|google-safety|google-inspectiontool|'
+    r'googleother|apis-google|mediapartners|bingpreview|'
+    # Search and SEO engines that do not say "bot" (YandexBot and the rest of its "bots" are
+    # caught above; the Yandex browser and search app are not crawlers).
+    r'yandex(?:images|direct|video|favicons|metrika|market|news|blogs|pagechecker)|'
+    r'baiduspider|applebot|petalbot|semrush|ahrefs|'
     # Monitors, headless browsers, scanners and HTTP libraries.
     r'headlesschrome|phantomjs|lighthouse|pingdom|uptimerobot|statuscake|datadog|'
     r'python-requests|python-urllib|aiohttp|httpx|go-http-client|java/|apache-httpclient|'

@@ -108,14 +108,33 @@ class RangeStats:
     tables: list[TopTable]
 
 
+class _Unset:
+    """Marks "read the watermark yourself", since `None` (nothing rolled up) is a real value."""
+
+
+UNSET = _Unset()
+
+
+def watermark() -> date | None:
+    """The newest rolled-up day. A page reads it once and passes it to every query below, so its
+    figures are split at one day even if the hourly rollup commits mid-request."""
+    return rolled_up_through()
+
+
+def _through(value: date | None | _Unset) -> date | None:
+    return watermark() if isinstance(value, _Unset) else value
+
+
 def _today(now: datetime | None) -> date:
     return (now or dj_timezone.now()).astimezone(timezone.utc).date()
 
 
-def _days(link: ShortLink, start: date | None, end: date) -> list[Day]:
+def _days(
+    link: ShortLink, start: date | None, end: date, through: date | None | _Unset = UNSET
+) -> list[Day]:
     """The link's per-day totals from `start` (None: from the beginning) through `end`, days
     without clicks left out: rollup rows up to the newest rolled-up day, events after it."""
-    through = rolled_up_through()
+    through = _through(through)
     found: dict[date, Day] = {}
 
     rolled = DailyLinkStat.objects.filter(link=link, date__lte=min(end, through or date.min))
@@ -153,10 +172,12 @@ def _uniques(day: Day, filter_bots: bool) -> int:
     return day.uniques if filter_bots else day.uniques_with_bots
 
 
-def totals(link: ShortLink, *, now: datetime | None = None) -> Totals:
+def totals(
+    link: ShortLink, *, now: datetime | None = None, through: date | None | _Unset = UNSET
+) -> Totals:
     """The always-visible totals. Clicks and bot clicks are the link's own counters (what the
     dashboard and the click cap use); unique visitors are summed from the daily figures."""
-    days = _days(link, None, _today(now))
+    days = _days(link, None, _today(now), through)
     return Totals(
         clicks=link.click_count,
         bot_clicks=link.bot_click_count,
@@ -220,10 +241,16 @@ def _label(kind: str, value: str) -> str:
 
 
 def top_table(
-    link: ShortLink, kind: str, start: date, end: date, *, limit: int = TOP_N
+    link: ShortLink,
+    kind: str,
+    start: date,
+    end: date,
+    *,
+    limit: int = TOP_N,
+    through: date | None | _Unset = UNSET,
 ) -> TopTable:
     """The `limit` biggest values of one dimension in the range, largest first (`Other` last)."""
-    through = rolled_up_through()
+    through = _through(through)
     counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # value -> [humans, bots]
 
     if through is not None and start <= through:
@@ -272,17 +299,23 @@ def top_table(
 
 
 def range_stats(
-    link: ShortLink, key: str = DEFAULT_RANGE, *, now: datetime | None = None
+    link: ShortLink,
+    key: str = DEFAULT_RANGE,
+    *,
+    now: datetime | None = None,
+    through: date | None | _Unset = UNSET,
 ) -> RangeStats:
-    """Everything the detailed page shows for one range (`RANGES`)."""
+    """Everything the detailed page shows for one range (`RANGES`). The watermark is read once
+    (or taken from `through`) for the chart and all four tables."""
+    through = _through(through)
     key = parse_range(key)
     end = _today(now)
     days_back = RANGES[key]
     if days_back is not None:
         start = end - timedelta(days=days_back - 1)
-        days = _days(link, start, end)
+        days = _days(link, start, end, through)
     else:
-        days = _days(link, None, end)
+        days = _days(link, None, end, through)
         start = days[0].date if days else end
     buckets = build_buckets(days, start, end, link.filter_bots)
     return RangeStats(
@@ -294,7 +327,7 @@ def range_stats(
         bot_clicks=sum(day.bot_clicks for day in days),
         bucket_days=bucket_days_for((end - start).days + 1),
         buckets=buckets,
-        tables=[top_table(link, kind, start, end) for kind in DIMENSION_FIELDS],
+        tables=[top_table(link, kind, start, end, through=through) for kind in DIMENSION_FIELDS],
     )
 
 

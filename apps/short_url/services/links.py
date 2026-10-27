@@ -443,6 +443,25 @@ def analytics_unlocked(link: ShortLink) -> bool:
     )
 
 
+def unlock_free_analytics(link: ShortLink) -> bool:
+    """`analytics_unlocked`, and while the price is 0 also records the unlock: the first time a
+    free link's statistics are opened `analytics_paid_at` is stamped (a conditional update, so
+    idempotent and race-free), as `charge_extra` does for the other extras at a price of 0. A
+    later price increase then doesn't take away statistics the link already had."""
+    if billing.is_paid(link, billing.Extra.ANALYTICS):
+        return True
+    if billing.price(billing.Extra.ANALYTICS) != 0:
+        return False
+    now = timezone.now()
+    if ShortLink.objects.filter(pk=link.pk, analytics_paid_at__isnull=True).update(
+        analytics_paid_at=now
+    ):
+        link.analytics_paid_at = now
+    else:
+        link.refresh_from_db(fields=['analytics_paid_at'])
+    return True
+
+
 def quote_analytics(link: ShortLink) -> billing.Quote:
     """What opening the detailed statistics would charge (nothing once paid, or when free)."""
     if analytics_unlocked(link):

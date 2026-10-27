@@ -21,7 +21,7 @@
     <div class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
         <dt class="text-sm text-gray-500 dark:text-gray-400">Clicks</dt>
         <dd class="mt-1 text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ totals.clicks }}</dd>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{% if totals.filter_bots %}People only: bots are left out.{% else %}Bots included.{% endif %}</p>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{% if link.max_clicks %}Every visit, bots included: the click limit counts them.{% elif totals.filter_bots %}People only: bots are left out.{% else %}Bots included.{% endif %}</p>
     </div>
     <div class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
         <dt class="text-sm text-gray-500 dark:text-gray-400">Unique visitors</dt>
@@ -31,7 +31,7 @@
     <div class="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
         <dt class="text-sm text-gray-500 dark:text-gray-400">Bot clicks</dt>
         <dd class="mt-1 text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ totals.bot_clicks }}</dd>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Crawlers and link previews. {% if totals.filter_bots %}Not in the clicks.{% else %}Also in the clicks.{% endif %}
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Crawlers and link previews. {% if link.max_clicks or not totals.filter_bots %}Also in the clicks.{% else %}Not in the clicks.{% endif %}
             <a href="{% url 'short_url:edit' link.pk %}" class="underline">Change</a></p>
     </div>
 </dl>

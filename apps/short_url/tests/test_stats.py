@@ -234,3 +234,16 @@ class TestChartBars:
             0,
             0,
         ]
+
+
+def test_a_range_reads_the_watermark_once(link, monkeypatch):
+    calls = []
+    real = stats.rolled_up_through
+
+    def counting():
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(stats, 'rolled_up_through', counting)
+    stats.range_stats(link, stats.DEFAULT_RANGE, now=NOW)
+    assert len(calls) == 1

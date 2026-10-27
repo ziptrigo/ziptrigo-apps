@@ -362,7 +362,7 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # The QR image of a link (CPU-bound rendering): per user, shared by the dashboard and the
     # link page. Looser than creating: a page of rows can show several at once.
     'SU_QR_USER': (60, 60),
-    # The password page of a protected link (`/s/<code>/unlock/`), the same split as file
+    # The password page of a protected link (`/s/<code>/unlock`), the same split as file
     # transfer's `FT_UNLOCK_*` (and for the same reason, see "Rate limiting" in CLAUDE.md):
     # `SU_PASSWORD_IP` is strict and counts every attempt; `SU_PASSWORD_LINK` is a looser ceiling
     # per link, across every IP, that counts only *wrong* passwords (peeked before the attempt,

@@ -296,11 +296,15 @@ class TestAnalytics:
         assert (link.click_count, link.bot_click_count) == (0, 1)
         assert ClickEvent.objects.get().is_bot
 
-    def test_a_bot_does_not_use_up_a_click_limit(self, client, user):
-        link = create_link(user, max_clicks=1)
-        assert client.get(f'/s/{link.code}', HTTP_USER_AGENT=BOT_AGENT).status_code == 302
-        assert client.get(f'/s/{link.code}').status_code == 302
+    @pytest.mark.parametrize('agent', [BOT_AGENT, 'curl/8.1.2', ''], ids=['bot', 'curl', 'blank'])
+    def test_a_bot_user_agent_cannot_get_around_a_click_limit(self, client, user, agent):
+        link = create_link(user, max_clicks=2)
+        for _ in range(2):
+            assert client.get(f'/s/{link.code}', HTTP_USER_AGENT=agent).status_code == 302
+        assert client.get(f'/s/{link.code}', HTTP_USER_AGENT=agent).status_code == 404
         assert client.get(f'/s/{link.code}').status_code == 404
+        link.refresh_from_db()
+        assert (link.click_count, link.bot_click_count) == (2, 2)
 
     def test_over_the_limit_no_event_is_written(self, client, link, tight_limit):
         from ..models import ClickEvent
