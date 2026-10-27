@@ -16,6 +16,8 @@ dependencies = [
     'django-ninja>=1.5,<2.0',
     'django-tasks-db>=0.13,<1.0',
     'django>=6.1,<6.2',
+    # Country of a click from a MaxMind GeoLite2-Country database (`GEOIP_PATH`; issue #162).
+    'geoip2>=5.0,<6.0',
     'gunicorn>=26.2,<27.0',
     # OpenAI-compatible client for receipt extraction (issue #98); used with an explicit timeout
     # and a bounded `max_retries` (`apps.receipts.services.ai`).
@@ -32,6 +34,10 @@ dependencies = [
     'python-dotenv>=1.0,<2.0',
     'requests>=2.32,<3.0',
     'segno>=1.6,<2.0',
+    # User-agent parsing (device, browser, OS, crawler detection) for short link analytics
+    # (issue #162). `ua-parser` itself, not `user-agents`: that wrapper is unmaintained and only
+    # adds the few boolean helpers `apps.short_url.services.useragents` writes in a few lines.
+    'ua-parser>=1.0,<2.0',
     'whitenoise>=6.11,<7.0',
 ]
 
