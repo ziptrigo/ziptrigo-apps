@@ -11,7 +11,7 @@ pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 def test_installed_products_are_registered_in_installed_apps_order():
     labels = [product.label for product in get_products()]
 
-    assert labels == ['qr_code', 'file_transfer', 'receipts']
+    assert labels == ['qr_code', 'file_transfer', 'receipts', 'short_url']
 
 
 def test_every_product_url_resolves():
@@ -56,3 +56,12 @@ def test_receipts_is_registered_as_a_product():
     assert receipts.url_name == 'receipts:dashboard'
     assert receipts.icon == 'fas fa-receipt'
     assert reverse(receipts.url_name) == '/receipts/'
+
+
+def test_short_url_is_registered_as_a_product():
+    short_url = next(p for p in get_products() if p.label == 'short_url')
+
+    assert short_url.name == 'Short URLs'
+    assert short_url.url_name == 'short_url:dashboard'
+    assert short_url.icon == 'fas fa-link'
+    assert reverse(short_url.url_name) == '/links/'

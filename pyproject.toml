@@ -154,7 +154,7 @@ root_packages = ['apps']
 name = 'Products -> billing | feedback -> accounts -> core'
 type = 'layers'
 layers = [
-    'apps.qr_code | apps.file_transfer | apps.receipts',
+    'apps.qr_code | apps.file_transfer | apps.receipts | apps.short_url',
     'apps.billing | apps.feedback',
     'apps.accounts',
     'apps.core',

@@ -1,0 +1,372 @@
+"""Creating, changing and ending short links.
+
+The web views and (later) the JWT API call these, so both enforce the same rules. Every function
+raises Django's `ValidationError` (see `errors`), and `InsufficientCreditsError` from
+`apps.billing.services` when an extra can't be paid for; nothing is left half done in either case
+(each runs in one transaction).
+"""
+
+import re
+import uuid
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+
+from apps.accounts.models import User
+from apps.core.services.queue import enqueue_after_commit
+
+from ..models import LinkStatus, ShortLink, ShortUrlSettings
+from . import billing, codes, limits
+from .destinations import apply_utm, validate_destination
+from .errors import AliasTakenError, field_error
+from .titles import fetch_title
+
+MAX_TAGS = 20
+MAX_TAG_LENGTH = 32
+MAX_TITLE_LENGTH = 255
+MAX_CLICKS_LIMIT = 2_000_000_000
+
+_TAG = re.compile(r'[a-z0-9][a-z0-9_-]*')
+
+
+class _Unset:
+    """Marks a field `update_link` was not given (None is a real value for an expiry)."""
+
+    def __repr__(self) -> str:
+        return 'UNSET'
+
+
+UNSET: Any = _Unset()
+
+
+def short_url(code: str) -> str:
+    """The public address of a link: `<BASE_URL>/s/<code>`."""
+    return f'{settings.BASE_URL.rstrip("/")}{settings.SHORT_URL_PATH}{code}'
+
+
+# -- validation of the free-form fields ------------------------------------------------------
+
+
+def normalize_tags(tags: str | Iterable[str] | None) -> list[str]:
+    """Tags as stored: lower-cased, spaces turned into hyphens, duplicates dropped, order kept.
+
+    A string is split on commas. A tag is ASCII letters, digits, hyphens and underscores, up to
+    32 characters, and at most 20 are kept per link; anything else is a `ValidationError`.
+    """
+    if tags is None:
+        return []
+    items = tags.split(',') if isinstance(tags, str) else list(tags)
+    result: list[str] = []
+    for item in items:
+        tag = re.sub(r'\s+', '-', str(item).strip().lower())
+        if not tag:
+            continue
+        if len(tag) > MAX_TAG_LENGTH or not _TAG.fullmatch(tag):
+            raise field_error(
+                'tags',
+                f'"{str(item).strip()[:40]}" is not a valid tag: use up to {MAX_TAG_LENGTH} '
+                'letters, digits, hyphens or underscores.',
+            )
+        if tag not in result:
+            result.append(tag)
+    if len(result) > MAX_TAGS:
+        raise field_error('tags', f'Use at most {MAX_TAGS} tags.')
+    return result
+
+
+def validate_title(title: str | None) -> str:
+    title = ' '.join((title or '').split())
+    if len(title) > MAX_TITLE_LENGTH:
+        raise field_error(
+            'title', f'The title is too long (at most {MAX_TITLE_LENGTH} characters).'
+        )
+    return title
+
+
+def validate_max_clicks(max_clicks: int | None) -> int | None:
+    if max_clicks is None:
+        return None
+    if not 1 <= max_clicks <= MAX_CLICKS_LIMIT:
+        raise field_error('max_clicks', f'Enter a number between 1 and {MAX_CLICKS_LIMIT:,}.')
+    return max_clicks
+
+
+def validate_expiry(expires_at: datetime | None, *, now: datetime | None = None) -> datetime | None:
+    if expires_at is None:
+        return None
+    if timezone.is_naive(expires_at):
+        expires_at = timezone.make_aware(expires_at)
+    if expires_at <= (now or timezone.now()):
+        raise field_error('expires_at', 'The expiry must be in the future.')
+    return expires_at
+
+
+def _destination_with_utm(destination: str, utm: dict[str, str] | None) -> str:
+    """Merge the UTM parameters first, then validate the result as a whole."""
+    return validate_destination(apply_utm(validate_destination(destination), **(utm or {})))
+
+
+# -- state -----------------------------------------------------------------------------------
+
+
+def is_available(link: ShortLink, *, now: datetime | None = None) -> bool:
+    """Whether `/s/<code>` redirects right now: active, not held for review, not expired and
+    not past its click cap. (Later phases add the blocked-destination check here, which is why
+    the redirect asks this one function and nothing else.)"""
+    now = now or timezone.now()
+    if link.status != LinkStatus.ACTIVE or link.held_for_review_at is not None:
+        return False
+    if link.password_hash:
+        # Reached only by a link someone gave a password outside the app: the password page
+        # arrives with the password feature, and until then such a link must not redirect.
+        return False
+    if link.expires_at is not None and link.expires_at <= now:
+        return False
+    if link.max_clicks is not None and link.click_count >= link.max_clicks:
+        return False
+    return True
+
+
+def display_state(link: ShortLink, *, now: datetime | None = None) -> str:
+    """The state shown on the dashboard, most specific first: `taken_down`, `deleted`,
+    `disabled`, `held`, `expired`, `capped` or `active`."""
+    now = now or timezone.now()
+    if link.status in (LinkStatus.TAKEN_DOWN, LinkStatus.DELETED, LinkStatus.DISABLED):
+        return str(link.status)
+    if link.held_for_review_at is not None:
+        return 'held'
+    if link.expires_at is not None and link.expires_at <= now:
+        return 'expired'
+    if link.max_clicks is not None and link.click_count >= link.max_clicks:
+        return 'capped'
+    return 'active'
+
+
+# -- create ----------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class LinkInput:
+    """The fields of a new link, as the web form and (later) the API collect them."""
+
+    destination: str
+    alias: str = ''
+    title: str = ''
+    tags: str | Iterable[str] | None = None
+    expires_at: datetime | None = None
+    max_clicks: int | None = None
+    utm: dict[str, str] | None = None
+
+
+def quote_create(owner: User, alias: str | None) -> billing.Quote:
+    """What creating a link (with `alias`, if any) would charge, to show before it is."""
+    settings_row = ShortUrlSettings.load()
+    extras: list[billing.Extra] = []
+    if alias and alias.strip():
+        extras.append(billing.Extra.ALIAS)
+    if limits.is_extra_link(owner, settings=settings_row):
+        extras.append(billing.Extra.EXTRA_LINK)
+    return billing.quote(extras, settings_row)
+
+
+def _lock_owner(owner: User) -> None:
+    """Serialize one user's create/enable calls, so the active-link cap can't be raced past (a
+    row lock on Postgres; SQLite has one writer at a time anyway)."""
+    User.objects.select_for_update().filter(pk=owner.pk).first()
+
+
+def create_link(owner: User, data: LinkInput) -> ShortLink:
+    """Create a link for `owner`: validate, pay for its extras and save it, in one transaction.
+
+    Raises `ValidationError` (a bad field, `AliasTakenError`, `LimitReachedError`) or
+    `InsufficientCreditsError`. A link made without a title gets one fetched in the background.
+    """
+    destination = _destination_with_utm(data.destination, data.utm)
+    title = validate_title(data.title)
+    tags = normalize_tags(data.tags)
+    expires_at = validate_expiry(data.expires_at)
+    max_clicks = validate_max_clicks(data.max_clicks)
+    alias = (data.alias or '').strip()
+    if alias:
+        codes.validate_alias(alias)
+
+    with transaction.atomic():
+        _lock_owner(owner)
+        settings_row = ShortUrlSettings.load()
+        limits.check_can_activate(owner, settings=settings_row)
+        extra_link = limits.is_extra_link(owner, settings=settings_row)
+
+        code = alias or codes.generate_code()
+        link = ShortLink(
+            owner=owner,
+            code=code,
+            code_key=codes.normalize_key(code),
+            is_alias=bool(alias),
+            destination=destination,
+            title=title,
+            tags=tags,
+            expires_at=expires_at,
+            max_clicks=max_clicks,
+        )
+        # Not `objects.create`: two requests for the same alias race on the unique key, and the
+        # loser must say "not available", not 500.
+        try:
+            with transaction.atomic():
+                link.save(force_insert=True)
+        except IntegrityError:
+            if not alias:
+                raise
+            raise AliasTakenError() from None
+
+        if alias:
+            billing.charge_extra(link, billing.Extra.ALIAS, settings=settings_row)
+        if extra_link:
+            billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
+        if not title:
+            enqueue_after_commit(fetch_title, str(link.pk))
+    return link
+
+
+# -- change ----------------------------------------------------------------------------------
+
+
+def _require_editable(link: ShortLink) -> None:
+    if link.status not in (LinkStatus.ACTIVE, LinkStatus.DISABLED):
+        raise ValidationError('This link can no longer be changed.')
+
+
+def update_link(
+    link: ShortLink,
+    *,
+    destination: str = UNSET,
+    utm: dict[str, str] | None = None,
+    title: str = UNSET,
+    tags: str | Iterable[str] | None = UNSET,
+    expires_at: datetime | None = UNSET,
+    max_clicks: int | None = UNSET,
+) -> ShortLink:
+    """Change the given fields of `link` (a field left out is untouched; `None` clears an expiry
+    or a click cap), all or nothing. The code and the alias never change: that would free the old
+    code for someone else. `utm` is merged into the destination (given or current).
+
+    Only the fields that really differ are written. Raises `ValidationError`.
+    """
+    changes: dict[str, Any] = {}
+    if destination is not UNSET or utm:
+        base = link.destination if destination is UNSET else destination
+        new_destination = _destination_with_utm(base, utm)
+        if new_destination != link.destination:
+            changes['destination'] = new_destination
+    if title is not UNSET:
+        changes['title'] = validate_title(title)
+    if tags is not UNSET:
+        changes['tags'] = normalize_tags(tags)
+    if expires_at is not UNSET:
+        if expires_at is not None and timezone.is_naive(expires_at):
+            expires_at = timezone.make_aware(expires_at)
+        # An unchanged expiry that has since passed is not an error: only a new value is checked.
+        if expires_at is None or expires_at != link.expires_at:
+            changes['expires_at'] = validate_expiry(expires_at)
+    if max_clicks is not UNSET:
+        changes['max_clicks'] = validate_max_clicks(max_clicks)
+    changes = {name: value for name, value in changes.items() if getattr(link, name) != value}
+
+    with transaction.atomic():
+        locked = ShortLink.objects.select_for_update().get(pk=link.pk)
+        _require_editable(locked)
+        if changes:
+            ShortLink.objects.filter(pk=link.pk).update(updated_at=timezone.now(), **changes)
+            for name, value in changes.items():
+                setattr(link, name, value)
+        # A new destination makes an automatically fetched title stale, so look again; a title
+        # the owner typed is kept (it is set, so nothing is fetched).
+        if 'destination' in changes and not link.title:
+            enqueue_after_commit(fetch_title, str(link.pk))
+    return link
+
+
+def set_enabled(link: ShortLink, enabled: bool) -> bool:
+    """Disable or enable `link`. Returns whether anything changed (a link already in that state
+    is a no-op). Enabling counts against the active-link cap and, beyond the free allowance,
+    pays the extra link price once (never again for the same link).
+
+    Raises `ValidationError` for a taken down or deleted link or the cap, and
+    `InsufficientCreditsError`.
+    """
+    with transaction.atomic():
+        _lock_owner(link.owner)
+        locked = ShortLink.objects.select_for_update().get(pk=link.pk)
+        _require_editable(locked)
+        link.status = locked.status
+        target = LinkStatus.ACTIVE if enabled else LinkStatus.DISABLED
+        if locked.status == target:
+            return False
+
+        settings_row = ShortUrlSettings.load()
+        owes = False
+        if enabled:
+            limits.check_can_activate(link.owner, settings=settings_row)
+            owes = limits.is_extra_link(link.owner, settings=settings_row)
+        changed = ShortLink.objects.filter(pk=link.pk, status=locked.status).update(
+            status=target, updated_at=timezone.now()
+        )
+        if not changed:
+            return False
+        link.status = target
+        if owes:
+            # Free for a link that already paid its way in (`charge_extra` skips it too).
+            billing.charge_extra(link, billing.Extra.EXTRA_LINK, settings=settings_row)
+        return True
+
+
+def quote_enable(link: ShortLink) -> billing.Quote:
+    """What enabling `link` would charge (nothing for an active link, or one that already paid
+    its way in), to show before it is."""
+    if link.status != LinkStatus.DISABLED or billing.is_paid(link, billing.Extra.EXTRA_LINK):
+        return billing.Quote()
+    settings_row = ShortUrlSettings.load()
+    if limits.is_extra_link(link.owner, settings=settings_row):
+        return billing.quote([billing.Extra.EXTRA_LINK], settings_row)
+    return billing.Quote()
+
+
+def enable_costs(owner: User, links: Iterable[ShortLink]) -> dict[uuid.UUID, int]:
+    """`quote_enable(...).total` for each of `links` (the owner's), with the settings and the
+    owner's active count read once: for a page of rows."""
+    settings_row = ShortUrlSettings.load()
+    beyond_allowance = limits.is_extra_link(owner, settings=settings_row)
+    extra_link_price = billing.price(billing.Extra.EXTRA_LINK, settings_row)
+    return {
+        link.pk: extra_link_price
+        if beyond_allowance
+        and link.status == LinkStatus.DISABLED
+        and not billing.is_paid(link, billing.Extra.EXTRA_LINK)
+        else 0
+        for link in links
+    }
+
+
+def delete_link(link: ShortLink) -> bool:
+    """Soft delete: the link stops working and leaves the owner's lists, but the row stays so its
+    code is never issued again. Returns whether it was deleted (False if it already was). A link
+    taken down by staff can't be deleted by its owner."""
+    if link.status == LinkStatus.DELETED:
+        return False
+    now = timezone.now()
+    changed = ShortLink.objects.filter(
+        pk=link.pk, status__in=(LinkStatus.ACTIVE, LinkStatus.DISABLED)
+    ).update(status=LinkStatus.DELETED, deleted_at=now, updated_at=now)
+    if not changed:
+        link.refresh_from_db()
+        if link.status == LinkStatus.DELETED:
+            return False
+        raise ValidationError('This link can no longer be changed.')
+    link.status = LinkStatus.DELETED
+    link.deleted_at = now
+    return True

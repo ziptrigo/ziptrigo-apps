@@ -1,0 +1,60 @@
+{% comment %} The row menu (Stats, Edit, QR, Preview, Disable/Enable, Delete), shared by the dashboard rows and the link
+   page. Needs `link` (with `enable_cost`) and `next_url` (where the actions come back to). Delete, and enabling
+   a link that costs credits, open the page's confirmation modal (an ancestor with x-data="confirmModal"). {% endcomment %}
+{% load short_url_ui %}
+<div class="relative" x-data="{ menu: false }" @click.outside="menu = false"
+     @keydown.escape="if (menu) { menu = false; $refs.trigger.focus() }">
+    <button type="button" x-ref="trigger" @click="menu = !menu" :aria-expanded="menu" aria-haspopup="menu"
+            aria-label="Actions for {{ link.code }}"
+            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors">
+        <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+    </button>
+    <div x-show="menu" style="display: none" role="menu"
+         class="absolute right-0 top-full mt-2 w-48 z-30 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700">
+        <a href="{% url 'short_url:detail' link.pk %}" role="menuitem"
+           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+            <i class="fas fa-chart-simple mr-2 w-4 text-center" aria-hidden="true"></i>Stats</a>
+        <a href="{% url 'short_url:edit' link.pk %}" role="menuitem"
+           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+            <i class="fas fa-pen mr-2 w-4 text-center" aria-hidden="true"></i>Edit</a>
+        <a href="{% url 'short_url:qr' link.pk %}?download=1" download role="menuitem"
+           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+            <i class="fas fa-qrcode mr-2 w-4 text-center" aria-hidden="true"></i>QR code</a>
+        <a href="{% url 's:redirect' link.code %}+" target="_blank" rel="noopener" role="menuitem"
+           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+            <i class="fas fa-eye mr-2 w-4 text-center" aria-hidden="true"></i>Preview</a>
+        {% if link.status == 'active' %}
+        <form method="post" action="{% url 'short_url:disable' link.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <button type="submit" role="menuitem"
+                    class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+                <i class="fas fa-pause mr-2 w-4 text-center" aria-hidden="true"></i>Disable</button>
+        </form>
+        {% elif link.status == 'disabled' %}
+        {% if link.enable_cost %}
+        <button type="button" role="menuitem" @click="menu = false; show($el)"
+                data-url="{% url 'short_url:enable' link.pk %}?next={{ next_url|urlencode:'' }}" data-tone="primary" data-label="Enable for {{ link.enable_cost }} credit{{ link.enable_cost|pluralize }}"
+                data-cost="{{ link.enable_cost }}" data-title="Enable this link?"
+                data-body="This link would go beyond your free active links, so enabling it costs {{ link.enable_cost }} credit{{ link.enable_cost|pluralize }}, once. It won't be charged again for this link."
+                class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+            <i class="fas fa-play mr-2 w-4 text-center" aria-hidden="true"></i>Enable</button>
+        {% else %}
+        <form method="post" action="{% url 'short_url:enable' link.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <button type="submit" role="menuitem"
+                    class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+                <i class="fas fa-play mr-2 w-4 text-center" aria-hidden="true"></i>Enable</button>
+        </form>
+        {% endif %}
+        {% endif %}
+        {% if link.status == 'active' or link.status == 'disabled' %}
+        <button type="button" role="menuitem" @click="menu = false; show($el)"
+                data-url="{% url 'short_url:delete' link.pk %}?next={{ next_url|urlencode:'' }}" data-title="Delete this link?" data-label="Delete"
+                data-body="{{ link.code }} will stop working for good, and its code can never be used again."
+                class="block w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+            <i class="fas fa-trash mr-2 w-4 text-center" aria-hidden="true"></i>Delete</button>
+        {% endif %}
+    </div>
+</div>

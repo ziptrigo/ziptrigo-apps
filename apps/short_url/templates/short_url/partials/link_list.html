@@ -1,0 +1,62 @@
+{% comment %} Everything under the filters: the list card and the pager. This is what the tabs, filters, sort links and
+   pager swap into #link-list; it sits inside the filter form, so the hidden inputs below keep the tab, tag and
+   sort when another filter changes. {% endcomment %}
+{% if parsed.tab != 'all' %}<input type="hidden" name="status" value="{{ parsed.tab }}">{% endif %}
+{% if parsed.params.sort %}<input type="hidden" name="sort" value="{{ parsed.params.sort }}">{% endif %}
+
+{% if oob %}
+{% include 'short_url/partials/tabs.html' with oob=True %}
+{% endif %}
+
+<div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+        <li class="hidden md:block bg-gray-50 dark:bg-gray-900 px-4 py-3 sm:px-6 sm:rounded-t-md">
+            <div class="md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.6fr)_9rem_5rem_5.5rem_2rem] md:gap-x-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                <span>Short link</span>
+                <span>Destination</span>
+                <span>Status</span>
+                {% with sort=sort_links.click_count %}
+                <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#link-list" hx-swap="innerHTML" hx-sync="#link-filters:replace"
+                   class="group flex items-center justify-end focus:outline-none focus:ring-2 focus:ring-brand-primary rounded {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+                    Clicks{% if sort.active %}<span class="sr-only"> (sorted {% if sort.descending %}descending{% else %}ascending{% endif %})</span>{% endif %}
+                    <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
+                </a>
+                {% endwith %}
+                {% with sort=sort_links.created_at %}
+                <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#link-list" hx-swap="innerHTML" hx-sync="#link-filters:replace"
+                   class="group flex items-center focus:outline-none focus:ring-2 focus:ring-brand-primary rounded {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+                    Created{% if sort.active %}<span class="sr-only"> (sorted {% if sort.descending %}descending{% else %}ascending{% endif %})</span>{% endif %}
+                    <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
+                </a>
+                {% endwith %}
+                <span class="sr-only">Actions</span>
+            </div>
+        </li>
+
+        {% for link in links %}
+        {% include 'short_url/partials/link_row.html' %}
+        {% empty %}
+        <li class="px-4 py-12 text-center sm:px-6">
+            <p class="text-sm text-gray-500 dark:text-gray-400">
+                {% if parsed.is_filtered %}No links found.{% else %}No links yet. <a href="{% url 'short_url:create' %}" class="text-sage-600 dark:text-sage-300 underline">Create your first one.</a>{% endif %}
+            </p>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="mt-6 flex items-center justify-between text-sm">
+    <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="flex gap-4">
+        {% if page_obj.has_previous %}
+        <a href="{{ dashboard_url }}?{{ prev_query }}" hx-get="{{ list_url }}?{{ prev_query }}" hx-target="#link-list" hx-swap="innerHTML" hx-sync="#link-filters:replace"
+           class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a href="{{ dashboard_url }}?{{ next_query }}" hx-get="{{ list_url }}?{{ next_query }}" hx-target="#link-list" hx-swap="innerHTML" hx-sync="#link-filters:replace"
+           class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
