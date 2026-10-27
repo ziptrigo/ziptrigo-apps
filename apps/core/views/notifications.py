@@ -57,7 +57,12 @@ def _page_url(number: str | None = None) -> str:
 def _dropdown_response(request: AuthenticatedHttpRequest) -> HttpResponse:
     """The dropdown's content. Rendering it is what marks its notifications read: the ones listed
     that were new are passed to the template as `new_ids` (so they still look new for as long as
-    the dropdown stays open) and are read by the time the response goes out."""
+    the dropdown stays open) and are read by the time the response goes out.
+
+    Known limit, accepted: the "new" highlight lasts only for the response that opened the dropdown.
+    An action inside it (dismiss, "Mark all as read") re-renders the list, and by then the opening
+    request has already marked its rows read, so nothing is highlighted any more; a notification
+    that moves into the top 10 because another was dismissed is marked read by that render."""
     user = request.user
     items = notifications.dropdown_notifications(user)
     new_ids = {n.pk for n in items if n.read_at is None}
@@ -162,7 +167,12 @@ def notification_dismiss(request: AuthenticatedHttpRequest, notification_id: UUI
 def notification_open(request: AuthenticatedHttpRequest, notification_id: UUID) -> HttpResponse:
     """Follow a notification: mark it read and opened, then redirect to its `url`. A plain GET
     link, so middle-click works. The stored URL is checked again here: whatever put it in the row,
-    a value that isn't a same-site path sends the user to the notifications page instead."""
+    a value that isn't a same-site path sends the user to the notifications page instead.
+
+    Trade-off, chosen on purpose: this writes (`read_at`, `opened_at`) on a GET, because a plain
+    link is what makes middle-click and "open in new tab" work. The only effect is on the
+    signed-in user's own notification, whose id is an unguessable UUID, but a link previewer or
+    prefetcher that follows it would take that item out of the dropdown (it stays on the page)."""
     try:
         notification = notifications.mark_opened(request.user, notification_id)
     except Notification.DoesNotExist:

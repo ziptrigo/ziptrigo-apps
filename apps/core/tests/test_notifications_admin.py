@@ -1,9 +1,11 @@
 """`NotificationAdmin` (issue #169): read-only, filterable, searchable by user."""
 
 import pytest
+from django.contrib.auth.models import Permission
 from django.urls import reverse
 
 from apps.accounts.models import User
+from apps.accounts.tests.factories import UserFactory
 from apps.core.models import Notification
 from apps.core.services import notifications
 
@@ -95,3 +97,37 @@ def test_deleting_a_user_deletes_their_notifications(admin_client, regular_user)
     assert response.status_code == 302
     assert not User.objects.filter(pk=regular_user.pk).exists()
     assert not Notification.objects.exists()
+
+
+def test_the_user_delete_exemption_is_scoped_to_the_notification_model():
+    """`core` is not exempted wholesale: a future `core` model with a user FK must not be,
+    without anyone deciding so."""
+    from apps.accounts.admin import CASCADE_WITH_USER_APP_LABELS, CASCADE_WITH_USER_MODELS
+
+    assert 'core' not in CASCADE_WITH_USER_APP_LABELS
+    assert 'core.notification' in CASCADE_WITH_USER_MODELS
+
+
+def _grant(user, *codenames):
+    """Make `user` staff holding exactly these permissions."""
+    user.is_staff = True
+    user.save(update_fields=['is_staff'])
+    user.user_permissions.add(*Permission.objects.filter(codename__in=codenames))
+    return User.objects.get(pk=user.pk)  # drop the cached permissions
+
+
+def test_staff_needs_the_notification_delete_permission_to_delete_a_user_with_notices(
+    client, regular_user
+):
+    staff = _grant(UserFactory(), 'view_user', 'delete_user')
+    notifications.notify(regular_user, source='t', title='x')
+    client.force_login(staff)
+    url = reverse('custom_admin:accounts_user_delete', args=[regular_user.pk])
+
+    assert client.post(url, {'post': 'yes'}).status_code == 403
+    assert User.objects.filter(pk=regular_user.pk).exists()
+
+    client.force_login(_grant(staff, 'delete_notification'))
+
+    assert client.post(url, {'post': 'yes'}).status_code == 302
+    assert not User.objects.filter(pk=regular_user.pk).exists()

@@ -59,12 +59,23 @@ def daily_cost(transfer: Transfer, price_per_gb_per_day: Decimal | None = None) 
     return max(storage_day_cost(transfer.size_bytes, price_per_gb_per_day), MIN_BALANCE_TO_REENABLE)
 
 
-def meter_transfer(transfer: Transfer, price_per_gb_per_day: Decimal | None = None) -> None:
+def suspended_notice_key(transfer_id: object) -> str:
+    """The `Notification.key` of the in-app "suspended" notice about one transfer (issue #169), so
+    re-enabling that transfer can delete exactly its notice and not another suspended one's."""
+    return f'transfer_suspended:{transfer_id}'
+
+
+def meter_transfer(
+    transfer: Transfer,
+    price_per_gb_per_day: Decimal | None = None,
+    suspension_grace_days: int | None = None,
+) -> None:
     """Charge one day's storage for `transfer`, if it's due (`last_billed_at` at least 24h old).
 
     The price is the site-wide storage price (`BillingSettings`, shared with every other product
     that stores files); a caller metering many transfers in a row loads it once and passes it as
-    `price_per_gb_per_day`, otherwise it's read here.
+    `price_per_gb_per_day`, otherwise it's read here. The same goes for `suspension_grace_days`
+    (`FileTransferSettings`), which only the suspension notice needs.
 
     Rounds down (`apps.billing.services.storage_charge`): `accrued` (a Decimal) collects
     `price x size_in_gb` every day, and only the floor of that -- whenever it's at least 1 -- is
@@ -120,7 +131,11 @@ def meter_transfer(transfer: Transfer, price_per_gb_per_day: Decimal | None = No
                 locked.owner, whole_credits, description=description, source='file_transfer'
             )
         except InsufficientCreditsError:
-            suspend_transfer(locked)
+            suspend_transfer(
+                locked,
+                price_per_gb_per_day=price_per_gb_per_day,
+                suspension_grace_days=suspension_grace_days,
+            )
             transfer.status = locked.status
             transfer.suspended_at = locked.suspended_at
             return
@@ -137,9 +152,16 @@ def meter_transfer(transfer: Transfer, price_per_gb_per_day: Decimal | None = No
         transfer.credits_charged += whole_credits
 
 
-def suspend_transfer(transfer: Transfer) -> None:
+def suspend_transfer(
+    transfer: Transfer,
+    *,
+    price_per_gb_per_day: Decimal | None = None,
+    suspension_grace_days: int | None = None,
+) -> None:
     """Suspend `transfer` for lack of credits: the link stops working, no more days are charged,
-    and the owner is emailed with the grace-period deadline."""
+    and the owner is emailed with the grace-period deadline (and notified in the app). The price
+    and grace period only feed the in-app notice; a caller that has them passes them, so the hook
+    needn't query for them."""
     now = timezone.now()
     Transfer.objects.filter(pk=transfer.pk).update(
         status=TransferStatus.SUSPENDED, suspended_at=now
@@ -147,29 +169,58 @@ def suspend_transfer(transfer: Transfer) -> None:
     transfer.status = TransferStatus.SUSPENDED
     transfer.suspended_at = now
     send_suspended_notification.enqueue(str(transfer.id))
-    _notify_suspended(transfer)
+    _notify_suspended(transfer, price_per_gb_per_day, suspension_grace_days)
 
 
-def _notify_suspended(transfer: Transfer) -> None:
+def _notify_suspended(
+    transfer: Transfer,
+    price_per_gb_per_day: Decimal | None = None,
+    suspension_grace_days: int | None = None,
+) -> None:
     """The in-app twin of the suspension email (issue #169). Written in the caller's transaction
     (`meter_transfer` suspends inside one), so it exists exactly when the suspension does; a
-    failure to write it is logged and must not undo the suspension or abort the metering run."""
+    failure to write it is logged and must not undo the suspension or abort the metering run.
+
+    The whole body runs in its own savepoint: on Postgres a database error (a settings or price
+    lookup, say) aborts the surrounding transaction even when caught, and the commit would then
+    quietly roll the suspension back. With the savepoint a failure only discards the notice."""
     if transfer.owner_id is None:
         return
     try:
-        grace_days = FileTransferSettings.load().suspension_grace_days
-        notifications.notify(
-            transfer.owner_id,
-            source='file_transfer',
-            title=f'Transfer suspended: {transfer_display_name(transfer)}',
-            body=(
-                'It ran out of credits and its download link no longer works. Add credits within '
-                f'{grace_days} day(s) to resume it, or its files will be deleted.'
-            ),
-            url=reverse('file_transfer:dashboard'),
-        )
+        with transaction.atomic():
+            if suspension_grace_days is None:
+                suspension_grace_days = FileTransferSettings.load().suspension_grace_days
+            needed = daily_cost(transfer, price_per_gb_per_day)
+            notifications.notify(
+                transfer.owner_id,
+                source='file_transfer',
+                title=f'Transfer suspended: {transfer_display_name(transfer)}',
+                body=(
+                    'It ran out of credits and its download link no longer works. Add at least '
+                    f'{needed} {"credit" if needed == 1 else "credits"} (one day of storage for '
+                    'this transfer; a smaller top-up will not resume it) within '
+                    f'{suspension_grace_days} day(s) to resume it, or its files will be deleted.'
+                ),
+                url=reverse('file_transfer:dashboard'),
+                key=suspended_notice_key(transfer.pk),
+            )
     except Exception:
         logger.exception('Could not notify the owner that transfer %s was suspended', transfer.pk)
+
+
+def _clear_suspended_notice(transfer: Transfer) -> None:
+    """Delete the in-app "suspended" notice of a transfer that was just re-enabled: it is stale
+    (the link works again). In the re-enable's transaction, in a savepoint of its own, and logged
+    rather than raised: tidying a notice must never undo or fail the resume."""
+    if transfer.owner_id is None:
+        return
+    try:
+        with transaction.atomic():
+            notifications.delete_for_key(
+                transfer.owner_id, suspended_notice_key(transfer.pk), source='file_transfer'
+            )
+    except Exception:
+        logger.exception('Could not clear the suspended notice of transfer %s', transfer.pk)
 
 
 def reenable_transfer(transfer: Transfer) -> bool:
@@ -187,6 +238,9 @@ def reenable_transfer(transfer: Transfer) -> bool:
     progress still falls due on schedule, while the clamp keeps a long disabled stretch from
     turning into a backlog of days charged one per run (`meter_transfer`'s "no backlog across a
     disabled stretch").
+
+    Re-enabling a *suspended* transfer also deletes its in-app "suspended" notice, in the same
+    transaction (a notice about a link that works again is just noise).
     """
     expected = transfer.status
     if expected not in (TransferStatus.SUSPENDED, TransferStatus.DISABLED):
@@ -197,9 +251,12 @@ def reenable_transfer(transfer: Transfer) -> bool:
         last_billed_at = now
     elif last_billed_at is not None:
         last_billed_at = max(last_billed_at, now - _BILLING_PERIOD)
-    updated = Transfer.objects.filter(pk=transfer.pk, status=expected).update(
-        status=TransferStatus.ACTIVE, suspended_at=None, last_billed_at=last_billed_at
-    )
+    with transaction.atomic():
+        updated = Transfer.objects.filter(pk=transfer.pk, status=expected).update(
+            status=TransferStatus.ACTIVE, suspended_at=None, last_billed_at=last_billed_at
+        )
+        if updated and expected == TransferStatus.SUSPENDED:
+            _clear_suspended_notice(transfer)
     if not updated:
         return False
     transfer.status = TransferStatus.ACTIVE

@@ -149,7 +149,7 @@ class TestBell:
 
         tag = badge_tag(html)
         assert ' hidden' in tag
-        assert 'hx-trigger="every 60s"' in tag
+        assert 'hx-trigger="every 60s [' in tag
         assert f'hx-get="{reverse("core:notification-bell")}"' in tag
         assert badge_count(html) == 0
 

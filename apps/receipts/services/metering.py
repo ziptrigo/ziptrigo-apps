@@ -125,32 +125,55 @@ def freeze_account(account: ReceiptsAccount) -> None:
         _notify_storage_paused(account.user_id)
 
 
+#: `Notification.key` of the in-app "storage paused" notice: one per user is enough, since an
+#: account is frozen at most once at a time, and unfreezing deletes it by this key.
+FROZEN_NOTICE_KEY = 'receipts_account:frozen'
+
+
 def _notify_storage_paused(user_id: UUID) -> None:
     """The in-app twin of the "storage paused" email (issue #169). Written in the caller's
     transaction, so it exists exactly when the freeze does; a failure to write it is logged and
-    must not undo the freeze or the metering run."""
+    must not undo the freeze or the metering run. The body runs in its own savepoint so that
+    nothing it does can abort the surrounding transaction, whatever it is."""
     try:
-        notifications.notify(
-            user_id,
-            source='receipts',
-            title='Receipts storage is paused',
-            body=(
-                "Your credit balance couldn't cover your receipts' storage. Nothing was deleted; "
-                'previews, downloads and processing are paused until you add credits.'
-            ),
-            url=reverse('receipts:dashboard'),
-        )
+        with transaction.atomic():
+            notifications.notify(
+                user_id,
+                source='receipts',
+                title='Receipts storage is paused',
+                body=(
+                    "Your credit balance couldn't cover your receipts' storage. Nothing was "
+                    'deleted; previews, downloads and processing are paused until you add credits.'
+                ),
+                url=reverse('receipts:dashboard'),
+                key=FROZEN_NOTICE_KEY,
+            )
     except Exception:
         logger.exception('Could not notify user %s that receipts storage is paused', user_id)
 
 
+def _clear_storage_paused_notice(user_id: UUID) -> None:
+    """Delete the "storage paused" notice once the account is unfrozen: it is stale. Same
+    guarantees as the notice's creation: in the caller's transaction, in a savepoint of its own,
+    logged rather than raised, so it can never undo or fail the resume."""
+    try:
+        with transaction.atomic():
+            notifications.delete_for_key(user_id, FROZEN_NOTICE_KEY, source='receipts')
+    except Exception:
+        logger.exception('Could not clear the storage paused notice of user %s', user_id)
+
+
 def unfreeze_account(account: ReceiptsAccount) -> bool:
     """Unfreeze and restart the billing clock, so the frozen stretch is never billed. Returns
-    whether this call did it."""
+    whether this call did it. Also deletes the in-app "storage paused" notice, in the same
+    transaction."""
     now = timezone.now()
-    won = ReceiptsAccount.objects.filter(pk=account.pk, frozen_at__isnull=False).update(
-        frozen_at=None, last_billed_at=now
-    )
+    with transaction.atomic():
+        won = ReceiptsAccount.objects.filter(pk=account.pk, frozen_at__isnull=False).update(
+            frozen_at=None, last_billed_at=now
+        )
+        if won:
+            _clear_storage_paused_notice(account.user_id)
     if won:
         account.frozen_at = None
         account.last_billed_at = now

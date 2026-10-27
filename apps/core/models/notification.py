@@ -14,6 +14,7 @@ SOURCE_MAX_LENGTH = 50
 TITLE_MAX_LENGTH = 140
 BODY_MAX_LENGTH = 500
 URL_MAX_LENGTH = 500
+KEY_MAX_LENGTH = 200
 
 
 class Notification(models.Model):
@@ -25,6 +26,11 @@ class Notification(models.Model):
     label (`'file_transfer'`, `'receipts'`, ...), `title` and `body` are plain text (every template
     escapes them) and `url` is a relative path the product built with `reverse(...)`, never
     something `core` could resolve itself.
+
+    `key` is optional and identifies *what the notification is about* (`'transfer_suspended:<id>'`,
+    `'receipts_account:frozen'`), chosen by the creating app, so that app can delete the notice
+    when the thing it describes is fixed (`delete_for_key`). `url` can't do that job: several
+    notices of one user share the same dashboard link.
 
     Three timestamps, all null until they happen:
 
@@ -50,6 +56,7 @@ class Notification(models.Model):
     title = cast(str, models.CharField(max_length=TITLE_MAX_LENGTH))
     body = cast(str, models.CharField(max_length=BODY_MAX_LENGTH, blank=True))
     url = cast(str, models.CharField(max_length=URL_MAX_LENGTH, blank=True))
+    key = cast(str, models.CharField(max_length=KEY_MAX_LENGTH, blank=True))
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
     read_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     opened_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
@@ -63,6 +70,8 @@ class Notification(models.Model):
             # The bell's count (unread, per user) and the user's lists (newest first).
             models.Index(fields=['user', 'read_at']),
             models.Index(fields=['user', 'created_at']),
+            # `delete_for_key`: a product clearing the notice about one object of one user.
+            models.Index(fields=['user', 'key']),
             # The retention job deletes by age across every user.
             models.Index(fields=['created_at']),
         ]

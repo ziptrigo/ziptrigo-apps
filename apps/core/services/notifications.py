@@ -33,6 +33,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from ..models import Notification
 from ..models.notification import (
     BODY_MAX_LENGTH,
+    KEY_MAX_LENGTH,
     SOURCE_MAX_LENGTH,
     TITLE_MAX_LENGTH,
     URL_MAX_LENGTH,
@@ -70,6 +71,7 @@ def notify(
     title: str,
     body: str = '',
     url: str = '',
+    key: str = '',
 ) -> Notification:
     """Create a notification for `user` (an instance, or just its id).
 
@@ -79,6 +81,11 @@ def notify(
     reported must not fail over it. `url` is optional, relative and built by the caller with
     `reverse(...)`; anything else (an absolute URL, `//host`, a backslash...) is a programming
     error and raises `ValueError`, as does a missing `source` or `title`.
+
+    `key` is optional: a short string the caller picks to identify the object the notice is about
+    (`'transfer_suspended:<transfer id>'`), so it can later delete exactly that notice with
+    `delete_for_key`. It is not shown and not unique (notifying twice with one key makes two rows).
+    A key longer than the column is a programming error and raises `ValueError`.
 
     The row is written inside a savepoint in the caller's transaction: it commits or rolls back
     with the caller's work, and a failed insert cannot poison the caller's transaction.
@@ -92,6 +99,9 @@ def notify(
     body = _truncate(body.replace('\r\n', '\n').strip(), BODY_MAX_LENGTH)
     if url and not is_safe_url(url):
         raise ValueError('url must be a relative path such as reverse() returns.')
+    key = key.strip()
+    if len(key) > KEY_MAX_LENGTH:
+        raise ValueError(f'key must be at most {KEY_MAX_LENGTH} characters.')
 
     user_pk = user.pk if isinstance(user, Model) else user
     with transaction.atomic():
@@ -101,6 +111,7 @@ def notify(
             title=_truncate(title, TITLE_MAX_LENGTH),
             body=body,
             url=url,
+            key=key,
         )
 
 
@@ -151,7 +162,8 @@ def mark_opened(user: Model, notification_id: UUID | str) -> Notification:
     return it, for the view to redirect to its `url`. `DoesNotExist` if it is not theirs."""
     notification = get_notification(user, notification_id)
     now = timezone.now()
-    _of(user).filter(pk=notification.pk).update(
+    # Already scoped to the user by `get_notification`, so the pk is enough here.
+    Notification.objects.filter(pk=notification.pk).update(
         opened_at=Coalesce('opened_at', now), read_at=Coalesce('read_at', now)
     )
     notification.opened_at = notification.opened_at or now
@@ -171,10 +183,31 @@ def dismiss(user: Model, notification_id: UUID | str) -> None:
 
 def delete_for_url(user: Model | UUID | str, url: str, *, source: str | None = None) -> int:
     """Delete the user's notifications that point at `url` (and, when given, were created by
-    `source`), for a product whose target no longer needs attention -- the paused transfer was
-    resumed, the task was done. Returns how many were deleted."""
+    `source`). Returns how many were deleted.
+
+    Blunt on purpose: every notice of the user with that link goes, so it only suits a link that
+    names one thing. A product whose notices share a generic link (a dashboard) should give them a
+    `key` and use `delete_for_key`."""
     user_pk = user.pk if isinstance(user, Model) else user
     queryset = Notification.objects.filter(user_id=user_pk, url=url)
+    if source is not None:
+        queryset = queryset.filter(source=source)
+    return queryset.delete()[0]
+
+
+def delete_for_key(user: Model | UUID | str, key: str, *, source: str | None = None) -> int:
+    """Delete the user's notifications created with this `key` (and, when given, by `source`), for
+    a product whose subject no longer needs attention -- the suspended transfer was resumed, the
+    frozen account was unfrozen. Only that user's, only that key: the user's other notices (the
+    same product's, even for the same kind of event) are untouched. Returns how many were deleted.
+
+    An empty `key` is refused (`ValueError`): it is what every notice without one carries, so it
+    would delete them all."""
+    key = key.strip()
+    if not key:
+        raise ValueError('key is required.')
+    user_pk = user.pk if isinstance(user, Model) else user
+    queryset = Notification.objects.filter(user_id=user_pk, key=key)
     if source is not None:
         queryset = queryset.filter(source=source)
     return queryset.delete()[0]

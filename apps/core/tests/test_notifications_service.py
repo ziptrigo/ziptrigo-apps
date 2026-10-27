@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from apps.accounts.tests.factories import UserFactory
 from apps.core.models import Notification
-from apps.core.models.notification import BODY_MAX_LENGTH, TITLE_MAX_LENGTH
+from apps.core.models.notification import BODY_MAX_LENGTH, KEY_MAX_LENGTH, TITLE_MAX_LENGTH
 from apps.core.services import notifications
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -114,6 +114,15 @@ class TestNotify:
     @pytest.mark.parametrize('url', ['/', '/transfer/', '/receipts/abc/?page=2#top'])
     def test_same_site_paths_are_accepted(self, user, url):
         assert make(user, url=url).url == url
+
+    def test_the_key_is_optional_and_stored(self, user):
+        assert make(user).key == ''
+        assert make(user, key=' transfer:abc ').key == 'transfer:abc'
+
+    def test_a_key_longer_than_the_column_is_refused(self, user):
+        with pytest.raises(ValueError):
+            make(user, key='k' * (KEY_MAX_LENGTH + 1))
+        assert make(user, key='k' * KEY_MAX_LENGTH).key == 'k' * KEY_MAX_LENGTH
 
     def test_it_is_part_of_the_callers_transaction(self, user):
         with pytest.raises(RuntimeError), transaction.atomic():
@@ -357,3 +366,67 @@ class TestDeleteForUrl:
 
     def test_nothing_to_delete(self, user):
         assert notifications.delete_for_url(user, '/a/') == 0
+
+
+class TestDeleteForKey:
+    def test_deletes_only_the_notifications_with_that_key(self, user):
+        gone = make(user, key='transfer:1', url='/t/')
+        also_gone = make(user, key='transfer:1', url='/t/')
+        other_key = make(user, key='transfer:2', url='/t/')  # same url, other subject
+        keyless = make(user, url='/t/')
+
+        assert notifications.delete_for_key(user, 'transfer:1') == 2
+
+        assert set(Notification.objects.all()) == {other_key, keyless}
+        assert not Notification.objects.filter(pk__in=[gone.pk, also_gone.pk]).exists()
+
+    def test_is_scoped_to_the_user(self, user, other):
+        mine = make(user, key='k')
+        theirs = make(other, key='k')
+
+        assert notifications.delete_for_key(user, 'k') == 1
+
+        assert list(Notification.objects.all()) == [theirs]
+        assert not Notification.objects.filter(pk=mine.pk).exists()
+
+    def test_can_be_limited_to_a_source(self, user):
+        mine = notifications.notify(user, source='receipts', title='x', key='k')
+        keep = notifications.notify(user, source='file_transfer', title='x', key='k')
+
+        assert notifications.delete_for_key(user, 'k', source='receipts') == 1
+
+        assert list(Notification.objects.all()) == [keep]
+        assert not Notification.objects.filter(pk=mine.pk).exists()
+
+    def test_a_user_id_will_do(self, user):
+        make(user, key='k')
+
+        assert notifications.delete_for_key(user.pk, 'k') == 1
+
+    def test_deletes_read_opened_and_dismissed_ones_too(self, user):
+        n = make(user, key='k')
+        notifications.mark_opened(user, n.pk)
+        notifications.dismiss(user, n.pk)
+
+        assert notifications.delete_for_key(user, 'k') == 1
+
+    def test_nothing_to_delete(self, user):
+        assert notifications.delete_for_key(user, 'k') == 0
+
+    @pytest.mark.parametrize('key', ['', '   '])
+    def test_an_empty_key_is_refused_so_it_cannot_wipe_the_keyless_ones(self, user, key):
+        keyless = make(user)
+
+        with pytest.raises(ValueError):
+            notifications.delete_for_key(user, key)
+
+        assert list(Notification.objects.all()) == [keyless]
+
+    def test_it_is_part_of_the_callers_transaction(self, user):
+        make(user, key='k')
+
+        with pytest.raises(RuntimeError), transaction.atomic():
+            notifications.delete_for_key(user, 'k')
+            raise RuntimeError
+
+        assert Notification.objects.count() == 1

@@ -667,12 +667,13 @@ notifications.notify(
     title='Transfer suspended: report.pdf',  # one line, <= 140 chars
     body='It ran out of credits ...',  # optional plain text, <= 500 chars
     url=reverse('file_transfer:dashboard'),  # optional, relative; where a click goes
+    key=f'transfer_suspended:{transfer.id}',  # optional; what the notice is about, to clear it later
 )
 ```
 
 - **`notify`** writes one `core.Notification` row (UUID id, `user` FK with `CASCADE`, `source`,
-  `title`, `body`, `url`, `created_at`, `read_at`, `opened_at`, `dismissed_at`; indexes on
-  `(user, read_at)`, `(user, created_at)` and `created_at` for the retention job) inside a
+  `title`, `body`, `url`, `key`, `created_at`, `read_at`, `opened_at`, `dismissed_at`; indexes on
+  `(user, read_at)`, `(user, created_at)`, `(user, key)` and `created_at` for the retention job) inside a
   savepoint in the caller's transaction, so it commits or rolls back with the caller's work and a
   failed insert cannot poison it. It does not queue anything, and **there is no email channel in v1**:
   products keep sending their own emails and call `notify` next to them. The title's whitespace is
@@ -684,13 +685,32 @@ notifications.notify(
   `url_has_allowed_host_and_scheme` with no host allowed) is a programming error and raises
   `ValueError`. The open view checks the stored URL again, so even a row written another way can
   never become an open redirect (it then sends the user to the notifications page).
+- **`key`** (optional, <= 200 characters, not shown, not unique) is a string the creating app
+  chooses to say *what the notice is about* (`transfer_suspended:<transfer id>`,
+  `receipts_account:frozen`), so the app can delete exactly that notice when the subject is fixed:
+  `delete_for_key(user, key, source=None)` (an empty key is a `ValueError`, since every keyless
+  notice carries one). It exists because `url` can't do that job: every suspended transfer of a
+  user links to the same dashboard, so `delete_for_url` would wipe the notices of the ones still
+  suspended. `delete_for_url` stays for a link that names one thing.
 - **Two products use it so far**, next to their existing emails and in the same transaction:
   Receipts "storage paused" (`receipts.services.metering.freeze_account`, url: the Receipts
-  dashboard) and file transfer "suspended" (`file_transfer.services.metering.suspend_transfer`,
-  url: the transfer dashboard). Each wraps `notify` in its own `try/except` that logs: an in-app
-  notice is a courtesy, and failing to write it must never undo a freeze or a suspension. Neither
-  deletes its notification when the account is resumed (`delete_for_url` exists for that, but a
-  "paused" notice is also a record of what happened; wire it per product when one wants it).
+  dashboard, key `receipts_account:frozen`) and file transfer "suspended"
+  (`file_transfer.services.metering.suspend_transfer`, url: the transfer dashboard, key
+  `transfer_suspended:<transfer id>`, from `metering.suspended_notice_key`; its body says how many
+  credits are needed, `daily_cost`, like the email). Each hook runs in **its own savepoint**
+  (`transaction.atomic()` around the whole body, inside a `try/except` that logs), not just
+  `notify`'s: on Postgres a database error that is merely caught still aborts the surrounding
+  transaction, and the commit would then roll the freeze or suspension back. For the same reason the
+  hook queries nothing it can be handed: `meter_transfers` loads `suspension_grace_days` and the
+  storage price once per run and passes them through `meter_transfer` -> `suspend_transfer`
+  (loaded in the hook only when a caller passes nothing).
+  **Both delete their notice when the subject is resumed**, in the resume's own transaction and
+  savepoint, logged and never raised, so tidying a notice can't undo or fail a resume: file
+  transfer in `metering.reenable_transfer`, only on a successful re-enable of a *suspended* transfer
+  (the credits receiver, the daily fallback and the dashboard/API action all go through it; a lost
+  race or a transfer that stays suspended keeps its notice, as does a disabled one's re-enable), and
+  Receipts in `metering.unfreeze_account` when it wins the write. A notice for a transfer that is
+  instead deleted at the end of its grace period stays, as a record of what happened.
 - **Read, opened, dismissed** (`apps.core.services.notifications`' module docstring is the long
   version). *New* means `read_at` is null. The bell counts what is new and not dismissed
   (`unread_count`, one indexed `COUNT`). The dropdown lists the latest 10 (`DROPDOWN_LIMIT`) that
@@ -707,15 +727,17 @@ notifications.notify(
   notification raises `Notification.DoesNotExist`, which the views turn into a **404, never a 403**.
   `mark_read(user, ids)` ignores ids that are not the user's; `mark_all_read(user)`;
   `mark_opened(user, id)`; `dismiss(user, id)` (idempotent); `get_notification`;
-  `dropdown_notifications`; `page_notifications`; and `delete_for_url(user, url, source=None)`,
-  for a product whose target no longer needs attention (a stale notification).
+  `dropdown_notifications`; `page_notifications`; and `delete_for_key(user, key, source=None)` /
+  `delete_for_url(user, url, source=None)`, for a product whose target no longer needs attention
+  (a stale notification).
 - **Views** (`apps/core/views/notifications.py`, mounted at the site root under `core:`):
   `GET /notifications/` (page), `GET notifications/list/` (the page's list partial, htmx
   pagination; opened directly it redirects to the page), `GET notifications/bell/` (the badge, polled),
   `POST notifications/dropdown/` (opens the dropdown: a POST because it writes, `read_at`),
   `POST notifications/read-all/`, `POST notifications/<id>/read/`, `POST notifications/<id>/dismiss/`
   and `GET notifications/<id>/open/` (marks read and opened, then redirects to the stored URL, a
-  plain link so middle-click works). All are `@login_required` and session + CSRF; the actions follow
+  plain link so middle-click works; a write on a GET, the deliberate trade-off being that a link
+  previewer following it would take the item out of the dropdown). All are `@login_required` and session + CSRF; the actions follow
   the htmx convention (an htmx request gets the list it came from back, chosen by the posted `scope`
   of `dropdown` or `page`, plus the bell's badge out of band; without htmx they redirect to the
   page). The two fragments htmx fetches in the background (the bell and the dropdown) answer an htmx
@@ -727,19 +749,29 @@ notifications.notify(
   `{% if user.is_authenticated %}`, so an anonymous page does nothing and costs nothing). The count
   comes from the `{% unread_notification_count %}` tag (`templatetags/notification_tags.py`), not a
   context processor, so only a page that renders the bell pays for the one `COUNT`. The badge
-  (`#notification-badge`) polls `notifications/bell/` **every 60 seconds** and replaces itself; it
-  is always rendered (hidden at 0) so the polling element persists, and the dropdown, list and
-  action responses swap it out of band to keep the count in step. It shows `99+` past 99 and is read
-  out in full by screen readers. The `notificationBell` Alpine component (`core/js/components.js`)
-  opens the panel and triggers its htmx POST (so closing asks for nothing). On a phone the panel
+  (`#notification-badge`) polls `notifications/bell/` **every 60 seconds, only while the tab is
+  visible** (`every 60s [document.visibilityState === 'visible']`), and fetches once when a hidden
+  tab becomes visible again (`visibilitychange[...] from:document`), then replaces itself; it is
+  always rendered (hidden at 0) so the polling element persists, and the dropdown, list and action
+  responses swap it out of band to keep the count in step. It shows `99+` past 99 (the digits are
+  `aria-hidden`; an `sr-only` "N new notifications" carries the full count). **The button has no
+  `aria-label`**: that would replace the name made from its content and hide the badge, so its
+  accessible name is its `sr-only` "Notifications" plus the badge's sentence, which lives inside
+  the button and so survives every swap (`test_notification_bell.py` parses the rendered button
+  to check it). It uses `aria-controls="notification-dropdown"` and `aria-expanded`, not
+  `aria-haspopup` (the panel is not a `role="menu"`). The `notificationBell` Alpine component
+  (`core/js/components.js`) opens the panel and triggers its htmx POST (so closing asks for
+  nothing). The dropdown's "new" highlight lasts only for the response that opened it: an action
+  inside it re-renders the list after the opening request marked its rows read (accepted). On a phone the panel
   spans the header (`<header class="relative">`, `inset-x-4`); from `sm` it hangs under the bell.
 - **Retention**: `NOTIFICATION_RETENTION` (90 days, `core/jobs.py`), applied to `created_at`
   whatever the state, by the daily `core.purge_old_notifications` job in `PURGE_BATCH` batches
   (registered from `CoreConfig._register_jobs`, like `core.purge_old_task_results`).
 - **Admin**: read-only `NotificationAdmin` (filter by source, read state, dismissed, date; search by
   the user's email or name and by title). Deleting a user removes their notifications through the
-  cascade; `accounts`' `UserAdmin` lists `core` in `CASCADE_WITH_USER_APP_LABELS` so the read-only
-  admin doesn't refuse that.
+  cascade; `accounts`' `UserAdmin` lists `core.notification` in `CASCADE_WITH_USER_MODELS` (a
+  model-scoped twin of `CASCADE_WITH_USER_APP_LABELS`, so a future `core` model isn't exempted
+  silently) so the read-only admin doesn't refuse that.
 - **Not in v1**: an email or push channel, per-user preferences, grouping, a JWT API, websockets
   (the count is polled), a browser-extension or mobile client.
 
@@ -2395,10 +2427,11 @@ future app:
 
 `core`'s jobs (`apps/core/jobs.py`) let exceptions propagate (the runner records them in
 `ScheduledJob.last_error`; a swallowed one would show as a success). Besides the email-verification and
-rate-limit purges, and `core.purge_old_notifications` (daily, 90 days, see "Notifications"), two daily ones keep tables from growing forever (audit #18):
+rate-limit purges, two daily ones keep tables from growing forever (audit #18):
 `core.purge_old_task_results` (finished `DBTaskResult` rows past `TASK_RESULT_RETENTION`, 14 days,
 succeeded and failed alike, in batches; ready/running rows never) and `core.clear_expired_sessions` (`SESSION_ENGINE`'s
-`SessionStore.clear_expired()`; nothing else purges `django_session`).
+`SessionStore.clear_expired()`; nothing else purges `django_session`). A third daily one,
+`core.purge_old_notifications` (90 days, see "Notifications"), does the same for in-app notifications.
 
 `file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers

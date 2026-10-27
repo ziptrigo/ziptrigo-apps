@@ -9,6 +9,7 @@ from django.utils import timezone
 from apps.billing.models import BillingSettings, CreditTransaction, CreditTransactionType
 from apps.billing.services import add_credits, get_balance, spend_credits
 from apps.core.models import Notification
+from apps.core.services import notifications
 
 from ..models import Receipt, ReceiptsAccount, ReceiptStatus
 from ..services import metering
@@ -154,6 +155,28 @@ class TestMeterAccount:
         assert notification.url == reverse('receipts:dashboard')
         assert 'Nothing was deleted' in notification.body
 
+    def test_the_notification_is_keyed_so_it_can_be_cleared(self, stored, funded_user):
+        spend_credits(funded_user, 100, source='test')
+
+        metering.meter_account(stored(10).pk)
+
+        assert Notification.objects.get(user=funded_user).key == 'receipts_account:frozen'
+
+    def test_a_hook_that_fails_midway_leaves_nothing_behind(self, stored, funded_user, monkeypatch):
+        def write_then_fail(user, **kwargs):
+            Notification.objects.create(user_id=user, source='x', title='half-written')
+            raise RuntimeError('boom')
+
+        monkeypatch.setattr('apps.receipts.services.metering.notifications.notify', write_then_fail)
+        spend_credits(funded_user, 100, source='test')
+        account = stored(10)
+
+        metering.meter_account(account.pk)
+
+        account.refresh_from_db()
+        assert account.frozen_at is not None
+        assert not Notification.objects.exists()
+
     def test_freezing_twice_notifies_once(self, stored, funded_user):
         spend_credits(funded_user, 100, source='test')
         account = stored(10)
@@ -243,6 +266,57 @@ class TestUnfreeze:
         assert timezone.now() - account.last_billed_at < timedelta(minutes=1)
         metering.meter_account(account.pk)
         assert get_balance(funded_user) == 50  # nothing billed for the frozen days
+
+    def test_unfreezing_deletes_the_storage_paused_notice(self, stored, funded_user):
+        account = self.freeze(stored, funded_user)
+        assert Notification.objects.filter(user=funded_user).count() == 1
+        add_credits(funded_user, 50, source='test')
+
+        metering.resume(str(funded_user.pk))
+
+        account.refresh_from_db()
+        assert account.frozen_at is None
+        assert not Notification.objects.filter(user=funded_user).exists()
+
+    def test_unfreezing_leaves_other_notices_and_other_users_alone(
+        self, stored, funded_user, other_user
+    ):
+        account = self.freeze(stored, funded_user)
+        mine = notifications.notify(funded_user, source='receipts', title='something else')
+        theirs = notifications.notify(
+            other_user,
+            source='receipts',
+            title='paused',
+            key=metering.FROZEN_NOTICE_KEY,
+        )
+        add_credits(funded_user, 50, source='test')
+
+        metering.resume(str(funded_user.pk))
+
+        assert set(Notification.objects.all()) == {mine, theirs}
+        account.refresh_from_db()
+        assert account.frozen_at is None
+
+    def test_a_balance_that_does_not_unfreeze_keeps_the_notice(self, stored, funded_user):
+        self.freeze(stored, funded_user)
+
+        assert metering.resume(str(funded_user.pk)) == 0
+
+        assert Notification.objects.filter(user=funded_user).count() == 1
+
+    def test_a_failing_cleanup_never_undoes_the_unfreeze(self, stored, funded_user, monkeypatch):
+        account = self.freeze(stored, funded_user)
+
+        def boom(*args, **kwargs):
+            raise RuntimeError('boom')
+
+        monkeypatch.setattr('apps.receipts.services.metering.notifications.delete_for_key', boom)
+        add_credits(funded_user, 50, source='test')
+
+        metering.resume(str(funded_user.pk))
+
+        account.refresh_from_db()
+        assert account.frozen_at is None
 
     def test_less_than_one_credit_does_not_unfreeze(self, stored, funded_user):
         account = self.freeze(stored, funded_user)
