@@ -1,0 +1,40 @@
+{% load short_url_ui %}
+<li id="link-{{ link.pk }}" class="px-4 py-4 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition duration-150 ease-in-out">
+    <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.6fr)_9rem_5rem_5.5rem_2rem] md:items-center">
+        <div x-data="copyText" class="min-w-0 flex items-center gap-2">
+            {% comment %} The row shows the path (`/s/code`); the full address is what "Copy" copies and what
+               screen readers get. {% endcomment %}
+            <a href="{% url 'short_url:detail' link.pk %}" title="{% short_link_url link %}"
+               class="min-w-0 truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded"><span class="sr-only" x-ref="text">{% short_link_url link %}</span><span aria-hidden="true">{% short_link_path link %}</span></a>
+            <button type="button" @click="copy()" aria-label="Copy the short link"
+                    class="shrink-0 inline-flex items-center px-2 py-1 text-xs font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                <i class="fas" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+                <span class="ml-1.5" x-text="copied ? 'Copied' : 'Copy'">Copy</span>
+            </button>
+        </div>
+
+        <div class="row-start-2 col-span-2 md:row-start-auto md:col-span-1 min-w-0">
+            <p class="truncate text-sm text-gray-700 dark:text-gray-300" title="{{ link.destination }}">{{ link.destination }}</p>
+            {% if link.title %}<p class="truncate text-xs font-medium text-gray-900 dark:text-gray-100">{{ link.title }}</p>{% endif %}
+            {% if link.tags %}
+            <p class="mt-1 flex flex-wrap gap-1">
+                {% for tag in link.tags %}<span class="rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs text-gray-700 dark:text-gray-300">{{ tag }}</span>{% endfor %}
+            </p>
+            {% endif %}
+        </div>
+
+        <span class="row-start-1 col-start-2 justify-self-end md:row-start-auto md:col-start-auto md:justify-self-start hidden md:inline-flex">{% link_status_pill link %}</span>
+        <span class="hidden md:block text-right text-sm text-gray-700 dark:text-gray-300 tabular-nums">{{ link.click_count|default:'0' }}</span>
+        <span class="hidden md:block text-sm text-gray-700 dark:text-gray-300 tabular-nums">{{ link.created_at|date:'M j, Y' }}</span>
+
+        <div class="row-start-1 col-start-2 justify-self-end md:row-start-auto md:col-start-auto">
+            {% include 'short_url/partials/link_actions_menu.html' %}
+        </div>
+
+        <p class="col-span-2 md:hidden flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+            {% link_status_pill link %}
+            <span>{{ link.click_count }} click{{ link.click_count|pluralize }}</span>
+            <span>{{ link.created_at|date:'M j, Y' }}</span>
+        </p>
+    </div>
+</li>

@@ -14,7 +14,9 @@ manage.py
 config/               The Django project: settings, urls, api (one NinjaAPI), environment.py.
 apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email,
                       email verification, rate limiting (`apps.core.ratelimit`), client IP,
-                      generic S3 storage (`apps.core.services.storage`).
+                      generic S3 storage (`apps.core.services.storage`), a QR image helper
+                      (`apps.core.services.qr_image`), and the Alpine components every product
+                      shares (`core/js/components.js`: `copyText`, `confirmModal`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
                       shared storage price (BillingSettings).
@@ -26,6 +28,11 @@ apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/do
 apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
                       uploads, email intake, AI extraction, billing, jobs, admin, the web pages, the
                       JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts").
+apps/short_url/       Short URLs (issue #162): `ShortLink` + `ShortUrlSettings`, the public `/s/<code>`
+                      redirect (root-mounted), dashboard / create-edit / link pages, QR image, and the
+                      one-off billing of its extras. Built in phases: this is the first (links,
+                      redirect, dashboard, alias and extra-link billing, title fetching); the full
+                      "Short URLs" section arrives with the last phase.
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts.
                       Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
@@ -107,7 +114,7 @@ inv pip compile --clean           # delete uv.lock and re-lock from scratch
 ### Dependency rules between apps
 
 ```
-qr_code | file_transfer | receipts   products; may not import each other
+qr_code | file_transfer | receipts | short_url   products; may not import each other
 billing | feedback        may not import each other either
 accounts
 core
@@ -2135,10 +2142,13 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     in a modal; each action re-renders `#categories`; deleting names how many receipts become
     uncategorized) and the 20 most recent inbound emails with their outcome and `note`.
   - **UI parts**: `{% status_pill receipt.status %}` (`receipts_ui`; colours in the design doc),
-    `partials/confirm_modal.html` driven by the `confirmModal` Alpine component and the `copyText`
-    component, both in `static/receipts/js/common.js` -- loaded as a *classic* script (not `defer`) so
-    its `alpine:init` listener exists before Alpine starts. Multi-line template comments use
-    `{% comment %}`: `{# #}` is single-line only.
+    `core/partials/confirm_modal.html` driven by the `confirmModal` Alpine component and the `copyText`
+    component, both shared with Short URLs and so in `apps/core/static/core/js/components.js`
+    (loaded *deferred* by `core/base.html`, ahead of Alpine; the modal also posts the trigger's
+    `data-cost` as `confirm_cost`, empty when there is none). Receipts' own
+    `static/receipts/js/common.js` keeps `fragmentModal` and is loaded as a *classic* script (not
+    `defer`) so its `alpine:init` listener exists before Alpine starts. Multi-line template comments
+    use `{% comment %}`: `{# #}` is single-line only.
   - **Tests**: `tests/test_views_*.py`, `test_ui.py` (every page, 404s, 422 paths, rate limits via the
     `settings` fixture, frozen account, CSV, the body headers, the `sandbox` attribute, the upload flow
     against the fake storage and AI). One Playwright test file (`tests_e2e/test_receipts.py`: upload ->
@@ -2460,7 +2470,7 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
 ### GitHub issues
 
 Label every issue with the app(s) it applies to: `Users` (accounts), `Billing`, `Core`, `QR Code`,
-`File Transfer`. Work that happens in the separate `infra` repository is tracked here under
+`File Transfer`, `Url` (short_url). Work that happens in the separate `infra` repository is tracked here under
 `Infra`. An issue that touches several apps gets several labels.
 
 ### Adding an app

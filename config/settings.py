@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     'apps.qr_code',
     'apps.file_transfer',
     'apps.receipts',
+    'apps.short_url',
     # Task queue: an ORM-backed store for `django.tasks` (Django 6's built-in task queue API).
     'django_tasks_db',
 ]
@@ -341,6 +342,26 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # burst, not to shed load (an increment is already one cheap `UPDATE`; the redirect itself is
     # the expensive-if-anything part, and that never gets skipped).
     'QR_REDIRECT_IP': (120, 60),
+    # -- short_url (issue #162): the `/s/<code>` redirect and the owner's pages --
+    # `/s/<code>` redirects: public and high-traffic by design, so as generous as `/go/<code>`.
+    # Same behaviour over the limit (`apps/short_url/views/redirect.py`): charged *before* the
+    # lookup, so made-up codes spend the budget too; a known link still redirects (a visitor behind
+    # a busy shared IP must never see an error because others followed the same link) but its
+    # click write is skipped, and an unknown code is a 404, never a 429. The rule protects the
+    # accuracy of the click counts, it doesn't shed load (nginx's looser `/s/` zone, an infra
+    # follow-up, does that). One exception, deliberately unlike `/go/`: a link with a click cap
+    # (`max_clicks`) is still counted over the limit, because there the counter is what ends the
+    # link, not just a statistic; do not "fix" that to match.
+    'SU_REDIRECT_IP': (120, 60),
+    # Creating a link (web form and, later, `/api/s/`): per user. Each one is a database row
+    # (and a background request to the destination page for its title), so hourly, but well above
+    # what a person typing links in does.
+    'SU_CREATE_USER': (30, 60 * 60),
+    # Editing a link (destination, title, tags, expiry, click cap): per user.
+    'SU_EDIT_USER': (60, 60 * 60),
+    # The QR image of a link (CPU-bound rendering): per user, shared by the dashboard and the
+    # link page. Looser than creating: a page of rows can show several at once.
+    'SU_QR_USER': (60, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -731,6 +752,10 @@ LOGGING = {
 
 # QR code settings
 QR_CODE_REDIRECT_PATH = '/go/'
+
+# Short URLs (issue #162): a short link is `<BASE_URL>/s/<code>`. Like `/go/`, the path is
+# printed and shared, so it must never move.
+SHORT_URL_PATH = '/s/'
 
 
 # Jazzmin configuration

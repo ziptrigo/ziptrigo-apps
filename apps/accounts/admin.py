@@ -13,7 +13,7 @@ from .models import User
 # their own admins refuse delete (a ledger row must not be removed by hand, but deleting the
 # account removes ledger and balance together, which keeps them consistent). Named by label because
 # `accounts` can't import them.
-CASCADE_WITH_USER_APP_LABELS = ('billing',)
+CASCADE_WITH_USER_APP_LABELS = ('billing', 'short_url')
 
 
 class UserAdmin(DjangoUserAdmin):

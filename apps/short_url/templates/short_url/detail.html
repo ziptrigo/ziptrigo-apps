@@ -1,0 +1,145 @@
+{% extends 'short_url/layout.html' %}
+{% load short_url_ui %}
+
+{% block title %}{% firstof link.title link.code %} - ZipTrigo{% endblock %}
+{% block page_width %}max-w-3xl{% endblock %}
+
+{% block su_content %}
+<div x-data="confirmModal">
+<div class="mb-6">
+    <a href="{% url 'short_url:dashboard' %}"
+       class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Short URLs</a>
+    <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h1 class="min-w-0 break-words text-3xl font-bold text-gray-900 dark:text-gray-100">{% firstof link.title link.code %}</h1>
+        {% link_status_pill link %}
+    </div>
+</div>
+
+{% if state == 'taken_down' and link.takedown_reason %}
+<div class="mb-6 rounded-md border border-red-600/40 dark:border-red-400/40 px-4 py-3 text-sm text-red-700 dark:text-red-400" role="alert">
+    <i class="fas fa-ban mr-1" aria-hidden="true"></i>This link was taken down: {{ link.takedown_reason }}
+</div>
+{% endif %}
+
+<div x-data="copyText"
+     class="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3">
+    <i class="fas fa-link text-sage-400" aria-hidden="true"></i>
+    <code x-ref="text" class="break-all text-sm font-medium text-gray-900 dark:text-gray-100">{{ short_url }}</code>
+    <button type="button" @click="copy()"
+            class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+        <i class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+        <span x-text="copied ? 'Copied' : 'Copy'">Copy</span>
+    </button>
+</div>
+
+<div class="grid gap-6 md:grid-cols-[1fr_auto]">
+    <dl class="min-w-0 space-y-4 text-sm">
+        <div>
+            <dt class="text-gray-500 dark:text-gray-400">Destination</dt>
+            <dd class="mt-1 break-all text-gray-900 dark:text-gray-100"><a href="{{ link.destination }}" rel="nofollow noopener noreferrer" target="_blank" class="hover:underline">{{ link.destination }}</a></dd>
+        </div>
+        {% if link.title %}
+        <div>
+            <dt class="text-gray-500 dark:text-gray-400">Title</dt>
+            <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.title }}</dd>
+        </div>
+        {% endif %}
+        {% if link.tags %}
+        <div>
+            <dt class="text-gray-500 dark:text-gray-400">Tags</dt>
+            <dd class="mt-1 flex flex-wrap gap-1">
+                {% for tag in link.tags %}<span class="rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs text-gray-700 dark:text-gray-300">{{ tag }}</span>{% endfor %}
+            </dd>
+        </div>
+        {% endif %}
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Clicks</dt>
+                <dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ link.click_count }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Created</dt>
+                <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.created_at|date:'M j, Y' }}</dd>
+            </div>
+            {% if link.last_clicked_at %}
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Last click</dt>
+                <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.last_clicked_at|date:'M j, Y H:i' }}</dd>
+            </div>
+            {% endif %}
+        </div>
+        {% if link.expires_at %}
+        <div>
+            <dt class="text-gray-500 dark:text-gray-400">Expires</dt>
+            <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.expires_at|date:'M j, Y H:i' }}</dd>
+        </div>
+        {% endif %}
+        {% if link.max_clicks %}
+        <div>
+            <dt class="text-gray-500 dark:text-gray-400">Click limit</dt>
+            <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.max_clicks }}</dd>
+        </div>
+        {% endif %}
+    </dl>
+
+    <div class="justify-self-start md:justify-self-end">
+        <img src="{% url 'short_url:qr' link.pk %}" width="180" height="180" alt="QR code of {{ short_url }}"
+             class="rounded border border-gray-200 bg-white p-2">
+        <a href="{% url 'short_url:qr' link.pk %}?download=1" download
+           class="mt-2 inline-flex items-center text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-download mr-1.5" aria-hidden="true"></i>Download QR code</a>
+    </div>
+</div>
+
+<div class="mt-8 flex flex-wrap items-center gap-3">
+    {% if link.status == 'active' or link.status == 'disabled' %}
+    <a href="{% url 'short_url:edit' link.pk %}"
+       class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit
+    </a>
+    {% endif %}
+    <a href="{% url 's:redirect' link.code %}+" target="_blank" rel="noopener"
+       class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        <i class="fas fa-eye mr-2" aria-hidden="true"></i>Preview
+    </a>
+    {% if link.status == 'active' %}
+    <form method="post" action="{% url 'short_url:disable' link.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{% url 'short_url:detail' link.pk %}">
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            <i class="fas fa-pause mr-2" aria-hidden="true"></i>Disable
+        </button>
+    </form>
+    {% elif link.status == 'disabled' %}
+    {% if link.enable_cost %}
+    <button type="button" @click="show($el)"
+            data-url="{% url 'short_url:enable' link.pk %}?next={% url 'short_url:detail' link.pk %}" data-tone="primary" data-label="Enable for {{ link.enable_cost }} credit{{ link.enable_cost|pluralize }}"
+            data-cost="{{ link.enable_cost }}" data-title="Enable this link?"
+            data-body="This link would go beyond your free active links, so enabling it costs {{ link.enable_cost }} credit{{ link.enable_cost|pluralize }}, once. It won't be charged again for this link."
+            class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        <i class="fas fa-play mr-2" aria-hidden="true"></i>Enable
+    </button>
+    {% else %}
+    <form method="post" action="{% url 'short_url:enable' link.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{% url 'short_url:detail' link.pk %}">
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            <i class="fas fa-play mr-2" aria-hidden="true"></i>Enable
+        </button>
+    </form>
+    {% endif %}
+    {% endif %}
+    {% if link.status == 'active' or link.status == 'disabled' %}
+    <button type="button" @click="show($el)"
+            data-url="{% url 'short_url:delete' link.pk %}" data-title="Delete this link?" data-label="Delete"
+            data-body="{{ link.code }} will stop working for good, and its code can never be used again."
+            class="ml-auto inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+        <i class="fas fa-trash mr-2" aria-hidden="true"></i>Delete
+    </button>
+    {% endif %}
+</div>
+
+{% include 'core/partials/confirm_modal.html' %}
+</div>
+{% endblock %}

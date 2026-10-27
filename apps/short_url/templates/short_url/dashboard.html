@@ -1,0 +1,61 @@
+{% extends 'short_url/layout.html' %}
+
+{% block title %}Short URLs - ZipTrigo{% endblock %}
+
+{% block su_content %}
+{# One confirmation modal for the whole page (delete, and enabling a link that costs credits). #}
+<div x-data="confirmModal">
+<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Short URLs</h1>
+    <a href="{% url 'short_url:create' %}"
+       class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+        <i class="fas fa-plus mr-2" aria-hidden="true"></i>New link
+    </a>
+</div>
+
+{% include 'short_url/partials/tabs.html' %}
+
+<form id="link-filters" method="get" action="{% url 'short_url:dashboard' %}"
+      hx-get="{% url 'short_url:list' %}" hx-target="#link-list" hx-swap="innerHTML"
+      hx-sync="this:replace"
+      hx-trigger="input changed delay:300ms from:#q, change from:#tag, submit">
+    <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end">
+        <div class="relative flex-1" data-has-value="{{ parsed.params.q|yesno:'true,false' }}"
+             x-data="{ hasValue: $el.dataset.hasValue === 'true' }">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <i class="fas fa-magnifying-glass text-gray-400" aria-hidden="true"></i>
+            </div>
+            <input type="text" name="q" id="q" x-ref="q" value="{{ parsed.params.q }}" maxlength="200"
+                   autocomplete="off" enterkeyhint="search"
+                   @input="hasValue = $event.target.value !== ''"
+                   placeholder="Search code, destination, title or tag" aria-label="Search code, destination, title or tag"
+                   class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+            <button type="button" x-show="hasValue" {% if not parsed.params.q %}style="display: none"{% endif %}
+                    @click="$refs.q.value = ''; hasValue = false; $refs.q.dispatchEvent(new Event('input', { bubbles: true })); $refs.q.focus()"
+                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    aria-label="Clear search">
+                <i class="fas fa-times" aria-hidden="true"></i>
+            </button>
+        </div>
+        {% if tags or parsed.tag %}
+        <div>
+            <label for="tag" class="block mb-1 text-sm font-medium">Tag</label>
+            <select name="tag" id="tag"
+                    class="w-full lg:w-48 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <option value="">All tags</option>
+                {% for tag in tags %}
+                <option value="{{ tag }}" {% if parsed.tag == tag %}selected{% endif %}>{{ tag }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+    </div>
+
+    <div id="link-list">
+        {% include 'short_url/partials/link_list.html' %}
+    </div>
+</form>
+
+{% include 'core/partials/confirm_modal.html' %}
+</div>
+{% endblock %}

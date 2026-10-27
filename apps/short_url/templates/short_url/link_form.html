@@ -1,0 +1,109 @@
+{% extends 'short_url/layout.html' %}
+
+{% block title %}{% if link %}Edit link{% else %}New link{% endif %} - ZipTrigo{% endblock %}
+{% block page_width %}max-w-3xl{% endblock %}
+
+{% block su_content %}
+<div class="mb-6">
+    <a href="{% if link %}{% url 'short_url:detail' link.pk %}{% else %}{% url 'short_url:dashboard' %}{% endif %}"
+       class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>{% if link %}{{ link.code }}{% else %}Short URLs{% endif %}</a>
+    <h1 class="mt-2 text-3xl font-bold text-gray-900 dark:text-gray-100">{% if link %}Edit link{% else %}New link{% endif %}</h1>
+</div>
+
+{% with action=request.path %}
+<form id="link-form" method="post" action="{{ action }}"
+      hx-post="{{ action }}" hx-target="#link-form-msg" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type='submit']">
+    {% csrf_token %}
+
+    <div class="mb-4">
+        <label for="id_destination" class="block mb-1 text-sm font-medium">Destination <span class="text-gray-500" aria-hidden="true">*</span></label>
+        <input id="id_destination" name="destination" type="url" required maxlength="4096" value="{{ values.destination }}"
+               placeholder="https://example.com/a/very/long/address" autocomplete="off" aria-describedby="destination-help"
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <p id="destination-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the link goes. Starts with http:// or https://. You can change it later; the short link stays the same.</p>
+    </div>
+
+    {% if link %}
+    <div class="mb-4">
+        <span class="block mb-1 text-sm font-medium">Short link</span>
+        <code class="block break-all rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm text-gray-700 dark:text-gray-300">{{ link_base }}{{ link.code }}</code>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The code can't be changed: it may already be printed or shared.</p>
+    </div>
+    {% else %}
+    <div class="mb-4" x-data="{ alias: '' }">
+        <label for="id_alias" class="block mb-1 text-sm font-medium">Custom alias <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
+        <input id="id_alias" name="alias" type="text" maxlength="32" x-model="alias" autocomplete="off" aria-describedby="alias-help"
+               placeholder="spring-sale"
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <p id="alias-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            3-32 letters, digits, hyphens or underscores. Capitals don't matter: <code>Sale</code> and <code>sale</code> are the same link.
+            {% if alias_price %}An alias costs {{ alias_price }} credit{{ alias_price|pluralize }}, once.{% else %}Aliases are free.{% endif %}
+            Leave it empty for a random code.
+        </p>
+        <p class="mt-2 text-sm text-gray-700 dark:text-gray-300" aria-live="polite">Your link will be
+            <code class="break-all font-medium">{{ link_base }}<span x-text="alias.trim() || 'xxxxxxx'">xxxxxxx</span></code></p>
+    </div>
+    {% endif %}
+
+    <div class="mb-4">
+        <label for="id_title" class="block mb-1 text-sm font-medium">Title <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
+        <input id="id_title" name="title" type="text" maxlength="255" value="{{ values.title }}" aria-describedby="title-help"
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <p id="title-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">A name for you. If you leave it empty we use the page's own title when we can read it.</p>
+    </div>
+
+    <div class="mb-4">
+        <label for="id_tags" class="block mb-1 text-sm font-medium">Tags <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
+        <input id="id_tags" name="tags" type="text" value="{{ values.tags }}" aria-describedby="tags-help" placeholder="campaign, newsletter"
+               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <p id="tags-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Separated by commas, up to 20. Letters, digits, hyphens and underscores.</p>
+    </div>
+
+    <div class="mb-4 grid gap-4 sm:grid-cols-2">
+        <div>
+            <label for="id_expires_at" class="block mb-1 text-sm font-medium">Expires <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
+            <input id="id_expires_at" name="expires_at" type="datetime-local" value="{{ values.expires_at }}"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">After this the link stops working.</p>
+        </div>
+        <div>
+            <label for="id_max_clicks" class="block mb-1 text-sm font-medium">Click limit <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
+            <input id="id_max_clicks" name="max_clicks" type="number" min="1" inputmode="numeric" value="{{ values.max_clicks }}"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">After this many clicks the link stops working.</p>
+        </div>
+    </div>
+
+    <details class="mb-6 rounded border border-gray-200 dark:border-gray-700 px-4 py-3">
+        <summary class="cursor-pointer text-sm font-medium">Campaign tracking (UTM)</summary>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Added to the destination's query string when you save. {% if link %}Leave a field empty to keep what the address already has; to remove a parameter, edit the destination above.{% endif %}</p>
+        <div class="mt-3 grid gap-4 sm:grid-cols-2">
+            {% for name, label in utm_fields %}
+            <div>
+                <label for="id_{{ name }}" class="block mb-1 text-sm font-medium">{{ label }}</label>
+                <input id="id_{{ name }}" name="{{ name }}" type="text" maxlength="200" autocomplete="off"
+                       class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            </div>
+            {% endfor %}
+        </div>
+    </details>
+
+    {% if beyond_allowance and extra_link_price %}
+    <p class="mb-4 text-sm text-amber-700 dark:text-amber-400"><i class="fas fa-coins mr-1" aria-hidden="true"></i>You have used your free active links, so this one costs {{ extra_link_price }} credit{{ extra_link_price|pluralize }}, once.</p>
+    {% endif %}
+
+    <div id="link-form-msg" class="mb-4 text-sm"></div>
+    <div id="cost-confirm" class="mb-4"></div>
+
+    <div class="flex items-center gap-3">
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-60">
+            {% if link %}Save changes{% else %}Create link{% endif %}
+        </button>
+        <a href="{% if link %}{% url 'short_url:detail' link.pk %}{% else %}{% url 'short_url:dashboard' %}{% endif %}"
+           class="text-sm text-gray-600 dark:text-gray-300 hover:underline">Cancel</a>
+    </div>
+</form>
+{% endwith %}
+{% endblock %}
