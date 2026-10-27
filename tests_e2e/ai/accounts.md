@@ -522,8 +522,8 @@ link instead.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/account/`. | The `Appearance` section sits between `Credits` and `Change Password`; `System` is selected; the page is light. |
-| 2 | Click `Dark`. | The page reloads without a Save click; it is dark; `Dark` is selected; `<html>` has `data-theme="dark"` and class `dark`. |
-| 3 | Use only the keyboard: Tab to the group, use the arrow keys to move to `Light`. | A visible focus ring shows on the focused option; the choice is applied (page reloads, light) when the selection changes. |
+| 2 | Click `Dark`. | Without a Save click and without a page reload (the page does not flash or jump; scroll position stays), the page turns dark; `Dark` is selected; `<html>` has `data-theme="dark"` and class `dark`. |
+| 3 | Use only the keyboard: Tab to the group, use the arrow keys to move to `Light`. | A visible focus ring shows on the focused option and stays on the group after each arrow press; the choice is applied at once, with no reload (the page turns light) when the selection changes. |
 | 4 | Open `/`, `/feedback/` and `/billing/credits/`. | All follow the saved theme. |
 | 5 | Sign out; the same browser's login page. | It follows the system (light), not the account's last choice. |
 | 6 | Sign in again from a different browser profile (another "device"). | The saved theme applies there too. |

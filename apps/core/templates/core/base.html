@@ -10,18 +10,30 @@
     <link rel="icon" type="image/png" href="{% static 'core/images/logo_32x32.png' %}">
 
     <!-- Early theme boot: the class is set before CSS to avoid FOUC. A signed-in user's saved theme
-         is rendered on <html> by the server (data-theme, and the dark class for "dark"); only
-         "system" needs the browser's colour scheme, and keeps following it live. Anyone without a
-         session follows the system. -->
+         is rendered on <html> by the server (data-theme, and the dark class for "dark"); "system"
+         is resolved here from the browser's colour scheme, which it keeps following live. Anyone
+         without a session follows the system. `apply` reads data-theme every time, so the colour
+         scheme listener only matters while the theme is "system". When a page saves a new theme
+         it fires a `themeChanged` event (htmx's HX-Trigger, detail.theme), and the same `apply`
+         shows it at once; the Tailwind Play CDN generates the dark: styles whatever the class,
+         so toggling it needs no reload. -->
     <script>
       (function () {
         try {
           const html = document.documentElement;
-          if (html.getAttribute('data-theme') !== 'system') return;
           const mql = window.matchMedia('(prefers-color-scheme: dark)');
-          const apply = () => html.classList.toggle('dark', mql.matches);
+          const apply = () => {
+            const theme = html.getAttribute('data-theme');
+            html.classList.toggle('dark', theme === 'dark' || (theme !== 'light' && mql.matches));
+          };
           apply();
           mql.addEventListener('change', apply);
+          document.addEventListener('themeChanged', (e) => {
+            const theme = e.detail && e.detail.theme;
+            if (theme !== 'system' && theme !== 'light' && theme !== 'dark') return;
+            html.setAttribute('data-theme', theme);
+            apply();
+          });
         } catch (_) { /* noop */ }
       })();
     </script>

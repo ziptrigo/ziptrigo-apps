@@ -459,15 +459,22 @@ the header has no toggle) and stored on the account, `User.theme` (default `syst
 `db_default` too: the #102 lesson), so it follows the user across devices instead of living in
 `localStorage` (the old key is simply ignored). It is a session form view like the two above
 (`POST /account/theme/`, `views/theme.py`, `forms.ThemeForm`, `services.theme.set_theme`; web only,
-no `/api/` endpoint, no rate limit: one column write per call). The three radios submit on
-`change` (htmx; a `<noscript>` Save button covers no JS); success answers `HX-Refresh: true`
-(plain redirect without htmx) because the Tailwind CDN only applies `dark:` styles when the page
-loads, a bad value is a 422 with `partials/theme_form.html` and saves nothing. `core/base.html`
-renders it for a signed-in user (`core` can't import `accounts`, but the template just reads
-`user.theme`): `<html data-theme="...">` plus `class="dark"` for "dark", server-side, so there is no
-flash; the early boot script in `<head>` only acts when `data-theme` is `system` (adds/removes
-`dark` from `prefers-color-scheme` and keeps following it live). A visitor without a session is
-rendered as `system`. The admin's own toggle (`core/js/admin_theme_toggle.js`) is separate.
+no `/api/` endpoint, no rate limit: one column write per call; `save(update_fields=['theme',
+'updated_at'])`, like the Google/Microsoft linking saves). The three radios submit on `change` (htmx,
+`hx-sync="this:queue last"` so quick clicks save in order; a `<noscript>` Save button covers no JS);
+success answers 200 with the re-rendered partial but `HX-Reswap: none` (swapping the radios would
+drop the keyboard focus from the one the user is on) and `HX-Trigger: {"themeChanged": {"theme":
+...}}`, which a listener in `core/base.html` applies to the page at once, **with no reload** (the
+Tailwind Play CDN generates the `dark:` variants whatever the class, so toggling `dark` is enough);
+without htmx it is a redirect, and a bad value is a 422 with `partials/theme_form.html` swapped over
+the form, saving nothing. `views.pages.account_page_context` builds the account page's context for
+the profile, password and theme views. `core/base.html` renders it for a signed-in user (`core`
+can't import `accounts`, but the template just reads `user.theme`): `<html data-theme="...">` plus
+`class="dark"` for "dark", server-side, so there is no flash; the early boot script in `<head>` has
+one `apply` that reads `data-theme` each time (`dark` for "dark", none for "light",
+`prefers-color-scheme` for "system"), so its live follow of the OS setting only matters while the
+theme is `system`, and the `themeChanged` listener sets `data-theme` and calls it. `User.theme` is
+read-only in the user admin ("Personal info"). A visitor without a session is rendered as `system`. The admin's own toggle (`core/js/admin_theme_toggle.js`) is separate.
 
 Tasks queued from inside a transaction go through `apps.core.services.queue.enqueue_after_commit`
 (on commit; a failure to enqueue is logged and swallowed, since the domain write is already

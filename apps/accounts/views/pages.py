@@ -1,3 +1,5 @@
+from typing import Any
+
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
@@ -6,19 +8,31 @@ from django.views.decorators.http import require_http_methods
 
 from apps.core import ratelimit
 
-from ..forms import ChangePasswordForm, ProfileForm, ResendConfirmationForm
+from ..forms import ChangePasswordForm, ProfileForm, ResendConfirmationForm, ThemeForm
 from ..http import AuthenticatedHttpRequest
 from ..services.email_confirmation import format_validity_minutes, get_email_confirmation_service
+
+
+def account_page_context(request: AuthenticatedHttpRequest, **overrides: Any) -> dict[str, Any]:
+    """The account settings page's context: one fresh form per section, `overrides` replacing any.
+
+    The profile, password and theme views all re-render the whole page (when htmx isn't used, or to
+    show errors), so the forms are built here once rather than each view naming the other
+    sections' forms.
+    """
+    context: dict[str, Any] = {
+        'form': ProfileForm(instance=request.user),
+        'password_form': ChangePasswordForm(request.user),
+        'theme_form': ThemeForm(),
+    }
+    context.update(overrides)
+    return context
 
 
 @login_required
 def account_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Render the account settings page for the authenticated user."""
-    context = {
-        'form': ProfileForm(instance=request.user),
-        'password_form': ChangePasswordForm(request.user),
-    }
-    return render(request, 'accounts/account.html', context)
+    return render(request, 'accounts/account.html', account_page_context(request))
 
 
 def account_created_page(request: HttpRequest) -> HttpResponse:

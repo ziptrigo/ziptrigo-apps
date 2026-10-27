@@ -20,4 +20,4 @@ def set_theme(user: User, theme: str) -> None:
     if theme not in THEMES:
         raise ValueError(f'Unknown theme: {theme!r}')
     user.theme = theme
-    user.save(update_fields=['theme'])
+    user.save(update_fields=['theme', 'updated_at'])

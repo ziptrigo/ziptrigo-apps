@@ -1,5 +1,6 @@
 """The account page's "Appearance" form (issue #166) and how `core/base.html` applies the theme."""
 
+import json
 import re
 
 import pytest
@@ -51,6 +52,16 @@ def test_set_theme_saves(user, theme):
     assert user.theme == theme
 
 
+def test_set_theme_bumps_updated_at(user):
+    """`save(update_fields=...)` skips `auto_now` unless `updated_at` is named, as the linking
+    saves do."""
+    before = User.objects.get(pk=user.pk).updated_at
+
+    set_theme(user, 'dark')
+
+    assert User.objects.get(pk=user.pk).updated_at > before
+
+
 def test_set_theme_rejects_an_unknown_value(user):
     with pytest.raises(ValueError):
         set_theme(user, 'purple')
@@ -73,6 +84,18 @@ def test_account_page_shows_the_appearance_section(client, user):
     assert f'hx-post="{reverse("accounts:theme-update")}"' in content
     for theme in THEMES:
         assert f'name="theme" value="{theme}"' in re.sub(r'\s+', ' ', content)
+
+
+def test_theme_form_is_one_request_at_a_time_with_the_last_click_winning(client, user):
+    """Quick clicks must not overlap: `hx-sync` queues, and drops all but the last."""
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+    form = re.search(r'<form id="theme-form".*?>', content, flags=re.DOTALL)
+
+    assert form is not None
+    assert 'hx-sync="this:queue last"' in form.group(0)
+    assert 'hx-trigger="change"' in form.group(0)
 
 
 def test_account_page_checks_system_by_default(client, user):
@@ -108,7 +131,9 @@ def test_appearance_section_is_shown_to_an_account_without_a_password(client, us
 
 
 @pytest.mark.parametrize('theme', THEMES)
-def test_saves_each_valid_theme_and_refreshes_the_page_for_htmx(client, user, theme):
+def test_htmx_save_answers_the_partial_without_swapping_it_and_announces_the_theme(
+    client, user, theme
+):
     # Start from a different theme, so every parametrized value is a change.
     set_theme(user, 'dark' if theme == 'light' else 'light')
     client.force_login(user)
@@ -116,7 +141,15 @@ def test_saves_each_valid_theme_and_refreshes_the_page_for_htmx(client, user, th
     response = client.post(reverse('accounts:theme-update'), {'theme': theme}, **HTMX)
 
     assert response.status_code == 200
-    assert response['HX-Refresh'] == 'true'
+    # No reload: the page applies the theme itself, from the event.
+    assert 'HX-Refresh' not in response
+    assert json.loads(response['HX-Trigger']) == {'themeChanged': {'theme': theme}}
+    # Swapping the radios would drop the keyboard focus from the one the user is on.
+    assert response['HX-Reswap'] == 'none'
+    content = response.content.decode()
+    assert '<html' not in content
+    assert 'id="theme-form"' in content
+    assert _checked_themes(content) == [theme]
     user.refresh_from_db()
     assert user.theme == theme
 
@@ -142,6 +175,9 @@ def test_invalid_value_is_a_422_and_saves_nothing(client, user, value):
 
     assert response.status_code == 422
     assert 'HX-Refresh' not in response
+    assert 'HX-Trigger' not in response
+    # An error is swapped in over the form (no `HX-Reswap`), so the message shows.
+    assert 'HX-Reswap' not in response
     content = response.content.decode()
     assert '<html' not in content
     assert 'Please choose' in content
@@ -173,6 +209,9 @@ def test_invalid_value_without_htmx_rerenders_the_account_page(client, user):
     assert '<html' in content
     assert 'Appearance' in content
     assert 'Please choose one of system, light or dark.' in content
+    # The page is rendered whole, so the other sections' forms are there too.
+    assert 'Profile Information' in content
+    assert 'Change Password' in content
     user.refresh_from_db()
     assert user.theme == 'system'
 
@@ -235,6 +274,43 @@ def test_the_form_on_the_page_carries_a_csrf_token(user):
     assert user.theme == 'dark'
 
 
+# --- the user admin ---
+
+
+def test_admin_change_form_shows_the_theme_read_only(client, admin_user, regular_user):
+    set_theme(regular_user, 'dark')
+    client.force_login(admin_user)
+
+    response = client.get(reverse('custom_admin:accounts_user_change', args=[regular_user.pk]))
+
+    content = response.content.decode()
+    assert response.status_code == 200
+    assert 'field-theme' in content
+    assert 'Dark' in content
+    assert 'name="theme"' not in content
+
+
+def test_admin_change_form_save_leaves_the_theme_alone(client, admin_user, regular_user):
+    set_theme(regular_user, 'dark')
+    client.force_login(admin_user)
+
+    response = client.post(
+        reverse('custom_admin:accounts_user_change', args=[regular_user.pk]),
+        {
+            'email': regular_user.email,
+            'name': 'Renamed',
+            'status': User.STATUS_ACTIVE,
+            'is_active': 'on',
+            'theme': 'light',
+        },
+    )
+
+    assert response.status_code == 302
+    regular_user.refresh_from_db()
+    assert regular_user.name == 'Renamed'
+    assert regular_user.theme == 'dark'
+
+
 # --- how base.html applies it ---
 
 
@@ -281,6 +357,20 @@ def test_anonymous_visitor_is_not_given_a_users_theme(client, user):
 
     assert 'data-theme="system"' in tag
     assert 'class="dark"' not in tag
+
+
+def test_base_listens_for_the_theme_changed_event(client, user):
+    """The success response only carries `HX-Trigger`; this listener is what applies it, on every
+    page, resolving "system" itself and reading `data-theme` each time, so the colour-scheme
+    listener only matters while the theme is "system"."""
+    client.force_login(user)
+
+    for url in (reverse('accounts:account'), reverse('core:home')):
+        content = client.get(url).content.decode()
+        assert "addEventListener('themeChanged'" in content
+        assert "html.setAttribute('data-theme', theme)" in content
+        assert "html.getAttribute('data-theme')" in content
+        assert 'HX-Refresh' not in content
 
 
 def test_the_header_toggle_and_browser_storage_are_gone(client, user):

@@ -1,8 +1,11 @@
 {% comment %}
 The account page's "Appearance" form. `theme_form` (a `ThemeForm`) is only passed back with errors.
-The saved theme is read from `request.user`. A choice submits straight away (htmx, `change`); the
-server answers with `HX-Refresh`, because the Tailwind CDN only applies `dark:` styles on load.
-Without JavaScript the Save button, shown only then, does the same with a normal POST.
+The saved theme is read from `request.user`. A choice submits straight away (htmx, `change`). On
+success the server answers `HX-Reswap: none` -- the radios stay in place, so the keyboard focus
+isn't lost -- and an `HX-Trigger: themeChanged` event that `core/base.html` applies to the page, no
+reload. Only an error (422) is swapped in, over the form (`hx-target="this"`). `hx-sync` runs one
+request at a time and keeps only the last click queued, so clicks in quick succession save in order.
+Without JavaScript the Save button, shown only then, does the same with a normal POST and redirect.
 {% endcomment %}
 <form id="theme-form"
       method="post"
@@ -10,11 +13,13 @@ Without JavaScript the Save button, shown only then, does the same with a normal
       hx-post="{% url 'accounts:theme-update' %}"
       hx-trigger="change"
       hx-target="this"
-      hx-swap="outerHTML">
+      hx-swap="outerHTML"
+      hx-sync="this:queue last"
+      hx-on::before-request="this.querySelector('[data-theme-error]')?.remove()">
   {% csrf_token %}
 
   {% if theme_form.errors %}
-    <div class="mb-4 text-sm p-3 rounded bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700">
+    <div data-theme-error class="mb-4 text-sm p-3 rounded bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700">
       {% for field in theme_form %}{% for error in field.errors %}{{ error }}<br>{% endfor %}{% endfor %}
     </div>
   {% endif %}
