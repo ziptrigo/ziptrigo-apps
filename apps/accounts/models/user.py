@@ -51,6 +51,15 @@ class User(AbstractBaseUser, PermissionsMixin):
         (STATUS_DELETED, 'Deleted'),
     ]
 
+    THEME_SYSTEM = 'system'
+    THEME_LIGHT = 'light'
+    THEME_DARK = 'dark'
+    THEME_CHOICES = [
+        (THEME_SYSTEM, 'System'),
+        (THEME_LIGHT, 'Light'),
+        (THEME_DARK, 'Dark'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # These fields are re-typed with `cast(...)` to their actual Python value type rather than
     # left as the declared `models.Field` subclass: Django model fields are descriptors handled by
@@ -95,6 +104,18 @@ class User(AbstractBaseUser, PermissionsMixin):
             max_length=16,
             choices=STATUS_CHOICES,
             default=STATUS_ACTIVE,
+        ),
+    )
+    # The colour theme the site shows this user (issue #166), set on the account page and rendered
+    # by `core/base.html` on every page. `db_default` as well as `default`: the previous release's
+    # container keeps inserting users while the migration runs and doesn't know the column.
+    theme = cast(
+        str,
+        models.CharField(
+            max_length=16,
+            choices=THEME_CHOICES,
+            default=THEME_SYSTEM,
+            db_default=THEME_SYSTEM,
         ),
     )
     inactive_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))

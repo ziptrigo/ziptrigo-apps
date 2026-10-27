@@ -14,6 +14,7 @@ from .views import (
     register_page,
     resend_confirmation_page,
     reset_password_page,
+    theme_update,
 )
 
 app_name = 'accounts'
@@ -22,6 +23,7 @@ urlpatterns = [
     path('', account_page, name='account'),
     path('profile/', profile_update, name='profile-update'),
     path('password/', password_change, name='password-change'),
+    path('theme/', theme_update, name='theme-update'),
     path('login/', login_page, name='login'),
     path('register/', register_page, name='register'),
     path('logout/', logout_page, name='logout'),

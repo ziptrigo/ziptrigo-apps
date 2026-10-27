@@ -1,7 +1,7 @@
 # Core: site shell
 
 **Scope.** Everything every page shares (`apps/core/templates/core/base.html`) and the landing page
-(`core/home.html`): the header (logo, one link per registered product, theme toggle, Login link or
+(`core/home.html`): the header (logo, one link per registered product, Login link or
 account menu), the footer (FAQ, Feedback, copyright), the product cards on `/`, the "login
 required" redirects of the product and account pages, unknown URLs, the API docs at `/api/docs`,
 light/dark theme, the layout at phone width (375 px), page titles, favicon and logo, and console
@@ -14,7 +14,7 @@ errors. Signing in itself is covered in `accounts.md`; here it is only a step.
 - Seeded accounts (password `QaE2e-Passw0rd!` for all): `qa.user@example.com` (name "QA User",
   100 credits), `qa.admin@example.com` (superuser, "QA Admin").
 - Start logged out, in a fresh browser profile or after clearing cookies and `localStorage` for
-  `localhost:8765` (the theme choice lives in `localStorage` under the key `theme`).
+  `localhost:8765` (the theme is stored on the account, not in the browser, since issue #166).
 - To log in during a case: on `/account/login/` fill **Email** and **Password** and press
   **Sign in**. To log out: open the account menu (the person icon at the top right, accessible
   name "Account menu") and press **Logout**.
@@ -52,7 +52,7 @@ them in this order:
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the header (top bar). | Left: a small logo plus the text **ZipTrigo**, then the links **QR Codes**, **File Transfer**, **Receipts**, each with its icon. Right: a theme toggle button (an icon image, tooltip "Toggle theme") and a **Login** link. There is no person icon / account menu. |
+| 1 | Look at the header (top bar). | Left: a small logo plus the text **ZipTrigo**, then the links **QR Codes**, **File Transfer**, **Receipts**, each with its icon. Right: a **Login** link (no theme button: the theme is chosen on the account page). There is no person icon / account menu. |
 | 2 | Look for a credit balance in the header. | None is shown (the base template has no balance in the header; the balance is on the account page, see CORE-08). |
 | 3 | Look at the footer. | Links **FAQ** and **Feedback** in the middle; on the right, in small grey text, `© <current year> Joao Coelho. Licensed under MIT.` (the year is the current one, e.g. `© 2026`). The footer sits at the bottom of the window even though the page content is short (no gap below it). |
 | 4 | Click **ZipTrigo** in the header. | Stays on / reloads `/`. |
@@ -105,7 +105,7 @@ parameter, and signing in returns them to the product.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the header's right side. | The theme toggle and a person icon button (tooltip "Account"); no **Login** link. |
+| 1 | Look at the header's right side. | A person icon button (tooltip "Account"); no theme button and no **Login** link. |
 | 2 | Click the person icon. | A dropdown opens under it, right-aligned and fully inside the window: first line **QA User** (bold, not a link), then **Settings** (cog icon) and **Logout** (sign-out icon). |
 | 3 | Click anywhere outside the dropdown. | It closes. |
 | 4 | Open it again and press `Escape`. | It closes and keyboard focus returns to the person icon (a focus ring is visible on it). |
@@ -174,21 +174,24 @@ none.
 | 3 | Expand `POST /api/auth/login`. | The request body schema shows `email` and `password`. (Do not execute requests here; the API is out of scope.) |
 | 4 | Open `/api/openapi.json`. | A JSON document whose `info.title` is `ZipTrigo API`. |
 
-### CORE-12 Theme toggle
+### CORE-12 Theme follows the account setting
 
-**Purpose:** the toggle cycles system -> light -> dark -> system, persists, and dark mode is readable.
-**Preconditions:** logged out, `localStorage` cleared, the OS/browser colour scheme set to **light**,
-on `/`.
+**Purpose:** the theme is chosen on the account page (issue #166), is stored on the account, and
+dark mode is readable. There is no toggle in the header.
+**Preconditions:** logged out, the OS/browser colour scheme set to **light**, on `/`.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the toggle icon. | The "system" icon (`theme-system_128x128.png`) is shown; the page is light (white background, dark text). |
-| 2 | Click the toggle. | The page reloads. Mode is now **light**: the icon changes to `theme-light_128x128.png`; `localStorage.theme` is `light`; the page stays light. |
-| 3 | Click the toggle again. | Reloads into **dark**: icon `theme-dark_128x128.png`, `localStorage.theme` = `dark`, `<html>` has class `dark`; dark grey background, light text; header and footer dark grey; product cards dark sage with readable text. |
-| 4 | In dark mode, go to `/account/login/` (and, after signing in as `qa.user@example.com`, to `/account/` and `/feedback/`; sign out again afterwards). Skip `/api/docs`, which has its own styling. | Every page is dark too (the choice persists across pages); all text and input fields are readable (no dark text on a dark background, no white boxes with white text). |
-| 5 | Go back to `/` and click the toggle once more. | Back to **system**: icon `theme-system_128x128.png`, `localStorage.theme` = `system`, page light (because the OS is light). |
-| 6 | (If the browser tool can emulate `prefers-color-scheme: dark`) switch the emulated scheme to dark while in **system** mode and reload. | The page renders dark without clicking the toggle; the icon stays the "system" one. |
-| 7 | Look for a flash of the wrong theme on reload while in dark mode. | No visible white flash before dark styles apply (the early boot script sets the class before CSS loads). Tailwind's Play CDN may cause a brief unstyled flash; note it if noticeable. |
+| 1 | Look at the header and the page. | No theme button anywhere in the header. The page is light (white background, dark text) and `<html>` has `data-theme="system"` and no `dark` class. |
+| 2 | (If the browser tool can emulate `prefers-color-scheme: dark`) switch the emulated scheme to dark while logged out and reload. | The page renders dark with no choice made: a visitor without a session follows the system. Switch the emulation back to light. |
+| 3 | Sign in as `qa.user@example.com` and open `/account/`. | The **Appearance** section has three options, **System**, **Light**, **Dark**, with **System** selected. |
+| 4 | Choose **Dark**. | The page reloads by itself (no Save button) into dark: `<html>` has `data-theme="dark"` and class `dark`; dark grey background, light text; header and footer dark grey. **Dark** is selected after the reload. |
+| 5 | In dark mode, go to `/`, `/feedback/` and `/billing/credits/`. | Every page is dark too (the choice is the account's, so it applies to all pages); all text and input fields are readable (no dark text on a dark background, no white boxes with white text). |
+| 6 | Choose **Light** on `/account/`. | Reloads into light: `<html>` has `data-theme="light"` and no `dark` class. |
+| 7 | With **Light** saved, emulate a dark OS colour scheme and reload. | The page stays light: an explicit choice wins over the system. |
+| 8 | Choose **System** (OS emulation still dark). | Reloads into dark (`data-theme="system"`, class `dark` added by the boot script). While in **System**, switch the emulated scheme back to light **without reloading**: the page follows it live. |
+| 9 | Sign out and sign in again (or open a fresh browser profile and sign in); open `/account/` and save **Dark**, then sign out. | After signing out the page follows the system again (light), and the choice is waiting on the account after signing back in (it is stored on the account, not in the browser). |
+| 10 | Look for a flash of the wrong theme on reload while in dark mode. | No visible white flash before dark styles apply (the server renders the `dark` class on `<html>` before any CSS loads). Tailwind's Play CDN may cause a brief unstyled flash; note it if noticeable. |
 
 ### CORE-13 Keyboard navigation of the header
 
@@ -197,7 +200,7 @@ on `/`.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Press `Tab` repeatedly. | Focus moves in order: **ZipTrigo**, **QR Codes**, **File Transfer**, **Receipts**, the theme toggle, the account icon, then into the page (the product cards), then the footer links. Every focused element shows a visible focus indicator. |
+| 1 | Press `Tab` repeatedly. | Focus moves in order: **ZipTrigo**, **QR Codes**, **File Transfer**, **Receipts**, the account icon, then into the page (the product cards), then the footer links. Every focused element shows a visible focus indicator. |
 | 2 | With the account icon focused press `Enter`. | The menu opens; its `aria-expanded` becomes `true`. |
 | 3 | Press `Tab`. | Focus moves to **Settings**, then **Logout**. |
 | 4 | Press `Escape`. | The menu closes, `aria-expanded` is `false`, focus is back on the account icon. |
@@ -210,7 +213,7 @@ on `/`.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Look at the whole page, then try to scroll horizontally. | No horizontal scrolling: the page is not wider than the viewport (`document.documentElement.scrollWidth` <= 375). Nothing is cut off at the right edge. |
-| 2 | Look at the header. | The logo, the three product links, the theme toggle and **Login** are all visible and tappable (not overlapping one another, not clipped). Text may wrap, but each link stays legible. Take a screenshot. |
+| 2 | Look at the header. | The logo, the three product links and **Login** are all visible and tappable (not overlapping one another, not clipped). Text may wrap, but each link stays legible. Take a screenshot. |
 | 3 | Look at the product cards. | One column, full width with side padding; text wraps inside the cards. |
 | 4 | Look at the footer. | **FAQ**, **Feedback** and the copyright line fit within the width (the copyright is `whitespace-nowrap`, so check it isn't pushed off-screen). |
 | 5 | Tap **Login**. | The login form fits the width; the inputs are full width. |
@@ -249,9 +252,9 @@ on `/`.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Load `/`, `/account/login/` (logged out), `/account/`, `/billing/credits/`, `/feedback/`, `/qr/`, `/transfer/`, `/receipts/`, and open/close the account menu on one of them. | No console **errors**. Acceptable: Tailwind's warning that `cdn.tailwindcss.com` should not be used in production. No failed requests (4xx/5xx) for scripts, styles, images or fonts: htmx (`unpkg.com/htmx.org@2.0.3`), Alpine.js, Font Awesome, the logo, the favicon and the three theme icons all load. |
+| 1 | Load `/`, `/account/login/` (logged out), `/account/`, `/billing/credits/`, `/feedback/`, `/qr/`, `/transfer/`, `/receipts/`, and open/close the account menu on one of them. | No console **errors**. Acceptable: Tailwind's warning that `cdn.tailwindcss.com` should not be used in production. No failed requests (4xx/5xx) for scripts, styles, images or fonts: htmx (`unpkg.com/htmx.org@2.0.3`), Alpine.js, Font Awesome, the logo and the favicon all load. |
 | 2 | Check that Font Awesome icons render. | Icons in the header links, the cards and the account menu show as glyphs, not empty squares. |
-| 3 | Check images. | No broken-image icons anywhere (logo in the header and on the landing page, theme icon). |
+| 3 | Check images. | No broken-image icons anywhere (logo in the header and on the landing page). |
 
 ### CORE-18 Logout ends access
 
