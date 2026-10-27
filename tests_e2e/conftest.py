@@ -13,32 +13,48 @@ import pytest
 
 @pytest.fixture(scope='session')
 def site_server():
-    # Start the site from the repo root.
+    """The site on port 8000, against the local environment's own database.
+
+    It migrates that database first (a checkout that just pulled new migrations would otherwise
+    serve 500s), and runs with rate limiting off: the signup rule allows 5 per hour per IP, so a
+    sixth run within the hour would fail for no reason of its own.
+    """
     env = os.environ.copy()
     env.setdefault('ENVIRONMENT', 'local')
+    env['RATELIMIT_ENABLE'] = 'False'
 
-    # Using a temporary database for E2E tests would be better,
-    # but for now we'll assume the local environment is set up.
-
-    process = subprocess.Popen(
-        ['python', 'manage.py', 'runserver', '8000', '--noreload'],
+    subprocess.run(
+        [sys.executable, 'manage.py', 'migrate', '--noinput'],
         env=env,
-        stdout=subprocess.PIPE,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    process = subprocess.Popen(
+        [sys.executable, 'manage.py', 'runserver', '8000', '--noreload'],
+        env=env,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
     )
+    try:
+        _wait_until_up(process, 'http://localhost:8000')
+        yield 'http://localhost:8000'
+    finally:
+        process.terminate()
+        process.wait()
 
-    # Give it a few seconds to start
-    time.sleep(3)
 
-    if process.poll() is not None:
-        stdout, stderr = process.communicate()
-        pytest.fail(f'Server failed to start:\nSTDOUT: {stdout}\nSTDERR: {stderr}')
-
-    yield 'http://localhost:8000'
-
-    process.terminate()
-    process.wait()
+def _wait_until_up(process: subprocess.Popen, url: str) -> None:
+    for _ in range(60):
+        if process.poll() is not None:
+            pytest.fail(f'Server failed to start:\n{process.stderr.read()}')
+        try:
+            urllib.request.urlopen(f'{url}/account/login/', timeout=1)
+            return
+        except OSError:
+            time.sleep(0.5)
+    pytest.fail('The server did not come up')
 
 
 class ReceiptsServer:
@@ -125,16 +141,7 @@ def receipts_server():
         text=True,
     )
     try:
-        for _ in range(60):
-            if process.poll() is not None:
-                pytest.fail(f'Server failed to start:\n{process.stderr.read()}')
-            try:
-                urllib.request.urlopen(f'{url}/account/login/', timeout=1)
-                break
-            except OSError:
-                time.sleep(0.5)
-        else:
-            pytest.fail('The server did not come up')
+        _wait_until_up(process, url)
         yield server
     finally:
         process.terminate()

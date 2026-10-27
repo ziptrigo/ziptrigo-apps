@@ -72,14 +72,14 @@
             {% if link.last_clicked_at %}
             <div>
                 <dt class="text-gray-500 dark:text-gray-400">Last click</dt>
-                <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.last_clicked_at|date:'M j, Y H:i' }}</dd>
+                <dd class="mt-1 text-gray-900 dark:text-gray-100"><time datetime="{{ link.last_clicked_at|date:'c' }}" data-local-time>{{ link.last_clicked_at|date:'M j, Y H:i' }} UTC</time></dd>
             </div>
             {% endif %}
         </div>
         {% if link.expires_at %}
         <div>
             <dt class="text-gray-500 dark:text-gray-400">Expires</dt>
-            <dd class="mt-1 text-gray-900 dark:text-gray-100">{{ link.expires_at|date:'M j, Y H:i' }}</dd>
+            <dd class="mt-1 text-gray-900 dark:text-gray-100"><time datetime="{{ link.expires_at|date:'c' }}" data-local-time>{{ link.expires_at|date:'M j, Y H:i' }} UTC</time></dd>
         </div>
         {% endif %}
         {% if link.max_clicks %}
@@ -160,4 +160,9 @@
 
 {% include 'core/partials/confirm_modal.html' %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script src="{% static 'short_url/js/local_time.js' %}"></script>
 {% endblock %}

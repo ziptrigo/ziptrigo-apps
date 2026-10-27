@@ -63,9 +63,12 @@
     <div class="mb-4 grid gap-4 sm:grid-cols-2">
         <div>
             <label for="id_expires_at" class="block mb-1 text-sm font-medium">Expires <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
-            <input id="id_expires_at" name="expires_at" type="datetime-local" value="{{ values.expires_at }}"
+            {% comment %} The visible input is in the browser's time zone; local_time.js keeps the hidden
+               one, which is what is submitted, in UTC. {% endcomment %}
+            <input id="id_expires_at" type="datetime-local" data-utc-target="id_expires_at_utc" aria-describedby="expires-help"
                    class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">After this the link stops working.</p>
+            <input id="id_expires_at_utc" name="expires_at" type="hidden" value="{{ values.expires_at }}">
+            <p id="expires-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">In your own time zone. After this the link stops working.</p>
         </div>
         <div>
             <label for="id_max_clicks" class="block mb-1 text-sm font-medium">Click limit <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
@@ -131,4 +134,9 @@
     </div>
 </form>
 {% endwith %}
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script src="{% static 'short_url/js/local_time.js' %}"></script>
 {% endblock %}

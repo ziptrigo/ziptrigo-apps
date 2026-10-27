@@ -14,13 +14,14 @@ concurrent request) asks again instead of charging unconfirmed. Editing works th
 one charge, setting a password the link has never had (`update_link`'s `expected_cost`).
 """
 
+from datetime import UTC
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
-from django.utils.timezone import localtime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
@@ -65,7 +66,8 @@ def _initial(link: ShortLink) -> dict:
         'destination': link.destination,
         'title': link.title,
         'tags': ', '.join(link.tags),
-        'expires_at': localtime(link.expires_at).strftime('%Y-%m-%dT%H:%M')
+        # UTC with its offset: the form's script shows it in the browser's own time zone.
+        'expires_at': link.expires_at.astimezone(UTC).strftime('%Y-%m-%dT%H:%MZ')
         if link.expires_at
         else '',
         'max_clicks': link.max_clicks or '',

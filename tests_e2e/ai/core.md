@@ -213,14 +213,14 @@ dark mode is readable. There is no toggle in the header.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Look at the whole page, then try to scroll horizontally. | No horizontal scrolling: the page is not wider than the viewport (`document.documentElement.scrollWidth` <= 375). Nothing is cut off at the right edge. |
-| 2 | Look at the header. | The logo, the three product links and **Login** are all visible and tappable (not overlapping one another, not clipped). Text may wrap, but each link stays legible. Take a screenshot. |
+| 2 | Look at the header. | One line: the logo and **ZipTrigo**, the four product links as icons only (QR Codes, File Transfer, Receipts, Short URLs; each name is its tooltip and accessible name), and **Login** at the right. Nothing overlaps, wraps or is clipped. Take a screenshot. (The product names appear next to the icons from 768 px wide.) |
 | 3 | Look at the product cards. | One column, full width with side padding; text wraps inside the cards. |
 | 4 | Look at the footer. | **FAQ**, **Feedback** and the copyright line fit within the width (the copyright is `whitespace-nowrap`, so check it isn't pushed off-screen). |
 | 5 | Tap **Login**. | The login form fits the width; the inputs are full width. |
 
-> Note for the reviewer: the header is a single non-wrapping flex row with no mobile menu, and the
-> footer copyright never wraps, so overflow at 375 px is plausible. Record exactly what you see,
-> with a screenshot, and the measured `scrollWidth`.
+> Note for the reviewer: the header has no mobile menu, and the footer copyright never wraps, so
+> overflow at 375 px is plausible. Record exactly what you see, with a screenshot, and the measured
+> `scrollWidth`.
 
 ### CORE-15 Phone width (375 px), logged in
 
@@ -229,10 +229,11 @@ dark mode is readable. There is no toggle in the header.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | On `/`, tap the person icon. | The dropdown opens fully inside the viewport (nothing cut off at the right or left edge); **QA User**, **Settings**, **Logout** are readable and tappable. |
-| 2 | Tap outside it. | It closes. |
-| 3 | Open `/qr/`, `/transfer/`, `/receipts/`, `/account/`, `/billing/credits/` and `/feedback/` in turn. | Each page has no horizontal page scroll (a wide table may scroll inside its own box, e.g. the credits table, but the page itself must not). Headings and primary buttons are visible without zooming. |
-| 4 | Reset the viewport to desktop. | - |
+| 1 | Look at the header. | Still one line: the four product icons, the notification bell and the person icon (no icon pushed onto a second line). It stays one line at 320 px too, where **ZipTrigo** next to the logo is hidden. |
+| 2 | On `/`, tap the person icon. | The dropdown opens fully inside the viewport (nothing cut off at the right or left edge); **QA User**, **Settings**, **Logout** are readable and tappable. |
+| 3 | Tap outside it. | It closes. |
+| 4 | Open `/qr/`, `/transfer/`, `/receipts/`, `/account/`, `/links/`, `/billing/credits/` and `/feedback/` in turn. | Each page has no horizontal page scroll (a wide table may scroll inside its own box, e.g. the credits table, but the page itself must not). Headings and primary buttons are visible without zooming. |
+| 5 | Reset the viewport to desktop. | - |
 
 ### CORE-16 Page titles
 
