@@ -5,13 +5,11 @@ against it, so both sides ignore case, accents, punctuation and formatting.
 """
 
 import unicodedata
-from collections.abc import Sequence
 
-from markdown_it.token import Token
-
+from .inline_text import inline_text
+from .limits import check_length
 from .parser import get_parser
 
-_TEXT_TOKENS = frozenset({'text', 'text_special', 'code_inline', 'task_reference'})
 #: Block tokens that end a line of text (a paragraph, a list item); others only separate by a space.
 _LINE_ENDS = frozenset({'paragraph_close', 'list_item_close'})
 _SEPARATORS = frozenset(
@@ -27,19 +25,6 @@ _SEPARATORS = frozenset(
         'hr',
     }
 )
-
-
-def _inline_text(children: Sequence[Token]) -> str:
-    parts: list[str] = []
-    for token in children:
-        if token.type in _TEXT_TOKENS:
-            parts.append(token.content)
-        elif token.type in ('softbreak', 'hardbreak'):
-            parts.append('\n')
-        elif token.type == 'image':
-            # The alt text; the URL is dropped.
-            parts.append(_inline_text(token.children or []))
-    return ''.join(parts)
 
 
 class _Writer:
@@ -68,12 +53,14 @@ def to_plain_text(markdown: str) -> str:
     Keeps the text of paragraphs, headings, code, link text (a bare URL is its own text), image alt
     text and `#1234` references; drops emphasis and heading marks, checklist boxes, link
     destinations and fence markers. Paragraphs and list items end in a newline, other blocks are
-    separated by a single space.
+    separated by a single space. Raises `ValueError('Document too long')` over
+    `MAX_MARKDOWN_CHARS`, like `render`.
     """
+    check_length(markdown)
     writer = _Writer()
     for token in get_parser().parse(markdown):
         if token.type == 'inline':
-            writer.write(_inline_text(token.children or []).strip())
+            writer.write(inline_text(token.children or []).strip())
         elif token.type in ('fence', 'code_block'):
             writer.separate(' ')
             writer.write(token.content.strip('\n'))
@@ -88,17 +75,23 @@ def to_plain_text(markdown: str) -> str:
 def normalize_for_search(text: str) -> str:
     """Lower-cased words separated by single spaces: no accents, no punctuation.
 
-    `Cão, Ação & Coração!` -> `cao acao coracao`. Letters and digits of every script are kept.
+    `Cão, Ação & Coração!` -> `cao acao coracao`. Letters, digits and combining marks of every
+    script are kept as word characters: NFKD first splits an accented Latin letter into the letter
+    and a non-spacing mark, and that mark (combining class above 0) is dropped; the vowel signs of
+    Devanagari and other abugidas (class 0, category M) stay, so `किताब` is still one word.
     """
     decomposed = unicodedata.normalize('NFKD', text)
     unmarked = ''.join(ch for ch in decomposed if not unicodedata.combining(ch))
     folded = unmarked.casefold()
     words = ''.join(
-        ch if ch.isspace() or unicodedata.category(ch)[0] in 'LN' else ' ' for ch in folded
+        ch if ch.isspace() or unicodedata.category(ch)[0] in 'LNM' else ' ' for ch in folded
     )
     return ' '.join(words.split())
 
 
 def search_text(markdown: str) -> str:
-    """What the TODO app stores for searching: `normalize_for_search(to_plain_text(markdown))`."""
+    """What the TODO app stores for searching: `normalize_for_search(to_plain_text(markdown))`.
+
+    Raises `ValueError('Document too long')` over `MAX_MARKDOWN_CHARS`.
+    """
     return normalize_for_search(to_plain_text(markdown))

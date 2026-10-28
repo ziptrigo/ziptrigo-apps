@@ -14,10 +14,14 @@ from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
 from markdown_it.utils import EnvType, OptionsDict
 
+from .inline_text import inline_text
 from .links import LinkKind, classify_href
 
 #: `env` key holding `{number: url}` from the caller's reference resolver.
 TASK_URLS = 'task_urls'
+#: `env` key holding the stack of open links (`True`: the link was written as an anchor). Links
+#: cannot nest, so it is at most one deep; its length is how an image knows it sits inside a link.
+_OPEN_LINKS = 'open_links'
 
 _LANGUAGE_CHARS = re.compile(r'[^a-z0-9+\-]')
 _MAX_LANGUAGE_LENGTH = 20
@@ -41,7 +45,7 @@ def _anchor_open(href: str, number: int | None, env: EnvType) -> str | None:
         return f'<a href="{target}" target="_blank" rel="noopener noreferrer nofollow ugc">'
     if kind is LinkKind.MAIL:
         return f'<a href="{target}" rel="nofollow ugc">'
-    if kind is LinkKind.RELATIVE:
+    if kind in (LinkKind.RELATIVE, LinkKind.SAME_SITE):
         return f'<a href="{target}">'
     return None
 
@@ -51,26 +55,8 @@ def _href(token: Token, name: str) -> str:
     return value if isinstance(value, str) else ''
 
 
-def _matching_close(tokens: Sequence[Token], idx: int) -> Token | None:
-    depth = 0
-    for token in tokens[idx:]:
-        if token.type == 'link_open':
-            depth += 1
-        elif token.type == 'link_close':
-            depth -= 1
-            if depth == 0:
-                return token
-    return None
-
-
-def _inside_link(tokens: Sequence[Token], idx: int) -> bool:
-    depth = 0
-    for token in tokens[:idx]:
-        if token.type == 'link_open':
-            depth += 1
-        elif token.type == 'link_close':
-            depth -= 1
-    return depth > 0
+def _open_links(env: EnvType) -> list[bool]:
+    return env.setdefault(_OPEN_LINKS, [])
 
 
 def link_open(
@@ -78,15 +64,15 @@ def link_open(
 ) -> str:
     token = tokens[idx]
     opening = _anchor_open(_href(token, 'href'), token.meta.get('task_number'), env)
-    if (close := _matching_close(tokens, idx)) is not None:
-        close.meta['anchor'] = opening is not None
+    _open_links(env).append(opening is not None)
     return opening or ''
 
 
 def link_close(
     self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
 ) -> str:
-    return '</a>' if tokens[idx].meta.get('anchor') else ''
+    stack = _open_links(env)
+    return '</a>' if stack and stack.pop() else ''
 
 
 def image(
@@ -95,8 +81,8 @@ def image(
     """Images are never rendered: a link with the alt text (the URL when there is none)."""
     token = tokens[idx]
     src = _href(token, 'src')
-    label = escapeHtml(self.renderInlineAsText(token.children or [], options, env) or src)
-    opening = None if _inside_link(tokens, idx) else _anchor_open(src, None, env)
+    label = escapeHtml(inline_text(token.children or []) or src)
+    opening = None if _open_links(env) else _anchor_open(src, None, env)
     return f'{opening}{label}</a>' if opening else label
 
 

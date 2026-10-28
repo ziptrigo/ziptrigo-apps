@@ -1,17 +1,16 @@
 """`render`: Markdown to sanitised HTML."""
 
+import re
 from collections.abc import Callable
 
 import nh3
 from django.utils.safestring import SafeString, mark_safe
 
+from .limits import MAX_MARKDOWN_CHARS, check_length
+from .links import check_task_url_path
 from .parser import get_parser
-from .references import referenced_numbers
+from .references import TASK_URL_PATH, referenced_numbers
 from .renderer import TASK_URLS
-
-#: Longer documents are refused. Callers cap their own fields well below this (the TODO app:
-#: 20,000 for a description, 10,000 for a comment).
-MAX_MARKDOWN_CHARS = 50_000
 
 #: Given every task number a document mentions (once each, in order of appearance), the numbers
 #: the caller recognises mapped to the URL each should link to. Called once per render.
@@ -30,17 +29,32 @@ ALLOWED_ATTRIBUTES = {
 ALLOWED_URL_SCHEMES = {'http', 'https', 'mailto'}
 
 
-def render(markdown: str, *, reference_resolver: ReferenceResolver | None = None) -> SafeString:
+__all__ = ['MAX_MARKDOWN_CHARS', 'ReferenceResolver', 'render']
+
+
+def render(
+    markdown: str,
+    *,
+    reference_resolver: ReferenceResolver | None = None,
+    task_url_path: re.Pattern[str] | None = None,
+) -> SafeString:
     """The HTML for `markdown`, safe to put in a page.
 
     Raises `ValueError('Document too long')` over `MAX_MARKDOWN_CHARS` characters.
-    Without a `reference_resolver`, `#1234` and links to task pages stay plain text and ordinary
-    links.
+
+    `reference_resolver` turns task numbers into URLs (without one, `#1234` and links to task
+    pages stay plain text and ordinary links). `task_url_path` is the caller's pattern for a task
+    page's site-relative path, with a named group `number` and matching the whole path (e.g.
+    `^/todo/(?P<number>[0-9]{1,9})/?$`); a link to that path, relative or absolute on the host of
+    `settings.BASE_URL`, counts as a mention of that task. Without it URLs are never task
+    references. `ValueError` also for a pattern with no `number` group.
     """
-    if len(markdown) > MAX_MARKDOWN_CHARS:
-        raise ValueError('Document too long')
-    md = get_parser()
+    check_length(markdown)
     env: dict = {}
+    if task_url_path is not None:
+        check_task_url_path(task_url_path)
+        env[TASK_URL_PATH] = task_url_path
+    md = get_parser()
     tokens = md.parse(markdown, env)
     if reference_resolver is not None and (numbers := referenced_numbers(tokens)):
         resolved = reference_resolver(numbers)

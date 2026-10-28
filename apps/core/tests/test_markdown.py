@@ -2,6 +2,7 @@
 
 import re
 import threading
+import time
 
 import pytest
 from django.template import Context, Template
@@ -13,12 +14,16 @@ from apps.core.markdown import (
     normalize_for_search,
     render,
     search_text,
+    task_number_from_href,
     to_plain_text,
     toggle_checklist_item,
 )
 from apps.core.markdown.links import LinkKind, classify_href
+from apps.core.templatetags.core_markdown import markdown_filter
 
 EXTERNAL = 'target="_blank" rel="noopener noreferrer nofollow ugc"'
+#: What the TODO app passes: the site-relative path of a task page.
+TASK_PATH = re.compile(r'^/todo/(?P<number>[0-9]{1,9})/?$')
 
 
 def resolver(known: dict[int, str]):
@@ -175,6 +180,44 @@ def test_bare_urls_become_links():
 
 
 @pytest.mark.parametrize(
+    ('source', 'href', 'text'),
+    [
+        ('http://example.com', 'http://example.com', 'http://example.com'),
+        ('(www.example.org/a_(b)?x=1).', 'http://www.example.org/a_(b)?x=1', None),
+        ('WWW.Example.ORG:8080/x', 'http://WWW.Example.ORG:8080/x', 'WWW.Example.ORG:8080/x'),
+        ('http://manage.py', 'http://manage.py', 'http://manage.py'),
+    ],
+)
+def test_bare_urls_with_a_scheme_or_www_still_link(source, href, text):
+    html = render(source)
+    assert f'<a href="{href}" {EXTERNAL}>' in html
+    if text:
+        assert f'>{text}</a>' in html
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        'edit manage.py and settings.py',
+        'read README.md or run deploy.sh',
+        'see example.com and foo.io/bar',
+        'wwwexample.org and xwww.example.org',
+        'www.localhost and www.com',
+    ],
+)
+def test_scheme_less_names_stay_text(source):
+    html = render(source)
+    assert '<a' not in html
+    assert html.strip() == f'<p>{source}</p>'
+
+
+def test_email_addresses_still_link():
+    assert '<a href="mailto:a@example.com" rel="nofollow ugc">a@example.com</a>' in render(
+        'write a@example.com'
+    )
+
+
+@pytest.mark.parametrize(
     'href',
     [
         'javascript:alert(1)',
@@ -237,6 +280,24 @@ def test_site_relative_image_is_a_plain_link():
     )
 
 
+def test_image_label_keeps_code_spans_and_references():
+    html = render('![see #1234 and `x` **b**](https://a.example.com/i.png)')
+    assert f'{EXTERNAL}>see #1234 and x b</a>' in html
+    # The same text the plain-text export (and so search) has.
+    assert to_plain_text('![see #1234 and `x` **b**](https://a.example.com/i.png)') == (
+        'see #1234 and x b'
+    )
+
+
+def test_image_label_in_an_image_and_with_a_resolver():
+    html = render(
+        '![a ![inner `c`](https://b.example.com/i.png) #1234](https://a.example.com/i.png)',
+        reference_resolver=resolver(TASKS),
+    )
+    assert 'a inner c #1234</a>' in html
+    assert 'task-ref' not in html
+
+
 def test_image_inside_a_link_does_not_nest_anchors():
     html = render('[![alt](https://img.example.com/a.png)](https://example.com)')
     assert html.count('<a ') == 1
@@ -260,6 +321,7 @@ def test_resolver_is_called_once_with_deduplicated_numbers_in_order():
     html = render(
         '#2000 then #1234, and again #2000 and `#3000` and [x](/todo/1234/)\n\n- #1234',
         reference_resolver=resolve,
+        task_url_path=TASK_PATH,
     )
     assert resolve.calls == [[2000, 1234]]
     assert html.count('class="task-ref"') == 5
@@ -304,12 +366,36 @@ def test_these_are_references(source):
     assert '<a href="/todo/1234/" class="task-ref">#1234</a>' in html
 
 
-@pytest.mark.parametrize(
-    'source', ['#1234abc', '#1234x', '*#1234*', '**#1234**', '#1234-5', '#1234/']
-)
+@pytest.mark.parametrize('source', ['#1234abc', '#1234x', '#1234-5', '#1234/', '+#1234'])
 def test_neighbouring_characters_prevent_a_reference(source):
     html = render(source, reference_resolver=resolver(TASKS))
     assert 'task-ref' not in html
+
+
+@pytest.mark.parametrize(
+    ('source', 'html'),
+    [
+        ('**#1234**', '<strong>{ref}</strong>'),
+        ('*#1234*', '<em>{ref}</em>'),
+        ('_#1234_', '<em>{ref}</em>'),
+        ('__#1234__', '<strong>{ref}</strong>'),
+        ('see **#1234**.', 'see <strong>{ref}</strong>.'),
+        ('**done:** #1234', '<strong>done:</strong> {ref}'),
+        ('***#1234***', '<em><strong>{ref}</strong></em>'),
+    ],
+)
+def test_reference_wrapped_in_emphasis(source, html):
+    ref = '<a href="/todo/1234/" class="task-ref">#1234</a>'
+    resolve = resolver(TASKS)
+    rendered = render(source, reference_resolver=resolve)
+    assert rendered.strip() == f'<p>{html.format(ref=ref)}</p>'
+    assert resolve.calls == [[1234]]
+
+
+def test_unbalanced_emphasis_marks_next_to_a_reference_stay_text():
+    html = render('*#1234 and _#1234', reference_resolver=resolver(TASKS))
+    assert html.count('class="task-ref"') == 2
+    assert html.startswith('<p>*<a ') and ' and _<a ' in html
 
 
 def test_reference_in_code_span_and_in_link_text_is_text():
@@ -359,7 +445,9 @@ def test_resolver_cannot_produce_an_unsafe_link():
 def test_site_relative_task_url_is_a_reference():
     resolve = resolver({1234: '/todo/1234/'})
     html = render(
-        '[the task](/todo/1234/) and /todo/1234 [no slash](/todo/1234)', reference_resolver=resolve
+        '[the task](/todo/1234/) and /todo/1234 [no slash](/todo/1234)',
+        reference_resolver=resolve,
+        task_url_path=TASK_PATH,
     )
     assert resolve.calls == [[1234]]
     assert html.count('<a href="/todo/1234/" class="task-ref">') == 2
@@ -371,6 +459,7 @@ def test_bare_task_url_keeps_its_text(settings):
     html = render(
         'https://app.example.com/todo/1234/',
         reference_resolver=resolver({1234: '/todo/1234/'}),
+        task_url_path=TASK_PATH,
     )
     assert html.strip() == (
         '<p><a href="/todo/1234/" class="task-ref">https://app.example.com/todo/1234/</a></p>'
@@ -380,7 +469,11 @@ def test_bare_task_url_keeps_its_text(settings):
 def test_absolute_task_url_of_this_site_is_a_reference(settings):
     settings.BASE_URL = 'https://app.example.com'
     resolve = resolver({1234: '/todo/1234/'})
-    html = render('[go](https://app.example.com/todo/1234/)', reference_resolver=resolve)
+    html = render(
+        '[go](https://app.example.com/todo/1234/)',
+        reference_resolver=resolve,
+        task_url_path=TASK_PATH,
+    )
     assert resolve.calls == [[1234]]
     assert html.strip() == '<p><a href="/todo/1234/" class="task-ref">go</a></p>'
 
@@ -388,35 +481,125 @@ def test_absolute_task_url_of_this_site_is_a_reference(settings):
 @pytest.mark.parametrize(
     'url',
     [
-        'https://other.example.com/todo/1234/',
         'https://app.example.com/todo/1234/?x=1',
         'https://app.example.com/todo/1234/#c',
         'https://app.example.com/todo/1234/edit',
         'https://app.example.com/other/1234/',
-        'https://app.example.com.evil.com/todo/1234/',
     ],
 )
-def test_other_urls_are_ordinary_links(settings, url):
+def test_other_paths_on_this_site_are_ordinary_same_site_links(settings, url):
     settings.BASE_URL = 'https://app.example.com'
     resolve = resolver({1234: '/todo/1234/'})
-    html = render(f'[go]({url})', reference_resolver=resolve)
+    html = render(f'[go]({url})', reference_resolver=resolve, task_url_path=TASK_PATH)
+    assert resolve.calls == []
+    assert html.strip() == f'<p><a href="{url}">go</a></p>'
+
+
+@pytest.mark.parametrize(
+    'url',
+    [
+        'https://other.example.com/todo/1234/',
+        'https://app.example.com.evil.com/todo/1234/',
+        'https://app.example.com@evil.com/todo/1234/',
+        'https://app.example.com:8443/todo/1234/',
+    ],
+)
+def test_other_hosts_are_ordinary_external_links(settings, url):
+    settings.BASE_URL = 'https://app.example.com'
+    resolve = resolver({1234: '/todo/1234/'})
+    html = render(f'[go]({url})', reference_resolver=resolve, task_url_path=TASK_PATH)
     assert resolve.calls == []
     assert 'task-ref' not in html
-    assert f'{EXTERNAL}>go</a>' in html
+    assert f'<a href="{url}" {EXTERNAL}>go</a>' in html
 
 
 def test_task_url_the_resolver_omits_stays_an_ordinary_link(settings):
     settings.BASE_URL = 'https://app.example.com'
-    html = render('[go](https://app.example.com/todo/1234/)', reference_resolver=resolver({}))
+    html = render(
+        '[go](https://app.example.com/todo/1234/)',
+        reference_resolver=resolver({}),
+        task_url_path=TASK_PATH,
+    )
     assert 'task-ref' not in html
-    assert f'<a href="https://app.example.com/todo/1234/" {EXTERNAL}>go</a>' in html
+    assert html.strip() == '<p><a href="https://app.example.com/todo/1234/">go</a></p>'
 
 
 def test_task_url_without_a_resolver_is_an_ordinary_link(settings):
     settings.BASE_URL = 'https://app.example.com'
-    html = render('[go](https://app.example.com/todo/1234/)')
+    html = render('[go](https://app.example.com/todo/1234/)', task_url_path=TASK_PATH)
     assert 'task-ref' not in html
-    assert f'{EXTERNAL}>go</a>' in html
+    assert html.strip() == '<p><a href="https://app.example.com/todo/1234/">go</a></p>'
+
+
+def test_without_a_task_url_path_urls_are_never_task_references(settings):
+    settings.BASE_URL = 'https://app.example.com'
+    resolve = resolver({1234: '/todo/1234/'})
+    html = render(
+        '[a](/todo/1234/) [b](https://app.example.com/todo/1234/) /todo/1234/',
+        reference_resolver=resolve,
+    )
+    assert resolve.calls == []
+    assert 'task-ref' not in html
+    assert '<a href="/todo/1234/">a</a>' in html
+
+
+def test_the_task_url_path_is_the_callers_to_choose(settings):
+    settings.BASE_URL = 'https://app.example.com'
+    pattern = re.compile(r'^/tasks/(?P<number>[0-9]+)$')
+    resolve = resolver({4321: '/tasks/4321'})
+    html = render(
+        '[a](/tasks/4321) [b](/todo/4321/) [c](/tasks/4321/)',
+        reference_resolver=resolve,
+        task_url_path=pattern,
+    )
+    assert resolve.calls == [[4321]]
+    assert html.count('class="task-ref"') == 1
+    assert '<a href="/tasks/4321" class="task-ref">a</a>' in html
+
+
+def test_task_url_path_needs_a_number_group():
+    with pytest.raises(ValueError, match='number'):
+        render('x', task_url_path=re.compile(r'^/todo/([0-9]+)/?$'))
+
+
+def test_task_number_from_href_is_exported(settings):
+    settings.BASE_URL = 'https://app.example.com'
+    assert task_number_from_href('/todo/1234/', TASK_PATH) == 1234
+    assert task_number_from_href('/todo/1234', TASK_PATH) == 1234
+    assert task_number_from_href('https://app.example.com/todo/1234/', TASK_PATH) == 1234
+    assert task_number_from_href('https://other.example.com/todo/1234/', TASK_PATH) is None
+    assert task_number_from_href('https://app.example.com/todo/1234/?x=1', TASK_PATH) is None
+    assert task_number_from_href('/todo/1234/edit', TASK_PATH) is None
+    assert task_number_from_href('/todo/12345678901/', TASK_PATH) is None
+    assert task_number_from_href('/todo/1234/', None) is None
+
+
+# --- Same-site absolute links -------------------------------------------------------------------
+
+
+def test_absolute_links_to_this_site_render_like_relative_ones(settings):
+    settings.BASE_URL = 'https://app.example.com'
+    html = render('[a](https://app.example.com/account/) [b](HTTP://APP.example.com/x)')
+    assert '<a href="https://app.example.com/account/">a</a>' in html
+    assert '<a href="HTTP://APP.example.com/x">b</a>' in html
+    assert 'target' not in html and 'rel=' not in html
+
+
+def test_same_site_bare_url_and_image_have_no_target(settings):
+    settings.BASE_URL = 'https://app.example.com'
+    html = render('https://app.example.com/a ![pic](https://app.example.com/i.png)')
+    assert 'target' not in html and 'rel=' not in html
+    assert html.count('<a href=') == 2
+
+
+def test_classify_href_same_site(settings):
+    settings.BASE_URL = 'https://app.example.com'
+    assert classify_href('https://app.example.com/x') is LinkKind.SAME_SITE
+    assert classify_href('http://app.example.com') is LinkKind.SAME_SITE
+    assert classify_href('https://app.example.com:8443/x') is LinkKind.EXTERNAL
+    assert classify_href('https://app.example.com.evil.com/x') is LinkKind.EXTERNAL
+    assert classify_href('https://other.example.com/x') is LinkKind.EXTERNAL
+    assert classify_href('mailto:a@app.example.com') is LinkKind.MAIL
 
 
 # --- Checklists ---------------------------------------------------------------------------------
@@ -490,6 +673,32 @@ def test_document_length_limit():
         render('a' * (MAX_MARKDOWN_CHARS + 1))
 
 
+def test_plain_text_and_search_text_have_the_same_length_limit():
+    assert to_plain_text('a' * MAX_MARKDOWN_CHARS) == 'a' * MAX_MARKDOWN_CHARS
+    assert search_text('a' * MAX_MARKDOWN_CHARS) == 'a' * MAX_MARKDOWN_CHARS
+    with pytest.raises(ValueError, match='Document too long'):
+        to_plain_text('a' * (MAX_MARKDOWN_CHARS + 1))
+    with pytest.raises(ValueError, match='Document too long'):
+        search_text('a' * (MAX_MARKDOWN_CHARS + 1))
+
+
+def test_many_images_render_in_linear_time():
+    source = '![](a) ' * (MAX_MARKDOWN_CHARS // 7)
+    assert len(source) >= MAX_MARKDOWN_CHARS - 7
+    start = time.perf_counter()
+    html = render(source)
+    assert time.perf_counter() - start < 1
+    assert html.count('a') >= MAX_MARKDOWN_CHARS // 7
+
+
+def test_many_links_and_images_in_links_render_in_linear_time():
+    source = '[![x](https://a.example.com/i.png)](https://b.example.com) ' * 800
+    start = time.perf_counter()
+    html = render(source)
+    assert time.perf_counter() - start < 1
+    assert html.count('<a ') == 800
+
+
 # --- Template filter ----------------------------------------------------------------------------
 
 
@@ -498,6 +707,20 @@ def test_markdown_filter():
         Context({'text': '**hi** <b>there</b> #1234'})
     )
     assert html.strip() == '<p><strong>hi</strong> &lt;b&gt;there&lt;/b&gt; #1234</p>'
+
+
+def test_markdown_filter_never_raises_and_shows_a_too_long_text_escaped():
+    text = '<b>x</b> & y\n' + 'a' * MAX_MARKDOWN_CHARS
+    html = Template('{% load core_markdown %}{{ text|markdown }}').render(Context({'text': text}))
+    assert html.startswith('<p>&lt;b&gt;x&lt;/b&gt; &amp; y<br>a')
+    assert html.endswith('a</p>')
+    assert '<b>' not in html and '<strong>' not in html
+    assert isinstance(markdown_filter(text), SafeString)
+
+
+def test_markdown_filter_at_the_limit_still_renders():
+    html = markdown_filter('**x**' + 'a' * (MAX_MARKDOWN_CHARS - 5))
+    assert html.startswith('<p><strong>x</strong>')
 
 
 def test_markdown_filter_accepts_none():
@@ -671,6 +894,25 @@ def test_normalize_for_search_keeps_digits_and_letters_of_every_script():
     assert normalize_for_search('Привет, МИР! 東京 ١٢٣ Ünï-cøde ﬁne 3.14') == (
         'привет мир 東京 ١٢٣ uni cøde fine 3 14'
     )
+
+
+def test_normalize_for_search_keeps_abugida_words_whole():
+    # Devanagari vowel signs have combining class 0 (category Mc/Mn): they are part of the word.
+    assert normalize_for_search('किताब') == 'किताब'
+    # The nukta of ढ़ (combining class 7) is dropped like an accent, on the stored text and the
+    # query alike; the word stays in one piece.
+    assert search_text('**किताब** पढ़ो!') == 'किताब पढो'
+    assert normalize_for_search('ภาษาไทย বাংলা') == 'ภาษาไทย বাংলা'
+    # A virama (class 9) goes too, but a word is never cut into pieces.
+    assert len(normalize_for_search('தமிழ்').split()) == 1
+    # The same word typed precomposed (U+095D) or as ढ + nukta normalises identically.
+    assert normalize_for_search('\u095d') == normalize_for_search('\u0922\u093c')
+
+
+def test_normalize_for_search_still_strips_accents_around_other_scripts():
+    assert normalize_for_search('cão') == 'cao'
+    assert normalize_for_search('Ação किताब Ünï') == 'acao किताब uni'
+    assert normalize_for_search('e\u0301') == 'e'
 
 
 def test_normalize_for_search_is_idempotent():
