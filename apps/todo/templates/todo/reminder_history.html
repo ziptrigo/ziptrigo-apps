@@ -1,0 +1,39 @@
+{% extends 'todo/layout.html' %}
+
+{% block title %}Reminder history - To-do - ZipTrigo{% endblock %}
+
+{% block todo_content %}
+<a href="{% url 'todo:settings' %}" class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Settings</a>
+<h1 class="mt-2 mb-6 text-3xl font-bold text-gray-900 dark:text-gray-100">Reminder history</h1>
+
+{% if deliveries %}
+<ul id="reminder-history" class="divide-y divide-gray-200 dark:divide-gray-700 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    {% for delivery in deliveries %}
+    <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-3 text-sm">
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ delivery.sent_at|date:'j M Y, H:i' }}</span>
+        <span class="min-w-0 flex-1">
+            <span class="text-gray-500 dark:text-gray-400">#{{ delivery.task_number }}</span>
+            {% if delivery.task_id %}
+            <a href="{% url 'todo:task' delivery.task_number %}" class="text-sage-600 dark:text-sage-300 hover:underline">{{ delivery.task_title }}</a>
+            {% else %}
+            <span class="text-gray-900 dark:text-gray-100">{{ delivery.task_title }}</span> <span class="text-xs text-gray-500 dark:text-gray-400">(task deleted)</span>
+            {% endif %}
+        </span>
+        <span class="text-xs text-gray-600 dark:text-gray-300">{{ delivery.get_channel_display }}
+            {% if delivery.note == 'unconfirmed' %}(not sent: your email address is not confirmed)
+            {% elif delivery.note == 'failed' %}(could not be sent)
+            {% elif delivery.note == 'skipped' %}(skipped: its time had already passed){% endif %}</span>
+    </li>
+    {% endfor %}
+</ul>
+{% if page_obj.has_previous or page_obj.has_next %}
+<nav class="mt-4 flex items-center justify-between text-sm" aria-label="Pages">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="text-sage-600 dark:text-sage-300 hover:underline">Newer</a>{% else %}<span></span>{% endif %}
+    <span class="text-gray-500 dark:text-gray-400">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="text-sage-600 dark:text-sage-300 hover:underline">Older</a>{% else %}<span></span>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<p class="text-sm text-gray-500 dark:text-gray-400">No reminders have been delivered yet.</p>
+{% endif %}
+{% endblock %}

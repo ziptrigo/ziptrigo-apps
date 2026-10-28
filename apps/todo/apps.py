@@ -57,6 +57,14 @@ class TodoConfig(AppConfig):
                 lease=timedelta(minutes=30),
             )
         )
+        register_job(
+            JobSpec(
+                name='todo.send_reminders',
+                func=jobs.send_reminders,
+                interval=timedelta(minutes=1),
+                lease=timedelta(minutes=5),
+            )
+        )
 
     def _connect_signals(self):
         import logging
@@ -100,3 +108,18 @@ class TodoConfig(AppConfig):
                 enqueue_after_commit(lifecycle.delete_user_storage, str(instance.pk))
             except Exception:
                 logger.exception('Could not queue deletion of to-do storage for %s', instance.pk)
+
+        from apps.accounts.signals import timezone_changed
+
+        from .services import reminders
+
+        # A new time zone moves every reminder's instant. Queued, not done here: a user can have
+        # thousands of tasks, and the signal is sent in the request that changed the zone.
+        # `timezone_changed` is sent with `send_robust` (a failing receiver is logged), but never
+        # let one escape anyway.
+        @receiver(timezone_changed, dispatch_uid='todo.reschedule_reminders', weak=False)
+        def _reschedule_reminders(sender, user, old, new, **kwargs):
+            try:
+                enqueue_after_commit(reminders.reschedule_user_reminders, str(user.pk))
+            except Exception:
+                logger.exception('Could not queue reschedule_user_reminders for user %s', user.pk)

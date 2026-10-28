@@ -23,6 +23,7 @@ from .lists import (
     trash_page,
     upcoming_page,
 )
+from .reminders import reminder_add, reminder_delete, reminder_edit, reminder_history
 from .settings import settings_page
 from .tasks import (
     recurrence_stop,
@@ -61,6 +62,10 @@ __all__ = [
     'label_reorder',
     'labels_page',
     'recurrence_stop',
+    'reminder_add',
+    'reminder_delete',
+    'reminder_edit',
+    'reminder_history',
     'reorder_view',
     'reschedule_overdue_view',
     'settings_page',

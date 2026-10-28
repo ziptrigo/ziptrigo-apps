@@ -11,3 +11,8 @@ LABEL_DESCRIPTION_MAX = 255
 #: Task numbers are per user and start here, so `#1` to `#999` are never task references in
 #: Markdown (`apps.core.markdown` only links numbers of 4 to 9 figures).
 FIRST_TASK_NUMBER = 1000
+
+#: A reminder is set this many minutes before the due time, at most 30 days.
+MAX_REMINDER_MINUTES = 43_200
+#: At most this many reminders on one task.
+MAX_REMINDERS_PER_TASK = 10

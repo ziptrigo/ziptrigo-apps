@@ -7,6 +7,7 @@ from . import (
     metering,
     recurrence,
     references,
+    reminders,
     tasks,
 )
 from .accounts import (
@@ -157,6 +158,7 @@ __all__ = [
     'recurrence',
     'referenced_by',
     'references',
+    'reminders',
     'render_markdown',
     'reorder',
     'reorder_labels',

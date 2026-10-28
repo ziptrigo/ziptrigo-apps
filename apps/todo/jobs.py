@@ -6,10 +6,12 @@ the service itself, so one bad task can't hold up the rest of the run.
 
 import logging
 
+from django.utils import timezone
+
 from apps.billing.services import get_storage_price_per_gb_per_day
 
 from .models import TodoAccount
-from .services import attachments, tasks
+from .services import attachments, reminders, tasks
 from .services.metering import meter_account, resume
 
 logger = logging.getLogger(__name__)
@@ -53,3 +55,11 @@ def cleanup_uploads() -> None:
     removed = attachments.abandon_uploads()
     if removed:
         logger.info('Removed %d abandoned attachment upload(s).', removed)
+
+
+def send_reminders() -> None:
+    """Every minute: deliver the reminders that are due (in-app, by email or both) and mark the
+    ones too old to deliver as sent (`services.reminders.deliver_due`)."""
+    delivered = reminders.deliver_due(timezone.now())
+    if delivered:
+        logger.info('Delivered %d reminder(s).', delivered)

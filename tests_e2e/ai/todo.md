@@ -2,9 +2,9 @@
 
 ## Scope
 
-The To-do product's web UI (`apps/todo`, issues #178, #179 and #180: tasks, repeating tasks (TODO-19 and TODO-20),
-comments and task references (TODO-17 and TODO-18); search, reminders, attachments, AI parsing and email intake are
-later issues and are not covered):
+The To-do product's web UI (`apps/todo`, issues #178, #179, #180 and #182: tasks, repeating tasks (TODO-19 and TODO-20),
+comments and task references (TODO-17 and TODO-18), reminders (TODO-21); search, attachments, AI parsing and email
+intake are later issues and are not covered):
 
 - the sidebar (Today with a count, Upcoming, All, Completed, Labels, Trash, Settings; a top bar on
   phones) and the "Tasks are blocked" banner;
@@ -17,7 +17,8 @@ later issues and are not covered):
 - comments on the task page (add, edit with a visible history, delete and restore, Markdown, `#1234` links) and the
   "Referenced by" panel;
 - **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and
-  **Settings** `/todo/settings/` (default due time, the free-tasks line);
+  **Settings** `/todo/settings/` (default due time, default reminder and channel, the free-tasks line) and the reminder
+  history `/todo/reminders/history/`;
 - credits: the first 10 tasks of a calendar month are free, then 10 credits each; subtasks count;
 - access control: logged-out visitors, another user's task numbers.
 
@@ -361,3 +362,28 @@ Compute dates from the heading of **Today**; "the 1st" below means the first day
 | 4 | Create a task `Water plants`, Repeat = **Day**, Ends **On a date** = tomorrow, mode Fixed. Complete it twice. | After the first completion a new one is due tomorrow. After completing that one, no new `Water plants` is created and the last one shows "This task no longer repeats." |
 | 5 | Add a task whose Repeat is **Year**, "On" = **A month and day**, left at day 1, month January. | The label reads "Every year on 1 January"; after adding, the date is the next 1 January on or after today. |
 | 6 | As `qa.broke@example.com` (no credits; the first 10 tasks of the month are free), create 10 tasks including one repeating task, complete the repeating one. | Completing works and its next occurrence is created (owed): the page shows the "Tasks are blocked" banner with **Top up**, and adding a task is refused until credits are added. (Skip when this takes too long.) |
+
+### TODO-21 Reminders
+
+**Purpose:** a task's reminders are listed, added, edited and removed, a new task with a date gets the default one, and a
+due reminder shows in the notification bell and the history.
+**Preconditions:** logged in as `qa.user@example.com` with at least 3 free tasks left this month (or enough credits).
+The delivery step needs shell access to the test server database (the scheduler does not run there): without it skip steps
+9 to 11.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open **Settings**. | A "Default reminder" section: a select "New tasks with a date" showing "Get a reminder", an amount `5`, a unit "minutes before", a "Default channel" select showing "In-app", the note "Email reminders go to your confirmed address only" and a **Reminder history** link. |
+| 2 | In the quick-add box type `Call the bank`, set Date = today and Time = 23:00, **Add task**. Record the number as `T_BANK`. Open `/todo/<T_BANK>/`. | A **Reminders** block lists "5 minutes before (in-app)" with "Fires" and today's date at 22:55. Its row on Today shows a small bell icon. Under it, **History** says "No reminders sent yet." |
+| 3 | In the add row choose **1 hour before**, channel **Both**, and press **Add**. | The list now has "1 hour before (both)" (fires 22:00) above the 5 minute one. |
+| 4 | Add **1 hour before** again. | A red message "Reminder: There is already a reminder at that time." and the list is unchanged. |
+| 5 | Choose **Custom...**, enter `2` and unit `days before`, channel Email, **Add**. | "2 days before (email)" is listed (shown as "Skipped": its time, two days before the due time, is more than a day past, so it is created already sent and never delivered, and the History says "skipped: its time had already passed"). |
+| 6 | Click the pen on "5 minutes before", change the amount to `15`, **Save**. | The row reads "15 minutes before (in-app)" and fires at 22:45. Press **Cancel** on another row's editor: nothing changes. |
+| 7 | Click the bin on the "2 days before" row. | It is removed. |
+| 8 | In **Details** clear the Date and press **Save**. | A browser confirmation "Clearing the date removes its 2 reminders. Continue?". Cancel: nothing changes. Accept: the Reminders block says "Set a due date to add reminders." and the bell is gone from the row. Set the date to today again and Save: the default reminder (5 minutes before) is back. |
+| 9 | In a Django shell set the reminder's `fire_at` to a minute ago (`Reminder.objects.filter(task__number=<T_BANK>).update(fire_at=timezone.now() - timedelta(minutes=1), sent_at=None)`) and run `from apps.todo.services import reminders; reminders.deliver_due()`. Reload any To-do page. | The header bell shows a new notification titled `Call the bank` with the body "Due <today's date>, 23:00", which opens the task. |
+| 10 | Open `/todo/<T_BANK>/`. | **History** lists the delivery (date, time, "In-app"). Open **Settings** > **Reminder history**: the same row with `#<T_BANK> Call the bank` linking to the task. |
+| 11 | Run `deliver_due()` again. | Nothing new: the bell count and the history are unchanged (a reminder is delivered once). |
+| 12 | In **Settings** choose "Get no reminder", **Save**, then add a task `No reminder please` with a date. | Its page says "No reminders." and its row has no bell. Restore the setting (5 minutes) afterwards. |
+| 13 | Complete a repeating task that has a reminder (create `Pay rent`, Repeat = Week, with a 15 minute reminder, then **Complete**). Open the new occurrence. | It has the same reminder ("15 minutes before"), unsent, firing before the new date. |
+| 14 | (Only if step 9 ran.) Postpone `Call the bank` to **Tomorrow** (the Postpone action on its row or the task page) and open `/todo/<T_BANK>/`. | The reminder it already delivered is armed again: the Reminders block shows "Fires" (not "Sent") with tomorrow's date at 22:45. |

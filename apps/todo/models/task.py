@@ -50,7 +50,9 @@ class Task(models.Model):
     comments: ClassVar['models.Manager']
     references_out: ClassVar['models.Manager']
     references_in: ClassVar['models.Manager']
-
+    #: The reverse accessors of `Reminder.task` and `ReminderDelivery.task`.
+    reminders: ClassVar['models.Manager']
+    reminder_deliveries: ClassVar['models.Manager']
     # `ty` types `pk` as the primary key field object itself, not the value it holds.
     pk: uuid.UUID
     user_id: uuid.UUID
@@ -64,6 +66,8 @@ class Task(models.Model):
     subtask_open: int
     # Set by `services.comments.with_comment_counts` on the tasks a list shows (not stored).
     comment_count: int
+    # Set by `services.reminders.with_reminder_flags` on the tasks a list shows (not stored).
+    has_reminders: bool
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = cast(

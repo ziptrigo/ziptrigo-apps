@@ -46,6 +46,9 @@
             {% if task.subtask_total %}
             <span class="text-xs text-gray-500 dark:text-gray-400" title="Subtasks completed"><i class="fas fa-list-check mr-1" aria-hidden="true"></i>{{ task.subtask_done }}/{{ task.subtask_total }}</span>
             {% endif %}
+            {% if task.has_reminders and not task.is_completed %}
+            <span class="text-xs text-gray-500 dark:text-gray-400" title="Has reminders"><i class="far fa-bell" aria-hidden="true"></i><span class="sr-only">Has reminders</span></span>
+            {% endif %}
             {% if task.comment_count %}
             <span class="text-xs text-gray-500 dark:text-gray-400" title="Comments"><i class="far fa-comment mr-1" aria-hidden="true"></i>{{ task.comment_count }}<span class="sr-only"> comment{{ task.comment_count|pluralize }}</span></span>
             {% endif %}

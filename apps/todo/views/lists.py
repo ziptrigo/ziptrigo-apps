@@ -39,6 +39,7 @@ from ..services import (
     with_open_occurrences,
     with_subtask_counts,
 )
+from ..services.reminders import with_reminder_flags
 from .common import render_page
 
 PAGE_SIZE = 50
@@ -80,10 +81,12 @@ def belongs(task: Task, view: str, today: date) -> bool:
 
 
 def decorate(queryset: QuerySet) -> QuerySet:
-    """What a row needs: the subtask and comment counts, the parent (shown on a subtask), the
-    repeat rule and the labels."""
+    """What a row needs: the subtask and comment counts, whether it has reminders, the parent (shown
+    on a subtask), the repeat rule and the labels."""
     return (
-        with_open_occurrences(with_comment_counts(with_subtask_counts(queryset)))
+        with_reminder_flags(
+            with_open_occurrences(with_comment_counts(with_subtask_counts(queryset)))
+        )
         .select_related('parent', 'recurrence')
         .prefetch_related('labels')
     )

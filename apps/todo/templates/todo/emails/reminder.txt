@@ -1,0 +1,9 @@
+{% autoescape off %}Reminder: {{ title }}
+{{ due }} ({{ zone }})
+{% if description %}
+{{ description }}
+{% endif %}
+Open the task: {{ link }}
+
+You set this reminder on "{{ title }}". Change or remove it on the task page ({{ link }}); your default for new tasks is in To-do settings ({{ settings_link }}).
+{% endautoescape %}
