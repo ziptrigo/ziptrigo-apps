@@ -172,6 +172,20 @@
                     this.mode = this.$el.dataset.mode === 'from_completion' ? 'from_completion' : 'fixed';
                 },
                 touch() { this.customRule = ''; },
+                // Used by the title chip (title_parse.js): show `rule` (a canonical RRULE value)
+                // in the controls and submit it. The mode is left as it is.
+                setRule(rule) {
+                    var state = parse(rule);
+                    if (state === null) {
+                        this.customRule = rule;
+                        return;
+                    }
+                    this.customRule = '';
+                    var self = this;
+                    Object.keys(state).forEach(function (key) {
+                        if (key !== 'mode') self[key] = state[key];
+                    });
+                },
                 get rrule() { return this.customRule || build(this); },
                 get label() { return this.customRule ? 'Custom repeat' : summary(this); },
                 toggleDay(code) {

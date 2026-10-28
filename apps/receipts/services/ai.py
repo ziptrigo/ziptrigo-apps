@@ -35,6 +35,8 @@ from typing import Any, Literal, Protocol
 from django.conf import settings
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from apps.core.services.ai import build_openai_client, unwrap_json
+
 from .currencies import normalize_currency
 
 logger = logging.getLogger(__name__)
@@ -321,34 +323,13 @@ def build_messages(request: ExtractionRequest) -> list[dict[str, Any]]:
     ]
 
 
-#: A reply wrapped in a Markdown code fence (```json ... ```), which some models add.
-_CODE_FENCE = re.compile(r'\A```[A-Za-z0-9_-]*[ \t]*\n?(.*?)\n?[ \t]*```\Z', re.DOTALL)
 #: How much of a reply that fails to parse is logged.
 _LOG_SNIPPET_CHARS = 200
 
 
-def _unwrap(payload: Any) -> Any:
-    """Undo the wrappers models put around the object despite the strict schema: a list holding
-    exactly one object (`qwen/qwen3.6-plus` replies `[{...}]`) and the object JSON-encoded as a
-    string -- one layer of each, at most. Anything else is returned unchanged, so it still fails
-    validation."""
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except json.JSONDecodeError:
-            return payload
-    if isinstance(payload, list) and len(payload) == 1:
-        payload = payload[0]
-    return payload
-
-
 def _parse(raw: str) -> ExtractedReceipt:
-    text = raw.strip()
-    fenced = _CODE_FENCE.match(text)
-    if fenced:
-        text = fenced.group(1).strip()
     try:
-        payload = _unwrap(json.loads(text))
+        payload = unwrap_json(raw)
     except json.JSONDecodeError as exc:
         raise InvalidAIResponseError(f'The AI reply was not JSON: {exc}') from exc
     if not isinstance(payload, dict):
@@ -389,9 +370,7 @@ class OpenAIReceiptClient:
         import openai
 
         self._openai = openai
-        self._client = openai.OpenAI(
-            base_url=settings.OPENAI_BASE_URL or None,
-            api_key=settings.OPENAI_API_KEY or None,
+        self._client = build_openai_client(
             timeout=settings.RECEIPTS_AI_TIMEOUT_SECONDS,
             max_retries=settings.RECEIPTS_AI_MAX_RETRIES,
         )

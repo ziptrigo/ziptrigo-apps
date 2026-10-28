@@ -420,6 +420,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'TODO_UPLOAD_USER': (120, 60),
     'TODO_UPLOAD_COMPLETE_USER': (240, 60),
     'TODO_DOWNLOAD_USER': (120, 60),
+    # Reading a date out of a task title with the AI (issue #183), `POST /todo/parse/`: per user,
+    # charged before the model is called. The page asks after a 600 ms pause in typing, so a
+    # person stays far below it; it bounds what a script can make the AI bill.
+    'TODO_PARSE_USER': (60, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -693,6 +697,14 @@ OPENAI_RECEIPTS_MODEL = os.getenv('OPENAI_RECEIPTS_MODEL', '')
 # retried by `apps.receipts.services.processing` with a backoff (`ReceiptsSettings.max_ai_attempts`).
 RECEIPTS_AI_TIMEOUT_SECONDS = float(os.getenv('RECEIPTS_AI_TIMEOUT_SECONDS', '60'))
 RECEIPTS_AI_MAX_RETRIES = int(os.getenv('RECEIPTS_AI_MAX_RETRIES', '2'))
+
+# To-do (issue #183) reads a date, time and repeat rule out of a task title with the same API key
+# and base URL (`apps.core.services.ai`), as you type, so it waits far less than Receipts does. The
+# model falls back to Receipts'. Not in the prod required-secrets check below: without a key the
+# feature is simply off (`apps.todo.checks` warns when a key is set but no model resolves).
+OPENAI_TODO_MODEL = os.getenv('OPENAI_TODO_MODEL') or OPENAI_RECEIPTS_MODEL
+TODO_AI_TIMEOUT_SECONDS = float(os.getenv('TODO_AI_TIMEOUT_SECONDS', '15'))
+TODO_AI_MAX_RETRIES = int(os.getenv('TODO_AI_MAX_RETRIES', '1'))
 
 # Reading a stored receipt (PDF/image/HTML -> text and JPEGs) runs in a child process under a
 # resource budget (address space on Linux, CPU seconds, a wall-clock timeout 2-3x the CPU one), so

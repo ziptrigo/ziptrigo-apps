@@ -1,6 +1,6 @@
 """System checks for the To-do app, run by `manage.py check` and at `runserver` startup.
 
-Later sub-issues (AI parsing, email intake) register theirs here too.
+Later sub-issues (email intake) register theirs here too.
 """
 
 from django.conf import settings
@@ -40,3 +40,23 @@ def check_todo_storage_configuration(*args, **kwargs):
             )
         )
     return problems
+
+
+@register()
+def check_ai_configuration(*args, **kwargs):
+    """Warn when the AI key is set but no model resolves for To-do (issue #183).
+
+    Without a key the date parsing is simply off (no chip, no error), and that is fine. A key with
+    neither `OPENAI_TODO_MODEL` nor the `OPENAI_RECEIPTS_MODEL` it falls back to is a forgotten
+    variable that would otherwise only show up as a chip that never appears. A Warning, never an
+    Error: `migrate` runs the checks and a failed one would stop the whole site from starting.
+    """
+    if settings.OPENAI_API_KEY and not settings.OPENAI_TODO_MODEL:
+        return [
+            Warning(
+                'To-do date parsing is off: OPENAI_API_KEY is set but no model is.',
+                hint='Set OPENAI_TODO_MODEL (or OPENAI_RECEIPTS_MODEL, which it falls back to).',
+                id='todo.W001',
+            )
+        ]
+    return []

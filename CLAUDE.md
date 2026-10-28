@@ -17,7 +17,9 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       generic S3 storage (`apps.core.services.storage`), a QR image helper
                       (`apps.core.services.qr_image`), in-app notifications (the header bell, issue
                       #169), Markdown rendering / search text / checklist editing
-                      (`apps.core.markdown`, issue #176), and the Alpine components every product
+                      (`apps.core.markdown`, issue #176), the OpenAI client factory and reply
+                      unwrapping Receipts and To-do share (`apps.core.services.ai`, issue #183),
+                      and the Alpine components every product
                       shares (`core/js/components.js`: `copyText`, `confirmModal`,
                       `notificationBell`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
@@ -1961,8 +1963,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   the receipt is still `processing` for the same `attempt_id`. A HEIC preview is
   written before its conditional `UPDATE`; if that matches nothing and no row references the key
   (the receipt was purged, or its user deleted, meanwhile) the object is deleted again. The AI client is
-  `ai.get_client()` (tests: autouse `FakeAIClient`; the suite never touches the network); its reply
-  is validated with pydantic (`ai.parse_response` first unwraps one code fence, one-item list or
+  `ai.get_client()` (tests: autouse `FakeAIClient`; the suite never touches the network); its
+  `openai.OpenAI` comes from `apps.core.services.ai.build_openai_client` (shared with To-do, issue
+  #183) and its reply is validated with pydantic (`ai.parse_response` first unwraps, through
+  `apps.core.services.ai.unwrap_json`, one code fence, one-item list or
   JSON string around the object -- an OpenAI-compatible endpoint need not enforce the strict
   `json_schema`, and `qwen/qwen3.6-plus` replies `[{...}]` -- and logs the start of a reply that
   still fails, card-like digits masked), `payment_method` is masked to its last 4 digits (a run of 5+ digits
@@ -2583,7 +2587,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `RECEIPTS_DOCUMENT_SANDBOX`/`_MEMORY_MB`/`_CPU_SECONDS`/`_TIMEOUT_SECONDS`/`_CHILD_USER` (the document-preparation budget),
   `RECEIPTS_S3_BUCKET`/`_REGION`/`_ENDPOINT_URL`, `RECEIPTS_AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`,
   `RECEIPTS_INBOUND_ADDRESS`; the five required ones are checked in prod (see "Settings and
-  environment"), `apps.receipts.checks` warns about a *partial* local configuration.
+  environment"), `apps.receipts.checks` warns about a *partial* local configuration. To-do's AI
+  date parsing (#183) reuses `OPENAI_API_KEY` and `OPENAI_BASE_URL` and adds `OPENAI_TODO_MODEL`
+  (falls back to `OPENAI_RECEIPTS_MODEL`) and `TODO_AI_TIMEOUT_SECONDS` (15) /
+  `TODO_AI_MAX_RETRIES` (1); none is required in prod (see "AI date parsing" under "To-do").
 
 ### Short URLs
 
@@ -2893,9 +2900,10 @@ Todoist: tasks with a Markdown description, a due date with an optional time, a 
 and subtasks one level deep, shown on Today / Upcoming / All / Completed / Trash pages. A product
 (same layer as `qr_code`/`file_transfer`/`receipts`/`short_url`), logged-in users only. **Built so
 far:** the foundation (this section), repeating tasks (#179, "Recurrence"), comments with task
-references (#180, "Comments and references" below) and attachments (#184, "Attachments and storage
-billing" below). **Later sub-issues** add their own models, fields on `TodoSettings`,
-services, `RATELIMIT_RULES` and migrations (search #181, reminders #182, AI parsing #183, email
+references (#180, "Comments and references" below), attachments (#184, "Attachments and storage
+billing" below) and AI date parsing in the title (#183, "AI date parsing" below). **Later
+sub-issues** add their own models, fields on `TodoSettings`,
+services, `RATELIMIT_RULES` and migrations (search #181, reminders #182, email
 intake #186, the JWT API and
 `inv todo` #187), so `services/__init__.py`, `settings.py`, the migrations and this file will see
 small merge conflicts between them.
@@ -3559,6 +3567,87 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
   carrying over, re-arming, a real Chicago clock change for day and hour offsets, delivery, the
   claim, the skips, the stale window, email and its dedupe, failure logging, the job, the admin, the
   index, the pages and 404s, the history and the settings) and TODO-21 in `tests_e2e/ai/todo.md`.
+#### AI date parsing
+
+Issue #183. As the user types "pay rent every month on the 1st at 9am" the task form shows a chip
+("Sun 1 Nov, 09:00 · Every month on the 1st"); accepting it fills the date, time and repeat and
+strips those words from the title. The model is the one Receipts uses, through a client factory
+shared in `core`.
+
+- **Shared client** (`apps/core/services/ai.py`, tests in `apps/core/tests/test_ai.py`):
+  `is_configured()` (`OPENAI_API_KEY` set), `build_openai_client(*, timeout, max_retries)` (an
+  `openai.OpenAI` for `OPENAI_BASE_URL` / `OPENAI_API_KEY`, imported inside the function) and
+  `unwrap_json(raw)` (one code fence, a one-item list and a JSON string around the object, then
+  `json.loads`; raises `json.JSONDecodeError`, and returns whatever JSON it finds, unvalidated).
+  Receipts' `OpenAIReceiptClient` and `ai._parse` call them (it keeps its own error types, its
+  logging of a failed reply and `is_configured`, which also needs the model); its behaviour and
+  tests did not change. Products may not import each other, so only this much is shared: the prompt,
+  the pydantic model, the errors and the process-wide client are each product's own.
+- **Settings.** `OPENAI_TODO_MODEL` (`os.getenv('OPENAI_TODO_MODEL') or OPENAI_RECEIPTS_MODEL`),
+  `TODO_AI_TIMEOUT_SECONDS` (15: someone is waiting) and `TODO_AI_MAX_RETRIES` (1). **Not** in
+  the prod required-secrets check: without a key the feature is simply off (no chip, no error).
+  `apps.todo.checks` warns `todo.W001` when a key is set but no model resolves (a Warning, never an
+  Error: `migrate` runs the checks). `.env.example` documents `OPENAI_TODO_MODEL`.
+- **Parser** (`services/parsing.py`; no migration, nothing is stored). `AIClient.parse(ParseRequest)
+  -> ParsedTitle`; `OpenAITitleParser` implements it; `get_client()` / `set_client()` are
+  process-wide like Receipts' (`PermanentAIError` when the key or model is missing; tests use the
+  autouse `FakeTitleParser` of `apps/todo/tests/fakes.py`, installed by the `fake_title_parser`
+  fixture in `apps/todo/tests/conftest.py`, so the suite never reaches the network).
+  `ParseRequest` is the title, the user's local `today` and its `weekday`, the `timezone` name, the
+  `default_time` (the account's default due time) and `now_local`. `ParsedTitle` (pydantic,
+  `extra='ignore'`) is `has_date`, `clean_title`, `due_date`, `due_time`, `rrule`, `matched_text`
+  and `confidence`, and re-validates what the model said: an unreadable date or time is dropped, a
+  `due_date` before 2000 or more than 10 years after the user's today is dropped, `due_time` is
+  rounded to the minute, an `rrule` that `recurrence.parse_rule` refuses is **dropped, not an
+  error** (and an accepted one is stored canonical), a rule with no date gets
+  `recurrence.first_date`, a time without a date is dropped, `has_date` ends up false when nothing
+  usable is left, `clean_title` has its whitespace collapsed and falls back to the original title
+  when empty (the title and the user's today go in as pydantic validation context), `confidence` is
+  clamped. `_SYSTEM_PROMPT` tells the model today's date and weekday, the zone, the time now and
+  the default time, to extract only what is written, to leave `due_time` null unless a time is
+  written, to express repeats with only `FREQ`, `INTERVAL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`,
+  `COUNT` and `UNTIL`, and never to invent a date; the title goes in the user message as data. The
+  call is `chat.completions.create(model=OPENAI_TODO_MODEL, temperature=0, max_tokens=300,
+  response_format=json_schema from ParsedTitle, strict=False)`. Any exception (timeout, HTTP error,
+  bad JSON, validation) is logged at warning level with the first 200 characters of the reply and
+  raised as `ParseUnavailable`. `looks_dated(title)` is the cheap pre-check: a digit or one of
+  `DATE_WORDS` (English and Portuguese words, compared accent- and case-insensitively through
+  `normalize_for_search`), else no AI call and `has_date=false`; the list only saves calls, the
+  model decides what a title means. `parse_title(request)` ties it together (it asks `get_client()`
+  first, so an unconfigured site answers the same whatever the title) and `chip_text` builds the
+  label: `Today`, `Tomorrow`, `Mon 3 Nov` within the next 6 days, else `3 Nov` (`3 Nov 2027` for
+  another year), `, 09:00` when timed and ` · <describe(rrule)>` when repeating.
+- **Endpoint** (`views/parse.py`): `POST /todo/parse/` (`todo:parse`), `@login_required`, CSRF
+  protected, JSON in and out (like the upload views of Receipts). Body `{"title": ...}` (whitespace
+  collapsed; empty or over `TITLE_MAX` is a 422 `{"detail": ...}` that charges nothing). Answers 200
+  `{"available": true, "has_date", "clean_title", "due_date", "due_time", "rrule", "rrule_text",
+  "matched_text", "label"}`, or `{"available": false}` when the AI is not configured or the call
+  failed. `TODO_PARSE_USER` (60/min per user) is charged after validation and **before** the AI is
+  called (a 429 JSON through `ratelimit.json_response`, `Retry-After`). It saves nothing and spends
+  no credits: the AI call is not charged on its own, a task has its price. The server never
+  re-parses; the form posts the explicit `due_date`, `due_time`, `rrule` and `recurrence_mode`.
+- **The chip** (`static/todo/js/title_parse.js`, `partials/parse_chip.html`, in `task_form.html`):
+  a `data-title-parse` container around a text input (`data-parse-input`) and the chip
+  (`data-parse-chip`). On `input`, the chip is hidden at once, and after a 600 ms pause, only when
+  the text changed and has at least 3 characters, it is posted (an in-flight request is aborted by
+  new input, `AbortController`). With `has_date` the chip shows the label (tooltip: `matched_text`)
+  with Accept and Dismiss. **Accept** writes `due_date`, then `due_time` and the repeat **only when
+  the reply has them** (a title without a time or a repeat leaves the form's own alone; the repeat
+  goes through the Alpine component's `setRule`, `recurrence.js`, so its popover and label follow;
+  the mode stays what the form has), replaces the title with `clean_title` and hides the chip.
+  **Dismiss** hides it and remembers that text (not parsed again; other text is). Submitting with
+  the chip showing does not apply it. The chip is keyboard-reachable: Tab to its buttons, Enter on
+  the focused chip accepts, Escape dismisses. The task page's details form has the same script
+  on an "Or type a date" box (`data-mode="date"`): `clean_title` is ignored, only the date fields
+  are applied, the box is emptied, Enter reads it at once and "No date found." is its answer for
+  nothing. `available: false` stops the script asking for the rest of the page load; a 429 is
+  waited out silently (`Retry-After`, at most 60 s); any other failure shows nothing.
+- **Tests.** `apps/todo/tests/test_parsing.py` (the pre-check, `ParsedTitle`, the prompt, the
+  OpenAI call with `openai.OpenAI` mocked, the failure paths, the chip text, the endpoint, rate
+  limit and the page wiring), `apps/core/tests/test_ai.py`, and the Playwright
+  `tests_e2e/test_todo_parse.py` (accept, dismiss/Escape, submit with the chip showing, the date
+  box) on the shared e2e server, whose `receipts_e2e.E2EConfig.ready` installs a
+  `FakeTitleParser` that understands one title (`tests_e2e/todo_fakes.py`).
 
 ### Queue and scheduler
 
