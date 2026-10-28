@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load local_time %}
 
 {% block title %}{{ transfer.display_name }} - ZipTrigo{% endblock %}
 
@@ -12,7 +13,7 @@
         {% endif %}
 
         <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-            {% if transfer.expires_at %}Available until {{ transfer.expires_at|date:"Y-m-d H:i" }} UTC{% else %}No expiration{% endif %}
+            {% if transfer.expires_at %}Available until {% local_time transfer.expires_at %}{% else %}No expiration{% endif %}
         </p>
 
         {% comment %}The file list (names and sizes) is always shown -- only the download itself is

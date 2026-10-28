@@ -2593,14 +2593,9 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   page (`/links/<id>/stats/?range=7|30|90|all`: totals always; a server-rendered SVG chart with a table
   fallback and the four top lists behind the paid analytics extra). Another user's link, or one the
   owner deleted, is a 404 on every page. `copyText`/`confirmModal` are the shared Alpine components in
-  `core/js/components.js`. **Times are in the browser's zone** (`static/short_url/js/local_time.js`):
-  the site has no per-user time zone and `TIME_ZONE` is UTC, so a bare `datetime-local` value would be
-  read as UTC (found by the browser run of the AI plan: from Chicago, "2 minutes from now" was refused
-  as past). The visible Expires input has no `name`; the script keeps a hidden `expires_at` in UTC
-  (`2026-10-27T13:51:00.000Z`), and the edit form is prefilled in UTC with `Z` (`views.form._initial`)
-  for the script to show locally. Without JavaScript the expiry is not sent. The link page's Expires and
-  Last click are `<time datetime data-local-time>`, rendered in UTC (marked "UTC") and rewritten
-  locally.
+  `core/js/components.js`. The Expires field and the link page's times use core's local-time
+  helpers (see "Templates and static files"); the edit form is prefilled in UTC with `Z`
+  (`views.form._initial`) for the script to show locally.
 - **Rate limits** (`RATELIMIT_RULES`): `SU_REDIRECT_IP` (120/min, also charged by `/unlock` GETs),
   `SU_CREATE_USER` (30/h), `SU_EDIT_USER` (60/h), `SU_QR_USER` (60/min), `SU_PASSWORD_IP` (15/10 min),
   `SU_PASSWORD_LINK` (30/10 min), `SU_PREVIEW_IP` (60/min), `SU_REPORT_IP` (5/h), `SU_REPORT_LINK`
@@ -2795,6 +2790,28 @@ interval too).
 Always namespaced: `apps/<app>/templates/<app>/…` and `apps/<app>/static/<app>/…`. Every page
 extends `core/base.html`, which loads Tailwind (CDN, with the sage palette plus `brand-*` aliases),
 htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `admin/` overrides.
+
+**Times of day are shown and entered in the visitor's own zone.** The site has no per-user time zone
+and `TIME_ZONE` is UTC, so a time rendered with `|date:"H:i"` is UTC and a bare `datetime-local`
+value is read as UTC (found by the browser run of the Short URLs AI plan: from Chicago, an expiry "2
+minutes from now" was refused as past). `core/js/local_time.js`, loaded on every page by
+`core/base.html` and re-run on whatever htmx swaps in (`htmx:load`), converts both ways:
+
+- **Showing**: `{% load local_time %}{% local_time value %}` (`core/templatetags/local_time.py`)
+  renders `<time datetime="<UTC ISO>" data-local-time="long">Oct 27, 2026 13:51 UTC</time>`, the UTC
+  fallback marked "UTC" for a visitor without JavaScript, which the script rewrites locally. Styles:
+  `long` (default), `short` (no year), `iso` (`2026-10-27 08:51`, for tables); `title=True` renders
+  only the attributes for an element of your own and localizes its tooltip instead of its text (the
+  notification list's relative "3 hours ago"). Used by file transfer (dashboard row, download and
+  manage pages), billing history, the receipt page, notifications and Short URLs. A bare date
+  (`|date:"M j"`) needs none of this. **Emails stay in UTC** (no browser to convert them), and should
+  say so.
+- **Entering**: `<input type="datetime-local" data-utc-target="<id>">` with no `name`, next to a
+  hidden input `<id>` that carries the field's `name` and is prefilled in UTC with an offset
+  (`2026-10-27T13:51Z`); the script shows it locally and writes the UTC value
+  (`2026-10-27T13:51:00.000Z`) back on every change, which Django's `DateTimeField` parses as aware.
+  Without JavaScript the field is not sent. Only Short URLs' Expires uses it so far (file transfer's
+  expiry is a date picker).
 
 ### Docker
 

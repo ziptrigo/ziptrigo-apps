@@ -1,4 +1,4 @@
-{% load notification_tags %}{% comment %}One notification, in the dropdown (`scope` = dropdown) or on the page (`scope` = page).
+{% load local_time notification_tags %}{% comment %}One notification, in the dropdown (`scope` = dropdown) or on the page (`scope` = page).
    The row is a stretched link: the title's anchor covers it (`after:absolute after:inset-0`) and the
    action buttons sit above it. Everything the caller wrote is escaped by the template engine.
    Context: `n`, `new_ids`, `scope`, `target` (the element the actions swap), `page_number`. {% endcomment %}
@@ -15,7 +15,7 @@
         {% endif %}
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {{ n.source|source_label }} &middot;
-            <time datetime="{{ n.created_at|date:'c' }}" title="{{ n.created_at|date:'Y-m-d H:i' }}">{{ n.created_at|ago }}</time>
+            <time {% local_time n.created_at 'iso' title=True %}>{{ n.created_at|ago }}</time>
         </p>
     </div>
     <div class="relative z-10 flex shrink-0 items-center gap-1">
