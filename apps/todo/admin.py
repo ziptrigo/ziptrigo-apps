@@ -172,6 +172,7 @@ class CommentAdmin(ReadOnlyModelAdmin):
     search_fields = ['body', 'task__title', 'task__number', 'user__email']
     list_select_related = ['task', 'user']
     date_hierarchy = 'created_at'
+    ordering = ['-created_at']
     fields = [
         'task',
         'user',

@@ -1,8 +1,9 @@
 """Comments on a task (issue #180): add, edit, delete, restore, the edit history and a deleted
 comment's text.
 
-The comments section (`todo/partials/comments.html`, `#task-comments`) is part of the task page's
-panel and is also what each action answers, so only it is re-rendered. The rules are
+The comments section (`todo/partials/comments.html`, `#task-comments`) sits beside the task
+page's panel (a panel action doesn't touch it, so a draft survives) and is what each action
+answers, so only it is re-rendered. The rules are
 `services.comments`'; a refusal is a 422 with `Label: message` lines swapped into the slot of the
 control that was used. Another user's task, a comment of another task and a trashed task (for
 the actions that change anything) are a 404.
@@ -29,7 +30,7 @@ from ..services import (
     delete_comment,
     edit_comment,
     render_markdown,
-    resolver_for,
+    resolver_for_request,
     restore_comment,
 )
 from .common import form_error_lines, limited, owned_task, refuse, validation_lines
@@ -44,14 +45,14 @@ def _task_url(task: Task, comment: Comment | None = None) -> str:
 
 def _owned_comment(task: Task, comment_id: UUID) -> Comment:
     """The comment, if it is one of `task`'s; any other is a 404."""
-    return get_object_or_404(Comment.objects.select_related('user'), pk=comment_id, task=task)
+    return get_object_or_404(Comment, pk=comment_id, task=task)
 
 
 def comments_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
     """What `comments.html` needs: the task's comments, each with its rendered `html` (empty for a
     deleted one, whose text is fetched on request), rendered through one resolver so each task a
     comment mentions is looked up once."""
-    resolver = resolver_for(request.user)
+    resolver = resolver_for_request(request)
     comments = list(Comment.objects.filter(task=task).select_related('user'))
     for comment in comments:
         comment.html = '' if comment.is_deleted else render_markdown(comment.body, resolver)
@@ -130,6 +131,8 @@ def comment_delete(
 ) -> HttpResponse:
     task = owned_task(request, number)
     comment = _owned_comment(task, comment_id)
+    if comment.is_deleted:  # already there: nothing to do, so nothing to charge
+        return _done(request, task, comment)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=ADD_MSG)) is not None:
         return response
     try:
@@ -148,12 +151,16 @@ def comment_restore(
 ) -> HttpResponse:
     task = owned_task(request, number)
     comment = _owned_comment(task, comment_id)
+    if not comment.is_deleted:  # already there: nothing to do, so nothing to charge
+        return _done(request, task, comment)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=ADD_MSG)) is not None:
         return response
     try:
         restore_comment(comment)
     except ValidationError as exc:
         return _refuse(request, task, validation_lines(exc))
+    if not is_htmx(request):
+        messages.success(request, 'Comment restored.')
     return _done(request, task, comment)
 
 
@@ -166,7 +173,7 @@ def comment_history_view(
     Works for a deleted comment and a task in the Trash too (it only reads)."""
     task = owned_task(request, number, trashed=None)
     comment = _owned_comment(task, comment_id)
-    resolver = resolver_for(request.user)
+    resolver = resolver_for_request(request)
     revisions = comment_history(comment)[::-1]
     for revision in revisions:
         revision.html = render_markdown(revision.body, resolver)
@@ -188,5 +195,5 @@ def comment_deleted_view(
     comment = _owned_comment(task, comment_id)
     if not comment.is_deleted:
         raise Http404('Comment not found')
-    comment.html = render_markdown(comment.body, resolver_for(request.user))
+    comment.html = render_markdown(comment.body, resolver_for_request(request))
     return render(request, 'todo/partials/comment_deleted.html', {'task': task, 'comment': comment})

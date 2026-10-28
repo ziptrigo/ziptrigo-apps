@@ -3114,54 +3114,73 @@ Issue #180 (`models/comment.py`, `models/reference.py`, `services/comments.py`,
   order; a text over the Markdown size guard mentions nothing. (**Judgement call:** the issue wrote
   `extract_references(markdown)`; core knows no task URL, so, like `render`, it takes the caller's
   pattern as the keyword `task_url_path` and without it only `#1234` counts.)
-  `sync_references(task, comment=None)` resolves those numbers to the owner's non-trashed tasks
-  (open or completed; a number that isn't theirs, doesn't exist, is trashed or is the task itself
+  `sync_references(task, comment=None)` resolves those numbers to the owner's tasks (open,
+  completed **or in the Trash**; a number that isn't theirs, doesn't exist or is the task itself
   is dropped) and makes the rows of `(task, comment)` equal that set in one transaction (insert
   missing with `ignore_conflicts`, delete stale). It runs from `create_task` (when there is a
   description), `update_task` (when the description changed; so also a ticked checklist box), and
   `add_comment`, `edit_comment`, `delete_comment` (which just deletes the rows) and
-  `restore_comment`. Description and comments keep separate rows. It is not retroactive: trashing a
-  task leaves the rows pointing at it (it is dropped the next time the mentioning text is synced),
-  and restoring one doesn't re-add what was dropped; the reading side (`referenced_by`) is what
-  hides a trashed referencing task and a deleted comment. `referenced_by(task)` ->
-  `[(Task, Comment | None)]`: open and completed non-trashed tasks that mention it, ordered by the
-  mentioning task's number, the description before its comments (oldest first); the same task
-  appears once per place it mentions it.
+  `restore_comment`. Description and comments keep separate rows. **Rows are stored for any of the
+  owner's tasks, trashed ones included, and filtered only when read**, so trashing and restoring a
+  task (as target or as source) needs no re-sync and "Referenced by" never disagrees with what the
+  text says: a mention made while the target was in the Trash is listed once it is restored.
+  What is displayed is decided by `referenced_by(task)` -> `[(Task, Comment | None)]`: open and
+  completed non-trashed tasks that mention it, ordered by the mentioning task's number, the
+  description before its comments (oldest first); the same task appears once per place it
+  mentions it. It lists nothing for a task that is itself in the Trash, and hides a trashed
+  source and a deleted comment (their rows stay). The links in rendered text are decided at
+  render time by the resolver, which links only non-trashed tasks, so a trashed target shows as
+  plain text until it is restored. `update_task` compares the description with the stored one,
+  saves and syncs under the task's row lock in one transaction (so the rows always match the text
+  that was saved, and a task trashed meanwhile is refused).
 - **Rendering.** `references.resolver_for(user)` now remembers what it has been asked, so a page
-  rendering every comment through one resolver looks each number up once. `render_markdown(text,
+  rendering every comment through one resolver looks each number up once.
+  `resolver_for_request(request)` keeps one per request, which the description (`render_description`)
+  and the comments (`comments_context`) share, so a task page looks each number up once in all. `render_markdown(text,
   resolver)` is `render` with `TASK_URL_PATH` and the fall-back to escaped text for a text over the
   size guard (what the comments, the history and the deleted text use).
 - **Web** (all `@login_required`, htmx partials, 422 convention; another user's task, a comment of
   another task, a trashed task for every action that changes something, and the deleted-text
   partial of a comment that isn't deleted are a 404). The comments section
-  (`partials/comments.html`, `#task-comments`) is part of the task page's panel (so an action from
-  the page re-renders it) and is what each comment action answers: `POST /todo/<n>/comments/`
+  (`partials/comments.html`, `#task-comments`) sits **beside** `#task-panel` on the task page, not in
+  it, so an action on the task (complete, postpone, a label, an edit, a ticked checklist box) neither
+  re-renders the comments nor loses a draft or an open inline edit; `panel_context` has no comments,
+  `task_page` adds `comments_context`. The one exception is moving the task to the Trash and back:
+  it makes the section read-only/editable (and decides whether `#1234` to the task itself links),
+  so those two responses carry the section again out of band (`hx-swap-oob`, `refresh_comments`).
+  It is what each comment action answers: `POST /todo/<n>/comments/`
   (`todo:comment-add`), `.../comments/<id>/edit/`, `/delete/`, `/restore/`, `GET .../history/`
   (the revisions partial, newest first, each rendered, with when it was replaced; works for a
   deleted comment and a trashed task) and `GET .../deleted/` (the deleted comment's rendered text
   with Restore and History). Each comment: initial avatar, relative time (`|ago`) with the exact
   local time as `title` (`{% local_time ... title=True %}`), "(edited)" (click: the history is
   fetched into `#comment-history-<id>`), the rendered body, and a row menu with Edit (inline
-  textarea, same Markdown hint as the description, Save/Cancel; Escape cancels) and Delete (the
+  textarea, same Markdown hint as the description, Save/Cancel; Cancel and Escape also reset the
+  textarea to the saved text) and Delete (the
   page's shared `confirmModal`, a plain POST that redirects back to `#comment-<id>`). A deleted
   comment is a muted "Comment deleted <time>" with Show. The add box is at the bottom;
   Ctrl+Enter / Cmd+Enter submits it (and the edit box). Refusals go to `#comment-msg` (add,
   delete, restore) or `#comment-msg-<id>` (edit). **Rate limits:** `TODO_COMMENT_USER` (60 per
   minute, add and edit; a refused form spends nothing) and `TODO_EDIT_USER` for delete and
-  restore. "Referenced by" (`partials/referenced_by.html`, hidden when empty): `#<number> <title>`
+  restore; deleting a comment that is already deleted, or restoring one that isn't, is a no-op that
+  spends nothing (the view checks the state before charging); without htmx they flash "Comment
+  deleted." / "Comment restored.". "Referenced by" (`partials/referenced_by.html`, hidden when empty,
+  in the panel): `#<number> <title>`
   per mention, "in a comment" and a `#comment-<id>` anchor when it is one. The section order on the
-  page is description, subtasks, comments, referenced by. `task_row.html` shows a comment icon
+  page is description, subtasks, referenced by, comments (the comments last, with their add box). `task_row.html` shows a comment icon
   with the count of comments that aren't deleted (`with_comment_counts`, a subquery in
   `views.lists.decorate`; a join would multiply the subtask counts).
-- **Admin.** Read-only `CommentAdmin` (task number, user, created, edited, revisions, deleted, the
-  body; search over body, task and user) with `CommentRevision` as a read-only inline. A deleted
+- **Admin.** Read-only `CommentAdmin` (newest first; task number, user, created, edited, revisions,
+  deleted, the body; search over body, task and user) with `CommentRevision` as a read-only inline. A deleted
   comment's body is shown there too.
 - **Tests.** `apps/todo/tests/test_comments.py` (add/edit/delete/restore rules, the revision
   chain, the cap, `body_text`, the views and partials, 404s, rate limits, the admin),
   `test_references.py` (extraction, `sync_references` on create, description edit, comment
   add/edit/delete/restore, self-reference, foreign and trashed targets, `referenced_by`, the
   panel), the `extract_references` tests in `apps/core/tests/test_markdown.py`, and TODO-17 and
-  TODO-18 in `tests_e2e/ai/todo.md`.
+  TODO-18 in `tests_e2e/ai/todo.md`. Also covered: a panel action's response has no comments
+  section (`TestCommentsBesidePanel`), a mention made while the target is trashed shows after the
+  restore, the shared resolver and `update_task`'s lock (`test_review_fixes.py`).
 
 ### Queue and scheduler
 

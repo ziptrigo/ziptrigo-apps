@@ -2,9 +2,11 @@
 
 `apps.core.markdown` finds the numbers a text mentions and asks a resolver for their URLs; this is
 the To-do app's: only the user's own tasks that are not in the Trash link anywhere (anything else
-stays text). The same rule decides what is *stored*: `sync_references` keeps a `TaskReference` row
-for every task a description or a comment mentions, which is what a task page's "Referenced by"
-list (`referenced_by`) reads.
+stays text). What is *stored* is wider: `sync_references` keeps a `TaskReference` row for every one
+of the owner's tasks a description or a comment mentions, the trashed ones included, so trashing and
+restoring a task needs no re-sync. The reading side decides what shows: `referenced_by` (a task
+page's "Referenced by" list) hides a trashed task's list, trashed or deleted sources and deleted
+comments.
 """
 
 import logging
@@ -17,6 +19,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
+from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.models import User
 from apps.core.markdown import ReferenceResolver, extract_references, render
 
@@ -26,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 #: What a task page's path looks like (`todo:task`), for links written as URLs.
 TASK_URL_PATH = re.compile(r'^/todo/(?P<number>[0-9]{1,9})/?$')
+
+
+def resolver_for_request(request: AuthenticatedHttpRequest) -> ReferenceResolver:
+    """The request's resolver (`resolver_for(request.user)`, made once per request): the
+    description and the comments of a page render through the same one, so each task number is
+    looked up once."""
+    resolver = getattr(request, '_todo_reference_resolver', None)
+    if resolver is None:
+        resolver = resolver_for(request.user)
+        setattr(request, '_todo_reference_resolver', resolver)
+    return resolver
 
 
 def resolver_for(user: User) -> ReferenceResolver:
@@ -74,9 +88,9 @@ def sync_references(task: Task, comment: Comment | None = None) -> None:
     """Make the `TaskReference` rows of `(task, comment)` equal what the text mentions.
 
     The text is `task.description` (`comment` is None) or `comment.body`. A number counts when it
-    is one of the task's owner's non-trashed tasks, open or completed; the task itself does not (a
-    self-reference is not stored). Missing rows are inserted and stale ones deleted in one
-    transaction. Called when a task is created, when its description changes and whenever a
+    is one of the task's owner's tasks, open, completed or in the Trash (what is shown is decided
+    when it is read, see `referenced_by`); the task itself does not (a self-reference is not
+    stored). Missing rows are inserted and stale ones deleted in one transaction. Called when a task is created, when its description changes and whenever a
     comment is added, edited, deleted or restored (a deleted comment has no references).
     """
     text = task.description if comment is None else comment.body
@@ -85,9 +99,7 @@ def sync_references(task: Task, comment: Comment | None = None) -> None:
         wanted: set = set()
         if numbers:
             wanted = set(
-                Task.objects.filter(
-                    user_id=task.user_id, number__in=numbers, deleted_at__isnull=True
-                )
+                Task.objects.filter(user_id=task.user_id, number__in=numbers)
                 .exclude(pk=task.pk)
                 .values_list('pk', flat=True)
             )
@@ -110,7 +122,10 @@ def referenced_by(task: Task) -> list[tuple[Task, Comment | None]]:
     """The tasks that mention `task`, open and completed (not the Trash), each with the comment the
     mention is in (None: its description), ordered by the referencing task's number, then the
     description before the comments, oldest first. A task that mentions it several times in
-    different places appears once per place."""
+    different places appears once per place. Nothing for a task in the Trash; the sources in the
+    Trash and deleted comments are hidden here (the rows are kept, so a restore shows them again)."""
+    if task.is_trashed:
+        return []
     rows = (
         TaskReference.objects.filter(
             to_task=task, from_task__deleted_at__isnull=True, comment__deleted_at__isnull=True

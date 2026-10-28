@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
@@ -82,7 +83,9 @@ def _task_url(task: Task) -> str:
 
 
 def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
-    """The context of the task page's panel (also what an action from the page re-renders)."""
+    """The context of the task page's panel (also what an action from the page re-renders). The
+    comments are not part of it: they sit beside the panel (`comments_context`), so a panel action
+    neither re-renders them nor loses a draft typed in them."""
     user = request.user
     task = decorate(Task.objects.filter(pk=task.pk)).get()
     subtasks = []
@@ -94,7 +97,6 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
         open_subtasks = sum(1 for sub in subtasks if not sub.is_completed)
     labels = list(Label.objects.filter(user=user))
     return {
-        **comments_context(request, task),
         'referenced_by': referenced_by(task),
         'task': task,
         'subtasks': subtasks,
@@ -107,20 +109,36 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
 
 
 def panel_response(
-    request: AuthenticatedHttpRequest, task: Task, *, status: int = 200
+    request: AuthenticatedHttpRequest,
+    task: Task,
+    *,
+    status: int = 200,
+    refresh_comments: bool = False,
 ) -> HttpResponse:
-    return render(
+    """The re-rendered panel. `refresh_comments` adds the comments section out of band: only for
+    an action that changes what it shows (moving the task to the Trash or back makes the section
+    read-only or editable, and decides whether `#1234` to the task itself is a link); any other
+    action leaves the section, and a draft typed in it, alone."""
+    response = render(
         request, 'todo/partials/task_panel.html', panel_context(request, task), status=status
     )
+    if refresh_comments:
+        context = {**comments_context(request, task), 'oob': True}
+        response.content += render_to_string(
+            'todo/partials/comments.html', context, request=request
+        ).encode()
+    return response
 
 
-def after_action(request: AuthenticatedHttpRequest, task: Task) -> HttpResponse:
+def after_action(
+    request: AuthenticatedHttpRequest, task: Task, *, refresh_comments: bool = False
+) -> HttpResponse:
     """The answer to a successful action on `task`: the panel (from the task page), the row, or an
     empty body that removes the row (it left the list it was in). Without htmx, a redirect back."""
     if not is_htmx(request):
         return redirect(_task_url(task)) if _is_page(request) else redirect_back(request)
     if _is_page(request):
-        return panel_response(request, task)
+        return panel_response(request, task, refresh_comments=refresh_comments)
     view = _view_of(request)
     today = user_today(request.user)
     fresh = row_task(request.user, task.pk)
@@ -228,7 +246,7 @@ def task_page(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """The task page. A trashed task opens too, read-only, with Restore."""
     task = owned_task(request, number, trashed=None)
     get_account(request.user)
-    context = panel_context(request, task)
+    context = {**comments_context(request, task), **panel_context(request, task)}
     context['title_task'] = task
     return render_page(
         request, 'todo/task.html', context, nav='trash' if task.is_trashed else 'all'
@@ -285,9 +303,10 @@ def _act(
     *,
     trashed: bool | None = False,
     task: Task | None = None,
+    refresh_comments: bool = False,
 ):
     """Look up the task (unless the caller already has it), charge the edit budget, run
-    `action(task)` and answer."""
+    `action(task)` and answer (`refresh_comments`: see `panel_response`)."""
     if task is None:
         task = owned_task(request, number, trashed=trashed)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=_slot(request))) is not None:
@@ -296,7 +315,7 @@ def _act(
         action(task)
     except ValidationError as exc:
         return _refuse_validation(request, exc, task)
-    return after_action(request, task)
+    return after_action(request, task, refresh_comments=refresh_comments)
 
 
 @login_required
@@ -349,13 +368,13 @@ def task_postpone(request: AuthenticatedHttpRequest, number: int) -> HttpRespons
 @login_required
 @require_POST
 def task_trash(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
-    return _act(request, number, trash_task)
+    return _act(request, number, trash_task, refresh_comments=True)
 
 
 @login_required
 @require_POST
 def task_restore(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
-    return _act(request, number, restore_task, trashed=True)
+    return _act(request, number, restore_task, trashed=True, refresh_comments=True)
 
 
 @login_required

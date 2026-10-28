@@ -3,6 +3,7 @@ delete, restore, the history and deleted-text partials, ownership, rate limits a
 comment count."""
 
 from html import unescape
+from html.parser import HTMLParser
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -342,6 +343,88 @@ class TestTaskPage:
         assert 'fa-comment' not in row.split('</li>')[0]
 
 
+class _Ancestors(HTMLParser):
+    """The ids of the elements each element with an id sits inside (`ancestors[id]`)."""
+
+    VOID = {'meta', 'link', 'input', 'br', 'hr', 'img', 'source'}
+
+    def __init__(self):
+        super().__init__()
+        self.stack: list[str | None] = []
+        self.ancestors: dict[str, list[str]] = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.VOID:
+            return
+        element_id = dict(attrs).get('id')
+        if element_id:
+            self.ancestors[element_id] = [i for i in self.stack if i]
+        self.stack.append(element_id)
+
+    def handle_endtag(self, tag):
+        if tag not in self.VOID and self.stack:
+            self.stack.pop()
+
+
+class TestCommentsBesidePanel:
+    """The comments section is not part of `#task-panel` (issue #180 review): a panel action does
+    not re-render it, so a draft typed in it survives."""
+
+    PAGE = {'ctx': 'page'}
+
+    def test_a_panel_action_does_not_answer_the_comments(self, web, my_task, comment):
+        response = web.post(url('complete', my_task), self.PAGE, **HTMX)
+
+        body = text(response)
+        assert response.status_code == 200 and 'id="task-panel"' in body
+        assert 'id="task-comments"' not in body and 'Add a comment' not in body
+        assert 'First' not in body  # none of the comments' text
+
+    def test_other_panel_actions_leave_the_comments_alone_too(self, web, my_task, comment):
+        edit = {**self.PAGE, 'part': 'title', 'title': 'Renamed'}
+        for response in (
+            web.post(url('edit', my_task), edit, **HTMX),
+            web.post(url('postpone', my_task), {**self.PAGE, 'preset': 'tomorrow'}, **HTMX),
+            web.post(url('subtask-add', my_task), {'title': 'Sub'}, **HTMX),
+        ):
+            assert response.status_code == 200
+            assert 'id="task-comments"' not in text(response)
+
+    def test_the_page_has_the_comments_outside_the_panel(self, web, my_task, comment):
+        parser = _Ancestors()
+        parser.feed(web.get(url('task', my_task)).content.decode())
+
+        assert parser.ancestors['task-panel'] is not None
+        assert 'task-panel' not in parser.ancestors['task-comments']
+        assert 'task-comments' not in parser.ancestors['task-panel']
+
+    def test_moving_the_task_to_the_trash_and_back_refreshes_the_comments(
+        self, web, my_task, comment
+    ):
+        trashed = text(web.post(url('trash-task', my_task), self.PAGE, **HTMX))
+
+        assert 'id="task-panel"' in trashed
+        assert 'id="task-comments"' in trashed and 'hx-swap-oob="true"' in trashed
+        assert 'First' in trashed and 'Add a comment' not in trashed  # read-only now
+
+        restored = text(web.post(url('restore', my_task), self.PAGE, **HTMX))
+
+        assert 'hx-swap-oob="true"' in restored and 'Add a comment' in restored
+
+    def test_a_comment_action_still_answers_only_the_comments(self, web, my_task):
+        response = web.post(url('comment-add', my_task), {'body': 'Hello'}, **HTMX)
+
+        body = text(response)
+        assert 'id="task-comments"' in body and 'hx-swap-oob' not in body
+        assert 'id="task-panel"' not in body
+
+    def test_the_edit_box_resets_on_cancel(self, web, my_task, comment):
+        body = text(web.get(url('task', my_task)))
+
+        assert 'x-ref="edit"' in body
+        assert body.count('$refs.edit.value = $refs.edit.defaultValue') == 2  # Cancel and Escape
+
+
 class TestAddView:
     def test_htmx_answers_the_section_with_the_new_comment(self, web, my_task):
         response = web.post(url('comment-add', my_task), {'body': 'Hello *there*'}, **HTMX)
@@ -437,6 +520,18 @@ class TestDeleteAndRestoreViews:
         assert response.status_code == 200 and 'First' in text(response)
         comment.refresh_from_db()
         assert not comment.is_deleted
+
+    def test_restore_without_htmx_says_so(self, web, my_task, comment):
+        delete_comment(comment)
+
+        response = web.post(url('comment-restore', my_task, comment.pk), follow=True)
+
+        assert 'Comment restored.' in text(response)
+
+    def test_delete_without_htmx_says_so(self, web, my_task, comment):
+        response = web.post(url('comment-delete', my_task, comment.pk), follow=True)
+
+        assert 'Comment deleted.' in text(response)
 
     def test_both_are_idempotent(self, web, my_task, comment):
         assert web.post(url('comment-restore', my_task, comment.pk), **HTMX).status_code == 200
@@ -596,6 +691,17 @@ class TestRateLimits:
             web.post(url('comment-add', my_task), {'body': 'still ok'}, **HTMX).status_code == 200
         )
 
+    def test_a_no_op_delete_or_restore_spends_nothing(self, web, my_task, comment):
+        for _ in range(5):  # restoring a comment that is not deleted
+            assert web.post(url('comment-restore', my_task, comment.pk), **HTMX).status_code == 200
+        assert web.post(url('comment-delete', my_task, comment.pk), **HTMX).status_code == 200
+        for _ in range(5):  # deleting one that already is
+            assert web.post(url('comment-delete', my_task, comment.pk), **HTMX).status_code == 200
+
+        # Only the delete above was charged: one of the two hits is left.
+        assert web.post(url('comment-restore', my_task, comment.pk), **HTMX).status_code == 200
+        assert web.post(url('comment-delete', my_task, comment.pk), **HTMX).status_code == 429
+
 
 class TestAdmin:
     @pytest.fixture
@@ -620,6 +726,14 @@ class TestAdmin:
         assert page.status_code == 200
         assert 'Original findable text' in body and 'Edited text' in body  # revision + body
         assert '_save' not in body  # read-only: no save button
+
+    def test_the_newest_comment_comes_first(self, admin_client, task, user):
+        add_comment(task, user, 'Oldest one')
+        add_comment(task, user, 'Newest one')
+
+        body = text(admin_client.get(reverse('admin:todo_comment_changelist')))
+
+        assert body.index('Newest one') < body.index('Oldest one')
 
     def test_it_cannot_be_added_changed_or_deleted(self, admin_client, task, user):
         comment = add_comment(task, user, 'text')

@@ -50,6 +50,7 @@ from .references import (
     referenced_by,
     render_markdown,
     resolver_for,
+    resolver_for_request,
     sync_references,
 )
 from .tasks import (
@@ -117,6 +118,7 @@ __all__ = [
     'reorder_labels',
     'reschedule_overdue',
     'resolver_for',
+    'resolver_for_request',
     'restore_comment',
     'restore_task',
     'settle_unpaid_tasks',

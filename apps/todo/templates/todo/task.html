@@ -7,6 +7,8 @@
    class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>{% if task.is_trashed %}Trash{% else %}All tasks{% endif %}</a>
 <div class="mt-2">
     {% include 'todo/partials/task_panel.html' %}
+    {% comment %} Outside `#task-panel` on purpose: an action on the task does not re-render the comments, so a draft survives. {% endcomment %}
+    {% include 'todo/partials/comments.html' %}
 </div>
 {% endblock %}
 

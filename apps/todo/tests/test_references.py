@@ -4,7 +4,8 @@ their upkeep, `referenced_by` and the "Referenced by" panel."""
 from html import unescape
 
 import pytest
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.core.markdown import MAX_MARKDOWN_CHARS
@@ -20,6 +21,7 @@ from ..services import (
     referenced_by,
     resolver_for,
     restore_comment,
+    restore_task,
     sync_references,
     toggle_checklist,
     trash_task,
@@ -135,23 +137,23 @@ class TestSyncOnTasks:
 
         assert pairs() == set()
 
-    def test_a_trashed_task_is_dropped(self, user, tasks):
+    def test_a_trashed_task_is_recorded(self, user, tasks):
         task = make_task(user, number=2000, description='#1001 #1002')
         sync_references(task)
         trash_task(tasks[1001])
 
-        # The next sync (any edit of the text) no longer records it.
+        # Trashing a target leaves its row, and a later sync of the text keeps it.
         update_task(task, changes={'description': '#1001 #1002 #1003'})
 
-        assert pairs(task) == {(2000, 1002, False), (2000, 1003, False)}
+        assert pairs(task) == {(2000, 1001, False), (2000, 1002, False), (2000, 1003, False)}
 
-    def test_a_trashed_task_is_not_added_in_the_first_place(self, user, tasks):
+    def test_a_task_that_is_trashed_when_mentioned_is_recorded(self, user, tasks):
         trash_task(tasks[1001])
         task = make_task(user, number=2000, description='#1001')
 
         sync_references(task)
 
-        assert pairs(task) == set()
+        assert pairs(task) == {(2000, 1001, False)}
 
     def test_a_completed_task_is_recorded(self, funded_user):
         done = create_task(funded_user, title='Done')
@@ -229,15 +231,11 @@ class TestSyncOnComments:
 
         assert pairs() == set()
 
-    def test_a_reference_to_a_trashed_task_is_dropped(self, user, source, target):
+    def test_a_reference_to_a_trashed_task_is_recorded(self, user, source, target):
         trash_task(target)
 
-        comment = add_comment(source, user, '#1001')
-        assert pairs() == set()
+        add_comment(source, user, '#1001')
 
-        # An edit after it is restored records it.
-        Task.objects.filter(pk=target.pk).update(deleted_at=None)
-        edit_comment(comment, '#1001!')
         assert pairs() == {(2000, 1001, True)}
 
     def test_deleting_the_comment_row_deletes_its_references(self, user, source, target):
@@ -313,6 +311,33 @@ class TestReferencedBy:
 
         assert [t.number for t, _ in referenced_by(target)] == [1100]
 
+    def test_a_mention_made_while_the_target_is_trashed_shows_once_it_is_restored(
+        self, user, target
+    ):
+        mentioner = make_task(user, number=1100)
+        trash_task(target)
+        add_comment(mentioner, user, '#1001')
+        update_task(mentioner, changes={'description': 'also #1001'})
+
+        assert referenced_by(target) == []  # a task in the Trash lists nothing
+
+        restore_task(target)
+
+        assert [(t.number, c is not None) for t, c in referenced_by(target)] == [
+            (1100, False),
+            (1100, True),
+        ]
+
+    def test_a_mentioner_trashed_and_restored_is_listed_again(self, user, target):
+        mentioner = make_task(user, number=1100, description='#1001')
+        sync_references(mentioner)
+        trash_task(mentioner)
+        assert referenced_by(target) == []
+
+        restore_task(mentioner)
+
+        assert [t.number for t, _ in referenced_by(target)] == [1100]
+
     def test_a_deleted_comment_is_not_listed(self, user, target):
         mentioner = make_task(user, number=1100)
         comment = add_comment(mentioner, user, '#1001')
@@ -343,6 +368,24 @@ class TestResolver:
         trash_task(gone)
 
         assert resolver_for(user)([1001, 1002, 1003]) == {1003: '/todo/1003/'}
+
+
+class TestSharedResolver:
+    def test_a_page_looks_each_number_up_once_for_the_description_and_the_comments(
+        self, web, funded_user
+    ):
+        target = create_task(funded_user, title='Target')
+        page = create_task(funded_user, title='Page', description=f'see #{target.number}')
+        add_comment(page, funded_user, f'also #{target.number}')
+        add_comment(page, funded_user, f'and #{target.number} again')
+
+        with CaptureQueriesContext(connection) as queries:
+            response = web.get(reverse('todo:task', args=[page.number]))
+
+        lookups = [q for q in queries if '"number" IN' in q['sql']]
+        assert len(lookups) == 1
+        body = text(response)
+        assert body.count(f'<a href="/todo/{target.number}/" class="task-ref">') == 3
 
 
 class TestPanel:
@@ -385,6 +428,22 @@ class TestPanel:
         trash_task(mentioner)
 
         assert 'Referenced by' not in text(web.get(reverse('todo:task', args=[target.number])))
+
+    def test_a_mention_made_while_the_target_was_trashed_is_listed_after_the_restore(
+        self, web, pair, funded_user
+    ):
+        target, mentioner = pair
+        trash_task(target)
+        update_task(mentioner, changes={'description': f'#{target.number}'})
+        add_comment(mentioner, funded_user, f'and #{target.number}')
+        page = reverse('todo:task', args=[target.number])
+        assert 'Referenced by' not in text(web.get(page))  # in the Trash: nothing listed
+
+        restore_task(target)
+
+        body = text(web.get(page))
+        assert 'Referenced by' in body and f'#{mentioner.number} Mentions it' in body
+        assert 'in a comment' in body
 
     def test_the_description_links_to_the_right_task_and_leaves_unknown_numbers(
         self, web, pair, funded_user
