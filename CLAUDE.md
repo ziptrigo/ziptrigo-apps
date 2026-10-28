@@ -35,6 +35,10 @@ apps/short_url/       Short URLs (issue #162): links with editable destinations,
                       redirect (root-mounted), click analytics, password and preview pages, abuse
                       tooling, one-off billing of its extras, dashboard/stats pages, the JWT API
                       (`/api/s/`) and the `admin/shorturl.py` CLI (see "Short URLs").
+apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks with per-user numbers
+                      from 1000, labels, due dates in the user's time zone, Today / Upcoming / All /
+                      Completed / Trash pages, task billing (a monthly free allowance, then a price;
+                      see "To-do").
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts/
                       shorturl. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
@@ -127,7 +131,7 @@ inv pip compile --clean           # delete uv.lock and re-lock from scratch
 ### Dependency rules between apps
 
 ```
-qr_code | file_transfer | receipts | short_url   products; may not import each other
+qr_code | file_transfer | receipts | short_url | todo   products; may not import each other
 billing | feedback        may not import each other either
 accounts
 core
@@ -1367,7 +1371,7 @@ row's admin `has_delete_permission`, so `UserAdmin.get_deleted_objects` (`apps/a
 `CASCADE_WITH_USER_APP_LABELS`) drops a billing model from `perms_needed` when the caller holds its
 `delete_<model>` permission (what the default check asked before): superusers pass, staff still
 need it granted. The receipts and file_transfer read-only admins already refuse delete the same way,
-so a user with receipts or transfers still can't be deleted from the admin (not changed here).
+so a user with receipts or transfers still can't be deleted from the admin (not changed here). `short_url` and `todo` are in that list too, so their rows go with the user.
 The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
 so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
 and to the admin tools page.
@@ -2873,6 +2877,196 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   `GEOIP_PATH` have to reach the containers (#171). A dedicated short domain, anonymous shortening,
   bulk create, a trash with restore and device/geo routing are out of scope for v1.
 
+### To-do
+
+`apps.todo` (issue #161, foundation #178; app label `todo`) is a task manager in the spirit of
+Todoist: tasks with a Markdown description, a due date with an optional time, a priority, labels
+and subtasks one level deep, shown on Today / Upcoming / All / Completed / Trash pages. A product
+(same layer as `qr_code`/`file_transfer`/`receipts`/`short_url`), logged-in users only. **Built so
+far:** the foundation (this section). **Later sub-issues** add their own models, fields on
+`TodoSettings`, services, `RATELIMIT_RULES` and migrations (repeating tasks #179, comments #180,
+attachments #184, search #181, reminders #182, AI parsing #183, email intake #186, the JWT API and
+`inv todo` #187), so `services/__init__.py`, `settings.py`, the migrations and this file will see
+small merge conflicts between them.
+Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
+`templates/todo/`, `static/todo/`, `jobs.py`, `admin.py`, `checks.py`, `urls.py` (mounted at
+`/todo/`, `app_name = 'todo'`).
+
+- **Constants** (`apps/todo/limits.py`, re-exported by `services/limits.py`: the models need them
+  and a model can't import the `services` package, whose `__init__` imports the models):
+  `TITLE_MAX` 500, `DESCRIPTION_MAX` 20,000, `LABEL_NAME_MAX` 50, `LABEL_DESCRIPTION_MAX` 255,
+  `FIRST_TASK_NUMBER` 1000.
+- **Models.** `TodoSettings` (a `SingletonSettingsAdmin` singleton, `/admin/todo/todosettings/`):
+  `free_tasks_per_month` (10), `task_price` (10 credits; 0 makes tasks free), `trash_days` (30),
+  `max_open_tasks_per_user` (10,000, a hard cap on non-trashed open tasks) and `max_labels_per_user`
+  (200). `TodoAccount` (pk = the user) is created lazily by `services.accounts.get_account`: the
+  next task number, `default_due_time` (09:00), the month count (`month_key` `YYYY-MM` in the user's
+  zone + `month_task_count`) and `creation_blocked_at`. `Label` (per user, `#rrggbb` lower-case
+  colour, a description shown as the chip's native `title`, `position`; unique per user ignoring
+  case; `Meta.ordering` is `position, name`, but an aggregating query drops it, so
+  `services.labels.list_labels` orders explicitly). `Task`: UUID pk, `number` (**per user**,
+  unique with the user, never reused: a trashed or purged task keeps its number out of circulation),
+  `parent` (self FK, `CASCADE`, one level: a subtask's parent has no parent, enforced by the services
+  and `clean()`), `title`, `description` (Markdown), `description_text` and `title_text` (the
+  normalised copies search will run over; `Task.save()` keeps them in step, also with
+  `update_fields`), `priority` (0 none, 1 highest to 3), `due_date` and `due_time` (the user's local
+  date and wall-clock time, **not an instant**; a time only with a date), `completed_at`,
+  `deleted_at` (the Trash is a column, not a status), `position` (manual order among a parent's
+  subtasks) and `today_position` (manual order of the Today list: two columns, see "Ordering"),
+  `source` (`web`, `api`, `email`, `recurrence`), `charged_credits`, `unpaid_at`, `labels` (M2M). The user's time zone
+  turns the local date into an instant only when something needs one: `services.dates.due_at(task,
+  account)` uses `local_datetime` with `due_time` or the account's `default_due_time`; "today" is
+  always `user_today(user)` (`apps.accounts.services.timezones`).
+- **Numbering and billing** (`services.accounts`, `services.billing`). `tasks.create_task` is one
+  `transaction.atomic()` that calls `allocate_number(account)` (locks the account row with
+  `select_for_update`, so two creations can't read the same number, reads and bumps
+  `next_task_number`, and refreshes the passed account from the locked row), then
+  `charge_task_creation(account, settings, *, number, allow_unpaid)`: it counts the task in the
+  user's calendar month (`month_key` in **their** zone; a new month resets the count), and beyond
+  `free_tasks_per_month` spends `task_price` credits (`spend_credits`, `source='todo'`, description
+  `To-do: task #<number>`) unless the price is 0. Subtasks and every occurrence count, from any
+  source. `InsufficientCreditsError` **rolls the whole creation back** (the number and the count
+  too), the web showing a 422 with a Top up link. `allow_unpaid=True` is for a task the user did not
+  ask for (the next occurrence of a repeating task, #179): it is created owed (`unpaid_at` set,
+  `charged_credits` = the price) and `TodoAccount.creation_blocked_at` is set, which makes
+  `create_task` refuse (`'Top up your credits to add tasks: a repeating task is waiting to be
+  paid.'`, `__all__`) for everything that is not `allow_unpaid`. The `credits_added` receiver
+  (`apps.py`, `weak=False`, `try/except`; connected next to Receipts' and file transfer's) calls
+  `billing.on_credits_added`, which only queues `settle_unpaid_tasks(user_id)` (a `default` queue
+  task, through `enqueue_after_commit`, and only for a user whose account is blocked). It settles the
+  user's unpaid tasks oldest first, each in its own transaction with the task row locked, stopping at
+  the first the balance can't cover, and clears the block when none remain; idempotent. That last
+  step (`billing._unblock_if_settled`) runs its "none remain" check and the clearing in one
+  transaction under the account row lock (the one `allocate_number` takes), so a concurrent
+  `create_task(..., allow_unpaid=True)` can't have its block cleared over its new unpaid task.
+  **An unpaid task cannot be deleted forever** (decision on the review of #192): deleting the debt
+  would let the user top up 1 credit, have `settle` find nothing owed and unblock creation. So
+  `delete_forever` refuses a task that is unpaid, or whose subtasks are (`tasks.owes_credits`; a
+  `ValidationError` with `UNPAID_MESSAGE`, which the web shows as a 422 / flash message, the 422
+  with a Top up link to `billing:credits-history`), and `purge_trash` skips such tasks, and a
+  parent holding one, until a settle pays them; they then follow the normal Trash rules. Trashing,
+  restoring and completing an unpaid task stay allowed, and deleting one does not clear the block
+  (only a settle does). Nothing is ever refunded: completing, trashing, deleting forever or
+  purging keep what was paid. `get_account(user)` hands back an account whose `.user` is the
+  `user` passed in, so billing and the pages cost no extra query. `month_usage` is
+  `(tasks created this month, free allowance)`; the pages show `min(used, free)`
+  (`views.common.free_line`) as "N of F free tasks used this month".
+- **Services** (`services/tasks.py`; a refusal is a `django.core.exceptions.ValidationError` keyed
+  by field, `__all__` for none). `create_task` validates before writing anything: title (stripped,
+  1 to 500), description (`\r\n` normalised, at most 20,000; the form has no `max_length` of its own and calls
+  this same check, so a browser submission at the limit is accepted), priority 0 to 3, a time needs a date,
+  the parent is the user's own open non-trashed top-level task (`'A subtask cannot have
+  subtasks.'`; re-read under its row lock inside the creation transaction, after the account lock,
+  so it can't be moved under another task in between), labels are the user's own, the blocked state and the open-task cap (both checked
+  under the account lock). `update_task(task, *, changes)` is partial (`UPDATABLE` keys), computes
+  every value before assigning any (a refusal leaves the instance untouched), clears the time when
+  the date is cleared, lets a task move under a parent only when it has no subtasks of its own (decided inside the
+  write's transaction with the task and the new parent locked, `select_for_update` in pk order, so
+  two concurrent moves can't leave two levels of nesting), and refuses a trashed task. A date
+  change resets `today_position`. `complete_task` is a conditional write (`completed_at IS NULL`) that also
+  completes the open, non-trashed subtasks in the same transaction (the web asks first, see below;
+  the recurrence sub-issue hooks in here); `uncomplete_task` leaves a subtask's parent as it is.
+  `postpone_task(task, preset=, date=)`: `tomorrow`, `next_week` (the next Monday *after* today,
+  so on a Monday it means in 7 days), `next_weekend` (the next Saturday after today, on a Saturday
+  in 7 days), `date` (today or later), "today" being the owner's, keeping the time; a task without a
+  date gets one. `reschedule_overdue(user)` sets `due_date` to today on every open overdue task.
+  `trash_task` stamps the task and its not-yet-trashed subtasks with **one** `deleted_at`;
+  `restore_task` clears it on the task and the subtasks with that same value (a subtask trashed on
+  its own stays trashed) and refuses a subtask whose parent is still trashed; `delete_forever`
+  cascades; `purge_trash()` (the daily `todo.purge_trash` job, lease 1 h) deletes what was trashed
+  more than `trash_days` ago in batches, logging and skipping a row that fails.
+  `toggle_checklist(task, index, checked)` is `apps.core.markdown.toggle_checklist_item` applied to
+  the description *as it is now* (the row is re-read with `select_for_update` in the same
+  transaction as the save, so two boxes ticked at once both survive) and saved through
+  `update_task`; it returns the fresh task. `reorder(user, scope=, ids=, parent=)` writes the
+  index of each id into the scope's column (`today`: `today_position` of the tasks due today,
+  `dates.todays_tasks`, the overdue ones excluded; `subtasks`: `position` of the children of
+  `parent`) and ignores the rest.
+  `services/labels.py`: `create_label` (name whitespace-collapsed, unique ignoring case with a
+  friendly message, the per-user cap, colour validated and lower-cased, empty = `#8fa89e`),
+  `update_label` (`None` leaves a field), `delete_label` (tasks keep their other labels),
+  `reorder_labels`, `list_labels` (with `task_count` of tasks not in the Trash).
+  `services/references.py`: `resolver_for(user)` is the `ReferenceResolver` for
+  `apps.core.markdown.render` (one query; only the user's own non-trashed tasks link) and
+  `TASK_URL_PATH` the pattern of a task page's path (`/todo/<number>/`) that makes a pasted task
+  URL a reference too; the comments sub-issue reuses both.
+- **Ordering** (`services/dates.py`). The default sort, in every list: due date ascending with
+  undated last, then date-only before timed, then the time, then priority (1 first, none last),
+  then oldest; done in the database (`order_tasks`, so pagination works). `?sort=` on All:
+  `priority` (then date), `created` (newest), `title` (the normalised title). **Manual order exists
+  in two lists only, each with its own column**, so ordering one never changes the other: Today
+  (the tasks due *today*, subtasks included; the overdue ones keep the default sort above them) in
+  `Task.today_position`, and a parent's subtasks in `Task.position`. Judgement call, since a task
+  can't otherwise tell "never positioned" from "positioned first": `reorder` writes 0, 1, 2, ...,
+  so a list with any value above 0 in its column is *manually ordered* (`dates.has_manual_order`)
+  and gets that column then the default order, otherwise the default sort. **The rule: the set
+  that decides, the set a new task's value is taken over and the set the view orders are the same
+  set.** Today: `dates.todays_tasks`; `create_task` gives a new task due today `max
+  today_position + 1` over that set when it is manual, and every other task 0 (so a task created
+  for another day, or while nobody reordered Today, never changes how any Today sorts, and the
+  default stays due time then priority unless the user reordered *that* list). A date change
+  (`update_task`, `postpone_task`, `reschedule_overdue`) resets `today_position` to 0, since a
+  place in one day's order means nothing on another. Subtasks: `dates.subtasks_of(parent)`;
+  `next_position` takes the max over that parent's subtasks, so a drag in one parent's list never
+  orders another's. A top-level task's `position` stays 0. SortableJS (`sortablejs@1.15.6` from
+  cdnjs, loaded only on Today, the task page and Labels) posts the order to `POST /todo/reorder/`
+  (`scope`, `ids[]`, `parent`: the parent's number), answered 204.
+- **Views and URLs** (`views/`; every one `@login_required`; another user's task, and a *trashed*
+  task where a view doesn't accept one, is a **404**, never a 403: `views.common.owned_task`).
+  `todo:today` `/todo/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
+  due"), `todo:all` `/todo/all/` (50 per page, `?sort=`), `todo:completed`, `todo:trash`,
+  `todo:list` `/todo/list/` (the partial every page fetches with htmx: `view`, `sort`, `page`; the
+  response's `HX-Push-Url` is the *page* URL, a direct GET redirects to the page),
+  `todo:create` `POST /todo/new/` (the quick-add form: on success the list of the hidden `view` is
+  re-rendered into `#task-list`, with the cleared form `#quick-add` and the sidebar count swapped
+  out of band), `todo:task` `/todo/<number>/` (also a trashed task, read-only with Restore),
+  `todo:edit` (`part=title|description|details`, so each part of the page saves on its own; no part
+  is the whole form), `todo:complete`, `uncomplete`, `postpone` (`preset`, `date`), `trash-task`,
+  `restore`, `delete` (a trashed task, forever; an unpaid one is a 422, see "Numbering and billing"), `checklist` (`index`, `checked`; answers the
+  re-rendered `#task-description`), `subtask-add`, `todo:reorder`, `todo:reschedule-overdue`,
+  `todo:labels` (GET the page, POST add) with `labels/<id>/edit/`, `labels/<id>/delete/`,
+  `labels/reorder/`, and `todo:settings` (GET, POST the default due time). Every page renders
+  through `views.common.render_page` (creates the `TodoAccount` on first visit; adds the sidebar
+  entries, the count beside Today, `todo_blocked` and the free-tasks line). **htmx answers**: an
+  action on a row (`ctx=row`, the default, with the `view` the row is in) answers the re-rendered
+  `task_row.html`, or an *empty* body when the row no longer belongs to that list
+  (`views.lists.belongs`: completed from Today, postponed past the date, trashed anywhere), which
+  htmx swaps in to remove it, plus the sidebar count out of band (completing a parent that had open subtasks adds an out-of-band
+  `<li id="task-N" hx-swap-oob="delete">` per subtask it completed, so their rows leave the same
+  list instead of staying open until a reload); from the task page (`ctx=page`)
+  it answers the whole `task_panel.html` (`#task-panel`); without htmx it redirects back (a POSTed
+  same-site `next`, else the `Referer`, else Today). Errors follow the 422 convention with
+  `HX-Retarget` to the slot of the control that was used (`#quick-add-msg`, `#task-msg`,
+  `#subtask-msg`, `#label-msg`, `#settings-msg`, else `#todo-msg`); `InsufficientCreditsError` is a
+  422 with a Top up link to `billing:credits-history`. A parent with open subtasks asks first: its
+  circle and its Complete button open the shared `confirmModal` (plain POST, so the redirect-back
+  path above), no script of its own. The Postpone menu is Alpine in the template.
+  `static/todo/js/tasks.js` (deferred, wired through `htmx.onLoad` so it covers swapped-in HTML)
+  enables the description's checklist boxes (the server renders them `disabled`; a change posts to
+  the block's `data-checklist-url`) and makes `[data-sortable]` lists sortable by their
+  `.drag-handle`. Template tags (`templatetags/todo_ui.py`): `{% render_description task %}` (the
+  Markdown through `apps.core.markdown.render` with `resolver_for` and `TASK_URL_PATH`; a text over
+  the Markdown size guard is shown escaped instead of failing the page), `{% due_badge task %}` (red
+  when overdue, `Today`, `Tomorrow`, the weekday for the next 6 days, else `5 Nov`, with the year
+  when it isn't this year's; the time when set), `{% priority_flag task %}` (red / amber / sky for
+  1 / 2 / 3, each with a dark twin), `{% label_chip label %}` (the colour at 20% as the background
+  and as the text, the description as `title`). Times a page shows (`completed_at`, `deleted_at`) go
+  through `|date`, so they follow the user's saved zone.
+- **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
+  creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation).
+  A form is validated first and the limit charged after, so a refused form spends nothing; over the
+  limit `ratelimit.web_response` (retargeted to the control's message slot).
+- **Admin**: `TodoSettingsAdmin` (singleton, superusers), and read-only `TaskAdmin` (search title,
+  number, user email; filters for priority, source, completed, trash, unpaid), `TodoAccountAdmin`
+  and `LabelAdmin` (no add, change or delete; the user admin lists `todo` in
+  `CASCADE_WITH_USER_APP_LABELS` so deleting a user still works).
+- **Tests**: `apps/todo/tests/` (`test_numbering_and_billing.py`: numbering, the lock, the allowance
+  and price, the month in the user's zone, unpaid tasks and settling through the `credits_added`
+  signal; `test_tasks_service.py`; `test_labels_and_references.py`; `test_views.py`;
+  `test_wiring_and_ui.py`) and the AI plan `tests_e2e/ai/todo.md`. A test that needs a fixed day
+  uses the `wednesday`/`freeze_now` fixtures (`timezone.now` is replaced), billing tests the
+  `config` fixture (2 free tasks, price 5).
+
 ### Queue and scheduler
 
 Two background-work mechanisms, both used by `file_transfer` (spec issue #55) and available to any
@@ -3139,6 +3333,12 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   to the containers (#171: until then every click's country is unknown and `short_url.W001` shows at
   every deploy). `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
   `receipts.py` and `filetransfer.py` still carry their own copies of it.
+- To-do (#161) is built in waves. Only the foundation (#178: tasks, subtasks, labels, numbering, task
+  billing, the web pages) exists; repeating tasks, comments, search, reminders, attachments, AI date
+  parsing, email intake and the JWT API/CLI are their own sub-issues. Until the recurrence sub-issue
+  lands nothing creates an *unpaid* task, so `creation_blocked_at` is never set outside tests (the
+  settling code, the banner and the refusal are built and unit-tested). The AI plan
+  `tests_e2e/ai/todo.md` has not been run end to end by an agent yet.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set); the coarse nginx `limit_req`
   that backs it up as defense-in-depth is configured in the separate `infra` repo (#119), not
@@ -3169,7 +3369,7 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
 ### GitHub issues
 
 Label every issue with the app(s) it applies to: `Users` (accounts), `Billing`, `Core`, `QR Code`,
-`File Transfer`, `Url` (short_url). Work that happens in the separate `infra` repository is tracked here under
+`File Transfer`, `Url` (short_url), `Todo`. Work that happens in the separate `infra` repository is tracked here under
 `Infra`. An issue that touches several apps gets several labels.
 
 ### Adding an app

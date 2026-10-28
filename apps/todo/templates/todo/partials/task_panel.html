@@ -1,0 +1,113 @@
+{% load todo_ui %}
+{% comment %} The task page's content: what every action taken from the page re-renders (`ctx=page`, target #task-panel).
+   Needs `task` (with subtask counts), `subtasks`, `labels`, `selected_label_ids` and `today`. A trashed task is
+   read-only: Restore (and Delete forever), no editing. {% endcomment %}
+<div id="task-panel" hx-vals='{"ctx": "page"}'>
+    <div id="task-msg" class="mb-4 text-sm" aria-live="polite"></div>
+
+    <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
+        <span>#{{ task.number }}</span>
+        {% if task.parent %}<span>Subtask of <a href="{% url 'todo:task' task.parent.number %}" class="text-sage-600 dark:text-sage-300 hover:underline">{{ task.parent.title }}</a></span>{% endif %}
+        {% if task.is_trashed %}
+        <span class="text-red-600 dark:text-red-400"><i class="fas fa-trash mr-1" aria-hidden="true"></i>In the trash since {{ task.deleted_at|date:'j M Y' }}</span>
+        {% elif task.is_completed %}
+        <span class="text-green-700 dark:text-green-400"><i class="fas fa-check mr-1" aria-hidden="true"></i>Completed {{ task.completed_at|date:'j M Y, H:i' }}</span>
+        {% endif %}
+        {% if task.is_unpaid %}<span class="text-amber-700 dark:text-amber-400"><i class="fas fa-coins mr-1" aria-hidden="true"></i>Waiting for credits ({{ task.charged_credits }})</span>{% endif %}
+    </div>
+
+    <!-- Title -->
+    {% if task.is_trashed %}
+    <h1 class="mb-6 text-3xl font-bold text-gray-500 dark:text-gray-400 line-through">{{ task.title }}</h1>
+    {% else %}
+    <div x-data="{ editing: false }" class="mb-6">
+        <div x-show="!editing" class="flex items-start gap-3">
+            <h1 class="min-w-0 flex-1 break-words text-3xl font-bold {% if task.is_completed %}text-gray-500 dark:text-gray-400 line-through{% else %}text-gray-900 dark:text-gray-100{% endif %}">{{ task.title }}</h1>
+            <button type="button" @click="editing = true; $nextTick(() => $refs.title.focus())"
+                    aria-label="Edit the title" title="Edit title"
+                    class="mt-1 p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+        </div>
+        <form x-show="editing" style="display: none" method="post" action="{% url 'todo:edit' task.number %}"
+              hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+              hx-disabled-elt="find button[type='submit']"
+              class="flex items-center gap-2" @keydown.escape="editing = false">
+            {% csrf_token %}
+            <input type="hidden" name="part" value="title">
+            <input type="hidden" name="ctx" value="page">
+            <label for="task-title" class="sr-only">Title</label>
+            <input id="task-title" x-ref="title" name="title" type="text" value="{{ task.title }}" maxlength="500" required
+                   class="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xl focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            <button type="submit" aria-label="Save the title" title="Save"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            <button type="button" @click="editing = false" aria-label="Cancel editing the title" title="Cancel"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+        </form>
+    </div>
+    {% endif %}
+
+    <!-- Actions -->
+    <div class="mb-8 flex flex-wrap items-center gap-3">
+        {% if task.is_trashed %}
+        <button type="button" hx-post="{% url 'todo:restore' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore
+        </button>
+        <button type="button" @click="show($el)"
+                data-url="{% url 'todo:delete' task.number %}"
+                data-title="Delete forever"
+                data-body="Are you sure you want to delete {{ task.title }} forever? This can't be undone."
+                data-label="Delete forever"
+                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+            <i class="fas fa-trash mr-2" aria-hidden="true"></i>Delete forever
+        </button>
+        {% else %}
+            {% if task.is_completed %}
+            <button type="button" hx-post="{% url 'todo:uncomplete' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Uncomplete
+            </button>
+            {% elif open_subtasks %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:complete' task.number %}"
+                    data-title="Complete task"
+                    data-body="{{ task.title }} has {{ open_subtasks }} open subtask{{ open_subtasks|pluralize }}. Completing it completes {{ open_subtasks|pluralize:'it,them' }} too."
+                    data-label="Complete" data-tone="primary"
+                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="fas fa-check mr-2" aria-hidden="true"></i>Complete
+            </button>
+            {% else %}
+            <button type="button" hx-post="{% url 'todo:complete' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="fas fa-check mr-2" aria-hidden="true"></i>Complete
+            </button>
+            {% endif %}
+            {% if not task.is_completed %}
+            <div hx-target="#task-panel" hx-swap="outerHTML">{% include 'todo/partials/postpone_menu.html' with button_label=True %}</div>
+            {% endif %}
+            <button type="button" hx-post="{% url 'todo:trash-task' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+                    class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="fas fa-trash mr-2" aria-hidden="true"></i>Move to trash
+            </button>
+        {% endif %}
+    </div>
+
+    <!-- Details -->
+    <section class="mb-8" aria-labelledby="details-title">
+        <h2 id="details-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Details</h2>
+        {% if task.is_trashed %}
+        <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <div><dt class="text-xs text-gray-500 dark:text-gray-400">Date</dt><dd>{% if task.due_date %}{{ task.due_date|date:'D j M Y' }}{% if task.due_time %} {{ task.due_time|time:'H:i' }}{% endif %}{% else %}No date{% endif %}</dd></div>
+            <div><dt class="text-xs text-gray-500 dark:text-gray-400">Priority</dt><dd>{% if task.priority %}Priority {{ task.priority }}{% else %}None{% endif %}</dd></div>
+            <div class="sm:col-span-2"><dt class="mb-1 text-xs text-gray-500 dark:text-gray-400">Labels</dt><dd class="flex flex-wrap gap-2">{% for label in task.labels.all %}{% label_chip label %}{% empty %}None{% endfor %}</dd></div>
+        </dl>
+        {% else %}
+        {% include 'todo/partials/task_form.html' with mode='details' %}
+        {% endif %}
+    </section>
+
+    {% include 'todo/partials/description.html' %}
+
+    {% if not task.parent_id %}
+        {% include 'todo/partials/subtasks.html' %}
+    {% endif %}
+</div>

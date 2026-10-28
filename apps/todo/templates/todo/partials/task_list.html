@@ -1,0 +1,104 @@
+{% load todo_ui %}
+{% comment %} The list of the current view, what every page's tabs, sort links and pager swap into #task-list (and
+   what the quick-add form re-renders, with `oob_form`/`oob_nav` refreshing the form and the sidebar count out
+   of band). Needs `view`, `today` and the view's own data (`overdue` + `tasks`, `days`, or `tasks` + `page_obj`). {% endcomment %}
+{% if oob_form %}
+<div id="quick-add" hx-swap-oob="true">{% include 'todo/partials/task_form.html' with mode='quick' %}</div>
+{% endif %}
+{% if oob_nav %}{% include 'todo/partials/nav_count.html' with oob=True %}{% endif %}
+
+{% if view == 'today' %}
+    {% if overdue %}
+    <section class="mb-8" aria-labelledby="overdue-title">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 id="overdue-title" class="text-lg font-semibold text-red-600 dark:text-red-400">Overdue</h2>
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:reschedule-overdue' %}"
+                    data-title="Reschedule overdue tasks"
+                    data-body="Move the date of {{ overdue|length }} overdue task{{ overdue|length|pluralize }} to today? Their times stay."
+                    data-label="Reschedule" data-tone="primary"
+                    class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="fas fa-calendar-check mr-2" aria-hidden="true"></i>Reschedule overdue to today
+            </button>
+        </div>
+        <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+            <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+                {% for task in overdue %}{% include 'todo/partials/task_row.html' with oob_nav=False %}{% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+    <section aria-labelledby="today-title">
+        <h2 id="today-title" class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">Today <span class="text-sm font-normal text-gray-500 dark:text-gray-400">{{ today|date:'l j M' }}</span></h2>
+        <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+            <ul class="divide-y divide-gray-200 dark:divide-gray-700"
+                data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="today">
+                {% for task in tasks %}{% include 'todo/partials/task_row.html' with sortable=True oob_nav=False %}
+                {% empty %}
+                <li class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400" data-empty>
+                    {% if overdue %}Nothing else due today.{% else %}Nothing due today. Add a task above.{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+
+{% elif view == 'upcoming' %}
+    {% for day, day_tasks in days %}
+    <section class="mb-6" aria-label="{{ day|date:'l j M' }}">
+        <h2 class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">{% day_heading day today %}</h2>
+        <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+            <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+                {% for task in day_tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
+                {% empty %}
+                <li class="px-4 py-3 sm:px-6 text-sm text-gray-500 dark:text-gray-400">Nothing due</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endfor %}
+    <p class="text-sm"><a href="{% url 'todo:all' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Later: see all tasks <i class="fas fa-arrow-right ml-1" aria-hidden="true"></i></a></p>
+
+{% else %}
+    {% if view == 'all' %}
+    <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <span class="text-gray-500 dark:text-gray-400">Sort by</span>
+        {% for key, label in sorts.items %}
+        <a href="{{ page_url }}{% if key != 'date' %}?sort={{ key }}{% endif %}"
+           hx-get="{{ list_url }}?view=all{% if key != 'date' %}&sort={{ key }}{% endif %}" hx-target="#task-list" hx-swap="innerHTML"
+           {% if sort == key %}aria-current="true"{% endif %}
+           class="rounded focus:outline-none focus:ring-2 focus:ring-brand-primary {% if sort == key %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ label }}</a>
+        {% endfor %}
+    </div>
+    {% elif view == 'trash' %}
+    <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">
+        Tasks are deleted forever {{ trash_days }} days after being trashed. Credits spent on them are not refunded.
+    </p>
+    {% endif %}
+    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
+            {% empty %}
+            <li class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">
+                {% if view == 'completed' %}No completed tasks yet.{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="mt-6 flex items-center justify-between text-sm">
+        <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+        <div class="flex gap-4">
+            {% if page_obj.has_previous %}
+            <a href="{{ page_url }}?{{ prev_query }}" hx-get="{{ list_url }}?view={{ view }}&{{ prev_query }}" hx-target="#task-list" hx-swap="innerHTML"
+               class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>
+            {% endif %}
+            {% if page_obj.has_next %}
+            <a href="{{ page_url }}?{{ next_query }}" hx-get="{{ list_url }}?view={{ view }}&{{ next_query }}" hx-target="#task-list" hx-swap="innerHTML"
+               class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+{% endif %}

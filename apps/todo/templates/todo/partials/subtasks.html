@@ -1,0 +1,33 @@
+{% comment %} The subtasks of a top-level task: the list (drag to reorder), and the add box. Rows are the ordinary task rows
+   in the `subtask` view, so a completed subtask stays in the list. Adding one re-renders the whole panel. {% endcomment %}
+<section id="subtasks" aria-labelledby="subtasks-title" class="mb-8">
+    <h2 id="subtasks-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Subtasks</h2>
+    <div id="subtask-msg" class="mb-2 text-sm" aria-live="polite"></div>
+    {% if subtasks %}
+    <div class="mb-4 bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700"
+            data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="subtasks" data-parent="{{ task.number }}">
+            {% for task in subtasks %}{% include 'todo/partials/task_row.html' with view='subtask' sortable=True oob_nav=False %}{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% if not task.is_trashed %}
+    <form method="post" action="{% url 'todo:subtask-add' task.number %}"
+          hx-post="{% url 'todo:subtask-add' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+          hx-vals='{"ctx": "page"}'
+          hx-disabled-elt="find button[type='submit']"
+          class="flex items-end gap-3">
+        {% csrf_token %}
+        <input type="hidden" name="ctx" value="page">
+        <div class="min-w-0 flex-1">
+            <label for="subtask-title" class="block mb-1 text-sm font-medium">New subtask</label>
+            <input id="subtask-title" name="title" type="text" maxlength="500" required autocomplete="off" placeholder="Subtask title"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        </div>
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+            <i class="fas fa-plus mr-2" aria-hidden="true"></i>Add
+        </button>
+    </form>
+    {% endif %}
+</section>

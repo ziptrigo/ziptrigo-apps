@@ -1,0 +1,31 @@
+{% comment %} The settings sections: the default due time (an htmx form that re-renders this block), and what tasks cost. Later
+   sub-issues add their own sections here. {% endcomment %}
+<section class="mb-8" aria-labelledby="due-time-title">
+    <h2 id="due-time-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Default due time</h2>
+    <div id="settings-msg" class="mb-4 text-sm" aria-live="polite">
+        {% if saved %}<p class="text-green-700 dark:text-green-400" role="status">Saved.</p>{% endif %}
+    </div>
+    <form method="post" action="{% url 'todo:settings' %}" hx-post="{% url 'todo:settings' %}"
+          hx-target="#settings-form" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']"
+          class="flex flex-wrap items-end gap-3">
+        {% csrf_token %}
+        <div>
+            <label for="default-due-time" class="block mb-1 text-sm font-medium">Time</label>
+            <input id="default-due-time" type="time" name="default_due_time" value="{{ account.default_due_time|time:'H:i' }}" required
+                   class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        </div>
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+    </form>
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">The time a task with a date and no time is treated as due, for reminders and ordering. Such a task is still shown as date-only.</p>
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Dates and times follow your time zone, which you can change on your <a href="{% url 'accounts:account' %}" class="underline">account page</a>.</p>
+</section>
+
+<section class="mb-8" aria-labelledby="cost-title">
+    <h2 id="cost-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">What tasks cost</h2>
+    <p class="text-sm text-gray-700 dark:text-gray-300"><strong>{{ free_used }} of {{ free_total }}</strong> free tasks used this month.</p>
+    <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+        {% if task_price %}After that each task costs {{ task_price }} credit{{ task_price|pluralize }}.{% else %}Tasks are free.{% endif %}
+        Subtasks and every occurrence of a repeating task count. Credits are not refunded when a task is completed or deleted.
+    </p>
+</section>

@@ -1,0 +1,15 @@
+{% extends 'todo/layout.html' %}
+
+{% block title %}{{ task.title }} - To-do - ZipTrigo{% endblock %}
+
+{% block todo_content %}
+<a href="{% if task.is_trashed %}{% url 'todo:trash' %}{% else %}{% url 'todo:all' %}{% endif %}"
+   class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>{% if task.is_trashed %}Trash{% else %}All tasks{% endif %}</a>
+<div class="mt-2">
+    {% include 'todo/partials/task_panel.html' %}
+</div>
+{% endblock %}
+
+{% block todo_js_libs %}
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"></script>
+{% endblock %}

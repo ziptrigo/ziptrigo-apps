@@ -11,7 +11,7 @@ pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 def test_installed_products_are_registered_in_installed_apps_order():
     labels = [product.label for product in get_products()]
 
-    assert labels == ['qr_code', 'file_transfer', 'receipts', 'short_url']
+    assert labels == ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo']
 
 
 def test_every_product_url_resolves():

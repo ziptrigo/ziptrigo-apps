@@ -1,0 +1,47 @@
+{% load todo_ui %}
+{% comment %} The task form, in two modes. `mode='quick'`: the quick-add box (title, date, time, priority, labels; posts
+   to todo:create and re-renders the list in `view`). `mode='details'`: the task page's details (the same
+   controls without a title; saves `part=details` of the task and re-renders the panel). Needs `labels` (the user's)
+   and `selected_label_ids`; in details mode `task`. The AI date parsing sub-issue adds its chip here later. {% endcomment %}
+{% if mode == 'quick' %}
+<form id="quick-add-form" method="post" action="{% url 'todo:create' %}"
+      hx-post="{% url 'todo:create' %}" hx-target="#task-list" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type='submit']"
+      class="mb-6 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
+    {% csrf_token %}
+    <input type="hidden" name="view" value="{{ view }}">
+    <div id="quick-add-msg" class="mb-2 text-sm" aria-live="polite"></div>
+    <div class="flex flex-col gap-2 sm:flex-row">
+        <div class="flex-1">
+            <label for="quick-title" class="sr-only">Task title</label>
+            <input id="quick-title" type="text" name="title" maxlength="500" required autocomplete="off"
+                   placeholder="Add a task"
+                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        </div>
+        <button type="submit"
+                class="group inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+            <span class="group-disabled:hidden"><i class="fas fa-plus mr-2" aria-hidden="true"></i>Add task</span>
+            <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2" aria-hidden="true"></i>Adding&hellip;</span>
+        </button>
+    </div>
+    <div class="mt-2 flex flex-wrap items-center gap-2">
+        {% include 'todo/partials/task_form_fields.html' %}
+    </div>
+    {% if free_total %}<p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ free_used }} of {{ free_total }} free tasks used this month.</p>{% endif %}
+</form>
+{% else %}
+<form id="task-details-form" method="post" action="{% url 'todo:edit' task.number %}"
+      hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+      hx-vals='{"ctx": "page", "part": "details"}'
+      hx-disabled-elt="find button[type='submit']"
+      class="mb-8">
+    {% csrf_token %}
+    <input type="hidden" name="part" value="details">
+    <input type="hidden" name="ctx" value="page">
+    <div class="flex flex-wrap items-end gap-3">
+        {% include 'todo/partials/task_form_fields.html' with show_labels_text=True %}
+        <button type="submit"
+                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+    </div>
+</form>
+{% endif %}
