@@ -2593,7 +2593,14 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   page (`/links/<id>/stats/?range=7|30|90|all`: totals always; a server-rendered SVG chart with a table
   fallback and the four top lists behind the paid analytics extra). Another user's link, or one the
   owner deleted, is a 404 on every page. `copyText`/`confirmModal` are the shared Alpine components in
-  `core/js/components.js`.
+  `core/js/components.js`. **Times are in the browser's zone** (`static/short_url/js/local_time.js`):
+  the site has no per-user time zone and `TIME_ZONE` is UTC, so a bare `datetime-local` value would be
+  read as UTC (found by the browser run of the AI plan: from Chicago, "2 minutes from now" was refused
+  as past). The visible Expires input has no `name`; the script keeps a hidden `expires_at` in UTC
+  (`2026-10-27T13:51:00.000Z`), and the edit form is prefilled in UTC with `Z` (`views.form._initial`)
+  for the script to show locally. Without JavaScript the expiry is not sent. The link page's Expires and
+  Last click are `<time datetime data-local-time>`, rendered in UTC (marked "UTC") and rewritten
+  locally.
 - **Rate limits** (`RATELIMIT_RULES`): `SU_REDIRECT_IP` (120/min, also charged by `/unlock` GETs),
   `SU_CREATE_USER` (30/h), `SU_EDIT_USER` (60/h), `SU_QR_USER` (60/min), `SU_PASSWORD_IP` (15/10 min),
   `SU_PASSWORD_LINK` (30/10 min), `SU_PREVIEW_IP` (60/min), `SU_REPORT_IP` (5/h), `SU_REPORT_LINK`

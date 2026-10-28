@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 import pytest
 from django.contrib.messages import get_messages
@@ -374,7 +374,9 @@ class TestEdit:
     def test_an_expired_link_can_be_saved_without_touching_its_expiry(self, web, funded_user):
         link = expired(funded_user, code='Old001')
         shown = web.get(self.url(link)).content.decode()
-        value = timezone.localtime(link.expires_at).strftime('%Y-%m-%dT%H:%M')
+        # Prefilled in UTC with its offset; the page's script shows it in the browser's zone.
+        assert link.expires_at is not None
+        value = link.expires_at.astimezone(UTC).strftime('%Y-%m-%dT%H:%MZ')
         assert f'value="{value}"' in shown
         response = web.post(
             self.url(link),
@@ -384,6 +386,29 @@ class TestEdit:
         assert response.status_code == 200
         link.refresh_from_db()
         assert link.title == 'Still fine'
+
+    def test_an_expiry_with_an_offset_is_read_in_that_offset(self, web, link):
+        # What the browser submits: the local time the user picked, converted to UTC.
+        local = (timezone.now() + timedelta(days=2)).astimezone(timezone.get_fixed_timezone(-300))
+        sent = local.replace(second=0, microsecond=0)
+        response = web.post(
+            self.url(link),
+            {'destination': 'https://example.com/x', 'expires_at': sent.isoformat()},
+            **HX,
+        )
+        assert response.status_code == 200
+        link.refresh_from_db()
+        assert link.expires_at == sent
+
+    def test_the_browser_s_utc_value_with_milliseconds_is_accepted(self, web, link):
+        sent = (timezone.now() + timedelta(days=1)).astimezone(UTC).replace(microsecond=0)
+        value = sent.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        response = web.post(
+            self.url(link), {'destination': 'https://example.com/x', 'expires_at': value}, **HX
+        )
+        assert response.status_code == 200
+        link.refresh_from_db()
+        assert link.expires_at == sent
 
     def test_a_new_expiry_in_the_past_is_refused(self, web, link):
         response = web.post(

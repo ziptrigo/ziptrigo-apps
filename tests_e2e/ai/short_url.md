@@ -94,7 +94,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/` and click **Short URLs** in the top navigation (link icon). | Lands on `/links/`. Tab title "Short URLs - ZipTrigo". |
-| 2 | Look at the page. | Heading "Short URLs"; a **New link** button; status tabs All, Active, Disabled, Expired, Click limit reached, Taken down, each with a count of 0; a search box "Search code, destination, title or tag"; a list header (Short link, Destination, Status, Clicks, Created); one row "No links yet. Create your first one." with a link. No tag filter yet. No broken icons, raw `{{ }}`/`{% %}`, or console errors. |
+| 2 | Look at the page. | Heading "Short URLs"; a **New link** button; status tabs All, Active, Disabled, Expired, Click limit reached, Taken down (a tab shows its count only when it is above 0, so none has one yet); a search box "Search code, destination, title or tag"; a list header (Short link, Destination, Status, Clicks, Created); one row "No links yet. Create your first one." with a link. No tag filter yet. No broken icons, raw `{{ }}`/`{% %}`, or console errors. |
 | 3 | Click **Create your first one.** | Goes to `/links/new/`. |
 
 ### SU-03 The new link form
@@ -175,7 +175,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/links/`. | Two rows, newest first (`QA Sale`, then the plain link). Each row: the path `/s/<code>` with a **Copy** button, the destination (truncated, full text in a tooltip), the title for the alias link, tag chips, an **Active** pill, the click count and the created date, and a "⋮" actions menu. Tabs: All 2, Active 2, others 0. A **Tag** dropdown now exists with `promo` and `spring`. |
+| 1 | Open `/links/`. | Two rows, newest first (`QA Sale`, then the plain link). Each row: the path `/s/<code>` with a **Copy** button, the destination (truncated, full text in a tooltip), the title for the alias link, tag chips, an **Active** pill, the click count and the created date, and a "⋮" actions menu. Tabs: All 2, Active 2, the others without a count. A **Tag** dropdown now exists with `promo` and `spring`. |
 | 2 | Click **Copy** on a row. | The button reads "Copied" for a moment; pasting somewhere gives the full address `http://localhost:8765/s/<code>`. |
 | 3 | Type `sale` in the search box. | After a short pause (no page reload) only `QA Sale` remains; the address bar shows `?q=sale`. Clear it with the × button: both rows return. |
 | 4 | Search `example.com/plain`, then `spring`, then `"`. | The plain link; the alias link (matched by tag); no results ("No links found.") for `"`. |
@@ -223,7 +223,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 3 | Follow it a third time. | The neutral "This link isn't available" page (404). |
 | 4 | On `/links/`, look at the row and the tabs. | A **Click limit reached** pill; the tab "Click limit reached" counts 1 and lists it; the click count reads 2. |
 | 5 | Open the link page and click **Edit**; raise the click limit to `5`, save, and follow the link again. | It redirects again (3 of 5). |
-| 6 | Create the expiring link: destination `https://example.com/expiring`, title `QA Expiring`, **Expires** a minute or two ahead. Follow it at once, then again after it has expired. | The first follow redirects; the second shows the neutral page. The dashboard shows an **Expired** pill and the Expired tab counts it. |
+| 6 | Create the expiring link: destination `https://example.com/expiring`, title `QA Expiring`, **Expires** a minute or two ahead **in your own local time** (the field is in the browser's time zone; the link page then shows the same local time). Follow it at once, then again after it has expired. | The first follow redirects; the second shows the neutral page. The dashboard shows an **Expired** pill and the Expired tab counts it. |
 | 7 | Edit the expiring link and clear the expiry (empty field), save. | It works again and the pill is **Active**. (An unchanged, already-passed expiry would also have saved.) |
 
 ### SU-12 A password-protected link
@@ -318,13 +318,13 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/admin/short_url/shorturlsettings/` and set **Free active links** to `1`, keep **Max links** at 500 (or higher), save. | "changed successfully". |
+| 1 | Go to `/admin/short_url/shorturlsettings/`, open the **Allowances (per user)** tab, set **Free active links** to `1`, keep **Max links** at 500 (or higher), save. | "changed successfully". |
 | 2 | As `qa.admin`, create a link (`https://example.com/a1`, title `A1`). | Free (the first active link). |
 | 3 | Create a second (`https://example.com/a2`, title `A2`). | The form shows "You have used your free active links, so this one costs 1 credit, once." and the cost panel appears on submit; confirm it. Balance is one lower. |
 | 4 | Disable `A2`, then enable it again. | The enable has no cost dialog and charges nothing (the link already paid its way in). |
 | 5 | Disable `A1` and enable it. | Also free. |
 | 6 | Create a third link `A3` (`https://example.com/a3`). | The cost panel appears again: `A1` still uses the one free active link, `A2` paid its way in and doesn't count. Confirm: 1 more credit is charged, and the ledger agrees with the panel. |
-| 7 | Restore **Free active links** to `25` in the admin. | Saved. |
+| 7 | Restore **Free active links** to `25` in the admin (same tab). | Saved. |
 
 ### SU-19 Admin: blocked domains
 
@@ -341,7 +341,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 6 | In the visitor window follow that link's short URL. | The neutral unavailable page: the block takes existing links offline too. |
 | 7 | As `qa.admin`, open that link's page and its dashboard row. | The pill reads **Not working** and the page explains that the destination can't be used and to edit it. |
 | 8 | Disable the link, then click **Enable**. | Refused with "That address cannot be used." and nothing is charged; it stays disabled. |
-| 9 | Edit the link and point it at `https://example.com/fixed`, save. | Saved (a new, unblocked destination is accepted) and the link works again. |
+| 9 | Edit the link and point it at `https://example.com/fixed`, save; then click **Enable**. | Saved (a new, unblocked destination is accepted; the pill now reads **Disabled**, since step 8 left it off), and after Enable the link works again. |
 | 10 | Delete both blocked-domain entries in the admin. | Gone from the list. |
 
 ### SU-20 Admin: reports, takedown and what the owner sees
