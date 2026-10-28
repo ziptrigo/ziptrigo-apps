@@ -1,15 +1,20 @@
-"""A user's To-do account: creating it, and handing out task numbers."""
+"""A user's To-do account: creating it, handing out task numbers, and the email address tasks can
+be sent to (issue #186)."""
 
+from collections.abc import Iterable
 from datetime import time
 
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Value
 from django.db.models.functions import Greatest
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.core.services.mail.addresses import parse_allowlist
 
-from ..models import TodoAccount
+from ..models import InboxCode, TodoAccount
 
 
 def get_account(user: User) -> TodoAccount:
@@ -83,3 +88,53 @@ def add_stored_bytes(user_id: object, delta: int) -> None:
 def is_frozen(user_id: object) -> bool:
     """Whether the user's attachment storage is paused for lack of credits."""
     return TodoAccount.objects.filter(pk=user_id, frozen_at__isnull=False).exists()
+
+
+# -- The inbox address (issue #186) ---------------------------------------------------------------
+
+
+def active_inbox_code(account: TodoAccount) -> InboxCode:
+    """The account's active code, issued on first use (an account created before the email intake
+    existed has none yet)."""
+    code = InboxCode.objects.filter(account=account, active=True).first()
+    return code if code is not None else InboxCode.issue(account)
+
+
+def inbox_address(code: str) -> str:
+    """`todo+<code>@<domain>`, from `settings.TODO_INBOUND_ADDRESS` (`todo@ziptrigo.com`)."""
+    local, _, domain = settings.TODO_INBOUND_ADDRESS.partition('@')
+    local = local.split('+', 1)[0]
+    return f'{local}+{code}@{domain}'
+
+
+def inbox_address_for(user: User) -> str:
+    return inbox_address(active_inbox_code(get_account(user)).code)
+
+
+def regenerate_inbox_code(user: User) -> InboxCode:
+    """Retire the active address immediately and issue a new one. The old code is kept forever
+    and never reissued, so mail still sent to it is dropped rather than delivered to a stranger."""
+    account = get_account(user)
+    with transaction.atomic():
+        InboxCode.objects.filter(account=account, active=True).update(
+            active=False, retired_at=timezone.now()
+        )
+        return InboxCode.issue(account)
+
+
+def update_inbox_settings(user: User, *, sender_allowlist: str | Iterable[str]) -> list[str]:
+    """Set the accepted senders (a list, or the text the user typed; an empty one accepts anyone)
+    and return the normalized list.
+
+    Raises:
+        ValidationError: an entry isn't an address or `*@domain`, or there are too many (keyed
+            `sender_allowlist`).
+    """
+    account = get_account(user)
+    try:
+        allowlist = parse_allowlist(sender_allowlist)
+    except ValidationError as exc:
+        raise ValidationError({'sender_allowlist': list(exc.messages)}) from exc
+    account.sender_allowlist = allowlist
+    account.save(update_fields=['sender_allowlist'])
+    return allowlist

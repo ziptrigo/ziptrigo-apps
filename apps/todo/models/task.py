@@ -54,6 +54,8 @@ class Task(models.Model):
     #: The reverse accessors of `Reminder.task` and `ReminderDelivery.task`.
     reminders: ClassVar['models.Manager']
     reminder_deliveries: ClassVar['models.Manager']
+    #: The reverse accessor of `InboundEmail.task` (a task made from an email, issue #186).
+    inbound_emails: ClassVar['models.Manager']
     # `ty` types `pk` as the primary key field object itself, not the value it holds.
     pk: uuid.UUID
     user_id: uuid.UUID
@@ -176,6 +178,14 @@ class Task(models.Model):
     @property
     def is_unpaid(self) -> bool:
         return self.unpaid_at is not None
+
+    @property
+    def email_from(self) -> str | None:
+        """For a task made from an email (`source='email'`): the address it came from (`''` when
+        the email row is gone), else `None`. One query, only for such a task."""
+        if self.source != TaskSource.EMAIL:
+            return None
+        return self.inbound_emails.values_list('from_address', flat=True).first() or ''
 
     @property
     def active_recurrence(self) -> Recurrence | None:

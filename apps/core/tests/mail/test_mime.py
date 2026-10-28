@@ -1,18 +1,22 @@
-"""`services.mime`: reading a raw email. Pure functions over bytes (no database), except that the
-recipient match reads `settings.RECEIPTS_INBOUND_ADDRESS`."""
+"""`apps.core.services.mail.mime`: reading a raw email. Pure functions over bytes (no database).
+Moved here from Receipts' tests (issue #186) and adjusted to pass the product-specific parameters
+Receipts used to bind: the inbound address, the sniffer, and the stripped-copy marker headers."""
 
 import copy
 import logging
 from datetime import UTC, datetime
 from email.message import Message
+from typing import Any
 
 import pytest
 
-from ..models import DEFAULT_ALLOWED_TYPES
-from ..services import mime
-from ..services.addresses import matches_allowlist
-from . import samples
-from .emails import (
+from apps.core.services.mail import mime
+from apps.core.services.mail.addresses import matches_allowlist
+from apps.core.services.mail.images import IMAGE_TYPES, image_dimensions
+from apps.core.services.mail.text import html_to_text
+from apps.core.services.sniff import SNIFF_BYTES, sniff_inline_type
+from apps.receipts.tests import samples
+from apps.receipts.tests.emails import (
     FIXED_ADDRESS,
     FIXTURES,
     HTML_RECEIPT,
@@ -26,17 +30,53 @@ from .emails import (
 
 pytestmark = [pytest.mark.unit]
 
-ALLOWED = DEFAULT_ALLOWED_TYPES.split(',')
+ALLOWED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+INBOUND_ADDRESS = 'receipts@ziptrigo.com'
+RECEIPT_ID_HEADER = 'X-Receipts-Receipt-Id'
+SKIPPED_HEADER = 'X-Receipts-Skipped'
+STRIPPED_HEADER = 'X-Receipts-Stripped'
+
+
+def sniff(data: bytes) -> str | None:
+    return sniff_inline_type(data[:SNIFF_BYTES])
+
+
+def scan(msg: Message) -> mime.RecipientScan:
+    return mime.scan_recipients(msg, inbound_address=INBOUND_ADDRESS)
+
+
+def strip_parsed(raw: bytes, parsed: Message, markers) -> bytes:
+    return mime.build_stripped_eml(
+        raw,
+        parsed,
+        markers,
+        marker_headers=(RECEIPT_ID_HEADER, SKIPPED_HEADER),
+        stripped_header=STRIPPED_HEADER,
+    )
 
 
 def strip(raw: bytes, markers) -> bytes:
-    return mime.build_stripped_eml(raw, mime.parse_message(raw), markers)
+    return strip_parsed(raw, mime.parse_message(raw), markers)
+
+
+def analyze_message(msg: Message, **overrides):
+    options: dict[str, Any] = {
+        'allowed_types': ALLOWED,
+        'max_file_bytes': 15 * 1024**2,
+        'min_inline_image_px': 150,
+        'sniff': sniff,
+        'html_to_text': html_to_text,
+        'image_dimensions': image_dimensions,
+        'image_types': IMAGE_TYPES,
+    }
+    options.update(overrides)
+    return mime.analyze(msg, **options)
 
 
 def analyze(raw: bytes, **overrides):
-    options = {'allowed_types': ALLOWED, 'max_file_bytes': 15 * 1024**2, 'min_inline_px': 150}
-    options.update(overrides)
-    return mime.analyze(mime.parse_message(raw), **options)
+    if 'min_inline_px' in overrides:
+        overrides['min_inline_image_px'] = overrides.pop('min_inline_px')
+    return analyze_message(mime.parse_message(raw), **overrides)
 
 
 def with_auth_results(
@@ -69,7 +109,7 @@ SPF_OK = (
 
 class TestRecipients:
     def addresses(self, raw: bytes) -> list[str]:
-        return [r.address for r in mime.scan_recipients(mime.parse_message(raw)).matches]
+        return [r.address for r in scan(mime.parse_message(raw)).matches]
 
     def test_the_envelope_recipient_from_the_ses_received_header(self):
         raw = build_email(to='joao@gmail.com')
@@ -165,7 +205,9 @@ class TestRecipients:
             assert self.addresses(f'Delivered-To: {address}\n\nx\n'.encode()) == []
 
     def test_explicit_addresses(self):
-        scan = mime.recipients_from_addresses(['Receipts+ABCD2345@ziptrigo.com', 'x@y.com'])
+        scan = mime.recipients_from_addresses(
+            ['Receipts+ABCD2345@ziptrigo.com', 'x@y.com'], inbound_address=INBOUND_ADDRESS
+        )
 
         assert [(r.code, r.address) for r in scan.matches] == [('abcd2345', FIXED_ADDRESS)]
 
@@ -1024,7 +1066,7 @@ class TestIsForwardingLink:
 
 class TestForwardingConfirmation:
     def test_gmails_code_and_link(self):
-        from .emails import gmail_forwarding_confirmation
+        from apps.receipts.tests.emails import gmail_forwarding_confirmation
 
         msg = mime.parse_message(gmail_forwarding_confirmation())
 
@@ -1235,9 +1277,9 @@ class TestStrippedEml:
         analysis = analyze(raw)
         by_name = {a.filename: a.index for a in analysis.attachments}
         markers = {
-            by_name['invoice.pdf']: (mime.RECEIPT_ID_HEADER, 'rid-1'),
-            by_name['photo.jpg']: (mime.SKIPPED_HEADER, mime.SKIP_DAILY_LIMIT),
-            by_name['logo.png']: (mime.SKIPPED_HEADER, mime.SKIP_INLINE),
+            by_name['invoice.pdf']: (RECEIPT_ID_HEADER, 'rid-1'),
+            by_name['photo.jpg']: (SKIPPED_HEADER, mime.SKIP_DAILY_LIMIT),
+            by_name['logo.png']: (SKIPPED_HEADER, mime.SKIP_INLINE),
         }
 
         stripped = strip(raw, markers)
@@ -1264,7 +1306,7 @@ class TestStrippedEml:
         parsed = mime.parse_message(raw)
         index = analyze(raw).attachments[0].index
 
-        mime.build_stripped_eml(raw, parsed, {index: (mime.SKIPPED_HEADER, 'x')})
+        strip_parsed(raw, parsed, {index: (SKIPPED_HEADER, 'x')})
 
         [attachment] = [p for p in mime.iter_leaves(parsed) if mime.is_attachment_like(p)]
         assert mime.part_bytes(attachment) == samples.text_pdf_bytes()
@@ -1286,7 +1328,7 @@ class TestStrippedEml:
         raw = build_email(html=big, attachments=[pdf()])
         index = analyze(raw).attachments[0].index
 
-        stripped = strip(raw, {index: (mime.RECEIPT_ID_HEADER, 'rid')})
+        stripped = strip(raw, {index: (RECEIPT_ID_HEADER, 'rid')})
 
         assert len(stripped) < 20 * 1024
         msg = mime.parse_message(stripped)
@@ -1311,9 +1353,7 @@ class TestStrippedEml:
         attachment['X-Receipts-Receipt-Id'] = 'forged'
         index = analyze(raw).attachments[0].index
 
-        stripped = mime.build_stripped_eml(
-            raw, parsed, {index: (mime.SKIPPED_HEADER, 'inline image')}
-        )
+        stripped = strip_parsed(raw, parsed, {index: (SKIPPED_HEADER, 'inline image')})
 
         assert b'forged' not in stripped
 
@@ -1583,7 +1623,7 @@ class TestLimits:
         msg = mime.parse_message(raw)
 
         assert msg['Subject'] == 's'
-        assert len(mime.scan_recipients(msg).seen) >= 1
+        assert len(scan(msg).seen) >= 1
 
     def test_the_line_source_is_the_one_the_parser_reads(self, monkeypatch):
         """If a stdlib change made the parser stop reading through `_input.readline`, the limits
@@ -1634,7 +1674,7 @@ class TestLimits:
     def test_a_message_with_many_headers_under_the_limit_still_builds_a_stripped_eml(self):
         raw = b'Received: x\n' * 2000 + b'Subject: s\n\nhello there, this is a body\n'
 
-        stripped = mime.build_stripped_eml(raw, mime.parse_message(raw), {})
+        stripped = strip(raw, {})
 
         assert stripped.count(b'Received: x') == 2000
         assert b'X-Receipts-Stripped' not in stripped
@@ -1708,12 +1748,7 @@ class TestDeepNesting:
         ]
 
         assert outside
-        assert (
-            mime.analyze(
-                msg, allowed_types=ALLOWED, max_file_bytes=1024, min_inline_px=150
-            ).attachments
-            == []
-        )
+        assert analyze_message(msg, max_file_bytes=1024).attachments == []
 
     def test_an_attachment_inside_a_deep_nest_is_not_a_crash(self):
         inner = build_email(attachments=[pdf('inner.pdf')])
@@ -1733,4 +1768,4 @@ def test_the_literal_fixtures_parse_and_match_their_builders():
         'forward_as_attachment.eml',
     ):
         msg = mime.parse_message((FIXTURES / name).read_bytes())
-        assert [r.address for r in mime.scan_recipients(msg).matches] == [FIXED_ADDRESS]
+        assert [r.address for r in scan(msg).matches] == [FIXED_ADDRESS]

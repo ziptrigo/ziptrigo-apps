@@ -13,6 +13,8 @@ from django.db import IntegrityError
 from django.utils import timezone
 
 from apps.billing.services import add_credits, get_balance
+from apps.core.services.mail import mime as core_mime
+from apps.core.tests.mail.test_mime import nested_forwards
 
 from ..models import (
     InboundEmail,
@@ -53,7 +55,6 @@ from .emails import (
 )
 from .factories import make_user
 from .fakes import sample_extraction
-from .test_mime import nested_forwards
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -1768,7 +1769,7 @@ class TestHostileMessages:
     def test_a_stripped_eml_over_the_ceiling_is_headers_only(
         self, deliver, inbox, fake_storage, monkeypatch
     ):
-        monkeypatch.setattr(mime, 'MAX_EML_BYTES', 1100)
+        monkeypatch.setattr(core_mime, 'MAX_EML_BYTES', 1100)
         raw = build_email(attachments=[pdf()], ses=Ses(recipient=inbox))
 
         email = one_email(deliver(raw))

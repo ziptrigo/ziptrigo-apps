@@ -19,3 +19,8 @@ FIRST_TASK_NUMBER = 1000
 MAX_REMINDER_MINUTES = 43_200
 #: At most this many reminders on one task.
 MAX_REMINDERS_PER_TASK = 10
+
+#: An image of an email that its HTML body shows inline (`cid:`) and that is smaller than this on
+#: both sides is a logo or a signature, not an attachment (issue #186). Receipts has the same
+#: threshold as a setting (`ReceiptsSettings.min_inline_image_px`, 150).
+INLINE_IMAGE_MIN_PX = 150

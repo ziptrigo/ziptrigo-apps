@@ -82,6 +82,18 @@ class TodoSettings(models.Model):
         ),
     )
 
+    max_inbound_rows_per_day = cast(
+        int,
+        models.PositiveIntegerField(
+            default=500,
+            db_default=500,
+            validators=[MinValueValidator(1)],
+            help_text='Inbound emails per user per 24 hours that are recorded when they create '
+            'no task (rejected, empty); beyond it they are only logged. Accepted mail is never '
+            'dropped by it.',
+        ),
+    )
+
     class Meta:
         verbose_name = 'To-do settings'
         verbose_name_plural = 'To-do settings'

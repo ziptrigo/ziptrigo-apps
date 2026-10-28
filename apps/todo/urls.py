@@ -21,6 +21,8 @@ urlpatterns = [
     path('labels/<uuid:label_id>/delete/', views.label_delete, name='label-delete'),
     path('reminders/history/', views.reminder_history, name='reminder-history'),
     path('settings/', views.settings_page, name='settings'),
+    path('settings/inbox/', views.inbox_update, name='settings-inbox'),
+    path('settings/regenerate/', views.inbox_regenerate, name='regenerate'),
     path(
         'attachments/<uuid:attachment_id>/download/',
         views.attachment_download,

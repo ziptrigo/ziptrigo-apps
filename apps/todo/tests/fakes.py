@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
 
-from apps.core.services.storage import GET_URL_EXPIRES_SECONDS, ObjectInfo
+from apps.core.services.storage import GET_URL_EXPIRES_SECONDS, ObjectInfo, ObjectTooLargeError
 
 from ..services.parsing import ParsedTitle, ParseRequest
 
@@ -53,6 +53,10 @@ class FakeTodoStorage:
     deleted: list[str] = field(default_factory=list)
     #: Keys whose deletion should fail, to test retry behaviour.
     failing_deletes: set[str] = field(default_factory=set)
+    #: Keys whose `put_object` should fail.
+    failing_puts: set[str] = field(default_factory=set)
+    #: The content type each key was written with.
+    content_types: dict[str, str] = field(default_factory=dict)
     #: Raise on every `delete_prefix` while true.
     failing_prefix_delete: bool = False
     deleted_prefixes: list[str] = field(default_factory=list)
@@ -62,6 +66,26 @@ class FakeTodoStorage:
     fail_read_after: int | None = None
     #: The sizes of the `read(n)` calls made on streams, to show the read-back is chunked.
     read_sizes: list[int | None] = field(default_factory=list)
+
+    def put_object(self, key: str, body: bytes, *, content_type: str | None = None) -> None:
+        if key in self.failing_puts:
+            raise ClientError({'Error': {'Code': 'InternalError', 'Message': 'x'}}, 'PutObject')
+        self.objects[key] = bytes(body)
+        if content_type:
+            self.content_types[key] = content_type
+
+    def get_object_bytes(self, key: str, *, max_bytes: int | None = None) -> bytes:
+        if key not in self.objects:
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'missing'}}, 'GetObject')
+        data = self.objects[key]
+        if max_bytes is not None and len(data) > max_bytes:
+            raise ObjectTooLargeError(f'{key} is over the {max_bytes} byte limit')
+        return data
+
+    def copy_object(self, src_key: str, dst_key: str) -> None:
+        if src_key not in self.objects:
+            raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'missing'}}, 'CopyObject')
+        self.objects[dst_key] = self.objects[src_key]
 
     def seed(self, key: str, data: bytes) -> None:
         """Test helper: stand in for the client's direct PUT."""
