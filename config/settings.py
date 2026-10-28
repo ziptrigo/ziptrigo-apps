@@ -433,6 +433,8 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # expression, so it is the one read that costs real work; a person typing a search and
     # adjusting filters stays well below this. Saved-filter changes spend `TODO_EDIT_USER`.
     'TODO_SEARCH_USER': (60, 60),
+    # Retiring the email address and issuing a new one (issue #186), per user.
+    'TODO_REGENERATE_USER': (5, 60 * 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -768,6 +770,11 @@ TODO_S3_REGION = os.getenv('TODO_S3_REGION', AWS_REGION)
 TODO_S3_ENDPOINT_URL = os.getenv('TODO_S3_ENDPOINT_URL') or None
 TODO_AWS_ACCESS_KEY_ID = os.getenv('TODO_AWS_ACCESS_KEY_ID', '')
 TODO_AWS_SECRET_ACCESS_KEY = os.getenv('TODO_AWS_SECRET_ACCESS_KEY', '')
+# The address tasks can be emailed to (issue #186): each user's is `todo+<code>@<this domain>`, and
+# SES drops those messages under `todo/inbound/` in the bucket above (the SES rule: the `infra`
+# repo, issue #185). `todo@ziptrigo.com` in production, `todo-staging@ziptrigo.com` on staging. Not
+# a required secret: the default is the production address.
+TODO_INBOUND_ADDRESS = os.getenv('TODO_INBOUND_ADDRESS', 'todo@ziptrigo.com')
 
 if os.getenv('ENVIRONMENT') == 'prod':
     _insecure = insecure_secrets(

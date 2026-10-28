@@ -1,6 +1,13 @@
 from .account import TodoAccount
 from .attachment import Attachment
 from .comment import Comment, CommentRevision
+from .inbox import (
+    InboundEmail,
+    InboundEmailStatus,
+    InboundMessage,
+    InboundMessageStatus,
+    InboxCode,
+)
 from .label import DEFAULT_LABEL_COLOR, Label
 from .recurrence import Recurrence, RecurrenceMode
 from .reference import TaskReference
@@ -15,6 +22,11 @@ __all__ = [
     'Attachment',
     'DEFAULT_LABEL_COLOR',
     'DeliveryChannel',
+    'InboundEmail',
+    'InboundEmailStatus',
+    'InboundMessage',
+    'InboundMessageStatus',
+    'InboxCode',
     'Label',
     'Priority',
     'Recurrence',

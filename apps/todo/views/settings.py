@@ -1,7 +1,5 @@
 """`/todo/settings/`: the default due time, the default reminder, the free-tasks line and the price,
-and the storage line.
-
-Later sub-issues add their own sections (the email address, ...).
+the storage line and the email address tasks can be sent to (`views.inbox`).
 """
 
 from django.contrib import messages
@@ -36,6 +34,7 @@ from .common import (
     render_page,
     validation_lines,
 )
+from .inbox import inbox_context
 
 SLOT = '#settings-msg'
 
@@ -69,7 +68,8 @@ def settings_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """GET: the page. POST: save the default due time and the default reminder."""
     if request.method == 'POST':
         return _save(request)
-    return render_page(request, 'todo/settings.html', _form_context(request), nav='settings')
+    context = {**_form_context(request), **inbox_context(request.user)}
+    return render_page(request, 'todo/settings.html', context, nav='settings')
 
 
 def _save(request: AuthenticatedHttpRequest) -> HttpResponse:

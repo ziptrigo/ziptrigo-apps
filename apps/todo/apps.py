@@ -66,6 +66,23 @@ class TodoConfig(AppConfig):
             )
         )
 
+        register_job(
+            JobSpec(
+                name='todo.poll_inbound',
+                func=jobs.poll_inbound,
+                interval=timedelta(minutes=1),
+                lease=timedelta(minutes=2),
+            )
+        )
+        register_job(
+            JobSpec(
+                name='todo.purge_inbound_messages',
+                func=jobs.purge_inbound_messages,
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+
     def _connect_signals(self):
         import logging
 

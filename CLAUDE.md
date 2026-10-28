@@ -19,6 +19,8 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       #169), Markdown rendering / search text / checklist editing
                       (`apps.core.markdown`, issue #176), the OpenAI client factory and reply
                       unwrapping Receipts and To-do share (`apps.core.services.ai`, issue #183),
+                      the inbound-email parser and sender-authentication code they share
+                      (`apps.core.services.mail`, issue #186, see "Mail parsing"),
                       and the Alpine components every product
                       shares (`core/js/components.js`: `copyText`, `confirmModal`,
                       `notificationBell`).
@@ -39,8 +41,8 @@ apps/short_url/       Short URLs (issue #162): links with editable destinations,
                       (`/api/s/`) and the `admin/shorturl.py` CLI (see "Short URLs").
 apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks with per-user numbers
                       from 1000, labels, due dates in the user's time zone, Today / Upcoming / All /
-                      Completed / Trash pages, task billing (a monthly free allowance, then a price;
-                      see "To-do").
+                      Completed / Trash pages, task billing (a monthly free allowance, then a price),
+                      and tasks added by email (see "To-do").
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts/
                       shorturl. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
@@ -759,6 +761,52 @@ transfer id only for routing, not as part of what proves the click legitimate). 
 the same `_activate` step: check the per-IP-per-day caps (see "File transfer specifics" below),
 then flip the transfer `ACTIVE` and queue the recipient + sender emails, exactly like
 `services.send.finalize_send` does for a logged-in sender.
+
+### Mail parsing
+
+`apps.core.services.mail` (issue #186) is the code that reads a raw inbound email, moved out of
+Receipts so To-do reads mail with the very same parser and sender authentication; it imports only
+the stdlib (and Pillow in `images`), so `core` gains no dependency. **Receipts' behaviour did not
+change**: `apps.receipts.services.mime` and `.addresses` are now thin modules that import from here,
+re-export everything and bind Receipts' parameters (small wrapper functions with the signatures the
+Receipts call sites always had; Receipts' `inbound.py` is untouched).
+
+- `mime.py` (the old `receipts/services/mime.py`, whose module docstring is still the long version
+  of the SES header shapes, the parser limits and the defensive `Authentication-Results` reading --
+  see "Receipts" > "Email intake"): `parse_message`, `scan_recipients`, `read_verdicts` /
+  `Verdicts.vouches_for`, `iter_leaves`, `analyze`, `build_stripped_eml` and the forwarding-
+  confirmation helpers. What was product-specific is a parameter:
+  - `scan_recipients(msg, *, inbound_address)` and `recipients_from_addresses(addresses, *,
+    inbound_address)` take the product's `<product>@<domain>` base address (Receipts passes
+    `settings.RECEIPTS_INBOUND_ADDRESS`, To-do `settings.TODO_INBOUND_ADDRESS`);
+    `addresses.inbox_code_from_address(address, *, inbound_address)` likewise, and the canonical
+    `<product>+<code>@<domain>` is built from it (the Receipts-only `accounts.inbox_address` import
+    is gone).
+  - `analyze(msg, *, allowed_types, max_file_bytes, min_inline_image_px, sniff, html_to_text=None,
+    image_dimensions=None, image_types=())`. The three things that used `receipts.services.
+    documents` are parameters: `sniff` (`documents.sniff_content_type`), `html_to_text` (to choose a
+    body; **without it no body is chosen**) and `image_dimensions` + `image_types` (the tiny-inline-
+    image check; without them nothing is skipped as an inline image). **`allowed_types=None` means
+    any type** -- an unrecognised one included (`content_type` is then `''`) -- which To-do uses;
+    a list filters as before.
+  - `build_stripped_eml(raw, parsed, markers, *, marker_headers, stripped_header)`: the names of the
+    headers that mark a stripped part (`('X-Receipts-Receipt-Id', 'X-Receipts-Skipped')`) and of the
+    "headers only" line (`X-Receipts-Stripped`) are the caller's (Receipts' wrapper has them as
+    `RECEIPT_ID_HEADER`, `SKIPPED_HEADER`, `STRIPPED_HEADER`). To-do keeps no copy of the message.
+- `addresses.py`: `normalize_address`, `parse_allowlist`, `matches_allowlist`, `inbox_code_from_address`.
+- `text.py`: `html_to_text(html, *, max_chars)`, the stdlib-parser conversion To-do uses for a
+  description (block elements become lines, `li` starts `- `, a link becomes `text (url)` -- only
+  `http`, `https` and `mailto`; scripts, styles and the head are dropped). Receipts keeps its own
+  `documents.html_to_text` (it runs in the document child process and has no links).
+- `images.py`: `image_dimensions` (Pillow, header only) and `IMAGE_TYPES`, the To-do binding for the
+  inline-image check (Receipts passes its HEIC-aware `documents` versions).
+- Tests: `apps/core/tests/mail/` (`test_mime.py` and `test_addresses.py` are Receipts' old tests moved
+  and adjusted to pass the parameters -- the `_HeaderLineCounter.readline` spy test moved with the
+  parser --, `test_text_and_images.py`); `apps/receipts/tests/test_mail_wrappers.py` checks the
+  wrappers bind the right values. The tests build messages with `apps/receipts/tests/emails.py`
+  (tests are exempt from the import contract, and To-do's use it too). The one edit to a Receipts
+  test that stayed: `test_inbound.py` patches `MAX_EML_BYTES` on the core module now, and
+  `test_admin.py` looks its permissions up by app label too (To-do has an `InboundMessage` model).
 
 ### Notifications
 
@@ -2181,7 +2229,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `django_capture_on_commit_callbacks(execute=True)` around anything queued on commit; call a task
   as `<task>.call(...)` (or the underlying service function) in a test, not `<task>(...)`.
 - **Email intake** (`services.inbound` for the flow and the decisions, `services.mime` for reading a
-  raw message; issue #98 phase 2). SES drops each accepted message in `receipts/inbound/`; nothing
+  raw message -- now a thin wrapper over `apps.core.services.mail.mime`, see "Mail parsing"; issue
+  #98 phase 2). To-do's intake (#186) is this one reproduced for `todo/inbound/`. SES drops each accepted message in `receipts/inbound/`; nothing
   is pushed to us. The `receipts.poll_inbound` job lists up to 100 keys under `receipts/inbound/`
   (`list_keys`), `get_or_create`s an `InboundMessage` (`pending`) per new key and queues
   `ingest_message(id)` on commit, and nothing more: no parsing. It also re-queues `pending` rows
@@ -2902,10 +2951,10 @@ and subtasks one level deep, shown on Today / Upcoming / All / Completed / Trash
 far:** the foundation (this section), repeating tasks (#179, "Recurrence"), comments with task
 references (#180, "Comments and references" below), search with saved filters (#181, "Search and
 saved filters" below), attachments (#184, "Attachments and storage billing" below), reminders
-(#182, "Reminders" below) and AI date parsing in the title (#183, "AI date parsing" below). **Later
+(#182, "Reminders" below), AI date parsing in the title (#183, "AI date parsing" below) and tasks
+added by email (#186, "Email intake" below). **Later
 sub-issues** add their own models, fields on `TodoSettings`,
-services, `RATELIMIT_RULES` and migrations (email
-intake #186, the JWT API and
+services, `RATELIMIT_RULES` and migrations (the JWT API and
 `inv todo` #187), so `services/__init__.py`, `settings.py`, the migrations and this file will see
 small merge conflicts between them.
 Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
@@ -3855,6 +3904,134 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   the SQLite branch for real, `FilterParams` parsing and applying, the views, the search rate limit),
   `test_saved_filters.py` (model, services, the one-query counts and their timeout, the pages and endpoints, the
   counts endpoint, 404s, the sidebar, rate limits, admin), TODO-22 and TODO-23 in `tests_e2e/ai/todo.md`.
+
+#### Email intake
+
+Issue #186 (`models/inbox.py`, `services/inbound.py`, `views/inbox.py`, `jobs.py`,
+`management/commands/todo_ingest_eml.py`, migration `0007_email_intake`). Each user has an address
+`todo+<code>@ziptrigo.com`; the subject becomes the title, the body the description, the email's
+attachments the task's attachments, and the AI reads a due date from the subject. It is Receipts'
+intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parked failures) for the
+`todo/inbound/` prefix, on the mail code shared in `apps.core.services.mail` ("Mail parsing"); read
+`services/inbound.py`'s module docstring for the long version.
+
+- **Settings and storage.** `TODO_INBOUND_ADDRESS` (`todo@ziptrigo.com`, `todo-staging@...` on
+  staging; **not** a required prod secret: it has a default; the bucket and the `TODO_AWS_*` keys it
+  uses are the attachments' and already required). `services/storage.py`: `INBOUND_PREFIX =
+  'todo/inbound/'` (where SES drops messages; the SES rule, the prefix's lifecycle expiry and the IAM
+  scope are the `infra` repo, issue #185, not done when this was written), `FAILED_PREFIX =
+  'todo/failed/'`, `failed_key_for`. `TODO_REGENERATE_USER` is `(5, 3600)`.
+- **Models** (`models/inbox.py`). `InboxCode` (FK `account` -> `TodoAccount`, `related_name='codes'`;
+  8 characters from Receipts' alphabet without look-alikes; `active`, `retired_at`; `code` unique
+  across all rows, retired ones kept forever; a partial unique constraint allows one active per
+  account; `InboxCode.issue(account)`). `TodoAccount.sender_allowlist` (JSON list, `db_default=[]`).
+  `InboundMessage` (one row per S3 object; `status` `pending`/`done`/`failed`, `attempts` as claim
+  token, `next_attempt_at` lease/retry time, `queued_at`, `failed_key`, `last_error`) and
+  `InboundEmail` (one per matched recipient: `user` with `related_name='todo_inbound_emails'` --
+  Receipts' is `inbound_emails` --, `recipient`, `from_address`, `envelope_sender`, `subject`,
+  `received_at`, `sender_authenticated`, `status`, `note`, `task` FK `SET_NULL`; unique on
+  `(message, recipient)`). `sender_authenticated` is whether SES authenticated the **From** address
+  (`Verdicts.vouches_for` with only that address listed: DMARC for its domain, else an aligned DKIM
+  signature, or SPF when it is also the envelope sender), recorded even with an empty allowlist,
+  which accepts anyone. `Task.email_from` / `Task.email_from_authenticated` (real columns, with
+  `db_default`s) copy the From address and that result onto a task made from an email, so the task
+  page needs no lookup of the email.
+  `InboundEmail.status`: `accepted`, `rejected_sender`, `rejected_spam`, `rejected_virus`,
+  `rejected_credits`, `rejected_too_large` (files), `rejected_task_limit` (the open-task cap),
+  `no_content` (no forwarding-confirmation status, and no
+  `.eml` copy is stored). `TodoSettings.max_inbound_rows_per_day` (500, with a `db_default` too: the
+  #102 lesson). The model names are the same as Receipts' (another app label), so a test that looks
+  a permission up by codename (`view_inboundmessage`) filters by `content_type__app_label`.
+- **Polling and retries** (`poll`, `ingest_message` on the `default` queue -- a To-do task, no new
+  worker --, `ingest`, `reset_message_for_retry`, `purge_done_messages`): exactly Receipts'
+  (`CLAIM_LEASE` 10 min, `MAX_ATTEMPTS` 3, `RETRY_BACKOFF` 1 and 5 min, `MAX_RAW_BYTES` 40 MB, a
+  failed message's object parked under `todo/failed/`, `DONE_MESSAGE_RETENTION` 30 days, which must
+  stay well above the 14-day expiry the infra repo puts on `todo/inbound/`). Jobs (`apps.py`):
+  `todo.poll_inbound` (every minute, lease 2 min) and `todo.purge_inbound_messages` (daily); both let
+  errors propagate to `ScheduledJob.last_error`.
+- **Per recipient** (an *active* `InboxCode` of an active user; else logged and dropped), in this
+  order, the first that applies deciding the status: SES spam `FAIL` -> `rejected_spam`; virus `FAIL`
+  -> `rejected_virus`; the allowlist (empty accepts anyone with no authentication; otherwise `From` or
+  the envelope sender must match **and** `Verdicts.vouches_for` must authenticate the matching
+  address, exactly Receipts' rule and code) -> `rejected_sender`; nothing in it -> `no_content`
+  (files that were all over the size limit: `rejected_too_large`); then, **before the AI call and the
+  uploads**, a cheap look at the open-task cap -> `rejected_task_limit` ("Too many open tasks.") and
+  at the credits and `creation_blocked_at` -> `rejected_credits`; then the task.
+- **What becomes the task.** *Title*: the decoded `Subject` through `mime.clean_text(..., TITLE_MAX)`
+  with leading `Fwd:`/`Fw:`/`Re:` (any case, repeated) removed; empty -> `(no subject)`. *Description*
+  (`inbound.body_text`): the first non-attachment `text/plain` part of the message itself (as Markdown,
+  unchanged), else the `text/html` one through `core`'s `html_to_text`, else empty; a message
+  forwarded as an attachment is not searched for a body; quoted history is kept; control characters
+  are dropped; capped at `DESCRIPTION_MAX`, a cut marked by a final line `…` (the result is still
+  within the cap). The decoded body is **sliced right after decoding**, before any copy or clean-up
+  (`MAX_TEXT_CHARS` = 2 x `DESCRIPTION_MAX` for `text/plain`, `MAX_HTML_CHARS` for HTML, whose
+  markup is most of it), so a 30 MB body costs no more than a small one. *Attachments*: `mime.analyze(allowed_types=None, max_file_bytes=
+  max_attachment_bytes, min_inline_image_px=INLINE_IMAGE_MIN_PX (150, `limits.py`), sniff=<inline
+  sniffer>, image_dimensions=...)` -- any type, no body chosen, tiny `cid:` images (logos,
+  signatures) skipped -- up to `max_attachments_per_task`; each is written with `put_object` at
+  `attachment_key(user_id, attachment_id)` (the id a `uuid5` of message, recipient and part, so a
+  retry overwrites instead of orphaning) and gets an `Attachment` row created `uploaded=True` with
+  `inline_type` sniffed, its SHA-256, and its bytes added to `stored_bytes`. The email's `note` says
+  what was left out: `'1 of 3 files skipped: too large'`, `'2 of 3 files skipped: 1 too large, 1 over
+  the limit of N per task'`, and for a **frozen** storage account (the task is still created, no file
+  is stored) `'files skipped: storage is paused'`. *Due date*: `parsing.parse_title` on the title
+  (`looks_dated` first, so a subject with no digit or date word makes no AI call), outside any
+  transaction and after the cheap refusals above; the result applied when `has_date`, with
+  `clean_title` as the title (and the rule as a repeat); `ParseUnavailable`, `PermanentAIError` (not
+  configured), an unexpected error or the user's `TODO_PARSE_USER`/`_DAY` limits (spent through
+  `charge`, as on the web) leave the task undated. That is **the same per-user AI budget as the web
+  quick add** (deliberately one budget: with an empty allowlist a stranger who knows the address can
+  use some of it, and past it the task is just created undated). A date `create_task` refuses is
+  dropped rather than losing the task.
+- **Creation and billing.** `services.tasks.create_task(user, title=..., description=...,
+  source='email', allow_unpaid=False)` -- so it counts toward the free allowance and costs what any
+  task does. `InsufficientCreditsError`, or `BLOCKED_MESSAGE` (`creation_blocked_at`), is
+  `rejected_credits`: nothing is stored (the uploaded objects are deleted again), and the user is told
+  in-app by **one coalesced notice per user**: a fixed text ("Emailed tasks were not created: not
+  enough credits", linking to `billing:credits-history`; nothing the sender wrote, subject included,
+  reaches it) under the stable key `todo_email_credits`, written as `delete_for_key` then `notify`
+  in its own savepoint next to the email row (a failing notice is logged, never loses the row), so a
+  flood of rejected emails leaves a single, fresh notice and the rows ceiling below still bounds the
+  writes. The open-task cap (`TOO_MANY_MESSAGE`) is `rejected_task_limit` with the note "Too many open
+  tasks." -- normally from the cheap check before the AI call and the uploads, and from `create_task`
+  under its lock when a race gets past it (a rejection, not a failing message).
+- **One transaction per recipient.** The objects are uploaded first, outside any transaction; then
+  one `atomic()` creates the task, the `InboundEmail` row (so "the row exists" means "done" and a retry
+  skips it), the attachment rows and the `stored_bytes`; if it fails the objects are deleted again
+  (unless another worker finished the same recipient meanwhile and the row exists). The email id is
+  a `uuid5` too.
+- **Rows ceiling.** An email that creates no task (every rejection, `no_content`) gets its
+  `InboundEmail` row only while the user has fewer than `max_inbound_rows_per_day` rows from the last
+  24 hours; else it is only logged. Accepted mail is never dropped by it.
+- **Addresses** (`services.accounts`): `inbox_address(code)` / `inbox_address_for(user)`
+  (`todo+<code>@<domain of TODO_INBOUND_ADDRESS>`; the first code is issued on first use, since
+  accounts predate the intake; two first visits at once re-read the winner's code on the
+  constraint's `IntegrityError`), `regenerate_inbox_code(user)` (locks the account row, retires the
+  active code, issues a new one; a lost race returns the code that is active, never an error), `update_inbox_settings(user, sender_allowlist=...)` through the shared
+  `addresses.parse_allowlist` (errors keyed `sender_allowlist`).
+- **Web.** The settings page's "Add tasks by email" section (`templates/todo/settings.html`, outside
+  the `#settings-form` that one htmx form re-renders): the address with the shared `copyText`
+  component, Regenerate through the shared `confirmModal` (`POST /todo/settings/regenerate/`,
+  `todo:regenerate`, `TODO_REGENERATE_USER`, a flash message and a redirect), the accepted senders
+  (`POST /todo/settings/inbox/`, `todo:settings-inbox`, Anyone / Only these over a textarea of
+  addresses and `*@domain`; a refusal is a 422 retargeted at `#inbox-settings-msg`; spends
+  `TODO_EDIT_USER`) and the 20 most recent inbound emails (from, subject, received, outcome, note,
+  a link to the task). The task page shows "Created from an email from <from address>" for
+  `source='email'` only when SES authenticated that address (`Task.email_from_authenticated`), else
+  "Created from an email claiming to be from <from address>" (no lookup: both are on the task).
+- **Admin.** `InboundMessageAdmin` (status, attempts, last error; the "retry" action needs
+  `todo.change_inboundmessage`, `reset_message_for_retry`), `InboundEmailAdmin`, an `InboxCode` inline
+  on `TodoAccountAdmin`, all read-only. `./manage.py todo_ingest_eml file.eml --to
+  todo+<code>@ziptrigo.com` runs the real ingest on a local file (uploaded to
+  `todo/inbound/local-<uuid>`), like `receipts_ingest_eml`.
+- **Tests.** `apps/todo/tests/test_inbound.py` (the decision order; the allowlist with and without
+  authentication; subject cleaning; plain and HTML bodies and the cap; attachments stored, skipped over
+  size, over the per-task cap and while frozen; `rejected_credits` and its notification; the AI date
+  through the fake parser; retries, the lease, parking; the rows ceiling; `poll`; purging; atomicity)
+  and `test_inbox_settings.py` (the address functions, the page and endpoints, rate limits, the
+  command, jobs, admin). `FakeTodoStorage` gained `put_object`, `get_object_bytes` and `copy_object`.
+- **Not verified on real mail** (like Receipts' list in "Known gaps"): a BCC and a Gmail auto-forward;
+  and nothing here ran against real SES, which needs the infra side (#185).
 
 ### Queue and scheduler
 

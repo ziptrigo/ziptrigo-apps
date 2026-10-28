@@ -23,6 +23,7 @@ from .filters import (
     filter_update,
     filters_page,
 )
+from .inbox import inbox_regenerate, inbox_update
 from .labels import label_delete, label_edit, label_reorder, labels_page
 from .lists import (
     all_page,
@@ -75,6 +76,8 @@ __all__ = [
     'filter_reorder',
     'filter_update',
     'filters_page',
+    'inbox_regenerate',
+    'inbox_update',
     'label_delete',
     'label_edit',
     'label_reorder',

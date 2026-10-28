@@ -1,7 +1,11 @@
 from django import forms
 
+from apps.core.services.mail.addresses import parse_allowlist
+
 from ..models import ReminderChannel
 from .reminder import UNITS, to_minutes
+
+SENDER_MODES = (('any', 'Anyone'), ('only', 'Only these'))
 
 
 class SettingsForm(forms.Form):
@@ -57,4 +61,37 @@ class SettingsForm(forms.Form):
             minutes,
             cleaned.get('default_reminder_channel') or ReminderChannel.IN_APP,
         )
+        return cleaned
+
+
+class InboxSettingsForm(forms.Form):
+    """Accepted senders of the email intake (issue #186). Validation is the shared
+    `addresses.parse_allowlist`, so a typo shows the same friendly message as it would through the
+    API."""
+
+    sender_mode = forms.ChoiceField(
+        label='Accepted senders',
+        choices=SENDER_MODES,
+        error_messages={'invalid_choice': 'Choose anyone or only these senders.'},
+    )
+    sender_allowlist = forms.CharField(label='Accepted senders', required=False, strip=False)
+
+    def clean_sender_allowlist(self) -> str:
+        return self.cleaned_data['sender_allowlist'].strip()
+
+    def clean(self) -> dict:
+        cleaned = super().clean() or {}
+        if cleaned.get('sender_mode') != 'only':
+            cleaned['sender_allowlist'] = ''
+        elif 'sender_allowlist' in cleaned:
+            try:
+                entries = parse_allowlist(cleaned['sender_allowlist'])
+            except forms.ValidationError as exc:
+                self.add_error('sender_allowlist', exc)
+            else:
+                if not entries:
+                    self.add_error(
+                        'sender_allowlist',
+                        'Enter at least one address, or choose Anyone to accept all senders.',
+                    )
         return cleaned

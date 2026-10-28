@@ -8,4 +8,58 @@
 <div id="settings-form">
     {% include 'todo/partials/settings_form.html' %}
 </div>
+
+{% comment %} Add tasks by email (issue #186): not inside `#settings-form`, which one htmx form re-renders. {% endcomment %}
+<section class="mb-8" aria-labelledby="email-title">
+    <h2 id="email-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Add tasks by email</h2>
+    <div x-data="copyText" class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <code x-ref="text" class="break-all text-sm font-medium text-gray-900 dark:text-gray-100">{{ inbox_address }}</code>
+        <button type="button" @click="copy()"
+                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+            <i class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+            <span x-text="copied ? 'Copied' : 'Copy'">Copy</span>
+        </button>
+        <button type="button" @click="show($el)"
+                data-url="{% url 'todo:regenerate' %}"
+                data-title="Regenerate address"
+                data-body="Your old address stops working immediately. Mail already sent to it is dropped, so update any contacts or rules that use it."
+                data-label="Regenerate"
+                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+            <i class="fas fa-arrows-rotate mr-2" aria-hidden="true"></i>Regenerate&hellip;
+        </button>
+    </div>
+    <p class="mt-2 mb-6 text-xs text-gray-500 dark:text-gray-400">
+        Email a task to this address: the subject becomes the title, the text the description and the attachments are attached.
+        A date in the subject (&ldquo;pay rent on the 1st&rdquo;) is read for you. The task counts like any other: free allowance first, then {{ task_price }} credit{{ task_price|pluralize }}.
+    </p>
+
+    <div id="inbox-settings" class="mb-6">
+        {% include 'todo/partials/settings_inbox_form.html' %}
+    </div>
+
+    <h3 id="emails-title" class="mb-2 text-base font-semibold">Recent emails</h3>
+    {% if recent_emails %}
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+        {% for email in recent_emails %}
+        <li class="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:gap-4">
+            <span class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap sm:w-16">{{ email.received_at|default:email.created_at|date:'M j' }}</span>
+            <span class="min-w-0 flex-1 text-sm">
+                <span class="block truncate text-gray-900 dark:text-gray-100">{{ email.from_address|default:'(unknown sender)' }}</span>
+                {% if email.subject %}<span class="block truncate text-xs text-gray-500 dark:text-gray-400">&ldquo;{{ email.subject }}&rdquo;</span>{% endif %}
+            </span>
+            <span class="text-sm sm:text-right">
+                {% if email.accepted %}
+                <span class="text-green-700 dark:text-green-400"><i class="fas fa-check mr-1" aria-hidden="true"></i>{% if email.task %}<a href="{% url 'todo:task' email.task.number %}" class="underline">Task #{{ email.task.number }}</a>{% else %}Task created{% endif %}</span>
+                {% else %}
+                <span class="text-red-600 dark:text-red-400"><i class="fas fa-xmark mr-1" aria-hidden="true"></i>{{ email.outcome|default:'not accepted' }}</span>
+                {% endif %}
+                {% if email.note %}<span class="block text-xs text-gray-500 dark:text-gray-400">{{ email.note }}</span>{% endif %}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-gray-500 dark:text-gray-400">No emails yet.</p>
+    {% endif %}
+</section>
 {% endblock %}

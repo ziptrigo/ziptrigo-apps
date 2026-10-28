@@ -288,7 +288,9 @@ class TestInboundMessageRetry:
         staff = make_user(is_staff=True)
         # `user_permissions` is a many-to-many manager `ty` can't see through the field type.
         staff.user_permissions.add(  # ty: ignore[unresolved-attribute]
-            Permission.objects.get(codename='view_inboundmessage')
+            Permission.objects.get(
+                codename='view_inboundmessage', content_type__app_label='receipts'
+            )
         )
         failed = self.make(InboundMessageStatus.FAILED)
         client.force_login(staff)
@@ -303,8 +305,12 @@ class TestInboundMessageRetry:
 
         staff = make_user(is_staff=True)
         staff.user_permissions.add(  # ty: ignore[unresolved-attribute]
-            Permission.objects.get(codename='view_inboundmessage'),
-            Permission.objects.get(codename='change_inboundmessage'),
+            Permission.objects.get(
+                codename='view_inboundmessage', content_type__app_label='receipts'
+            ),
+            Permission.objects.get(
+                codename='change_inboundmessage', content_type__app_label='receipts'
+            ),
         )
         failed = self.make(InboundMessageStatus.FAILED)
         client.force_login(staff)

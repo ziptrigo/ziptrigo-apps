@@ -11,7 +11,7 @@ from django.utils import timezone
 from apps.billing.services import get_storage_price_per_gb_per_day
 
 from .models import TodoAccount
-from .services import attachments, reminders, tasks
+from .services import attachments, inbound, reminders, tasks
 from .services.metering import meter_account, resume
 
 logger = logging.getLogger(__name__)
@@ -63,3 +63,18 @@ def send_reminders() -> None:
     delivered = reminders.deliver_due(timezone.now())
     if delivered:
         logger.info('Delivered %d reminder(s).', delivered)
+
+
+def poll_inbound() -> None:
+    """Every minute: register the messages SES dropped under `todo/inbound/` and queue their
+    ingest (`services.inbound.poll`). Errors propagate: the scheduler records them as the job's
+    `last_error`."""
+    inbound.poll()
+
+
+def purge_inbound_messages() -> None:
+    """Daily: delete the bookkeeping rows (and objects) of old `done` messages that created no
+    email row (`services.inbound.purge_done_messages`). Errors propagate."""
+    purged = inbound.purge_done_messages()
+    if purged:
+        logger.info('Purged %d old inbound message(s).', purged)

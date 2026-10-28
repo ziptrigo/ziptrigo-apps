@@ -54,6 +54,8 @@ class Task(models.Model):
     #: The reverse accessors of `Reminder.task` and `ReminderDelivery.task`.
     reminders: ClassVar['models.Manager']
     reminder_deliveries: ClassVar['models.Manager']
+    #: The reverse accessor of `InboundEmail.task` (a task made from an email, issue #186).
+    inbound_emails: ClassVar['models.Manager']
     # `ty` types `pk` as the primary key field object itself, not the value it holds.
     pk: uuid.UUID
     user_id: uuid.UUID
@@ -108,6 +110,24 @@ class Task(models.Model):
     #: from `position`, so dragging in one list never puts the other into manual order.
     today_position = cast(int, models.IntegerField(default=0))
     source = cast(str, models.CharField(max_length=12, choices=TaskSource, default=TaskSource.WEB))
+    email_from = cast(
+        str,
+        models.CharField(
+            max_length=320,
+            blank=True,
+            default='',
+            db_default='',
+            help_text='For a task made from an email: the From address, as the sender wrote it.',
+        ),
+    )
+    email_from_authenticated = cast(
+        bool,
+        models.BooleanField(
+            default=False,
+            db_default=False,
+            help_text='For a task made from an email: whether SES authenticated that sender.',
+        ),
+    )
     charged_credits = cast(
         int,
         models.PositiveIntegerField(
@@ -176,6 +196,12 @@ class Task(models.Model):
     @property
     def is_unpaid(self) -> bool:
         return self.unpaid_at is not None
+
+    @property
+    def is_from_email(self) -> bool:
+        """Whether the task was made from an email (`email_from` and `email_from_authenticated`,
+        stored on the task, say whose; no query)."""
+        return self.source == TaskSource.EMAIL
 
     @property
     def active_recurrence(self) -> Recurrence | None:

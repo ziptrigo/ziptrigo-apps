@@ -5,10 +5,11 @@ rules. Deleting a *user* still removes their rows through the cascade
 (`apps.accounts.admin.CASCADE_WITH_USER_APP_LABELS` lists `todo`).
 """
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Count, Q
 from django.http import HttpRequest
 
+from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
@@ -16,6 +17,9 @@ from .models import (
     Attachment,
     Comment,
     CommentRevision,
+    InboundEmail,
+    InboundMessage,
+    InboxCode,
     Label,
     Recurrence,
     Reminder,
@@ -26,6 +30,7 @@ from .models import (
     TodoSettings,
 )
 from .services.billing import month_key
+from .services.inbound import reset_message_for_retry
 
 
 class ReadOnlyModelAdmin(admin.ModelAdmin):
@@ -120,6 +125,19 @@ class RecurrenceAdmin(ReadOnlyModelAdmin):
     list_select_related = ['user']
 
 
+class InboxCodeInline(admin.TabularInline):
+    """The account's `todo+<code>@...` addresses, the retired ones included. Read-only."""
+
+    model = InboxCode
+    extra = 0
+    can_delete = False
+    fields = ['code', 'active', 'created_at', 'retired_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
 class TodoAccountAdmin(ReadOnlyModelAdmin):
     list_display = [
         'user',
@@ -137,6 +155,7 @@ class TodoAccountAdmin(ReadOnlyModelAdmin):
     ]
     search_fields = ['user__email']
     list_select_related = ['user']
+    inlines = [InboxCodeInline]
 
     @admin.display(description='Created this month')
     def month_usage(self, obj: TodoAccount) -> int:
@@ -308,6 +327,56 @@ class SavedFilterAdmin(ReadOnlyModelAdmin):
         return str(obj.params.get('q') or '')
 
 
+class InboundEmailInline(admin.TabularInline):
+    model = InboundEmail
+    extra = 0
+    can_delete = False
+    fields = ['user', 'recipient', 'from_address', 'subject', 'status', 'task', 'created_at']
+    readonly_fields = fields
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+class InboundMessageAdmin(ReadOnlyModelAdmin):
+    """The S3 objects found under `todo/inbound/`: filter by status to find failures, read
+    `last_error`, and retry."""
+
+    list_display = [
+        's3_key',
+        'status',
+        'attempts',
+        'short_error',
+        'next_attempt_at',
+        'created_at',
+        'processed_at',
+    ]
+    list_filter = ['status', 'created_at']
+    search_fields = ['s3_key', 'last_error']
+    inlines = [InboundEmailInline]
+    actions = ['retry_action']
+
+    @admin.display(description='Last error')
+    def short_error(self, obj: InboundMessage) -> str:
+        return obj.last_error[:80]
+
+    def has_retry_permission(self, request: AuthenticatedHttpRequest) -> bool:
+        # An action ignores `has_change_permission` (False above), so it needs its own check.
+        return request.user.has_perm('todo.change_inboundmessage')
+
+    @admin.action(description='Retry selected failed messages', permissions=['retry'])
+    def retry_action(self, request: AuthenticatedHttpRequest, queryset) -> None:
+        count = sum(reset_message_for_retry(message) for message in queryset)
+        messages.success(request, f'Reset {count} failed message(s) to pending.')
+
+
+class InboundEmailAdmin(ReadOnlyModelAdmin):
+    list_display = ['recipient', 'user', 'from_address', 'subject', 'status', 'note', 'created_at']
+    list_filter = ['status', 'created_at']
+    search_fields = ['recipient', 'from_address', 'envelope_sender', 'subject', 'user__email']
+    list_select_related = ['user']
+
+
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
 custom_admin_site.register(Recurrence, RecurrenceAdmin)
@@ -317,6 +386,6 @@ custom_admin_site.register(Comment, CommentAdmin)
 custom_admin_site.register(Attachment, AttachmentAdmin)
 custom_admin_site.register(Reminder, ReminderAdmin)
 custom_admin_site.register(ReminderDelivery, ReminderDeliveryAdmin)
-
-
 custom_admin_site.register(SavedFilter, SavedFilterAdmin)
+custom_admin_site.register(InboundMessage, InboundMessageAdmin)
+custom_admin_site.register(InboundEmail, InboundEmailAdmin)

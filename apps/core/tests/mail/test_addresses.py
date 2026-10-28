@@ -1,8 +1,7 @@
 import pytest
 from django.core.exceptions import ValidationError
 
-from ..services.accounts import inbox_address
-from ..services.addresses import (
+from apps.core.services.mail.addresses import (
     inbox_code_from_address,
     matches_allowlist,
     normalize_address,
@@ -135,13 +134,29 @@ def test_any_of_several_addresses_may_match():
     ],
 )
 def test_inbox_code_from_address(address, code):
-    assert inbox_code_from_address(address) == code
+    assert inbox_code_from_address(address, inbound_address='receipts@ziptrigo.com') == code
 
 
-def test_inbox_code_from_address_inverts_inbox_address(settings):
-    for configured in ('receipts@ziptrigo.com', 'receipts-staging@ziptrigo.com'):
-        settings.RECEIPTS_INBOUND_ADDRESS = configured
-        assert inbox_code_from_address(inbox_address('k7m2xq9p')) == 'k7m2xq9p'
+def test_inbox_code_from_address_inverts_the_products_address():
+    for configured in (
+        'receipts@ziptrigo.com',
+        'receipts-staging@ziptrigo.com',
+        'todo@ziptrigo.com',
+    ):
+        local, _, domain = configured.partition('@')
+        address = f'{local}+k7m2xq9p@{domain}'
+        assert inbox_code_from_address(address, inbound_address=configured) == 'k7m2xq9p'
 
-    # A production address is not a staging one.
-    assert inbox_code_from_address('receipts+k7m2xq9p@ziptrigo.com') is None
+    # A production address is not a staging one, and one product's is not another's.
+    assert (
+        inbox_code_from_address(
+            'receipts+k7m2xq9p@ziptrigo.com', inbound_address='receipts-staging@ziptrigo.com'
+        )
+        is None
+    )
+    assert (
+        inbox_code_from_address(
+            'todo+k7m2xq9p@ziptrigo.com', inbound_address='receipts@ziptrigo.com'
+        )
+        is None
+    )

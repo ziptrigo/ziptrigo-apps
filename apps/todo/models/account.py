@@ -27,6 +27,9 @@ class TodoAccount(models.Model):
     Attachment storage is billed per account (issue #184, `services.metering`), with the same
     four columns as `receipts.ReceiptsAccount`: `stored_bytes` x the shared storage price once a
     day (`accrued` carries the fraction), and `frozen_at` set when the balance can't cover it.
+
+    `sender_allowlist` is the accepted senders of the email intake (issue #186); the account's
+    `InboxCode`s (`codes`) are its `todo+<code>@...` addresses.
     """
 
     objects: ClassVar['models.Manager']
@@ -74,6 +77,16 @@ class TodoAccount(models.Model):
             default=ReminderChannel.IN_APP,
             db_default=ReminderChannel.IN_APP,
             help_text='Where the default reminder is delivered.',
+        ),
+    )
+    sender_allowlist = cast(
+        list[str],
+        models.JSONField(
+            default=list,
+            db_default=[],
+            blank=True,
+            help_text='Accepted senders for adding tasks by email: exact addresses and '
+            '`*@domain` wildcards, lowercase. Empty accepts anyone.',
         ),
     )
     month_key = cast(

@@ -8,6 +8,11 @@ stores is under `todo/` (the infra IAM user is scoped to that prefix, issue #185
   filename, which the user controls -- for the same reasons as file transfer's and Receipts' keys;
   the display name lives on `Attachment.filename` and goes into `Content-Disposition`.
 
+- `todo/inbound/<message id>`: the raw messages SES drops for the email intake (issue #186), read by
+  the poller (`services.inbound`); a message that fails to ingest is parked under `todo/failed/`
+  so a pile of failures cannot crowd new mail out of the listing. SES writes under `todo/inbound/`;
+  the bucket's lifecycle rule expires that prefix (the `infra` repo, issue #185).
+
 Putting the user id in the path is what lets deleting an account delete all of its objects with one
 `delete_prefix` (`user_prefix`).
 
@@ -34,15 +39,31 @@ __all__ = [
     'GET_URL_EXPIRES_SECONDS',
     'PUT_URL_EXPIRES_SECONDS',
     'USERS_PREFIX',
+    'FAILED_PREFIX',
+    'INBOUND_PREFIX',
     'ObjectInfo',
     'S3Storage',
     'attachment_key',
+    'failed_key_for',
     'get_storage',
     'reset_storage_cache',
     'user_prefix',
 ]
 
 USERS_PREFIX = 'todo/users/'
+
+#: Where SES drops the raw messages sent to `todo+<code>@...`.
+INBOUND_PREFIX = 'todo/inbound/'
+
+#: Where messages that failed to ingest are parked.
+FAILED_PREFIX = 'todo/failed/'
+
+
+def failed_key_for(inbound_key: str) -> str:
+    """Where the object at `inbound_key` is parked when its message fails: the same name under
+    `FAILED_PREFIX`."""
+    name = inbound_key[len(INBOUND_PREFIX) :] if inbound_key.startswith(INBOUND_PREFIX) else None
+    return f'{FAILED_PREFIX}{name if name else inbound_key.replace("/", "_")}'
 
 
 def user_prefix(user_id: object) -> str:
