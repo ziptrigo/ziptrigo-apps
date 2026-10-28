@@ -60,8 +60,9 @@ def page_url(view: str) -> str:
 def belongs(task: Task, view: str, today: date) -> bool:
     """Whether `task` (as it is now) would still be listed in `view`: after an action on a row,
     one that no longer belongs is removed instead of re-rendered. `subtask` is the list on the task
-    page, where a completed subtask stays."""
-    if view == 'subtask':
+    page, where a completed subtask stays, and `search`, whose results include completed tasks when
+    asked."""
+    if view in ('subtask', 'search'):
         return not task.is_trashed
     if view == 'trash':
         return task.is_trashed

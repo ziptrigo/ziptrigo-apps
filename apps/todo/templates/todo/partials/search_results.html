@@ -1,0 +1,83 @@
+{% comment %} The results of a search (what the form, the pager, "Update filter" and the sort swap into #search-results).
+   Needs the context of `views.search.build_context`. {% endcomment %}
+{% if clear_message %}<div id="search-msg" hx-swap-oob="innerHTML"></div>{% endif %}
+{% if not ran %}
+<p class="rounded-md border border-dashed border-gray-300 dark:border-gray-600 px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+    {% if error_lines %}Fix the search above to see results.{% else %}Type something to search for, or choose a priority, label or date above.{% endif %}
+</p>
+{% else %}
+<div x-data="{ saving: false }" @keydown.escape="saving = false">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p class="text-sm text-gray-600 dark:text-gray-300" aria-live="polite">
+            <span class="font-medium text-gray-900 dark:text-gray-100">{{ count }} result{{ count|pluralize }}</span>
+            {% if is_search %}<span class="text-xs text-gray-500 dark:text-gray-400"> &middot; matches shown without accents or formatting</span>{% endif %}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+            {% if differs %}
+            <form method="post" action="{% url 'todo:filter-update' saved.pk %}" hx-post="{% url 'todo:filter-update' saved.pk %}" hx-target="#search-msg" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']">
+                {% csrf_token %}
+                {% for key, value in hidden_pairs %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+                <button type="submit"
+                        class="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+                    <i class="fas fa-rotate mr-2" aria-hidden="true"></i>Update filter
+                </button>
+            </form>
+            {% endif %}
+            <button type="button" @click="saving = true; $nextTick(() => $refs.filterName.focus())"
+                    class="inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="far fa-bookmark mr-2" aria-hidden="true"></i>Save as filter
+            </button>
+        </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
+            {% empty %}
+            <li class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">Nothing matches.{% if not params.include_completed %} Completed tasks are left out unless you tick Include completed.{% endif %}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="mt-6 flex items-center justify-between text-sm">
+        <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+        <div class="flex gap-4">
+            {% if page_obj.has_previous %}
+            <a href="{{ page_url }}?{{ prev_query }}" hx-get="{{ list_url }}?{{ prev_query }}{{ filter_suffix }}" hx-target="#search-results" hx-swap="innerHTML"
+               class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>
+            {% endif %}
+            {% if page_obj.has_next %}
+            <a href="{{ page_url }}?{{ next_query }}" hx-get="{{ list_url }}?{{ next_query }}{{ filter_suffix }}" hx-target="#search-results" hx-swap="innerHTML"
+               class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div x-show="saving" style="display: none" @click.self="saving = false"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70">
+        <div role="dialog" aria-modal="true" aria-labelledby="save-filter-title"
+             class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
+            <form method="post" action="{% url 'todo:filters' %}" hx-post="{% url 'todo:filters' %}" hx-target="#filter-save-msg" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']" class="p-6">
+                {% csrf_token %}
+                {% for key, value in hidden_pairs %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+                <h3 id="save-filter-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Save as filter</h3>
+                <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">Name this search to keep it in the sidebar.</p>
+                <div id="filter-save-msg" class="mb-3 text-sm" aria-live="polite"></div>
+                <label for="filter-name" class="block mb-1 text-sm font-medium">Name</label>
+                <input id="filter-name" x-ref="filterName" name="name" type="text" maxlength="50" required autocomplete="off"
+                       class="mb-6 w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <div class="flex justify-end gap-3">
+                    <button type="button" @click="saving = false"
+                            class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">Cancel</button>
+                    <button type="submit"
+                            class="px-4 py-2 text-sm font-medium rounded-md text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}

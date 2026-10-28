@@ -428,6 +428,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # the model is really called: the call is free to the user, so without it one account could
     # make 86,400 a day. A person typing tasks never gets near it. Over it the chip just stops.
     'TODO_PARSE_USER_DAY': (500, 24 * 60 * 60),
+    # The search endpoints (issue #181: the search page, its list and a saved filter's page): per
+    # user, charged *before* the query. A search scans the user's text columns with a regular
+    # expression, so it is the one read that costs real work; a person typing a search and
+    # adjusting filters stays well below this. Saved-filter changes spend `TODO_EDIT_USER`.
+    'TODO_SEARCH_USER': (60, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),

@@ -1,0 +1,49 @@
+{% comment %} The saved filters: name (links to the filter), a summary of its params, the count of its open tasks, rename in place, delete in
+   the shared confirmation modal, drag to reorder. Needs `rows` (`services.saved_filters.FilterRow`s). A rename re-renders this
+   whole block into #filters; a refusal is a 422 into #filter-msg. The counts are filled in after the list shows: the hidden
+   request asks `todo:filter-counts` (scope=all), which answers out of band into #page-count-<id> (and the sidebar's). {% endcomment %}
+{% if rows %}<div hidden hx-get="{% url 'todo:filter-counts' %}?scope=all" hx-trigger="load" hx-swap="none"></div>{% endif %}
+<ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+    data-sortable data-reorder-url="{% url 'todo:filter-reorder' %}" data-msg="#filter-msg">
+    {% for row in rows %}
+    <li x-data="{ editing: false }" data-task-id="{{ row.filter.pk }}" class="flex items-center gap-3 px-3 py-2">
+        <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Drag to reorder" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
+        <div class="min-w-0 flex-1">
+            <div x-show="!editing">
+                <div class="flex flex-wrap items-baseline gap-x-3">
+                    <a href="{% url 'todo:filter' row.filter.pk %}" class="font-medium text-gray-900 dark:text-gray-100 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">{{ row.filter.name }}</a>
+                    <span id="page-count-{{ row.filter.pk }}" class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"></span>
+                </div>
+                <p class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{{ row.summary }}</p>
+            </div>
+            <form x-show="editing" style="display: none" method="post" action="{% url 'todo:filter-rename' row.filter.pk %}"
+                  hx-post="{% url 'todo:filter-rename' row.filter.pk %}" hx-target="#filters" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']"
+                  class="flex items-center gap-2" @keydown.escape="editing = false">
+                {% csrf_token %}
+                <label for="filter-name-{{ row.filter.pk }}" class="sr-only">Name</label>
+                <input id="filter-name-{{ row.filter.pk }}" name="name" type="text" value="{{ row.filter.name }}" maxlength="50" required
+                       x-effect="if (editing) $nextTick(() => $el.focus())"
+                       class="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <button type="submit" aria-label="Save the name" title="Save"
+                        class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                <button type="button" @click="editing = false" aria-label="Cancel renaming" title="Cancel"
+                        class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            </form>
+        </div>
+        <div x-show="!editing" class="flex flex-shrink-0 items-center">
+            <button type="button" @click="editing = true" aria-label="Rename {{ row.filter.name }}" title="Rename"
+                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:filter-delete' row.filter.pk %}"
+                    data-title="Delete filter"
+                    data-body="Are you sure you want to delete {{ row.filter.name }}? Your tasks are not affected."
+                    data-label="Delete"
+                    aria-label="Delete {{ row.filter.name }}" title="Delete"
+                    class="p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-trash" aria-hidden="true"></i></button>
+        </div>
+    </li>
+    {% empty %}
+    <li class="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No saved filters yet. Search for something, then choose "Save as filter".</li>
+    {% endfor %}
+</ul>

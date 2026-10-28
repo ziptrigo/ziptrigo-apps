@@ -1,0 +1,30 @@
+{% comment %} The "Filters" section of the sidebar: the first 20 saved filters, then "and N more". Needs `sidebar_filters`
+   (`SavedFilter`s), `sidebar_more` and `current_filter_id`. The counts of open tasks are not rendered: one hidden request
+   fetches them after the page loads (`todo:filter-counts`, which answers out of band into #side-count-<id>); on the
+   filters page the list of that page asks for them instead, for the sidebar too. {% endcomment %}
+<nav aria-label="Saved filters" class="mt-4">
+    {% if sidebar_filters and nav != 'filters' %}<div hidden hx-get="{% url 'todo:filter-counts' %}" hx-trigger="load" hx-swap="none"></div>{% endif %}
+    <h2 class="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        <a href="{% url 'todo:filters' %}"{% if nav == 'filters' %} aria-current="page"{% endif %}
+           class="rounded hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary">Filters</a>
+    </h2>
+    <ul class="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
+        {% for saved in sidebar_filters %}
+        <li class="flex-shrink-0">
+            <a href="{% url 'todo:filter' saved.pk %}"{% if current_filter_id == saved.pk %} aria-current="page"{% endif %}
+               class="flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors {% if current_filter_id == saved.pk %}bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100{% else %}text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800{% endif %}">
+                <i class="fas fa-filter w-4 text-center text-sage-400" aria-hidden="true"></i>
+                <span class="min-w-0 truncate">{{ saved.name }}</span>
+                <span id="side-count-{{ saved.pk }}" class="ml-auto text-xs text-gray-500 dark:text-gray-400"></span>
+            </a>
+        </li>
+        {% empty %}
+        <li class="flex-shrink-0 px-3 py-1 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">No saved filters</li>
+        {% endfor %}
+        {% if sidebar_more %}
+        <li class="flex-shrink-0">
+            <a href="{% url 'todo:filters' %}" class="block rounded-md px-3 py-1 text-xs text-sage-600 dark:text-sage-300 hover:underline whitespace-nowrap">and {{ sidebar_more }} more</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>

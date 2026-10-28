@@ -69,7 +69,7 @@ CREDITS_LINE = 'You do not have enough credits to add this task.'
 
 def _view_of(request: AuthenticatedHttpRequest) -> str:
     view = request.POST.get('view', '')
-    return view if view in (*VIEWS, 'subtask') else 'all'
+    return view if view in (*VIEWS, 'subtask', 'search') else 'all'
 
 
 def _is_page(request: AuthenticatedHttpRequest) -> bool:

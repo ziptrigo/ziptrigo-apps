@@ -1,4 +1,4 @@
-"""What the To-do views share: the page renderer (account, sidebar counts, the free-tasks line),
+"""What the To-do views share: the page renderer (account, sidebar, the free-tasks line),
 ownership lookups, rate limits, and the 422 message responses.
 
 Ownership: a task that is not the requester's is a 404, never a 403, so a number can't be probed.
@@ -17,7 +17,7 @@ from apps.core import ratelimit
 from apps.core.htmx import is_htmx
 
 from ..models import Task, TodoSettings
-from ..services import get_account, month_usage, today_set
+from ..services import get_account, month_usage, sidebar_filters, today_set
 
 FIELD_LABELS = {
     'title': 'Title',
@@ -38,6 +38,7 @@ FIELD_LABELS = {
     'default_due_time': 'Default due time',
     'minutes_before': 'Reminder',
     'channel': 'Channel',
+    'params': 'Filter',
 }
 
 
@@ -72,10 +73,12 @@ def render_page(
 ) -> HttpResponse:
     """Render a full To-do page. Makes sure the user's To-do account exists (created on first
     visit) and adds what the layout shows: the account, the "N of F free tasks used" line, the
-    count beside Today and the highlighted sidebar entry (`nav`)."""
+    count beside Today, the saved filters and the highlighted sidebar entry (`nav`). The saved
+    filters' counts are not here: the sidebar asks for them after the page loads."""
     account = get_account(request.user)
     config = TodoSettings.load()
     used, free = free_line(account, config)
+    saved_filters, more_filters = sidebar_filters(request.user)
     page_context = {
         'account': account,
         'todo_blocked': account.is_blocked,
@@ -86,6 +89,9 @@ def render_page(
         'nav': nav,
         'nav_items': nav_items(),
         'today_count': today_set(request.user).count(),
+        'sidebar_filters': saved_filters,
+        'sidebar_more': more_filters,
+        'show_sidebar_search': True,
     }
     page_context.update(context or {})
     return render(request, template, page_context, status=status)

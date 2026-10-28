@@ -20,6 +20,7 @@ from .models import (
     Recurrence,
     Reminder,
     ReminderDelivery,
+    SavedFilter,
     Task,
     TodoAccount,
     TodoSettings,
@@ -292,6 +293,21 @@ class ReminderDeliveryAdmin(ReadOnlyModelAdmin):
     ordering = ['-sent_at']
 
 
+class SavedFilterAdmin(ReadOnlyModelAdmin):
+    """Saved filters, for support: the name, the owner and the stored params."""
+
+    list_display = ['name', 'user', 'position', 'summary', 'created_at']
+    search_fields = ['name', 'user__email']
+    list_select_related = ['user']
+    ordering = ['user__email', 'position']
+    fields = ['user', 'name', 'position', 'params', 'created_at']
+    readonly_fields = fields
+
+    @admin.display(description='Search text')
+    def summary(self, obj: SavedFilter) -> str:
+        return str(obj.params.get('q') or '')
+
+
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
 custom_admin_site.register(Recurrence, RecurrenceAdmin)
@@ -301,3 +317,6 @@ custom_admin_site.register(Comment, CommentAdmin)
 custom_admin_site.register(Attachment, AttachmentAdmin)
 custom_admin_site.register(Reminder, ReminderAdmin)
 custom_admin_site.register(ReminderDelivery, ReminderDeliveryAdmin)
+
+
+custom_admin_site.register(SavedFilter, SavedFilterAdmin)

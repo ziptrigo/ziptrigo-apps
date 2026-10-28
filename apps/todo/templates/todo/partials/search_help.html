@@ -1,0 +1,18 @@
+{% comment %} The "?" popover that explains the search syntax. Put it inside any element; it carries its own Alpine state.
+   `help_id` makes the popover's id unique when it appears twice on a page. {% endcomment %}
+<span x-data="{ help: false }" class="relative inline-block" @keydown.escape="help = false" @click.outside="help = false">
+    <button type="button" @click="help = !help" :aria-expanded="help" aria-controls="search-help-{{ help_id|default:'box' }}"
+            class="inline-flex h-6 w-6 items-center justify-center rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            aria-label="Search help" title="Search help"><i class="fas fa-circle-question" aria-hidden="true"></i></button>
+    <div id="search-help-{{ help_id|default:'box' }}" x-show="help" style="display: none"
+         class="absolute left-0 z-40 mt-1 w-72 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-left text-xs font-normal normal-case tracking-normal text-gray-700 dark:text-gray-300 shadow-lg">
+        <ul class="list-disc space-y-1 pl-4">
+            <li><code>*</code> matches any text, <code>?</code> matches one character: <code>pay*rent</code> finds "pay the rent".</li>
+            <li>A word matches anywhere in a word: <code>rent</code> also finds "parent".</li>
+            <li><code>/.../</code>, or the Regex box, reads the text as a regular expression. It is matched against the <em>normalised</em> text: lower case, no accents, punctuation as spaces. Letters you type are lower-cased for you (not escapes such as <code>\D</code>); write the pattern without accents.</li>
+            <li>Regular expressions share the common syntax of Python and PostgreSQL: no backreferences, lookarounds, atomic groups, possessive quantifiers or named groups.</li>
+            <li>Case, accents, punctuation and formatting are ignored.</li>
+            <li>Deleted comments and earlier edits are not searched.</li>
+        </ul>
+    </div>
+</span>
