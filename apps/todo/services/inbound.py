@@ -22,12 +22,18 @@ polls that prefix, and the rest runs on the `default` queue.
      the address that matched (`Verdicts.vouches_for`, exactly Receipts' rule): `rejected_sender`.
      An empty allowlist accepts anyone, with no authentication needed.
    - Nothing in it (no subject, no body, no file): `no_content`. Files that were all too large:
-     `rejected_too_large`; the user already at the open-task cap: `rejected_too_large` too.
+     `rejected_too_large`.
+   - The user is already at the open-task cap: `rejected_task_limit`. (Checked here, with the
+     credits below, before the AI call and the uploads; `create_task` checks again under its lock.)
    - The task would not be paid for (not enough credits, or creation blocked by an unpaid repeating
-     task): `rejected_credits`, nothing stored, and one in-app notification.
+     task): `rejected_credits`, nothing stored, and the user's in-app notice (one per user, however
+     many emails: see `_notify_not_created`).
    - Otherwise a task: the subject is the title (`Fwd:`/`Re:` prefixes removed), the body the
      description (`text/plain` as it is, else the HTML as text), the attachments the task's
-     attachments (any type), and the AI reads a due date from the subject.
+     attachments (any type), and the AI reads a due date from the subject. The reading spends the
+     user's `TODO_PARSE_USER` / `TODO_PARSE_USER_DAY` rate limits, **the same budget as the web
+     quick add** (one shared AI budget per user): with an empty allowlist anyone who knows the
+     address can use some of it, and past it the task is simply created undated.
 
    A rejected email keeps its metadata only (from, subject, time, status, note). The task is
    created with `services.tasks.create_task` (source `email`, never unpaid), so it counts toward
@@ -109,7 +115,7 @@ from ..models import (
     TodoSettings,
 )
 from . import attachments as attachments_service
-from . import billing, parsing, tasks
+from . import billing, dates, parsing, tasks
 from .accounts import add_stored_bytes
 from .limits import DESCRIPTION_MAX, TITLE_MAX
 from .storage import INBOUND_PREFIX, attachment_key, failed_key_for, get_storage
@@ -145,7 +151,13 @@ MAX_RAW_BYTES = 40 * 1024 * 1024
 MAX_ERROR_CHARS = 2000
 #: The window the per-user `max_inbound_rows_per_day` ceiling counts rows over.
 ROWS_WINDOW = timedelta(hours=24)
-#: Only this much of an HTML body is turned into text (the result is cut to `DESCRIPTION_MAX`).
+#: Only this much of a `text/plain` body is read, sliced as soon as it is decoded and before any
+#: copy or clean-up (the result is cut to `DESCRIPTION_MAX`): a message can carry ~30 MB of text,
+#: and the cleaning copies it several times.
+MAX_TEXT_CHARS = DESCRIPTION_MAX * 2
+#: Only this much of an HTML body is turned into text, sliced right after decoding as well. Larger
+#: than the text bound because markup is most of an HTML body (the result is cut to
+#: `DESCRIPTION_MAX`).
 MAX_HTML_CHARS = 1_000_000
 #: What replaces a missing subject.
 NO_SUBJECT = '(no subject)'
@@ -153,6 +165,10 @@ NO_SUBJECT = '(no subject)'
 CUT_MARK = '\n…'
 #: The rate limits the AI reading of the subject spends, as the web's `POST /todo/parse/` does.
 PARSE_RULES = ('TODO_PARSE_USER', 'TODO_PARSE_USER_DAY')
+#: The note of an email refused at the open-task cap.
+TASK_LIMIT_NOTE = 'Too many open tasks.'
+#: The key of the one in-app notice about emailed tasks refused for lack of credits (per user).
+CREDITS_NOTICE_KEY = 'todo_email_credits'
 
 #: Namespace of the deterministic ids (`email_id_for`, `attachment_id_for`). Random, and fixed
 #: forever: changing it would change the keys a retry writes.
@@ -566,6 +582,7 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
         received_at=context.received_at,
     )
 
+    email.sender_authenticated = _authenticated(context)
     rejection = _rejection(context, account)
     if rejection is not None:
         email.status, email.note = rejection
@@ -588,6 +605,12 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
         _record_unaccepted(email, user, config, message.s3_key)
         return
 
+    # The cheap refusals that need the database come before the AI call and the uploads.
+    if _at_task_cap(user, config):
+        email.status = InboundEmailStatus.REJECTED_TASK_LIMIT
+        email.note = TASK_LIMIT_NOTE
+        _record_unaccepted(email, user, config, message.s3_key)
+        return
     if account.creation_blocked_at is not None or _cannot_afford(account, config):
         _reject_for_credits(email, user, config, message.s3_key)
         return
@@ -613,11 +636,18 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
         max_bytes=config.max_attachment_bytes,
     )
 
-    # The AI call is slow and costs us: outside any transaction, after the cheap refusals above.
+    # The AI call is slow and costs us: outside any transaction, after the cheap refusals above
+    # (the cap on open tasks and the credits).
     request = _parse_request(user, account, title or NO_SUBJECT)
     reading = _read_date(user, request)
     email.note = note
     _create(context, user, email, title or NO_SUBJECT, description, reading, files, config)
+
+
+def _at_task_cap(user: User, config: TodoSettings) -> bool:
+    """A cheap look before the AI call and the uploads: the user already has the most open tasks
+    allowed. (`create_task` decides for good, under the account lock.)"""
+    return dates.open_tasks(user).count() >= config.max_open_tasks_per_user
 
 
 def _cannot_afford(account: TodoAccount, config: TodoSettings) -> bool:
@@ -726,7 +756,7 @@ def _create(
             written.append(key)
 
         with transaction.atomic():
-            created = _create_task(user, title, description, reading)
+            created = _create_task(user, email, title, description, reading)
             email.status = InboundEmailStatus.ACCEPTED
             email.task = created
             email.save(force_insert=True)
@@ -775,7 +805,13 @@ class _Refused(Exception):
         self.note = note
 
 
-def _create_task(user: User, title: str, description: str, reading: parsing.TitleParse | None):
+def _create_task(
+    user: User,
+    email: InboundEmail,
+    title: str,
+    description: str,
+    reading: parsing.TitleParse | None,
+):
     """`tasks.create_task` for an email, with the AI's date when there is one. A date the task
     service won't take (it should not happen: the reading was validated) is dropped rather than
     losing the task."""
@@ -790,6 +826,8 @@ def _create_task(user: User, title: str, description: str, reading: parsing.Titl
                     due_time=reading.due_time,
                     rrule=reading.rrule or '',
                     source=TaskSource.EMAIL,
+                    email_from=email.from_address,
+                    email_from_authenticated=email.sender_authenticated,
                     allow_unpaid=False,
                 )
             except ValidationError as exc:
@@ -801,6 +839,8 @@ def _create_task(user: User, title: str, description: str, reading: parsing.Titl
             title=title,
             description=description,
             source=TaskSource.EMAIL,
+            email_from=email.from_address,
+            email_from_authenticated=email.sender_authenticated,
             allow_unpaid=False,
         )
     except InsufficientCreditsError as exc:
@@ -809,7 +849,7 @@ def _create_task(user: User, title: str, description: str, reading: parsing.Titl
         if tasks.BLOCKED_MESSAGE in exc.messages:
             raise _Refused(InboundEmailStatus.REJECTED_CREDITS, 'Not enough credits.') from exc
         if tasks.TOO_MANY_MESSAGE in exc.messages:
-            raise _Refused(InboundEmailStatus.REJECTED_TOO_LARGE, 'Too many open tasks.') from exc
+            raise _Refused(InboundEmailStatus.REJECTED_TASK_LIMIT, TASK_LIMIT_NOTE) from exc
         raise
 
 
@@ -845,19 +885,23 @@ def _record_unaccepted(
 
 
 def _notify_not_created(user: User, email: InboundEmail) -> None:
-    """The in-app notice for a task that was not created for lack of credits. In its own
-    savepoint, logged and never raised: a failed notice must not lose the email's row."""
+    """The in-app notice that emailed tasks were not created for lack of credits. **One per user**,
+    under a stable key: the previous one is deleted before the new one is written, so a flood of
+    emails leaves a single notice (the bell shows it new again), not one per email. The text is
+    fixed -- nothing the sender wrote (the subject included) reaches it -- and it links to the
+    credits page, where the user tops up. In its own savepoint, logged and never raised: a failed
+    notice must not lose the email's row."""
     try:
         with transaction.atomic():
+            notifications.delete_for_key(user, CREDITS_NOTICE_KEY, source='todo')
             notifications.notify(
                 user,
                 source='todo',
-                title='A task sent by email was not created: not enough credits',
-                body=f'Top up your credits and send it again. Subject: {email.subject}'
-                if email.subject
-                else 'Top up your credits and send it again.',
-                url=reverse('todo:settings'),
-                key=f'todo_email_rejected:{email.pk}',
+                title='Emailed tasks were not created: not enough credits',
+                body="Tasks sent to your To-do address couldn't be created because you don't have "
+                'enough credits. Top up, then send them again.',
+                url=reverse('billing:credits-history'),
+                key=CREDITS_NOTICE_KEY,
             )
     except Exception:
         logger.exception('Could not notify user %s of a rejected email', user.pk)
@@ -865,6 +909,24 @@ def _notify_not_created(user: User, email: InboundEmail) -> None:
 
 def _is_listed(allowlist: Sequence[str], address: str) -> bool:
     return bool(address) and matches_allowlist(allowlist, address)
+
+
+def _authenticated(context: _Context) -> bool:
+    """Whether SES authenticated the address a page will present as the sender: the `From`
+    address (DMARC for its domain, else an aligned DKIM signature, or SPF when it is also the
+    envelope sender). Recorded on the email and the task, whatever the allowlist says -- an empty
+    one accepts anyone, authenticated or not, and a page must not present an unproven `From` as
+    who sent it. (The allowlist decision is `_rejection`'s.)"""
+    from_address = context.from_address.lower()
+
+    def is_from(address: str) -> bool:
+        return bool(from_address) and address.lower() == from_address
+
+    return context.verdicts.vouches_for(
+        from_address=context.from_address,
+        envelope_sender=context.envelope_sender,
+        is_listed=is_from,
+    )
 
 
 def _rejection(context: _Context, account: TodoAccount) -> tuple[str, str] | None:
@@ -920,9 +982,13 @@ def body_text(msg: Message) -> str:
         part = next((leaf for leaf in leaves if leaf.get_content_type() == content_type), None)
         if part is None:
             continue
-        text = mime.part_text(part)
+        # Sliced as soon as it is decoded: nothing below copies more than the bound.
         if content_type == 'text/html':
-            text = html_to_text(text[:MAX_HTML_CHARS], max_chars=DESCRIPTION_MAX * 2)
+            text = html_to_text(
+                mime.part_text(part)[:MAX_HTML_CHARS], max_chars=DESCRIPTION_MAX * 2
+            )
+        else:
+            text = mime.part_text(part)[:MAX_TEXT_CHARS]
         cleaned = _clean_body(text)
         if cleaned:
             return cleaned

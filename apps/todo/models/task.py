@@ -110,6 +110,24 @@ class Task(models.Model):
     #: from `position`, so dragging in one list never puts the other into manual order.
     today_position = cast(int, models.IntegerField(default=0))
     source = cast(str, models.CharField(max_length=12, choices=TaskSource, default=TaskSource.WEB))
+    email_from = cast(
+        str,
+        models.CharField(
+            max_length=320,
+            blank=True,
+            default='',
+            db_default='',
+            help_text='For a task made from an email: the From address, as the sender wrote it.',
+        ),
+    )
+    email_from_authenticated = cast(
+        bool,
+        models.BooleanField(
+            default=False,
+            db_default=False,
+            help_text='For a task made from an email: whether SES authenticated that sender.',
+        ),
+    )
     charged_credits = cast(
         int,
         models.PositiveIntegerField(
@@ -180,12 +198,10 @@ class Task(models.Model):
         return self.unpaid_at is not None
 
     @property
-    def email_from(self) -> str | None:
-        """For a task made from an email (`source='email'`): the address it came from (`''` when
-        the email row is gone), else `None`. One query, only for such a task."""
-        if self.source != TaskSource.EMAIL:
-            return None
-        return self.inbound_emails.values_list('from_address', flat=True).first() or ''
+    def is_from_email(self) -> bool:
+        """Whether the task was made from an email (`email_from` and `email_from_authenticated`,
+        stored on the task, say whose; no query)."""
+        return self.source == TaskSource.EMAIL
 
     @property
     def active_recurrence(self) -> Recurrence | None:

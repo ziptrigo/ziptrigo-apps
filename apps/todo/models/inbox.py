@@ -169,6 +169,7 @@ class InboundEmailStatus(models.TextChoices):
     REJECTED_VIRUS = 'rejected_virus', 'Rejected: flagged as a virus'
     REJECTED_CREDITS = 'rejected_credits', 'Rejected: not enough credits'
     REJECTED_TOO_LARGE = 'rejected_too_large', 'Rejected: too large'
+    REJECTED_TASK_LIMIT = 'rejected_task_limit', 'Rejected: too many open tasks'
     NO_CONTENT = 'no_content', 'No content'
 
 
@@ -199,6 +200,15 @@ class InboundEmail(models.Model):
     recipient = cast(str, models.CharField(max_length=320))
     from_address = cast(str, models.CharField(max_length=320, blank=True, default=''))
     envelope_sender = cast(str, models.CharField(max_length=320, blank=True, default=''))
+    sender_authenticated = cast(
+        bool,
+        models.BooleanField(
+            default=False,
+            help_text='Whether SES authenticated the From address (DMARC for its domain, else an '
+            'aligned DKIM signature, or SPF when it is also the envelope sender). Recorded '
+            'whatever the accepted-senders list says, which an empty one does not check.',
+        ),
+    )
     subject = cast(str, models.CharField(max_length=500, blank=True, default=''))
     received_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     status = cast(

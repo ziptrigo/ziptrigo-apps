@@ -4,12 +4,14 @@ task. Fixtures are built with the SES-shaped email builder Receipts' tests use
 
 import base64
 import hashlib
+import re
 import uuid
 from datetime import date, time, timedelta
 from typing import Any
 
 import pytest
 from botocore.exceptions import ClientError
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.services import add_credits, get_balance
@@ -161,7 +163,76 @@ class TestAcceptedTask:
 
         page = web.get(f'/todo/{task.number}/').content.decode()
 
-        assert 'Created from an email' in page and ' from orders' not in page
+        assert 'Created from an email from orders@staples.com' in page  # kept on the task
+
+    def test_the_authentication_of_the_sender_is_stored(self, deliver, inbox):
+        task = the_task(deliver(mail(inbox)))
+
+        assert task.email_from == 'orders@staples.com' and task.email_from_authenticated
+        assert one_email(InboundMessage.objects.get()).sender_authenticated
+
+    def test_an_unauthenticated_sender_is_stored_as_such_and_the_page_says_claiming(
+        self, deliver, inbox, web
+    ):
+        """An empty allowlist accepts anyone, authenticated or not: the page must not present an
+        unproven `From` as the sender."""
+        raw = build_email(
+            from_addr='boss@work.test',
+            subject='Pay up',
+            text='x',
+            ses=Ses(recipient=inbox, spf=None, dkim=None, dmarc=None),
+        )
+
+        message = deliver(raw)
+
+        task = the_task(message)
+        assert one_email(message).sender_authenticated is False
+        assert task.email_from == 'boss@work.test' and not task.email_from_authenticated
+        page = web.get(f'/todo/{task.number}/').content.decode()
+        assert 'Created from an email claiming to be from boss@work.test' in page
+        assert 'Created from an email from' not in page
+
+    def test_a_forged_from_with_a_pass_for_another_domain_is_not_authenticated(
+        self, deliver, inbox
+    ):
+        raw = build_email(
+            from_addr='ceo@victim.test',
+            text='x',
+            ses=Ses(
+                recipient=inbox,
+                return_path='me@attacker.test',
+                dkim_domain='attacker.test',
+                dmarc='FAIL',
+            ),
+        )
+
+        assert the_task(deliver(raw)).email_from_authenticated is False
+
+    def test_a_listed_and_vouched_sender_is_authenticated(self, deliver, inbox, funded_user):
+        TodoAccount.objects.filter(pk=get_account(funded_user).pk).update(
+            sender_allowlist=['orders@staples.com']
+        )
+
+        assert the_task(deliver(mail(inbox))).email_from_authenticated
+
+    def test_the_task_page_needs_no_lookup_of_the_email(self, deliver, inbox, web, funded_user):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from ..services import create_task
+
+        emailed = the_task(deliver(mail(inbox)))
+        typed = create_task(funded_user, title='Typed')
+        web.get(f'/todo/{typed.number}/')  # warm up (caches, content types)
+
+        with CaptureQueriesContext(connection) as typed_queries:
+            web.get(f'/todo/{typed.number}/')
+        with CaptureQueriesContext(connection) as emailed_queries:
+            page = web.get(f'/todo/{emailed.number}/').content.decode()
+
+        assert 'Created from an email from' in page
+        assert len(emailed_queries) == len(typed_queries)
+        assert not [q for q in emailed_queries if 'todo_inboundemail' in q['sql']]
 
     def test_two_recipients_two_users(self, deliver, funded_user, inbox):
         other = make_user()
@@ -326,6 +397,54 @@ class TestBody:
         task = the_task(deliver(mail(inbox, text='a' * DESCRIPTION_MAX)))
 
         assert task.description == 'a' * DESCRIPTION_MAX
+
+    def test_a_huge_plain_body_is_sliced_before_any_copy(self, deliver, inbox, monkeypatch):
+        seen: list[int] = []
+        real = inbound._clean_body
+
+        def spy(text: str) -> str:
+            seen.append(len(text))
+            return real(text)
+
+        monkeypatch.setattr(inbound, '_clean_body', spy)
+
+        task = the_task(deliver(mail(inbox, text='word ' * 2_000_000)))  # 10 MB of text
+
+        assert seen and max(seen) <= inbound.MAX_TEXT_CHARS
+        assert inbound.MAX_TEXT_CHARS < 10 * inbound.DESCRIPTION_MAX
+        assert len(task.description) == inbound.DESCRIPTION_MAX
+        assert task.description.endswith('\n…')
+
+    def test_a_huge_html_body_is_sliced_before_it_is_converted(self, deliver, inbox, monkeypatch):
+        seen: list[int] = []
+        real = inbound.html_to_text
+
+        def spy(html: str, **kwargs) -> str:
+            seen.append(len(html))
+            return real(html, **kwargs)
+
+        monkeypatch.setattr(inbound, 'html_to_text', spy)
+
+        task = the_task(deliver(mail(inbox, text=None, html='<p>word</p>' * 1_000_000)))
+
+        assert seen == [inbound.MAX_HTML_CHARS]
+        assert 0 < len(task.description) <= inbound.DESCRIPTION_MAX
+
+    def test_html_links_cannot_inject_html_or_unsafe_hrefs_into_the_page(self, deliver, inbox, web):
+        html = (
+            '<p><a href="javascript:alert(1)">js</a> <a href="data:text/html,<b>x</b>">data</a> '
+            '<a href="https://ok.example/a">fine</a> <a href="https://e.example/x)[y](javascript:z)">'
+            'label</a> <img src="x" onerror="alert(1)"><script>alert(2)</script></p>'
+        )
+
+        task = the_task(deliver(mail(inbox, text=None, html=html)))
+        page = web.get(f'/todo/{task.number}/').content.decode()
+
+        hrefs = re.findall(r'href="([^"]*)"', page)
+        assert 'href="https://ok.example/a"' in page
+        assert not [h for h in hrefs if h.lower().startswith(('javascript:', 'data:', 'vbscript:'))]
+        assert 'data:text' not in task.description
+        assert '<script>alert' not in page and 'onerror' not in page and '<iframe' not in page
 
     def test_control_characters_are_dropped(self, deliver, inbox):
         task = the_task(deliver(mail(inbox, text='a\x00b\x07c\td\ne')))
@@ -740,9 +859,9 @@ class TestCredits:
         assert not [k for k in fake_storage.objects if k.startswith(user_prefix(broke.pk))]
         assert get_account(broke).stored_bytes == 0
         [note] = list(Notification.objects.filter(user=broke))
-        assert note.title == 'A task sent by email was not created: not enough credits'
-        assert note.url == '/todo/settings/'
-        assert note.source == 'todo'
+        assert note.title == 'Emailed tasks were not created: not enough credits'
+        assert note.url == reverse('billing:credits-history')
+        assert note.source == 'todo' and note.key == inbound.CREDITS_NOTICE_KEY
 
     def test_the_balance_is_untouched(self, deliver, broke):
         add_credits(broke, 3, source='test')
@@ -809,11 +928,47 @@ class TestCredits:
 
         assert Notification.objects.filter(user=broke).count() == 1
 
-    def test_each_rejected_email_has_its_own_notification(self, deliver, broke):
-        for _ in range(3):
-            deliver(mail(inbox_address_for(broke)))
+    def test_many_rejected_emails_leave_one_notification(self, deliver, broke):
+        for i in range(4):
+            deliver(mail(inbox_address_for(broke), subject=f'attempt {i}'))
 
-        assert Notification.objects.filter(user=broke).count() == 3
+        assert InboundEmail.objects.filter(user=broke).count() == 4
+        [note] = list(Notification.objects.filter(user=broke))
+        assert note.key == inbound.CREDITS_NOTICE_KEY
+
+    def test_the_notification_is_fresh_each_time(self, deliver, broke):
+        deliver(mail(inbox_address_for(broke)))
+        first = Notification.objects.get(user=broke)
+        Notification.objects.filter(pk=first.pk).update(read_at=timezone.now())
+
+        deliver(mail(inbox_address_for(broke)))
+
+        second = Notification.objects.get(user=broke)
+        assert second.pk != first.pk and second.read_at is None
+
+    def test_nothing_the_sender_wrote_reaches_the_notification(self, deliver, broke):
+        raw = mail(
+            inbox_address_for(broke),
+            subject='SENDER-SUBJECT <b>x</b>',
+            text='SENDER-BODY',
+            from_addr='SENDER-NAME@sender.test',
+        )
+
+        deliver(raw)
+
+        note = Notification.objects.get(user=broke)
+        for part in (note.title, note.body, note.url, note.key):
+            assert 'SENDER' not in part and '<' not in part
+
+    def test_another_users_notification_is_left_alone(self, funded_user, broke, deliver):
+        Notification.objects.create(
+            user=funded_user, source='todo', title='mine', key=inbound.CREDITS_NOTICE_KEY
+        )
+
+        deliver(mail(inbox_address_for(broke)))
+
+        assert Notification.objects.filter(user=funded_user).count() == 1
+        assert Notification.objects.filter(user=broke).count() == 1
 
     def test_the_rows_ceiling_bounds_the_notifications_too(self, deliver, broke):
         TodoSettings.objects.update_or_create(pk=1, defaults={'max_inbound_rows_per_day': 2})
@@ -825,7 +980,7 @@ class TestCredits:
             deliver(mail(inbox_address_for(broke)))
 
         assert InboundEmail.objects.filter(user=broke).count() == 2
-        assert Notification.objects.filter(user=broke).count() == 2
+        assert Notification.objects.filter(user=broke).count() == 1
 
     def test_a_failing_notification_does_not_lose_the_row(self, deliver, broke, monkeypatch):
         def broken(*args, **kwargs):
@@ -848,8 +1003,56 @@ class TestCredits:
 
         assert message.status == InboundMessageStatus.DONE
         email = one_email(message)
-        assert email.status == InboundEmailStatus.REJECTED_TOO_LARGE
+        assert email.status == InboundEmailStatus.REJECTED_TASK_LIMIT
+        assert email.note == 'Too many open tasks.'
         assert Task.objects.count() == 1
+
+    def test_the_cap_is_checked_before_the_ai_call_and_the_uploads(
+        self, deliver, inbox, funded_user, fake_title_parser, fake_storage
+    ):
+        config = TodoSettings.load()
+        config.max_open_tasks_per_user = 1
+        config.save()
+        deliver(mail(inbox, subject='first'))
+        fake_title_parser.replies['pay rent tomorrow'] = ParsedTitle(
+            has_date=True,
+            clean_title='pay rent',
+            due_date=date(2026, 10, 29),
+            matched_text='tomorrow',
+            confidence=0.9,
+        )
+        before = len(fake_storage.objects)
+
+        message = deliver(mail(inbox, subject='pay rent tomorrow', attachments=[pdf()]))
+
+        assert one_email(message).status == InboundEmailStatus.REJECTED_TASK_LIMIT
+        assert fake_title_parser.calls == 0
+        assert len(fake_storage.objects) == before
+        assert not TaskAttachment.objects.exists()
+
+    def test_a_race_past_the_cap_is_still_a_task_limit_rejection(self, deliver, inbox, monkeypatch):
+        """The cheap look says there is room, `create_task` (under the lock) says there is not."""
+        config = TodoSettings.load()
+        config.max_open_tasks_per_user = 1
+        config.save()
+        deliver(mail(inbox, subject='first'))
+        monkeypatch.setattr(inbound, '_at_task_cap', lambda *a, **k: False)
+
+        message = deliver(mail(inbox, subject='second', attachments=[pdf()]))
+
+        assert one_email(message).status == InboundEmailStatus.REJECTED_TASK_LIMIT
+        assert Task.objects.count() == 1 and not TaskAttachment.objects.exists()
+
+    def test_the_settings_page_says_too_many_open_tasks(self, deliver, inbox, web):
+        config = TodoSettings.load()
+        config.max_open_tasks_per_user = 1
+        config.save()
+        deliver(mail(inbox, subject='first'))
+        deliver(mail(inbox, subject='second'))
+
+        page = web.get('/todo/settings/').content.decode()
+
+        assert 'too many open tasks' in page and 'too large' not in page
 
 
 class TestDateReading:

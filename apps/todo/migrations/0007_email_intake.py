@@ -16,6 +16,16 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AddField(
+            model_name='task',
+            name='email_from',
+            field=models.CharField(blank=True, db_default='', default='', help_text='For a task made from an email: the From address, as the sender wrote it.', max_length=320),
+        ),
+        migrations.AddField(
+            model_name='task',
+            name='email_from_authenticated',
+            field=models.BooleanField(db_default=False, default=False, help_text='For a task made from an email: whether SES authenticated that sender.'),
+        ),
+        migrations.AddField(
             model_name='todoaccount',
             name='sender_allowlist',
             field=models.JSONField(blank=True, db_default=[], default=list, help_text='Accepted senders for adding tasks by email: exact addresses and `*@domain` wildcards, lowercase. Empty accepts anyone.'),
@@ -51,9 +61,10 @@ class Migration(migrations.Migration):
                 ('recipient', models.CharField(max_length=320)),
                 ('from_address', models.CharField(blank=True, default='', max_length=320)),
                 ('envelope_sender', models.CharField(blank=True, default='', max_length=320)),
+                ('sender_authenticated', models.BooleanField(default=False, help_text='Whether SES authenticated the From address (DMARC for its domain, else an aligned DKIM signature, or SPF when it is also the envelope sender). Recorded whatever the accepted-senders list says, which an empty one does not check.')),
                 ('subject', models.CharField(blank=True, default='', max_length=500)),
                 ('received_at', models.DateTimeField(blank=True, null=True)),
-                ('status', models.CharField(choices=[('accepted', 'Accepted'), ('rejected_sender', 'Rejected: sender not allowed'), ('rejected_spam', 'Rejected: flagged as spam'), ('rejected_virus', 'Rejected: flagged as a virus'), ('rejected_credits', 'Rejected: not enough credits'), ('rejected_too_large', 'Rejected: too large'), ('no_content', 'No content')], default='accepted', max_length=32)),
+                ('status', models.CharField(choices=[('accepted', 'Accepted'), ('rejected_sender', 'Rejected: sender not allowed'), ('rejected_spam', 'Rejected: flagged as spam'), ('rejected_virus', 'Rejected: flagged as a virus'), ('rejected_credits', 'Rejected: not enough credits'), ('rejected_too_large', 'Rejected: too large'), ('rejected_task_limit', 'Rejected: too many open tasks'), ('no_content', 'No content')], default='accepted', max_length=32)),
                 ('note', models.CharField(blank=True, default='', max_length=255)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('task', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='inbound_emails', to='todo.task')),

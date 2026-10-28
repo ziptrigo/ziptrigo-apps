@@ -190,6 +190,8 @@ def create_task(
     recurrence_mode: str = RecurrenceMode.FIXED,
     recurrence: Recurrence | None = None,
     source: str = TaskSource.WEB,
+    email_from: str = '',
+    email_from_authenticated: bool = False,
     allow_unpaid: bool = False,
 ) -> Task:
     """Create a task (or a subtask under `parent`), numbered and charged.
@@ -205,6 +207,10 @@ def create_task(
     anchor is the task's date, which is the rule's first date on or after today when none is given.
     `recurrence` joins the task to an existing one (the next occurrence, `services.recurrence`).
     Only a top-level task can repeat.
+
+    `email_from` and `email_from_authenticated` (a task made from an email, issue #186) are stored
+    on the task so its page needs no lookup of the email: the From address and whether SES
+    authenticated the sender.
     """
     cleaned_title = clean_title(title)
     cleaned_description = clean_description(description)
@@ -253,6 +259,8 @@ def create_task(
             recurrence=recurrence,
             recurrence_anchor=cleaned_date if recurrence is not None else None,
             source=source,
+            email_from=email_from[:320],
+            email_from_authenticated=email_from_authenticated,
             charged_credits=charged,
             unpaid_at=timezone.now() if unpaid else None,
             position=next_position(cleaned_parent),

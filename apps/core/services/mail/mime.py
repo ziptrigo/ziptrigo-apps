@@ -980,7 +980,7 @@ def _visible_text(part: Message, html_to_text: Callable[[str], str]) -> str:
     return text.strip()
 
 
-# -- What in the message is an attachment or the body -----------------------------------------------------------
+# -- What in the message is an attachment or the body ------------------------------------------
 
 
 @dataclass(slots=True)

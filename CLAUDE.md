@@ -3929,9 +3929,16 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
   token, `next_attempt_at` lease/retry time, `queued_at`, `failed_key`, `last_error`) and
   `InboundEmail` (one per matched recipient: `user` with `related_name='todo_inbound_emails'` --
   Receipts' is `inbound_emails` --, `recipient`, `from_address`, `envelope_sender`, `subject`,
-  `received_at`, `status`, `note`, `task` FK `SET_NULL`; unique on `(message, recipient)`).
+  `received_at`, `sender_authenticated`, `status`, `note`, `task` FK `SET_NULL`; unique on
+  `(message, recipient)`). `sender_authenticated` is whether SES authenticated the **From** address
+  (`Verdicts.vouches_for` with only that address listed: DMARC for its domain, else an aligned DKIM
+  signature, or SPF when it is also the envelope sender), recorded even with an empty allowlist,
+  which accepts anyone. `Task.email_from` / `Task.email_from_authenticated` (real columns, with
+  `db_default`s) copy the From address and that result onto a task made from an email, so the task
+  page needs no lookup of the email.
   `InboundEmail.status`: `accepted`, `rejected_sender`, `rejected_spam`, `rejected_virus`,
-  `rejected_credits`, `rejected_too_large`, `no_content` (no forwarding-confirmation status, and no
+  `rejected_credits`, `rejected_too_large` (files), `rejected_task_limit` (the open-task cap),
+  `no_content` (no forwarding-confirmation status, and no
   `.eml` copy is stored). `TodoSettings.max_inbound_rows_per_day` (500, with a `db_default` too: the
   #102 lesson). The model names are the same as Receipts' (another app label), so a test that looks
   a permission up by codename (`view_inboundmessage`) filters by `content_type__app_label`.
@@ -3947,15 +3954,18 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
   -> `rejected_virus`; the allowlist (empty accepts anyone with no authentication; otherwise `From` or
   the envelope sender must match **and** `Verdicts.vouches_for` must authenticate the matching
   address, exactly Receipts' rule and code) -> `rejected_sender`; nothing in it -> `no_content`
-  (files that were all over the size limit: `rejected_too_large`); a cheap look at the credits and
-  `creation_blocked_at` -> `rejected_credits`; then the task.
+  (files that were all over the size limit: `rejected_too_large`); then, **before the AI call and the
+  uploads**, a cheap look at the open-task cap -> `rejected_task_limit` ("Too many open tasks.") and
+  at the credits and `creation_blocked_at` -> `rejected_credits`; then the task.
 - **What becomes the task.** *Title*: the decoded `Subject` through `mime.clean_text(..., TITLE_MAX)`
   with leading `Fwd:`/`Fw:`/`Re:` (any case, repeated) removed; empty -> `(no subject)`. *Description*
   (`inbound.body_text`): the first non-attachment `text/plain` part of the message itself (as Markdown,
   unchanged), else the `text/html` one through `core`'s `html_to_text`, else empty; a message
   forwarded as an attachment is not searched for a body; quoted history is kept; control characters
   are dropped; capped at `DESCRIPTION_MAX`, a cut marked by a final line `…` (the result is still
-  within the cap). *Attachments*: `mime.analyze(allowed_types=None, max_file_bytes=
+  within the cap). The decoded body is **sliced right after decoding**, before any copy or clean-up
+  (`MAX_TEXT_CHARS` = 2 x `DESCRIPTION_MAX` for `text/plain`, `MAX_HTML_CHARS` for HTML, whose
+  markup is most of it), so a 30 MB body costs no more than a small one. *Attachments*: `mime.analyze(allowed_types=None, max_file_bytes=
   max_attachment_bytes, min_inline_image_px=INLINE_IMAGE_MIN_PX (150, `limits.py`), sniff=<inline
   sniffer>, image_dimensions=...)` -- any type, no body chosen, tiny `cid:` images (logos,
   signatures) skipped -- up to `max_attachments_per_task`; each is written with `put_object` at
@@ -3969,17 +3979,22 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
   transaction and after the cheap refusals above; the result applied when `has_date`, with
   `clean_title` as the title (and the rule as a repeat); `ParseUnavailable`, `PermanentAIError` (not
   configured), an unexpected error or the user's `TODO_PARSE_USER`/`_DAY` limits (spent through
-  `charge`, as on the web) leave the task undated. A date `create_task` refuses is dropped rather
-  than losing the task.
+  `charge`, as on the web) leave the task undated. That is **the same per-user AI budget as the web
+  quick add** (deliberately one budget: with an empty allowlist a stranger who knows the address can
+  use some of it, and past it the task is just created undated). A date `create_task` refuses is
+  dropped rather than losing the task.
 - **Creation and billing.** `services.tasks.create_task(user, title=..., description=...,
   source='email', allow_unpaid=False)` -- so it counts toward the free allowance and costs what any
   task does. `InsufficientCreditsError`, or `BLOCKED_MESSAGE` (`creation_blocked_at`), is
-  `rejected_credits`: nothing is stored (the uploaded objects are deleted again), and **one in-app
-  notification** per such recorded email ("A task sent by email was not created: not enough
-  credits", url `todo:settings`, key `todo_email_rejected:<email id>`), written in its own savepoint
-  next to the email row (a failing notice is logged, never loses the row) -- so the rows ceiling
-  below bounds the notifications too. The open-task cap (`TOO_MANY_MESSAGE`) is recorded as
-  `rejected_too_large` with the note "Too many open tasks." (a rejection, not a failing message).
+  `rejected_credits`: nothing is stored (the uploaded objects are deleted again), and the user is told
+  in-app by **one coalesced notice per user**: a fixed text ("Emailed tasks were not created: not
+  enough credits", linking to `billing:credits-history`; nothing the sender wrote, subject included,
+  reaches it) under the stable key `todo_email_credits`, written as `delete_for_key` then `notify`
+  in its own savepoint next to the email row (a failing notice is logged, never loses the row), so a
+  flood of rejected emails leaves a single, fresh notice and the rows ceiling below still bounds the
+  writes. The open-task cap (`TOO_MANY_MESSAGE`) is `rejected_task_limit` with the note "Too many open
+  tasks." -- normally from the cheap check before the AI call and the uploads, and from `create_task`
+  under its lock when a race gets past it (a rejection, not a failing message).
 - **One transaction per recipient.** The objects are uploaded first, outside any transaction; then
   one `atomic()` creates the task, the `InboundEmail` row (so "the row exists" means "done" and a retry
   skips it), the attachment rows and the `stored_bytes`; if it fails the objects are deleted again
@@ -3990,8 +4005,9 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
   24 hours; else it is only logged. Accepted mail is never dropped by it.
 - **Addresses** (`services.accounts`): `inbox_address(code)` / `inbox_address_for(user)`
   (`todo+<code>@<domain of TODO_INBOUND_ADDRESS>`; the first code is issued on first use, since
-  accounts predate the intake), `regenerate_inbox_code(user)` (retires the active code, issues a new
-  one), `update_inbox_settings(user, sender_allowlist=...)` through the shared
+  accounts predate the intake; two first visits at once re-read the winner's code on the
+  constraint's `IntegrityError`), `regenerate_inbox_code(user)` (locks the account row, retires the
+  active code, issues a new one; a lost race returns the code that is active, never an error), `update_inbox_settings(user, sender_allowlist=...)` through the shared
   `addresses.parse_allowlist` (errors keyed `sender_allowlist`).
 - **Web.** The settings page's "Add tasks by email" section (`templates/todo/settings.html`, outside
   the `#settings-form` that one htmx form re-renders): the address with the shared `copyText`
@@ -4001,7 +4017,8 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
   addresses and `*@domain`; a refusal is a 422 retargeted at `#inbox-settings-msg`; spends
   `TODO_EDIT_USER`) and the 20 most recent inbound emails (from, subject, received, outcome, note,
   a link to the task). The task page shows "Created from an email from <from address>" for
-  `source='email'` (`Task.email_from`).
+  `source='email'` only when SES authenticated that address (`Task.email_from_authenticated`), else
+  "Created from an email claiming to be from <from address>" (no lookup: both are on the task).
 - **Admin.** `InboundMessageAdmin` (status, attempts, last error; the "retry" action needs
   `todo.change_inboundmessage`, `reset_message_for_retry`), `InboundEmailAdmin`, an `InboxCode` inline
   on `TodoAccountAdmin`, all read-only. `./manage.py todo_ingest_eml file.eml --to

@@ -127,3 +127,41 @@ class TestAnalyzeForAnyType:
 
         assert analyze(raw).body is None
         assert analyze(raw, html_to_text=html_to_text).body is not None
+
+
+class TestLinkSafetyEndToEnd:
+    """What `html_to_text` makes is shown as Markdown (To-do's description): whatever a sender puts
+    in an `href` or the markup can't become HTML or an unsafe link on the page."""
+
+    HOSTILE = (
+        '<p><a href="javascript:alert(1)">js</a> <a href=" JaVaScRiPt:alert(2)">spaced</a> '
+        '<a href="data:text/html,<b>x</b>">data</a> <a href="vbscript:x">vb</a> '
+        '<a href="//evil.example/a">protocol-relative</a> '
+        '<a href="https://ok.example/a">fine</a> <a href="mailto:me@ok.example">mail</a> '
+        '<a href="https://e.example/x)[y](javascript:z)">breakout</a>'
+        '<img src="https://t.example/p.gif" onerror="alert(3)"><script>alert(4)</script>'
+        '<iframe src="https://evil.example"></iframe> &lt;b&gt;escaped&lt;/b&gt;</p>'
+    )
+
+    def test_unsafe_links_are_dropped_from_the_text(self):
+        text = html_to_text(self.HOSTILE.replace('javascript:z', 'safe'))
+
+        for unsafe in ('javascript:', 'JaVaScRiPt', 'data:', 'vbscript:', '//evil.example'):
+            assert unsafe not in text
+        assert 'js' in text and 'spaced' in text and 'data' in text  # their text stays
+        assert 'fine (https://ok.example/a)' in text
+
+    def test_the_rendered_description_has_no_html_and_no_unsafe_hrefs(self):
+        import re
+
+        from apps.core.markdown import render
+
+        html = str(render(html_to_text(self.HOSTILE)))
+
+        hrefs = re.findall(r'href="([^"]*)"', html)
+        assert hrefs, html
+        for href in hrefs:
+            assert href.lower().startswith(('https://', 'http://', 'mailto:')), href
+        for tag in ('<script', '<iframe', '<img', 'onerror', 'href="javascript', 'href="data'):
+            assert tag not in html.lower()
+        assert '<b>' not in html and '&lt;b&gt;escaped' in html

@@ -32,6 +32,7 @@ _OUTCOMES = {
     InboundEmailStatus.REJECTED_VIRUS: 'flagged as a virus',
     InboundEmailStatus.REJECTED_CREDITS: 'not enough credits',
     InboundEmailStatus.REJECTED_TOO_LARGE: 'too large',
+    InboundEmailStatus.REJECTED_TASK_LIMIT: 'too many open tasks',
     InboundEmailStatus.NO_CONTENT: 'nothing to add',
 }
 

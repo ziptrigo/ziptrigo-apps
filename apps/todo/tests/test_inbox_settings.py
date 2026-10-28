@@ -7,6 +7,7 @@ from io import StringIO
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError
 from django.urls import reverse
 
 from apps.core.scheduler.registry import get_jobs
@@ -27,6 +28,7 @@ from ..services import (
     regenerate_inbox_code,
     update_inbox_settings,
 )
+from ..services.accounts import active_inbox_code
 from ..services.storage import INBOUND_PREFIX
 from .factories import make_user
 
@@ -71,6 +73,71 @@ class TestAddress:
         retired = InboxCode.objects.get(code=old.split('+')[1].split('@')[0])
         assert not retired.active and retired.retired_at is not None
         assert InboxCode.objects.filter(account__user=funded_user, active=True).count() == 1
+
+    def test_a_lost_race_on_the_first_code_returns_the_winners(self, funded_user, monkeypatch):
+        """Two first visits at once: the other request issued the code between our look and our
+        insert, so the constraint refuses ours. We read theirs; no error."""
+        account = get_account(funded_user)
+        winner = InboxCode.objects.create(account=account, code='winner22')
+        real = InboxCode.objects.filter
+        lookups = iter([InboxCode.objects.none()])  # the first look finds nothing
+
+        def look(*args, **kwargs):
+            return next(lookups, None) or real(*args, **kwargs)
+
+        def lose(account):
+            raise IntegrityError('todo_one_active_inbox_code_per_account')
+
+        monkeypatch.setattr(InboxCode.objects, 'filter', look)
+        monkeypatch.setattr(InboxCode, 'issue', staticmethod(lose))
+
+        assert active_inbox_code(account) == winner
+
+    def test_an_integrity_error_with_no_code_to_read_is_not_swallowed(
+        self, funded_user, monkeypatch
+    ):
+        account = get_account(funded_user)
+
+        def lose(account):
+            raise IntegrityError('something else')
+
+        monkeypatch.setattr(InboxCode, 'issue', staticmethod(lose))
+
+        with pytest.raises(IntegrityError):
+            active_inbox_code(account)
+
+    def test_a_lost_race_when_regenerating_returns_the_active_code(self, funded_user, monkeypatch):
+        inbox_address_for(funded_user)
+        current = InboxCode.objects.get(account__user=funded_user, active=True)
+
+        def lose(account):
+            raise IntegrityError('todo_one_active_inbox_code_per_account')
+
+        monkeypatch.setattr(InboxCode, 'issue', staticmethod(lose))
+
+        result = regenerate_inbox_code(funded_user)
+
+        assert result == current and result.active and result.retired_at is None  # rolled back
+        assert InboxCode.objects.filter(account__user=funded_user, active=True).count() == 1
+
+    def test_the_settings_page_survives_a_lost_first_issuance_race(
+        self, web, funded_user, monkeypatch
+    ):
+        winner = InboxCode.objects.create(account=get_account(funded_user), code='winner22')
+        real = InboxCode.objects.filter
+        lookups = iter([InboxCode.objects.none()])
+        monkeypatch.setattr(
+            InboxCode.objects, 'filter', lambda *a, **k: next(lookups, None) or real(*a, **k)
+        )
+        monkeypatch.setattr(
+            InboxCode,
+            'issue',
+            staticmethod(lambda account: (_ for _ in ()).throw(IntegrityError('lost'))),
+        )
+
+        response = web.get(reverse('todo:settings'))
+
+        assert response.status_code == 200 and winner.code in text(response)
 
     def test_codes_use_the_alphabet_without_look_alikes(self, funded_user):
         for _ in range(20):

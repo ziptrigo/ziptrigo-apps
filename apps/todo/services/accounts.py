@@ -95,9 +95,21 @@ def is_frozen(user_id: object) -> bool:
 
 def active_inbox_code(account: TodoAccount) -> InboxCode:
     """The account's active code, issued on first use (an account created before the email intake
-    existed has none yet)."""
+    existed has none yet).
+
+    Two first visits at once (two tabs) both find none and both issue one; the partial unique
+    constraint lets one win and `InboxCode.issue` raises `IntegrityError` for the other, which
+    re-reads the winner's code instead of failing."""
     code = InboxCode.objects.filter(account=account, active=True).first()
-    return code if code is not None else InboxCode.issue(account)
+    if code is not None:
+        return code
+    try:
+        return InboxCode.issue(account)
+    except IntegrityError:
+        code = InboxCode.objects.filter(account=account, active=True).first()
+        if code is None:
+            raise
+        return code
 
 
 def inbox_address(code: str) -> str:
@@ -113,13 +125,24 @@ def inbox_address_for(user: User) -> str:
 
 def regenerate_inbox_code(user: User) -> InboxCode:
     """Retire the active address immediately and issue a new one. The old code is kept forever
-    and never reissued, so mail still sent to it is dropped rather than delivered to a stranger."""
+    and never reissued, so mail still sent to it is dropped rather than delivered to a stranger.
+
+    The account row is locked for the swap, so two regenerations take turns. If the unique
+    constraint still refuses (SQLite has no row locks; a concurrent first issuance), the
+    transaction is rolled back and the code that is active now is returned -- never an error."""
     account = get_account(user)
-    with transaction.atomic():
-        InboxCode.objects.filter(account=account, active=True).update(
-            active=False, retired_at=timezone.now()
-        )
-        return InboxCode.issue(account)
+    try:
+        with transaction.atomic():
+            TodoAccount.objects.select_for_update().get(pk=account.pk)
+            InboxCode.objects.filter(account=account, active=True).update(
+                active=False, retired_at=timezone.now()
+            )
+            return InboxCode.issue(account)
+    except IntegrityError:
+        code = InboxCode.objects.filter(account=account, active=True).first()
+        if code is None:
+            raise
+        return code
 
 
 def update_inbox_settings(user: User, *, sender_allowlist: str | Iterable[str]) -> list[str]:
