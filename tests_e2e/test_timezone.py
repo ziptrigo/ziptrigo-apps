@@ -12,6 +12,13 @@ from tests_e2e.conftest import ReceiptsServer
 def test_browser_zone_is_saved_once_and_offered_on_the_account_page(
     browser: Browser, receipts_server: ReceiptsServer
 ):
+    # The seeded account is shared, and any earlier test that signed in saved its browser's zone,
+    # so start from an account with none.
+    receipts_server.shell(
+        'import os\n'
+        'from apps.accounts.models import User\n'
+        "User.objects.filter(email=os.environ['E2E_EMAIL']).update(timezone='')\n"
+    )
     context = browser.new_context(timezone_id='Europe/Lisbon')
     page = context.new_page()
     try:
