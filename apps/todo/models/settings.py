@@ -12,6 +12,7 @@ class TodoSettings(models.Model):
     price, and the caps. Always the row with `pk=1`; use `TodoSettings.load()`.
 
     Later sub-issues add their own fields (with their own migrations).
+    The storage price per GB per day is not here: it is the shared `BillingSettings` one.
     """
 
     objects: ClassVar['models.Manager']
@@ -61,6 +62,23 @@ class TodoSettings(models.Model):
             default=200,
             validators=[MinValueValidator(1)],
             help_text='Labels a user may have.',
+        ),
+    )
+
+    max_attachment_bytes = cast(
+        int,
+        models.PositiveBigIntegerField(
+            default=50 * 1024 * 1024,
+            validators=[MinValueValidator(1)],
+            help_text='The largest file that can be attached to a task, in bytes (default 50 MiB).',
+        ),
+    )
+    max_attachments_per_task = cast(
+        int,
+        models.PositiveIntegerField(
+            default=20,
+            validators=[MinValueValidator(1)],
+            help_text='Files that can be attached to one task (uploads in progress count).',
         ),
     )
 

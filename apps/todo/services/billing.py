@@ -29,6 +29,7 @@ from apps.billing.services import InsufficientCreditsError, spend_credits
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import Task, TodoAccount, TodoSettings
+from . import metering
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,15 @@ def _unblock_if_settled(user: User) -> None:
 
 def on_credits_added(user: User) -> None:
     """The `billing.credits_added` receiver's work: queue the settling for a user who owes
-    something. Only queues (the task runs after the commit, with the credits visible)."""
-    if TodoAccount.objects.filter(user=user, creation_blocked_at__isnull=False).exists():
-        enqueue_after_commit(settle_unpaid_tasks, str(user.pk))
+    something, and the resume of their attachment storage when it is frozen. Only queues (the
+    tasks run after the commit, with the credits visible). Each is attempted on its own, so a
+    failure queuing one never skips the other."""
+    try:
+        if TodoAccount.objects.filter(user=user, creation_blocked_at__isnull=False).exists():
+            enqueue_after_commit(settle_unpaid_tasks, str(user.pk))
+    except Exception:
+        logger.exception('Could not queue settle_unpaid_tasks for user %s', user.pk)
+    try:
+        metering.on_credits_added(user)
+    except Exception:
+        logger.exception('Could not queue resume_account for user %s', user.pk)

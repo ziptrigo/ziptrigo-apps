@@ -12,7 +12,16 @@ from django.http import HttpRequest
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
-from .models import Comment, CommentRevision, Label, Recurrence, Task, TodoAccount, TodoSettings
+from .models import (
+    Attachment,
+    Comment,
+    CommentRevision,
+    Label,
+    Recurrence,
+    Task,
+    TodoAccount,
+    TodoSettings,
+)
 from .services.billing import month_key
 
 
@@ -114,10 +123,15 @@ class TodoAccountAdmin(ReadOnlyModelAdmin):
         'next_task_number',
         'month_usage',
         'blocked',
+        'stored_bytes',
+        'frozen',
         'default_due_time',
         'created_at',
     ]
-    list_filter = [('creation_blocked_at', admin.EmptyFieldListFilter)]
+    list_filter = [
+        ('creation_blocked_at', admin.EmptyFieldListFilter),
+        ('frozen_at', admin.EmptyFieldListFilter),
+    ]
     search_fields = ['user__email']
     list_select_related = ['user']
 
@@ -130,6 +144,10 @@ class TodoAccountAdmin(ReadOnlyModelAdmin):
     )
     def blocked(self, obj: TodoAccount) -> bool:
         return obj.is_blocked
+
+    @admin.display(boolean=True, description='Storage frozen', ordering='frozen_at')
+    def frozen(self, obj: TodoAccount) -> bool:
+        return obj.is_frozen
 
 
 class LabelAdmin(ReadOnlyModelAdmin):
@@ -211,9 +229,29 @@ class CommentAdmin(ReadOnlyModelAdmin):
         return obj.body if len(obj.body) <= 80 else f'{obj.body[:79]}…'
 
 
+class AttachmentAdmin(ReadOnlyModelAdmin):
+    """Read-only: a row is created and removed together with its S3 object and the account's
+    `stored_bytes`, which only `apps.todo.services.attachments` keeps in step."""
+
+    list_display = [
+        'filename',
+        'task',
+        'size_bytes',
+        'uploaded',
+        'inline_type',
+        'user',
+        'created_at',
+    ]
+    list_filter = ['uploaded', 'inline_type', 'created_at']
+    search_fields = ['filename', 'user__email', 'task__title']
+    list_select_related = ['user', 'task']
+    date_hierarchy = 'created_at'
+
+
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
 custom_admin_site.register(Recurrence, RecurrenceAdmin)
 custom_admin_site.register(TodoAccount, TodoAccountAdmin)
 custom_admin_site.register(Label, LabelAdmin)
 custom_admin_site.register(Comment, CommentAdmin)
+custom_admin_site.register(Attachment, AttachmentAdmin)

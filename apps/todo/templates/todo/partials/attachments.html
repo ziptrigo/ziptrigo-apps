@@ -1,0 +1,36 @@
+{% comment %} The task page's "Attachments" block (issue #184): a drop zone and "Add files" for an open task, the rows of the
+   uploads in flight (built by static/todo/js/attachments.js into #attachment-uploads), and the list of the files
+   already attached (#attachment-list, re-fetched by the script when a file lands). Needs `task` and what
+   `views.attachments.attachments_context` builds. {% endcomment %}
+<section id="attachments" aria-labelledby="attachments-title" class="mt-8 mb-8"
+         data-start-url="{% url 'todo:attachment-start' task.number %}"
+         data-complete-url="{% url 'todo:attachment-complete' task.number '00000000-0000-0000-0000-000000000000' %}"
+         data-cancel-url="{% url 'todo:attachment-cancel' task.number '00000000-0000-0000-0000-000000000000' %}"
+         data-list-url="{% url 'todo:attachment-list' task.number %}"
+         data-max-bytes="{{ attachments_max_bytes }}"
+         data-frozen="{{ attachments_frozen|yesno:'true,false' }}">
+    <h2 id="attachments-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Attachments</h2>
+
+    {% if attachments_can_upload %}
+    <div id="attachment-drop-zone"
+         class="flex flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-6 text-center transition-colors">
+        <i class="fas fa-cloud-arrow-up text-2xl text-gray-400" aria-hidden="true"></i>
+        <p class="text-sm text-gray-700 dark:text-gray-300">Drop files here, or</p>
+        <input type="file" id="attachment-file-input" multiple class="hidden" tabindex="-1">
+        <button type="button" id="attachment-pick-btn"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                {% if attachments_frozen %}disabled{% endif %}>
+            <i class="fas fa-paperclip mr-2" aria-hidden="true"></i>Add files
+        </button>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Up to {{ attachments_max_bytes|filesizeformat }} each, {{ attachments_max_files }} per task. Stored files are billed by size, daily.</p>
+        {% if attachments_frozen %}
+        <p class="text-sm text-amber-700 dark:text-amber-400">Uploads are paused until you add credits. <a href="{% url 'billing:credits-history' %}" class="underline">Top up</a></p>
+        {% endif %}
+    </div>
+    <ul id="attachment-uploads" class="mt-4 space-y-3 empty:mt-0" aria-live="polite"></ul>
+    {% endif %}
+
+    <div id="attachment-list" class="mt-4">
+        {% include 'todo/partials/attachment_list.html' %}
+    </div>
+</section>

@@ -29,3 +29,16 @@
         Subtasks and every occurrence of a repeating task count. Credits are not refunded when a task is completed or deleted.
     </p>
 </section>
+
+<section class="mb-8" aria-labelledby="files-title">
+    <h2 id="files-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Files</h2>
+    {% if stored_bytes %}
+    <p class="text-sm text-gray-700 dark:text-gray-300"><strong>{{ stored_bytes|filesizeformat }}</strong> stored, {{ storage_daily_text }}.</p>
+    {% else %}
+    <p class="text-sm text-gray-700 dark:text-gray-300">No files stored.</p>
+    {% endif %}
+    {% if storage_frozen %}
+    <p class="mt-2 text-sm text-amber-700 dark:text-amber-400">Storage is paused until you add credits. <a href="{% url 'billing:credits-history' %}" class="underline">Top up</a></p>
+    {% endif %}
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Files attached to your tasks are billed by size, once a day, at the same rate as the other products. Files on tasks in the trash are billed until the trash is emptied.</p>
+</section>

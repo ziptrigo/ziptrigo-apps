@@ -46,6 +46,7 @@ from ..services import (
     uncomplete_task,
     update_task,
 )
+from .attachments import attachments_context
 from .comments import comments_context
 from .common import (
     form_error_lines,
@@ -249,6 +250,7 @@ def task_page(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     get_account(request.user)
     context = {**comments_context(request, task), **panel_context(request, task)}
     context['title_task'] = task
+    context.update(attachments_context(request, task))
     return render_page(
         request, 'todo/task.html', context, nav='trash' if task.is_trashed else 'all'
     )

@@ -22,7 +22,7 @@ from apps.accounts.services.timezones import user_today
 from apps.core.markdown import toggle_checklist_item
 
 from ..models import Label, Priority, Recurrence, RecurrenceMode, Task, TaskSource, TodoSettings
-from . import dates
+from . import attachments, dates
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account
 from .billing import charge_task_creation
@@ -53,6 +53,7 @@ UNPAID_MESSAGE = (
     'This task has not been paid for yet. Top up your credits first: it can be deleted forever '
     'once it is settled.'
 )
+FILES_NOT_DELETED_MESSAGE = "The task's files could not be deleted right now. Try again later."
 BLOCKED_MESSAGE = 'Top up your credits to add tasks: a repeating task is waiting to be paid.'
 TOO_MANY_MESSAGE = 'Too many open tasks. Complete or delete some to add more.'
 
@@ -552,7 +553,24 @@ def delete_forever(task: Task) -> None:
     """
     if owes_credits(task):
         raise _error(NON_FIELD_ERRORS, UNPAID_MESSAGE)
-    task.delete()
+    try:
+        _delete_with_attachments(task.pk)
+    except attachments.STORAGE_ERRORS:
+        logger.exception('Could not delete the files of task %s', task.pk)
+        raise _error(NON_FIELD_ERRORS, FILES_NOT_DELETED_MESSAGE) from None
+
+
+def _delete_with_attachments(task_id: UUID) -> int:
+    """Delete the task, its subtasks and all their attachments (objects first, then rows, with
+    the storage billing kept in step). A storage error raises before anything is deleted from the
+    database and leaves the task for the next try. Returns how many task rows were removed."""
+    with transaction.atomic():
+        ids = list(
+            Task.objects.filter(Q(pk=task_id) | Q(parent_id=task_id)).values_list('pk', flat=True)
+        )
+        attachments.delete_for_tasks(ids)
+        # A parent's delete takes its subtasks too, so this counts the rows it removed.
+        return Task.objects.filter(pk=task_id).delete()[0]
 
 
 def purge_trash() -> int:
@@ -574,9 +592,7 @@ def purge_trash() -> int:
             return deleted
         for pk in batch:
             try:
-                # A parent's delete takes its subtasks too, so this counts the rows it removed.
-                count, _ = Task.objects.filter(pk=pk).delete()
-                deleted += count
+                deleted += _delete_with_attachments(pk)
             except Exception:
                 failed.add(pk)
                 logger.exception('Could not purge task %s', pk)

@@ -77,6 +77,7 @@ def render_page(
     page_context = {
         'account': account,
         'todo_blocked': account.is_blocked,
+        'todo_frozen': account.is_frozen,
         'free_used': used,
         'free_total': free,
         'task_price': config.task_price,

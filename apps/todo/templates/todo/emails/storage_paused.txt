@@ -1,0 +1,10 @@
+{% autoescape off %}Your credit balance couldn't cover the storage for the files attached to your tasks ({{ stored }}, about {{ daily_cost }} credit{{ daily_cost|pluralize }} a day).
+
+Your files are safe, nothing was deleted. Until you add credits, uploading and downloading attachments is paused. It resumes by itself when your balance covers a day of storage.
+
+Add credits: {{ top_up_url }}
+Your to-do settings: {{ todo_url }}
+
+--
+The ZipTrigo Team
+{% endautoescape %}

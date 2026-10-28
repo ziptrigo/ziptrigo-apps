@@ -3,7 +3,9 @@
 from datetime import time
 
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Value
+from django.db.models.functions import Greatest
+from django.utils import timezone
 
 from apps.accounts.models import User
 
@@ -49,3 +51,24 @@ def update_default_due_time(account: TodoAccount, due_time: time) -> TodoAccount
     account.default_due_time = due_time
     account.save(update_fields=['default_due_time'])
     return account
+
+
+def add_stored_bytes(user_id: object, delta: int) -> None:
+    """Add `delta` (negative to remove) to the account's `stored_bytes`, never going below zero.
+
+    Every attachment that lands in or leaves the bucket goes through here, so billing sees exactly
+    what is stored. When an empty account gets its first bytes the billing clock restarts, so the
+    empty stretch before is never billed. (The twin of `receipts.services.accounts`' function.)
+    """
+    if not delta:
+        return
+    if delta > 0:
+        TodoAccount.objects.filter(pk=user_id, stored_bytes=0).update(last_billed_at=timezone.now())
+    TodoAccount.objects.filter(pk=user_id).update(
+        stored_bytes=Greatest(F('stored_bytes') + delta, Value(0))
+    )
+
+
+def is_frozen(user_id: object) -> bool:
+    """Whether the user's attachment storage is paused for lack of credits."""
+    return TodoAccount.objects.filter(pk=user_id, frozen_at__isnull=False).exists()

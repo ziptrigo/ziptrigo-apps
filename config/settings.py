@@ -413,6 +413,13 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # one is a row of up to 10,000 characters (an edit also a revision), so tighter than the
     # other edits; deleting and restoring a comment spend `TODO_EDIT_USER`.
     'TODO_COMMENT_USER': (60, 60),
+    # Attachments (issue #184), per user, shared by the web and the API. `start` presigns an
+    # upload and creates a row, so it is bounded like a real multi-file upload (a dozen files at
+    # a time, retried); `complete` is a free S3 HEAD even for an object that never arrived, so it
+    # has its own looser rule rather than riding on `start`'s; a download is a presign, no write.
+    'TODO_UPLOAD_USER': (120, 60),
+    'TODO_UPLOAD_COMPLETE_USER': (240, 60),
+    'TODO_DOWNLOAD_USER': (120, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -718,6 +725,33 @@ if os.getenv('ENVIRONMENT') == 'prod':
             'RECEIPTS_S3_BUCKET': RECEIPTS_S3_BUCKET,
             'RECEIPTS_AWS_ACCESS_KEY_ID': RECEIPTS_AWS_ACCESS_KEY_ID,
             'RECEIPTS_AWS_SECRET_ACCESS_KEY': RECEIPTS_AWS_SECRET_ACCESS_KEY,
+        }
+    )
+    if _insecure:
+        raise ImproperlyConfigured(
+            f'Set real values for {", ".join(_insecure)} in production; '
+            'they are missing or still placeholders.'
+        )
+
+
+# To-do attachments (issue #184): S3 storage. `TODO_S3_BUCKET` is the *same* per-environment app
+# bucket as `FILE_TRANSFER_S3_BUCKET` and `RECEIPTS_S3_BUCKET` (every key is under `todo/`); the
+# IAM user behind `TODO_AWS_*` is scoped to that prefix (the `infra` repo, `apps/ziptrigo-apps`,
+# issue #185). In dev point `TODO_S3_ENDPOINT_URL` at Floci. Local and pytest need none of these
+# (the storage is faked in tests); `ENVIRONMENT=prod` -- which includes staging -- refuses to start
+# without the bucket and both keys, below.
+TODO_S3_BUCKET = os.getenv('TODO_S3_BUCKET', '')
+TODO_S3_REGION = os.getenv('TODO_S3_REGION', AWS_REGION)
+TODO_S3_ENDPOINT_URL = os.getenv('TODO_S3_ENDPOINT_URL') or None
+TODO_AWS_ACCESS_KEY_ID = os.getenv('TODO_AWS_ACCESS_KEY_ID', '')
+TODO_AWS_SECRET_ACCESS_KEY = os.getenv('TODO_AWS_SECRET_ACCESS_KEY', '')
+
+if os.getenv('ENVIRONMENT') == 'prod':
+    _insecure = insecure_secrets(
+        {
+            'TODO_S3_BUCKET': TODO_S3_BUCKET,
+            'TODO_AWS_ACCESS_KEY_ID': TODO_AWS_ACCESS_KEY_ID,
+            'TODO_AWS_SECRET_ACCESS_KEY': TODO_AWS_SECRET_ACCESS_KEY,
         }
     )
     if _insecure:

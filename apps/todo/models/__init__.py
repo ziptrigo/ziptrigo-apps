@@ -1,4 +1,5 @@
 from .account import TodoAccount
+from .attachment import Attachment
 from .comment import Comment, CommentRevision
 from .label import DEFAULT_LABEL_COLOR, Label
 from .recurrence import Recurrence, RecurrenceMode
@@ -9,6 +10,7 @@ from .task import Priority, Task, TaskSource
 __all__ = [
     'Comment',
     'CommentRevision',
+    'Attachment',
     'DEFAULT_LABEL_COLOR',
     'Label',
     'Priority',

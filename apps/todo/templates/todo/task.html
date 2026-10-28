@@ -1,4 +1,5 @@
 {% extends 'todo/layout.html' %}
+{% load static %}
 
 {% block title %}{{ task.title }} - To-do - ZipTrigo{% endblock %}
 
@@ -7,11 +8,18 @@
    class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>{% if task.is_trashed %}Trash{% else %}All tasks{% endif %}</a>
 <div class="mt-2">
     {% include 'todo/partials/task_panel.html' %}
-    {% comment %} Outside `#task-panel` on purpose: an action on the task does not re-render the comments, so a draft survives. {% endcomment %}
+    {% comment %} Attachments and comments both sit outside `#task-panel` on purpose: an action on the
+       task re-renders the panel, which would drop the progress rows of an upload in flight and a
+       comment draft. Order: the task, its files, then the discussion. {% endcomment %}
+    {% include 'todo/partials/attachments.html' %}
     {% include 'todo/partials/comments.html' %}
 </div>
 {% endblock %}
 
 {% block todo_js_libs %}
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"></script>
+{% if attachments_can_upload %}
+<script src="{% static 'core/js/drop_zone.js' %}"></script>
+<script src="{% static 'todo/js/attachments.js' %}"></script>
+{% endif %}
 {% endblock %}

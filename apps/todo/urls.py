@@ -19,6 +19,16 @@ urlpatterns = [
     path('labels/<uuid:label_id>/edit/', views.label_edit, name='label-edit'),
     path('labels/<uuid:label_id>/delete/', views.label_delete, name='label-delete'),
     path('settings/', views.settings_page, name='settings'),
+    path(
+        'attachments/<uuid:attachment_id>/download/',
+        views.attachment_download,
+        name='attachment-download',
+    ),
+    path(
+        'attachments/<uuid:attachment_id>/delete/',
+        views.attachment_delete,
+        name='attachment-delete',
+    ),
     path('<int:number>/', views.task_page, name='task'),
     path('<int:number>/edit/', views.task_edit, name='edit'),
     path('<int:number>/complete/', views.task_complete, name='complete'),
@@ -51,5 +61,17 @@ urlpatterns = [
         '<int:number>/comments/<uuid:comment_id>/deleted/',
         views.comment_deleted_view,
         name='comment-deleted',
+    ),
+    path('<int:number>/attachments/', views.attachment_list, name='attachment-list'),
+    path('<int:number>/attachments/start/', views.attachment_start, name='attachment-start'),
+    path(
+        '<int:number>/attachments/<uuid:attachment_id>/complete/',
+        views.attachment_complete,
+        name='attachment-complete',
+    ),
+    path(
+        '<int:number>/attachments/<uuid:attachment_id>/cancel/',
+        views.attachment_cancel,
+        name='attachment-cancel',
     ),
 ]
