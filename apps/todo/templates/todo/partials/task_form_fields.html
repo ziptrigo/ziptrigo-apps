@@ -1,0 +1,46 @@
+{% load todo_ui %}
+{% comment %} The date, time, priority and labels controls both modes of task_form.html share. Initial values come from
+   `task` when there is one (details mode). {% endcomment %}
+{% with uid=task.number|default:'new' %}
+<div>
+    <label for="due-date-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Date</label>
+    <input id="due-date-{{ uid }}" type="date" name="due_date" value="{{ task.due_date|date:'Y-m-d' }}"
+           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+</div>
+<div>
+    <label for="due-time-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Time</label>
+    <input id="due-time-{{ uid }}" type="time" name="due_time" value="{{ task.due_time|time:'H:i' }}"
+           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+</div>
+<div>
+    <label for="priority-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Priority</label>
+    <select id="priority-{{ uid }}" name="priority"
+            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <option value="0" {% if not task.priority %}selected{% endif %}>None</option>
+        <option value="1" {% if task.priority == 1 %}selected{% endif %}>Priority 1</option>
+        <option value="2" {% if task.priority == 2 %}selected{% endif %}>Priority 2</option>
+        <option value="3" {% if task.priority == 3 %}selected{% endif %}>Priority 3</option>
+    </select>
+</div>
+<div class="relative" x-data="{ open: false }" @click.outside="open = false"
+     @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
+    <span class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Labels</span>
+    <button type="button" x-ref="trigger" @click="open = !open" :aria-expanded="open"
+            class="inline-flex items-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <i class="fas fa-tag mr-2 text-gray-500 dark:text-gray-400" aria-hidden="true"></i>{% if selected_label_ids %}{{ selected_label_ids|length }} selected{% else %}Add labels{% endif %}
+    </button>
+    <div x-show="open" style="display: none"
+         class="absolute left-0 top-full mt-1 w-60 max-h-64 overflow-y-auto z-50 rounded-md shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 py-1">
+        {% for label in labels %}
+        <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
+            <input type="checkbox" name="labels" value="{{ label.pk }}"
+                   {% if label.pk|stringformat:'s' in selected_label_ids %}checked{% endif %}
+                   class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+            {% label_chip label %}
+        </label>
+        {% empty %}
+        <p class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No labels yet. <a href="{% url 'todo:labels' %}" class="underline">Create one</a>.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endwith %}

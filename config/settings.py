@@ -88,6 +88,7 @@ INSTALLED_APPS = [
     'apps.file_transfer',
     'apps.receipts',
     'apps.short_url',
+    'apps.todo',
     # Task queue: an ORM-backed store for `django.tasks` (Django 6's built-in task queue API).
     'django_tasks_db',
 ]
@@ -400,6 +401,14 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # bounded.
     'SU_REPORT_IP': (5, 60 * 60),
     'SU_REPORT_LINK': (20, 60 * 60),
+    # -- todo (issue #178): the To-do pages (and, later, `/api/todo/`) --
+    # Creating a task or a subtask: per user, shared by the web and the API. Each one is a row and
+    # may cost credits, so well above what a person typing tasks in does, but bounded.
+    'TODO_CREATE_USER': (60, 60),
+    # Every other change (edit, complete, postpone, trash, reorder, labels, settings): per user,
+    # shared by the web and the API. Looser than creating: ticking off a list, or dragging, is a
+    # burst of small writes.
+    'TODO_EDIT_USER': (240, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),

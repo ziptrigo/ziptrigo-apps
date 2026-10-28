@@ -18,6 +18,7 @@ One file per area:
 | [`file_transfer.md`](file_transfer.md) | Sending files, dashboard actions, public download page, anonymous sending |
 | [`receipts.md`](receipts.md) | Upload, extraction, receipt page, vendors, trash, settings, CSV export |
 | [`short_url.md`](short_url.md) | Short links: dashboard, editor and costs, `/s/<code>` redirect and neutral page, password, preview and reports, stats, blocked domains, takedown |
+| [`todo.md`](todo.md) | To-do: Today/Upcoming/All/Completed/Trash, quick add, task page, subtasks, labels, postpone, credits, settings |
 | [`admin.md`](admin.md) | The Django admin: tools page, credit adjustment, settings singletons, moderation |
 
 ## The test server
@@ -102,7 +103,7 @@ Each file starts with the area's scope and preconditions, then numbered cases:
 | 2 | ... | ... |
 ```
 
-IDs are `<AREA>-<NN>` (`CORE`, `ACC`, `BILL`, `FB`, `QR`, `FT`, `RCPT`, `SU`, `ADM`).
+IDs are `<AREA>-<NN>` (`CORE`, `ACC`, `BILL`, `FB`, `QR`, `FT`, `RCPT`, `SU`, `TODO`, `ADM`).
 
 ## Out of scope here
 

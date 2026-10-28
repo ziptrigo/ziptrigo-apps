@@ -1,0 +1,17 @@
+{% extends 'todo/layout.html' %}
+
+{% block title %}Labels - To-do - ZipTrigo{% endblock %}
+
+{% block todo_content %}
+<h1 class="mb-6 text-3xl font-bold text-gray-900 dark:text-gray-100">Labels</h1>
+<p class="mb-6 text-sm text-gray-500 dark:text-gray-400">Labels are yours alone and a task can have as many as you like. Point at a label anywhere to read its description.</p>
+
+<div id="label-msg" class="mb-4 text-sm" aria-live="polite"></div>
+<div id="labels">
+    {% include 'todo/partials/label_list.html' %}
+</div>
+{% endblock %}
+
+{% block todo_js_libs %}
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"></script>
+{% endblock %}

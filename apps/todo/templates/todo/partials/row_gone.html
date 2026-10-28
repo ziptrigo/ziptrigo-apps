@@ -1,0 +1,2 @@
+{% comment %} The answer to an action that took a row out of its list: nothing (htmx swaps the row for an empty body,
+   which removes it) plus the sidebar count, out of band. {% endcomment %}{% if oob_nav %}{% include 'todo/partials/nav_count.html' with oob=True %}{% endif %}

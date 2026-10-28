@@ -30,6 +30,12 @@ A single Django project (a "modular monolith") with one Django app per concern:
   Click analytics (bots filtered, country from GeoLite2), a password page, a preview page with a
   report form, blocked domains and takedown for staff, a QR image of every link, a JWT API
   (`/api/s/`) and the `admin/shorturl.py` CLI.
+- **todo** — tasks in the spirit of Todoist (#161): a Markdown description, a due date with an
+  optional time (in your own time zone), a priority, coloured labels and subtasks one level deep,
+  with per-user task numbers from 1000, Today / Upcoming / All / Completed / Trash pages, manual
+  order and postponing. The first 10 tasks of a calendar month are free, then each costs credits.
+  Built so far (#178): the foundation and its web pages; repeating tasks, comments, search,
+  reminders, attachments, AI date parsing, email intake and the API are separate issues.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -57,7 +63,9 @@ ziptrigo-apps/
 │   ├── feedback/
 │   ├── qr_code/
 │   ├── file_transfer/
-│   └── receipts/
+│   ├── receipts/
+│   ├── short_url/
+│   └── todo/
 ├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, receipts, ...), run via `inv`
 ├── tests_e2e/               # Playwright end-to-end tests
 ├── conftest.py              # Fixtures shared by every app's tests
@@ -93,6 +101,7 @@ apps/<app>/
 | `/go/<code>` | qr_code short links — at the root because they're printed on QR codes |
 | `/links/…` | short_url: dashboard (`/links/`), create and edit, a link's page and its stats (`<id>/stats/`) |
 | `/s/<code>` | short_url short links (`/s/<code>+` previews one, `/s/<code>/unlock` is the password page of a protected one) — at the root because they're printed and shared |
+| `/todo/…` | todo: Today (`/todo/`), `upcoming/`, `all/`, `completed/`, `trash/`, a task's page (`<number>/`), `labels/`, `settings/` |
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
@@ -102,7 +111,7 @@ apps/<app>/
 ### Dependency rules
 
 ```
-qr_code, file_transfer, receipts, short_url   (products: may not import each other)
+qr_code, file_transfer, receipts, short_url, todo   (products: may not import each other)
         ↓
  billing, feedback
         ↓

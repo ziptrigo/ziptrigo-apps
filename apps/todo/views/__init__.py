@@ -1,0 +1,52 @@
+from .labels import label_delete, label_edit, label_reorder, labels_page
+from .lists import (
+    all_page,
+    completed_page,
+    task_list,
+    today_page,
+    trash_page,
+    upcoming_page,
+)
+from .settings import settings_page
+from .tasks import (
+    reorder_view,
+    reschedule_overdue_view,
+    subtask_add,
+    task_checklist,
+    task_complete,
+    task_create,
+    task_delete,
+    task_edit,
+    task_page,
+    task_postpone,
+    task_restore,
+    task_trash,
+    task_uncomplete,
+)
+
+__all__ = [
+    'all_page',
+    'completed_page',
+    'label_delete',
+    'label_edit',
+    'label_reorder',
+    'labels_page',
+    'reorder_view',
+    'reschedule_overdue_view',
+    'settings_page',
+    'subtask_add',
+    'task_checklist',
+    'task_complete',
+    'task_create',
+    'task_delete',
+    'task_edit',
+    'task_list',
+    'task_page',
+    'task_postpone',
+    'task_restore',
+    'task_trash',
+    'task_uncomplete',
+    'today_page',
+    'trash_page',
+    'upcoming_page',
+]
