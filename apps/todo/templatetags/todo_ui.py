@@ -16,6 +16,7 @@ from apps.accounts.services.timezones import user_today
 from apps.core.markdown import render
 
 from ..models import Label, Task
+from ..services.recurrence import MONTH_NAMES, WEEKDAY_NAMES, describe, mode_label
 from ..services.references import TASK_URL_PATH, resolver_for_request
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,38 @@ def label_chip(label: Label) -> SafeString:
         label.color,
         format_html(' title="{}"', label.description) if label.description else '',
         label.name,
+    )
+
+
+@register.simple_tag
+def repeat_choices() -> dict[str, list[tuple]]:
+    """The weekdays (RRULE code, name) and months (number, name) the Repeat control lists."""
+    return {
+        'weekdays': list(WEEKDAY_NAMES.items()),
+        'months': list(enumerate(MONTH_NAMES, start=1)),
+    }
+
+
+@register.simple_tag
+def repeat_chip(task: Task, detail: bool = False) -> SafeString:
+    """The repeat rule of a task that is still repeating as a chip: the sentence (`Every month on
+    the 1st`) and the mode, whose meaning is the tooltip. A row shows the mode only for "from
+    completion"; `detail` (the task page) always does. Nothing for a task that does not repeat."""
+    recurrence = task.active_recurrence
+    if recurrence is None:
+        return SafeString('')
+    label = mode_label(recurrence.mode)
+    show_mode = detail or recurrence.mode == 'from_completion'
+    return format_html(
+        '<span class="inline-flex items-center whitespace-nowrap text-xs text-gray-600 dark:text-gray-400"'
+        ' title="{}"><i class="fas fa-repeat mr-1" aria-hidden="true"></i>{}{}</span>',
+        label,
+        describe(recurrence.rrule),
+        format_html(
+            ' <span class="ml-1 text-gray-500 dark:text-gray-400">({})</span>', label.lower()
+        )
+        if show_mode
+        else '',
     )
 
 

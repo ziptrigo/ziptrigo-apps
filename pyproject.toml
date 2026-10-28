@@ -41,6 +41,8 @@ dependencies = [
     'pypdf>=6.20,<7.0',
     'pypdfium2>=5.0,<6.0',
     'pyjwt[crypto]>=2.10,<3.0',
+    # RRULE parsing and iteration (`dateutil.rrule`) for repeating To-do tasks (issue #179).
+    'python-dateutil>=2.9,<3.0',
     'python-dotenv>=1.0,<2.0',
     'requests>=2.32,<3.0',
     'segno>=1.6,<2.0',

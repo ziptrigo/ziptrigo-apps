@@ -61,6 +61,8 @@ document.addEventListener('alpine:init', function () {
             label: 'Delete',
             tone: 'danger',
             cost: '',
+            checkboxName: '',
+            checkboxLabel: '',
             trigger: null,
             show(el) {
                 const data = el.dataset;
@@ -70,6 +72,10 @@ document.addEventListener('alpine:init', function () {
                 this.label = data.label || 'Delete';
                 this.tone = data.tone || 'danger';
                 this.cost = data.cost || '';
+                // An optional checkbox (`data-checkbox-name` / `data-checkbox-label`), posted as
+                // `<name>=1` when ticked (To-do: "Also stop repeating").
+                this.checkboxName = data.checkboxName || '';
+                this.checkboxLabel = data.checkboxLabel || '';
                 this.trigger = el;
                 this.open = true;
                 this.$nextTick(() => { if (this.$refs.cancel) this.$refs.cancel.focus(); });

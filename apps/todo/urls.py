@@ -27,6 +27,7 @@ urlpatterns = [
     path('<int:number>/trash/', views.task_trash, name='trash-task'),
     path('<int:number>/restore/', views.task_restore, name='restore'),
     path('<int:number>/delete/', views.task_delete, name='delete'),
+    path('<int:number>/recurrence/stop/', views.recurrence_stop, name='recurrence-stop'),
     path('<int:number>/checklist/', views.task_checklist, name='checklist'),
     path('<int:number>/subtasks/', views.subtask_add, name='subtask-add'),
     path('<int:number>/comments/', views.comment_add, name='comment-add'),

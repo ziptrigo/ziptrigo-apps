@@ -42,7 +42,7 @@
         </div>
         <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             {% priority_flag task %}
-            {% if not task.is_completed %}{% due_badge task %}{% endif %}
+            {% if not task.is_completed %}{% due_badge task %}{% repeat_chip task %}{% endif %}
             {% if task.subtask_total %}
             <span class="text-xs text-gray-500 dark:text-gray-400" title="Subtasks completed"><i class="fas fa-list-check mr-1" aria-hidden="true"></i>{{ task.subtask_done }}/{{ task.subtask_total }}</span>
             {% endif %}
@@ -79,11 +79,24 @@
         </button>
         {% else %}
         {% if not task.is_completed %}{% include 'todo/partials/postpone_menu.html' %}{% endif %}
+        {% if task.offers_stop_repeating %}
+        <button type="button" @click="show($el)"
+                data-url="{% url 'todo:trash-task' task.number %}"
+                data-title="Move to trash"
+                data-body="Move {{ task.title }} to the trash? It repeats: tick the box to stop repeating too, otherwise the repeat carries on."
+                data-label="Move to trash" data-tone="primary"
+                data-checkbox-name="stop_recurrence" data-checkbox-label="Also stop repeating"
+                class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                aria-label="Move {{ task.title }} to the trash" title="Move to trash">
+            <i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+        </button>
+        {% else %}
         <button type="button" hx-post="{% url 'todo:trash-task' task.number %}"
                 class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
                 aria-label="Move {{ task.title }} to the trash" title="Move to trash">
             <i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
         </button>
+        {% endif %}
         {% endif %}
     </div>
 </li>

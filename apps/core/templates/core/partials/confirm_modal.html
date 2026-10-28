@@ -2,7 +2,8 @@
    it inside an element with x-data="confirmModal" and open it from a button with
    @click="show($el)" and data-url / data-title / data-body / data-label (and data-tone="primary" for a
    confirmation that is not destructive: the button is the brand colour instead of red). The form is a plain POST
-   (the views redirect back with a flash message). `confirm_cost` is the `data-cost` of the trigger (empty when it has none). {% endcomment %}
+   (the views redirect back with a flash message). `confirm_cost` is the `data-cost` of the trigger (empty when it has none).
+   A trigger with `data-checkbox-name` and `data-checkbox-label` also shows an unticked checkbox posted as `<name>=1`. {% endcomment %}
 <div x-show="open" style="display: none"
      @keydown.escape.window="if (open) close()" @click.self="close()"
      x-transition:enter="transition-opacity duration-150 ease-out"
@@ -21,6 +22,13 @@
             <input type="hidden" name="confirm_cost" :value="cost">
             <h3 id="confirm-modal-title" x-text="title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2"></h3>
             <p x-text="body" class="text-sm text-gray-600 dark:text-gray-400 mb-6"></p>
+            <template x-if="checkboxName">
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-6">
+                    <input type="checkbox" :name="checkboxName" value="1"
+                           class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                    <span x-text="checkboxLabel"></span>
+                </label>
+            </template>
             <div class="flex justify-end gap-3">
                 <button type="button" x-ref="cancel" @click="close()"
                         class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">Cancel</button>

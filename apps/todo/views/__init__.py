@@ -17,6 +17,7 @@ from .lists import (
 )
 from .settings import settings_page
 from .tasks import (
+    recurrence_stop,
     reorder_view,
     reschedule_overdue_view,
     subtask_add,
@@ -45,6 +46,7 @@ __all__ = [
     'label_edit',
     'label_reorder',
     'labels_page',
+    'recurrence_stop',
     'reorder_view',
     'reschedule_overdue_view',
     'settings_page',

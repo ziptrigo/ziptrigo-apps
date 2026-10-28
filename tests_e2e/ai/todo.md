@@ -2,8 +2,8 @@
 
 ## Scope
 
-The To-do product's web UI (`apps/todo`, issue #178: tasks without repeating; comments and task references,
-issue #180, are covered by TODO-17 and TODO-18; search, reminders, attachments, AI parsing and email intake are
+The To-do product's web UI (`apps/todo`, issues #178, #179 and #180: tasks, repeating tasks (TODO-19 and TODO-20),
+comments and task references (TODO-17 and TODO-18); search, reminders, attachments, AI parsing and email intake are
 later issues and are not covered):
 
 - the sidebar (Today with a count, Upcoming, All, Completed, Labels, Trash, Settings; a top bar on
@@ -22,7 +22,7 @@ later issues and are not covered):
 - access control: logged-out visitors, another user's task numbers.
 
 Not covered here: the JWT API and the CLI (later issue), the credit settling of an unpaid repeating
-task (needs repeating tasks, a later issue; covered by unit tests), the daily purge job (unit tests).
+task (covered by unit tests, and by TODO-14 for the banner), the daily purge job (unit tests).
 
 ## Preconditions
 
@@ -247,8 +247,8 @@ Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`,
 
 ### TODO-14 The blocked banner (admin-seeded)
 
-**Purpose:** the layout shows "Tasks are blocked" while creation is blocked. A repeating task does not exist yet, so this
-state is reached by the admin shell, not by the UI.
+**Purpose:** the layout shows "Tasks are blocked" while creation is blocked. Completing a repeating task without credits
+reaches it (TODO-20 step 6); here it is set from the admin shell.
 **Preconditions:** logged in as `qa.user@example.com`; shell access to the test server database (skip this case without it).
 
 | # | Action | Expected result |
@@ -326,3 +326,38 @@ that has no comments.
 | 7 | Move `T_CALL` to the trash. Open `T_REPORT`. | `T_CALL` is no longer listed. Restore it: it is listed again. |
 | 8 | On `T_REPORT`, add a comment `#<T_REPORT>` (itself). | It renders as a link to itself, but `T_REPORT`'s own **Referenced by** does not list `T_REPORT`. |
 | 9 | Log in as `qa.broke@example.com`, write `#<T_REPORT>` in a description of one of their tasks (they have no task with that number). | It stays plain text, and `qa.user`'s `T_REPORT` is unaffected. |
+
+### TODO-19 Repeating task, fixed schedule
+
+**Purpose:** a fixed-schedule repeat keeps to its schedule when a task is postponed or completed late.
+**Preconditions:** logged in as `qa.user@example.com` with at least 4 free tasks left this month (or enough credits); on `/todo/`.
+Compute dates from the heading of **Today**; "the 1st" below means the first day of next month.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In the quick-add box type `Pay rent`. Open **Repeat**. | A popover with **Frequency** (Does not repeat, Day, Week, Month, Year), defaulting to "Does not repeat", and a **Remove repeat** / **Done** row. No mode radios yet. |
+| 2 | Choose **Month**; under **On** choose **Day of the month** and type `1`. | The button label reads "Every month on the 1st". "Every [1] month" is shown; **Ends** offers Never / After a number of times / On a date; two radios: "Fixed schedule: the next one is due on schedule even if this one is late" (selected) and "From completion: the next one is counted from when I complete this one". |
+| 3 | Click **Done**, then **Add task**. | The task is created. It is not on Today (it is due on the 1st); open **All**: the row shows `Pay rent`, the date of the 1st and a repeat icon with "Every month on the 1st". Record the number as `T_RENT`. |
+| 4 | Open `/todo/<T_RENT>/`. | The Date field is the 1st (a rule with no date takes its first date). Below Details: the chip "Every month on the 1st (fixed schedule)" and a **Stop repeating** link. |
+| 5 | Click **Postpone** > **Pick a date**, choose the 5th (of next month). | The Date field is the 5th. The chip still says "Every month on the 1st". |
+| 6 | Click **Complete**. | The task shows Completed, with the note "Uncompleting this task keeps the next occurrence of the repeat if one was already created: nothing is deleted or refunded." |
+| 7 | Open **All**. | A new `Pay rent` (number `T_RENT + 1`) is due on the 1st of the month **after** (not the 5th plus a month), with the same chip. Open **Completed**: the finished one is its own row. |
+| 8 | Open `/todo/<T_RENT>/` and click **Uncomplete**. | It is open again; **All** still lists the next occurrence (two open `Pay rent` rows). Move this older one to the trash with its row's trash icon: with two open occurrences there is no "Also stop repeating" checkbox, it just moves. |
+| 9 | On the newer occurrence's row click the trash icon. | Now the newest is the only open occurrence: a dialog "Move to trash" with an unticked checkbox "Also stop repeating". Tick it and confirm. The row leaves **All**. Open its page from **Trash**: "This task no longer repeats." and no chip. |
+| 10 | Create `Weekly review` with Repeat = Week, ticking Monday and Wednesday, Ends "After a number of times" `2`. | The button reads "Every week on Monday, Wednesday, 2 times". After adding, its date is the next Monday or Wednesday on or after today. |
+| 11 | Open `Weekly review`, click **Stop repeating**. | The chip and the link disappear and "This task no longer repeats." shows; the task stays open. Click **Repeat** > **Week** > **Done** > **Save**: the chip returns ("Every week"). |
+| 12 | In the Repeat popover enter Month with "On" = **Day of the month** `31` and Save on a task. Open its page. | The chip reads "Every month on the 31st". (Completing it later skips months without a 31st: not checked here.) |
+
+### TODO-20 Repeating task, from completion
+
+**Purpose:** a from-completion repeat counts from the day the task was completed.
+**Preconditions:** logged in as `qa.user@example.com`; on `/todo/`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Add `Rotate tires` with today's date, Repeat = **Month**, "Every" `3`, "On" = **The same day of the month**, mode **From completion**. | The label reads "Every 3 months" and the chip after adding says "Every 3 months (from completion)". The task is due today. |
+| 2 | Complete it from Today. | It leaves Today. Open **All**: a new `Rotate tires` due exactly 3 months from **today** (the completion day). Its subtasks (if any were open) are copied; the completed original is in **Completed**. |
+| 3 | Open the new task, change Date to a day last week and **Save**, then **Complete**. | The next one is again 3 months from the day you completed it (today), not from the date you edited. |
+| 4 | Create a task `Water plants`, Repeat = **Day**, Ends **On a date** = tomorrow, mode Fixed. Complete it twice. | After the first completion a new one is due tomorrow. After completing that one, no new `Water plants` is created and the last one shows "This task no longer repeats." |
+| 5 | Add a task whose Repeat is **Year**, "On" = **A month and day**, left at day 1, month January. | The label reads "Every year on 1 January"; after adding, the date is the next 1 January on or after today. |
+| 6 | As `qa.broke@example.com` (no credits; the first 10 tasks of the month are free), create 10 tasks including one repeating task, complete the repeating one. | Completing works and its next occurrence is created (owed): the page shows the "Tasks are blocked" banner with **Top up**, and adding a task is refused until credits are added. (Skip when this takes too long.) |
