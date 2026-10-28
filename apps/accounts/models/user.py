@@ -11,6 +11,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.utils import timezone
 
+from ..validators import validate_timezone
+
 
 class UserManager(BaseUserManager):
     def create_user(
@@ -117,6 +119,21 @@ class User(AbstractBaseUser, PermissionsMixin):  # ty: ignore[invalid-attribute-
             choices=THEME_CHOICES,
             default=THEME_SYSTEM,
             db_default=THEME_SYSTEM,
+        ),
+    )
+    # The user's IANA time zone (issue #177), for "today", due dates with times and reminders in
+    # their local time. `''` means not set yet and is treated as UTC everywhere. Set on the account
+    # page or detected from the browser (`apps.accounts.services.timezones.set_timezone`, which
+    # also sends `timezone_changed`). `db_default` as well as `default`, as for `theme`: the
+    # previous release's container keeps inserting users while the migration runs.
+    timezone = cast(
+        str,
+        models.CharField(
+            max_length=64,
+            blank=True,
+            default='',
+            db_default='',
+            validators=[validate_timezone],
         ),
     )
     inactive_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))

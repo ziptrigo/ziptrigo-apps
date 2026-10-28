@@ -6,17 +6,26 @@ from apps.core import ratelimit
 
 from ..auth import JWTAuth
 from ..models import User
-from ..schemas import AccountUpdateRequest, AccountUpdateResponse
+from ..schemas import AccountSchema, AccountUpdateRequest, AccountUpdateResponse
 from ..services.email_change import notify_previous_address
 from ..services.email_confirmation import get_email_confirmation_service
+from ..services.timezones import set_timezone
 
 router = Router()
 jwt_auth = JWTAuth()
 
 
+@router.get('/account', response=AccountSchema, auth=jwt_auth)
+def get_account(request):
+    """The current user's account: id, name, email and time zone (`""` while none is set,
+    which is treated as UTC)."""
+    user: User = request.auth
+    return AccountSchema(id=str(user.id), name=user.name, email=user.email, timezone=user.timezone)
+
+
 @router.put('/account', response=AccountUpdateResponse, auth=jwt_auth)
 def update_account(request, payload: AccountUpdateRequest):
-    """Update current user's account information (name and/or email).
+    """Update current user's account information (name, email and/or time zone).
 
     Requires JWT authentication; changing the email also requires `current_password`.
     """
@@ -25,9 +34,15 @@ def update_account(request, payload: AccountUpdateRequest):
     # above) sets it to the authenticated `User` at runtime.
     user: User = request.auth
 
+    # The columns this request writes. Never `timezone`: only `set_timezone` writes that, so a
+    # change made since `user` was loaded (browser detection, another tab) isn't reverted by a
+    # save of the whole row.
+    update_fields = ['updated_at']
+
     # Update name if provided
     if payload.name is not None:
         user.name = payload.name
+        update_fields.append('name')
 
     # Update email if provided and different. The new address must be confirmed again, so a user
     # can't claim an address they don't own.
@@ -65,8 +80,14 @@ def update_account(request, payload: AccountUpdateRequest):
         user.email = payload.email
         user.email_confirmed = False
         user.email_confirmed_at = None
+        update_fields += ['email', 'email_confirmed', 'email_confirmed_at']
 
-    user.save()
+    user.save(update_fields=update_fields)
+
+    # Through the service so `timezone_changed` is sent. The schema has validated the name. It is
+    # not a security-relevant field, so it needs neither the password nor a rate limit.
+    if payload.timezone is not None:
+        set_timezone(user, payload.timezone)
 
     if email_changed:
         service = get_email_confirmation_service()
@@ -94,5 +115,6 @@ def update_account(request, payload: AccountUpdateRequest):
             'id': str(user.id),
             'name': user.name,
             'email': user.email,
+            'timezone': user.timezone,
         },
     )

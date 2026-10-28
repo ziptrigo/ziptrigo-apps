@@ -99,9 +99,16 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    # Activates the signed-in user's time zone for the request (issue #177); needs `request.user`.
+    'apps.accounts.middleware.TimezoneMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+# Paths `TimezoneMiddleware` leaves alone: it would otherwise resolve `request.user` (a session and
+# a user query) on the hot public ones. The short links and the download page serve visitors, not
+# accounts, static files render nothing, and the API authenticates with JWTs, not sessions, so none
+# of them has a saved zone to activate; they render in `TIME_ZONE` (UTC).
+TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = ('/go/', '/s/', '/t/', '/static/', '/api/')
 
 ROOT_URLCONF = 'config.urls'
 
@@ -320,6 +327,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # one account can probe, and a real change is a once-in-a-blue-moon event (a few typos at most).
     # A name-only update, or resubmitting the current address, is not a change and costs nothing.
     'ACCOUNT_EMAIL_CHANGE_USER': (5, 60 * 60),
+    # The browser's automatic time zone detection (`POST /account/timezone/`, issue #177), per
+    # user and charged for every call. A real client posts once per browser session and only
+    # while the account has no zone, so it needs a handful at most; the rest is headroom for
+    # several devices and tabs, and a bound on a script hammering the endpoint.
+    'ACCOUNT_TIMEZONE_USER': (10, 60 * 60),
     # -- core: shared email verification (`apps.core.services.email_verification.start`) --
     # The per-email-address-per-day cap on verification *starts* (CLAUDE.md Known gaps: a resend
     # every 60s cooldown alone still allows ~1,440 sends/day, each with fresh guess attempts).

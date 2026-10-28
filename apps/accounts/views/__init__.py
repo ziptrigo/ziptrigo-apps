@@ -15,6 +15,7 @@ from .register import register_page
 from .resend_confirmation import resend_confirmation_page
 from .reset_password import reset_password_page
 from .theme import theme_update
+from .timezone import timezone_detect
 
 __all__ = [
     'account_created_page',
@@ -35,4 +36,5 @@ __all__ = [
     'resend_confirmation_page',
     'reset_password_page',
     'theme_update',
+    'timezone_detect',
 ]

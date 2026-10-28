@@ -8,6 +8,7 @@ from apps.core.admin_site import custom_admin_site
 from .forms.admin import UserAdminChangeForm, UserAdminCreationForm
 from .http import AuthenticatedHttpRequest
 from .models import User
+from .services.timezones import set_timezone
 
 # Apps whose rows hang off a user with `on_delete=CASCADE` and are meant to go with it, although
 # their own admins refuse delete (a ledger row must not be removed by hand, but deleting the
@@ -56,7 +57,7 @@ class UserAdmin(DjangoUserAdmin):
         ),
         (
             'Personal info',
-            {'fields': ('name', 'theme')},
+            {'fields': ('name', 'timezone', 'theme')},
         ),
         (
             'Status',
@@ -80,6 +81,20 @@ class UserAdmin(DjangoUserAdmin):
             },
         ),
     )
+
+    def save_model(self, request, obj: User, form, change: bool) -> None:
+        """Save the user, sending `timezone_changed` when staff changed the time zone.
+
+        The zone is a plain field on the change form (the form has already validated it), but a
+        product listening to the signal needs to hear about it however it was changed, so it is
+        written back through `set_timezone` after the rest of the row.
+        """
+        new = obj.timezone
+        if change and 'timezone' in form.changed_data:
+            obj.timezone = form.initial.get('timezone', '')
+        super().save_model(request, obj, form, change)
+        if obj.timezone != new:
+            set_timezone(obj, new)
 
     def get_deleted_objects(self, objs, request: AuthenticatedHttpRequest):
         """Don't let a cascaded row's read-only admin block deleting its user.

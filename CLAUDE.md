@@ -490,6 +490,70 @@ one `apply` that reads `data-theme` each time (`dark` for "dark", none for "ligh
 theme is `system`, and the `themeChanged` listener sets `data-theme` and calls it. `User.theme` is
 read-only in the user admin ("Personal info"). A visitor without a session is rendered as `system`. The admin's own toggle (`core/js/admin_theme_toggle.js`) is separate.
 
+**Time zone** (issue #177) is a property of the account, for "today", due dates with a time and
+reminders in the user's local time (the To-do app, #161). `User.timezone` is an IANA name or `''` for
+"not set yet", treated as UTC everywhere (`CharField(max_length=64, blank=True, default='',
+db_default='')`: the #102 lesson again). A non-empty value must be in `zoneinfo.available_timezones()`
+(`validators.is_valid_timezone`, cached); the field's validator (`validators.validate_timezone`, so
+a `ModelForm` without the field is unaffected by a stale value), the profile and admin forms, the
+detection endpoint and the API schema all refuse anything else with `Unknown time zone.`.
+`services.timezones` is the one place to compute with it: `user_tz(user)` (a `ZoneInfo`, UTC for an
+empty or stale name, which logs a warning once per process per value and never raises),
+`user_today(user)`, `local_datetime(user, date, time | None)` (the instant in UTC; a skipped local
+time lands forward by the gap, a repeated one is its first occurrence, `fold=0`), `timezone_choices()`
+(UTC first, then the `Area/City` names, without `Etc/`, `US/`, `posix/`, bare aliases such as `GMT`
+or `Japan` and the `Canada/`-style links) and `set_timezone(user, name, *, only_if_unset=False)`,
+which compares with the row under a lock, saves with `update_fields`, returns whether it changed
+and, **on commit and only on a change**, sends `signals.timezone_changed` (`sender=User`, `user`,
+`old`, `new`; `send_robust`, a failing receiver is logged). A product connects to it from its own
+`AppConfig.ready()` (the To-do reminders recompute their instants); `accounts` never imports one.
+`TimezoneMiddleware` (`apps/accounts/middleware.py`, right after `AuthenticationMiddleware`)
+activates the signed-in user's zone and deactivates it again after the response (a streamed body
+is read after that, in UTC), which is why every product's `|date`/`localtime()` output follows the
+user; see "Templates and static files" for how it relates to the browser-side helpers. It never
+touches `request.user` (a session and a user query) for a path starting with one of
+`settings.TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` = `('/go/', '/s/', '/t/', '/static/', '/api/')`: the
+public redirects and download page, static files and the JWT API, none of which has a session
+zone, so they render in `TIME_ZONE` (UTC) even for a signed-in owner (a visitor's browser-side
+`{% local_time %}` is unaffected). A new hot public prefix goes in that setting. **Behaviour change
+for existing users once they have a zone:** everything that asks Django for "now" or "today" while
+a request is active follows the saved zone, notably file transfer's end-of-day expiry picker (a
+bare date means the end of *that* day in the user's zone) and Receipts' date-range presets ("This
+month", "Last 30 days" ending today); with no zone they stay UTC, as before. Expect a "my expiry
+is off by a few hours" report to mean the saved zone differs from where the user is. Ways to set it:
+
+- *Account page:* the profile form (`ProfileForm`, model field `name` plus a hand-validated
+  `timezone`, a select with `UTC` first; a user with no zone gets a leading "Not set (UTC)" option
+  so saving the name alone doesn't set one, a valid zone outside the usual list that the account
+  already has is added to it, and a saved name that is no longer in the tz database is still
+  offered, labelled "<name> (no longer recognised)"). The zone is not a model-form field: `save()`
+  writes only `name` and `updated_at` (`update_fields`) and the zone only through `set_timezone`
+  (so the signal fires, and a zone changed since the request loaded the user is never reverted by
+  a snapshot of the row; `PUT /api/account` does the same). The form posts a hidden
+  `timezone_rendered`, the zone it was built against (for a 422 re-render, the stored one, not the
+  typed one): a posted `timezone` equal to it means "untouched" and never writes, and is not even
+  validated, so detection saving a zone while the page still showed "Not set", or an untouched
+  stale zone, survives saving the name. A post without `timezone`, or without `timezone_rendered`
+  (an older client), still works: the former keeps the zone, the latter compares with the database.
+  Under the select, `accounts/js/timezone.js` shows "Detected from your browser: ..." with a "Use
+  it" link when the browser's zone differs from the selected one and is one of the options, and,
+  when detection saves the zone while the select shows "Not set", selects it there.
+- *Detection:* the same script (loaded deferred by `core/base.html` for signed-in users only, with
+  the endpoint in its `data-url`; `<html data-user-timezone>` carries the saved zone) posts the
+  browser's zone, form-encoded with the CSRF token, to `POST /account/timezone/` (`accounts:timezone`)
+  once per browser session (`sessionStorage` `tzSent`), only while the account has no zone. The view
+  writes with `set_timezone(..., only_if_unset=True)`, so a zone saved meanwhile is never overridden
+  (only the account page changes a saved one); it answers 204, 400 `{"detail": "Unknown time
+  zone."}`, or the JSON 429 of `ACCOUNT_TIMEZONE_USER` (10/hour per user, charged on every call).
+- *API:* `PUT /api/account` takes an optional `timezone` (`""` clears it; an unknown name is a 422
+  from the schema validator; no password needed, it isn't security-relevant) applied through
+  `set_timezone`, and returns it in `user`; `GET /api/account` returns `{id, name, email, timezone}`.
+- *Admin:* a plain editable field in "Personal info" (not a list filter); `UserAdmin.save_model`
+  writes a changed zone through `set_timezone` so the signal fires for staff edits too.
+
+Tests: `apps/accounts/tests/unit/test_timezone.py` and the Playwright `tests_e2e/test_timezone.py`
+(detection on the page after sign-in, the "Use it" hint, a saved zone surviving a new session).
+
 Tasks queued from inside a transaction go through `apps.core.services.queue.enqueue_after_commit`
 (on commit; a failure to enqueue is logged and swallowed, since the domain write is already
 committed and raising would only turn it into an error page). `accounts`, `feedback` and
@@ -1021,7 +1085,8 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
 - **The rules** (`settings.RATELIMIT_RULES`, one dict, each entry commented with its reasoning):
   login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address limits on the email an
   existing address gets, `SIGNUP_EXISTING_EMAIL` and `SIGNUP_EXISTING_EMAIL_DAY`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
-  `PUT /api/account`, per user), forgot-password (as above,
+  `PUT /api/account`, per user), `ACCOUNT_TIMEZONE_USER` (the browser's time zone detection, 10/hour per
+  user, see "Auth" > "Time zone"), forgot-password (as above,
   and its response shape never changes so existence still isn't leaked), resend-confirmation, `CONFIRM_EMAIL_IP` (the confirming POST of the emailed link, per IP, generous), QR preview/create (per user, shared between
   the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP,
   generous, charged *before* the code lookup so made-up codes spend the budget too -- over the limit
@@ -2910,11 +2975,31 @@ Always namespaced: `apps/<app>/templates/<app>/…` and `apps/<app>/static/<app>
 extends `core/base.html`, which loads Tailwind (CDN, with the sage palette plus `brand-*` aliases),
 htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `admin/` overrides.
 
-**Times of day are shown and entered in the visitor's own zone.** The site has no per-user time zone
-and `TIME_ZONE` is UTC, so a time rendered with `|date:"H:i"` is UTC and a bare `datetime-local`
-value is read as UTC (found by the browser run of the Short URLs AI plan: from Chicago, an expiry "2
-minutes from now" was refused as past). `core/js/local_time.js`, loaded on every page by
-`core/base.html` and re-run on whatever htmx swaps in (`htmx:load`), converts both ways:
+**Times of day have two zones, on purpose.** `TIME_ZONE` is UTC and the database holds UTC. A
+signed-in user may also have a saved time zone (`User.timezone`, issue #177, see "Auth" > "Time
+zone"), which `TimezoneMiddleware` activates for the request. The two mechanisms below don't depend
+on each other:
+
+- **Server side, the user's saved zone.** With the middleware active, `{{ value|date }}`,
+  `{% now %}`, `localtime()`, `localdate()` and `make_aware()` use the user's zone, so a `|date:"H:i"`
+  on any page (receipts, file transfer dates, `timezone.localdate()` in Receipts' date-range presets,
+  file transfer's end-of-day expiry, core's date picker) is local time for a user who has set a zone,
+  and UTC for one who hasn't, for an anonymous visitor and for the JWT API (no session, so no zone;
+  its values are explicit ISO 8601 anyway). Code that has to compute with the zone calls
+  `apps.accounts.services.timezones` (`user_tz`, `user_today`, `local_datetime`) instead of relying
+  on what is active.
+- **Browser side, the visitor's own zone.** Before there was a saved zone, a time rendered with
+  `|date:"H:i"` was UTC and a bare `datetime-local` value was read as UTC (found by the browser run
+  of the Short URLs AI plan: from Chicago, an expiry "2 minutes from now" was refused as past).
+  `core/js/local_time.js`, loaded on every page by `core/base.html` and re-run on whatever htmx swaps
+  in (`htmx:load`), converts both ways **using the browser's zone, not the saved one** (the two are
+  normally the same place; when they aren't, a `{% local_time %}` shows where the visitor is, while
+  `|date` shows where the account says they live). It is independent of the middleware: the tag
+  always renders the UTC value and the UTC fallback whatever zone is active
+  (`apps/accounts/tests/unit/test_timezone.py` renders it under another active zone), and the
+  inputs always submit UTC.
+
+The browser-side pieces:
 
 - **Showing**: `{% load local_time %}{% local_time value %}` (`core/templatetags/local_time.py`)
   renders `<time datetime="<UTC ISO>" data-local-time="long">Oct 27, 2026 13:51 UTC</time>`, the UTC
