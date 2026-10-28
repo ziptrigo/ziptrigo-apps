@@ -6,17 +6,26 @@ from apps.core import ratelimit
 
 from ..auth import JWTAuth
 from ..models import User
-from ..schemas import AccountUpdateRequest, AccountUpdateResponse
+from ..schemas import AccountSchema, AccountUpdateRequest, AccountUpdateResponse
 from ..services.email_change import notify_previous_address
 from ..services.email_confirmation import get_email_confirmation_service
+from ..services.timezones import set_timezone
 
 router = Router()
 jwt_auth = JWTAuth()
 
 
+@router.get('/account', response=AccountSchema, auth=jwt_auth)
+def get_account(request):
+    """The current user's account: id, name, email and time zone (`""` while none is set,
+    which is treated as UTC)."""
+    user: User = request.auth
+    return AccountSchema(id=str(user.id), name=user.name, email=user.email, timezone=user.timezone)
+
+
 @router.put('/account', response=AccountUpdateResponse, auth=jwt_auth)
 def update_account(request, payload: AccountUpdateRequest):
-    """Update current user's account information (name and/or email).
+    """Update current user's account information (name, email and/or time zone).
 
     Requires JWT authentication; changing the email also requires `current_password`.
     """
@@ -68,6 +77,11 @@ def update_account(request, payload: AccountUpdateRequest):
 
     user.save()
 
+    # Through the service so `timezone_changed` is sent. The schema has validated the name. It is
+    # not a security-relevant field, so it needs neither the password nor a rate limit.
+    if payload.timezone is not None:
+        set_timezone(user, payload.timezone)
+
     if email_changed:
         service = get_email_confirmation_service()
         # Invalidate any still-pending confirmation for the address being left behind first
@@ -94,5 +108,6 @@ def update_account(request, payload: AccountUpdateRequest):
             'id': str(user.id),
             'name': user.name,
             'email': user.email,
+            'timezone': user.timezone,
         },
     )

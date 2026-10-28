@@ -1,5 +1,8 @@
 """Custom password validators for user authentication."""
 
+from functools import cache
+from zoneinfo import available_timezones
+
 from django.core.exceptions import ValidationError
 
 
@@ -25,3 +28,20 @@ class PasswordValidator:
     def get_help_text(self):
         """Return help text for password requirements."""
         return 'Password must be at least 6 characters long and contain at least one digit.'
+
+
+#: The message every surface (model, forms, API schema, endpoint) gives for an unknown time zone.
+UNKNOWN_TIMEZONE_MESSAGE = 'Unknown time zone.'
+
+
+@cache
+def known_timezone_names() -> frozenset[str]:
+    """Every IANA zone name `zoneinfo` knows. Read once: `available_timezones()` walks the tz
+    database on every call."""
+    return frozenset(available_timezones())
+
+
+def is_valid_timezone(name: str) -> bool:
+    """Whether `name` is an acceptable value for `User.timezone`: empty (not set yet) or a zone in
+    `zoneinfo.available_timezones()`."""
+    return name == '' or name in known_timezone_names()

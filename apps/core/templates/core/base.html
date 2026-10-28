@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ user.theme|default:'system' }}"{% if user.theme == 'dark' %} class="dark"{% endif %}>
+<html lang="en" data-theme="{{ user.theme|default:'system' }}"{% if user.is_authenticated %} data-user-timezone="{{ user.timezone }}"{% endif %}{% if user.theme == 'dark' %} class="dark"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -79,6 +79,10 @@
     <script defer src="{% static 'core/js/date_picker.js' %}"></script>
     <script defer src="{% static 'core/js/components.js' %}"></script>
     <script defer src="{% static 'core/js/local_time.js' %}"></script>
+    {% if user.is_authenticated %}
+    {% comment %}Saves the browser's time zone for an account with none and offers it on the account page (issue #177). Separate from local_time.js, which only shows times in the browser's zone.{% endcomment %}
+    <script defer src="{% static 'accounts/js/timezone.js' %}" data-url="{% url 'accounts:timezone' %}"></script>
+    {% endif %}
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <!-- Font Awesome -->

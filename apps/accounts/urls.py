@@ -15,6 +15,7 @@ from .views import (
     resend_confirmation_page,
     reset_password_page,
     theme_update,
+    timezone_detect,
 )
 
 app_name = 'accounts'
@@ -24,6 +25,7 @@ urlpatterns = [
     path('profile/', profile_update, name='profile-update'),
     path('password/', password_change, name='password-change'),
     path('theme/', theme_update, name='theme-update'),
+    path('timezone/', timezone_detect, name='timezone'),
     path('login/', login_page, name='login'),
     path('register/', register_page, name='register'),
     path('logout/', logout_page, name='logout'),

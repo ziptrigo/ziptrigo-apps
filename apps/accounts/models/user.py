@@ -7,9 +7,11 @@ from django.contrib.auth.models import (
     BaseUserManager,
     PermissionsMixin,
 )
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 from django.utils import timezone
+
+from ..validators import UNKNOWN_TIMEZONE_MESSAGE, is_valid_timezone
 
 
 class UserManager(BaseUserManager):
@@ -119,6 +121,15 @@ class User(AbstractBaseUser, PermissionsMixin):  # ty: ignore[invalid-attribute-
             db_default=THEME_SYSTEM,
         ),
     )
+    # The user's IANA time zone (issue #177), for "today", due dates with times and reminders in
+    # their local time. `''` means not set yet and is treated as UTC everywhere. Set on the account
+    # page or detected from the browser (`apps.accounts.services.timezones.set_timezone`, which
+    # also sends `timezone_changed`). `db_default` as well as `default`, as for `theme`: the
+    # previous release's container keeps inserting users while the migration runs.
+    timezone = cast(
+        str,
+        models.CharField(max_length=64, blank=True, default='', db_default=''),
+    )
     inactive_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     inactive_reason = cast(str, models.TextField(blank=True))
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -137,6 +148,11 @@ class User(AbstractBaseUser, PermissionsMixin):  # ty: ignore[invalid-attribute-
     # equivalent of django-stubs' plugin for that, so it doesn't know this attribute exists. See
     # the field-casting comment above for the same root cause.
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+
+    def clean(self) -> None:
+        super().clean()
+        if not is_valid_timezone(self.timezone):
+            raise ValidationError({'timezone': UNKNOWN_TIMEZONE_MESSAGE})
 
     def mark_deleted(self) -> None:
         self.status = self.STATUS_DELETED

@@ -1,4 +1,4 @@
-from .account import AccountUpdateRequest, AccountUpdateResponse
+from .account import AccountSchema, AccountUpdateRequest, AccountUpdateResponse
 from .auth import (
     EmailConfirmRequest,
     LoginRequest,
@@ -10,6 +10,7 @@ from .auth import (
 )
 
 __all__ = [
+    'AccountSchema',
     'AccountUpdateRequest',
     'AccountUpdateResponse',
     'EmailConfirmRequest',
