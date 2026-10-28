@@ -243,9 +243,9 @@ def _completion(content: str | None, refusal: str | None = None):
 
 
 def _status_error(status: int) -> openai.APIStatusError:
-    import httpx
+    import httpx2
 
-    response = httpx.Response(status, request=httpx.Request('POST', 'https://x.test/v1'))
+    response = httpx2.Response(status, request=httpx2.Request('POST', 'https://x.test/v1'))
     return openai.APIStatusError('boom', response=response, body=None)
 
 
@@ -329,9 +329,9 @@ class TestOpenAIClient:
             client.extract(REQUEST)
 
     def test_timeouts_and_connection_errors_are_transient(self, openai_client):
-        import httpx
+        import httpx2
 
-        request = httpx.Request('POST', 'https://x.test')
+        request = httpx2.Request('POST', 'https://x.test')
         for error in (
             openai.APITimeoutError(request=request),
             openai.APIConnectionError(request=request),
