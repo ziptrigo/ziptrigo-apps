@@ -5,6 +5,8 @@ from the `services` package (its `__init__` imports the models). `services.limit
 """
 
 TITLE_MAX = 500
+#: The longest id list the task and label reorder endpoints take (`MAX_SAVED_FILTERS` for filters).
+MAX_REORDER_IDS = 500
 DESCRIPTION_MAX = 20_000
 LABEL_NAME_MAX = 50
 LABEL_DESCRIPTION_MAX = 255

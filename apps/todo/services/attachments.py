@@ -47,6 +47,8 @@ from uuid import UUID
 from botocore.exceptions import BotoCoreError, ClientError
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Count, OuterRef, QuerySet, Subquery
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.core.services.sniff import SNIFF_BYTES, sniff_inline_type
@@ -313,6 +315,20 @@ def abandon_uploads(*, older_than: timedelta = ABANDONED_AFTER) -> int:
         except Exception:
             logger.exception('Failed to clean up abandoned upload %s', attachment.pk)
     return removed
+
+
+def with_attachment_counts(queryset: QuerySet) -> QuerySet:
+    """Annotate `attachment_count` (uploaded attachments; a pending upload isn't one yet) on a
+    queryset of tasks. A subquery, not a join, like `comments.with_comment_counts`: a list already
+    counts subtasks with a join, and two joins would multiply the counts."""
+    counts = (
+        Attachment.objects.filter(task=OuterRef('pk'), uploaded=True)
+        .order_by()
+        .values('task')
+        .annotate(total=Count('pk'))
+        .values('total')
+    )
+    return queryset.annotate(attachment_count=Coalesce(Subquery(counts), 0))
 
 
 def delete_attachment(attachment: Attachment) -> None:

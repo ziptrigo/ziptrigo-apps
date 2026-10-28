@@ -896,8 +896,9 @@ class TestCredits:
         """The cheap look says yes, `create_task` (under the lock) says no: the same outcome and
         nothing left behind."""
         add_credits(broke, 5, source='test')
-        monkeypatch.setattr(inbound, '_cannot_afford', lambda *a, **k: False)
         from ..services import billing
+
+        monkeypatch.setattr(billing, 'cannot_afford', lambda *a, **k: False)
 
         real = billing.spend_credits
 

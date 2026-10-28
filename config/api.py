@@ -9,6 +9,7 @@ from apps.file_transfer.api import router as file_transfer_router
 from apps.qr_code.api import router as qr_code_router
 from apps.receipts.api import router as receipts_router
 from apps.short_url.api import router as short_url_router
+from apps.todo.api import router as todo_router
 
 api = NinjaAPI(
     title='ZipTrigo API',
@@ -22,6 +23,7 @@ api.add_router('/qr/', qr_code_router)
 api.add_router('/ft/', file_transfer_router)
 api.add_router('/receipts/', receipts_router)
 api.add_router('/s/', short_url_router)
+api.add_router('/todo/', todo_router)
 
 
 @api.exception_handler(RateLimitExceeded)

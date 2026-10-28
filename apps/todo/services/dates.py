@@ -6,7 +6,7 @@ with undated tasks last, then date-only tasks before timed ones, then the time, 
 first, none last), then oldest first.
 """
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from django.db.models import (
     Case,
@@ -86,6 +86,29 @@ def order_tasks(queryset: QuerySet, sort: str = SORT_DEFAULT) -> QuerySet:
     return queryset.order_by(*default_order())
 
 
+def order_today(queryset: QuerySet, today: date, *, manual: bool) -> QuerySet:
+    """The Today list in one query: the overdue tasks and the ones due `today`, the way the page
+    shows them (the overdue first, by date, then today's). With `manual` (the tasks due today have
+    been ordered by hand, `has_manual_order(todays_tasks(user), 'today_position')`) the ones due
+    today follow `Task.today_position`; the overdue ones never do, since a position only means
+    something on the day it was set. Without it, the default order."""
+    if not manual:
+        return order_tasks(queryset)
+    in_todays_order = Case(
+        When(due_date=today, then=F('today_position')),
+        default=Value(0),
+        output_field=IntegerField(),
+    )
+    return queryset.order_by(
+        F('due_date').asc(nulls_last=True),
+        in_todays_order.asc(),
+        F('due_time').asc(nulls_first=True),
+        _priority_rank().asc(),
+        'created_at',
+        'number',
+    )
+
+
 def has_manual_order(queryset: QuerySet, field: str = 'position') -> bool:
     """Whether anything in `queryset` was ever positioned by hand in `field` (`position` for a
     parent's subtasks, `today_position` for the Today list). A reorder writes 0, 1, 2, ..., so any
@@ -134,6 +157,25 @@ def today_set(user: User) -> QuerySet:
     """Open, non-trashed tasks due today or earlier (the overdue ones included), unordered: what
     the count beside Today counts."""
     return open_tasks(user).filter(due_date__lte=user_today(user))
+
+
+def upcoming_set(user: User) -> QuerySet:
+    """Open, non-trashed tasks due after today and within the next `UPCOMING_DAYS` days,
+    unordered: what the Upcoming page lists."""
+    today = user_today(user)
+    return open_tasks(user).filter(
+        due_date__gt=today, due_date__lte=today + timedelta(days=UPCOMING_DAYS)
+    )
+
+
+def completed_set(user: User) -> QuerySet:
+    """Completed tasks that are not in the Trash, unordered: what the Completed page lists."""
+    return Task.objects.filter(user=user, completed_at__isnull=False, deleted_at__isnull=True)
+
+
+def trash_set(user: User) -> QuerySet:
+    """Tasks in the Trash (subtasks included), unordered: what the Trash page lists."""
+    return Task.objects.filter(user=user, deleted_at__isnull=False)
 
 
 def todays_tasks(user: User) -> QuerySet:

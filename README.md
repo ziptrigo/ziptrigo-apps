@@ -34,8 +34,9 @@ A single Django project (a "modular monolith") with one Django app per concern:
   optional time (in your own time zone), a priority, coloured labels and subtasks one level deep,
   with per-user task numbers from 1000, Today / Upcoming / All / Completed / Trash pages, manual
   order and postponing. The first 10 tasks of a calendar month are free, then each costs credits.
-  Built so far (#178): the foundation and its web pages; repeating tasks, comments, search,
-  reminders, attachments, AI date parsing, email intake and the API are separate issues.
+  Repeating tasks, comments with `#1234` references, search and saved filters, reminders,
+  attachments, AI date parsing in the title, tasks added by email, a JWT API (`/api/todo/`) and the
+  `admin/todo.py` CLI (`inv todo ...`) (#161, #187).
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -105,7 +106,7 @@ apps/<app>/
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
-| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…`, `/api/s/…` (short_url) |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…`, `/api/s/…` (short_url), `/api/todo/…` |
 | `/admin/` | Django admin (Jazzmin) |
 
 ### Dependency rules
