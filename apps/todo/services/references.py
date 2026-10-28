@@ -63,10 +63,10 @@ def resolver_for(user: User) -> ReferenceResolver:
     return resolve
 
 
-def render_markdown(text: str, resolver: ReferenceResolver) -> SafeString:
-    """`text` as sanitised HTML with `#1234` and task URLs linked through `resolver`. A text over
-    the Markdown size guard (the services cap far below it) is shown escaped instead of failing the
-    page."""
+def render_markdown(text: str, resolver: ReferenceResolver | None) -> SafeString:
+    """`text` as sanitised HTML with `#1234` and task URLs linked through `resolver` (without one
+    they stay plain text: an email can't resolve them). A text over the Markdown size guard (the
+    services cap far below it) is shown escaped instead of failing the page."""
     try:
         return render(text, reference_resolver=resolver, task_url_path=TASK_URL_PATH)
     except ValueError:

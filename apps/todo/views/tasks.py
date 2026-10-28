@@ -25,7 +25,9 @@ from apps.billing.services import InsufficientCreditsError
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import ChecklistForm, PostponeForm, SubtaskForm, TaskForm
-from ..models import Label, Task, TodoSettings
+from ..forms.reminder import PRESETS as REMINDER_PRESETS
+from ..forms.reminder import UNITS as REMINDER_UNITS
+from ..models import Label, ReminderChannel, Task, TodoSettings
 from ..services import (
     complete_task,
     create_task,
@@ -36,6 +38,7 @@ from ..services import (
     postpone_task,
     recurrence,
     referenced_by,
+    reminders,
     reorder,
     reschedule_overdue,
     restore_task,
@@ -99,6 +102,12 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
         open_subtasks = sum(1 for sub in subtasks if not sub.is_completed)
     labels = list(Label.objects.filter(user=user))
     return {
+        'reminders': reminders.task_reminders(task),
+        'reminder_history': reminders.task_history(task),
+        'reminder_presets': REMINDER_PRESETS,
+        'reminder_units': REMINDER_UNITS,
+        'reminder_channels': ReminderChannel.choices,
+        'default_reminder_channel': get_account(user).default_reminder_channel,
         'referenced_by': referenced_by(task),
         'task': task,
         'subtasks': subtasks,

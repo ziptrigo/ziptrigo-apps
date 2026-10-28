@@ -33,6 +33,7 @@
 <form id="task-details-form" method="post" action="{% url 'todo:edit' task.number %}"
       hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
       hx-vals='{"ctx": "page", "part": "details"}'
+      data-reminder-count="{{ reminders|length }}"
       hx-disabled-elt="find button[type='submit']"
       class="mb-8">
     {% csrf_token %}

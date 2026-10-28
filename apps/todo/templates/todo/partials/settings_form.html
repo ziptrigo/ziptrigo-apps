@@ -1,25 +1,60 @@
-{% comment %} The settings sections: the default due time (an htmx form that re-renders this block), and what tasks cost. Later
-   sub-issues add their own sections here. {% endcomment %}
-<section class="mb-8" aria-labelledby="due-time-title">
-    <h2 id="due-time-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Default due time</h2>
-    <div id="settings-msg" class="mb-4 text-sm" aria-live="polite">
-        {% if saved %}<p class="text-green-700 dark:text-green-400" role="status">Saved.</p>{% endif %}
-    </div>
-    <form method="post" action="{% url 'todo:settings' %}" hx-post="{% url 'todo:settings' %}"
-          hx-target="#settings-form" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']"
-          class="flex flex-wrap items-end gap-3">
-        {% csrf_token %}
+{% comment %} The settings sections. One htmx form re-renders this block: the default due time and the default reminder. Then what tasks cost
+   and the reminder history link. Later sub-issues add their own sections here. {% endcomment %}
+<div id="settings-msg" class="mb-4 text-sm" aria-live="polite">
+    {% if saved %}<p class="text-green-700 dark:text-green-400" role="status">Saved.</p>{% endif %}
+</div>
+<form method="post" action="{% url 'todo:settings' %}" hx-post="{% url 'todo:settings' %}"
+      hx-target="#settings-form" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']">
+    {% csrf_token %}
+    <section class="mb-8" aria-labelledby="due-time-title">
+        <h2 id="due-time-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Default due time</h2>
         <div>
             <label for="default-due-time" class="block mb-1 text-sm font-medium">Time</label>
             <input id="default-due-time" type="time" name="default_due_time" value="{{ account.default_due_time|time:'H:i' }}" required
                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
         </div>
-        <button type="submit"
-                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
-    </form>
-    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">The time a task with a date and no time is treated as due, for reminders and ordering. Such a task is still shown as date-only.</p>
-    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Dates and times follow your time zone, which you can change on your <a href="{% url 'accounts:account' %}" class="underline">account page</a>.</p>
-</section>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">The time a task with a date and no time is treated as due, for reminders and ordering. Such a task is still shown as date-only.</p>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Dates and times follow your time zone, which you can change on your <a href="{% url 'accounts:account' %}" class="underline">account page</a>.</p>
+    </section>
+
+    <section class="mb-8" aria-labelledby="reminder-title" x-data="{ mode: '{% if account.default_reminder_minutes is None %}none{% else %}set{% endif %}' }">
+        <h2 id="reminder-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Default reminder</h2>
+        <div class="flex flex-wrap items-end gap-3">
+            <div>
+                <label for="default-reminder-mode" class="block mb-1 text-sm font-medium">New tasks with a date</label>
+                <select id="default-reminder-mode" name="default_reminder_mode" x-model="mode"
+                        class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <option value="none" {% if account.default_reminder_minutes is None %}selected{% endif %}>Get no reminder</option>
+                    <option value="set" {% if account.default_reminder_minutes is not None %}selected{% endif %}>Get a reminder</option>
+                </select>
+            </div>
+            <div x-show="mode === 'set'" {% if account.default_reminder_minutes is None %}style="display: none"{% endif %}>
+                <label for="default-reminder-amount" class="block mb-1 text-sm font-medium">Amount</label>
+                <input id="default-reminder-amount" type="number" name="default_reminder_amount" min="0" value="{{ reminder_amount }}"
+                       class="w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            </div>
+            <div x-show="mode === 'set'" {% if account.default_reminder_minutes is None %}style="display: none"{% endif %}>
+                <label for="default-reminder-unit" class="block mb-1 text-sm font-medium">Unit</label>
+                <select id="default-reminder-unit" name="default_reminder_unit"
+                        class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    {% for value, label in reminder_units %}<option value="{{ value }}" {% if value == reminder_unit %}selected{% endif %}>{{ label }} before</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="default-reminder-channel" class="block mb-1 text-sm font-medium">Default channel</label>
+                <select id="default-reminder-channel" name="default_reminder_channel"
+                        class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    {% for value, label in reminder_channels %}<option value="{{ value }}" {% if value == account.default_reminder_channel %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">A new task with a date gets this reminder, which you can change on the task. Email reminders go to your confirmed address only.</p>
+        <p class="mt-2 text-xs"><a href="{% url 'todo:reminder-history' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Reminder history</a></p>
+    </section>
+
+    <button type="submit"
+            class="mb-8 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+</form>
 
 <section class="mb-8" aria-labelledby="cost-title">
     <h2 id="cost-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">What tasks cost</h2>

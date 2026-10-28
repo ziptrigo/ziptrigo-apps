@@ -5,11 +5,13 @@ from uuid import UUID
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.core.validators import MaxValueValidator
 from django.db import models
 
 from apps.accounts.models import User
 
-from ..limits import FIRST_TASK_NUMBER
+from ..limits import FIRST_TASK_NUMBER, MAX_REMINDER_MINUTES
+from .reminder import ReminderChannel
 
 
 class TodoAccount(models.Model):
@@ -50,6 +52,28 @@ class TodoAccount(models.Model):
             default=time(9, 0),
             help_text='The time a task with a date and no time is treated as due, for reminders '
             'and ordering.',
+        ),
+    )
+    default_reminder_minutes = cast(
+        int | None,
+        models.PositiveIntegerField(
+            null=True,
+            blank=True,
+            default=5,
+            db_default=5,
+            validators=[MaxValueValidator(MAX_REMINDER_MINUTES)],
+            help_text='Minutes before the due time of the reminder a new task with a date gets; '
+            'empty means new tasks get no reminder.',
+        ),
+    )
+    default_reminder_channel = cast(
+        str,
+        models.CharField(
+            max_length=8,
+            choices=ReminderChannel,
+            default=ReminderChannel.IN_APP,
+            db_default=ReminderChannel.IN_APP,
+            help_text='Where the default reminder is delivered.',
         ),
     )
     month_key = cast(

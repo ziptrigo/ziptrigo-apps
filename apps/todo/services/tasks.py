@@ -22,7 +22,7 @@ from apps.accounts.services.timezones import user_today
 from apps.core.markdown import toggle_checklist_item
 
 from ..models import Label, Priority, Recurrence, RecurrenceMode, Task, TaskSource, TodoSettings
-from . import attachments, dates
+from . import attachments, dates, reminders
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account
 from .billing import charge_task_creation
@@ -263,6 +263,7 @@ def create_task(
             task.labels.set(cleaned_labels)
         if cleaned_description:
             sync_references(task)
+        reminders.apply_defaults(task, account)
     return task
 
 
@@ -356,6 +357,10 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
         description_changed = (
             'description' in values and values['description'] != current.description
         )
+        due_changed = ('due_date' in values and values['due_date'] != current.due_date) or (
+            'due_time' in values and values['due_time'] != current.due_time
+        )
+        had_date = current.due_date is not None
         for name, value in values.items():
             setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
@@ -363,6 +368,8 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
             task.labels.set(labels)
         if description_changed:
             sync_references(task)
+        if due_changed:
+            reminders.on_due_changed(task, had_date=had_date)
         if rule_action is not None and rule_action[0] == 'stop':
             recurrence_service.stop(current)
             task.recurrence = current.recurrence
@@ -471,23 +478,38 @@ def postpone_target(today: date, preset: str, chosen: date | None = None) -> dat
 def postpone_task(task: Task, *, preset: str, date: date | None = None) -> Task:
     """Move the due date to a preset or a chosen date, keeping the time. "Today" is the owner's.
     A task with no due date gets one. Postponing one occurrence never moves a repeating
-    schedule (that is the recurrence sub-issue's rule; nothing here touches it)."""
+    schedule (that is the recurrence sub-issue's rule; nothing here touches it). Its reminders
+    follow the new date."""
     if not task.is_open:
         raise _error(NON_FIELD_ERRORS, 'Only open tasks can be postponed.')
     target = postpone_target(user_today(task.user), preset, date)
-    if target != task.due_date:
-        task.due_date = target
-        task.today_position = 0  # a place in another day's Today order means nothing
-    task.save(update_fields=['due_date', 'today_position', 'updated_at'])
+    had_date = task.due_date is not None
+    moved = target != task.due_date
+    with transaction.atomic():
+        if moved:
+            task.due_date = target
+            task.today_position = 0  # a place in another day's Today order means nothing
+        task.save(update_fields=['due_date', 'today_position', 'updated_at'])
+        if moved:  # its reminders follow the new date (a task with no date gets the default one)
+            reminders.on_due_changed(task, had_date=had_date)
     return task
 
 
 def reschedule_overdue(user: User) -> int:
     """Set the due date to today on every open task that is overdue, keeping the times. Returns
     how many changed."""
-    return dates.overdue_set(user).update(
-        due_date=user_today(user), today_position=0, updated_at=timezone.now()
-    )
+    today = user_today(user)
+    account = get_account(user)
+    with transaction.atomic():
+        with_reminders = list(dates.overdue_set(user).filter(reminders__isnull=False).distinct())
+        count = dates.overdue_set(user).update(
+            due_date=today, today_position=0, updated_at=timezone.now()
+        )
+        for task in with_reminders:  # their reminders follow the new date
+            task.user = user
+            task.due_date = today
+            reminders.reschedule(task, account)
+    return count
 
 
 # -- Trash ---------------------------------------------------------------------------------------

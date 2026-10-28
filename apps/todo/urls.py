@@ -18,6 +18,7 @@ urlpatterns = [
     path('labels/reorder/', views.label_reorder, name='label-reorder'),
     path('labels/<uuid:label_id>/edit/', views.label_edit, name='label-edit'),
     path('labels/<uuid:label_id>/delete/', views.label_delete, name='label-delete'),
+    path('reminders/history/', views.reminder_history, name='reminder-history'),
     path('settings/', views.settings_page, name='settings'),
     path(
         'attachments/<uuid:attachment_id>/download/',
@@ -40,6 +41,17 @@ urlpatterns = [
     path('<int:number>/recurrence/stop/', views.recurrence_stop, name='recurrence-stop'),
     path('<int:number>/checklist/', views.task_checklist, name='checklist'),
     path('<int:number>/subtasks/', views.subtask_add, name='subtask-add'),
+    path('<int:number>/reminders/', views.reminder_add, name='reminder-add'),
+    path(
+        '<int:number>/reminders/<uuid:reminder_id>/edit/',
+        views.reminder_edit,
+        name='reminder-edit',
+    ),
+    path(
+        '<int:number>/reminders/<uuid:reminder_id>/delete/',
+        views.reminder_delete,
+        name='reminder-delete',
+    ),
     path('<int:number>/comments/', views.comment_add, name='comment-add'),
     path('<int:number>/comments/<uuid:comment_id>/edit/', views.comment_edit, name='comment-edit'),
     path(

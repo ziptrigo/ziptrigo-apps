@@ -46,6 +46,7 @@ from apps.accounts.services.timezones import user_today
 from apps.core.services import notifications
 
 from ..models import Recurrence, RecurrenceMode, Task, TaskSource
+from . import reminders
 
 logger = logging.getLogger(__name__)
 
@@ -433,8 +434,8 @@ def stop(task: Task) -> bool:
 
 
 def copy_extras(from_task: Task, to_task: Task) -> None:
-    """Hook for what else an occurrence carries to the next one. The reminders sub-issue (#182)
-    copies a task's reminders here; until then it does nothing."""
+    """What else an occurrence carries to the next one: its reminders (`reminders.copy_extras`)."""
+    reminders.copy_extras(from_task, to_task)
 
 
 def on_completed(task: Task) -> Task | None:

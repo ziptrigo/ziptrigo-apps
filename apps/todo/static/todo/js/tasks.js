@@ -5,6 +5,7 @@
  *  - Checklists. The server renders the description's checkboxes disabled. On a task that can be
  *    edited (the description block has `data-checklist-url`) they are enabled here, and a change
  *    posts `index` and `checked` to that URL; the answer is the description block again.
+ *  - Clearing a task's date asks first when it has reminders (they are removed with the date).
  *  - Drag and drop. A list with `data-sortable` is sorted with SortableJS by its `.drag-handle`;
  *    the new order of the rows' `data-task-id`s is posted to `data-reorder-url` as `ids[]`, with
  *    `scope` and `parent` when the list has them (`data-scope`, `data-parent`).
@@ -77,6 +78,22 @@
             },
         });
     }
+
+    // Clearing the date of a task removes its reminders (they are due relative to the date): ask first.
+    // The details form carries the number of reminders in `data-reminder-count`. htmx raises
+    // `htmx:confirm` before every request; cancelling it and calling `issueRequest(true)` sends it.
+    document.addEventListener('htmx:confirm', function (event) {
+        const form = event.target;
+        if (!form || !form.matches || !form.matches('form[data-reminder-count]')) return;
+        const count = parseInt(form.dataset.reminderCount, 10);
+        const date = form.querySelector('input[name="due_date"]');
+        if (!count || !date || date.value) return;
+        event.preventDefault();
+        const noun = count === 1 ? 'reminder' : 'reminders';
+        if (window.confirm('Clearing the date removes its ' + count + ' ' + noun + '. Continue?')) {
+            event.detail.issueRequest(true);
+        }
+    });
 
     htmx.onLoad(function (root) {
         const scope = root.querySelectorAll ? root : document;

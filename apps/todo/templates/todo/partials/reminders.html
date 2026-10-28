@@ -1,0 +1,124 @@
+{% comment %} The task page's "Reminders" block, inside `#task-panel` (every action answers the whole panel, since the times shown follow the date).
+   Needs `task`, `reminders` (each with offset_text, amount, unit), `reminder_history`, `reminder_presets`, `reminder_units`,
+   `reminder_channels` and `default_reminder_channel`. Only an open task can be changed; a completed or trashed one lists them. {% endcomment %}
+<section id="task-reminders" class="mb-8" aria-labelledby="reminders-title">
+    <h2 id="reminders-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Reminders</h2>
+    <div id="reminder-msg" class="mb-3 text-sm" aria-live="polite"></div>
+
+    {% if reminders %}
+    <ul class="mb-4 divide-y divide-gray-200 dark:divide-gray-700 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        {% for reminder in reminders %}
+        <li x-data="{ editing: false }" class="px-4 py-3 text-sm">
+            <div x-show="!editing" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <i class="far fa-bell text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+                <span class="font-medium text-gray-900 dark:text-gray-100">{{ reminder.offset_text }} <span class="font-normal text-gray-500 dark:text-gray-400">({{ reminder.get_channel_display|lower }})</span></span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">
+                    {% if reminder.sent_at %}Sent{% else %}Fires{% endif %} {{ reminder.fire_at|date:'D j M Y, H:i' }}
+                </span>
+                {% if task.is_open %}
+                <span class="ml-auto flex items-center gap-1">
+                    <button type="button" @click="editing = true"
+                            aria-label="Edit the reminder {{ reminder.offset_text }}" title="Edit"
+                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                    <button type="button" hx-post="{% url 'todo:reminder-delete' task.number reminder.pk %}"
+                            hx-target="#task-panel" hx-swap="outerHTML"
+                            aria-label="Remove the reminder {{ reminder.offset_text }}" title="Remove"
+                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                </span>
+                {% endif %}
+            </div>
+            {% if task.is_open %}
+            <form x-show="editing" style="display: none" method="post" action="{% url 'todo:reminder-edit' task.number reminder.pk %}"
+                  hx-post="{% url 'todo:reminder-edit' task.number reminder.pk %}" hx-target="#task-panel" hx-swap="outerHTML"
+                  hx-disabled-elt="find button[type='submit']"
+                  class="flex flex-wrap items-end gap-2" @keydown.escape="editing = false">
+                {% csrf_token %}
+                <input type="hidden" name="ctx" value="page">
+                <div>
+                    <label for="reminder-amount-{{ reminder.pk }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Amount</label>
+                    <input id="reminder-amount-{{ reminder.pk }}" type="number" name="amount" min="0" value="{{ reminder.amount }}" required
+                           class="w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                </div>
+                <div>
+                    <label for="reminder-unit-{{ reminder.pk }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Unit</label>
+                    <select id="reminder-unit-{{ reminder.pk }}" name="unit"
+                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        {% for value, label in reminder_units %}<option value="{{ value }}" {% if value == reminder.unit %}selected{% endif %}>{{ label }} before</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="reminder-channel-{{ reminder.pk }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Channel</label>
+                    <select id="reminder-channel-{{ reminder.pk }}" name="channel"
+                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        {% for value, label in reminder_channels %}<option value="{{ value }}" {% if value == reminder.channel %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                <button type="submit"
+                        class="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+                <button type="button" @click="editing = false"
+                        class="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500">Cancel</button>
+            </form>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% elif not task.due_date %}
+    <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Set a due date to add reminders.</p>
+    {% else %}
+    <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">No reminders.</p>
+    {% endif %}
+
+    {% if task.is_open and task.due_date %}
+    <form method="post" action="{% url 'todo:reminder-add' task.number %}"
+          hx-post="{% url 'todo:reminder-add' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+          hx-disabled-elt="find button[type='submit']"
+          x-data="{ preset: '5' }" class="flex flex-wrap items-end gap-2">
+        {% csrf_token %}
+        <input type="hidden" name="ctx" value="page">
+        <div>
+            <label for="reminder-preset" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Add reminder</label>
+            <select id="reminder-preset" name="preset" x-model="preset"
+                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                {% for value, label in reminder_presets %}<option value="{{ value }}" {% if value == '5' %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </div>
+        <div x-show="preset === 'custom'" style="display: none">
+            <label for="reminder-new-amount" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Amount</label>
+            <input id="reminder-new-amount" type="number" name="amount" min="0" :required="preset === 'custom'"
+                   class="w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        </div>
+        <div x-show="preset === 'custom'" style="display: none">
+            <label for="reminder-new-unit" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Unit</label>
+            <select id="reminder-new-unit" name="unit"
+                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                {% for value, label in reminder_units %}<option value="{{ value }}">{{ label }} before</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="reminder-new-channel" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Channel</label>
+            <select id="reminder-new-channel" name="channel"
+                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                {% for value, label in reminder_channels %}<option value="{{ value }}" {% if value == default_reminder_channel %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </div>
+        <button type="submit"
+                class="inline-flex items-center px-4 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50"><i class="fas fa-plus mr-2" aria-hidden="true"></i>Add</button>
+    </form>
+    {% endif %}
+
+    <h3 class="mt-6 mb-2 text-sm font-semibold text-gray-700 dark:text-gray-300">History</h3>
+    {% if reminder_history %}
+    <ul id="reminder-history" class="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+        {% for delivery in reminder_history %}
+        <li>
+            {{ delivery.sent_at|date:'j M Y, H:i' }} &middot; {{ delivery.get_channel_display }}
+            {% if delivery.note == 'unconfirmed' %}<span class="text-xs text-amber-700 dark:text-amber-400">(not sent: your email address is not confirmed)</span>
+            {% elif delivery.note == 'failed' %}<span class="text-xs text-red-600 dark:text-red-400">(could not be sent)</span>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    <p class="mt-2 text-xs"><a href="{% url 'todo:reminder-history' %}" class="text-sage-600 dark:text-sage-300 hover:underline">All reminder history</a></p>
+    {% else %}
+    <p class="text-sm text-gray-500 dark:text-gray-400">No reminders sent yet.</p>
+    {% endif %}
+</section>

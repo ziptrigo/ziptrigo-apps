@@ -36,6 +36,8 @@ FIELD_LABELS = {
     'index': 'Item',
     'body': 'Comment',
     'default_due_time': 'Default due time',
+    'minutes_before': 'Reminder',
+    'channel': 'Channel',
 }
 
 

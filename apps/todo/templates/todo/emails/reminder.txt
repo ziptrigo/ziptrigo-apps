@@ -1,0 +1,9 @@
+{% autoescape off %}Reminder: {{ title }}
+{{ due }} ({{ zone }})
+{% if description %}
+{{ description }}
+{% endif %}
+Open the task: {{ link }}
+
+You get this because a reminder is set on this task. You can change reminders on the task, or turn email reminders off in your To-do settings.
+{% endautoescape %}

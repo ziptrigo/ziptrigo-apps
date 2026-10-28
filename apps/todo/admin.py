@@ -18,6 +18,8 @@ from .models import (
     CommentRevision,
     Label,
     Recurrence,
+    Reminder,
+    ReminderDelivery,
     Task,
     TodoAccount,
     TodoSettings,
@@ -248,6 +250,46 @@ class AttachmentAdmin(ReadOnlyModelAdmin):
     date_hierarchy = 'created_at'
 
 
+class ReminderAdmin(ReadOnlyModelAdmin):
+    """Reminders, for support: when each fires and whether it was delivered."""
+
+    list_display = [
+        'task_number',
+        'user',
+        'minutes_before',
+        'channel',
+        'fire_at',
+        'sent_at',
+    ]
+    list_filter = [
+        'channel',
+        ('sent_at', admin.EmptyFieldListFilter),
+        'fire_at',
+    ]
+    search_fields = ['task__title', 'task__number', 'task__user__email']
+    list_select_related = ['task', 'task__user']
+    ordering = ['-fire_at']
+
+    @admin.display(description='Task', ordering='task__number')
+    def task_number(self, obj: Reminder) -> str:
+        return f'#{obj.task.number}'
+
+    @admin.display(description='User', ordering='task__user__email')
+    def user(self, obj: Reminder) -> str:
+        return str(obj.task.user)
+
+
+class ReminderDeliveryAdmin(ReadOnlyModelAdmin):
+    """The reminder history: every delivery, per channel."""
+
+    list_display = ['task_number', 'task_title', 'user', 'channel', 'note', 'sent_at', 'fire_at']
+    list_filter = ['channel', 'note', 'sent_at']
+    search_fields = ['task_title', 'task_number', 'user__email']
+    list_select_related = ['user']
+    date_hierarchy = 'sent_at'
+    ordering = ['-sent_at']
+
+
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
 custom_admin_site.register(Recurrence, RecurrenceAdmin)
@@ -255,3 +297,5 @@ custom_admin_site.register(TodoAccount, TodoAccountAdmin)
 custom_admin_site.register(Label, LabelAdmin)
 custom_admin_site.register(Comment, CommentAdmin)
 custom_admin_site.register(Attachment, AttachmentAdmin)
+custom_admin_site.register(Reminder, ReminderAdmin)
+custom_admin_site.register(ReminderDelivery, ReminderDeliveryAdmin)

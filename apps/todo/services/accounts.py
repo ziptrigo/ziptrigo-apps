@@ -47,9 +47,16 @@ def allocate_number(account: TodoAccount) -> int:
 
 
 def update_default_due_time(account: TodoAccount, due_time: time) -> TodoAccount:
-    """Save the time a task with a date and no time is treated as due."""
+    """Save the time a task with a date and no time is treated as due. When it changed, the unsent
+    reminders of the user's date-only tasks are recomputed (they are due at this time)."""
+    from . import reminders  # `reminders` imports this module
+
+    changed = account.default_due_time != due_time
     account.default_due_time = due_time
-    account.save(update_fields=['default_due_time'])
+    with transaction.atomic():
+        account.save(update_fields=['default_due_time'])
+        if changed:
+            reminders.reschedule_user(account.user, untimed_only=True)
     return account
 
 
