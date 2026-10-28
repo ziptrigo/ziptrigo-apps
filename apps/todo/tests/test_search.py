@@ -36,6 +36,7 @@ from ..services import (
     update_task,
 )
 from ..services import search as search_module
+from ..services.reminders import add_reminder
 from ..services.search import (
     EMPTY_MESSAGE,
     INVALID_MESSAGE,
@@ -1194,6 +1195,22 @@ class TestSearchViews:
         assert '1 result' in html
         assert '<mark>rent</mark>' in html
         assert 'matches shown without accents or formatting' in html
+
+    def test_results_are_decorated_like_the_lists(self, web, funded_user):
+        """A repeating task and a task with a reminder show their chip and bell in the results,
+        and a comment match still shows its count (the rows go through `views.lists.decorate`)."""
+        due = user_today(funded_user) + timedelta(days=3)
+        rent = create_task(funded_user, title='Pay the rent', due_date=due, rrule='FREQ=DAILY')
+        add_reminder(rent, minutes_before=15)
+        talk = create_task(funded_user, title='Call the bank')
+        add_comment(talk, funded_user, 'mention the rent too')
+
+        html = unescape(web.get(reverse('todo:search'), {'q': 'rent'}).content.decode())
+
+        assert 'Pay the rent' in html and 'Call the bank' in html
+        assert 'fa-repeat' in html
+        assert 'Has reminders' in html
+        assert 'Comments' in html
 
     def test_accents(self, web, seeded):
         assert 'Walk the' in web.get(reverse('todo:search'), {'q': 'cao'}).content.decode()
