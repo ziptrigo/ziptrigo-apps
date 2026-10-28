@@ -21,7 +21,10 @@ class _HasPk(Protocol):
     `apps.core` can't import `apps.accounts` (see CLAUDE.md's layering), so `hit_user` is typed
     structurally instead of importing the real model just for a type hint."""
 
-    pk: object
+    # Read-only on purpose: a plain `pk: object` attribute is writable, which a model whose `pk`
+    # is typed as its field (or as `UUID`) doesn't accept under `ty`.
+    @property
+    def pk(self) -> object: ...
 
 
 def normalize_ip_for_key(ip: str) -> str:

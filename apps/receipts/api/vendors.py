@@ -8,7 +8,7 @@ is a 404, also inside a merge. A rename that clashes with another vendor is a 40
 vendor's id; see `common.py` for the other status codes.
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from django.shortcuts import get_object_or_404
@@ -34,7 +34,7 @@ def _owned(user, vendor_id: int) -> Vendor:
 
 
 @contextmanager
-def _vendor_errors() -> Iterator[None]:
+def _vendor_errors() -> Generator[None]:
     """`mapped_errors()`, plus a vendor that vanished after the ownership check (merged or deleted
     from another tab or client; `rename_vendor` re-reads the row under its lock) is the same 404
     as one that was never the caller's."""

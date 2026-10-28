@@ -56,6 +56,8 @@ class ShortLink(models.Model):
     #: The reverse accessor of `LinkReport.link`.
     reports: ClassVar['Manager']
 
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: uuid.UUID
     # A foreign key's auto `_id` companion attribute, which `ty` can't see.
     owner_id: uuid.UUID
     # Set by the dashboard view on the links it lists (not stored): the credits enabling this

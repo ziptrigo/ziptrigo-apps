@@ -20,6 +20,9 @@ class ShortUrlSettings(models.Model):
     objects: ClassVar['models.Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: int
+
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
 
     custom_alias_price = cast(

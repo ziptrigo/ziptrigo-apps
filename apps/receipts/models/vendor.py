@@ -28,6 +28,9 @@ class Vendor(models.Model):
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
+    # The implicit auto primary key, which `ty` types as the `AutoField` itself.
+    pk: int
+
     user = cast(
         'User',
         models.ForeignKey(

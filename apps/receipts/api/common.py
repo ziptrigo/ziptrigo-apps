@@ -24,7 +24,7 @@ Status codes (documented once, here):
 - **429** the site-wide rate limiter (`ratelimit.enforce`), with `Retry-After`.
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date
 
@@ -60,7 +60,7 @@ def validation_detail(exc: ValidationError) -> str:
 
 
 @contextmanager
-def mapped_errors() -> Iterator[None]:
+def mapped_errors() -> Generator[None]:
     """Turn the services' exceptions into the API's statuses (400 / 402, see the module docs)."""
     try:
         yield

@@ -24,6 +24,9 @@ class CoreSettings(models.Model):
     objects: ClassVar['models.Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: int
+
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
 
     # Email verification (issue #58 initial values: 6 digits, 30 minutes, 5 attempts, 60s cooldown).

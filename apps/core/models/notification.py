@@ -46,6 +46,9 @@ class Notification(models.Model):
     objects: ClassVar['models.Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: uuid.UUID
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # The user is referenced by setting, not imported: `core` sits below `accounts`.
     user = models.ForeignKey(
