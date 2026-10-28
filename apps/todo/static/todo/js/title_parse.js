@@ -13,11 +13,23 @@
  *
  * Dismiss hides the chip and remembers the text, which is not parsed again. Nothing is applied
  * unless the user accepts: submitting the form with the chip showing sends the fields as they are,
- * and the server never re-parses. A time or a repeat the text does not contain leaves the form's
- * own time and repeat alone. When the server answers `available: false` (no AI configured, or the
- * call failed) the script stops asking for the rest of the page load; a 429 is waited out
- * silently. Tab reaches the buttons, Enter on the focused chip accepts, Escape dismisses.
- * Everything is wired from `htmx.onLoad`, so the form htmx swaps in is covered too.
+ * and the server never re-parses.
+ *
+ * What Accept changes is exactly what the chip says. The date is always written; the time and the
+ * repeat only when the text contains them. A time or repeat the text does not contain leaves the
+ * form's own alone (a deliberate choice: typing "tomorrow" into a repeating task moves its date,
+ * it does not stop the repeat), so when the form has one the chip says so: "Tomorrow (repeat
+ * kept)", "Tomorrow (time and repeat kept)".
+ *
+ * Failures: `available: false` (no AI configured) turns the feature off for the rest of the page
+ * load. A transient failure (`retry: true`: a timeout, a busy server, a non-2xx answer) only backs
+ * off: nothing is asked for 60 s, then the current text is. A 429 is waited out silently when it
+ * is short, and over a long wait (the daily limit) the script stops for the page. A text counts
+ * as handled only once its answer was applied, so one that never got an answer (the user kept
+ * typing, the call failed) is asked again if the user comes back to it.
+ * Tab reaches the buttons, Enter on the focused chip accepts, Escape dismisses. Everything is
+ * wired from `htmx.onLoad`, so the form htmx swaps in is covered too. A box sets
+ * `data-parse-ready="1"` once it is wired, which the browser tests wait for before typing.
  */
 (function () {
     'use strict';
@@ -25,7 +37,9 @@
     var PAUSE_MS = 600;
     var MIN_LENGTH = 3;
     var MAX_RETRY_WAIT_S = 60;
-    var stopped = false;
+    var BACKOFF_MS = 60000;
+    var stopped = false;       // the AI is not configured, or the daily limit is spent
+    var backoffUntil = 0;      // a transient failure: nothing is asked before this time
 
     function csrfToken(form) {
         var field = form && form.querySelector('input[name="csrfmiddlewaretoken"]');
@@ -42,11 +56,11 @@
     }
 
     function setup(box) {
-        if (box.dataset.parseReady) return;
+        if (box.dataset.parseWired) return;
         var input = box.querySelector('[data-parse-input]');
         var chip = box.querySelector('[data-parse-chip]');
         if (!input || !chip) return;
-        box.dataset.parseReady = '1';
+        box.dataset.parseWired = '1';
 
         var form = box.closest('form');
         var dateMode = box.dataset.mode === 'date';
@@ -57,6 +71,16 @@
         var handled = '';   // the text last asked about or accepted: not asked again
         var dismissed = Object.create(null);  // the texts the user dismissed: not asked again either
         var result = null;
+
+        // What Accept leaves alone, in words: the form's own time or repeat the text lacks.
+        function labelFor(data) {
+            var kept = [];
+            var time = form && form.querySelector('[name="due_time"]');
+            var rule = form && form.querySelector('input[name="rrule"]');
+            if (!data.due_time && time && time.value) kept.push('time');
+            if (!data.rrule && rule && rule.value) kept.push('repeat');
+            return data.label + (kept.length ? ' (' + kept.join(' and ') + ' kept)' : '');
+        }
 
         function hideChip() {
             chip.hidden = true;
@@ -75,6 +99,12 @@
         function ask() {
             var text = input.value.replace(/\s+/g, ' ').trim();
             if (stopped || text.length < MIN_LENGTH || text === handled || dismissed[text]) return;
+            var wait = backoffUntil - Date.now();
+            if (wait > 0) {
+                // Backing off after a failure: ask again, for whatever is typed by then, after it.
+                schedule(wait + 50);
+                return;
+            }
             if (controller) controller.abort();
             controller = new AbortController();
             var mine = controller;
@@ -86,12 +116,17 @@
                 signal: mine.signal,
             }).then(function (response) {
                 if (response.status === 429) {
-                    // Waited out silently: ask again when the budget is back.
-                    var wait = parseInt(response.headers.get('Retry-After'), 10) || 1;
-                    schedule(Math.min(wait, MAX_RETRY_WAIT_S) * 1000);
+                    // A short wait is waited out silently; a long one (the daily limit) stops the
+                    // chip for this page.
+                    var retryAfter = parseInt(response.headers.get('Retry-After'), 10) || 1;
+                    if (retryAfter > MAX_RETRY_WAIT_S) stopped = true;
+                    else schedule(retryAfter * 1000);
                     return null;
                 }
-                if (!response.ok) return null;
+                if (!response.ok) {
+                    backoffUntil = Date.now() + BACKOFF_MS;
+                    return null;
+                }
                 return response.json();
             }).then(function (data) {
                 if (!data) return;
@@ -99,21 +134,27 @@
                     stopped = true;
                     return;
                 }
-                handled = text;
-                // The user kept typing: this answer is for text that is gone.
+                if (data.retry) {
+                    backoffUntil = Date.now() + BACKOFF_MS;
+                    return;
+                }
+                // The user kept typing: this answer is for text that is gone, and that text is
+                // not handled (coming back to it asks again).
                 if (input.value.replace(/\s+/g, ' ').trim() !== text) return;
+                handled = text;
                 if (!data.has_date) {
                     hideChip();
                     if (dateMode) say('No date found.');
                     return;
                 }
                 result = data;
-                label.textContent = data.label;
+                label.textContent = labelFor(data);
                 chip.title = data.matched_text || '';
                 chip.hidden = false;
                 say('');
-            }).catch(function () {
-                // Aborted by newer input, or the network failed: no chip, no message.
+            }).catch(function (error) {
+                // Aborted by newer input: nothing. The network failed: back off, no chip.
+                if (!error || error.name !== 'AbortError') backoffUntil = Date.now() + BACKOFF_MS;
             });
         }
 
@@ -166,6 +207,12 @@
                 ask();
             });
         }
+        // The label says what is kept from the form: keep it true if the form changes meanwhile.
+        if (form) {
+            form.addEventListener('change', function () {
+                if (result && !chip.hidden) label.textContent = labelFor(result);
+            });
+        }
         chip.querySelector('[data-parse-accept]').addEventListener('click', accept);
         chip.querySelector('[data-parse-dismiss]').addEventListener('click', dismiss);
         chip.addEventListener('keydown', function (event) {
@@ -177,6 +224,7 @@
                 accept();
             }
         });
+        box.dataset.parseReady = '1';  // wired: every listener above is in place
     }
 
     htmx.onLoad(function (root) {

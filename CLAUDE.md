@@ -2589,8 +2589,8 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   `RECEIPTS_INBOUND_ADDRESS`; the five required ones are checked in prod (see "Settings and
   environment"), `apps.receipts.checks` warns about a *partial* local configuration. To-do's AI
   date parsing (#183) reuses `OPENAI_API_KEY` and `OPENAI_BASE_URL` and adds `OPENAI_TODO_MODEL`
-  (falls back to `OPENAI_RECEIPTS_MODEL`) and `TODO_AI_TIMEOUT_SECONDS` (15) /
-  `TODO_AI_MAX_RETRIES` (1); none is required in prod (see "AI date parsing" under "To-do").
+  (falls back to `OPENAI_RECEIPTS_MODEL`) and `TODO_AI_TIMEOUT_SECONDS` (6) /
+  `TODO_AI_MAX_RETRIES` (0); none is required in prod (see "AI date parsing" under "To-do").
 
 ### Short URLs
 
@@ -3584,7 +3584,12 @@ shared in `core`.
   tests did not change. Products may not import each other, so only this much is shared: the prompt,
   the pydantic model, the errors and the process-wide client are each product's own.
 - **Settings.** `OPENAI_TODO_MODEL` (`os.getenv('OPENAI_TODO_MODEL') or OPENAI_RECEIPTS_MODEL`),
-  `TODO_AI_TIMEOUT_SECONDS` (15: someone is waiting) and `TODO_AI_MAX_RETRIES` (1). **Not** in
+  `TODO_AI_TIMEOUT_SECONDS` (6: someone is waiting, and a late answer is worth nothing) and
+  `TODO_AI_MAX_RETRIES` (0). They are short because the call holds a **sync gunicorn worker** (3 per
+  container, 30 s `timeout`) for as long as it lasts: a 15 s timeout with a retry could outlast the
+  worker timeout, get the worker SIGKILLed (taking its scheduler thread down mid-job, whose lease
+  then stays held) and, with three people typing while the provider is slow, stop the whole site
+  from answering. **Not** in
   the prod required-secrets check: without a key the feature is simply off (no chip, no error).
   `apps.todo.checks` warns `todo.W001` when a key is set but no model resolves (a Warning, never an
   Error: `migrate` runs the checks). `.env.example` documents `OPENAI_TODO_MODEL`.
@@ -3603,27 +3608,53 @@ shared in `core`.
   `recurrence.first_date`, a time without a date is dropped, `has_date` ends up false when nothing
   usable is left, `clean_title` has its whitespace collapsed and falls back to the original title
   when empty (the title and the user's today go in as pydantic validation context), `confidence` is
-  clamped. `_SYSTEM_PROMPT` tells the model today's date and weekday, the zone, the time now and
+  clamped (a reply without one counts as 0, so it shows no chip). `_SYSTEM_PROMPT` tells the model today's date and weekday, the zone, the time now and
   the default time, to extract only what is written, to leave `due_time` null unless a time is
   written, to express repeats with only `FREQ`, `INTERVAL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`,
   `COUNT` and `UNTIL`, and never to invent a date; the title goes in the user message as data. The
   call is `chat.completions.create(model=OPENAI_TODO_MODEL, temperature=0, max_tokens=300,
   response_format=json_schema from ParsedTitle, strict=False)`. Any exception (timeout, HTTP error,
-  bad JSON, validation) is logged at warning level with the first 200 characters of the reply and
-  raised as `ParseUnavailable`. `looks_dated(title)` is the cheap pre-check: a digit or one of
+  bad JSON, validation) is raised as `ParseUnavailable`; a reply that fails validation is logged
+  at warning level as its **length and a short SHA-256 prefix, never any of its text** (it echoes
+  the user's task title), and the exception raised carries only the error's type name
+  (`from None`, since pydantic's message holds the values). `looks_dated(title)` is the cheap pre-check: a digit or one of
   `DATE_WORDS` (English and Portuguese words, compared accent- and case-insensitively through
   `normalize_for_search`), else no AI call and `has_date=false`; the list only saves calls, the
-  model decides what a title means. `parse_title(request)` ties it together (it asks `get_client()`
-  first, so an unconfigured site answers the same whatever the title) and `chip_text` builds the
+  model decides what a title means. `parse_title(request, *, charge=None)` ties it together (it
+  asks `get_client()` first, so an unconfigured site answers the same whatever the title) and
+  applies, in order: the **concurrency limit**, the **rate limits** (`charge`), the call, the
+  **confidence** (under `MIN_CONFIDENCE`, 0.5, the answer is "no date" and there is no chip, as
+  Receipts sends a doubtful reading to review) and **`safe_title`**. `chip_text` builds the
   label: `Today`, `Tomorrow`, `Mon 3 Nov` within the next 6 days, else `3 Nov` (`3 Nov 2027` for
   another year), `, 09:00` when timed and ` · <describe(rrule)>` when repeating.
+  - **Concurrency.** `parsing._slot` is a module-level `threading.BoundedSemaphore(1)`, taken
+    **without waiting** around the model call. A request that finds it taken gets `ParseBusy` (a
+    `ParseUnavailable`) without the model being called and without spending any rate limit; the
+    endpoint answers it like a transient failure. It bounds a process to one open call; with sync
+    workers a worker serves one request at a time anyway, so there the real bound is the 6 s timeout
+    with no retries, and the semaphore is what keeps a threaded server (`runserver`, a `gthread`
+    deployment) from piling calls up.
+  - **`safe_title`.** The model's `clean_title` is free text that Accept writes into the title
+    input (where `maxlength` does not stop a script), so it is used only when it is no longer than
+    the original, within `TITLE_MAX`, has a word and every word of it (compared through
+    `normalize_for_search`: case, accents and punctuation ignored) is in the original. Anything else
+    (rewritten, extended, injected, empty) keeps the original title. `matched_text`, which is only a
+    tooltip, is kept only when it is a substring of the title (case-insensitive).
 - **Endpoint** (`views/parse.py`): `POST /todo/parse/` (`todo:parse`), `@login_required`, CSRF
   protected, JSON in and out (like the upload views of Receipts). Body `{"title": ...}` (whitespace
   collapsed; empty or over `TITLE_MAX` is a 422 `{"detail": ...}` that charges nothing). Answers 200
   `{"available": true, "has_date", "clean_title", "due_date", "due_time", "rrule", "rrule_text",
-  "matched_text", "label"}`, or `{"available": false}` when the AI is not configured or the call
-  failed. `TODO_PARSE_USER` (60/min per user) is charged after validation and **before** the AI is
-  called (a 429 JSON through `ratelimit.json_response`, `Retry-After`). It saves nothing and spends
+  "matched_text", "label"}`; `{"available": false}` when the AI is not configured (permanent: the
+  page stops asking); or `{"available": true, "has_date": false, "retry": true}` when the call
+  failed or the process is busy (transient: the page backs off). **Two rate limits, both on the
+  per-user key and checked together** (the project's two-rule pattern, like `SIGNUP_EXISTING_EMAIL`
+  and `_DAY`): `TODO_PARSE_USER` (60/min, a person typing never gets near it) and
+  `TODO_PARSE_USER_DAY` (500/day, the ceiling on what a script can make the AI bill, since the call
+  is free to the user). The view **peeks both** first (over either: 429 JSON through
+  `ratelimit.json_response`, `Retry-After` of the longer wait) and **hits both only inside
+  `parse_title`'s `charge` callback**, right before the model is called with the slot taken. So a
+  title with no date in it (no call), an unconfigured site, a busy process and a refused request
+  spend nothing, while a call that then fails or times out is charged. It saves nothing and spends
   no credits: the AI call is not charged on its own, a task has its price. The server never
   re-parses; the form posts the explicit `due_date`, `due_time`, `rrule` and `recurrence_mode`.
 - **The chip** (`static/todo/js/title_parse.js`, `partials/parse_chip.html`, in `task_form.html`):
@@ -3635,19 +3666,33 @@ shared in `core`.
   the reply has them** (a title without a time or a repeat leaves the form's own alone; the repeat
   goes through the Alpine component's `setRule`, `recurrence.js`, so its popover and label follow;
   the mode stays what the form has), replaces the title with `clean_title` and hides the chip.
+  **This is a deliberate deviation from the issue**, which says Accept writes `due_date`,
+  `due_time` and `rrule`: accepting "tomorrow" after picking 18:00 by hand, or typing it into the
+  date box of a repeating task, should move the date, not silently drop the time or stop the repeat.
+  To keep the chip honest it **says what stays**: when the form already has a time the reply lacks,
+  or a repeat the reply lacks, the label gets ` (time kept)`, ` (repeat kept)` or ` (time and repeat
+  kept)` (`labelFor` in the script; it follows the form if it changes while the chip is up).
   **Dismiss** hides it and remembers that text (not parsed again; other text is). Submitting with
   the chip showing does not apply it. The chip is keyboard-reachable: Tab to its buttons, Enter on
   the focused chip accepts, Escape dismisses. The task page's details form has the same script
   on an "Or type a date" box (`data-mode="date"`): `clean_title` is ignored, only the date fields
   are applied, the box is emptied, Enter reads it at once and "No date found." is its answer for
-  nothing. `available: false` stops the script asking for the rest of the page load; a 429 is
-  waited out silently (`Retry-After`, at most 60 s); any other failure shows nothing.
+  nothing. **Failure handling** (`title_parse.js`): `available: false` (not configured) stops the
+  script for the rest of the page load; a transient failure (`retry: true`, a non-2xx answer other
+  than 429, a network error) only **backs off**: nothing is asked for 60 s, then the text then in
+  the box is asked about; a 429 with a `Retry-After` up to 60 s is waited out silently, and a longer
+  one (the daily limit) stops the script for the page, silently, like `available: false`. Neither
+  shows any message. A text is marked **handled** (not asked again) only once its answer was
+  applied, after the "user kept typing" check, so editing back to a text that never got an answer
+  asks again. Each box gets `data-parse-ready="1"` once all its listeners are in place (the
+  script is `defer` and wires from `htmx.onLoad`), which the browser tests wait for before typing.
 - **Tests.** `apps/todo/tests/test_parsing.py` (the pre-check, `ParsedTitle`, the prompt, the
   OpenAI call with `openai.OpenAI` mocked, the failure paths, the chip text, the endpoint, rate
-  limit and the page wiring), `apps/core/tests/test_ai.py`, and the Playwright
-  `tests_e2e/test_todo_parse.py` (accept, dismiss/Escape, submit with the chip showing, the date
-  box) on the shared e2e server, whose `receipts_e2e.E2EConfig.ready` installs a
-  `FakeTitleParser` that understands one title (`tests_e2e/todo_fakes.py`).
+  limits, the concurrency slot, `safe_title`, confidence, log content and the page wiring),
+  `apps/core/tests/test_ai.py`, and the Playwright `tests_e2e/test_todo_parse.py` (accept,
+  dismiss/Escape, submit with the chip showing, the date box, the "kept" wording) on the shared e2e
+  server, whose `receipts_e2e.E2EConfig.ready` installs a `FakeTitleParser` that understands two
+  titles (`tests_e2e/todo_fakes.py`).
 
 ### Queue and scheduler
 

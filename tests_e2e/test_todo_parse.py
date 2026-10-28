@@ -5,15 +5,25 @@ swapped for a fake that understands one title (`todo_fakes.DATED_TITLE`), so no 
 """
 
 import re
+from datetime import UTC, datetime, timedelta
 
 from playwright.sync_api import Page, expect
 
 from tests_e2e.conftest import ReceiptsServer
-from tests_e2e.todo_fakes import DATED_TITLE, RULE
+from tests_e2e.todo_fakes import DATE_ONLY_TITLE, DATED_TITLE, RULE
+
+
+def _wired(page: Page, field: str) -> None:
+    """Wait until `title_parse.js` has wired the box around `field` (a selector): keys typed before
+    that fire no listener, and the chip would never come (the script is deferred and wires from
+    `htmx.onLoad`, so a click that navigates can leave the input usable a moment too early)."""
+    box = page.locator(f'[data-title-parse]:has({field})')
+    expect(box).to_have_attribute('data-parse-ready', '1')
 
 
 def _type_title(page: Page, text: str) -> None:
     # `press_sequentially` types key by key, like a person: the script's pause starts at the last.
+    _wired(page, '#quick-title')
     field = page.locator('#quick-title')
     field.fill('')
     field.press_sequentially(text)
@@ -107,6 +117,7 @@ def test_the_task_page_date_box_applies_only_the_date_fields(
     page.locator('#task-list').get_by_text('Plain task').first.click()
 
     box = page.get_by_label('Or type a date')
+    _wired(page, '[id^="date-words-"]')
     box.press_sequentially(DATED_TITLE)
     chip = page.locator('#details-parse-chip')
     expect(chip).to_be_visible()
@@ -118,3 +129,39 @@ def test_the_task_page_date_box_applies_only_the_date_fields(
     expect(form.locator('input[name="rrule"]')).to_have_value(RULE)
     expect(box).to_have_value('')  # the words are not a title: nothing else changed
     expect(page.locator('h1')).to_contain_text('Plain task')
+
+
+def test_the_chip_says_what_stays_when_the_text_has_no_time_or_repeat(
+    page: Page, receipts_server: ReceiptsServer
+):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    page.fill('#quick-title', 'Plain task')
+    page.click('#quick-add-form button[type="submit"]')
+    page.locator('#task-list').get_by_text('Plain task').first.click()
+
+    form = page.locator('#task-details-form')
+    box = page.get_by_label('Or type a date')
+    chip = page.locator('#details-parse-chip')
+    _wired(page, '[id^="date-words-"]')
+
+    # Nothing to keep yet: the chip is the date alone.
+    box.press_sequentially(DATE_ONLY_TITLE)
+    expect(chip).to_be_visible()
+    expect(chip).not_to_contain_text('kept')
+    box.fill('')
+
+    # Put a time and a repeat on the form, then read a date that has neither.
+    box.press_sequentially(DATED_TITLE)
+    expect(chip).to_be_visible()
+    chip.get_by_role('button', name='Accept').click()
+    expect(form.locator('input[name="rrule"]')).to_have_value(RULE)
+    box.press_sequentially(DATE_ONLY_TITLE)
+    expect(chip).to_contain_text('Tomorrow (time and repeat kept)')
+    chip.get_by_role('button', name='Accept').click()
+
+    # The date moved; the time and the repeat are what the chip said they were.
+    expect(form.locator('input[name="due_time"]')).to_have_value('09:00')
+    expect(form.locator('input[name="rrule"]')).to_have_value(RULE)
+    tomorrow = datetime.now(UTC).date() + timedelta(days=1)  # the user's zone is UTC
+    expect(form.locator('input[name="due_date"]')).to_have_value(tomorrow.isoformat())

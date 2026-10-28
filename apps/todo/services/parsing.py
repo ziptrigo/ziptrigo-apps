@@ -16,15 +16,32 @@ network. Receipts' own client is not imported (products may not import each othe
 lines the two share are in `core`, the rest is written here for this product.
 
 Failures: nothing here ever raises into a page. `PermanentAIError` means the AI is not configured
-(`get_client`), `ParseUnavailable` that one call failed (timeout, HTTP error, a reply that is not
-the JSON asked for); the endpoint turns either into `{'available': false}`. The title is untrusted
-text: the prompt says to treat it as data, and everything the model returns is validated again
-(`ParsedTitle`): a repeat rule must pass `recurrence.parse_rule`, dates must be plausible, and a
-reply that does not fit costs the chip, never a wrong task.
+(`get_client`): the endpoint answers `{'available': false}` and the page stops asking.
+`ParseUnavailable` means that one call failed (timeout, HTTP error, a reply that is not the JSON
+asked for) and `ParseBusy` (a `ParseUnavailable`) that the process is already waiting on the model
+for someone else: the endpoint answers `{'retry': true}` and the page backs off for a minute. The
+title is untrusted text: the prompt says to treat it as data, and everything the model returns is
+validated again (`ParsedTitle`): a repeat rule must pass `recurrence.parse_rule`, dates must be
+plausible, a reading the model is not sure of (`confidence` under `MIN_CONFIDENCE`) is dropped, and
+the cleaned title is used only when it is the original with words taken out (`safe_title`). A reply
+that does not fit costs the chip, never a wrong task.
+
+**A slow model must not take the web tier with it** (review of #198): the call is bounded by a short
+timeout (`TODO_AI_TIMEOUT_SECONDS`, 6 s, no SDK retries) and by `_slot`, a per-process
+`BoundedSemaphore(1)` taken without waiting, so a process never has more than one parse call open;
+a request that finds it taken is answered `ParseBusy` without calling the model. The rate limits
+(`TODO_PARSE_USER`, `TODO_PARSE_USER_DAY`) are charged only for a call that is going to be made,
+inside the slot, through `parse_title`'s `charge` callback.
+
+**Logs never carry user text**: a reply that fails validation is logged as its length and a short
+SHA-256 prefix, never a snippet (the reply echoes the task title).
 """
 
+import hashlib
 import logging
 import re
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, time
 from typing import Any, Protocol
@@ -36,6 +53,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from apps.core.markdown import normalize_for_search
 from apps.core.services import ai as core_ai
 
+from .limits import TITLE_MAX
 from .recurrence import describe, first_date, parse_rule
 
 logger = logging.getLogger(__name__)
@@ -43,15 +61,26 @@ logger = logging.getLogger(__name__)
 #: A due date further away than this, or before `MIN_DATE`, is dropped: the model misread a year.
 MAX_YEARS_AHEAD = 10
 MIN_DATE = date(2000, 1, 1)
-#: How much of a reply that fails is logged.
-_LOG_SNIPPET_CHARS = 200
+#: A reading the model gives less confidence than this is not shown as a chip.
+MIN_CONFIDENCE = 0.5
 _MAX_TOKENS = 300
+#: At most one model call open per process (see the module docstring).
+_slot = threading.BoundedSemaphore(1)
 
 WEEKDAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
 
 
 class ParseUnavailable(Exception):
     """One parse failed (timeout, HTTP error, bad JSON, a reply that does not validate)."""
+
+
+class ParseBusy(ParseUnavailable):
+    """This process is already waiting on the model for another request: try again later."""
+
+
+class ParseRateLimited(Exception):
+    """The `charge` callback of `parse_title` refused: over a rate limit (the caller has the
+    details)."""
 
 
 class PermanentAIError(Exception):
@@ -303,8 +332,8 @@ class AIClient(Protocol):
 
 
 def parse_reply(raw: str | None, request: ParseRequest) -> ParsedTitle:
-    """Validate the model's reply text. Raises `ParseUnavailable` (and logs the start of the
-    reply) when it is not the JSON asked for."""
+    """Validate the model's reply text. Raises `ParseUnavailable` (and logs its length and a short
+    hash, never the text: it echoes the user's title) when it is not the JSON asked for."""
     try:
         if not raw or not raw.strip():
             raise ValueError('empty reply')
@@ -315,13 +344,15 @@ def parse_reply(raw: str | None, request: ParseRequest) -> ParsedTitle:
             payload, context={'today': request.today, 'title': request.title}
         )
     except ValueError as exc:  # includes json.JSONDecodeError and pydantic's ValidationError
+        digest = hashlib.sha256((raw or '').encode(errors='replace')).hexdigest()[:8]
         logger.warning(
-            'Unparseable To-do AI reply (%s; %d chars): %r',
+            'Unparseable To-do AI reply (%s; %d chars; sha256 %s)',
             type(exc).__name__,
             len(raw or ''),
-            (raw or '')[:_LOG_SNIPPET_CHARS],
+            digest,
         )
-        raise ParseUnavailable(str(exc)) from exc
+        # `from None`: pydantic's error text holds the reply's values, which echo the title.
+        raise ParseUnavailable(type(exc).__name__) from None
 
 
 class OpenAITitleParser:
@@ -399,26 +430,58 @@ def chip_text(due: date, today: date, at: time | None, rrule: str | None) -> str
     return text
 
 
-def parse_title(request: ParseRequest) -> TitleParse:
+def _tokens(text: str) -> set[str]:
+    return set(normalize_for_search(text).split())
+
+
+def safe_title(original: str, cleaned: str) -> str:
+    """The model's `clean_title` if it is the original with words taken out, else `original`.
+
+    The model's title is free text that Accept puts into the form, so it is used only when it is
+    not longer than the original (and within `TITLE_MAX`), has at least one word, and is made only
+    of words (case and accents ignored) that the original contains: a rewritten, extended or
+    injected title keeps the user's own."""
+    cleaned = ' '.join(cleaned.split())
+    if not cleaned or len(cleaned) > min(len(original), TITLE_MAX):
+        return original
+    words = _tokens(cleaned)
+    if not words or not words <= _tokens(original):
+        return original
+    return cleaned
+
+
+def parse_title(request: ParseRequest, *, charge: Callable[[], bool] | None = None) -> TitleParse:
     """Interpret `request.title`. Returns "no date" without an AI call when `looks_dated` says
     there is nothing to find. Raises `PermanentAIError` when the AI is not configured (checked
-    first, so an unconfigured site answers the same for every title) and `ParseUnavailable` when
-    the call fails."""
+    first, so an unconfigured site answers the same for every title), `ParseBusy` when this process
+    is already calling the model, `ParseUnavailable` when the call fails and `ParseRateLimited`
+    when `charge` refuses.
+
+    `charge`, if given, is called once, right before the model is, with the slot taken, and returns
+    whether the call may go ahead: it is where the rate limits are spent, so a title that needs no
+    call and a call refused as busy cost nothing."""
     title = request.title
     client = get_client()
     if not looks_dated(title):
         return TitleParse(has_date=False, clean_title=title)
-    parsed = client.parse(request)
-    if not parsed.has_date or parsed.due_date is None:
+    if not _slot.acquire(blocking=False):
+        raise ParseBusy('a parse call is already open in this process')
+    try:
+        if charge is not None and not charge():
+            raise ParseRateLimited
+        parsed = client.parse(request)
+    finally:
+        _slot.release()
+    if not parsed.has_date or parsed.due_date is None or parsed.confidence < MIN_CONFIDENCE:
         return TitleParse(has_date=False, clean_title=title)
+    matched = parsed.matched_text if parsed.matched_text.lower() in title.lower() else ''
     return TitleParse(
         has_date=True,
-        # The model returned no title: keep the original rather than create an empty task.
-        clean_title=parsed.clean_title or title,
+        clean_title=safe_title(title, parsed.clean_title),
         due_date=parsed.due_date,
         due_time=parsed.due_time,
         rrule=parsed.rrule,
         rrule_text=describe(parsed.rrule) if parsed.rrule else None,
-        matched_text=parsed.matched_text,
+        matched_text=matched,
         label=chip_text(parsed.due_date, request.today, parsed.due_time, parsed.rrule),
     )
