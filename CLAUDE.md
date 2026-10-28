@@ -16,8 +16,10 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       email verification, rate limiting (`apps.core.ratelimit`), client IP,
                       generic S3 storage (`apps.core.services.storage`), a QR image helper
                       (`apps.core.services.qr_image`), in-app notifications (the header bell, issue
-                      #169), and the Alpine components every product shares
-                      (`core/js/components.js`: `copyText`, `confirmModal`, `notificationBell`).
+                      #169), Markdown rendering / search text / checklist editing
+                      (`apps.core.markdown`, issue #176), and the Alpine components every product
+                      shares (`core/js/components.js`: `copyText`, `confirmModal`,
+                      `notificationBell`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
                       shared storage price (BillingSettings).
@@ -806,6 +808,123 @@ notifications.notify(
   silently) so the read-only admin doesn't refuse that.
 - **Not in v1**: an email or push channel, per-user preferences, grouping, a JWT API, websockets
   (the count is polled), a browser-extension or mobile client.
+
+### Markdown
+
+`apps.core.markdown` (issue #176) is a library with no views, for any app that stores Markdown
+(the TODO app's descriptions and comments, #161): it renders a fixed subset of Markdown to
+sanitised HTML, produces the plain text search runs over, and flips a checklist box inside a
+document. It has no dependency on a product; the TODO-specific pieces, turning `#1234` into a link
+and knowing which URL is a task page, are a callback and a pattern the caller passes in.
+Dependencies: `markdown-it-py` (CommonMark; `>=3.0,<5.0`, the lock selects 4.x, the version `rich`
+also uses), `mdit-py-plugins` (`tasklists`), `linkify-it-py` (bare URLs) and `nh3` (sanitiser;
+`bleach` is deprecated). Layout: `parser.py` (the one parser), `renderer.py` (token -> HTML
+rules), `references.py` (task references), `tasklist.py` (checklist items), `links.py` (which
+destinations are links), `inline_text.py` (the text of inline tokens, shared by plain text and
+image labels), `limits.py` (the length guard), and the public `render.py`, `plain.py`,
+`checklist.py`, all re-exported from `__init__.py`.
+
+- **`render(markdown, *, reference_resolver=None, task_url_path=None) -> SafeString`.** Raises
+  `ValueError('Document too long')` over `MAX_MARKDOWN_CHARS` (50,000); callers validate their own
+  field caps first (description 20,000, comment 10,000). The same guard (the same `ValueError`)
+  is applied by `to_plain_text` and `search_text`, so the functions that turn a document into HTML
+  or text share one contract; `normalize_for_search` takes plain text, not a document, and has none, and the
+  checklist functions don't either (the caller has validated what it stored). `task_url_path` is
+  the caller's `re.Pattern` for a task page's site-relative path, with a named group `number` and
+  matching the whole path (`fullmatch`; `^/todo/(?P<number>[0-9]{1,9})/?$` for the To-do app --
+  use `[0-9]`, not `\d`, which matches other scripts' digits); a pattern without the group is a
+  `ValueError`. **Core knows no task URL itself**: with `None`, URLs are never task references.
+  `task_number_from_href(href, task_url_path)` (exported) is the function behind it, for a caller
+  that needs the same recognition elsewhere. The `markdown` template filter
+  (`{% load core_markdown %}{{ text|markdown }}`, `templatetags/core_markdown.py`) calls `render`
+  without a resolver or pattern; a caller with references renders through its own tag. **The
+  filter never raises**: a value over the limit (a `ValueError` from `render`) comes out
+  unrendered, HTML-escaped with line breaks kept, in one `<p>` (and a warning with its length,
+  never its content, is logged), so a page showing an over-long field is not a 500.
+- **Supported syntax, exactly:** paragraphs, `*italic*`/`_italic_`, `**bold**`/`__bold__`,
+  `` `code` ``, fenced and indented code blocks, headings `#` to `######` (no `id`, no anchors),
+  ordered and unordered (nested) lists, checklists, block quotes, horizontal rules, links, bare
+  URLs and task references. A single newline is a `<br>` (`breaks`). **Not supported, and shown as
+  literal text:** tables, footnotes, strikethrough, and raw HTML (`html=False`: escaped, never
+  rendered). `[^1]: note` is still a CommonMark link reference definition, so it disappears into
+  the reference-style link it defines. **Images are never rendered**: `![alt](url)` is a link with
+  the alt text (the URL when the alt is empty), or just that text when the URL is not a safe link
+  or the image sits inside a link. The alt text is `inline_text`, the very text `to_plain_text`
+  keeps: literal text, code spans, `#1234` references (as text, not resolved) and nested alt
+  text, emphasis marks dropped. Whether an image is inside a link is known from a stack of open
+  links in the render `env` (`link_open` pushes, `link_close` pops), so rendering is linear in
+  the document (a 50,000-character document of `![](a) ` renders in well under a second). A fence's first info word becomes `class="language-<tag>"` on
+  `<code>`: lower-cased, anything but `a-z 0-9 - +` dropped, cut to 20 characters, no class when
+  nothing is left.
+- **Links.** `parser._Parser.validateLink` accepts everything (markdown-it's own check would leave
+  `[x](javascript:...)` as literal source) and `links.classify_href` decides: `http`/`https`,
+  `mailto:` or a site-relative path (one leading `/`, not `//host` or `/\host`) are anchors; any
+  other scheme or shape renders the link's text with no anchor. External `http`/`https` get
+  `target="_blank" rel="noopener noreferrer nofollow ugc"`, `mailto` gets `rel="nofollow ugc"`, a
+  site-relative link neither. **A same-site absolute link** (`LinkKind.SAME_SITE`: `http`/`https`
+  with exactly the authority of `settings.BASE_URL`, case-insensitive; a different port, a
+  userinfo or a longer name like `app.example.com.evil.com` is another site) renders like a
+  relative one, no `target`, no `rel`, its `href` unchanged. The URL is only what markdown-it's
+  `normalizeLink` makes of it. **Bare URLs** (`parser._configure_linkify`): linkify-it's
+  `fuzzy_link` is off, so only text that names its scheme (`http://...`, `https://...`), starts
+  with `www.` or is an e-mail address (`fuzzy_email` stays on: `mailto:`) becomes a link;
+  `manage.py`, `README.md`, `settings.py`, `example.com` stay text (`.py`, `.md`, `.sh`, `.io` are
+  country TLDs). linkify-it has no separate switch for `www.`, so it is added back as a schema of
+  its own (`www.` followed by at least one more label, normalised to `http://www....`).
+- **Task references and the resolver.** `ReferenceResolver = Callable[[list[int]], dict[int,
+  str]]` is called **once per render** (not at all when the document mentions no task) with every
+  task number found, deduplicated, in order of appearance, and returns the numbers it recognises
+  mapped to the URL each links to; a number missing from the result stays plain text. What counts
+  as a mention: `#` plus 4 to 9 digits (`#1` to `#999` never; numbers start at 1000) at the start
+  of the text or after whitespace or one of `( [ { " ' , * _`, with the end of the text,
+  whitespace or one of `) ] } " ' , . ; : ! ? * _` right after (`references.task_reference`, an
+  inline rule before `emphasis`, which is why `**#1234**` and `_#1234_` are references: it sees
+  the raw `*`/`_`; never inside a code span or block, nor inside a link's text,
+  `state.linkLevel`); and a bare or `[text](...)` link whose path matches the caller's
+  `task_url_path`, site-relative or on the host of `settings.BASE_URL`, with no query or fragment
+  (`links.task_number_from_href`, marked by a core rule after `linkify` so bare URLs count; the
+  pattern travels in `env['task_url_path']`, and the rule does nothing without one). A resolved one renders
+  `<a href="<url>" class="task-ref">`, with the text unchanged; the URL the resolver returns must
+  itself be a safe link or it is ignored. Without a resolver both render as plain text and
+  ordinary links.
+- **Checklists.** `- [ ]`, `- [x]` and `- [X]` render
+  `<li class="task-list-item"><input class="task-list-item-checkbox" type="checkbox" disabled
+  data-index="<n>">`. The plugin's raw `html_inline` checkbox is replaced in the token stream by a
+  `task_checkbox` token (`tasklist.number_checkboxes`, a core rule after the plugin's) that carries
+  the index, so no HTML is rewritten; `n` counts checklist items in document order from 0. The
+  boxes stay `disabled`: the caller's own script removes it when the viewer may edit. What is an
+  item is the plugin's rule (`[ ]`, `[x]` or `[X]` then whitespace and more text, first thing in a
+  list item's first paragraph), shared with the functions below through
+  `tasklist.checklist_inlines`, so the indexes always agree.
+- **`toggle_checklist_item(markdown, index, checked)` / `count_checklist_items(markdown)`** work
+  on the source text: the parser's token map gives the source line of the `index`th item and only
+  its three-character marker changes (`[x]` or `[ ]`); whitespace, the rest of the line and the
+  line endings (`\r\n`, `\r`, `\n`) are kept byte for byte. Items in nested lists and block
+  quotes count; a fence's content does not. `IndexError` when there is no such item. The caller
+  validates and saves the result (and its own search text) in its own endpoint.
+- **`to_plain_text(markdown)`, `normalize_for_search(text)`, `search_text(markdown)`.** Plain text
+  keeps the text of paragraphs, headings, code (inline and blocks), link text (a bare URL is its
+  own text), image alt text and the literal `#1234` of a reference; it drops emphasis and heading
+  marks, checklist boxes, link destinations and fence markers. Paragraphs and list items end in a
+  newline, other blocks (headings, quotes, lists, code blocks, rules) are separated by one space.
+  `normalize_for_search` is NFKD, characters with a combining class (`unicodedata.combining`,
+  the accents NFKD splits off Latin, Greek, Cyrillic ...) dropped, `casefold`, everything that is
+  not a letter, number, mark (categories L, N, M, any script) or whitespace turned into a space,
+  whitespace collapsed: `Cão, Ação & Coração!` is `cao acao coracao`. Marks with combining class 0
+  (the vowel signs of Devanagari, Bengali, Thai ...) stay, so `किताब` is one word, not three
+  fragments; a nukta or virama has a class and goes with the accents (`पढ़ो` is `पढो`, on the
+  stored text and the query alike, so matching is unaffected; so is NFKD splitting voiced
+  Japanese kana, `ガ` -> `カ`). `search_text` is the two
+  in a row, what the TODO app stores next to every Markdown column.
+- **Sanitiser.** The renderer's output goes through `nh3.clean` with an explicit allow-list, and
+  only then `mark_safe`: tags `p br strong em code pre h1`-`h6 ul ol li input blockquote hr a`;
+  attributes `a: href target rel class`, `code: class`, `input: type checked disabled class
+  data-index`, `ol: start`, `li: class`; URL schemes `http`, `https`, `mailto`; `link_rel=None`
+  (the renderer sets `rel`). A consequence: the plugin's `contains-task-list` class on `ul`/`ol`
+  does not survive (style `li.task-list-item`). nh3 writes boolean attributes as `disabled=""`.
+- **One parser per thread** (`parser.get_parser`): `linkify-it-py` keeps match state on the
+  instance, so a shared parser is not thread-safe under a threaded gunicorn worker.
+- **Tests:** `apps/core/tests/test_markdown.py`.
 
 ### Rate limiting
 

@@ -19,6 +19,16 @@ dependencies = [
     # Country of a click from a MaxMind GeoLite2-Country database (`GEOIP_PATH`; issue #162).
     'geoip2>=5.0,<6.0',
     'gunicorn>=26.2,<27.0',
+    # Bare-URL detection for markdown-it's `linkify` option (`apps.core.markdown`, issue #176).
+    'linkify-it-py>=2.0,<3.0',
+    # CommonMark parser behind `apps.core.markdown`: the Markdown subset of descriptions and
+    # comments, plain search text and checklist toggling (issue #176).
+    'markdown-it-py>=3.0,<5.0',
+    # `tasklists` plugin for markdown-it-py (`- [ ]` checklists; issue #176).
+    'mdit-py-plugins>=0.4,<1.0',
+    # HTML sanitizer applied to everything `apps.core.markdown.render` produces (issue #176);
+    # `bleach` is deprecated.
+    'nh3>=0.2,<1.0',
     # OpenAI-compatible client for receipt extraction (issue #98); used with an explicit timeout
     # and a bounded `max_retries` (`apps.receipts.services.ai`).
     'openai>=3.0,<4.0',
