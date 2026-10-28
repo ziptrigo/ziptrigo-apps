@@ -211,7 +211,7 @@ def create_task(
     cleaned_date, cleaned_time = clean_due(due_date, due_time)
     cleaned_labels = clean_labels(user, labels)
     cleaned_parent = clean_parent(user, parent)
-    cleaned_rule = recurrence_service.clean_rule(rrule) if rrule else ''
+    cleaned_rule = recurrence_service.clean_rule(rrule, user_today(user)) if rrule else ''
     cleaned_mode = recurrence_service.clean_mode(recurrence_mode)
     if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
         raise _error('rrule', 'A subtask cannot repeat.')
@@ -250,6 +250,7 @@ def create_task(
             due_date=cleaned_date,
             due_time=cleaned_time,
             recurrence=recurrence,
+            recurrence_anchor=cleaned_date if recurrence is not None else None,
             source=source,
             charged_credits=charged,
             unpaid_at=timezone.now() if unpaid else None,
@@ -274,7 +275,8 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
     `rrule` / `recurrence_mode` edit the repeat rule (`services.recurrence`): a rule that differs
     from the running one replaces it (the anchor becomes the task's date, which is filled with the
     rule's first date when the task has none); the same rule and mode change nothing, the anchor
-    included; an empty `rrule` stops repeating.
+    included; an empty `rrule` stops repeating. A change also makes this task the occurrence whose
+    completion creates the next one (`Task.recurrence_anchor`) and starts the `COUNT` again.
     """
     unknown = set(changes) - UPDATABLE
     if unknown:
@@ -339,6 +341,7 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
             values['recurrence'] = recurrence_service.change(
                 current, rule_action[1], rule_action[2], anchor
             )
+            values['recurrence_anchor'] = anchor
         elif moves and new_parent is not None and current.active_recurrence is not None:
             raise _error('parent', 'A repeating task cannot become a subtask.')
         if moves:
@@ -374,7 +377,7 @@ def _rule_action(task: Task, changes: Mapping[str, Any]) -> tuple[str, str, str]
     if 'rrule' in changes:
         if not changes['rrule']:
             return ('stop', '', '') if active is not None else None
-        rule = recurrence_service.clean_rule(changes['rrule'])
+        rule = recurrence_service.clean_rule(changes['rrule'], user_today(task.user))
     elif active is not None:
         rule = active.rrule
     else:

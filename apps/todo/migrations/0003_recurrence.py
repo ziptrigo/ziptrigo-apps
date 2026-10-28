@@ -21,6 +21,7 @@ class Migration(migrations.Migration):
                 ('rrule', models.CharField(max_length=255)),
                 ('mode', models.CharField(choices=[('fixed', 'Fixed schedule'), ('from_completion', 'From completion')], default='fixed', max_length=16)),
                 ('anchor_date', models.DateField()),
+                ('anchor_day', models.PositiveSmallIntegerField(blank=True, null=True)),
                 ('ended_at', models.DateTimeField(blank=True, null=True)),
                 ('occurrences_created', models.PositiveIntegerField(default=1)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
@@ -31,5 +32,10 @@ class Migration(migrations.Migration):
             model_name='task',
             name='recurrence',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='tasks', to='todo.recurrence'),
+        ),
+        migrations.AddField(
+            model_name='task',
+            name='recurrence_anchor',
+            field=models.DateField(blank=True, null=True),
         ),
     ]

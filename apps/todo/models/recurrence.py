@@ -24,8 +24,13 @@ class Recurrence(models.Model):
     canonical form `services.recurrence.parse_rule` produces. `anchor_date` is the date the
     *current* occurrence was scheduled for by the rule: postponing or editing an occurrence's due
     date never changes it, which is what makes "fixed" work. `occurrences_created` counts the
-    occurrences made so far (the first included), which is how `COUNT` is tracked. `ended_at` is
-    set when the user stops repeating or the rule is exhausted; the row is kept.
+    occurrences made so far (the first included), which is how `COUNT` is tracked; editing the rule
+    starts the count again from 0 (a new `COUNT` counts the occurrences created after the change).
+    `anchor_day` is the day of the month the schedule was set on, which `anchor_date` can differ
+    from once a day-less monthly or yearly rule has been clamped to a short month (31 Jan, 28 Feb,
+    31 Mar). `ended_at` is set when the user stops repeating or the rule is exhausted; the row is
+    kept. Each occurrence remembers the anchor it was scheduled for (`Task.recurrence_anchor`);
+    only the one whose anchor is still `anchor_date` creates the next occurrence when completed.
     """
 
     objects: ClassVar['models.Manager']
@@ -48,6 +53,7 @@ class Recurrence(models.Model):
         str, models.CharField(max_length=16, choices=RecurrenceMode, default=RecurrenceMode.FIXED)
     )
     anchor_date = cast(date, models.DateField())
+    anchor_day = cast(int | None, models.PositiveSmallIntegerField(null=True, blank=True))
     ended_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     occurrences_created = cast(int, models.PositiveIntegerField(default=1))
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))

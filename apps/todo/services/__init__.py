@@ -28,6 +28,7 @@ from .dates import (
     subtasks_of,
     today_set,
     todays_tasks,
+    with_open_occurrences,
     with_subtask_counts,
 )
 from .labels import (
@@ -135,5 +136,6 @@ __all__ = [
     'update_label',
     'update_task',
     'with_comment_counts',
+    'with_open_occurrences',
     'with_subtask_counts',
 ]

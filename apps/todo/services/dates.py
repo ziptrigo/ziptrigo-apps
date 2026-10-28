@@ -8,8 +8,20 @@ first, none last), then oldest first.
 
 from datetime import datetime
 
-from django.db.models import Case, Count, F, IntegerField, Q, QuerySet, Value, When
+from django.db.models import (
+    Case,
+    Count,
+    F,
+    IntegerField,
+    OuterRef,
+    Q,
+    QuerySet,
+    Subquery,
+    Value,
+    When,
+)
 from django.db.models.expressions import OrderBy
+from django.db.models.functions import Coalesce
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import local_datetime, user_today
@@ -90,6 +102,26 @@ def with_subtask_counts(queryset: QuerySet) -> QuerySet:
         subtask_total=Count('subtasks', filter=live),
         subtask_done=Count('subtasks', filter=live & Q(subtasks__completed_at__isnull=False)),
         subtask_open=Count('subtasks', filter=live & Q(subtasks__completed_at__isnull=True)),
+    )
+
+
+def with_open_occurrences(queryset: QuerySet) -> QuerySet:
+    """Annotate `open_occurrences`: how many open, non-trashed tasks share each task's repeat rule
+    (0 for a task that does not repeat). `Task.offers_stop_repeating` reads it, so a list of rows
+    does not query once per row."""
+    siblings = (
+        Task.objects.filter(
+            recurrence_id=OuterRef('recurrence_id'),
+            completed_at__isnull=True,
+            deleted_at__isnull=True,
+        )
+        .order_by()
+        .values('recurrence_id')
+        .annotate(total=Count('pk'))
+        .values('total')
+    )
+    return queryset.annotate(
+        open_occurrences=Coalesce(Subquery(siblings, output_field=IntegerField()), Value(0))
     )
 
 

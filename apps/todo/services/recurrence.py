@@ -17,11 +17,13 @@ both. `WKST` is ignored. Anything else is refused. The canonical form orders the
 `INTERVAL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`, `COUNT`/`UNTIL` and leaves out `INTERVAL=1` and
 `WKST`.
 
-**Month lengths.** `BYMONTHDAY` beyond a month's length is skipped by `dateutil`, not clamped:
-`BYMONTHDAY=31` has no occurrence in February, April, June, September or November. `-1` is the last
-day of the month, whatever its length. A monthly or yearly rule with no day of its own repeats on
-the day of the date it is computed from, so it follows the same skipping (from 31 Jan, the next is
-31 Mar).
+**Month lengths.** An explicit `BYMONTHDAY` beyond a month's length is skipped by `dateutil`, not
+clamped: `BYMONTHDAY=31` has no occurrence in February, April, June, September or November. `-1` is
+the last day of the month, whatever its length. A monthly or yearly rule with *no day of its own*
+(no `BYMONTHDAY`, no `BYDAY`) repeats on the day of the month the schedule was set on and is
+**clamped** to a short month's last day: 31 Jan, 28 Feb, 31 Mar, 30 Apr, 31 May (`Recurrence.
+anchor_day` keeps the intended day once the anchor itself has been clamped); a yearly rule on 29 Feb
+falls on 28 Feb in other years.
 
 **COUNT** is not left to `dateutil`: a count would restart at every computed date (each call starts
 a new series at `after`). `Recurrence.occurrences_created` counts the occurrences made, and
@@ -30,15 +32,18 @@ a new series at `after`). `Recurrence.occurrences_created` counts the occurrence
 
 import logging
 import re
-from datetime import UTC, date, datetime, time, timedelta
+from calendar import monthrange
+from datetime import date, datetime, time
 
 from dateutil.rrule import rrulestr
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
+from apps.core.services import notifications
 
 from ..models import Recurrence, RecurrenceMode, Task, TaskSource
 
@@ -134,11 +139,13 @@ def _single(raw: str, low: int, high: int) -> int:
     return numbers[0]
 
 
-def parse_rule(value: str) -> str:
+def parse_rule(value: str, today: date) -> str:
     """Validate `value` (an `RRULE` property value, no `DTSTART`) and return its canonical form.
 
     Raises `ValidationError('Unsupported repeat rule.')` for anything outside the subset in the
     module docstring, and a different message for a rule that is too long or never occurs again.
+    `today` is the user's today (`user_today`), not UTC's: a rule is accepted while it still has a
+    date on or after it, so an `UNTIL` of the user's own today is fine at 23:30 in Chicago.
     """
     value = str(value or '').strip()
     if value.upper().startswith('RRULE:'):
@@ -187,8 +194,7 @@ def parse_rule(value: str) -> str:
     # Build it and read one occurrence: `dateutil` has the last word on what it accepts, and a rule
     # that can never occur again (an `UNTIL` in the past, February 30th) is no use as a repeat.
     try:
-        today = datetime.now(UTC).date()
-        first = _iterate(result, today - timedelta(days=1), keep_count=True)
+        first = _iterate(result, today, keep_count=True, inclusive=True)
     except ValueError, TypeError, OverflowError, IndexError:
         raise _unsupported() from None
     if first is None:
@@ -196,25 +202,69 @@ def parse_rule(value: str) -> str:
     return result
 
 
+def _parts(rrule: str) -> list[str]:
+    return [part for part in rrule.split(';') if part]
+
+
+def _is_dayless(rrule: str) -> bool:
+    """A monthly or yearly rule that names no day of its own (no `BYMONTHDAY`, no `BYDAY`): it
+    falls on the day of the month it is computed from."""
+    keys = {part.partition('=')[0] for part in _parts(rrule)}
+    freq = next((p[len('FREQ=') :] for p in _parts(rrule) if p.startswith('FREQ=')), '')
+    return freq in ('MONTHLY', 'YEARLY') and not keys & {'BYMONTHDAY', 'BYDAY'}
+
+
 def _iterate(
-    rrule: str, after: date, *, keep_count: bool = False, inclusive: bool = False
+    rrule: str,
+    after: date,
+    *,
+    keep_count: bool = False,
+    inclusive: bool = False,
+    day: int | None = None,
 ) -> date | None:
     """The first date strictly after `after` (`inclusive`: on or after) that `rrule` yields, for
-    the series that starts at `after`."""
+    the series that starts at `after`.
+
+    `day` is the day of the month a day-less monthly/yearly rule means (default: `after`'s). Over
+    28 it is clamped to a short month's last day instead of skipping the month: the rule is run on
+    the 1st of each period (`BYMONTHDAY=1`, from the 1st of `after`'s month, with `BYMONTH` the
+    start month for a yearly one) and each
+    result moved to `min(day, month length)`; an `UNTIL` is then checked against the moved date.
+    """
     if not keep_count:
-        rrule = ';'.join(part for part in rrule.split(';') if not part.startswith('COUNT='))
+        rrule = ';'.join(part for part in _parts(rrule) if not part.startswith('COUNT='))
     start_at = datetime.combine(after, time())
-    found = rrulestr('RRULE:' + rrule, dtstart=start_at).after(start_at, inc=inclusive)
-    return found.date() if found is not None else None
+    day = day or after.day
+    if day <= 28 or not _is_dayless(rrule):
+        found = rrulestr('RRULE:' + rrule, dtstart=start_at).after(start_at, inc=inclusive)
+        return found.date() if found is not None else None
+
+    # From the 1st of `after`'s month (the same period as `after` itself, so `INTERVAL` still
+    # counts from it): this month's own date is a candidate too.
+    start_at = datetime.combine(after.replace(day=1), time())
+    parts = _parts(rrule) + ['BYMONTHDAY=1']
+    if 'FREQ=YEARLY' in parts and not any(part.startswith('BYMONTH=') for part in parts):
+        parts.append(f'BYMONTH={after.month}')
+    until = next((p[len('UNTIL=') :] for p in parts if p.startswith('UNTIL=')), None)
+    last = datetime.strptime(until, '%Y%m%d').date() if until else None
+    for found in rrulestr('RRULE:' + ';'.join(parts), dtstart=start_at):
+        moved = found.date().replace(day=min(day, monthrange(found.year, found.month)[1]))
+        if last is not None and moved > last:
+            return None
+        if moved > after or (inclusive and moved == after):
+            return moved
+    return None
 
 
-def next_date(rrule: str, after: date) -> date | None:
+def next_date(rrule: str, after: date, day: int | None = None) -> date | None:
     """The first date after `after` the rule yields, or `None` when it is exhausted (`UNTIL`).
 
     `COUNT` is ignored here: it is tracked by `Recurrence.occurrences_created` (see the module
-    docstring). A `BYMONTHDAY` beyond the month's length skips that month; `-1` is its last day.
+    docstring). A `BYMONTHDAY` beyond the month's length skips that month; `-1` is its last day. A
+    day-less monthly/yearly rule means `day` (default: `after`'s day of the month), clamped to the
+    month's length.
     """
-    return _iterate(rrule, after)
+    return _iterate(rrule, after, day=day)
 
 
 def count_of(rrule: str) -> int | None:
@@ -307,10 +357,10 @@ def mode_label(mode: str) -> str:
 # -- Cleaning ------------------------------------------------------------------------------------
 
 
-def clean_rule(value: object) -> str:
-    """`parse_rule`, with its refusal keyed to the `rrule` field."""
+def clean_rule(value: object, today: date) -> str:
+    """`parse_rule`, with its refusal keyed to the `rrule` field (`today`: the user's today)."""
     try:
-        return parse_rule(str(value or ''))
+        return parse_rule(str(value or ''), today)
     except ValidationError as exc:
         raise ValidationError({'rrule': exc.messages}) from None
 
@@ -340,20 +390,27 @@ def first_date(rrule: str, today: date) -> date:
 def start(user: User, rrule: str, mode: str, anchor: date) -> Recurrence:
     """A new `Recurrence` for a task about to be created (or given a rule); call it inside the
     caller's transaction. `rrule` and `mode` are already cleaned."""
-    return Recurrence.objects.create(user=user, rrule=rrule, mode=mode, anchor_date=anchor)
+    return Recurrence.objects.create(
+        user=user, rrule=rrule, mode=mode, anchor_date=anchor, anchor_day=anchor.day
+    )
 
 
 def change(task: Task, rrule: str, mode: str, anchor: date) -> Recurrence:
     """Give `task` this rule: the running `Recurrence` is edited in place (under its row lock, so a
     completion at the same moment sees either the old rule or the new one), else a new one is made
     (also when the task's earlier one had ended). Editing the schedule sets the anchor to the
-    task's date. Call it inside the caller's transaction."""
+    task's date and the occurrence count starts again from 0, so a new `COUNT` counts the occurrences
+    created after the change (the task being edited is not one of them). Call it inside the
+    caller's transaction. The caller sets the task's own `recurrence_anchor` to `anchor`: that is
+    what makes the edited task the one whose completion creates the next occurrence (an older open
+    occurrence of the same rule no longer does)."""
     active = task.active_recurrence
     if active is None:
         return start(task.user, rrule, mode, anchor)
     locked = Recurrence.objects.select_for_update().get(pk=active.pk)
     locked.rrule, locked.mode, locked.anchor_date = rrule, mode, anchor
-    locked.save(update_fields=['rrule', 'mode', 'anchor_date'])
+    locked.anchor_day, locked.occurrences_created = anchor.day, 0
+    locked.save(update_fields=['rrule', 'mode', 'anchor_date', 'anchor_day', 'occurrences_created'])
     return locked
 
 
@@ -383,41 +440,49 @@ def on_completed(task: Task) -> Task | None:
     """What completing an occurrence does (`tasks.complete_task` calls it in its transaction, once
     `completed_at` is set): create the next occurrence, or end the rule.
 
-    The `Recurrence` row is locked first, and the anchor it holds must still be the one `task`
-    was loaded with: a mismatch means another call already advanced the rule, so nothing is created
-    (two tabs completing at once make one next occurrence). The next date is counted from the
-    anchor (fixed) or from the user's today (from completion). It is created with
-    `allow_unpaid=True`: completing a repeating task always succeeds, and an occurrence the balance
-    can't cover is owed (`services.billing`). Open subtasks are copied the same way. Returns the
-    new occurrence, if one was made.
+    **An occurrence spawns its successor at most once.** The `Recurrence` row is locked first, and
+    the next occurrence is created only while the anchor the task was scheduled for
+    (`Task.recurrence_anchor`) is still the recurrence's `anchor_date`. Creating the successor moves
+    the anchor on, so completing the same occurrence again (after an uncomplete), completing an
+    older open occurrence, or two tabs completing at once, find the anchors different and create
+    (and charge) nothing. The next date is counted from the anchor (fixed) or from the user's today
+    (from completion). It is created with `allow_unpaid=True`: completing a repeating task always
+    succeeds, and an occurrence the balance can't cover is owed (`services.billing`). Open subtasks
+    are copied the same way. Returns the new occurrence, if one was made.
+
+    If the occurrence can't be created (the open-task cap), it is retried without the copied
+    subtasks, and the user is told in-app either way (`_notify`); when even that fails the
+    recurrence and anchor stay as they were, so uncompleting and completing the task once there is
+    room tries again.
     """
     from . import tasks as task_service
 
     if task.recurrence_id is None or task.recurrence is None:
         return None
-    seen_anchor = task.recurrence.anchor_date  # as this task was loaded; never refreshed below
     user = task.user
     with transaction.atomic():
         recurrence = Recurrence.objects.select_for_update().filter(pk=task.recurrence_id).first()
         if recurrence is None or recurrence.ended_at is not None:
             return None
-        if recurrence.anchor_date != seen_anchor:
+        if task.recurrence_anchor != recurrence.anchor_date:
             return None
         count = count_of(recurrence.rrule)
-        base = (
-            recurrence.anchor_date if recurrence.mode == RecurrenceMode.FIXED else user_today(user)
-        )
-        nxt = next_date(recurrence.rrule, base)
+        if recurrence.mode == RecurrenceMode.FIXED:
+            nxt = next_date(
+                recurrence.rrule,
+                recurrence.anchor_date,
+                recurrence.anchor_day or recurrence.anchor_date.day,
+            )
+        else:
+            nxt = next_date(recurrence.rrule, user_today(user))
         if nxt is None or (count is not None and recurrence.occurrences_created >= count):
             ended_at = timezone.now()
             Recurrence.objects.filter(pk=recurrence.pk).update(ended_at=ended_at)
             task.recurrence.ended_at = ended_at  # the caller's copy reflects it
             return None
-        try:
-            with transaction.atomic():  # a refusal (the open-task cap) undoes the partial copy
-                created = _create_occurrence(task, recurrence, nxt, task_service)
-        except ValidationError:
-            logger.warning('Task %s: the next occurrence could not be created', task.pk)
+        created, dropped_subtasks = _create_with_fallback(task, recurrence, nxt, task_service)
+        _notify(task, recurrence, created, dropped_subtasks)
+        if created is None:
             return None
         recurrence.anchor_date = nxt
         recurrence.occurrences_created += 1
@@ -425,7 +490,85 @@ def on_completed(task: Task) -> Task | None:
     return created
 
 
-def _create_occurrence(task: Task, recurrence: Recurrence, due: date, task_service) -> Task:
+def _create_with_fallback(
+    task: Task, recurrence: Recurrence, due: date, task_service
+) -> tuple[Task | None, bool]:
+    """The next occurrence with its copied subtasks; when that is refused, once more without them.
+    Returns `(occurrence or None, whether the subtasks were left out)`. Each attempt is a savepoint,
+    so a refusal undoes the partial copy and its charges."""
+    for with_subtasks in (True, False):
+        try:
+            with transaction.atomic():
+                created = _create_occurrence(
+                    task, recurrence, due, task_service, with_subtasks=with_subtasks
+                )
+            return created, not with_subtasks
+        except ValidationError as exc:
+            logger.warning(
+                'Task %s: the next occurrence could not be created%s: %s',
+                task.pk,
+                '' if with_subtasks else ' even without its subtasks',
+                '; '.join(exc.messages),
+            )
+            if with_subtasks and not _has_open_subtasks(task):
+                break  # nothing to leave out: the same refusal again
+    return None, False
+
+
+def _has_open_subtasks(task: Task) -> bool:
+    return Task.objects.filter(
+        parent=task, completed_at__isnull=True, deleted_at__isnull=True
+    ).exists()
+
+
+def failure_key(recurrence: Recurrence) -> str:
+    """The `key` of the in-app notice about a next occurrence that could not be made (or made in
+    full) for this recurrence."""
+    return f'todo_recurrence_failed:{recurrence.id}'
+
+
+def _notify(
+    task: Task, recurrence: Recurrence, created: Task | None, dropped_subtasks: bool
+) -> None:
+    """Tell the user in-app when the next occurrence was not created, or was created without its
+    subtasks; otherwise clear an earlier notice (the repeat works again). One notice per
+    recurrence (`failure_key`), replaced each time. Never raises: it runs in its own savepoint, and
+    telling the user must not undo or fail the completion."""
+    key = failure_key(recurrence)
+    title = body = ''
+    if created is None:
+        title = f'Couldn\u2019t create the next \u201c{task.title}\u201d'
+        body = (
+            'The next occurrence of this repeating task was not created, usually because you have '
+            'reached the open-task limit. Free some space by completing or deleting tasks, then '
+            'uncomplete and complete this task again, or set the date manually.'
+        )
+    elif dropped_subtasks:
+        title = f'The next \u201c{task.title}\u201d has no subtasks'
+        body = (
+            'The next occurrence of this repeating task was created, but its subtasks were not '
+            'copied because you have reached the open-task limit. Add them yourself once you have '
+            'freed some space.'
+        )
+    try:
+        with transaction.atomic():
+            notifications.delete_for_key(task.user, key, source='todo')
+            if title:
+                notifications.notify(
+                    task.user,
+                    source='todo',
+                    title=title,
+                    body=body,
+                    url=reverse('todo:task', args=[task.number]),
+                    key=key,
+                )
+    except Exception:
+        logger.exception('Task %s: could not notify about its next occurrence', task.pk)
+
+
+def _create_occurrence(
+    task: Task, recurrence: Recurrence, due: date, task_service, *, with_subtasks: bool = True
+) -> Task:
     user = task.user
     created = task_service.create_task(
         user,
@@ -439,10 +582,14 @@ def _create_occurrence(task: Task, recurrence: Recurrence, due: date, task_servi
         source=TaskSource.RECURRENCE,
         allow_unpaid=True,
     )
-    open_subtasks = list(
-        Task.objects.filter(parent=task, completed_at__isnull=True, deleted_at__isnull=True)
-        .order_by('position', 'number')
-        .prefetch_related('labels')
+    open_subtasks = (
+        list(
+            Task.objects.filter(parent=task, completed_at__isnull=True, deleted_at__isnull=True)
+            .order_by('position', 'number')
+            .prefetch_related('labels')
+        )
+        if with_subtasks
+        else []
     )
     copies: list[Task] = []
     for subtask in open_subtasks:

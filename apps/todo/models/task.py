@@ -59,6 +59,8 @@ class Task(models.Model):
     # Set by `services.dates.with_subtask_counts` on the tasks a list shows (not stored).
     subtask_total: int
     subtask_done: int
+    # Set by `services.dates.with_open_occurrences` (not stored).
+    open_occurrences: int
     subtask_open: int
     # Set by `services.comments.with_comment_counts` on the tasks a list shows (not stored).
     comment_count: int
@@ -127,6 +129,12 @@ class Task(models.Model):
         ),
     )
 
+    #: The `Recurrence.anchor_date` this occurrence was scheduled for: set when it is created as an
+    #: occurrence, and again when a rule change re-anchors it. Completing it creates the next
+    #: occurrence only while this is still the recurrence's anchor, so an occurrence spawns at most
+    #: one (completing it again after an uncomplete, or an older open one, creates nothing).
+    recurrence_anchor = cast(date | None, models.DateField(null=True, blank=True))
+
     labels = cast(
         'models.Manager',
         models.ManyToManyField(Label, blank=True, related_name='tasks'),
@@ -167,6 +175,23 @@ class Task(models.Model):
             return None
         recurrence = self.recurrence
         return recurrence if recurrence is not None and recurrence.is_active else None
+
+    @property
+    def offers_stop_repeating(self) -> bool:
+        """Whether trashing this task should offer "Also stop repeating": it is open, its repeat is
+        running and it is the only open occurrence (trashing one of several leaves the repeat
+        with another occurrence to carry on from). Reads the `open_occurrences` annotation when the
+        task has it, else counts."""
+        if self.is_completed or self.active_recurrence is None:
+            return False
+        count = getattr(self, 'open_occurrences', None)
+        if count is None:
+            count = Task.objects.filter(
+                recurrence_id=self.recurrence_id,
+                completed_at__isnull=True,
+                deleted_at__isnull=True,
+            ).count()
+        return count <= 1
 
     def is_overdue(self, today_local: date) -> bool:
         """Open, with a due date before `today_local` (the user's today)."""

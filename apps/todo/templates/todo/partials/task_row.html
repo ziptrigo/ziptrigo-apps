@@ -79,7 +79,7 @@
         </button>
         {% else %}
         {% if not task.is_completed %}{% include 'todo/partials/postpone_menu.html' %}{% endif %}
-        {% if task.active_recurrence and not task.is_completed %}
+        {% if task.offers_stop_repeating %}
         <button type="button" @click="show($el)"
                 data-url="{% url 'todo:trash-task' task.number %}"
                 data-title="Move to trash"

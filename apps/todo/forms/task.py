@@ -4,6 +4,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 
 from apps.accounts.models import User
+from apps.accounts.services.timezones import user_today
 
 from ..models import Label, Priority, RecurrenceMode
 from ..services.limits import TITLE_MAX
@@ -75,7 +76,7 @@ class TaskForm(forms.Form):
         if not value:
             return ''
         try:
-            return parse_rule(value)
+            return parse_rule(value, user_today(self.user))
         except ValidationError as exc:
             raise forms.ValidationError(exc.messages) from None
 

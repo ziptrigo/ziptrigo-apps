@@ -8,8 +8,9 @@ from django.core.exceptions import ValidationError
 from django.urls import reverse
 
 from apps.billing.services import add_credits
+from apps.core.models import Notification
 
-from ..models import Recurrence, RecurrenceMode, Task, TodoAccount
+from ..models import Recurrence, RecurrenceMode, Task, TodoAccount, TodoSettings
 from ..services import (
     complete_task,
     create_task,
@@ -21,7 +22,14 @@ from ..services import (
     uncomplete_task,
     update_task,
 )
-from ..services.recurrence import describe, next_date, on_completed, parse_rule
+from ..services.recurrence import (
+    describe,
+    failure_key,
+    first_date,
+    next_date,
+    on_completed,
+    parse_rule,
+)
 from .conftest import balance
 from .factories import make_label, make_task, make_user
 
@@ -29,6 +37,7 @@ pytestmark = pytest.mark.django_db
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
 MONTHLY_FIRST = 'FREQ=MONTHLY;BYMONTHDAY=1'
+TODAY = date(2026, 10, 28)
 
 
 def occurrences(user) -> list[Task]:
@@ -55,8 +64,8 @@ class TestParseRule:
         ],
     )
     def test_accepts_and_canonicalises(self, value, canonical):
-        assert parse_rule(value) == canonical
-        assert parse_rule(canonical) == canonical  # idempotent
+        assert parse_rule(value, TODAY) == canonical
+        assert parse_rule(canonical, TODAY) == canonical  # idempotent
 
     @pytest.mark.parametrize(
         'value',
@@ -92,19 +101,56 @@ class TestParseRule:
     )
     def test_refuses_what_is_not_supported(self, value):
         with pytest.raises(ValidationError) as caught:
-            parse_rule(value)
+            parse_rule(value, TODAY)
         assert caught.value.messages == ['Unsupported repeat rule.']
 
     def test_refuses_a_rule_longer_than_255_characters(self):
         with pytest.raises(ValidationError, match='too long'):
-            parse_rule('FREQ=WEEKLY;BYDAY=' + ','.join(['MO'] * 100))
+            parse_rule('FREQ=WEEKLY;BYDAY=' + ','.join(['MO'] * 100), TODAY)
 
     @pytest.mark.parametrize(
         'value', ['FREQ=DAILY;UNTIL=20200101', 'FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30']
     )
     def test_refuses_a_rule_that_never_occurs_again(self, value):
         with pytest.raises(ValidationError, match='no upcoming date'):
-            parse_rule(value)
+            parse_rule(value, TODAY)
+
+
+class TestParseRuleToday:
+    def test_until_the_users_local_today_is_accepted_in_the_evening_in_chicago(
+        self, funded_user, freeze_now
+    ):
+        funded_user.timezone = 'America/Chicago'
+        funded_user.save()
+        freeze_now(2026, 10, 29, 4, 30)  # 23:30 on the 28th in Chicago, the 29th in UTC
+
+        task = create_task(
+            funded_user,
+            title='Last one',
+            due_date=date(2026, 10, 28),
+            rrule='FREQ=DAILY;UNTIL=20261028',
+        )
+
+        assert task.recurrence is not None
+        assert parse_rule('FREQ=DAILY;UNTIL=20261028', date(2026, 10, 28)) == (
+            'FREQ=DAILY;UNTIL=20261028'
+        )
+        with pytest.raises(ValidationError, match='no upcoming date'):
+            parse_rule('FREQ=DAILY;UNTIL=20261028', date(2026, 10, 29))  # UTC's today: past it
+
+    def test_the_form_checks_against_the_users_today(self, web, funded_user, freeze_now):
+        funded_user.timezone = 'America/Chicago'
+        funded_user.save()
+        freeze_now(2026, 10, 29, 4, 30)
+
+        response = web.post(
+            reverse('todo:create'),
+            {'title': 'Last', 'due_date': '2026-10-28', 'rrule': 'FREQ=DAILY;UNTIL=20261028'},
+            **HTMX,
+        )
+
+        assert response.status_code != 422
+        assert Task.objects.filter(title='Last').exists()
 
 
 class TestDescribe:
@@ -169,6 +215,39 @@ class TestNextDate:
         assert next_date(rule, date(2026, 1, 31)) == date(2026, 2, 28)
         assert next_date(rule, date(2028, 1, 31)) == date(2028, 2, 29)  # a leap year
         assert next_date(rule, date(2026, 2, 28)) == date(2026, 3, 31)
+
+    def test_a_day_less_monthly_rule_is_clamped_to_short_months_and_keeps_its_day(self):
+        rule = 'FREQ=MONTHLY'
+
+        assert next_date(rule, date(2026, 1, 31)) == date(2026, 2, 28)
+        assert next_date(rule, date(2026, 2, 28), day=31) == date(2026, 3, 31)
+        assert next_date(rule, date(2026, 3, 31)) == date(2026, 4, 30)
+        assert next_date(rule, date(2026, 4, 30), day=31) == date(2026, 5, 31)
+        assert next_date(rule, date(2028, 1, 31)) == date(2028, 2, 29)  # a leap year
+        assert next_date(rule, date(2026, 1, 30)) == date(2026, 2, 28)
+        assert next_date(rule, date(2026, 1, 29)) == date(2026, 2, 28)
+        assert next_date(rule, date(2026, 1, 28)) == date(2026, 2, 28)
+
+    def test_the_clamp_respects_the_interval_and_until(self):
+        assert next_date('FREQ=MONTHLY;INTERVAL=2', date(2026, 1, 31)) == date(2026, 3, 31)
+        assert next_date('FREQ=MONTHLY;INTERVAL=3', date(2026, 11, 30), day=31) == date(2027, 2, 28)
+        # The 1st of February is before the end date, but the clamped 28th is not.
+        assert next_date('FREQ=MONTHLY;UNTIL=20260215', date(2026, 1, 31)) is None
+        assert next_date('FREQ=MONTHLY;UNTIL=20260228', date(2026, 1, 31)) == date(2026, 2, 28)
+
+    def test_a_day_less_yearly_rule_on_the_29th_of_february(self):
+        rule = 'FREQ=YEARLY'
+
+        assert next_date(rule, date(2028, 2, 29)) == date(2029, 2, 28)
+        assert next_date(rule, date(2029, 2, 28), day=29) == date(2030, 2, 28)
+        assert next_date(rule, date(2031, 2, 28), day=29) == date(2032, 2, 29)
+        assert next_date('FREQ=YEARLY;INTERVAL=4', date(2028, 2, 29)) == date(2032, 2, 29)
+        assert next_date('FREQ=YEARLY;BYMONTH=2', date(2026, 10, 31)) == date(2027, 2, 28)
+
+    def test_first_date_includes_today_and_clamps(self):
+        assert first_date('FREQ=MONTHLY', date(2026, 1, 31)) == date(2026, 1, 31)
+        assert first_date('FREQ=YEARLY', date(2028, 2, 29)) == date(2028, 2, 29)
+        assert first_date('FREQ=YEARLY;BYMONTH=2', date(2026, 10, 31)) == date(2027, 2, 28)
 
     def test_last_friday(self):
         assert next_date('FREQ=MONTHLY;BYDAY=-1FR', date(2026, 10, 28)) == date(2026, 10, 30)
@@ -463,6 +542,156 @@ class TestSubtasksAndBilling:
         assert Recurrence.objects.get().occurrences_created == 1  # nothing advanced
 
 
+class TestAnOccurrenceSpawnsAtMostOnce:
+    @pytest.mark.parametrize('mode', [RecurrenceMode.FIXED, RecurrenceMode.FROM_COMPLETION])
+    def test_complete_uncomplete_complete_creates_and_charges_nothing_more(
+        self, funded_user, wednesday, mode
+    ):
+        task = create_task(
+            funded_user,
+            title='Daily',
+            due_date=wednesday,
+            rrule='FREQ=DAILY',
+            recurrence_mode=mode,
+        )
+        complete_task(task)
+        spent = balance(funded_user)
+        used = month_usage(get_account(funded_user), TodoSettings.load())
+        state = Recurrence.objects.get()
+        anchor = state.anchor_date
+
+        uncomplete_task(task)
+        complete_task(task)
+        uncomplete_task(task)
+        complete_task(task)
+
+        assert len(occurrences(funded_user)) == 2
+        state.refresh_from_db()
+        assert (state.anchor_date, state.occurrences_created) == (anchor, 2)
+        assert balance(funded_user) == spent
+        assert month_usage(get_account(funded_user), TodoSettings.load()) == used
+        assert Task.objects.get(pk=task.pk).completed_at is not None
+
+    def test_the_new_occurrence_remembers_the_anchor_it_was_scheduled_for(
+        self, funded_user, wednesday
+    ):
+        first = create_task(funded_user, title='Daily', due_date=wednesday, rrule='FREQ=DAILY')
+        assert first.recurrence_anchor == wednesday
+
+        complete_task(first)
+
+        second = occurrences(funded_user)[1]
+        assert second.recurrence_anchor == second.due_date == date(2026, 10, 29)
+
+    def test_completing_an_older_open_occurrence_creates_nothing(self, funded_user, wednesday):
+        first = create_task(funded_user, title='Daily', due_date=wednesday, rrule='FREQ=DAILY')
+        complete_task(first)
+        second = occurrences(funded_user)[1]
+        uncomplete_task(first)  # two open occurrences, the first one older
+        complete_task(second)
+        assert len(occurrences(funded_user)) == 3
+
+        complete_task(first)
+
+        assert len(occurrences(funded_user)) == 3
+        assert Recurrence.objects.get().occurrences_created == 3
+
+    def test_a_rule_change_makes_the_edited_task_the_one_that_spawns(self, funded_user, wednesday):
+        first = create_task(funded_user, title='Daily', due_date=wednesday, rrule='FREQ=DAILY')
+        complete_task(first)
+        second = occurrences(funded_user)[1]
+        uncomplete_task(first)
+
+        update_task(first, changes={'rrule': 'FREQ=WEEKLY'})
+        complete_task(second)  # an older anchor now: nothing
+
+        assert len(occurrences(funded_user)) == 2
+        assert Task.objects.get(pk=first.pk).recurrence_anchor == wednesday
+        complete_task(first)
+        assert occurrences(funded_user)[2].due_date == date(2026, 11, 4)
+
+
+class TestFailedNextOccurrence:
+    def notices(self, user):
+        return list(Notification.objects.filter(user=user, source='todo'))
+
+    def test_a_refused_occurrence_tells_the_user_and_leaves_the_repeat_retryable(
+        self, funded_user, config, wednesday
+    ):
+        task = create_task(funded_user, title='Pay “rent”', due_date=wednesday, rrule='FREQ=DAILY')
+        config.max_open_tasks_per_user = 0
+        config.save()
+
+        complete_task(task)
+
+        state = Recurrence.objects.get()
+        assert (state.anchor_date, state.occurrences_created, state.ended_at) == (
+            wednesday,
+            1,
+            None,
+        )
+        (notice,) = self.notices(funded_user)
+        assert notice.title == 'Couldn\u2019t create the next \u201cPay \u201crent\u201d\u201d'
+        assert 'open-task limit' in notice.body
+        assert 'uncomplete and complete' in notice.body and 'manually' in notice.body
+        assert notice.url == reverse('todo:task', args=[task.number])
+        assert notice.key == failure_key(state)
+
+        config.max_open_tasks_per_user = 100
+        config.save()
+        uncomplete_task(task)
+        complete_task(task)  # there is room now
+
+        assert len(occurrences(funded_user)) == 2
+        assert self.notices(funded_user) == []  # the stale notice is cleared
+
+    def test_the_subtasks_are_left_out_when_they_do_not_fit(self, funded_user, config, wednesday):
+        parent = create_task(funded_user, title='Clean', due_date=wednesday, rrule='FREQ=DAILY')
+        create_task(funded_user, title='Sub', parent=parent)
+        config.max_open_tasks_per_user = 2
+        config.save()
+
+        complete_task(parent)
+
+        _, copy = occurrences(funded_user)
+        assert copy.due_date == date(2026, 10, 29)
+        assert not copy.subtasks.exists()
+        assert Task.objects.filter(title='Sub').count() == 1  # the partial copy was undone
+        state = Recurrence.objects.get()
+        assert (state.anchor_date, state.occurrences_created) == (date(2026, 10, 29), 2)
+        (notice,) = self.notices(funded_user)
+        assert 'no subtasks' in notice.title and 'Clean' in notice.title
+        assert 'subtasks were not copied' in notice.body
+        assert notice.key == failure_key(state)
+
+    def test_a_task_without_subtasks_is_not_retried_and_a_clean_one_creates_no_notice(
+        self, funded_user, wednesday
+    ):
+        task = create_task(funded_user, title='Daily', due_date=wednesday, rrule='FREQ=DAILY')
+
+        complete_task(task)
+
+        assert self.notices(funded_user) == []
+        assert len(occurrences(funded_user)) == 2
+
+    def test_a_failing_notification_does_not_fail_the_completion(
+        self, funded_user, config, wednesday, monkeypatch
+    ):
+        from apps.core.services import notifications
+
+        def boom(*args, **kwargs):
+            raise RuntimeError('boom')
+
+        monkeypatch.setattr(notifications, 'notify', boom)
+        task = create_task(funded_user, title='Daily', due_date=wednesday, rrule='FREQ=DAILY')
+        config.max_open_tasks_per_user = 0
+        config.save()
+
+        complete_task(task)
+
+        assert Task.objects.get(pk=task.pk).completed_at is not None
+
+
 class TestRaceAndUncomplete:
     def test_two_completions_with_the_same_stale_task_create_one_occurrence(
         self, funded_user, wednesday
@@ -537,6 +766,51 @@ class TestSettingTheRule:
         state = Recurrence.objects.get()
         assert (state.rrule, state.anchor_date) == (MONTHLY_FIRST, date(2026, 11, 20))
         assert Recurrence.objects.count() == 1  # edited in place
+
+    def test_changing_the_rule_restarts_the_count(self, funded_user, wednesday):
+        first = create_task(funded_user, title='Daily', due_date=wednesday, rrule='FREQ=DAILY')
+        complete_task(first)
+        second = occurrences(funded_user)[1]
+        assert Recurrence.objects.get().occurrences_created == 2
+
+        update_task(second, changes={'rrule': 'FREQ=DAILY;COUNT=2'})
+
+        assert Recurrence.objects.get().occurrences_created == 0
+        for _ in range(3):  # a new COUNT of 2 counts the occurrences made after the change
+            complete_task(occurrences(funded_user)[-1])
+        assert len(occurrences(funded_user)) == 4  # 2 before the change + 2 after it
+        assert Recurrence.objects.get().ended_at is not None
+
+    def test_the_same_rule_and_mode_do_not_restart_the_count(self, funded_user, wednesday):
+        first = create_task(funded_user, title='Daily', due_date=wednesday, rrule='FREQ=DAILY')
+        complete_task(first)
+        second = occurrences(funded_user)[1]
+
+        update_task(second, changes={'rrule': 'FREQ=DAILY', 'title': 'Daily!'})
+
+        assert Recurrence.objects.get().occurrences_created == 2
+
+    def test_a_day_less_rule_keeps_the_intended_day_across_short_months(
+        self, funded_user, freeze_now
+    ):
+        freeze_now(2027, 1, 20)
+        task = create_task(
+            funded_user, title='Invoice', due_date=date(2027, 1, 31), rrule='FREQ=MONTHLY'
+        )
+        dates = [task.due_date]
+
+        for _ in range(4):
+            complete_task(occurrences(funded_user)[-1])
+            dates.append(occurrences(funded_user)[-1].due_date)
+
+        assert dates == [
+            date(2027, 1, 31),
+            date(2027, 2, 28),
+            date(2027, 3, 31),
+            date(2027, 4, 30),
+            date(2027, 5, 31),
+        ]
+        assert Recurrence.objects.get().anchor_day == 31
 
     def test_the_same_rule_and_mode_change_nothing(self, funded_user, wednesday):
         task = create_task(funded_user, title='Rent', due_date=wednesday, rrule=MONTHLY_FIRST)
@@ -770,6 +1044,33 @@ class TestPages:
         page = web.get(reverse('todo:today')).content.decode()
 
         assert page.count('data-checkbox-name="stop_recurrence"') == 1
+
+    def test_the_trash_button_offers_to_stop_only_for_the_only_open_occurrence(
+        self, web, funded_user, wednesday
+    ):
+        first = create_task(funded_user, title='Rent', due_date=wednesday, rrule='FREQ=DAILY')
+        complete_task(first)
+        uncomplete_task(first)  # two open occurrences now
+        assert Task.objects.filter(user=funded_user, completed_at__isnull=True).count() == 2
+
+        rows = web.get(reverse('todo:all')).content.decode()
+        page = web.get(reverse('todo:task', args=[first.number])).content.decode()
+        assert 'data-checkbox-name="stop_recurrence"' not in rows
+        assert 'data-checkbox-name="stop_recurrence"' not in page
+
+        trash_task(occurrences(funded_user)[1])  # leaves the first as the only one
+        rows = web.get(reverse('todo:all')).content.decode()
+        page = web.get(reverse('todo:task', args=[first.number])).content.decode()
+        assert rows.count('data-checkbox-name="stop_recurrence"') == 1
+        assert page.count('data-checkbox-name="stop_recurrence"') == 1
+
+    def test_a_stopped_repeat_does_not_offer_to_stop(self, web, funded_user, wednesday):
+        task = create_task(funded_user, title='Rent', due_date=wednesday, rrule='FREQ=DAILY')
+        recurrence.stop(task)
+
+        page = web.get(reverse('todo:all')).content.decode()
+
+        assert 'data-checkbox-name="stop_recurrence"' not in page
 
     def test_completing_from_the_page_creates_the_next_occurrence(
         self, web, funded_user, wednesday
