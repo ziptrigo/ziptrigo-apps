@@ -48,7 +48,11 @@ def allocate_number(account: TodoAccount) -> int:
 
 def update_default_due_time(account: TodoAccount, due_time: time) -> TodoAccount:
     """Save the time a task with a date and no time is treated as due. When it changed, the unsent
-    reminders of the user's date-only tasks are recomputed (they are due at this time)."""
+    reminders of the user's date-only tasks (they are due at this time) are recomputed by a task
+    queued on commit, like a time zone change: a user can have thousands of tasks, and this runs in
+    the request."""
+    from apps.core.services.queue import enqueue_after_commit
+
     from . import reminders  # `reminders` imports this module
 
     changed = account.default_due_time != due_time
@@ -56,7 +60,7 @@ def update_default_due_time(account: TodoAccount, due_time: time) -> TodoAccount
     with transaction.atomic():
         account.save(update_fields=['default_due_time'])
         if changed:
-            reminders.reschedule_user(account.user, untimed_only=True)
+            enqueue_after_commit(reminders.reschedule_user_reminders, str(account.user_id), True)
     return account
 
 

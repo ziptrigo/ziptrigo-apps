@@ -6,12 +6,27 @@ due time, `dates.due_at`). `Reminder.fire_at` is that instant in UTC; it is reco
 `deliver_due` (the `todo.send_reminders` job, every minute) delivers what is due and records each
 delivery as a `ReminderDelivery`, the history.
 
+**Whole days are calendar days.** An offset that is a whole number of days (1440 minutes or a
+multiple, so "1 day before" and "1 week before") is taken on the owner's wall clock: the due local
+date minus the days, at the same local time, then converted to UTC. Across a clock change that
+keeps "1 day before" at the same hour of the day, whereas 24 elapsed hours would land an hour off.
+Every other offset (minutes and hours) is real elapsed time.
+
+**Re-arming.** A date or time the *user* changes (`update_task`, `postpone_task`,
+`reschedule_overdue`: `on_due_changed`) recomputes every reminder of the task, sent ones too, and
+arms a sent one again (`sent_at` null) when its new time is ahead, so a postponed task reminds the
+user for its new due time. The time-zone and default-due-time passes never do (`reschedule_user`
+touches unsent reminders only): they move the same due moment, and re-arming there could fire a
+reminder twice for it.
+
 **Stale reminders.** A reminder added when its time has already passed fires at the next job run,
 so one set a minute late is not lost -- but only if it is no older than `FIRE_WINDOW` (1 hour) by
-then: the job never delivers older ones, it marks them sent without a delivery (also to keep the
-`(sent_at, fire_at)` index small). `add_reminder` goes further and creates a reminder that is more
-than `LATE_GRACE` (24 hours) overdue already sent, so a long-dated edit ("1 day before" on a task
-due in an hour) doesn't leave an unsent row behind. Between the two limits the job's rule decides.
+then: the job never delivers older ones, it marks them sent and `skipped` (the sweep, which also
+keeps the partial index on unsent reminders small), with a `ReminderDelivery` of note `skipped` in
+the history when the task is open and its owner active. `add_reminder` goes further and creates a
+reminder that is more than `LATE_GRACE` (24 hours) overdue already sent and skipped, so a
+long-dated edit ("1 day before" on a task due in an hour) doesn't leave an unsent row behind.
+Between the two limits the job's rule decides.
 
 A completed or trashed task keeps its reminders, but the job skips them (leaving them unsent) and so
 does it for an inactive user: restoring or uncompleting a task whose time is still ahead (or within
@@ -20,23 +35,22 @@ the window) makes them live again; the sweep marks the older ones sent.
 
 import logging
 from collections.abc import Iterable
-from datetime import datetime, timedelta
-from uuid import UUID
+from datetime import date, datetime, timedelta
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
-from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models import Exists, F, OuterRef, QuerySet
 from django.tasks import task as background_task
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.accounts.services.timezones import user_today, user_tz
+from apps.accounts.services.timezones import local_datetime, user_today, user_tz
 from apps.core.services import notifications
 from apps.core.services.email import send_email
-from apps.core.services.queue import enqueue_after_commit
 
 from ..limits import MAX_REMINDER_MINUTES, MAX_REMINDERS_PER_TASK
 from ..models import (
@@ -64,6 +78,8 @@ BATCH = 200
 NOTICE_TITLE_MAX = 120
 SUBJECT_TITLE_MAX = 80
 
+MINUTES_PER_DAY = 1440
+
 NO_DATE_MESSAGE = 'Set a due date first.'
 DUPLICATE_MESSAGE = 'There is already a reminder at that time.'
 TOO_MANY_MESSAGE = f'A task can have at most {MAX_REMINDERS_PER_TASK} reminders.'
@@ -80,11 +96,21 @@ def _error(field: str, message: str) -> ValidationError:
 
 
 def fire_at_for(task: Task, minutes_before: int, account: TodoAccount) -> datetime | None:
-    """The UTC instant a reminder `minutes_before` the task's due time is due: the due instant
-    (`dates.due_at`: the task's time, or the account's default due time for a date-only task, on the
-    owner's wall clock) minus the minutes. `None` for a task without a due date."""
+    """The UTC instant a reminder `minutes_before` the task's due time is due. The due moment is
+    the task's time, or the account's default due time for a date-only task, on the owner's wall
+    clock (`dates.due_at`). A whole number of days (1440 minutes or more, evenly) is subtracted on
+    that wall clock -- the same local time N calendar days earlier, so "1 day before" stays at the
+    same hour across a clock change -- and anything else is real elapsed minutes. `None` for a task
+    without a due date."""
+    if task.due_date is None:
+        return None
+    due_time = task.due_time or account.default_due_time
+    if minutes_before and minutes_before % MINUTES_PER_DAY == 0:
+        earlier = task.due_date - timedelta(days=minutes_before // MINUTES_PER_DAY)
+        return local_datetime(task.user, earlier, due_time)
     due = due_at(task, account)
-    return None if due is None else due - timedelta(minutes=minutes_before)
+    assert due is not None
+    return due - timedelta(minutes=minutes_before)
 
 
 def clean_minutes(value: object) -> int:
@@ -110,7 +136,7 @@ def describe_offset(minutes: int) -> str:
     minutes, hours and days that divides the offset evenly."""
     if minutes == 0:
         return 'At time of task'
-    for size, name in ((1440, 'day'), (60, 'hour'), (1, 'minute')):
+    for size, name in ((MINUTES_PER_DAY, 'day'), (60, 'hour'), (1, 'minute')):
         if minutes % size == 0:
             count = minutes // size
             return f'{count} {name}{"" if count == 1 else "s"} before'
@@ -119,13 +145,13 @@ def describe_offset(minutes: int) -> str:
 
 def split_offset(minutes: int) -> tuple[int, str]:
     """`(amount, unit)` (`minutes`, `hours` or `days`) the edit form shows for an offset."""
-    for size, unit in ((1440, 'days'), (60, 'hours')):
+    for size, unit in ((MINUTES_PER_DAY, 'days'), (60, 'hours')):
         if minutes and minutes % size == 0:
             return minutes // size, unit
     return minutes, 'minutes'
 
 
-UNIT_MINUTES = {'minutes': 1, 'hours': 60, 'days': 1440}
+UNIT_MINUTES = {'minutes': 1, 'hours': 60, 'days': MINUTES_PER_DAY}
 
 
 def due_label(task: Task, today=None) -> str:
@@ -156,13 +182,18 @@ def _create(
 ) -> Reminder:
     fire_at = fire_at_for(task, minutes, account)
     assert fire_at is not None  # callers check the due date
-    return Reminder.objects.create(
+    sent_at = _initial_sent_at(fire_at, now)
+    reminder = Reminder.objects.create(
         task=task,
         minutes_before=minutes,
         channel=channel,
         fire_at=fire_at,
-        sent_at=_initial_sent_at(fire_at, now),
+        sent_at=sent_at,
+        skipped=sent_at is not None,
     )
+    if sent_at is not None:
+        _record_skipped([reminder], now)
+    return reminder
 
 
 def _lock_open_task(task: Task) -> Task:
@@ -235,10 +266,15 @@ def update_reminder(
             current.minutes_before = minutes
             current.fire_at = fire_at
             current.sent_at = _initial_sent_at(fire_at, now)
-            fields += ['minutes_before', 'fire_at', 'sent_at']
+            current.skipped = current.sent_at is not None
+            current.failures = 0
+            fields += ['minutes_before', 'fire_at', 'sent_at', 'skipped', 'failures']
         if fields:
             current.save(update_fields=fields)
-    for name in ('minutes_before', 'channel', 'fire_at', 'sent_at'):
+            if current.skipped and 'sent_at' in fields:
+                current.task = current_task
+                _record_skipped([current], now)
+    for name in ('minutes_before', 'channel', 'fire_at', 'sent_at', 'skipped'):
         setattr(reminder, name, getattr(current, name))
     return reminder
 
@@ -253,38 +289,79 @@ def delete_reminder(reminder: Reminder) -> None:
 # -- Rescheduling --------------------------------------------------------------------------------
 
 
-def _refresh(reminders: Iterable[Reminder], account: TodoAccount) -> int:
-    """Recompute `fire_at` of `reminders` (each with its task loaded), writing what changed.
-    Returns how many changed."""
+REFRESH_FIELDS = ['fire_at', 'sent_at', 'skipped', 'failures']
+
+
+def _refresh(
+    reminders: Iterable[Reminder],
+    account: TodoAccount,
+    *,
+    rearm: bool = False,
+    now: datetime | None = None,
+) -> int:
+    """Recompute `fire_at` of `reminders` (each with its task, and the task's user, loaded) in one
+    `bulk_update`, writing what changed. With `rearm`, a *sent* reminder whose new time is ahead of
+    `now` is armed again (`sent_at` null, no longer skipped, its failure count reset); without it
+    the callers pass unsent reminders only. Returns how many changed."""
+    now = now or timezone.now()
     changed: list[Reminder] = []
     for reminder in reminders:
         fire_at = fire_at_for(reminder.task, reminder.minutes_before, account)
-        if fire_at is not None and fire_at != reminder.fire_at:
-            reminder.fire_at = fire_at
+        if fire_at is None:
+            continue
+        dirty = fire_at != reminder.fire_at
+        reminder.fire_at = fire_at
+        if rearm and reminder.sent_at is not None and fire_at > now:
+            reminder.sent_at = None
+            reminder.skipped = False
+            reminder.failures = 0
+            dirty = True
+        if dirty:
             changed.append(reminder)
-    Reminder.objects.bulk_update(changed, ['fire_at'])
+    Reminder.objects.bulk_update(changed, REFRESH_FIELDS)
     return len(changed)
 
 
-def reschedule(task: Task, account: TodoAccount | None = None) -> int:
-    """Recompute `fire_at` for every reminder of `task` that is not sent yet (call it after the
-    task's date or time changed). `fire_at` can't be empty, so a task whose due date was cleared
-    loses its reminders instead (the web confirmation says so). Returns how many were changed or
-    deleted."""
+def reschedule(task: Task, account: TodoAccount | None = None, *, rearm: bool = False) -> int:
+    """Recompute `fire_at` for the reminders of `task` that are not sent yet (call it after the
+    task's date or time changed), or for all of them with `rearm`, which also arms a sent one again
+    when its new time is ahead (see the module docstring: only for a change the user made).
+    `fire_at` can't be empty, so a task whose due date was cleared loses its reminders instead (the
+    web confirmation says so). Returns how many were changed or deleted."""
     if task.due_date is None:
         return Reminder.objects.filter(task=task).delete()[0]
     account = account or get_account(task.user)
-    unsent = list(Reminder.objects.filter(task=task, sent_at__isnull=True))
-    for reminder in unsent:
+    queryset = Reminder.objects.filter(task=task)
+    if not rearm:
+        queryset = queryset.filter(sent_at__isnull=True)
+    rows = list(queryset)
+    for reminder in rows:
         reminder.task = task
-    return _refresh(unsent, account)
+    return _refresh(rows, account, rearm=rearm)
+
+
+def reminders_of_tasks(tasks: QuerySet) -> list[Reminder]:
+    """Every reminder of the tasks in `tasks`, each with its task loaded: the first half of moving
+    many tasks at once (`move_reminders` is the second), in one query."""
+    return list(Reminder.objects.filter(task__in=tasks.values('pk')).select_related('task'))
+
+
+def move_reminders(rows: list[Reminder], user: User, new_due_date: date) -> int:
+    """After a bulk move of tasks to `new_due_date` (`reschedule_overdue`), recompute the
+    reminders `reminders_of_tasks` loaded before the move, re-arming sent ones whose new time is
+    ahead: one `bulk_update`, however many tasks. Returns how many changed."""
+    for reminder in rows:
+        reminder.task.user = user  # already loaded: the zone is needed for every one
+        reminder.task.due_date = new_due_date
+    return _refresh(rows, get_account(user), rearm=True)
 
 
 def reschedule_user(user: User, *, untimed_only: bool = False) -> int:
     """Recompute `fire_at` of every unsent reminder of `user`'s tasks: after their time zone
     changed (all of them), or the default due time did (`untimed_only`: tasks with a date and no
-    time, the only ones that use it). Completed and trashed tasks are included, so restoring one
-    later finds its reminders already right. Returns how many changed."""
+    time, the only ones that use it). Never re-arms a sent reminder: the due moment did not change.
+    Completed and trashed tasks are included, so restoring one later finds its reminders already
+    right. Returns how many changed."""
     account = get_account(user)
     queryset = Reminder.objects.filter(
         task__user=user, task__due_date__isnull=False, sent_at__isnull=True
@@ -303,24 +380,27 @@ def reschedule_user(user: User, *, untimed_only: bool = False) -> int:
 
 
 def on_due_changed(task: Task, *, had_date: bool) -> None:
-    """What a changed due date or time does to the reminders (call it after saving): the unsent ones
-    are recomputed, or deleted when the date was cleared; a task that just *gained* a date (it had
-    none) gets the default reminder when it has none yet."""
+    """What a changed due date or time does to the reminders (call it after saving, for a change
+    the user made): all are recomputed and a sent one whose new time is ahead is armed again, or
+    they are deleted when the date was cleared; a task that just *gained* a date (it had none) gets
+    the default reminder when it has none yet."""
     account = get_account(task.user)
-    reschedule(task, account)
+    reschedule(task, account, rearm=True)
     if not had_date:
         apply_defaults(task, account)
 
 
 @background_task(queue_name='default')
-def reschedule_user_reminders(user_id: str) -> None:
-    """After a time zone change (`apps.py` connects `timezone_changed` to it): every unsent
-    reminder of the user is recomputed on their new wall clock. Idempotent."""
+def reschedule_user_reminders(user_id: str, untimed_only: bool = False) -> None:
+    """After a time zone change (`apps.py` connects `timezone_changed` to it) or a new default due
+    time (`untimed_only`, `accounts.update_default_due_time`): every unsent reminder of the user is
+    recomputed on their wall clock. Queued, not run in the request: a user can have thousands of
+    tasks. Idempotent."""
     try:
         user = User.objects.get(pk=UUID(user_id))
     except User.DoesNotExist, ValueError:
         return
-    reschedule_user(user)
+    reschedule_user(user, untimed_only=untimed_only)
 
 
 # -- Defaults and recurrence ---------------------------------------------------------------------
@@ -407,7 +487,13 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def _record(
-    reminder: Reminder, *, channel: str, now: datetime, note: str = '', notification_id=None
+    reminder: Reminder,
+    *,
+    channel: str,
+    now: datetime,
+    note: str = '',
+    notification_id=None,
+    fire_token: UUID | None = None,
 ) -> ReminderDelivery:
     task = reminder.task
     return ReminderDelivery.objects.create(
@@ -421,10 +507,65 @@ def _record(
         sent_at=now,
         fire_at=reminder.fire_at,
         notification_id=notification_id,
+        fire_token=fire_token,
     )
 
 
-def _deliver(reminder: Reminder, now: datetime) -> None:
+def _record_skipped(rows: Iterable[Reminder], now: datetime) -> None:
+    """Write the history row of reminders that were not delivered because their time had passed
+    (`note='skipped'`, in the first channel they would have used). Only for a task that is open
+    and an active owner: for a completed or trashed task, or an inactive user, there was nothing to
+    miss, and a row per reminder would only bury the history. `rows` have their task and its user
+    loaded."""
+    deliveries = [
+        ReminderDelivery(
+            reminder=reminder,
+            task=reminder.task,
+            user=reminder.task.user,
+            task_number=reminder.task.number,
+            task_title=reminder.task.title,
+            channel=(
+                DeliveryChannel.EMAIL
+                if reminder.channel == ReminderChannel.EMAIL
+                else DeliveryChannel.IN_APP
+            ),
+            note=ReminderDelivery.NOTE_SKIPPED,
+            sent_at=now,
+            fire_at=reminder.fire_at,
+        )
+        for reminder in rows
+        if reminder.task.is_open
+        and reminder.task.user.is_active
+        and reminder.task.user.status == User.STATUS_ACTIVE
+    ]
+    ReminderDelivery.objects.bulk_create(deliveries)
+
+
+def _queue_email(reminder: Reminder, fire_token: UUID, now: datetime) -> None:
+    """Queue the email of one firing once the surrounding transaction has committed. If queuing
+    fails (the reminder is already marked sent by then) the failure is recorded in the history, so
+    it doesn't vanish: `note='failed'`. `send_reminder_email` records every other outcome."""
+
+    def _enqueue() -> None:
+        try:
+            send_reminder_email.enqueue(str(reminder.pk), str(fire_token))
+        except Exception:
+            logger.exception('Could not queue the email of reminder %s', reminder.pk)
+            try:
+                _record(
+                    reminder,
+                    channel=DeliveryChannel.EMAIL,
+                    now=now,
+                    note=ReminderDelivery.NOTE_FAILED,
+                    fire_token=fire_token,
+                )
+            except Exception:
+                logger.exception('Could not record the failed email of reminder %s', reminder.pk)
+
+    transaction.on_commit(_enqueue)
+
+
+def _deliver(reminder: Reminder, now: datetime, fire_token: UUID) -> None:
     """Deliver one claimed reminder through its channel(s). In-app is written here, in the
     caller's transaction; an email is queued on commit (`send_reminder_email` records it)."""
     task_row = reminder.task
@@ -441,16 +582,56 @@ def _deliver(reminder: Reminder, now: datetime) -> None:
             channel=DeliveryChannel.IN_APP,
             now=now,
             notification_id=notification.pk,
+            fire_token=fire_token,
         )
     if reminder.channel in (ReminderChannel.EMAIL, ReminderChannel.BOTH):
-        enqueue_after_commit(send_reminder_email, str(reminder.pk))
+        _queue_email(reminder, fire_token, now)
 
 
 def sweep_stale(now: datetime) -> int:
-    """Mark unsent reminders more than `FIRE_WINDOW` overdue as sent, without delivering them."""
-    return Reminder.objects.filter(sent_at__isnull=True, fire_at__lt=now - FIRE_WINDOW).update(
-        sent_at=now
-    )
+    """Mark unsent reminders more than `FIRE_WINDOW` overdue as sent and `skipped`, without
+    delivering them, `BATCH` at a time under row locks (a row another run holds is left to it). The
+    history gets a `skipped` row for each one whose task is open and owner active. Returns how many
+    were swept."""
+    cutoff = now - FIRE_WINDOW
+    swept = 0
+    while True:
+        with transaction.atomic():
+            batch = list(
+                Reminder.objects.filter(sent_at__isnull=True, fire_at__lt=cutoff)
+                .select_related('task', 'task__user')
+                .select_for_update(skip_locked=True, of=('self',))
+                .order_by('fire_at')[:BATCH]
+            )
+            if not batch:
+                return swept
+            Reminder.objects.filter(pk__in=[r.pk for r in batch], sent_at__isnull=True).update(
+                sent_at=now, skipped=True
+            )
+            _record_skipped(batch, now)
+            swept += len(batch)
+
+
+def _note_failure(reminder: Reminder, exc: Exception) -> None:
+    """A delivery raised (and its savepoint rolled back, claim included, so the reminder is tried
+    again next run until the sweep ends it an hour after its time). The full traceback is logged
+    for the first failure only; later ones are a one-line warning, so a reminder that always fails
+    doesn't log a traceback every minute. The count (`Reminder.failures`) is stored, so it holds
+    across runs and runners."""
+    if reminder.failures == 0:
+        logger.exception('Could not deliver reminder %s', reminder.pk)
+    else:
+        logger.warning(
+            'Could not deliver reminder %s again (failure %d): %s: %s',
+            reminder.pk,
+            reminder.failures + 1,
+            type(exc).__name__,
+            exc,
+        )
+    try:
+        Reminder.objects.filter(pk=reminder.pk).update(failures=F('failures') + 1)
+    except Exception:
+        logger.exception('Could not count the failure of reminder %s', reminder.pk)
 
 
 def deliver_due(now: datetime | None = None) -> int:
@@ -458,9 +639,9 @@ def deliver_due(now: datetime | None = None) -> int:
     `FIRE_WINDOW`) and whose task is open and owner active, in batches of `BATCH` under
     `select_for_update(skip_locked=True)`. Each is claimed with a conditional `UPDATE` on
     `sent_at IS NULL` (the compare-and-swap, so two runs never deliver one twice), then delivered
-    in a savepoint of its own: one that fails is logged and left unsent for the next run. Older
-    unsent reminders are marked sent without a delivery first (`sweep_stale`). Returns how many were
-    delivered."""
+    in a savepoint of its own: one that fails is logged (`_note_failure`) and left unsent for the
+    next run. Older unsent reminders are marked sent and skipped first (`sweep_stale`). Returns how
+    many were delivered."""
     now = now or timezone.now()
     sweep_stale(now)
     delivered = 0
@@ -483,17 +664,18 @@ def deliver_due(now: datetime | None = None) -> int:
             )
             for reminder in batch:
                 try:
+                    fire_token = uuid4()
                     with transaction.atomic():
                         claimed = Reminder.objects.filter(
                             pk=reminder.pk, sent_at__isnull=True
-                        ).update(sent_at=now)
+                        ).update(sent_at=now, skipped=False, fire_token=fire_token)
                         if not claimed:
                             continue
-                        _deliver(reminder, now)
+                        _deliver(reminder, now, fire_token)
                     delivered += 1
-                except Exception:
+                except Exception as exc:
                     failed.add(reminder.pk)
-                    logger.exception('Could not deliver reminder %s', reminder.pk)
+                    _note_failure(reminder, exc)
         if not batch:
             return delivered
 
@@ -502,8 +684,13 @@ def deliver_due(now: datetime | None = None) -> int:
 
 
 @background_task(queue_name='default')
-def send_reminder_email(reminder_id: str) -> None:
-    """Email a reminder to its task's owner, and record the delivery.
+def send_reminder_email(reminder_id: str, fire_token: str) -> None:
+    """Email one firing of a reminder to its task's owner, and record the delivery.
+
+    `fire_token` is the reminder's `fire_token` at the claim that queued this task: a reminder that
+    has been claimed again since (re-armed, then fired again) belongs to a newer firing and this
+    one sends nothing, and an email row already recorded for the token is a duplicate run. A
+    re-armed reminder therefore emails again, even at the same instant.
 
     Only to a *confirmed* address (changing the address through the API un-confirms the account but
     leaves sessions valid, and this mail quotes the user's task): otherwise nothing is sent and the
@@ -513,15 +700,18 @@ def send_reminder_email(reminder_id: str) -> None:
     no longer open, an inactive owner, or an email already recorded for this very firing, send
     nothing."""
     try:
+        token = UUID(fire_token)
         reminder = Reminder.objects.select_related('task', 'task__user').get(pk=UUID(reminder_id))
     except Reminder.DoesNotExist, ValueError:
         return
     task_row = reminder.task
     user = task_row.user
+    if reminder.fire_token != token:
+        return
     if not task_row.is_open or not user.is_active or user.status != User.STATUS_ACTIVE:
         return
     if ReminderDelivery.objects.filter(
-        reminder=reminder, channel=DeliveryChannel.EMAIL, fire_at=reminder.fire_at
+        reminder=reminder, channel=DeliveryChannel.EMAIL, fire_token=token
     ).exists():
         return
     now = timezone.now()
@@ -531,10 +721,12 @@ def send_reminder_email(reminder_id: str) -> None:
             channel=DeliveryChannel.EMAIL,
             now=now,
             note=ReminderDelivery.NOTE_UNCONFIRMED,
+            fire_token=token,
         )
         return
 
-    link = f'{settings.BASE_URL.rstrip("/")}{reverse("todo:task", args=[task_row.number])}'
+    base = settings.BASE_URL.rstrip('/')
+    link = f'{base}{reverse("todo:task", args=[task_row.number])}'
     context = {
         'title': task_row.title,
         'due': due_label(task_row),
@@ -544,6 +736,7 @@ def send_reminder_email(reminder_id: str) -> None:
         if task_row.description
         else '',
         'link': link,
+        'settings_link': f'{base}{reverse("todo:settings")}',
     }
     successes, _ = send_email(
         to=user.email,
@@ -556,4 +749,5 @@ def send_reminder_email(reminder_id: str) -> None:
         channel=DeliveryChannel.EMAIL,
         now=now,
         note='' if successes else ReminderDelivery.NOTE_FAILED,
+        fire_token=token,
     )

@@ -260,9 +260,11 @@ class ReminderAdmin(ReadOnlyModelAdmin):
         'channel',
         'fire_at',
         'sent_at',
+        'skipped',
     ]
     list_filter = [
         'channel',
+        'skipped',
         ('sent_at', admin.EmptyFieldListFilter),
         'fire_at',
     ]

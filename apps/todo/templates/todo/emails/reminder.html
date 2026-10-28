@@ -3,5 +3,5 @@
   <p style="margin: 0 0 16px; color: #475a53;">{{ due }} ({{ zone }})</p>
   {% if description_html %}<div style="margin: 0 0 16px; padding: 8px 16px; border-left: 4px solid #8fa89e; background: #f4f7f6;">{{ description_html }}</div>{% endif %}
   <p><a href="{{ link }}" style="color: #3b4a47;">Open the task</a></p>
-  <p style="color: #5a736a; font-size: 12px;">You get this because a reminder is set on this task. You can change reminders on the task, or turn email reminders off in your To-do settings.</p>
+  <p style="color: #5a736a; font-size: 12px;">You set this reminder on <a href="{{ link }}" style="color: #5a736a;">{{ title }}</a>. Change or remove it on the task page; your default for new tasks is in <a href="{{ settings_link }}" style="color: #5a736a;">To-do settings</a>.</p>
 </div>

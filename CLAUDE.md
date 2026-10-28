@@ -3437,19 +3437,28 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
 
 - **Models.** `Reminder` (UUID id, `task` FK `related_name='reminders'`, `minutes_before` 0 to
   `MAX_REMINDER_MINUTES` (43,200, 30 days), `channel` `in_app`/`email`/`both`, `fire_at` the UTC
-  instant it is due (indexed), `sent_at` null until delivered or discarded; unique `(task,
-  minutes_before)`, at most `MAX_REMINDERS_PER_TASK` (10); index `(sent_at, fire_at)`).
+  instant it is due, `sent_at` null until delivered or swept, `skipped` true when it was marked
+  sent without a delivery, `fire_token` a UUID regenerated at every claim (what the email task
+  dedupes on) and `failures` the deliveries that raised since it was last armed; unique `(task,
+  minutes_before)`, at most `MAX_REMINDERS_PER_TASK` (10); one **partial index** on `fire_at`
+  `WHERE sent_at IS NULL` (`todo_reminder_unsent_fire`: all the job ever looks up, and it stays as
+  small as the reminders waiting, however many have been sent)).
   `ReminderDelivery` is the **history**, one row per channel actually used (`reminder` and `task`
   `SET_NULL`, `user` `CASCADE`, `task_number` and `task_title` copied at delivery so it survives a
   purged task, `channel` `in_app`/`email`, `note` `unconfirmed` (an email skipped for an
-  unconfirmed address) or `failed` (every email backend failed), `sent_at`, `fire_at`,
-  `notification_id` of the core notification when in-app); it does not depend on the notification
-  purge. `TodoAccount.default_reminder_minutes` (null = new tasks get none, default 5) and
+  unconfirmed address), `failed` (every email backend failed, or the email could not be queued) or
+  `skipped` (the reminder was never delivered: see "Delivery"), `sent_at`, `fire_at`,
+  `notification_id` of the core notification when in-app, `fire_token` of the firing); it does
+  not depend on the notification purge. `TodoAccount.default_reminder_minutes` (null = new tasks get none, default 5) and
   `default_reminder_channel` (default `in_app`), both with a `db_default` (the #102 lesson).
 - **Computation.** `fire_at_for(task, minutes_before, account)` is `dates.due_at` (the task's time,
   or the account's `default_due_time` for a date-only task, on the owner's wall clock, #177) minus
-  the minutes, in real minutes: across a clock change "1 day before" is 24 hours before the due
-  instant. `None` without a due date.
+  the offset. **An offset of whole days (1440 minutes or a multiple, so "1 day before" and "1 week
+  before") is taken on the wall clock**: the due local date minus N days at the same local time,
+  then converted to UTC, so across a clock change it stays at the same hour of the day (due 1
+  Nov 2026 09:00 in Chicago, "1 day before" is 31 Oct 09:00 CDT, 25 elapsed hours earlier, where
+  24 elapsed hours would give 10:00 CDT). **Minute and hour offsets are real elapsed time.** `None`
+  without a due date. The tests cross Chicago's 1 Nov 2026 change for both kinds.
 - **Defaults.** `create_task` calls `reminders.apply_defaults` for every source once the row exists
   (a task with a date and no reminders gets `default_reminder_minutes` in `default_reminder_channel`),
   and so does a task that first *gains* a date (`update_task`, `postpone_task` on a task without
@@ -3460,36 +3469,50 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
   cap, a time outside 0..30 days, an unknown channel, `'Only an open task has reminders.'`). The task row
   is locked, so racing adds can't pass the cap together. A reminder is created with `sent_at`
   null even when its time has passed, so one added a little late fires at the next job run; one
-  more than `LATE_GRACE` (24 h) overdue is created already sent, with no delivery. Editing the time
-  recomputes `fire_at` and arms it again (`sent_at` null, same `LATE_GRACE` rule); editing only the
-  channel leaves a sent reminder sent.
-- **Rescheduling** (`reschedule(task)`, `reschedule_user(user, untimed_only=)`): recomputes
-  `fire_at` of every reminder with `sent_at` null, from `update_task` (the date or the time
-  changed), `postpone_task` and `reschedule_overdue` (which update the date themselves), the
-  settings (`update_default_due_time`, when the time changed: the user's tasks with a date and no
-  time) and the `timezone_changed` receiver (`apps.py`, `weak=False`, `dispatch_uid`; it only
-  queues the `default`-queue task `reschedule_user_reminders(user_id)` through
-  `enqueue_after_commit`, since a user can have thousands of tasks). Both user-wide passes include
-  completed and trashed tasks, so restoring one later finds its reminders already right. **Clearing
-  the due date deletes every reminder of the task** (`fire_at` can't be empty; the details form
-  asks first, `tasks.js`: "Clearing the date removes its N reminders"). A reminder that was
-  **already sent is never re-armed** by a date change (postponing a task whose reminder fired does
-  not make it fire again; add or edit a reminder for that), and one swept as stale stays sent.
+  more than `LATE_GRACE` (24 h) overdue is created already sent and `skipped`, with a `skipped`
+  history row. Editing the time recomputes `fire_at` and arms it again (`sent_at` null, same
+  `LATE_GRACE` rule, `failures` reset); editing only the channel leaves a sent reminder sent.
+- **Rescheduling.** Two kinds, on purpose:
+  - *The user changed the due moment* (`update_task` when the date or the time changed,
+    `postpone_task`, `reschedule_overdue`; `on_due_changed` -> `reschedule(task, rearm=True)`):
+    **every** reminder of the task is recomputed, sent ones too, and a sent (or skipped) one whose
+    new `fire_at` is ahead of now is **armed again** (`sent_at` null, `skipped` false, `failures`
+    0), so a postponed task reminds the user for its new date, and "reschedule all overdue to
+    today" (`reminders_of_tasks` before the move, `move_reminders` after: one query to load and
+    one `bulk_update`, however many tasks) doesn't silently drop every reminder. A sent one whose
+    new time is not ahead stays sent (with the new `fire_at`).
+  - *The same due moment, a different instant* (`reschedule_user(user, untimed_only=)`): the
+    `timezone_changed` receiver (`apps.py`, `weak=False`, `dispatch_uid`) and
+    `update_default_due_time` (only when the time changed: the user's tasks with a date and no
+    time) each queue the `default`-queue task `reschedule_user_reminders(user_id, untimed_only)`
+    through `enqueue_after_commit`, never run in the request (a user can have thousands of
+    tasks). They touch **unsent reminders only and never re-arm**: a re-arm there could fire a
+    reminder twice for one due moment. They include completed and trashed tasks, so restoring one
+    later finds its reminders already right.
+  - **Clearing the due date deletes every reminder of the task** (`fire_at` can't be empty; the
+    details form asks first, `tasks.js`: "Clearing the date removes its N reminders").
 - **Recurrence.** `reminders.copy_extras` (called by `recurrence.copy_extras`) first deletes the
   reminders `create_task` gave the new occurrence by default, then copies each of the completed
   task's (`minutes_before`, `channel`, `fire_at` recomputed for the new date, `sent_at` null): the
   occurrence has exactly the reminders its predecessor had, none if the user removed them all.
 - **Delivery.** `todo.send_reminders` (every minute, lease 5 minutes; `jobs.send_reminders`) calls
-  `deliver_due(now)`. It first sweeps (`sweep_stale`): an unsent reminder more than `FIRE_WINDOW`
-  (1 h) overdue is marked sent without a delivery (a long-dated edit, a job that was down, and the
-  index stays small). Then, in batches of 200 under `select_for_update(skip_locked=True,
+  `deliver_due(now)`. It first sweeps (`sweep_stale`, in batches under row locks): an unsent
+  reminder more than `FIRE_WINDOW` (1 h) overdue is marked sent **and `skipped`** without a
+  delivery (a long-dated edit, a job that was down), and, when its task is open and its owner
+  active, gets a `ReminderDelivery` with `note='skipped'` so the history says why nothing came
+  (a completed or trashed task or an inactive owner is only flagged: there was nothing to miss, and
+  a row per reminder would bury the history). The task panel and the history show "Skipped" where a
+  delivered one says "Sent". Then, in batches of 200 under `select_for_update(skip_locked=True,
   of=('self',))`, the reminders that are unsent, due and **whose task is open and owner active**
   (the query filters these, so a reminder of a completed or trashed task or an inactive user stays
   unsent, and uncompleting or restoring inside the window makes it live again; the sweep marks it
   sent once it is older than the window). Each is claimed with `UPDATE ... WHERE sent_at IS NULL`
-  (the compare-and-swap, a lost claim delivers nothing) and delivered in a savepoint of its own: a
-  failure is logged and the reminder, claim included, is left for the next run (until the window
-  passes). **Because the job's window (1 h) is much shorter than `LATE_GRACE` (24 h), a reminder
+  (the compare-and-swap, a lost claim delivers nothing; the claim also writes a new `fire_token`)
+  and delivered in a savepoint of its own: a failure is left for the next run (claim included, until
+  the sweep ends it an hour after its time) and counted in `Reminder.failures`, which is stored so it
+  holds across runs and runners. **Only the first failure logs a traceback**; later ones log a
+  one-line warning with the failure number, so a reminder that always fails doesn't log a stack
+  every minute. **Because the job's window (1 h) is much shorter than `LATE_GRACE` (24 h), a reminder
   added between 1 and 24 hours late is created unsent but swept at the next run without a
   delivery; `LATE_GRACE` only decides whether such a row is created already sent.**
   - *In-app*: `notifications.notify(source='todo', title=task.title cut to 120, body='Due 28 Oct
@@ -3497,15 +3520,21 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     owner's today, `Due 30 Oct 2026` for a date-only one on another day, with a reminder set days
     ahead) and a `ReminderDelivery` with the notification's id. No `key`: nothing deletes the
     notice later.
-  - *Email*: `send_reminder_email(reminder_id)` (`default` queue, queued with
-    `enqueue_after_commit`) renders `todo/emails/reminder.{txt,html}` (autoescaped HTML; the text
+  - *Email*: `send_reminder_email(reminder_id, fire_token)` (`default` queue, queued on commit by
+    `_queue_email`; if queuing raises, it is logged and a `ReminderDelivery` with `note='failed'` is
+    recorded, since the reminder is already marked sent) renders `todo/emails/reminder.{txt,html}` (autoescaped HTML; the text
     body has autoescape off; the description through `render_markdown(text, None)`, so no task
     links; an absolute `BASE_URL` link; the due date and time with the zone's name) and sends
     through `apps.core.services.email.send_email` **only to a confirmed address**; the subject is
     `Reminder: <title cut to 80>` and carries nothing else. The delivery row is written by the
-    task, either way (`note='unconfirmed'`, or `failed` when every backend failed). It sends
-    nothing when the reminder is gone, the task is no longer open, the owner is inactive or an
-    email row already exists for this `fire_at` (so a duplicate run doesn't send twice).
+    task, either way (`note='unconfirmed'`, or `failed` when every backend failed). The footer says
+    "You set this reminder on <task>. Change or remove it on the task page; your default for new
+    tasks is in To-do settings.", linking both with absolute `BASE_URL` URLs (the settings only
+    change the default for *new* tasks, so it doesn't promise to switch existing reminders off). **The
+    dedupe is per firing, not per instant**: it sends nothing when the reminder is gone, the task is
+    no longer open, the owner is inactive, the reminder's current `fire_token` is not the one it was
+    queued with (it has been claimed again since) or an email row with that token already exists (a
+    duplicate run). A reminder armed again therefore emails again, even at the same `fire_at`.
   - `both` does both. There is no rate limit on delivery (the system's own job).
 - **Web.** The task page's panel has a "Reminders" block (so each action answers the whole
   panel): each reminder as `5 minutes before (in-app)` (`describe_offset`: the largest of
@@ -3527,8 +3556,9 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
 - **Admin.** Read-only `ReminderAdmin` and `ReminderDeliveryAdmin`.
 - **Tests.** `apps/todo/tests/test_reminders.py` (the fire time across zones and a clock change,
   defaults for each source, the rules, rescheduling on every trigger including a zone change,
-  carrying over, delivery, the claim, the skips, the stale window, email, the job, the admin, the
-  pages and 404s, the history and the settings) and TODO-21 in `tests_e2e/ai/todo.md`.
+  carrying over, re-arming, a real Chicago clock change for day and hour offsets, delivery, the
+  claim, the skips, the stale window, email and its dedupe, failure logging, the job, the admin, the
+  index, the pages and 404s, the history and the settings) and TODO-21 in `tests_e2e/ai/todo.md`.
 
 ### Queue and scheduler
 

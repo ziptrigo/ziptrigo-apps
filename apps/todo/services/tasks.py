@@ -499,16 +499,13 @@ def reschedule_overdue(user: User) -> int:
     """Set the due date to today on every open task that is overdue, keeping the times. Returns
     how many changed."""
     today = user_today(user)
-    account = get_account(user)
     with transaction.atomic():
-        with_reminders = list(dates.overdue_set(user).filter(reminders__isnull=False).distinct())
-        count = dates.overdue_set(user).update(
-            due_date=today, today_position=0, updated_at=timezone.now()
-        )
-        for task in with_reminders:  # their reminders follow the new date
-            task.user = user
-            task.due_date = today
-            reminders.reschedule(task, account)
+        overdue = dates.overdue_set(user)
+        # Their reminders follow the new date, re-armed when it is ahead (the user asked for this):
+        # loaded in one query before the move and rewritten in one `bulk_update` after it.
+        pending = reminders.reminders_of_tasks(overdue)
+        count = overdue.update(due_date=today, today_position=0, updated_at=timezone.now())
+        reminders.move_reminders(pending, user, today)
     return count
 
 

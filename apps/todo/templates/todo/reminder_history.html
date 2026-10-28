@@ -21,7 +21,8 @@
         </span>
         <span class="text-xs text-gray-600 dark:text-gray-300">{{ delivery.get_channel_display }}
             {% if delivery.note == 'unconfirmed' %}(not sent: your email address is not confirmed)
-            {% elif delivery.note == 'failed' %}(could not be sent){% endif %}</span>
+            {% elif delivery.note == 'failed' %}(could not be sent)
+            {% elif delivery.note == 'skipped' %}(skipped: its time had already passed){% endif %}</span>
     </li>
     {% endfor %}
 </ul>

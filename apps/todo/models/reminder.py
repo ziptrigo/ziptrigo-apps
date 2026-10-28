@@ -33,7 +33,11 @@ class Reminder(models.Model):
 
     `fire_at` is the UTC instant it is due, recomputed by `services.reminders.reschedule` whenever
     the date, the time, the default due time or the owner's time zone changes. `sent_at` is null
-    until the job has delivered it (or decided it is too old to deliver).
+    until the job has delivered it or decided not to (`skipped`: it was too old to deliver). A
+    user-initiated change of the due date arms a sent reminder again (`sent_at` null, `skipped`
+    false) when its new time is ahead. `fire_token` is regenerated each time the reminder is
+    claimed for delivery, so the email task can tell one firing from the next; `failures` counts
+    the deliveries that raised since it was last armed (it keeps the log quiet).
     """
 
     objects: ClassVar['models.Manager']
@@ -57,8 +61,11 @@ class Reminder(models.Model):
         str,
         models.CharField(max_length=8, choices=ReminderChannel, default=ReminderChannel.IN_APP),
     )
-    fire_at = cast(datetime, models.DateTimeField(db_index=True))
+    fire_at = cast(datetime, models.DateTimeField())
     sent_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    skipped = cast(bool, models.BooleanField(default=False, db_default=False))
+    fire_token = cast(uuid.UUID, models.UUIDField(default=uuid.uuid4, editable=False))
+    failures = cast(int, models.PositiveSmallIntegerField(default=0, db_default=0))
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
 
     class Meta:
@@ -72,7 +79,15 @@ class Reminder(models.Model):
                 name='todo_reminder_minutes_max',
             ),
         ]
-        indexes = [models.Index(fields=['sent_at', 'fire_at'])]
+        # The job only ever looks for unsent reminders by time (`deliver_due`, `sweep_stale`): a
+        # partial index stays as small as the reminders waiting, however many have been sent.
+        indexes = [
+            models.Index(
+                fields=['fire_at'],
+                condition=models.Q(sent_at__isnull=True),
+                name='todo_reminder_unsent_fire',
+            )
+        ]
 
     def __str__(self) -> str:
         return f'Reminder {self.minutes_before} min before #{self.task.number}'
@@ -98,8 +113,11 @@ class ReminderDelivery(models.Model):
 
     #: `note` when an email was skipped because the address is not confirmed.
     NOTE_UNCONFIRMED = 'unconfirmed'
-    #: `note` when every email backend failed.
+    #: `note` when every email backend failed, or the email could not be queued.
     NOTE_FAILED = 'failed'
+    #: `note` when the reminder was not delivered at all: its time had passed (a late edit, or a
+    #: job that was down) before anything could deliver it.
+    NOTE_SKIPPED = 'skipped'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reminder = cast(
@@ -137,6 +155,9 @@ class ReminderDelivery(models.Model):
     sent_at = cast(datetime, models.DateTimeField())
     fire_at = cast(datetime, models.DateTimeField())
     notification_id = cast(uuid.UUID | None, models.UUIDField(null=True, blank=True))
+    #: The reminder's `fire_token` at the firing this row belongs to (null for a skipped one):
+    #: what the email task dedupes on.
+    fire_token = cast(uuid.UUID | None, models.UUIDField(null=True, blank=True))
 
     class Meta:
         ordering = ['-sent_at']

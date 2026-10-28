@@ -13,7 +13,7 @@
                 <i class="far fa-bell text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
                 <span class="font-medium text-gray-900 dark:text-gray-100">{{ reminder.offset_text }} <span class="font-normal text-gray-500 dark:text-gray-400">({{ reminder.get_channel_display|lower }})</span></span>
                 <span class="text-xs text-gray-500 dark:text-gray-400">
-                    {% if reminder.sent_at %}Sent{% else %}Fires{% endif %} {{ reminder.fire_at|date:'D j M Y, H:i' }}
+                    {% if reminder.skipped %}Skipped{% elif reminder.sent_at %}Sent{% else %}Fires{% endif %} {{ reminder.fire_at|date:'D j M Y, H:i' }}
                 </span>
                 {% if task.is_open %}
                 <span class="ml-auto flex items-center gap-1">
@@ -113,7 +113,8 @@
         <li>
             {{ delivery.sent_at|date:'j M Y, H:i' }} &middot; {{ delivery.get_channel_display }}
             {% if delivery.note == 'unconfirmed' %}<span class="text-xs text-amber-700 dark:text-amber-400">(not sent: your email address is not confirmed)</span>
-            {% elif delivery.note == 'failed' %}<span class="text-xs text-red-600 dark:text-red-400">(could not be sent)</span>{% endif %}
+            {% elif delivery.note == 'failed' %}<span class="text-xs text-red-600 dark:text-red-400">(could not be sent)</span>
+            {% elif delivery.note == 'skipped' %}<span class="text-xs text-gray-500 dark:text-gray-400">(skipped: its time had already passed)</span>{% endif %}
         </li>
         {% endfor %}
     </ul>

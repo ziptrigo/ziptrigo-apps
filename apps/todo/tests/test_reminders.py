@@ -79,18 +79,54 @@ class TestFireAt:
     def test_a_task_without_a_date_has_none(self, funded_user):
         assert reminders.fire_at_for(make_task(funded_user), 5, get_account(funded_user)) is None
 
-    def test_minutes_are_real_minutes_across_a_clock_change(self, funded_user):
-        # The clocks go back in Chicago on 1 November 2026 (02:00 CDT -> 01:00 CST). 09:00 on the
-        # 2nd is 15:00 UTC (CST, UTC-6); a day before is 24 real hours earlier, 15:00 UTC on the
-        # 1st, which is 09:00 CST again.
+    # The clocks go back in Chicago on 1 November 2026, at 02:00 CDT (07:00 UTC) -> 01:00 CST.
+    @pytest.mark.parametrize(
+        ('due_date', 'minutes', 'expected_utc'),
+        [
+            # Whole days are calendar days on the wall clock: 09:00 on the 1st (CST, UTC-6) a day
+            # before is 09:00 on 31 October (CDT, UTC-5), 25 elapsed hours earlier.
+            (date(2026, 11, 1), 1440, utc(2026, 10, 31, 14, 0)),
+            # A week before 3 November 09:00 CST is 27 October 09:00 CDT (169 elapsed hours).
+            (date(2026, 11, 3), 7 * 1440, utc(2026, 10, 27, 14, 0)),
+            (date(2026, 11, 3), 2 * 1440, utc(2026, 11, 1, 15, 0)),  # no change in between: 48 h
+        ],
+    )
+    def test_whole_days_are_calendar_days_across_a_clock_change(
+        self, funded_user, due_date, minutes, expected_utc
+    ):
         funded_user.timezone = 'America/Chicago'
-        task = make_task(funded_user, due_date=date(2026, 11, 2), due_time=time(9, 0))
+        task = make_task(funded_user, due_date=due_date, due_time=time(9, 0))
 
-        fire = reminders.fire_at_for(task, 24 * 60, get_account(funded_user))
+        fire = reminders.fire_at_for(task, minutes, get_account(funded_user))
+
+        assert fire == expected_utc
         assert fire is not None
+        assert fire.astimezone(reminders.user_tz(funded_user)).hour == 9  # the same wall clock
 
-        assert fire == utc(2026, 11, 1, 15, 0)
-        assert fire.astimezone(reminders.user_tz(funded_user)).hour == 9
+    def test_a_date_only_task_keeps_its_default_hour_across_a_clock_change(self, funded_user):
+        funded_user.timezone = 'America/Chicago'
+        task = make_task(funded_user, due_date=date(2026, 11, 1))  # default due time 09:00
+
+        fire = reminders.fire_at_for(task, 1440, get_account(funded_user))
+
+        assert fire == utc(2026, 10, 31, 14, 0)  # 09:00 CDT
+
+    @pytest.mark.parametrize('minutes', [180, 90])
+    def test_minutes_and_hours_are_real_elapsed_time_across_a_clock_change(
+        self, funded_user, minutes
+    ):
+        # 03:00 CST on 1 November is 09:00 UTC. Three hours earlier is 06:00 UTC, which is 01:00
+        # CDT (the hour before the change): only 2 hours on the wall clock, 3 real ones.
+        funded_user.timezone = 'America/Chicago'
+        task = make_task(funded_user, due_date=date(2026, 11, 1), due_time=time(3, 0))
+
+        fire = reminders.fire_at_for(task, minutes, get_account(funded_user))
+
+        assert fire == utc(2026, 11, 1, 9, 0) - timedelta(minutes=minutes)
+        assert fire is not None
+        if minutes == 180:
+            assert fire == utc(2026, 11, 1, 6, 0)
+            assert fire.astimezone(reminders.user_tz(funded_user)).hour == 1
 
     def test_the_wall_clock_follows_the_users_zone(self, funded_user):
         task = make_task(funded_user, due_date=TODAY, due_time=time(9, 0))
@@ -282,9 +318,11 @@ class TestAddUpdateDelete:
 
         reminder = reminders.add_reminder(task, minutes_before=2 * 1440, channel='in_app')
 
-        assert reminder.sent_at == wednesday_noon()
+        assert reminder.sent_at == wednesday_noon() and reminder.skipped
         assert reminders.deliver_due(wednesday_noon()) == 0
-        assert not ReminderDelivery.objects.filter(reminder=reminder).exists()
+        assert not Notification.objects.exists()
+        delivery = ReminderDelivery.objects.get(reminder=reminder)  # why it never fired
+        assert (delivery.note, delivery.fire_token) == ('skipped', None)
 
     def test_update_changes_the_time_and_arms_it_again(self, funded_user, wednesday):
         task = timed_task(funded_user)
@@ -376,14 +414,17 @@ class TestReschedule:
 
         assert reminders_of(task)[0].fire_at == before
 
-    def test_a_sent_reminder_is_left_alone(self, funded_user, wednesday):
-        task = timed_task(funded_user)
+    def test_a_sent_reminder_is_left_alone_when_the_new_time_is_not_ahead(
+        self, funded_user, wednesday
+    ):
+        task = timed_task(funded_user)  # due 14:30, reminder 14:25
         Reminder.objects.filter(task=task).update(sent_at=wednesday_noon())
-        before = reminders_of(task)[0].fire_at
 
-        update_task(task, changes={'due_date': date(2026, 10, 30)})
+        update_task(task, changes={'due_date': date(2026, 10, 27)})  # moved back a day
 
-        assert reminders_of(task)[0].fire_at == before
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at == wednesday_noon()
+        assert reminder.fire_at == utc(2026, 10, 27, 14, 25)
 
     def test_clearing_the_date_deletes_the_reminders(self, funded_user, wednesday):
         task = timed_task(funded_user)
@@ -412,24 +453,28 @@ class TestReschedule:
 
         assert reminders_of(task)[0].fire_at == utc(2026, 10, 28, 22, 55)
 
-    def test_changing_the_default_due_time_moves_date_only_tasks_only(self, funded_user, wednesday):
+    def test_changing_the_default_due_time_moves_date_only_tasks_only(
+        self, funded_user, wednesday, django_capture_on_commit_callbacks
+    ):
         date_only = create_task(funded_user, title='a', due_date=TODAY)
         timed = timed_task(funded_user)
 
-        update_default_due_time(get_account(funded_user), time(10, 0))
+        with django_capture_on_commit_callbacks(execute=True):
+            update_default_due_time(get_account(funded_user), time(10, 0))
 
         assert reminders_of(date_only)[0].fire_at == utc(2026, 10, 28, 9, 55)
         assert reminders_of(timed)[0].fire_at == utc(2026, 10, 28, 14, 25)
 
     def test_saving_the_same_default_due_time_changes_nothing(
-        self, funded_user, wednesday, monkeypatch
+        self, funded_user, wednesday, monkeypatch, django_capture_on_commit_callbacks
     ):
         called = []
         monkeypatch.setattr(reminders, 'reschedule_user', lambda *a, **k: called.append(1))
 
-        update_default_due_time(get_account(funded_user), time(9, 0))
+        with django_capture_on_commit_callbacks(execute=True) as callbacks:
+            update_default_due_time(get_account(funded_user), time(9, 0))
 
-        assert called == []
+        assert called == [] and callbacks == []
 
     def test_a_new_time_zone_moves_every_reminder(
         self, funded_user, wednesday, django_capture_on_commit_callbacks
@@ -687,6 +732,12 @@ class TestChannelsAndEmail:
         Reminder.objects.filter(task=task).update(channel=channel)
         return task
 
+    @staticmethod
+    def run_email(reminder: Reminder) -> None:
+        """What the queued task does for the reminder's current firing."""
+        reminder.refresh_from_db()
+        reminders.send_reminder_email.call(str(reminder.pk), str(reminder.fire_token))
+
     def test_email_is_queued_and_sent_to_a_confirmed_address(
         self, funded_user, wednesday, sent, django_capture_on_commit_callbacks
     ):
@@ -773,11 +824,11 @@ class TestChannelsAndEmail:
     def test_the_email_task_ignores_what_is_gone_or_not_open(self, funded_user, wednesday, sent):
         task = self.make(funded_user, 'email')
         reminder = reminders_of(task)[0]
-        reminders.send_reminder_email.call(str(uuid4()))
-        reminders.send_reminder_email.call('nope')
+        reminders.send_reminder_email.call(str(uuid4()), str(uuid4()))
+        reminders.send_reminder_email.call('nope', 'nope')
         complete_task(task)
 
-        reminders.send_reminder_email.call(str(reminder.pk))
+        self.run_email(reminder)
 
         assert sent == [] and not ReminderDelivery.objects.exists()
 
@@ -785,8 +836,8 @@ class TestChannelsAndEmail:
         task = self.make(funded_user, 'email')
         reminder = reminders_of(task)[0]
 
-        reminders.send_reminder_email.call(str(reminder.pk))
-        reminders.send_reminder_email.call(str(reminder.pk))
+        self.run_email(reminder)
+        self.run_email(reminder)
 
         assert len(sent) == 1 and ReminderDelivery.objects.count() == 1
 
@@ -794,7 +845,7 @@ class TestChannelsAndEmail:
         monkeypatch.setattr(reminders, 'send_email', lambda **kwargs: (0, 1))
         task = self.make(funded_user, 'email')
 
-        reminders.send_reminder_email.call(str(reminders_of(task)[0].pk))
+        self.run_email(reminders_of(task)[0])
 
         assert ReminderDelivery.objects.get().note == 'failed'
 
@@ -803,7 +854,7 @@ class TestChannelsAndEmail:
         funded_user.save()
         task = self.make(funded_user, 'email')
 
-        reminders.send_reminder_email.call(str(reminders_of(task)[0].pk))
+        self.run_email(reminders_of(task)[0])
 
         assert '(Europe/Lisbon)' in sent[0]['text_body']
 
@@ -816,8 +867,11 @@ class TestStaleWindow:
 
         assert reminders.deliver_due(utc(2026, 10, 28, 15, 26)) == 0  # 1 h 1 min late
 
-        assert reminders_of(task)[0].sent_at == utc(2026, 10, 28, 15, 26)
-        assert not ReminderDelivery.objects.exists() and not Notification.objects.exists()
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at == utc(2026, 10, 28, 15, 26) and reminder.skipped
+        assert not Notification.objects.exists()
+        [delivery] = ReminderDelivery.objects.all()  # the history says why nothing came
+        assert (delivery.note, delivery.task_id) == ('skipped', task.pk)
 
     def test_inside_the_window_it_is_still_delivered(self, funded_user, wednesday):
         timed_task(funded_user)
@@ -831,13 +885,17 @@ class TestStaleWindow:
 
         assert reminders_of(task)[0].sent_at is None
 
-    def test_a_completed_tasks_old_reminder_is_swept_too(self, funded_user, wednesday):
+    def test_a_completed_tasks_old_reminder_is_swept_too_without_a_history_row(
+        self, funded_user, wednesday
+    ):
         task = timed_task(funded_user)
         complete_task(task)
 
         reminders.deliver_due(utc(2026, 10, 28, 17, 0))
 
-        assert reminders_of(task)[0].sent_at is not None
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is not None and reminder.skipped
+        assert not ReminderDelivery.objects.exists()  # nothing to miss on a completed task
 
     def test_an_uncompleted_task_does_not_fire_the_past(self, funded_user, wednesday):
         task = timed_task(funded_user)
@@ -1303,9 +1361,367 @@ class TestSettings:
         account.refresh_from_db()
         assert account.default_due_time == time(9, 0)
 
-    def test_a_new_default_due_time_reschedules(self, web, funded_user, wednesday):
+    def test_a_new_default_due_time_reschedules(
+        self, web, funded_user, wednesday, django_capture_on_commit_callbacks
+    ):
         task = create_task(funded_user, title='x', due_date=TODAY)
 
-        self.post(web, default_due_time='07:00')
+        with django_capture_on_commit_callbacks(execute=True):
+            self.post(web, default_due_time='07:00')
 
         assert reminders_of(task)[0].fire_at == utc(2026, 10, 28, 6, 55)
+
+
+class TestRearming:
+    """A due date the user changes arms an already sent reminder for the new date; the zone and the
+    default due time never do."""
+
+    def test_postponing_after_delivery_reminds_again(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        assert reminders.deliver_due(utc(2026, 10, 28, 14, 26)) == 1
+        assert reminders_of(task)[0].sent_at is not None
+
+        postpone_task(task, preset='tomorrow')
+
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is None and reminder.fire_at == utc(2026, 10, 29, 14, 25)
+        assert reminders.deliver_due(utc(2026, 10, 29, 14, 26)) == 1
+        assert Notification.objects.filter(user=funded_user).count() == 2
+
+    def test_rescheduling_all_overdue_to_today_reminds_again(self, funded_user, wednesday):
+        task = create_task(
+            funded_user, title='x', due_date=date(2026, 10, 27), due_time=time(23, 0)
+        )
+        assert reminders.deliver_due(utc(2026, 10, 27, 22, 56)) == 1
+
+        assert reschedule_overdue(funded_user) == 1
+
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is None and reminder.fire_at == utc(2026, 10, 28, 22, 55)
+        assert reminders.deliver_due(utc(2026, 10, 28, 22, 56)) == 1
+        assert Notification.objects.filter(user=funded_user).count() == 2
+
+    @pytest.mark.parametrize(
+        'changes',
+        [{'due_date': date(2026, 10, 30)}, {'due_time': time(18, 0)}],
+        ids=['date', 'time'],
+    )
+    def test_editing_the_date_or_time_reminds_again(self, funded_user, wednesday, changes):
+        task = timed_task(funded_user)
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+
+        update_task(task, changes=changes)
+
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is None and not reminder.skipped
+
+    def test_a_skipped_reminder_is_armed_again_too(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        reminders.deliver_due(utc(2026, 10, 28, 16, 0))  # swept: more than an hour late
+        assert reminders_of(task)[0].skipped
+        Reminder.objects.filter(task=task).update(failures=2)
+
+        postpone_task(task, preset='tomorrow')
+
+        [reminder] = reminders_of(task)
+        assert (reminder.sent_at, reminder.skipped, reminder.failures) == (None, False, 0)
+
+    def test_a_new_time_that_is_not_ahead_leaves_it_sent(self, funded_user, wednesday):
+        task = timed_task(funded_user, hour=20, minute=0)  # fires 19:55
+        reminders.deliver_due(utc(2026, 10, 28, 19, 56))
+
+        update_task(task, changes={'due_time': time(8, 0)})  # 07:55 today: before now (12:00)
+
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is not None and reminder.fire_at == utc(2026, 10, 28, 7, 55)
+
+    def test_a_time_zone_change_never_arms_a_sent_reminder(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        funded_user.timezone = 'Asia/Tokyo'  # 14:30 Tokyo is hours earlier in UTC: still sent
+        reminders.reschedule_user(funded_user)
+        funded_user.timezone = 'America/Los_Angeles'  # 14:30 there is later: a future instant
+
+        reminders.reschedule_user(funded_user)
+
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is not None and reminder.fire_at == utc(2026, 10, 28, 14, 25)
+
+    def test_a_default_due_time_change_never_arms_a_sent_reminder(self, funded_user, wednesday):
+        task = create_task(funded_user, title='x', due_date=TODAY)  # due 09:00, fires 08:55
+        reminders.deliver_due(utc(2026, 10, 28, 9, 0))
+
+        reminders.reschedule_user_reminders.call(str(funded_user.pk), True)
+        account = get_account(funded_user)
+        account.default_due_time = time(18, 0)
+        account.save()
+        reminders.reschedule_user_reminders.call(str(funded_user.pk), True)
+
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is not None and reminder.fire_at == utc(2026, 10, 28, 8, 55)
+
+    def test_rescheduling_all_overdue_uses_a_fixed_number_of_queries(self, funded_user, wednesday):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def overdue_tasks(count):
+            for i in range(count):
+                task = create_task(
+                    funded_user,
+                    title=f'x{i}',
+                    due_date=date(2026, 10, 20),
+                    due_time=time(9, i),
+                )
+                reminders.add_reminder(task, minutes_before=60, channel='email')
+
+        overdue_tasks(2)
+        with CaptureQueriesContext(connection) as small:
+            assert reschedule_overdue(funded_user) == 2
+
+        Task.objects.filter(user=funded_user).update(due_date=date(2026, 10, 20))
+        overdue_tasks(10)
+        with CaptureQueriesContext(connection) as large:
+            assert reschedule_overdue(funded_user) == 12
+
+        assert len(large) == len(small)
+        assert all(r.fire_at.date() == TODAY for r in Reminder.objects.filter(minutes_before=60))
+
+
+class TestDefaultDueTimeQueued:
+    def test_the_request_does_not_reschedule_a_task_does(
+        self, funded_user, wednesday, django_capture_on_commit_callbacks
+    ):
+        task = create_task(funded_user, title='x', due_date=TODAY)
+
+        with django_capture_on_commit_callbacks() as callbacks:
+            update_default_due_time(get_account(funded_user), time(7, 0))
+
+        assert len(callbacks) == 1
+        assert reminders_of(task)[0].fire_at == utc(2026, 10, 28, 8, 55)  # not yet
+        callbacks[0]()
+        assert reminders_of(task)[0].fire_at == utc(2026, 10, 28, 6, 55)
+
+    def test_only_date_only_tasks_are_recomputed(self, funded_user, wednesday):
+        timed = timed_task(funded_user)
+        date_only = create_task(funded_user, title='x', due_date=TODAY)
+        account = get_account(funded_user)
+        account.default_due_time = time(7, 0)
+        account.save()
+
+        reminders.reschedule_user_reminders.call(str(funded_user.pk), True)
+
+        assert reminders_of(timed)[0].fire_at == utc(2026, 10, 28, 14, 25)
+        assert reminders_of(date_only)[0].fire_at == utc(2026, 10, 28, 6, 55)
+
+
+class TestEmailFiring:
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        mails = []
+
+        def fake(**kwargs):
+            mails.append(kwargs)
+            return 1, 0
+
+        monkeypatch.setattr(reminders, 'send_email', fake)
+        return mails
+
+    def email_task(self, user):
+        task = timed_task(user)
+        Reminder.objects.filter(task=task).update(channel='email')
+        return task
+
+    def test_a_reminder_armed_again_emails_again_even_at_the_same_instant(
+        self, funded_user, wednesday, sent, django_capture_on_commit_callbacks
+    ):
+        task = self.email_task(funded_user)
+        with django_capture_on_commit_callbacks(execute=True):
+            reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        assert len(sent) == 1
+        reminder = reminders_of(task)[0]
+        # 5 -> 10 -> 5 minutes before: the same instant again, armed twice.
+        reminders.update_reminder(reminder, minutes_before=10)
+        reminders.update_reminder(reminder, minutes_before=5)
+        assert reminder.fire_at == utc(2026, 10, 28, 14, 25) and reminder.sent_at is None
+
+        with django_capture_on_commit_callbacks(execute=True):
+            reminders.deliver_due(utc(2026, 10, 28, 14, 27))
+
+        assert len(sent) == 2
+        assert ReminderDelivery.objects.filter(channel='email').count() == 2
+
+    def test_a_queued_email_of_an_older_firing_sends_nothing(self, funded_user, wednesday, sent):
+        task = self.email_task(funded_user)
+        reminder = reminders_of(task)[0]
+        old = str(reminder.fire_token)
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))  # a new firing: the token changed
+        reminder.refresh_from_db()
+        assert str(reminder.fire_token) != old
+
+        reminders.send_reminder_email.call(str(reminder.pk), old)
+
+        assert sent == []
+
+    def test_each_claim_has_its_own_token(self, funded_user, wednesday):
+        task = self.email_task(funded_user)
+        first = reminders_of(task)[0].fire_token
+
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+        second = reminders_of(task)[0].fire_token
+        postpone_task(task, preset='tomorrow')
+        reminders.deliver_due(utc(2026, 10, 29, 14, 26))
+
+        assert len({first, second, reminders_of(task)[0].fire_token}) == 3
+
+    def test_a_failure_to_queue_the_email_is_recorded(
+        self, funded_user, wednesday, monkeypatch, django_capture_on_commit_callbacks
+    ):
+        class Broken:
+            @staticmethod
+            def enqueue(*args):
+                raise RuntimeError('queue down')
+
+        monkeypatch.setattr(reminders, 'send_reminder_email', Broken)
+        task = self.email_task(funded_user)
+
+        with django_capture_on_commit_callbacks(execute=True):
+            assert reminders.deliver_due(utc(2026, 10, 28, 14, 26)) == 1
+
+        delivery = ReminderDelivery.objects.get()
+        assert (delivery.channel, delivery.note, delivery.task_id) == ('email', 'failed', task.pk)
+        assert reminders_of(task)[0].sent_at is not None
+
+    def test_the_footer_says_what_the_user_can_do(
+        self, funded_user, wednesday, sent, settings, django_capture_on_commit_callbacks
+    ):
+        settings.BASE_URL = 'https://app.example.com/'
+        task = self.email_task(funded_user)
+
+        with django_capture_on_commit_callbacks(execute=True):
+            reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+
+        [mail] = sent
+        task_url = f'https://app.example.com/todo/{task.number}/'
+        settings_url = 'https://app.example.com' + reverse('todo:settings')
+        assert 'You set this reminder on "Pay rent"' in mail['text_body']
+        assert 'Change or remove it on the task page' in mail['text_body']
+        assert 'your default for new tasks is in To-do settings' in mail['text_body']
+        assert task_url in mail['text_body'] and settings_url in mail['text_body']
+        assert 'You set this reminder on' in mail['html_body']
+        assert f'href="{settings_url}"' in mail['html_body']
+        assert f'href="{task_url}"' in mail['html_body']
+        assert 'turn email reminders off' not in mail['text_body']
+
+
+class TestFailureLogging:
+    def test_only_the_first_failure_logs_a_traceback(
+        self, funded_user, wednesday, monkeypatch, caplog
+    ):
+        task = timed_task(funded_user)
+
+        def boom(user, **kwargs):
+            raise RuntimeError('boom')
+
+        monkeypatch.setattr(reminders.notifications, 'notify', boom)
+
+        for minute in (26, 27, 28):
+            reminders.deliver_due(utc(2026, 10, 28, 14, minute))
+
+        ours = [r for r in caplog.records if r.name == reminders.logger.name]
+        assert [r.levelname for r in ours] == ['ERROR', 'WARNING', 'WARNING']
+        assert ours[0].exc_info is not None
+        assert all(r.exc_info is None for r in ours[1:])
+        assert 'RuntimeError: boom' in ours[1].getMessage()
+        assert reminders_of(task)[0].failures == 3
+        assert reminders_of(task)[0].sent_at is None
+
+    def test_the_sweep_still_ends_it_an_hour_later(self, funded_user, wednesday, monkeypatch):
+        task = timed_task(funded_user)
+        monkeypatch.setattr(
+            reminders.notifications, 'notify', lambda *a, **k: (_ for _ in ()).throw(OSError())
+        )
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+
+        reminders.deliver_due(utc(2026, 10, 28, 15, 26))
+
+        [reminder] = reminders_of(task)
+        assert reminder.sent_at is not None and reminder.skipped
+
+    def test_editing_the_time_resets_the_count(self, funded_user, wednesday):
+        task = timed_task(funded_user)
+        Reminder.objects.filter(task=task).update(failures=4)
+
+        reminders.update_reminder(reminders_of(task)[0], minutes_before=10)
+
+        assert reminders_of(task)[0].failures == 0
+
+
+class TestSkipped:
+    def test_the_panel_says_skipped_not_sent(self, web, funded_user, wednesday):
+        task = timed_task(funded_user)
+        reminders.deliver_due(utc(2026, 10, 28, 16, 0))  # swept
+
+        body = text(web.get(reverse('todo:task', args=[task.number])))
+
+        assert 'Skipped Wed 28 Oct 2026, 14:25' in body
+        assert 'Sent Wed 28 Oct' not in body
+        assert 'skipped: its time had already passed' in body  # in the task's history too
+
+    def test_a_delivered_one_still_says_sent(self, web, funded_user, wednesday):
+        task = timed_task(funded_user)
+        reminders.deliver_due(utc(2026, 10, 28, 14, 26))
+
+        body = text(web.get(reverse('todo:task', args=[task.number])))
+
+        assert 'Sent Wed 28 Oct 2026, 14:25' in body and 'Skipped' not in body
+
+    def test_the_history_page_says_skipped(self, web, funded_user, wednesday):
+        timed_task(funded_user)
+        reminders.deliver_due(utc(2026, 10, 28, 16, 0))
+
+        body = text(web.get(reverse('todo:reminder-history')))
+
+        assert 'skipped: its time had already passed' in body
+
+    def test_a_late_added_reminder_is_skipped_in_the_panel(self, web, funded_user, wednesday):
+        task = timed_task(funded_user)
+        reminders.add_reminder(task, minutes_before=2 * 1440, channel='in_app')
+
+        body = text(web.get(reverse('todo:task', args=[task.number])))
+
+        assert 'Skipped Mon 26 Oct 2026, 14:30' in body
+
+    def test_an_inactive_owners_reminder_is_swept_without_a_history_row(
+        self, funded_user, wednesday
+    ):
+        task = timed_task(funded_user)
+        funded_user.is_active = False
+        funded_user.save()
+
+        reminders.deliver_due(utc(2026, 10, 28, 16, 0))
+
+        assert reminders_of(task)[0].skipped and not ReminderDelivery.objects.exists()
+
+
+class TestIndex:
+    def test_one_partial_index_on_unsent_reminders(self):
+        meta = Reminder._meta  # ty: ignore[unresolved-attribute]
+        [index] = meta.indexes
+
+        assert index.fields == ['fire_at']
+        assert index.condition is not None and 'sent_at' in str(index.condition)
+        assert not meta.get_field('fire_at').db_index
+
+    def test_the_migration_creates_it(self):
+        from importlib import import_module
+
+        migration = import_module('apps.todo.migrations.0005_reminders').Migration
+
+        assert migration.dependencies[0] == ('todo', '0004_attachments_and_storage_billing')
+        added = [
+            op.index
+            for op in migration.operations
+            if op.__class__.__name__ == 'AddIndex' and op.model_name == 'reminder'
+        ]
+        assert [(i.name, i.fields) for i in added] == [('todo_reminder_unsent_fire', ['fire_at'])]
+        assert str(added[0].condition) == "(AND: ('sent_at__isnull', True))"
