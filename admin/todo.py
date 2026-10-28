@@ -299,18 +299,17 @@ def _sha256_base64_file(path: Path) -> str:
 def todo_login(
     environment: EnvironmentAnnotation,
     email: str,
-    password: str | None = typer.Argument(
-        None, help=f'Password. Omit to be prompted, or set {PASSWORD_ENV}.'
-    ),
 ):
     """
-    Authenticate with the API and store the token.
+    Authenticate with the API and store the token. The password is read from the TODO_PASSWORD
+    environment variable, else asked for with the echo hidden: it is never an argument (it would
+    stay in the shell's history).
 
     Example:
         todo login local me@example.com
     """
     select_environment(environment)
-    password = password_from_prompt_or_env(password, PASSWORD_ENV)
+    password = password_from_prompt_or_env(None, PASSWORD_ENV)
 
     response = api_request(
         'post', api_url('/auth/login'), json={'email': email, 'password': password}
@@ -543,9 +542,17 @@ def todo_edit(
     description: str | None = typer.Option(None, '--description'),
     priority: int | None = typer.Option(None, '--priority', help='0 (none), 1 (highest), 2 or 3.'),
     due: str | None = typer.Option(
-        None, '--due', help='YYYY-MM-DD, or YYYY-MM-DDTHH:MM with a time.'
+        None,
+        '--due',
+        help='YYYY-MM-DD, or YYYY-MM-DDTHH:MM with a time. A date alone KEEPS the time the task '
+        'already has (use --clear-time to drop it).',
     ),
     clear_due: bool = typer.Option(False, '--clear-due', help='Remove the date (and the time).'),
+    clear_time: bool = typer.Option(
+        False,
+        '--clear-time',
+        help='Remove the time and keep the date (alone, or with a --due date).',
+    ),
     label: list[str] | None = typer.Option(
         None, '--label', help='Add a label (a name or id); repeat for several.'
     ),
@@ -559,11 +566,15 @@ def todo_edit(
     Example:
         todo edit local 1234 --title "Pay the rent" --priority 1
         todo edit local 1234 --due 2026-11-05T09:00 --label home --remove-label later
+        todo edit local 1234 --due 2026-11-06          (moves the day, keeps its time)
+        todo edit local 1234 --due 2026-11-06 --clear-time
         todo edit local 1234 --clear-due
     """
     select_environment(environment)
     if due and clear_due:
         raise typer.BadParameter('--due and --clear-due cannot be used together.')
+    if clear_time and clear_due:
+        raise typer.BadParameter('--clear-due already removes the time.')
 
     payload: dict = {}
     if title is not None:
@@ -574,10 +585,14 @@ def todo_edit(
         payload['priority'] = priority
     if due:
         payload['due_date'], due_time = _parse_due(due)
+        if due_time and clear_time:
+            raise typer.BadParameter('--due with a time and --clear-time contradict each other.')
         if due_time:
             payload['due_time'] = due_time
     elif clear_due:
         payload['due_date'] = None
+    if clear_time:
+        payload['due_time'] = None
     if label or remove_label:
         current = [item['id'] for item in _call('get', f'/tasks/{number}')['labels']]
         added = _label_ids(label)
@@ -896,6 +911,26 @@ class UploadFailed(Exception):
     """One file's upload failed; the message says why. The batch carries on with the next file."""
 
 
+def _cancel_upload(attachment_id: str) -> None:
+    """Best effort: tell the API this upload will not be completed, so it stops counting toward the
+    task's file cap and its object is removed. Idempotent on the server; a failure here is only
+    logged (the server abandons the upload after 24 hours anyway)."""
+    try:
+        response = api_request(
+            'post',
+            api_url(f'/todo/attachments/{attachment_id}/cancel'),
+            headers=get_headers(CLI),
+            exit_on_error=False,
+        )
+    except NetworkError as e:
+        logger.warning(escape(f'Could not cancel the upload {attachment_id}: {e}'))
+        return
+    if not response.ok:
+        logger.warning(
+            escape(f'Could not cancel the upload {attachment_id}: {_error_message(response)}')
+        )
+
+
 def _upload_file(number: int, path: Path) -> dict:
     """Attach one file: `POST .../attachments` for a presigned URL, `PUT` the bytes to it with the
     headers the API returned, then `POST .../complete`. Returns the attachment.
@@ -920,7 +955,10 @@ def _upload_file(number: int, path: Path) -> dict:
     if not start.ok:
         raise UploadFailed(_error_message(start))
     ticket = start.json()
+    attachment_id = ticket['attachment_id']
 
+    # From here on a row is pending on the server, counting toward the task's file cap: any failure
+    # cancels it (`POST /attachments/{id}/cancel`) instead of leaving it for the 24 hour sweep.
     try:
         put = api_request(
             'put',
@@ -930,18 +968,25 @@ def _upload_file(number: int, path: Path) -> dict:
             timeout=FILE_UPLOAD_TIMEOUT_SECONDS,
             exit_on_error=False,
         )
-    except NetworkError as e:
+    except (NetworkError, OSError) as e:
+        _cancel_upload(attachment_id)
         raise UploadFailed(f'upload failed: {e}') from e
     if not put.ok:
+        _cancel_upload(attachment_id)
         raise UploadFailed(f'the upload to storage failed ({put.status_code})')
 
-    complete = api_request(
-        'post',
-        api_url(f'/todo/tasks/{number}/attachments/{ticket["attachment_id"]}/complete'),
-        headers=headers,
-        exit_on_error=False,
-    )
+    try:
+        complete = api_request(
+            'post',
+            api_url(f'/todo/tasks/{number}/attachments/{attachment_id}/complete'),
+            headers=headers,
+            exit_on_error=False,
+        )
+    except NetworkError:
+        _cancel_upload(attachment_id)
+        raise
     if not complete.ok:
+        _cancel_upload(attachment_id)  # a no-op for an upload the server already discarded
         raise UploadFailed(_error_message(complete))
     return complete.json()
 

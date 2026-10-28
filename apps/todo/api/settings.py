@@ -59,6 +59,16 @@ def _save(account: TodoAccount, user: User, changes: dict) -> None:
             services.update_inbox_settings(user, sender_allowlist=changes['sender_allowlist'] or [])
 
 
+def _check(changes: dict) -> None:
+    """The refusals of `_save` that need no database, told before the budget is spent."""
+    if 'default_due_time' in changes and changes['default_due_time'] is None:
+        raise ValidationError({'default_due_time': 'Enter a time.'})
+    if changes.get('default_reminder_minutes') is not None:
+        reminders.clean_minutes(changes['default_reminder_minutes'])
+    if 'default_reminder_channel' in changes:
+        reminders.clean_channel(changes['default_reminder_channel'] or '')
+
+
 @router.get('/settings', response=SettingsSchema)
 def get_settings(request):
     """The account's settings and, read-only, its usage this month and its storage."""
@@ -71,11 +81,16 @@ def update_settings(request, payload: SettingsUpdateSchema):
     `default_reminder_channel`; `null` minutes: no default reminder) and/or who may add tasks by
     email (`sender_allowlist`; `[]` or `null`: anyone). Only the fields present are applied, all or
     none. They apply to tasks created (or first given a date) afterwards; changing the default due
-    time moves the reminders of date-only tasks."""
+    time moves the reminders of date-only tasks.
+
+    A missing due time, a reminder time outside 0 to 43,200 minutes and an unknown channel are
+    refused before `TODO_EDIT_USER` is spent; a sender allowlist the service then refuses still
+    spends one."""
     changes = payload.model_dump(exclude_unset=True)
     if changes:
-        charge(request, 'TODO_EDIT_USER')
         with mapped_errors():
+            _check(changes)
+            charge(request, 'TODO_EDIT_USER')
             _save(services.get_account(request.auth), request.auth, changes)
     return _settings(request.auth)
 

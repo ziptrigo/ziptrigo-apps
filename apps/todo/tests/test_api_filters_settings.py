@@ -148,7 +148,7 @@ class TestFilters:
 
         assert [f['name'] for f in response.json()] == ['B', 'A']
         too_many = post(client, '/filters/reorder', auth, {'ids': [str(uuid.uuid4())] * 51})
-        assert too_many.status_code == 400
+        assert too_many.status_code == 422
 
     def test_delete(self, client, auth, funded_user):
         saved = save_filter(funded_user, 'Gone', FilterParams())

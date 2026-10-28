@@ -55,8 +55,9 @@ def add_comment(request, number: int, payload: CommentBodySchema):
     and the tasks mentioned list this one under "referenced by". A task in the Trash takes none
     (400)."""
     task = owned_task(request, number)
-    charge(request, 'TODO_COMMENT_USER')
     with mapped_errors():
+        services.comments.clean_comment_body(payload.body)  # a refusal here spends no budget
+        charge(request, 'TODO_COMMENT_USER')
         comment = services.add_comment(task, request.auth, payload.body)
     return 201, _data(request, task, comment)
 
@@ -67,8 +68,9 @@ def edit_comment(request, number: int, comment_id: UUID, payload: CommentBodySch
     (`.../history`); the same text changes nothing; a deleted comment cannot be edited (400)."""
     task = owned_task(request, number)
     comment = _owned_comment(task, comment_id)
-    charge(request, 'TODO_COMMENT_USER')
     with mapped_errors():
+        services.comments.clean_comment_body(payload.body)  # a refusal here spends no budget
+        charge(request, 'TODO_COMMENT_USER')
         services.edit_comment(comment, payload.body)
     return _data(request, task, comment)
 

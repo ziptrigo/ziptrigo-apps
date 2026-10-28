@@ -91,7 +91,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today, user_tz
-from apps.billing.services import InsufficientCreditsError, get_balance
+from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
 from apps.core.services import notifications
 from apps.core.services.mail import mime
@@ -611,7 +611,7 @@ def _ingest_for_recipient(context: _Context, recipient: mime.InboxRecipient) -> 
         email.note = TASK_LIMIT_NOTE
         _record_unaccepted(email, user, config, message.s3_key)
         return
-    if account.creation_blocked_at is not None or _cannot_afford(account, config):
+    if account.creation_blocked_at is not None or billing.cannot_afford(account, config):
         _reject_for_credits(email, user, config, message.s3_key)
         return
 
@@ -648,15 +648,6 @@ def _at_task_cap(user: User, config: TodoSettings) -> bool:
     """A cheap look before the AI call and the uploads: the user already has the most open tasks
     allowed. (`create_task` decides for good, under the account lock.)"""
     return dates.open_tasks(user).count() >= config.max_open_tasks_per_user
-
-
-def _cannot_afford(account: TodoAccount, config: TodoSettings) -> bool:
-    """A cheap look before the AI call and the uploads: the task is beyond the free allowance and
-    the balance can't pay its price. (The real decision is `create_task`'s, under the lock.)"""
-    if config.task_price <= 0:
-        return False
-    used, free = billing.month_usage(account, config)
-    return used >= free and get_balance(account.user) < config.task_price
 
 
 def _reject_for_credits(
@@ -845,12 +836,10 @@ def _create_task(
         )
     except InsufficientCreditsError as exc:
         raise _Refused(InboundEmailStatus.REJECTED_CREDITS, 'Not enough credits.') from exc
-    except ValidationError as exc:
-        if tasks.BLOCKED_MESSAGE in exc.messages:
-            raise _Refused(InboundEmailStatus.REJECTED_CREDITS, 'Not enough credits.') from exc
-        if tasks.TOO_MANY_MESSAGE in exc.messages:
-            raise _Refused(InboundEmailStatus.REJECTED_TASK_LIMIT, TASK_LIMIT_NOTE) from exc
-        raise
+    except tasks.TaskCreationBlockedError as exc:
+        raise _Refused(InboundEmailStatus.REJECTED_CREDITS, 'Not enough credits.') from exc
+    except tasks.TooManyTasksError as exc:
+        raise _Refused(InboundEmailStatus.REJECTED_TASK_LIMIT, TASK_LIMIT_NOTE) from exc
 
 
 def _record_unaccepted(

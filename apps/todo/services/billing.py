@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
-from apps.billing.services import InsufficientCreditsError, spend_credits
+from apps.billing.services import InsufficientCreditsError, get_balance, spend_credits
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import Task, TodoAccount, TodoSettings
@@ -86,6 +86,16 @@ def month_usage(account: TodoAccount, settings: TodoSettings) -> tuple[int, int]
     """`(used, free)` for the user's current month: `0` used when the counted month is stale."""
     used = account.month_task_count if account.month_key == month_key(account.user) else 0
     return used, settings.free_tasks_per_month
+
+
+def cannot_afford(account: TodoAccount, settings: TodoSettings) -> bool:
+    """A cheap look before something slow or costly (the AI call, an upload, a rate-limit hit): the
+    next task is beyond the free allowance and the balance can't pay its price. Takes no lock, so
+    the real decision stays `charge_task_creation`'s, under the account lock."""
+    if settings.task_price <= 0:
+        return False
+    used, free = month_usage(account, settings)
+    return used >= free and get_balance(account.user) < settings.task_price
 
 
 @task(queue_name='default')

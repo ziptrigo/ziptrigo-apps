@@ -96,7 +96,7 @@ inv shorturl analytics local <link-id>           # open the detailed statistics 
 inv shorturl stats local <link-id> [--range 7|30|90|all]
 inv shorturl preview local <link-id>             # what /s/<code>+ shows, and whether it works now
 inv shorturl qr local <link-id> --out link.png
-inv todo login local <email>                    # password: prompt, or TODO_PASSWORD
+inv todo login local <email>                    # password: TODO_PASSWORD, else a hidden prompt (never an argument)
 inv todo add local "pay rent every month on the 1st"   # the date is read from the title (--no-parse: don't)
 inv todo add local call the dentist --due 2026-11-05T15:00 --priority 2 --label health --parent 1200
 inv todo list local [--view today|upcoming|all|completed|trash --q "rent*" --regex --include-completed]
@@ -1371,7 +1371,8 @@ a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tas
 (`GET|POST /tasks/{number}/comments`, `PATCH|DELETE .../comments/{id}`, `POST .../restore`, `GET
 .../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
 `GET /reminders/history`), attachments (`POST /tasks/{number}/attachments`, `POST
-.../attachments/{id}/complete`, `GET /attachments/{id}/url`, `DELETE /attachments/{id}`), saved
+.../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `GET /attachments/{id}/url`,
+`DELETE /attachments/{id}`), saved
 filters (`GET|POST /filters`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
 /filters/{id}/tasks`), `GET|PATCH /settings`, `GET /inbox`, `POST /inbox/regenerate` and `POST
 /parse`. Status codes (`api/common.py`): **400** a service `ValidationError` (`field: message`, a
@@ -1379,10 +1380,13 @@ message that belongs to no field plain) or a hand-read query parameter (`view`, 
 `priority`, `label`, `date_range`, `date_from`/`date_to`, `disposition`); **402**
 `InsufficientCreditsError` and `AccountFrozenError`; **404** another user's task, label, comment,
 reminder, attachment or filter (never 403), also `delete-forever` of a task that isn't in the Trash
-(as the web) and an attachment that never completed; **409** `POST /tasks` while a repeating task's
-next occurrence is waiting to be paid for, `{detail, unpaid_task_numbers}`; **422** ninja's own
-validation (a malformed number or id, a mistyped field, an unknown body key: every body schema is
-`extra='forbid'`) and an empty or over-long title for `POST /parse`; **429** from the site handler;
+(as the web) and an attachment that never completed (except for `cancel` and `DELETE`, which cancel
+it); **409** `POST /tasks` while a repeating task's next occurrence is waiting to be paid for,
+`{detail, unpaid_task_numbers}` (raised by the service as `TaskCreationBlockedError`, never matched
+by its text); **422** ninja's own validation (a malformed number or id, a mistyped field, an unknown
+body key: every body schema is `extra='forbid'`; a title over `TITLE_MAX` (500) in `POST /tasks` or
+`PATCH`; a reorder list over its cap: 500 tasks or labels, `MAX_SAVED_FILTERS` filters) and an empty
+or over-long title for `POST /parse`; **429** from the site handler;
 **503** only for a storage failure while deleting an attachment. A reference in a body to something
 that isn't the caller's (`labels`, `parent`) is a 400 with the service's own message, like Receipts'
 foreign `vendor_id`. The rate limits are the web's, so the budgets are shared: `TODO_CREATE_USER`
@@ -1392,8 +1396,17 @@ a comment that already is, spend nothing), `TODO_COMMENT_USER` (adding and editi
 `GET /filters/{id}/tasks`; charged before the query, so a refused pattern still spends it),
 `TODO_PARSE_USER` and `TODO_PARSE_USER_DAY` (`POST /parse` and `parse_title`; peeked first and hit
 only when the model is called), `TODO_UPLOAD_USER`, `TODO_UPLOAD_COMPLETE_USER` (charged first),
-`TODO_DOWNLOAD_USER` and `TODO_REGENERATE_USER`. Where the endpoint looks up a task the lookup
-(404) comes before its limit is charged. Tests: `apps/todo/tests/test_api_*.py` over Django's test
+`TODO_DOWNLOAD_USER` and `TODO_REGENERATE_USER`. **A refused request spends no budget**
+(`POST /tasks`, `PATCH /tasks/{number}`, postpone, reorder and the label, comment, reminder, filter
+and settings writes check first, as Short URLs' `check_new_link` / `check_update` do, then charge,
+then write): the fields, the 409, the cap on open tasks and the balance are told by
+`services.check_new_task` / `check_update_task` (no writes, no lock). What only the locked write can
+decide still spends one hit: a race for the last task slot or credit, a task trashed or completed
+since it was read, a task with subtasks moved under a parent, a subtask given a repeat rule, a
+sender allowlist the service refuses, and a `parse_title` reading that then fails the create. The
+attachment endpoints keep the web's order (charged before the lookup; `cancel` answers its 400 for a
+completed file first). Where the endpoint looks up a task the lookup (404) comes before its limit is
+charged. Tests: `apps/todo/tests/test_api_*.py` over Django's test
 client (the real `/api/todo/...` URLs), helpers in `tests/api_support.py`.
 
 **Resumable uploads** (spec section 2, issue #55 phase 3): `TransferFile.client_last_modified`
@@ -4114,7 +4127,7 @@ CLI does with them.
   in the order they were added.
 - **`GET /tasks`** is the Today / Upcoming / All / Completed / Trash pages and the search page in
   one. `view` picks the base set (`dates.today_set`, `upcoming_set`, `open_tasks`, `completed_set`,
-  `trash_set`; `parent=<number>` alone lists that task's subtasks, completed ones too, in the
+  `trash_set`, which the web's list pages use too; `parent=<number>` alone lists that task's subtasks, completed ones too, in the
   user's manual order when they gave one), `FilterParams` the rest (`condition(user)` is the
   structured filters and the search text as one `Q`; the text is validated by `search.prepare_query`
   and evaluated inside `search.search_guard()` like every search). `limit`/`offset` replace the
@@ -4128,19 +4141,27 @@ CLI does with them.
   `charged_credits` in the answer). `labels` are ids, `parent` a number. `reminders` replaces the
   default reminder `create_task` gave the task, inside one `transaction.atomic()` with the creation,
   so a refused reminder (no date, a duplicate time) creates and charges nothing; omitted keeps the
-  default, `[]` means none. **`parse_title`** runs the title through `services.parsing.parse_title`
-  first (the same request and the same two rate limits as the web endpoint, spent through its
-  `charge` callback) and uses what it found for each of the date (with its time) and the repeat
+  default, `[]` means none. **Order of work:** the body is checked (`services.check_new_task`: the
+  fields, then the 409, the cap on open tasks, a balance that can't pay -- the very checks email
+  intake makes before its AI call -- and the reminders), then `TODO_CREATE_USER` is spent, then the
+  title is read, then the task is created: a refused request never calls the model and spends neither
+  budget. **`parse_title`** runs the title through `services.parsing.parse_title` (the same request
+  and the same two rate limits as the web endpoint, spent through its `charge` callback) and uses what it found for each of the date (with its time) and the repeat
   **unless the body sets it**; the title is replaced by the cleaned one only when everything that was
   read was used. Nothing the AI does can fail the request: not configured, busy, failing, over the
   user's limits or no date found just creates the task as typed. `parsed` in the answer
   (`{applied, label, matched_text, reason}`, `null` when `parse_title` was not asked for) says what
-  happened. `POST /parse` is the web endpoint's body exactly (`{available, has_date, ...}`).
-  Creation refused because of an unpaid occurrence (`services.tasks.BLOCKED_MESSAGE`) is a 409 with
-  the numbers of the user's unpaid tasks.
+  happened. `POST /parse` is the web endpoint's body exactly (`{available, has_date, ...}`), typed by
+  `ParseAnswerSchema` (all fields optional, `exclude_unset`, so each of its three shapes is sent as
+  the web sends it). Creation refused because of an unpaid occurrence is a 409 with the numbers of
+  the user's unpaid tasks: `services.tasks.TaskCreationBlockedError` (a `ValidationError` subclass,
+  as is `TooManyTasksError` for the cap), which `mapped_errors(keep=...)` lets through to the
+  endpoint; email intake catches the same classes instead of comparing message text.
 - **`PATCH`es** apply `model_dump(exclude_unset=True)`: a key left out is unchanged and an explicit
   `null` clears (`description` to empty, `priority` to none, `labels` to none, `parent` to a
-  top-level task, `rrule` to stop repeating; `title` cannot be cleared, a 400). `PATCH /settings` saves
+  top-level task, `rrule` to stop repeating; `title` cannot be cleared, a 400; on `PATCH /filters/{id}`
+  `name` and `params` cannot be cleared either: an explicit `null` is a 400, and a body with nothing
+  in it changes nothing and spends nothing). `PATCH /settings` saves
   the due time, the default reminder and the allowlist in one transaction; `null` there clears
   `default_reminder_minutes` and `sender_allowlist` (accept anyone). Reminders' and comments'
   updates have nothing to clear (`null` there is "unchanged" / invalid).
@@ -4148,12 +4169,20 @@ CLI does with them.
   `x-amz-checksum-sha256`; `complete` re-reads the object; a complete for a row that is gone is a 404
   that also deletes the object). `GET /attachments/{id}/url` returns the presigned URL and the
   disposition it really has (`inline` only for a sniffed PDF or image, whatever was asked), never the
-  key. There is no cancel endpoint: an upload never completed is cleaned up by the hourly job.
+  key. A pending upload counts toward the task's file cap, so a client whose `PUT` fails cancels it:
+  `POST /attachments/{id}/cancel` (`attachments.cancel_upload`: the row, then the object; idempotent,
+  204 also for an id that is gone or isn't the caller's, removing only an object under the caller's
+  own prefix; a completed file is a 400 -- use `DELETE`; `TODO_EDIT_USER`), and `DELETE
+  /attachments/{id}` on a pending row does the same. The CLI's `upload` calls it after any failure
+  following the start (best effort: a failed cancel is a warning; the hourly job remains the net).
 - **Saved filters** take and return `params` (the stored `FilterParams` dict, validated by
   `FilterParamsSchema`; labels that are not the caller's are dropped by the service) and a `summary`.
   `GET /filters/{id}/tasks` runs the filter as saved (a deleted label has dropped out of it).
 - **CLI** (`admin/todo.py`, `inv todo ...`; `TODO_PASSWORD`, token `~/.todo_token.<env>`): every
-  command takes the environment first and goes through `admin/utils.py`'s `api_request` (default
+  command takes the environment first. **`login <email>` has no password argument** (issue #187 had
+  `[password]`, but this file's rule is that no CLI takes a password on the command line): it reads
+  `TODO_PASSWORD`, else prompts with the echo hidden. (`receipts` and `filetransfer` still accept the
+  optional positional argument; not changed here.) It goes through `admin/utils.py`'s `api_request` (default
   timeout, bounded 429 retry that does not sleep on an hourly rule), `get_headers('todo')`,
   `select_environment` and `password_from_prompt_or_env`; errors print the API's `detail` (a 422
   list flattened), a 409 names the unpaid task numbers and says to top up, exit 1. `add` sends
@@ -4166,11 +4195,12 @@ CLI does with them.
   on past a failed file (exit 1 if any) and PUTs with the exact headers the API returned;
   `download` asks for a presigned URL and streams it **without the API token** to
   `.<name>.part` next to the target, renaming it into place only when complete (and refusing to
-  overwrite without `--force`); `label-delete` and `regenerate` ask first (`--yes` skips). Everything
+  overwrite without `--force`); `edit --due DATE` alone keeps the time the task has (only
+  `--due YYYY-MM-DDTHH:MM` sets one; `--clear-time` removes it, alone or with a date); `label-delete` and `regenerate` ask first (`--yes` skips). Everything
   that prints a title or a label name escapes Rich markup, so a title like `[bold]` shows as typed.
   Tests: `admin/tests/test_todo.py` (HTTP mocked, no Django).
 - **Not in v1**: an `expected_cost` / quote for task creation (the price is the setting's and the
-  answer reports `charged_credits`), a cancel-upload endpoint, search snippets in the API.
+  answer reports `charged_credits`), search snippets in the API.
 - **Judgement calls** where the issue left room: `GET /tasks/{number}` also returns the task's
   uploaded `attachments` and `referenced_by` (the CLI's `get` needs them and no list endpoint was
   specified); `POST /tasks` answers an extra `parsed`; `POST /tasks/reorder` answers `{count}` (the

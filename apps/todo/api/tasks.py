@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from typing import Any
 from uuid import UUID
 
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
 from ninja.errors import HttpError
@@ -17,6 +18,7 @@ from ninja.errors import HttpError
 from apps.accounts.services.timezones import user_today
 
 from .. import services
+from ..limits import MAX_REMINDERS_PER_TASK
 from ..models import Reminder, Task, TaskSource
 from ..schemas import (
     ChecklistSchema,
@@ -49,7 +51,6 @@ from ..services import (
 )
 from ..services.filters import DATE_RANGES, NO_LABEL, PRIORITIES
 from ..services.search import MODES, order_results, search_guard
-from ..services.tasks import BLOCKED_MESSAGE
 from .common import (
     DEFAULT_LIMIT,
     charge,
@@ -268,8 +269,52 @@ def _set_reminders(task, wanted) -> None:
         )
 
 
-def _create(request, payload: TaskCreateSchema):
-    user = request.auth
+def _check_reminders(user, payload: TaskCreateSchema, *, has_date: bool) -> None:
+    """The refusals of the reminders asked for that `reminders.add_reminder` would make one by one
+    (a bad time or channel, a repeated time, more than the cap, no due date), told before anything
+    is spent. `has_date` is whether the task will have a due date (the reading of the title may
+    still give it one: the caller says so)."""
+    wanted = payload.reminders
+    if not wanted:
+        return
+    if len(wanted) > MAX_REMINDERS_PER_TASK:
+        raise ValidationError({'reminders': f'At most {MAX_REMINDERS_PER_TASK} reminders.'})
+    times: set[int] = set()
+    for item in wanted:
+        minutes = reminders.clean_minutes(item.minutes_before)
+        if item.channel:
+            reminders.clean_channel(item.channel)
+        if minutes in times:
+            raise ValidationError({'minutes_before': reminders.DUPLICATE_MESSAGE})
+        times.add(minutes)
+    if not has_date:
+        raise ValidationError({NON_FIELD_ERRORS: reminders.NO_DATE_MESSAGE})
+
+
+def _check_create(user, payload: TaskCreateSchema, parent: Task | None) -> None:
+    """Everything `POST /tasks` can refuse without writing, before the create budget is spent and
+    before the title is sent to the model: the fields, a creation blocked by an unpaid repeating
+    task (`TaskCreationBlockedError`, the 409), the cap on open tasks and a balance that can't pay
+    (402) -- the very checks email intake makes before its own AI call -- and the reminders."""
+    due = services.check_new_task(
+        user,
+        title=payload.title,
+        description=payload.description,
+        priority=payload.priority,
+        due_date=payload.due_date,
+        due_time=payload.due_time,
+        parent=parent,
+        labels=payload.labels,
+        rrule=payload.rrule,
+        recurrence_mode=payload.recurrence_mode,
+    )
+    fields = payload.model_fields_set
+    # The reading of the title may still set the date, when the body doesn't.
+    may_get_date = payload.parse_title and not fields & {'due_date', 'due_time'}
+    _check_reminders(user, payload, has_date=due is not None or may_get_date)
+
+
+def _create(user, payload: TaskCreateSchema, parent: Task | None):
     values: dict[str, Any] = {
         'due_date': payload.due_date,
         'due_time': payload.due_time,
@@ -289,7 +334,6 @@ def _create(request, payload: TaskCreateSchema):
                 matched_text=reading.matched_text,
                 reason=f'Kept what you set for {" and ".join(kept)}.' if kept else '',
             )
-    parent = task_from_body(user, payload.parent)
     with transaction.atomic():  # the reminders asked for and the task stand or fall together
         task = services.create_task(
             user,
@@ -311,23 +355,31 @@ def _create(request, payload: TaskCreateSchema):
 def create_task(request, payload: TaskCreateSchema):
     """Create a task (or a subtask with `parent`). It counts toward the month's free tasks and then
     costs the task price: a 402 when the balance can't cover it, and a 409
-    (`{detail, unpaid_task_numbers}`) while an occurrence of a repeating task is waiting to be
-    paid for (a top-up settles it). `source` is `api`.
+    (`{detail, unpaid_task_numbers}`) while an occurrence of a repeating task is waiting to be paid
+    for (a top-up settles it). `source` is `api`.
 
     See `TaskCreateSchema` for the body, `parse_title` and `reminders` in particular; `parsed` in
     the answer says what `parse_title` did.
+
+    The request is checked first (the fields, the 409, the cap on open tasks, the balance, the
+    reminders; a title over 500 characters is a 422), and only then are `TODO_CREATE_USER` and, for
+    `parse_title`, the date reader's budget spent: a refused request costs neither and never calls
+    the model. What only the creating transaction can decide (a race for the last slot or the last
+    credits, a repeat rule that fails against the final date) is still refused after the create
+    budget was spent.
     """
-    charge(request, 'TODO_CREATE_USER')
+    user = request.auth
     try:
-        with mapped_errors():
-            task, parsed = _create(request, payload)
-    except HttpError as exc:
-        if exc.status_code == 400 and exc.message == BLOCKED_MESSAGE:
-            return 409, {
-                'detail': BLOCKED_MESSAGE,
-                'unpaid_task_numbers': unpaid_task_numbers(request.auth),
-            }
-        raise
+        with mapped_errors(keep=services.TaskCreationBlockedError):
+            parent = task_from_body(user, payload.parent)
+            _check_create(user, payload, parent)
+            charge(request, 'TODO_CREATE_USER')
+            task, parsed = _create(user, payload, parent)
+    except services.TaskCreationBlockedError:
+        return 409, {
+            'detail': services.tasks.BLOCKED_MESSAGE,
+            'unpaid_task_numbers': unpaid_task_numbers(user),
+        }
     data = task_response(request, task)
     data['parsed'] = parsed
     return 201, data
@@ -352,6 +404,10 @@ def reorder_tasks(request, payload: ReorderSchema):
     subtasks of `parent` (`scope=subtasks`) by hand: the ids in the order wanted. Ids outside the
     set are ignored; `count` is how many were positioned."""
     parent = owned_task(request, payload.parent) if payload.parent is not None else None
+    if payload.scope not in services.tasks.REORDER_SCOPES:
+        raise HttpError(400, 'scope: Choose what to order.')
+    if payload.scope == 'subtasks' and parent is None:
+        raise HttpError(400, 'parent: Choose the task whose subtasks to order.')
     charge(request, 'TODO_EDIT_USER')
     ids: list[UUID] = list(payload.ids)
     with mapped_errors():
@@ -374,7 +430,11 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
     """Edit a task. Only the fields present in the body are applied, all or none (a refusal
     changes nothing); an explicit `null` clears a field (see `TaskUpdateSchema`). A task in the
     Trash is a 400: restore it first. Changing `rrule` or `recurrence_mode` edits the repeat rule
-    (an empty `rrule` stops repeating), and a new `due_date` moves the task's reminders."""
+    (an empty `rrule` stops repeating), and a new `due_date` moves the task's reminders.
+
+    The fields are checked before `TODO_EDIT_USER` is spent, so a bad value costs nothing. What
+    only the locked write can decide (the task was trashed or completed meanwhile, a task with
+    subtasks moved under a parent, a subtask given a repeat rule) is refused after it was spent."""
     task = owned_task(request, number)
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
@@ -390,6 +450,7 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
     with mapped_errors():
         if 'parent' in changes:
             changes['parent'] = task_from_body(request.auth, changes['parent'])
+        services.check_update_task(task, changes=changes)  # a refusal here spends no budget
         charge(request, 'TODO_EDIT_USER')
         services.update_task(task, changes=changes)
     return task_response(request, task)
@@ -454,6 +515,11 @@ def postpone_task(request, number: int, payload: PostponeSchema):
     """Move the due date: `tomorrow`, `next_week` (the next Monday), `next_weekend` (the next
     Saturday) or `date` with `date` (today or later), keeping the time. Postponing one occurrence
     never moves the schedule of a repeating task."""
+    task = owned_task(request, number)
+    with mapped_errors():  # a refusal here spends no budget
+        if not task.is_open:
+            raise ValidationError('Only open tasks can be postponed.')
+        services.tasks.postpone_target(user_today(request.auth), payload.preset, payload.date)
     return _act(
         request,
         number,

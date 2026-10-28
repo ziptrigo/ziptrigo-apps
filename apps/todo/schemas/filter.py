@@ -2,12 +2,13 @@
 
 from collections.abc import Collection
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from ninja import Schema
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
+from ..limits import MAX_SAVED_FILTERS
 from ..services.dates import SORTS
 from ..services.filters import DATE_RANGES, MAX_LABELS, PRIORITIES
 from ..services.search import MODES
@@ -105,6 +106,7 @@ class FilterUpdateSchema(Schema):
 
 
 class FilterOrderSchema(Schema):
-    """Body for `POST /filters/reorder`: the filter ids in the new order."""
+    """Body for `POST /filters/reorder`: the filter ids in the new order (at most 50, the most saved
+    filters one user can have; a longer list is a 422)."""
 
-    ids: list[UUID]
+    ids: Annotated[list[UUID], Field(max_length=MAX_SAVED_FILTERS)]

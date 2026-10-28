@@ -36,9 +36,11 @@ def add_reminder(request, number: int, payload: ReminderCreateSchema):
     `in_app`, by `email` or `both` (default: the channel of your default reminder). A date-only task
     is due at your default due time. One reminder per time, at most 10 per task."""
     task = owned_task(request, number)
-    charge(request, 'TODO_EDIT_USER')
     channel = payload.channel or services.get_account(request.auth).default_reminder_channel
     with mapped_errors():
+        services.reminders.clean_minutes(payload.minutes_before)  # a refusal here spends no budget
+        services.reminders.clean_channel(channel)
+        charge(request, 'TODO_EDIT_USER')
         reminder = services.reminders.add_reminder(
             task, minutes_before=payload.minutes_before, channel=channel
         )
@@ -51,8 +53,12 @@ def update_reminder(request, number: int, reminder_id: UUID, payload: ReminderUp
     arms it again."""
     task = owned_task(request, number)
     reminder = _owned_reminder(task, reminder_id)
-    charge(request, 'TODO_EDIT_USER')
     with mapped_errors():
+        if payload.minutes_before is not None:  # a refusal here spends no budget
+            services.reminders.clean_minutes(payload.minutes_before)
+        if payload.channel is not None:
+            services.reminders.clean_channel(payload.channel)
+        charge(request, 'TODO_EDIT_USER')
         services.reminders.update_reminder(
             reminder, minutes_before=payload.minutes_before, channel=payload.channel
         )

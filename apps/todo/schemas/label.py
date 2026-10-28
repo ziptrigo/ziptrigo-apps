@@ -1,9 +1,12 @@
 """Schemas for the label endpoints (`/api/todo/labels`)."""
 
+from typing import Annotated
 from uuid import UUID
 
 from ninja import Schema
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
+
+from ..limits import MAX_REORDER_IDS
 
 
 class LabelRefSchema(Schema):
@@ -50,6 +53,6 @@ class LabelUpdateSchema(Schema):
 
 class LabelOrderSchema(Schema):
     """Body for `POST /labels/reorder`: the label ids in the new order (ids that aren't yours are
-    ignored)."""
+    ignored; at most 500, a longer list is a 422)."""
 
-    ids: list[UUID]
+    ids: Annotated[list[UUID], Field(max_length=MAX_REORDER_IDS)]

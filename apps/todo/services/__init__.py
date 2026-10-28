@@ -119,6 +119,10 @@ from .saved_filters import (
 from .search import MAX_QUERY_CHARS, glob_to_regex, search_tasks
 from .tasks import (
     POSTPONE_PRESETS,
+    TaskCreationBlockedError,
+    TooManyTasksError,
+    check_new_task,
+    check_update_task,
     complete_task,
     create_task,
     delete_forever,
@@ -135,6 +139,10 @@ from .tasks import (
 )
 
 __all__ = [
+    'TaskCreationBlockedError',
+    'TooManyTasksError',
+    'check_new_task',
+    'check_update_task',
     'DATE_RANGES',
     'FilterParams',
     'MAX_QUERY_CHARS',

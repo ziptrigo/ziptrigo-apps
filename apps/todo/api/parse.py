@@ -19,7 +19,7 @@ from apps.accounts.services.timezones import user_today, user_tz
 from apps.core import ratelimit
 from apps.core.ratelimit import RateLimitResult
 
-from ..schemas import ParseSchema
+from ..schemas import ParseAnswerSchema, ParseSchema
 from ..services import TITLE_MAX, get_account
 from ..services.parsing import (
     WEEKDAY_NAMES,
@@ -85,7 +85,7 @@ def read_title(user: User, title: str) -> tuple[TitleParse | None, str]:
     return result, ''
 
 
-@router.post('/parse', response=dict)
+@router.post('/parse', response=ParseAnswerSchema, exclude_unset=True)
 def parse(request, payload: ParseSchema):
     """Read a date, time and repeat out of a title, without creating anything. The answer is the
     web endpoint's:

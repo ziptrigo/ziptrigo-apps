@@ -8,6 +8,7 @@ cover. Trashing, completing and the like never refund what a task cost.
 
 import logging
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import date, time, timedelta
 from typing import Any
 from uuid import UUID
@@ -19,13 +20,14 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
+from apps.billing.services import InsufficientCreditsError
 from apps.core.markdown import toggle_checklist_item
 
 from ..models import Label, Priority, Recurrence, RecurrenceMode, Task, TaskSource, TodoSettings
 from . import attachments, dates, reminders
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account
-from .billing import charge_task_creation
+from .billing import cannot_afford, charge_task_creation
 from .limits import DESCRIPTION_MAX, TITLE_MAX
 from .references import sync_references
 
@@ -60,6 +62,23 @@ TOO_MANY_MESSAGE = 'Too many open tasks. Complete or delete some to add more.'
 
 def _error(field: str, message: str) -> ValidationError:
     return ValidationError({field: message})
+
+
+class TaskCreationBlockedError(ValidationError):
+    """New tasks are refused until a top-up settles the repeating-task occurrences that could not
+    be paid for (`TodoAccount.creation_blocked_at`). A `ValidationError`, so a caller that does not
+    care why handles it as any other refusal; the API answers it with a 409 and the email intake
+    with `rejected_credits`."""
+
+    def __init__(self) -> None:
+        super().__init__({NON_FIELD_ERRORS: BLOCKED_MESSAGE})
+
+
+class TooManyTasksError(ValidationError):
+    """The user already has the most open tasks allowed (`TodoSettings.max_open_tasks_per_user`)."""
+
+    def __init__(self) -> None:
+        super().__init__({NON_FIELD_ERRORS: TOO_MANY_MESSAGE})
 
 
 # -- Validation ----------------------------------------------------------------------------------
@@ -176,6 +195,111 @@ def next_today_position(user: User, due_date: date | None) -> int:
 # -- Create and update ---------------------------------------------------------------------------
 
 
+@dataclass(slots=True)
+class _CleanedTask:
+    """What `create_task` writes, after every field has been validated."""
+
+    title: str
+    description: str
+    priority: int
+    due_date: date | None
+    due_time: time | None
+    labels: list[Label]
+    parent: Task | None
+    rule: str
+    mode: str
+
+
+def _clean_new_task(
+    user: User,
+    *,
+    title: str,
+    description: str,
+    priority: int,
+    due_date: date | None,
+    due_time: time | None,
+    parent: Task | None,
+    labels: Iterable[Label | str | UUID],
+    rrule: str,
+    recurrence_mode: str,
+    recurrence: Recurrence | None,
+) -> _CleanedTask:
+    """Validate the fields of a new task (no writes, no locks): what `create_task` and
+    `check_new_task` share."""
+    cleaned_title = clean_title(title)
+    cleaned_description = clean_description(description)
+    cleaned_priority = clean_priority(priority)
+    cleaned_date, cleaned_time = clean_due(due_date, due_time)
+    cleaned_labels = clean_labels(user, labels)
+    cleaned_parent = clean_parent(user, parent)
+    cleaned_rule = recurrence_service.clean_rule(rrule, user_today(user)) if rrule else ''
+    cleaned_mode = recurrence_service.clean_mode(recurrence_mode)
+    if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
+        raise _error('rrule', 'A subtask cannot repeat.')
+    if recurrence is not None and (cleaned_rule or recurrence.user_id != user.pk):
+        raise _error('rrule', 'Unknown repeat rule.')
+    if cleaned_rule and cleaned_date is None:
+        cleaned_date = recurrence_service.first_date(cleaned_rule, user_today(user))
+    return _CleanedTask(
+        title=cleaned_title,
+        description=cleaned_description,
+        priority=cleaned_priority,
+        due_date=cleaned_date,
+        due_time=cleaned_time,
+        labels=cleaned_labels,
+        parent=cleaned_parent,
+        rule=cleaned_rule,
+        mode=cleaned_mode,
+    )
+
+
+def check_new_task(
+    user: User,
+    *,
+    title: str,
+    description: str = '',
+    priority: int = 0,
+    due_date: date | None = None,
+    due_time: time | None = None,
+    parent: Task | None = None,
+    labels: Iterable[Label | str | UUID] = (),
+    rrule: str = '',
+    recurrence_mode: str = RecurrenceMode.FIXED,
+) -> date | None:
+    """Everything `create_task` would refuse that can be told without writing anything, in the same
+    order: the fields (`ValidationError`), a creation blocked by an unpaid repeating task
+    (`TaskCreationBlockedError`), the cap on open tasks (`TooManyTasksError`) and a balance that
+    can't pay for the task (`InsufficientCreditsError`). Returns the task's due date as it would be
+    created (the rule's first date for a repeating task without one).
+
+    For a caller that wants to refuse before spending something (a rate-limit budget, the AI call
+    that reads the title): it takes no lock, so `create_task` still decides for good under the
+    account lock, and a race (the cap or the balance changing in between) can still refuse there.
+    """
+    cleaned = _clean_new_task(
+        user,
+        title=title,
+        description=description,
+        priority=priority,
+        due_date=due_date,
+        due_time=due_time,
+        parent=parent,
+        labels=labels,
+        rrule=rrule,
+        recurrence_mode=recurrence_mode,
+        recurrence=None,
+    )
+    settings = TodoSettings.load()
+    account = get_account(user)
+    if account.creation_blocked_at is not None:
+        raise TaskCreationBlockedError
+    if dates.open_tasks(user).count() >= settings.max_open_tasks_per_user:
+        raise TooManyTasksError
+    if cannot_afford(account, settings):
+        raise InsufficientCreditsError('Insufficient credits')
+    return cleaned.due_date
+
+
 def create_task(
     user: User,
     *,
@@ -212,27 +336,29 @@ def create_task(
     on the task so its page needs no lookup of the email: the From address and whether SES
     authenticated the sender.
     """
-    cleaned_title = clean_title(title)
-    cleaned_description = clean_description(description)
-    cleaned_priority = clean_priority(priority)
-    cleaned_date, cleaned_time = clean_due(due_date, due_time)
-    cleaned_labels = clean_labels(user, labels)
-    cleaned_parent = clean_parent(user, parent)
-    cleaned_rule = recurrence_service.clean_rule(rrule, user_today(user)) if rrule else ''
-    cleaned_mode = recurrence_service.clean_mode(recurrence_mode)
-    if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
-        raise _error('rrule', 'A subtask cannot repeat.')
-    if recurrence is not None and (cleaned_rule or recurrence.user_id != user.pk):
-        raise _error('rrule', 'Unknown repeat rule.')
-    if cleaned_rule and cleaned_date is None:
-        cleaned_date = recurrence_service.first_date(cleaned_rule, user_today(user))
-
+    cleaned = _clean_new_task(
+        user,
+        title=title,
+        description=description,
+        priority=priority,
+        due_date=due_date,
+        due_time=due_time,
+        parent=parent,
+        labels=labels,
+        rrule=rrule,
+        recurrence_mode=recurrence_mode,
+        recurrence=recurrence,
+    )
+    cleaned_title, cleaned_description = cleaned.title, cleaned.description
+    cleaned_priority, cleaned_time = cleaned.priority, cleaned.due_time
+    cleaned_date, cleaned_labels = cleaned.due_date, cleaned.labels
+    cleaned_parent, cleaned_rule, cleaned_mode = cleaned.parent, cleaned.rule, cleaned.mode
     settings = TodoSettings.load()
     account = get_account(user)
     with transaction.atomic():
         number = allocate_number(account)  # locks the account row; refreshes `account`
         if account.creation_blocked_at is not None and not allow_unpaid:
-            raise _error(NON_FIELD_ERRORS, BLOCKED_MESSAGE)
+            raise TaskCreationBlockedError
         if cleaned_parent is not None:
             # Locked and re-read: a concurrent move of the parent under another task (`update_task`)
             # would otherwise leave this a subtask of a subtask.
@@ -240,7 +366,7 @@ def create_task(
         if (
             dates.open_tasks(user).count() >= settings.max_open_tasks_per_user
         ):  # under the lock, so racing creations can't pass the cap together
-            raise _error(NON_FIELD_ERRORS, TOO_MANY_MESSAGE)
+            raise TooManyTasksError
         charged, unpaid = charge_task_creation(
             account, settings, number=number, allow_unpaid=allow_unpaid
         )
@@ -275,19 +401,11 @@ def create_task(
     return task
 
 
-def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
-    """Apply a partial update (`UPDATABLE` keys only) with the same validation as `create_task`.
-
-    Clearing `due_date` clears `due_time` too. A task moves under a `parent` only when it has no
-    subtasks of its own; `parent=None` makes a subtask a top-level task. A trashed task is
-    read-only.
-
-    `rrule` / `recurrence_mode` edit the repeat rule (`services.recurrence`): a rule that differs
-    from the running one replaces it (the anchor becomes the task's date, which is filled with the
-    rule's first date when the task has none); the same rule and mode change nothing, the anchor
-    included; an empty `rrule` stops repeating. A change also makes this task the occurrence whose
-    completion creates the next one (`Task.recurrence_anchor`) and starts the `COUNT` again.
-    """
+def _clean_changes(
+    task: Task, changes: Mapping[str, Any]
+) -> tuple[dict[str, Any], list[Label] | None, Task | None, bool]:
+    """Validate a partial update against the task as read (no writes, no locks): `(values, labels,
+    new_parent, moves)`. What `update_task` and `check_update_task` share."""
     unknown = set(changes) - UPDATABLE
     if unknown:
         raise ValueError(f'Cannot update {sorted(unknown)}')
@@ -319,6 +437,36 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
         moves = new_parent != task.parent
         if moves:
             values['parent'] = new_parent
+    return values, labels, new_parent, moves
+
+
+def check_update_task(task: Task, *, changes: Mapping[str, Any]) -> None:
+    """What `update_task` would refuse that can be told without writing anything: an unknown key
+    (`ValueError`), a trashed task, an invalid field, a bad repeat rule, a task moved under itself.
+    For a caller that wants to refuse before spending a rate-limit budget.
+
+    It reads the task as the caller loaded it and takes no lock, so what `update_task` only decides
+    under the row lock (the task has been trashed, completed or moved since; a task with subtasks
+    moved under a parent; a subtask given a repeat rule) can still be refused there.
+    """
+    _clean_changes(task, changes)
+    _rule_action(task, changes)  # the repeat rule's syntax
+
+
+def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
+    """Apply a partial update (`UPDATABLE` keys only) with the same validation as `create_task`.
+
+    Clearing `due_date` clears `due_time` too. A task moves under a `parent` only when it has no
+    subtasks of its own; `parent=None` makes a subtask a top-level task. A trashed task is
+    read-only.
+
+    `rrule` / `recurrence_mode` edit the repeat rule (`services.recurrence`): a rule that differs
+    from the running one replaces it (the anchor becomes the task's date, which is filled with the
+    rule's first date when the task has none); the same rule and mode change nothing, the anchor
+    included; an empty `rrule` stops repeating. A change also makes this task the occurrence whose
+    completion creates the next one (`Task.recurrence_anchor`) and starts the `COUNT` again.
+    """
+    values, labels, new_parent, moves = _clean_changes(task, changes)
 
     with transaction.atomic():
         # The task's row (and the new parent's, in pk order) is locked and re-read first: the

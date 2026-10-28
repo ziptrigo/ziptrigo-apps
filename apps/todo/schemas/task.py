@@ -2,14 +2,20 @@
 
 import datetime as dt
 from datetime import date, datetime, time
+from typing import Annotated
 from uuid import UUID
 
 from ninja import Schema
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
+from ..limits import MAX_REORDER_IDS, TITLE_MAX
 from .attachment import AttachmentSchema
 from .label import LabelRefSchema
 from .reminder import ReminderCreateSchema, ReminderSchema
+
+#: A title is refused over `TITLE_MAX` before anything else is done with it (the AI reading in
+#: particular); a 422.
+Title = Annotated[str, Field(max_length=TITLE_MAX)]
 
 
 class RecurrenceSchema(Schema):
@@ -131,7 +137,7 @@ class TaskCreateSchema(Schema):
 
     model_config = ConfigDict(extra='forbid')
 
-    title: str
+    title: Title
     description: str = ''
     priority: int = 0
     due_date: date | None = None
@@ -156,7 +162,7 @@ class TaskUpdateSchema(Schema):
 
     model_config = ConfigDict(extra='forbid')
 
-    title: str | None = None
+    title: Title | None = None
     description: str | None = None
     priority: int | None = None
     due_date: date | None = None
@@ -184,13 +190,13 @@ class CountSchema(Schema):
 
 class ReorderSchema(Schema):
     """Body for `POST /tasks/reorder`: `scope` `today` (the tasks due today) or `subtasks` (the
-    subtasks of `parent`, a task number), and the task ids in the new order. Ids outside the set
-    are ignored."""
+    subtasks of `parent`, a task number), and the task ids in the new order (at most 500; a longer
+    list is a 422). Ids outside the set are ignored."""
 
     model_config = ConfigDict(extra='forbid')
 
     scope: str
-    ids: list[UUID]
+    ids: Annotated[list[UUID], Field(max_length=MAX_REORDER_IDS)]
     parent: int | None = None
 
 

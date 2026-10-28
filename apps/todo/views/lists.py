@@ -29,12 +29,15 @@ from ..services import (
     SORT_DEFAULT,
     SORTS,
     UPCOMING_DAYS,
+    completed_set,
     get_account,
     has_manual_order,
     open_tasks,
     order_tasks,
     overdue_set,
     todays_tasks,
+    trash_set,
+    upcoming_set,
     with_comment_counts,
     with_open_occurrences,
     with_subtask_counts,
@@ -125,9 +128,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
         return context
 
     if view == 'upcoming':
-        queryset = open_tasks(user).filter(
-            due_date__gt=today, due_date__lte=today + timedelta(days=UPCOMING_DAYS)
-        )
+        queryset = upcoming_set(user)
         by_day: dict[date, list[Task]] = {}
         for task in decorate(order_tasks(queryset)):
             assert task.due_date is not None  # filtered above
@@ -141,13 +142,9 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     if view == 'all':
         queryset = order_tasks(decorate(open_tasks(user)), sort)
     elif view == 'completed':
-        queryset = decorate(
-            Task.objects.filter(user=user, completed_at__isnull=False, deleted_at__isnull=True)
-        ).order_by('-completed_at', '-number')
+        queryset = decorate(completed_set(user)).order_by('-completed_at', '-number')
     else:
-        queryset = decorate(Task.objects.filter(user=user, deleted_at__isnull=False)).order_by(
-            '-deleted_at', '-number'
-        )
+        queryset = decorate(trash_set(user)).order_by('-deleted_at', '-number')
     page_obj = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get('page'))
     tasks = list(page_obj.object_list)
     if view == 'trash':

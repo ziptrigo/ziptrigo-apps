@@ -76,8 +76,10 @@ def validation_detail(exc: ValidationError) -> str:
 
 
 @contextmanager
-def mapped_errors() -> Generator[None]:
-    """Turn the services' exceptions into the API's statuses (400 / 402, see the module docs)."""
+def mapped_errors(*, keep: type[ValidationError] | None = None) -> Generator[None]:
+    """Turn the services' exceptions into the API's statuses (400 / 402, see the module docs).
+    `keep` is a `ValidationError` subclass the caller answers itself (the 409 of `POST /tasks`):
+    it passes through untouched."""
     try:
         yield
     except AccountFrozenError as exc:
@@ -85,6 +87,8 @@ def mapped_errors() -> Generator[None]:
     except InsufficientCreditsError as exc:
         raise HttpError(402, str(exc) or 'Insufficient credits') from exc
     except ValidationError as exc:
+        if keep is not None and isinstance(exc, keep):
+            raise
         raise HttpError(400, validation_detail(exc)) from exc
 
 

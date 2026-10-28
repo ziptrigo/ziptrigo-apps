@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404
 from .. import services
 from ..models import Label
 from ..schemas import LabelCreateSchema, LabelOrderSchema, LabelSchema, LabelUpdateSchema
+from ..services import labels as label_service
 from .common import charge, mapped_errors
 from .router import router
 
@@ -32,8 +33,11 @@ def list_labels(request):
 @router.post('/labels', response={201: LabelSchema})
 def create_label(request, payload: LabelCreateSchema):
     """Add a label at the end of the list. Names are unique, ignoring case; `color` is `#rrggbb`."""
-    charge(request, 'TODO_EDIT_USER')
     with mapped_errors():
+        label_service.clean_name(payload.name)  # a refusal here spends no budget
+        label_service.clean_color(payload.color)
+        label_service.clean_description(payload.description)
+        charge(request, 'TODO_EDIT_USER')
         label = services.create_label(
             request.auth, payload.name, payload.color, payload.description
         )
@@ -59,8 +63,14 @@ def update_label(request, label_id: UUID, payload: LabelUpdateSchema):
         for name, value in payload.model_dump(exclude_unset=True).items()
     }
     if changes:
-        charge(request, 'TODO_EDIT_USER')
         with mapped_errors():
+            if 'name' in changes:  # a refusal here spends no budget
+                label_service.clean_name(changes['name'])
+            if 'color' in changes:
+                label_service.clean_color(changes['color'])
+            if 'description' in changes:
+                label_service.clean_description(changes['description'])
+            charge(request, 'TODO_EDIT_USER')
             services.update_label(label, **changes)
     return _counted(request.auth, label.pk)
 

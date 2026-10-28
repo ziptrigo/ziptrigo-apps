@@ -488,6 +488,15 @@ class TestAttachments:
         pending = make_attachment(task, fake_storage, uploaded=False)
 
         assert get(client, f'/attachments/{pending.pk}/url', auth).status_code == 404
+
+    def test_deleting_a_pending_upload_cancels_it(self, client, auth, task, fake_storage):
+        pending = make_attachment(task, fake_storage, uploaded=False)
+        fake_storage.seed(attachment_key(task.user_id, pending.pk), PNG_BYTES)
+
+        assert delete(client, f'/attachments/{pending.pk}', auth).status_code == 204
+
+        assert not Attachment.objects.filter(pk=pending.pk).exists()
+        assert attachment_key(task.user_id, pending.pk) not in fake_storage.objects
         assert delete(client, f'/attachments/{pending.pk}', auth).status_code == 404
 
     def test_a_frozen_account_cannot_download(self, client, auth, task, funded_user, fake_storage):

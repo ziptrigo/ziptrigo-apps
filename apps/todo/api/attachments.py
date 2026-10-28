@@ -7,6 +7,10 @@ rate limits.
 3. `POST /tasks/{number}/attachments/{id}/complete` verifies the object (size and SHA-256) and
    counts it: only then is it attached, and billed as storage.
 
+A client that gives up between 1 and 3 calls `POST /attachments/{id}/cancel` (a pending row counts
+toward the task's file cap until it is cancelled or abandoned after 24 hours, so a client whose
+`PUT` fails must cancel it); `DELETE /attachments/{id}` on a pending row does the same.
+
 Downloading is a short-lived presigned URL (`GET /attachments/{id}/url`), never a redirect and
 never the S3 key. While the account's storage is paused (unpaid) uploads and downloads are a 402.
 """
@@ -28,14 +32,13 @@ from .router import router
 logger = logging.getLogger(__name__)
 
 
-def _owned_attachment(request, attachment_id: UUID) -> Attachment:
-    """The caller's uploaded attachment, or a 404 (one that never completed isn't one yet)."""
-    return get_object_or_404(
-        Attachment.objects.select_related('task', 'user'),
-        pk=attachment_id,
-        user=request.auth,
-        uploaded=True,
-    )
+def _owned_attachment(request, attachment_id: UUID, *, uploaded: bool | None = True) -> Attachment:
+    """The caller's attachment, or a 404. By default only an uploaded one (one that never completed
+    isn't an attachment yet); `uploaded=None` accepts a pending upload too."""
+    queryset = Attachment.objects.select_related('task', 'user').filter(user=request.auth)
+    if uploaded is not None:
+        queryset = queryset.filter(uploaded=uploaded)
+    return get_object_or_404(queryset, pk=attachment_id)
 
 
 @router.post('/tasks/{number}/attachments', response={201: UploadTicketSchema})
@@ -104,12 +107,36 @@ def attachment_url(request, attachment_id: UUID, disposition: str = 'attachment'
     }
 
 
+@router.post('/attachments/{attachment_id}/cancel', response={204: None})
+def cancel_upload(request, attachment_id: UUID):
+    """Give up on an upload that was started and not completed: its row (so it stops counting
+    toward the task's file cap) and its object, if the `PUT` landed. Idempotent: an upload that is
+    already gone (cancelled, abandoned, its task deleted, or never yours) answers 204 too, and
+    removes only an object under your own prefix. A file that is already attached is a 400: remove
+    it with `DELETE /attachments/{id}`. Spends `TODO_EDIT_USER`, after the 400."""
+    attachment = Attachment.objects.filter(pk=attachment_id, user=request.auth).first()
+    if attachment is not None and attachment.uploaded:
+        raise HttpError(400, 'This file is already attached.')
+    charge(request, 'TODO_EDIT_USER')
+    if attachment is None:
+        attachments.discard_orphan_object(request.auth.pk, attachment_id)
+        return 204, None
+    with mapped_errors():
+        attachments.cancel_upload(attachment)
+    return 204, None
+
+
 @router.delete('/attachments/{attachment_id}', response={204: None})
 def delete_attachment(request, attachment_id: UUID):
     """Remove a file from its task: the object and the row, and its bytes stop being billed. Also
-    allowed for a task in the Trash and while storage is paused (it saves money)."""
-    charge(request, 'TODO_EDIT_USER')
-    attachment = _owned_attachment(request, attachment_id)
+    allowed for a task in the Trash and while storage is paused (it saves money). On an upload
+    that was started and not completed it is the same as `POST /attachments/{id}/cancel`."""
+    charge(request, 'TODO_EDIT_USER')  # before the lookup, as the web view does
+    attachment = _owned_attachment(request, attachment_id, uploaded=None)
+    if not attachment.uploaded:
+        with mapped_errors():
+            attachments.cancel_upload(attachment)
+        return 204, None
     try:
         attachments.delete_attachment(attachment)
     except attachments.STORAGE_ERRORS as exc:

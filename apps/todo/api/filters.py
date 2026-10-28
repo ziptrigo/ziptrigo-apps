@@ -8,6 +8,7 @@ from uuid import UUID
 
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from ninja.errors import HttpError
 
 from .. import services
 from ..models import SavedFilter
@@ -18,6 +19,7 @@ from ..schemas import (
     FilterUpdateSchema,
     TaskListSchema,
 )
+from ..services import saved_filters
 from ..services.filters import filter_tasks, label_names
 from ..services.saved_filters import stored_params
 from ..services.search import search_guard
@@ -63,9 +65,12 @@ def list_filters(request):
 @router.post('/filters', response={201: FilterSchema})
 def create_filter(request, payload: FilterCreateSchema):
     """Save a search under a name (unique, ignoring case; at most 50 filters). A search text that
-    can't run (empty after cleaning, too long, an invalid pattern) is a 400."""
-    charge(request, 'TODO_EDIT_USER')
+    can't run (empty after cleaning, too long, an invalid pattern) is a 400, before the edit budget
+    is spent."""
     with mapped_errors():
+        saved_filters.clean_name(payload.name)
+        saved_filters.clean_params(request.auth, payload.params.to_params())
+        charge(request, 'TODO_EDIT_USER')
         saved = services.save_filter(request.auth, payload.name, payload.params.to_params())
     return 201, _data(saved, request.auth, label_names(request.auth))
 
@@ -74,7 +79,8 @@ def create_filter(request, payload: FilterCreateSchema):
 # `reorder` is never read as an id either way, but it reads better next to the others).
 @router.post('/filters/reorder', response=list[FilterSchema])
 def reorder_filters(request, payload: FilterOrderSchema):
-    """Put the saved filters in the order given (ids that aren't yours are ignored; at most 50)."""
+    """Put the saved filters in the order given (ids that aren't yours are ignored; at most 50, a
+    longer list is a 422)."""
     charge(request, 'TODO_EDIT_USER')
     with mapped_errors():
         services.reorder_filters(request.auth, payload.ids)
@@ -84,16 +90,26 @@ def reorder_filters(request, payload: FilterOrderSchema):
 @router.patch('/filters/{filter_id}', response=FilterSchema)
 def update_filter(request, filter_id: UUID, payload: FilterUpdateSchema):
     """Rename a filter and/or replace its search (`params`, as a whole). Both are saved, or
-    neither."""
+    neither. Neither can be cleared: an explicit `null` is a 400 (to search for everything, send
+    the default `params`). A body with nothing in it changes nothing and spends no budget; a value
+    that can't be used is refused before the edit budget is spent."""
     saved = _owned(request, filter_id)
     changes = payload.model_dump(exclude_unset=True)
+    for field in changes:
+        if changes[field] is None:
+            raise HttpError(400, f'{field}: Cannot be null.')
     if changes:
-        charge(request, 'TODO_EDIT_USER')
-        with mapped_errors(), transaction.atomic():
-            if changes.get('name') is not None:
-                services.rename_filter(saved, changes['name'])
+        with mapped_errors():
+            if 'name' in changes:
+                saved_filters.clean_name(changes['name'])
             if payload.params is not None:
-                services.update_filter_params(saved, payload.params.to_params())
+                saved_filters.clean_params(request.auth, payload.params.to_params())
+            charge(request, 'TODO_EDIT_USER')
+            with transaction.atomic():
+                if 'name' in changes:
+                    services.rename_filter(saved, changes['name'])
+                if payload.params is not None:
+                    services.update_filter_params(saved, payload.params.to_params())
     return _data(saved, request.auth, label_names(request.auth))
 
 

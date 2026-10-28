@@ -212,10 +212,11 @@ def invoke(*args, input=None):
 # -- login --
 
 
-def test_login_stores_the_token_for_the_environment(logged_out, api, token_dir):
+def test_login_stores_the_token_for_the_environment(logged_out, api, token_dir, monkeypatch):
     api.on('post', '/auth/login', FakeResponse(200, {'access_token': 'tok123'}))
+    monkeypatch.setenv('TODO_PASSWORD', 'pw')
 
-    result = invoke('login', 'local', 'me@example.com', 'pw')
+    result = invoke('login', 'local', 'me@example.com')
 
     assert result.exit_code == 0
     assert (token_dir / '.todo_token.local').read_text() == 'tok123'
@@ -230,18 +231,31 @@ def test_login_reads_the_password_from_the_environment(logged_out, api, monkeypa
     assert api.calls[0]['json']['password'] == 'env-pw'
 
 
+def test_login_takes_no_password_argument(logged_out, api, monkeypatch):
+    """No CLI takes a password on the command line (shell history): a third argument is refused."""
+    monkeypatch.delenv('TODO_PASSWORD', raising=False)
+
+    result = invoke('login', 'local', 'me@example.com', 'secret')
+
+    assert result.exit_code == 2 and api.calls == []
+
+
 def test_login_prompts_when_there_is_no_password(logged_out, api, monkeypatch):
     api.on('post', '/auth/login', FakeResponse(200, {'access_token': 't'}))
-    monkeypatch.setattr('typer.prompt', lambda *a, **k: 'typed-pw')
+    monkeypatch.delenv('TODO_PASSWORD', raising=False)
+    prompts: list[dict] = []
+    monkeypatch.setattr('typer.prompt', lambda *a, **k: prompts.append(k) or 'typed-pw')
 
     assert invoke('login', 'local', 'me@example.com').exit_code == 0
     assert api.calls[0]['json']['password'] == 'typed-pw'
+    assert prompts == [{'hide_input': True}]
 
 
-def test_a_failed_login_says_why_and_writes_no_token(logged_out, api):
+def test_a_failed_login_says_why_and_writes_no_token(logged_out, api, monkeypatch):
     api.on('post', '/auth/login', FakeResponse(401, {'detail': 'Invalid credentials'}))
+    monkeypatch.setenv('TODO_PASSWORD', 'bad')
 
-    result = invoke('login', 'local', 'me@example.com', 'bad')
+    result = invoke('login', 'local', 'me@example.com')
 
     assert result.exit_code == 1
     assert 'Invalid credentials' in result.output
@@ -607,6 +621,40 @@ def test_edit_clear_due(api):
 
     assert invoke('edit', 'local', '1234', '--clear-due').exit_code == 0
     assert api.calls[0]['json'] == {'due_date': None}
+
+
+def test_edit_a_date_alone_keeps_the_time(api):
+    api.on('patch', '/todo/tasks/1234', FakeResponse(200, TASK))
+
+    assert invoke('edit', 'local', '1234', '--due', '2026-12-01').exit_code == 0
+
+    assert api.calls[0]['json'] == {'due_date': '2026-12-01'}  # no due_time: the API keeps it
+
+
+def test_edit_clear_time_keeps_the_date(api):
+    api.on('patch', '/todo/tasks/1234', FakeResponse(200, TASK))
+
+    assert invoke('edit', 'local', '1234', '--clear-time').exit_code == 0
+    assert invoke('edit', 'local', '1234', '--due', '2026-12-01', '--clear-time').exit_code == 0
+
+    assert [c['json'] for c in api.calls] == [
+        {'due_time': None},
+        {'due_date': '2026-12-01', 'due_time': None},
+    ]
+
+
+def test_edit_clear_time_conflicts_with_a_time_and_with_clear_due(api):
+    with_time = invoke('edit', 'local', '1234', '--due', '2026-12-01T08:00', '--clear-time')
+    with_clear_due = invoke('edit', 'local', '1234', '--clear-due', '--clear-time')
+
+    assert with_time.exit_code == 2 and with_clear_due.exit_code == 2 and api.calls == []
+
+
+def test_edit_help_says_a_date_keeps_the_time(api):
+    result = invoke('edit', '--help')
+
+    assert 'KEEPS' in ' '.join(result.output.split()) or 'keeps' in ' '.join(result.output.split())
+    assert '--clear-time' in result.output
 
 
 def test_edit_adds_and_removes_labels_against_the_current_ones(api):
@@ -994,12 +1042,15 @@ def test_a_failed_put_is_reported_and_not_completed(api, tmp_path):
     path.write_bytes(b'aaa')
     api.on('post', '/todo/tasks/1234/attachments', ticket())
     api.on('put', 'https://fake-s3.test/key?put', FakeResponse(403))
+    api.on('post', f'/todo/attachments/{ATTACHMENT_ID}/cancel', FakeResponse(204))
 
     result = invoke('upload', 'local', '1234', str(path))
 
     assert result.exit_code == 1
     assert 'the upload to storage failed (403)' in result.output
     assert api.requests('post', '/complete') == []
+    cancel = api.requests('post', f'/attachments/{ATTACHMENT_ID}/cancel')
+    assert len(cancel) == 1 and cancel[0]['headers'] == {'Authorization': 'Bearer tok'}
 
 
 def test_a_connection_error_during_the_put_is_a_failure_not_a_crash(api, tmp_path, monkeypatch):
@@ -1008,6 +1059,7 @@ def test_a_connection_error_during_the_put_is_a_failure_not_a_crash(api, tmp_pat
     path = tmp_path / 'a.txt'
     path.write_bytes(b'aaa')
     api.on('post', '/todo/tasks/1234/attachments', ticket())
+    api.on('post', f'/todo/attachments/{ATTACHMENT_ID}/cancel', FakeResponse(204))
 
     def refuse(url, **kwargs):
         raise requests.exceptions.ConnectionError('reset')
@@ -1017,6 +1069,7 @@ def test_a_connection_error_during_the_put_is_a_failure_not_a_crash(api, tmp_pat
     result = invoke('upload', 'local', '1234', str(path))
 
     assert result.exit_code == 1 and 'upload failed: reset' in result.output
+    assert len(api.requests('post', f'/attachments/{ATTACHMENT_ID}/cancel')) == 1
 
 
 def test_a_rejected_complete_is_reported(api, tmp_path):
@@ -1029,10 +1082,40 @@ def test_a_rejected_complete_is_reported(api, tmp_path):
         f'/todo/tasks/1234/attachments/{ATTACHMENT_ID}/complete',
         FakeResponse(400, {'detail': 'The upload did not complete correctly.'}),
     )
+    api.on('post', f'/todo/attachments/{ATTACHMENT_ID}/cancel', FakeResponse(204))
 
     result = invoke('upload', 'local', '1234', str(path))
 
     assert result.exit_code == 1 and 'The upload did not complete correctly.' in result.output
+    assert len(api.requests('post', f'/attachments/{ATTACHMENT_ID}/cancel')) == 1
+
+
+def test_a_refused_start_has_nothing_to_cancel(api, tmp_path):
+    path = tmp_path / 'a.txt'
+    path.write_bytes(b'aaa')
+    api.on('post', '/todo/tasks/1234/attachments', FakeResponse(402, {'detail': 'Storage paused'}))
+
+    result = invoke('upload', 'local', '1234', str(path))
+
+    assert result.exit_code == 1 and len(api.calls) == 1
+
+
+def test_a_failed_cancel_is_only_a_warning(api, tmp_path):
+    path = tmp_path / 'a.txt'
+    path.write_bytes(b'aaa')
+    api.on('post', '/todo/tasks/1234/attachments', ticket())
+    api.on('put', 'https://fake-s3.test/key?put', FakeResponse(403))
+    api.on(
+        'post',
+        f'/todo/attachments/{ATTACHMENT_ID}/cancel',
+        FakeResponse(429, {'detail': 'Too many requests'}),
+    )
+
+    result = invoke('upload', 'local', '1234', str(path))
+
+    assert result.exit_code == 1
+    assert 'the upload to storage failed (403)' in result.output
+    assert 'Could not cancel the upload' in result.output
 
 
 # -- download --

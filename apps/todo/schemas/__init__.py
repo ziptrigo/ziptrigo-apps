@@ -21,7 +21,7 @@ from .label import (
     LabelSchema,
     LabelUpdateSchema,
 )
-from .parse import ParseSchema
+from .parse import ParseAnswerSchema, ParseSchema
 from .reminder import (
     DeliveryListSchema,
     DeliverySchema,
@@ -67,6 +67,7 @@ __all__ = [
     'LabelRefSchema',
     'LabelSchema',
     'LabelUpdateSchema',
+    'ParseAnswerSchema',
     'ParseSchema',
     'ParsedInfoSchema',
     'PostponeSchema',
