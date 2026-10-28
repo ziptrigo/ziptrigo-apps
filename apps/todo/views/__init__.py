@@ -1,11 +1,3 @@
-from .comments import (
-    comment_add,
-    comment_delete,
-    comment_deleted_view,
-    comment_edit,
-    comment_history_view,
-    comment_restore,
-)
 from .attachments import (
     attachment_cancel,
     attachment_complete,
@@ -13,6 +5,14 @@ from .attachments import (
     attachment_download,
     attachment_list,
     attachment_start,
+)
+from .comments import (
+    comment_add,
+    comment_delete,
+    comment_deleted_view,
+    comment_edit,
+    comment_history_view,
+    comment_restore,
 )
 from .labels import label_delete, label_edit, label_reorder, labels_page
 from .lists import (
