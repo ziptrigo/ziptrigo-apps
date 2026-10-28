@@ -69,6 +69,8 @@ class Task(models.Model):
     subtask_open: int
     # Set by `services.comments.with_comment_counts` on the tasks a list shows (not stored).
     comment_count: int
+    # Set by `services.attachments.with_attachment_counts` (not stored).
+    attachment_count: int
     # Set by `services.reminders.with_reminder_flags` on the tasks a list shows (not stored).
     has_reminders: bool
     # Set by `services.search` on the tasks a search shows (not stored): which field matched

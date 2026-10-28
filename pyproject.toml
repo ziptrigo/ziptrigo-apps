@@ -164,6 +164,7 @@ modules = [
     'admin.server',
     'admin.shorturl',
     'admin.test',
+    'admin.todo',
 ]
 
 # Dependency rules between apps (`inv lint imports`). Each app may only import from the layers

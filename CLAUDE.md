@@ -42,9 +42,10 @@ apps/short_url/       Short URLs (issue #162): links with editable destinations,
 apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks with per-user numbers
                       from 1000, labels, due dates in the user's time zone, Today / Upcoming / All /
                       Completed / Trash pages, task billing (a monthly free allowance, then a price),
-                      and tasks added by email (see "To-do").
+                      tasks added by email, the JWT API (`/api/todo/`) and the `admin/todo.py` CLI
+                      (see "To-do").
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts/
-                      shorturl. Via `inv`.
+                      shorturl/todo. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
                       test plans run by an AI agent driving a browser, one per area (see its README).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
@@ -71,7 +72,7 @@ inv test e2e [--no-headless]  # Playwright, uses pytest_e2e.ini
 inv server run [local|prod]     # runserver on :8000
 inv pip sync                  # uv sync --frozen, all groups
 inv openapi generate --format json --file <path>
-inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/, /api/receipts/, /api/s/
+inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/, /api/receipts/, /api/s/, /api/todo/
 inv filetransfer send local report.pdf --to a@example.com
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
 inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported types are skipped
@@ -95,10 +96,29 @@ inv shorturl analytics local <link-id>           # open the detailed statistics 
 inv shorturl stats local <link-id> [--range 7|30|90|all]
 inv shorturl preview local <link-id>             # what /s/<code>+ shows, and whether it works now
 inv shorturl qr local <link-id> --out link.png
+inv todo login local <email>                    # password: prompt, or TODO_PASSWORD
+inv todo add local "pay rent every month on the 1st"   # the date is read from the title (--no-parse: don't)
+inv todo add local call the dentist --due 2026-11-05T15:00 --priority 2 --label health --parent 1200
+inv todo list local [--view today|upcoming|all|completed|trash --q "rent*" --regex --include-completed]
+inv todo list local --priority 1,2 --label home --from 2026-11-01 --to 2026-11-30 --sort priority
+inv todo get local 1234                         # everything: description, comments, reminders, files, referenced by
+inv todo edit local 1234 [--title ... --priority 1 --due 2026-11-05T09:00 --clear-due --label home --remove-label later]
+inv todo done local 1234 1235 | undone local 1234 | trash local 1234 | restore local 1234
+inv todo postpone local 1234 tomorrow|next-week|next-weekend|2026-12-24
+inv todo overdue-to-today local
+inv todo comment local 1234 asked the landlord  # comments local 1234 lists them
+inv todo labels local | label-add local home --color "#336699" | label-edit local home --name house | label-delete local home [--yes]
+inv todo remind local 1234 60 [--channel in_app|email|both] | unremind local 1234 <reminder-id>
+inv todo upload local 1234 contract.pdf photo.jpg   # SHA-256, presigned PUT, complete; exit 1 if any failed
+inv todo download local <attachment-id> [--out contract.pdf --force]   # streams to .part, then renames
+inv todo filters local | filter-run local <id-or-name> [--limit 20]
+inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both]
+inv todo inbox local                            # the address tasks can be emailed to
+inv todo regenerate local [--yes]               # retire the address and issue a new one
 ```
 
 Every command accepts `--dry` to print the shell command without running it (the JWT HTTP-client
-CLIs -- `qrcode`, `filetransfer`, `receipts`, `shorturl` -- run no shell command, so they have no `--dry`). The app names `inv`
+CLIs -- `qrcode`, `filetransfer`, `receipts`, `shorturl`, `todo` -- run no shell command, so they have no `--dry`). The app names `inv`
 accepts come from `admin/django_app.py`, which discovers them from `apps/*/apps.py`.
 
 `admin/server.py` and `admin/openapi.py` each define one typer command, which typer collapses away
@@ -1222,8 +1242,8 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
 `config/api.py` builds one `NinjaAPI`; each app exposes a `router` from its `api` module/package
 and is mounted under its prefix (`/api/` for accounts, `/api/billing/`, `/api/qr/`, `/api/ft/` for
 file_transfer, `/api/receipts/` for receipts, `/api/s/` for short_url, described under "Short URLs"
-above, including how it handles credits for a client with no one to confirm with). Docs at
-`/api/docs`.
+above, including how it handles credits for a client with no one to confirm with, and `/api/todo/`
+for the To-do app, described just below and under "To-do" > "API and CLI"). Docs at `/api/docs`.
 
 `apps/file_transfer/api/` (issue #55 phase 3) is JWT-only (logged-in users; anonymous sending stays
 web-only) and mirrors the web send/dashboard flow endpoint-for-endpoint, calling the exact same
@@ -1334,6 +1354,47 @@ Where the endpoint looks up a receipt, the lookup (404) comes before its rate li
 `RECEIPTS_UPLOAD_COMPLETE_USER` first, like the web view. Tests: `apps/receipts/tests/
 test_api_*.py` over Django's test client (the real `/api/receipts/...` URLs), helpers in
 `tests/api_support.py`.
+
+`apps/todo/api/` (issue #187; `/api/todo/`) is JWT-only like the receipts one (router-level
+`auth=JWTAuth()` in `api/router.py`; endpoint modules `tasks.py`, `labels.py`, `comments.py`,
+`reminders.py`, `attachments.py`, `filters.py`, `settings.py`, `parse.py` share that one `Router`;
+schemas in `apps/todo/schemas/`) and calls the exact same `apps.todo.services` the web views do,
+adding no rule of its own. A task is addressed by its **number** (`/tasks/{number}`), everything
+else by its UUID. Endpoints, relative to the mount: `GET /tasks` (`view`, `q`, `mode`,
+`include_completed`, `priority`, `label`, `date_range`/`date_from`/`date_to`, `sort`, `parent`,
+`limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`), `POST /tasks` (201),
+`GET|PATCH|DELETE /tasks/{number}` (`DELETE` moves to the Trash, 204, idempotent; `GET` also returns
+a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tasks/{number}/` with
+`complete`, `uncomplete`, `restore`, `delete-forever`, `postpone`, `checklist`, `recurrence/stop`,
+`POST /tasks/reschedule-overdue` and `POST /tasks/reorder` (both `{count}`), labels (`GET|POST
+/labels`, `PATCH|DELETE /labels/{id}`, `POST /labels/reorder`), comments
+(`GET|POST /tasks/{number}/comments`, `PATCH|DELETE .../comments/{id}`, `POST .../restore`, `GET
+.../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
+`GET /reminders/history`), attachments (`POST /tasks/{number}/attachments`, `POST
+.../attachments/{id}/complete`, `GET /attachments/{id}/url`, `DELETE /attachments/{id}`), saved
+filters (`GET|POST /filters`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
+/filters/{id}/tasks`), `GET|PATCH /settings`, `GET /inbox`, `POST /inbox/regenerate` and `POST
+/parse`. Status codes (`api/common.py`): **400** a service `ValidationError` (`field: message`, a
+message that belongs to no field plain) or a hand-read query parameter (`view`, `mode`, `sort`,
+`priority`, `label`, `date_range`, `date_from`/`date_to`, `disposition`); **402**
+`InsufficientCreditsError` and `AccountFrozenError`; **404** another user's task, label, comment,
+reminder, attachment or filter (never 403), also `delete-forever` of a task that isn't in the Trash
+(as the web) and an attachment that never completed; **409** `POST /tasks` while a repeating task's
+next occurrence is waiting to be paid for, `{detail, unpaid_task_numbers}`; **422** ninja's own
+validation (a malformed number or id, a mistyped field, an unknown body key: every body schema is
+`extra='forbid'`) and an empty or over-long title for `POST /parse`; **429** from the site handler;
+**503** only for a storage failure while deleting an attachment. A reference in a body to something
+that isn't the caller's (`labels`, `parent`) is a 400 with the service's own message, like Receipts'
+foreign `vendor_id`. The rate limits are the web's, so the budgets are shared: `TODO_CREATE_USER`
+(`POST /tasks`), `TODO_EDIT_USER` (every other change; an empty `PATCH`, and deleting or restoring
+a comment that already is, spend nothing), `TODO_COMMENT_USER` (adding and editing a comment),
+`TODO_SEARCH_USER` (a `GET /tasks` with `q` or any of `priority`, `label`, `date_range`, and
+`GET /filters/{id}/tasks`; charged before the query, so a refused pattern still spends it),
+`TODO_PARSE_USER` and `TODO_PARSE_USER_DAY` (`POST /parse` and `parse_title`; peeked first and hit
+only when the model is called), `TODO_UPLOAD_USER`, `TODO_UPLOAD_COMPLETE_USER` (charged first),
+`TODO_DOWNLOAD_USER` and `TODO_REGENERATE_USER`. Where the endpoint looks up a task the lookup
+(404) comes before its limit is charged. Tests: `apps/todo/tests/test_api_*.py` over Django's test
+client (the real `/api/todo/...` URLs), helpers in `tests/api_support.py`.
 
 **Resumable uploads** (spec section 2, issue #55 phase 3): `TransferFile.client_last_modified`
 (nullable, the browser/CLI's `lastModified`, ms since epoch) plus its name and size let a client
@@ -2603,13 +2664,13 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
   exit code is 1 if any failed) and `vendor-merge <keep> <id>...` (unless `--yes`, it first `GET`s
   every vendor so the prompt shows which is kept and which are merged away -- and a wrong id fails
   before the question --, then `POST /vendors/merge`; the kept id and repeats are dropped from the
-  list). The four JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
+  list). The JWT CLIs share their plumbing in `admin/utils.py` (audit follow-up): the token
   is **per CLI and environment**, `~/.<cli>_token.<env>` (`token_file`, so the prod JWT is never
   sent to the local server; the single `~/.<cli>_token` of earlier versions is ignored -- log in
   again, then delete it), written by `write_private_file` (mode 0600 set on the open descriptor so
   a pre-existing looser file is tightened, `O_NOFOLLOW`); `get_headers(cli)`,
   `password_from_prompt_or_env` (`QRCODE_PASSWORD` / `FILETRANSFER_PASSWORD` /
-  `RECEIPTS_PASSWORD` / `SHORTURL_PASSWORD`, and `SHORTURL_LINK_PASSWORD` for the password of a
+  `RECEIPTS_PASSWORD` / `SHORTURL_PASSWORD` / `TODO_PASSWORD`, and `SHORTURL_LINK_PASSWORD` for the password of a
   short link itself, else a hidden prompt: no CLI takes a password on the command line any
   more) and `select_environment` (loads the env file and remembers which, for `token_file`; prints
   `Site: <url> (<env>)` to stderr and warns when `API_BASE_URL` differs from the file's `BASE_URL`,
@@ -2952,11 +3013,8 @@ far:** the foundation (this section), repeating tasks (#179, "Recurrence"), comm
 references (#180, "Comments and references" below), search with saved filters (#181, "Search and
 saved filters" below), attachments (#184, "Attachments and storage billing" below), reminders
 (#182, "Reminders" below), AI date parsing in the title (#183, "AI date parsing" below) and tasks
-added by email (#186, "Email intake" below). **Later
-sub-issues** add their own models, fields on `TodoSettings`,
-services, `RATELIMIT_RULES` and migrations (the JWT API and
-`inv todo` #187), so `services/__init__.py`, `settings.py`, the migrations and this file will see
-small merge conflicts between them.
+added by email (#186, "Email intake" below) and the JWT API with the `inv todo` CLI (#187, "API and
+CLI" below).
 Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
 `templates/todo/`, `static/todo/`, `jobs.py`, `admin.py`, `checks.py`, `urls.py` (mounted at
 `/todo/`, `app_name = 'todo'`).
@@ -4032,6 +4090,93 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
   command, jobs, admin). `FakeTodoStorage` gained `put_object`, `get_object_bytes` and `copy_object`.
 - **Not verified on real mail** (like Receipts' list in "Known gaps"): a BCC and a Gmail auto-forward;
   and nothing here ran against real SES, which needs the infra side (#185).
+
+#### API and CLI
+
+Issue #187 (`api/`, `schemas/`, `admin/todo.py`; no migration). The endpoints, status codes and the
+shared rate-limit budgets are listed under "API" above; this is how they are built and what the
+CLI does with them.
+
+- **Shape.** One module per domain on one `Router` (`api/router.py`, `auth=JWTAuth()`), the
+  Receipts API's layout. `api/common.py` holds `mapped_errors()` (`AccountFrozenError` and
+  `InsufficientCreditsError` -> 402, any other `ValidationError` -> 400), the lookups
+  (`owned_task(request, number)`: a trashed task is returned unless the endpoint asks otherwise,
+  and the service it calls says what is allowed on it, so changing or commenting on one is a 400
+  with the service's message; `delete-forever` asks for a trashed one and is a 404 otherwise, as the
+  web view is) and how a task becomes JSON. Responses are built as dicts (`task_data`) and validated
+  by the schema, because a task needs the owner's account (the default due time for `due_at`) and
+  one reference resolver for `description_html`, made once per request (`TaskContext`).
+  `decorated(queryset)` loads what a task's JSON needs without a query per task: the subtask,
+  comment and attachment counts (`services.with_attachment_counts`, new, a subquery like
+  `with_comment_counts`), the parent, the repeat rule, the labels and the reminders; a test pins the
+  number of queries of a 100-task page. Routes that are not a task number (`/tasks/reorder`,
+  `/labels/reorder`, ...) are registered before the `{number}` / `{id}` ones: a router tries paths
+  in the order they were added.
+- **`GET /tasks`** is the Today / Upcoming / All / Completed / Trash pages and the search page in
+  one. `view` picks the base set (`dates.today_set`, `upcoming_set`, `open_tasks`, `completed_set`,
+  `trash_set`; `parent=<number>` alone lists that task's subtasks, completed ones too, in the
+  user's manual order when they gave one), `FilterParams` the rest (`condition(user)` is the
+  structured filters and the search text as one `Q`; the text is validated by `search.prepare_query`
+  and evaluated inside `search.search_guard()` like every search). `limit`/`offset` replace the
+  pages' 50-row pages, so the web's snippets are not computed. The default order is each page's own
+  (`services.dates.order_today` is the Today list in one query: overdue first, then today's in
+  `today_position` order once the user ordered it by hand, never the stale position of an overdue
+  task; Completed latest first, Trash latest first, else by date); `sort` wins; with `view=all` and
+  `include_completed` the completed ones go last (`search.order_results`). A search, or any of the
+  structured filters, spends `TODO_SEARCH_USER`; a plain list spends nothing.
+- **`POST /tasks`.** `source='api'`, billed like any task (the free allowance, then the price;
+  `charged_credits` in the answer). `labels` are ids, `parent` a number. `reminders` replaces the
+  default reminder `create_task` gave the task, inside one `transaction.atomic()` with the creation,
+  so a refused reminder (no date, a duplicate time) creates and charges nothing; omitted keeps the
+  default, `[]` means none. **`parse_title`** runs the title through `services.parsing.parse_title`
+  first (the same request and the same two rate limits as the web endpoint, spent through its
+  `charge` callback) and uses what it found for each of the date (with its time) and the repeat
+  **unless the body sets it**; the title is replaced by the cleaned one only when everything that was
+  read was used. Nothing the AI does can fail the request: not configured, busy, failing, over the
+  user's limits or no date found just creates the task as typed. `parsed` in the answer
+  (`{applied, label, matched_text, reason}`, `null` when `parse_title` was not asked for) says what
+  happened. `POST /parse` is the web endpoint's body exactly (`{available, has_date, ...}`).
+  Creation refused because of an unpaid occurrence (`services.tasks.BLOCKED_MESSAGE`) is a 409 with
+  the numbers of the user's unpaid tasks.
+- **`PATCH`es** apply `model_dump(exclude_unset=True)`: a key left out is unchanged and an explicit
+  `null` clears (`description` to empty, `priority` to none, `labels` to none, `parent` to a
+  top-level task, `rrule` to stop repeating; `title` cannot be cleared, a 400). `PATCH /settings` saves
+  the due time, the default reminder and the allowlist in one transaction; `null` there clears
+  `default_reminder_minutes` and `sender_allowlist` (accept anyone). Reminders' and comments'
+  updates have nothing to clear (`null` there is "unchanged" / invalid).
+- **Attachments** follow Receipts' upload API (presigned PUT with the signed `Content-Length` and
+  `x-amz-checksum-sha256`; `complete` re-reads the object; a complete for a row that is gone is a 404
+  that also deletes the object). `GET /attachments/{id}/url` returns the presigned URL and the
+  disposition it really has (`inline` only for a sniffed PDF or image, whatever was asked), never the
+  key. There is no cancel endpoint: an upload never completed is cleaned up by the hourly job.
+- **Saved filters** take and return `params` (the stored `FilterParams` dict, validated by
+  `FilterParamsSchema`; labels that are not the caller's are dropped by the service) and a `summary`.
+  `GET /filters/{id}/tasks` runs the filter as saved (a deleted label has dropped out of it).
+- **CLI** (`admin/todo.py`, `inv todo ...`; `TODO_PASSWORD`, token `~/.todo_token.<env>`): every
+  command takes the environment first and goes through `admin/utils.py`'s `api_request` (default
+  timeout, bounded 429 retry that does not sleep on an hourly rule), `get_headers('todo')`,
+  `select_environment` and `password_from_prompt_or_env`; errors print the API's `detail` (a 422
+  list flattened), a 409 names the unpaid task numbers and says to top up, exit 1. `add` sends
+  `parse_title=true` unless `--no-parse` and prints what was read; labels are given by name (or
+  id) and resolved with `GET /labels`, an unknown one stops before anything is created. `list`
+  prints a table (number, due date and time as the owner wrote them, `!1`, title, labels, a repeat
+  mark and a bell); `get` prints everything (the description as Markdown, comments, reminders, files
+  and the tasks that mention it). `done` takes several numbers and carries on past a failure (exit 1
+  if any failed); `upload` hashes each file, skips an empty file or a folder with a warning, carries
+  on past a failed file (exit 1 if any) and PUTs with the exact headers the API returned;
+  `download` asks for a presigned URL and streams it **without the API token** to
+  `.<name>.part` next to the target, renaming it into place only when complete (and refusing to
+  overwrite without `--force`); `label-delete` and `regenerate` ask first (`--yes` skips). Everything
+  that prints a title or a label name escapes Rich markup, so a title like `[bold]` shows as typed.
+  Tests: `admin/tests/test_todo.py` (HTTP mocked, no Django).
+- **Not in v1**: an `expected_cost` / quote for task creation (the price is the setting's and the
+  answer reports `charged_credits`), a cancel-upload endpoint, search snippets in the API.
+- **Judgement calls** where the issue left room: `GET /tasks/{number}` also returns the task's
+  uploaded `attachments` and `referenced_by` (the CLI's `get` needs them and no list endpoint was
+  specified); `POST /tasks` answers an extra `parsed`; `POST /tasks/reorder` answers `{count}` (the
+  web answers 204); `POST /filters/reorder` exists next to the labels' for symmetry with the web;
+  `GET /reminders/history` and the task list take `limit`/`offset` instead of the pages' page
+  numbers.
 
 ### Queue and scheduler
 
