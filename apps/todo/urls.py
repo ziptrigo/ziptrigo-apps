@@ -29,4 +29,26 @@ urlpatterns = [
     path('<int:number>/delete/', views.task_delete, name='delete'),
     path('<int:number>/checklist/', views.task_checklist, name='checklist'),
     path('<int:number>/subtasks/', views.subtask_add, name='subtask-add'),
+    path('<int:number>/comments/', views.comment_add, name='comment-add'),
+    path('<int:number>/comments/<uuid:comment_id>/edit/', views.comment_edit, name='comment-edit'),
+    path(
+        '<int:number>/comments/<uuid:comment_id>/delete/',
+        views.comment_delete,
+        name='comment-delete',
+    ),
+    path(
+        '<int:number>/comments/<uuid:comment_id>/restore/',
+        views.comment_restore,
+        name='comment-restore',
+    ),
+    path(
+        '<int:number>/comments/<uuid:comment_id>/history/',
+        views.comment_history_view,
+        name='comment-history',
+    ),
+    path(
+        '<int:number>/comments/<uuid:comment_id>/deleted/',
+        views.comment_deleted_view,
+        name='comment-deleted',
+    ),
 ]

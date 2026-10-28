@@ -33,6 +33,7 @@ from ..services import (
     has_manual_order,
     order_tasks,
     postpone_task,
+    referenced_by,
     reorder,
     reschedule_overdue,
     restore_task,
@@ -43,6 +44,7 @@ from ..services import (
     uncomplete_task,
     update_task,
 )
+from .comments import comments_context
 from .common import (
     form_error_lines,
     free_line,
@@ -92,6 +94,8 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
         open_subtasks = sum(1 for sub in subtasks if not sub.is_completed)
     labels = list(Label.objects.filter(user=user))
     return {
+        **comments_context(request, task),
+        'referenced_by': referenced_by(task),
         'task': task,
         'subtasks': subtasks,
         'open_subtasks': open_subtasks,

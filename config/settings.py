@@ -409,6 +409,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # shared by the web and the API. Looser than creating: ticking off a list, or dragging, is a
     # burst of small writes.
     'TODO_EDIT_USER': (240, 60),
+    # Adding and editing a comment (issue #180): per user, shared by the web and the API. Every
+    # one is a row of up to 10,000 characters (an edit also a revision), so tighter than the
+    # other edits; deleting and restoring a comment spend `TODO_EDIT_USER`.
+    'TODO_COMMENT_USER': (60, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),

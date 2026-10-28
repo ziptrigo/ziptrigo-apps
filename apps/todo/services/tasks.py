@@ -26,6 +26,7 @@ from . import dates
 from .accounts import allocate_number, get_account
 from .billing import charge_task_creation
 from .limits import DESCRIPTION_MAX, TITLE_MAX
+from .references import sync_references
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,8 @@ def create_task(
         task.save()
         if cleaned_labels:
             task.labels.set(cleaned_labels)
+        if cleaned_description:
+            sync_references(task)
     return task
 
 
@@ -284,11 +287,14 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
                 if Task.objects.filter(parent=task).exists():
                     raise _error('parent', 'A task with subtasks cannot become a subtask.')
             values['position'] = next_position(new_parent)
+        description_changed = 'description' in values and values['description'] != task.description
         for name, value in values.items():
             setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
         if labels is not None:
             task.labels.set(labels)
+        if description_changed:
+            sync_references(task)
     return task
 
 

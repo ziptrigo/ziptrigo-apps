@@ -2,8 +2,9 @@
 
 ## Scope
 
-The To-do product's web UI (`apps/todo`, issue #178: tasks without repeating, comments, search,
-reminders, attachments, AI parsing and email intake are later issues and are not covered):
+The To-do product's web UI (`apps/todo`, issue #178: tasks without repeating; comments and task references,
+issue #180, are covered by TODO-17 and TODO-18; search, reminders, attachments, AI parsing and email intake are
+later issues and are not covered):
 
 - the sidebar (Today with a count, Upcoming, All, Completed, Labels, Trash, Settings; a top bar on
   phones) and the "Tasks are blocked" banner;
@@ -13,6 +14,8 @@ reminders, attachments, AI parsing and email intake are later issues and are not
 - the task page `/todo/<number>/`: inline title edit, the Markdown description with clickable
   checklists, due date, time, priority, labels, subtasks (add, complete, reorder), Complete,
   Postpone, Move to trash, Restore, Delete forever;
+- comments on the task page (add, edit with a visible history, delete and restore, Markdown, `#1234` links) and the
+  "Referenced by" panel;
 - **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and
   **Settings** `/todo/settings/` (default due time, the free-tasks line);
 - credits: the first 10 tasks of a calendar month are free, then 10 credits each; subtasks count;
@@ -261,7 +264,7 @@ state is reached by the admin shell, not by the UI.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/admin/` and find the **To-do** section. | Entries: To-do accounts, Labels, Tasks, To-do settings. |
+| 1 | Open `/admin/` and find the **To-do** section. | Entries: Comments, To-do accounts, Labels, Tasks, To-do settings. |
 | 2 | Open **Tasks**. | A read-only list (user, number, title, due date, priority, charged credits, unpaid, source) with filters for priority, source, completed, trash and unpaid, and a search box (title, number, email). No "Add" button; opening a task shows no Save button; deleting is refused. |
 | 3 | Search `1000`. | The tasks numbered 1000 of every user. |
 | 4 | Open **To-do settings**. | Straight to the one form: free tasks per month (10), task price (10), trash days (30), max open tasks per user (10000), max labels per user (200). Change the price to `0`, save; as `qa.user@example.com` the next task beyond the allowance costs nothing. Put it back to 10. |
@@ -279,3 +282,47 @@ state is reached by the admin shell, not by the UI.
 | 3 | Open a task page and the Postpone menu. | The menu stays on screen; the Details controls wrap; the subtasks list fits. |
 | 4 | Open Labels and edit a label. | The edit fields wrap onto several lines; the buttons stay reachable. |
 | 5 | Tab through Today with the keyboard. | Every control (circle, title link, menu, trash) is reachable with a visible focus ring; the menus open with Enter and close with Escape. |
+| 6 | Open a task page with a few comments, one edited and one deleted. | Comments, the "edited" marker, the deleted line and the add box all have dark twins; at 375 px the comment header, the menu and the textareas fit without horizontal scroll and the Save/Cancel buttons stay reachable. |
+
+### TODO-17 Comments
+
+**Purpose:** a task can be commented on in Markdown; a comment can be edited (its history stays visible), deleted
+(its text stays viewable) and restored.
+**Preconditions:** logged in as `qa.user@example.com` with a task `Write report` (`T_REPORT`, recorded in TODO-03)
+that has no comments.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/todo/<T_REPORT>/` and scroll below the description and subtasks. | A **Comments** section with an "Add a comment" textarea (placeholder mentioning Ctrl+Enter), the Markdown hint ("... and `#1234` to link a task. Up to 10,000 characters.") and a **Comment** button. No comments yet. |
+| 2 | Click **Comment** with the box empty. | A red message "Comment: Write a comment." under the Comments heading; nothing is added. |
+| 3 | Type `First **comment** with a [link](https://example.com)` and press **Ctrl+Enter** (Cmd+Enter on a Mac). | The comment appears without a page reload: your initial in a round avatar, your name, "just now" (hover: the full local date and time), the text with "comment" in bold and "link" an underlined link that opens in a new tab. The heading reads "Comments (1)". The box is empty again. |
+| 4 | Go to **All**. | The row of `Write report` shows a small comment icon with `1`. |
+| 5 | Back on the task page, open the comment's menu (the "..." button) and choose **Edit**. | The comment text is replaced by a textarea holding the Markdown source, with the hint and **Cancel** / **Save**. Escape or Cancel closes it without changes. |
+| 6 | Change it to `Second version` and **Save**. | The text shows `Second version` and a small "(edited)" marker appears after the time (hover: when). |
+| 7 | Edit it again to `Third version`, then click "(edited)". | A box "Earlier versions" opens below the comment listing, newest first, `Second version` then `First comment with a link`, each with "Replaced <date and time>". **Hide** closes it. |
+| 8 | Open the menu and choose **Delete**. | A confirmation dialog "Delete comment" ("You can still show and restore it afterwards."). **Cancel** closes it; confirm with **Delete**. |
+| 9 | After confirming. | The page reloads at the comments; the comment is now a muted italic line "Comment deleted just now." with a **Show** link. The heading no longer counts it; on **All** the comment icon of the row is gone. |
+| 10 | Click **Show**. | A dashed box with the last text (`Third version`) rendered, and **Restore**, **History** and **Hide** buttons. **History** lists the two earlier versions again. **Hide** closes the box. |
+| 11 | Click **Show**, then **Restore**. | The comment is back as a normal comment with its "(edited)" marker and the text `Third version`; the heading counts it again. |
+| 12 | Complete the task (**Complete**) and add another comment. | Allowed: comments can be added to a completed task. |
+| 13 | Move the task to the trash and open it from **Trash**. | The comments are visible and read-only: no add box, no menu. **Restore** the task afterwards. |
+| 14 | Paste a 10,001-character text into the add box and submit. | A red message "Comment: Comment is too long (at most 10,000 characters)." (the browser may also stop typing at the limit). |
+| 15 | Log in as `qa.broke@example.com` and open `/todo/<T_REPORT>/` (their own task with that number, if any) or `/todo/9999/`. | Nothing of `qa.user`'s comments is visible; an unknown number is a 404. |
+
+### TODO-18 Task references
+
+**Purpose:** `#1234` and task URLs link to the task, and a task lists the tasks that mention it.
+**Preconditions:** logged in as `qa.user@example.com` with at least three tasks: `T_REPORT`, `T_CALL` and `T_LATE`
+(recorded earlier).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Edit the description of `T_CALL` to `Prepare for #<T_REPORT> and #999 and #8888.` and save. | The rendered description shows `#<T_REPORT>` as a link (green-ish task-ref link) to `/todo/<T_REPORT>/`; `#999` and `#8888` stay plain text (999 is below the first number, 8888 is no task of yours). |
+| 2 | Open `/todo/<T_REPORT>/`. | Below the comments a **Referenced by** section lists `#<T_CALL> Call ...` as a link; no "in a comment". |
+| 3 | On `T_LATE`, add the comment `Related: http://localhost:8765/todo/<T_REPORT>/ and [that one](/todo/<T_REPORT>/)`. | Both render as links to the task (the absolute one is not opened in a new tab). |
+| 4 | Open `T_REPORT`. | **Referenced by** now also lists `#<T_LATE> ...` followed by "in a comment"; the entries are ordered by task number. Clicking the `T_LATE` entry opens its page scrolled to that comment. |
+| 5 | On `T_LATE`, edit the comment to remove the links, then open `T_REPORT`. | The `T_LATE` entry is gone. |
+| 6 | Edit the same comment to mention `#<T_REPORT>` again, then **Delete** it. Open `T_REPORT`. | The `T_LATE` entry is gone again (a deleted comment references nothing). **Restore** the comment: the entry returns. |
+| 7 | Move `T_CALL` to the trash. Open `T_REPORT`. | `T_CALL` is no longer listed. Restore it: it is listed again. |
+| 8 | On `T_REPORT`, add a comment `#<T_REPORT>` (itself). | It renders as a link to itself, but `T_REPORT`'s own **Referenced by** does not list `T_REPORT`. |
+| 9 | Log in as `qa.broke@example.com`, write `#<T_REPORT>` in a description of one of their tasks (they have no task with that number). | It stays plain text, and `qa.user`'s `T_REPORT` is unaffected. |

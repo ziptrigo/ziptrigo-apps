@@ -1,6 +1,7 @@
 {% load todo_ui %}
 {% comment %} The task page's content: what every action taken from the page re-renders (`ctx=page`, target #task-panel).
-   Needs `task` (with subtask counts), `subtasks`, `labels`, `selected_label_ids` and `today`. A trashed task is
+   Needs `task` (with subtask counts), `subtasks`, `labels`, `selected_label_ids`, `today`, the comments
+   (`comments`, `comment_total`) and `referenced_by`. A trashed task is
    read-only: Restore (and Delete forever), no editing. {% endcomment %}
 <div id="task-panel" hx-vals='{"ctx": "page"}'>
     <div id="task-msg" class="mb-4 text-sm" aria-live="polite"></div>
@@ -110,4 +111,7 @@
     {% if not task.parent_id %}
         {% include 'todo/partials/subtasks.html' %}
     {% endif %}
+
+    {% include 'todo/partials/comments.html' %}
+    {% include 'todo/partials/referenced_by.html' %}
 </div>

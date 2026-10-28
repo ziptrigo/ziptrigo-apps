@@ -46,6 +46,9 @@
             {% if task.subtask_total %}
             <span class="text-xs text-gray-500 dark:text-gray-400" title="Subtasks completed"><i class="fas fa-list-check mr-1" aria-hidden="true"></i>{{ task.subtask_done }}/{{ task.subtask_total }}</span>
             {% endif %}
+            {% if task.comment_count %}
+            <span class="text-xs text-gray-500 dark:text-gray-400" title="Comments"><i class="far fa-comment mr-1" aria-hidden="true"></i>{{ task.comment_count }}<span class="sr-only"> comment{{ task.comment_count|pluralize }}</span></span>
+            {% endif %}
             {% for label in task.labels.all %}{% label_chip label %}{% endfor %}
             {% if task.parent and view != 'subtask' %}
             <span class="text-xs text-gray-500 dark:text-gray-400">in <a href="{% url 'todo:task' task.parent.number %}" class="hover:underline">{{ task.parent.title }}</a></span>

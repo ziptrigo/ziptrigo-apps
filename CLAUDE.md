@@ -887,8 +887,8 @@ and knowing which URL is a task page, are a callback and a pattern the caller pa
 Dependencies: `markdown-it-py` (CommonMark; `>=3.0,<5.0`, the lock selects 4.x, the version `rich`
 also uses), `mdit-py-plugins` (`tasklists`), `linkify-it-py` (bare URLs) and `nh3` (sanitiser;
 `bleach` is deprecated). Layout: `parser.py` (the one parser), `renderer.py` (token -> HTML
-rules), `references.py` (task references), `tasklist.py` (checklist items), `links.py` (which
-destinations are links), `inline_text.py` (the text of inline tokens, shared by plain text and
+rules), `references.py` (task references), `extract.py` (`extract_references`), `tasklist.py`
+(checklist items), `links.py` (which destinations are links), `inline_text.py` (the text of inline tokens, shared by plain text and
 image labels), `limits.py` (the length guard), and the public `render.py`, `plain.py`,
 `checklist.py`, all re-exported from `__init__.py`.
 
@@ -903,7 +903,11 @@ image labels), `limits.py` (the length guard), and the public `render.py`, `plai
   use `[0-9]`, not `\d`, which matches other scripts' digits); a pattern without the group is a
   `ValueError`. **Core knows no task URL itself**: with `None`, URLs are never task references.
   `task_number_from_href(href, task_url_path)` (exported) is the function behind it, for a caller
-  that needs the same recognition elsewhere. The `markdown` template filter
+  that needs the same recognition elsewhere. `extract_references(markdown, *, task_url_path=None)
+  -> list[int]` (exported; issue #180) is the same traversal `render` does to find what to hand
+  its resolver, without rendering: every task number a document mentions (`#1234`, and links to a
+  task page when the caller passes `task_url_path`), once each, in order of appearance, with the
+  same size guard and pattern check as `render`; what the TODO app stores as `TaskReference` rows. The `markdown` template filter
   (`{% load core_markdown %}{{ text|markdown }}`, `templatetags/core_markdown.py`) calls `render`
   without a resolver or pattern; a caller with references renders through its own tag. **The
   filter never raises**: a value over the limit (a `ValueError` from `render`) comes out
@@ -2883,8 +2887,9 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
 Todoist: tasks with a Markdown description, a due date with an optional time, a priority, labels
 and subtasks one level deep, shown on Today / Upcoming / All / Completed / Trash pages. A product
 (same layer as `qr_code`/`file_transfer`/`receipts`/`short_url`), logged-in users only. **Built so
-far:** the foundation (this section). **Later sub-issues** add their own models, fields on
-`TodoSettings`, services, `RATELIMIT_RULES` and migrations (repeating tasks #179, comments #180,
+far:** the foundation (this section) and comments with task references (#180, "Comments and
+references" below). **Later sub-issues** add their own models, fields on
+`TodoSettings`, services, `RATELIMIT_RULES` and migrations (repeating tasks #179,
 attachments #184, search #181, reminders #182, AI parsing #183, email intake #186, the JWT API and
 `inv todo` #187), so `services/__init__.py`, `settings.py`, the migrations and this file will see
 small merge conflicts between them.
@@ -2989,7 +2994,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   `services/references.py`: `resolver_for(user)` is the `ReferenceResolver` for
   `apps.core.markdown.render` (one query; only the user's own non-trashed tasks link) and
   `TASK_URL_PATH` the pattern of a task page's path (`/todo/<number>/`) that makes a pasted task
-  URL a reference too; the comments sub-issue reuses both.
+  URL a reference too; comments render through both (see "Comments and references").
 - **Ordering** (`services/dates.py`). The default sort, in every list: due date ascending with
   undated last, then date-only before timed, then the time, then priority (1 first, none last),
   then oldest; done in the database (`order_tasks`, so pagination works). `?sort=` on All:
@@ -3053,19 +3058,110 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   and as the text, the description as `title`). Times a page shows (`completed_at`, `deleted_at`) go
   through `|date`, so they follow the user's saved zone.
 - **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
-  creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation).
+  creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
+  minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`).
   A form is validated first and the limit charged after, so a refused form spends nothing; over the
   limit `ratelimit.web_response` (retargeted to the control's message slot).
 - **Admin**: `TodoSettingsAdmin` (singleton, superusers), and read-only `TaskAdmin` (search title,
-  number, user email; filters for priority, source, completed, trash, unpaid), `TodoAccountAdmin`
-  and `LabelAdmin` (no add, change or delete; the user admin lists `todo` in
-  `CASCADE_WITH_USER_APP_LABELS` so deleting a user still works).
+  number, user email; filters for priority, source, completed, trash, unpaid), `TodoAccountAdmin`,
+  `LabelAdmin` and `CommentAdmin` (revisions inline), none with add, change or
+  delete (the user admin lists `todo` in `CASCADE_WITH_USER_APP_LABELS` so deleting a user still
+  works).
 - **Tests**: `apps/todo/tests/` (`test_numbering_and_billing.py`: numbering, the lock, the allowance
   and price, the month in the user's zone, unpaid tasks and settling through the `credits_added`
   signal; `test_tasks_service.py`; `test_labels_and_references.py`; `test_views.py`;
-  `test_wiring_and_ui.py`) and the AI plan `tests_e2e/ai/todo.md`. A test that needs a fixed day
+  `test_wiring_and_ui.py`; `test_comments.py` and `test_references.py`, see "Comments and
+  references") and the AI plan `tests_e2e/ai/todo.md`. A test that needs a fixed day
   uses the `wednesday`/`freeze_now` fixtures (`timezone.now` is replaced), billing tests the
   `config` fixture (2 free tasks, price 5).
+
+#### Comments and references
+
+Issue #180 (`models/comment.py`, `models/reference.py`, `services/comments.py`,
+`services/references.py`, `views/comments.py`, migration `0002_comments_and_references`).
+
+- **Models.** `Comment` (UUID id, `task` FK `related_name='comments'`, `user` the author -- always
+  the task's owner today, kept for the future --, `body` Markdown up to `COMMENT_MAX` 10,000,
+  `body_text`, `created_at`, `edited_at` null until the first edit, `deleted_at`, `revision_count`;
+  ordered by `created_at`, indexed `(task, created_at)`). `CommentRevision` (`comment` FK
+  `related_name='revisions'`, `body` = the text **before** the edit that made it, `replaced_at`;
+  ordered by `replaced_at`). `TaskReference` (`from_task` -> `to_task`, `comment` null for a mention
+  in the description; two unique constraints, `todo_reference_unique` on the three columns and
+  `todo_reference_unique_description` on `(from_task, to_task)` where `comment` is null, because a
+  unique constraint treats NULLs as distinct on SQLite and Postgres alike). All cascade from the
+  task, so deleting a task (or its user) removes them.
+- **The revision model.** `edit_comment` re-reads the comment under `select_for_update` and, in one
+  transaction, writes `CommentRevision(body=<old body>, replaced_at=now)`, the new `body` and
+  `body_text`, `edited_at` and `revision_count + 1`, then `sync_references`; two edits at once make
+  two revisions, never one lost (the instance passed in is brought up to date either way). An edit
+  to the same text (after stripping and `\r\n` normalisation) is a no-op: no revision. At most
+  `MAX_REVISIONS` (100) edits per comment, then `'This comment has been edited too many times.'`;
+  a deleted comment cannot be edited. `comment_history` is oldest first; the page shows newest
+  first. **Deleting is soft** (`delete_comment`: `deleted_at`, `body_text=''`, the comment's
+  `TaskReference` rows deleted; body and revisions kept); `restore_comment` clears `deleted_at`,
+  rebuilds `body_text` and the references. Both are no-ops in the state they ask for. `add_comment`
+  needs the user's own, non-trashed task (a completed one is fine) and strips the text
+  (1 to 10,000 characters; empty is `'Write a comment.'`).
+- **What is and is not searchable.** `Comment.body_text` is `search_text(body)`, the column the
+  search sub-issue (#181) reads. It is `''` for a deleted comment, so a deleted comment is never
+  found, and it follows every edit. **Revisions have no search column and are never searched**
+  (`CommentRevision` carries only the raw `body`). Their text is still viewable by the owner: on the
+  page and in the admin.
+- **References.** `services.references.extract_task_numbers(markdown)` is
+  `apps.core.markdown.extract_references(markdown, task_url_path=TASK_URL_PATH)`: the very
+  traversal `render` does to find what to hand its resolver (`#` plus 4-9 digits not in code or a
+  link's text, and links to `/todo/<n>/`, site-relative or on `BASE_URL`'s host), once each, in
+  order; a text over the Markdown size guard mentions nothing. (**Judgement call:** the issue wrote
+  `extract_references(markdown)`; core knows no task URL, so, like `render`, it takes the caller's
+  pattern as the keyword `task_url_path` and without it only `#1234` counts.)
+  `sync_references(task, comment=None)` resolves those numbers to the owner's non-trashed tasks
+  (open or completed; a number that isn't theirs, doesn't exist, is trashed or is the task itself
+  is dropped) and makes the rows of `(task, comment)` equal that set in one transaction (insert
+  missing with `ignore_conflicts`, delete stale). It runs from `create_task` (when there is a
+  description), `update_task` (when the description changed; so also a ticked checklist box), and
+  `add_comment`, `edit_comment`, `delete_comment` (which just deletes the rows) and
+  `restore_comment`. Description and comments keep separate rows. It is not retroactive: trashing a
+  task leaves the rows pointing at it (it is dropped the next time the mentioning text is synced),
+  and restoring one doesn't re-add what was dropped; the reading side (`referenced_by`) is what
+  hides a trashed referencing task and a deleted comment. `referenced_by(task)` ->
+  `[(Task, Comment | None)]`: open and completed non-trashed tasks that mention it, ordered by the
+  mentioning task's number, the description before its comments (oldest first); the same task
+  appears once per place it mentions it.
+- **Rendering.** `references.resolver_for(user)` now remembers what it has been asked, so a page
+  rendering every comment through one resolver looks each number up once. `render_markdown(text,
+  resolver)` is `render` with `TASK_URL_PATH` and the fall-back to escaped text for a text over the
+  size guard (what the comments, the history and the deleted text use).
+- **Web** (all `@login_required`, htmx partials, 422 convention; another user's task, a comment of
+  another task, a trashed task for every action that changes something, and the deleted-text
+  partial of a comment that isn't deleted are a 404). The comments section
+  (`partials/comments.html`, `#task-comments`) is part of the task page's panel (so an action from
+  the page re-renders it) and is what each comment action answers: `POST /todo/<n>/comments/`
+  (`todo:comment-add`), `.../comments/<id>/edit/`, `/delete/`, `/restore/`, `GET .../history/`
+  (the revisions partial, newest first, each rendered, with when it was replaced; works for a
+  deleted comment and a trashed task) and `GET .../deleted/` (the deleted comment's rendered text
+  with Restore and History). Each comment: initial avatar, relative time (`|ago`) with the exact
+  local time as `title` (`{% local_time ... title=True %}`), "(edited)" (click: the history is
+  fetched into `#comment-history-<id>`), the rendered body, and a row menu with Edit (inline
+  textarea, same Markdown hint as the description, Save/Cancel; Escape cancels) and Delete (the
+  page's shared `confirmModal`, a plain POST that redirects back to `#comment-<id>`). A deleted
+  comment is a muted "Comment deleted <time>" with Show. The add box is at the bottom;
+  Ctrl+Enter / Cmd+Enter submits it (and the edit box). Refusals go to `#comment-msg` (add,
+  delete, restore) or `#comment-msg-<id>` (edit). **Rate limits:** `TODO_COMMENT_USER` (60 per
+  minute, add and edit; a refused form spends nothing) and `TODO_EDIT_USER` for delete and
+  restore. "Referenced by" (`partials/referenced_by.html`, hidden when empty): `#<number> <title>`
+  per mention, "in a comment" and a `#comment-<id>` anchor when it is one. The section order on the
+  page is description, subtasks, comments, referenced by. `task_row.html` shows a comment icon
+  with the count of comments that aren't deleted (`with_comment_counts`, a subquery in
+  `views.lists.decorate`; a join would multiply the subtask counts).
+- **Admin.** Read-only `CommentAdmin` (task number, user, created, edited, revisions, deleted, the
+  body; search over body, task and user) with `CommentRevision` as a read-only inline. A deleted
+  comment's body is shown there too.
+- **Tests.** `apps/todo/tests/test_comments.py` (add/edit/delete/restore rules, the revision
+  chain, the cap, `body_text`, the views and partials, 404s, rate limits, the admin),
+  `test_references.py` (extraction, `sync_references` on create, description edit, comment
+  add/edit/delete/restore, self-reference, foreign and trashed targets, `referenced_by`, the
+  panel), the `extract_references` tests in `apps/core/tests/test_markdown.py`, and TODO-17 and
+  TODO-18 in `tests_e2e/ai/todo.md`.
 
 ### Queue and scheduler
 

@@ -45,6 +45,10 @@ class Task(models.Model):
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
     #: The reverse accessor of `parent`.
     subtasks: ClassVar['models.Manager']
+    #: The reverse accessors of `Comment.task` and `TaskReference.from_task` / `to_task`.
+    comments: ClassVar['models.Manager']
+    references_out: ClassVar['models.Manager']
+    references_in: ClassVar['models.Manager']
 
     # `ty` types `pk` as the primary key field object itself, not the value it holds.
     pk: uuid.UUID
@@ -54,6 +58,8 @@ class Task(models.Model):
     subtask_total: int
     subtask_done: int
     subtask_open: int
+    # Set by `services.comments.with_comment_counts` on the tasks a list shows (not stored).
+    comment_count: int
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = cast(

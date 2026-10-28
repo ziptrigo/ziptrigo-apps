@@ -1,10 +1,20 @@
-from . import billing, dates, labels, references, tasks
+from . import billing, comments, dates, labels, references, tasks
 from .accounts import allocate_number, get_account, update_default_due_time
 from .billing import (
     charge_task_creation,
     month_usage,
     on_credits_added,
     settle_unpaid_tasks,
+)
+from .comments import (
+    COMMENT_MAX,
+    MAX_REVISIONS,
+    add_comment,
+    comment_history,
+    delete_comment,
+    edit_comment,
+    restore_comment,
+    with_comment_counts,
 )
 from .dates import (
     SORT_DEFAULT,
@@ -34,7 +44,14 @@ from .limits import (
     LABEL_NAME_MAX,
     TITLE_MAX,
 )
-from .references import TASK_URL_PATH, resolver_for
+from .references import (
+    TASK_URL_PATH,
+    extract_task_numbers,
+    referenced_by,
+    render_markdown,
+    resolver_for,
+    sync_references,
+)
 from .tasks import (
     POSTPONE_PRESETS,
     complete_task,
@@ -53,10 +70,12 @@ from .tasks import (
 )
 
 __all__ = [
+    'COMMENT_MAX',
     'DESCRIPTION_MAX',
     'FIRST_TASK_NUMBER',
     'LABEL_DESCRIPTION_MAX',
     'LABEL_NAME_MAX',
+    'MAX_REVISIONS',
     'POSTPONE_PRESETS',
     'SORTS',
     'SORT_DEFAULT',
@@ -64,15 +83,21 @@ __all__ = [
     'TITLE_MAX',
     'UPCOMING_DAYS',
     'allocate_number',
+    'add_comment',
     'billing',
     'charge_task_creation',
+    'comment_history',
+    'comments',
     'complete_task',
     'create_label',
     'create_task',
     'dates',
+    'delete_comment',
     'delete_forever',
     'delete_label',
     'due_at',
+    'edit_comment',
+    'extract_task_numbers',
     'get_account',
     'has_manual_order',
     'labels',
@@ -85,14 +110,18 @@ __all__ = [
     'postpone_target',
     'postpone_task',
     'purge_trash',
+    'referenced_by',
     'references',
+    'render_markdown',
     'reorder',
     'reorder_labels',
     'reschedule_overdue',
     'resolver_for',
+    'restore_comment',
     'restore_task',
     'settle_unpaid_tasks',
     'subtasks_of',
+    'sync_references',
     'tasks',
     'toggle_checklist',
     'today_set',
@@ -102,5 +131,6 @@ __all__ = [
     'update_default_due_time',
     'update_label',
     'update_task',
+    'with_comment_counts',
     'with_subtask_counts',
 ]

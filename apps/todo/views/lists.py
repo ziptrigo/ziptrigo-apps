@@ -35,6 +35,7 @@ from ..services import (
     order_tasks,
     overdue_set,
     todays_tasks,
+    with_comment_counts,
     with_subtask_counts,
 )
 from .common import render_page
@@ -78,8 +79,13 @@ def belongs(task: Task, view: str, today: date) -> bool:
 
 
 def decorate(queryset: QuerySet) -> QuerySet:
-    """What a row needs: the subtask counts, the parent (shown on a subtask) and the labels."""
-    return with_subtask_counts(queryset).select_related('parent').prefetch_related('labels')
+    """What a row needs: the subtask and comment counts, the parent (shown on a subtask) and the
+    labels."""
+    return (
+        with_comment_counts(with_subtask_counts(queryset))
+        .select_related('parent')
+        .prefetch_related('labels')
+    )
 
 
 def row_task(user, pk) -> Task:
