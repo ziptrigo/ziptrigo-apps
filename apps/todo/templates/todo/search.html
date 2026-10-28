@@ -1,0 +1,95 @@
+{% extends 'todo/layout.html' %}
+
+{% block title %}{{ heading }} - To-do - ZipTrigo{% endblock %}
+
+{% comment %} The search page, and a saved filter's page (`saved`): the form and the filter bar above `#search-results`.
+   Every change re-fetches `search-list` into the results (htmx); without it the form is an ordinary GET. {% endcomment %}
+{% block todo_content %}
+<h1 class="mb-1 text-3xl font-bold text-gray-900 dark:text-gray-100">{{ heading }}</h1>
+{% if saved %}
+<p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Saved filter: {{ filter_summary }}</p>
+{% else %}
+<p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Search the titles, descriptions and comments of your tasks.</p>
+{% endif %}
+
+<div id="search-msg" class="mb-4 text-sm" aria-live="polite">{% if error_lines %}{% include 'todo/partials/messages.html' with messages_list=error_lines %}{% endif %}</div>
+
+<form id="search-form" role="search" method="get" action="{{ page_url }}"
+      hx-get="{{ list_url }}" hx-trigger="submit, change" hx-sync="this:replace" hx-target="#search-results" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type='submit']"
+      x-data="{ range: '{{ params.date_range }}' }"
+      class="mb-6 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
+    {% if saved %}<input type="hidden" name="filter" value="{{ saved.pk }}">{% endif %}
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div class="flex min-w-0 flex-1 items-center gap-1">
+            <label for="search-q" class="sr-only">Search text</label>
+            <input id="search-q" type="search" name="q" value="{{ params.q }}" maxlength="{{ max_query_chars }}" autocomplete="off"
+                   placeholder="Search tasks, e.g. pay*rent"
+                   class="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            {% include 'todo/partials/search_help.html' with help_id='page' %}
+        </div>
+        <button type="submit"
+                class="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+            <i class="fas fa-magnifying-glass mr-2" aria-hidden="true"></i>Search
+        </button>
+    </div>
+    <div class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-700 dark:text-gray-300">
+        <label class="inline-flex items-center gap-2"><input type="checkbox" name="mode" value="regex"{% if params.mode == 'regex' %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600"> Regex</label>
+        <label class="inline-flex items-center gap-2"><input type="checkbox" name="include_completed" value="1"{% if params.include_completed %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600"> Include completed</label>
+    </div>
+
+    <fieldset class="mt-3 grid gap-3 border-t border-gray-200 dark:border-gray-700 pt-3 text-sm sm:grid-cols-2">
+        <legend class="sr-only">Filters</legend>
+        <div>
+            <span class="mb-1 block font-medium">Priority</span>
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+                {% for value, label in priority_choices %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="priorities" value="{{ value }}"{% if value in selected_priorities %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600"> {{ label }}</label>
+                {% endfor %}
+            </div>
+        </div>
+        <div>
+            <span class="mb-1 block font-medium">Labels</span>
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+                {% for label in labels %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="labels" value="{{ label.pk }}"{% if label.pk|stringformat:'s' in selected_labels %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600"> @{{ label.name }}</label>
+                {% endfor %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="labels" value="none"{% if 'none' in selected_labels %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600"> No label</label>
+            </div>
+        </div>
+        <div>
+            <label for="search-date-range" class="mb-1 block font-medium">Due date</label>
+            <div class="flex flex-wrap items-center gap-2">
+                <select id="search-date-range" name="date_range" x-model="range"
+                        class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    {% for key, label in date_ranges.items %}
+                    <option value="{{ key }}"{% if params.date_range == key %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <span x-show="range === 'custom'" {% if params.date_range != 'custom' %}style="display: none"{% endif %} class="inline-flex flex-wrap items-center gap-2">
+                    <label class="sr-only" for="search-date-from">From</label>
+                    <input id="search-date-from" type="date" name="date_from" value="{{ params.date_from|date:'Y-m-d' }}" :disabled="range !== 'custom'"
+                           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <span aria-hidden="true">to</span>
+                    <label class="sr-only" for="search-date-to">To</label>
+                    <input id="search-date-to" type="date" name="date_to" value="{{ params.date_to|date:'Y-m-d' }}" :disabled="range !== 'custom'"
+                           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                </span>
+            </div>
+        </div>
+        <div>
+            <label for="search-sort" class="mb-1 block font-medium">Sort by</label>
+            <select id="search-sort" name="sort"
+                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                {% for key, label in sorts.items %}
+                <option value="{{ key }}"{% if params.sort == key %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </fieldset>
+</form>
+
+<div id="search-results">
+    {% include 'todo/partials/search_results.html' %}
+</div>
+{% endblock %}

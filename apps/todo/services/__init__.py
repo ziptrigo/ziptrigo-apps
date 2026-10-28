@@ -3,12 +3,15 @@ from . import (
     billing,
     comments,
     dates,
+    filters,
     labels,
     metering,
     parsing,
     recurrence,
     references,
     reminders,
+    saved_filters,
+    search,
     tasks,
 )
 from .accounts import (
@@ -59,6 +62,14 @@ from .dates import (
     with_subtask_counts,
 )
 from .errors import AccountFrozenError
+from .filters import (
+    DATE_RANGES,
+    FilterParams,
+    describe_params,
+    filter_page,
+    filter_tasks,
+    parse_filter_params,
+)
 from .labels import (
     create_label,
     delete_label,
@@ -71,6 +82,8 @@ from .limits import (
     FIRST_TASK_NUMBER,
     LABEL_DESCRIPTION_MAX,
     LABEL_NAME_MAX,
+    MAX_SAVED_FILTERS,
+    SAVED_FILTER_NAME_MAX,
     TITLE_MAX,
 )
 from .metering import daily_storage_cost, daily_storage_rate, describe_daily_rate
@@ -83,6 +96,16 @@ from .references import (
     resolver_for_request,
     sync_references,
 )
+from .saved_filters import (
+    delete_filter,
+    list_filters,
+    rename_filter,
+    reorder_filters,
+    save_filter,
+    sidebar_filters,
+    update_filter_params,
+)
+from .search import MAX_QUERY_CHARS, glob_to_regex, search_tasks
 from .tasks import (
     POSTPONE_PRESETS,
     complete_task,
@@ -101,6 +124,27 @@ from .tasks import (
 )
 
 __all__ = [
+    'DATE_RANGES',
+    'FilterParams',
+    'MAX_QUERY_CHARS',
+    'MAX_SAVED_FILTERS',
+    'SAVED_FILTER_NAME_MAX',
+    'delete_filter',
+    'describe_params',
+    'filter_page',
+    'filter_tasks',
+    'filters',
+    'glob_to_regex',
+    'list_filters',
+    'parse_filter_params',
+    'rename_filter',
+    'reorder_filters',
+    'save_filter',
+    'saved_filters',
+    'search',
+    'search_tasks',
+    'sidebar_filters',
+    'update_filter_params',
     'COMMENT_MAX',
     'AccountFrozenError',
     'UploadTicket',

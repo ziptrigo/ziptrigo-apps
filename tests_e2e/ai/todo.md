@@ -2,9 +2,9 @@
 
 ## Scope
 
-The To-do product's web UI (`apps/todo`, issues #178, #179, #180 and #182: tasks, repeating tasks (TODO-19 and TODO-20),
-comments and task references (TODO-17 and TODO-18), reminders (TODO-21); search, attachments, AI parsing and email
-intake are later issues and are not covered):
+The To-do product's web UI (`apps/todo`, issues #178, #179, #180, #181 and #182: tasks, repeating tasks (TODO-19 and
+TODO-20), comments and task references (TODO-17 and TODO-18), reminders (TODO-21), search and saved filters (TODO-22
+and TODO-23); attachments, AI parsing and email intake are later issues and are not covered):
 
 - the sidebar (Today with a count, Upcoming, All, Completed, Labels, Trash, Settings; a top bar on
   phones) and the "Tasks are blocked" banner;
@@ -16,6 +16,8 @@ intake are later issues and are not covered):
   Postpone, Move to trash, Restore, Delete forever;
 - comments on the task page (add, edit with a visible history, delete and restore, Markdown, `#1234` links) and the
   "Referenced by" panel;
+- **Search** `/todo/search/` (the sidebar box, glob and regular expressions, the filter bar, snippets) and **Filters**
+  `/todo/filters/` (saved filters in the sidebar, rename, reorder, delete, update);
 - **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and
   **Settings** `/todo/settings/` (default due time, default reminder and channel, the free-tasks line) and the reminder
   history `/todo/reminders/history/`;
@@ -387,3 +389,55 @@ The delivery step needs shell access to the test server database (the scheduler 
 | 12 | In **Settings** choose "Get no reminder", **Save**, then add a task `No reminder please` with a date. | Its page says "No reminders." and its row has no bell. Restore the setting (5 minutes) afterwards. |
 | 13 | Complete a repeating task that has a reminder (create `Pay rent`, Repeat = Week, with a 15 minute reminder, then **Complete**). Open the new occurrence. | It has the same reminder ("15 minutes before"), unsent, firing before the new date. |
 | 14 | (Only if step 9 ran.) Postpone `Call the bank` to **Tomorrow** (the Postpone action on its row or the task page) and open `/todo/<T_BANK>/`. | The reminder it already delivered is armed again: the Reminders block shows "Fires" (not "Sent") with tomorrow's date at 22:45. |
+
+### TODO-22 Search
+
+**Purpose:** search finds tasks by title, description and comments, ignoring case, accents, punctuation and
+formatting; `*` and `?` are wildcards, `/.../` or the Regex box is a regular expression.
+**Preconditions:** logged in as `qa.user@example.com` with these tasks (create them first; the numbers do not
+matter): `Pay the rent` (priority 1, label `Home`, due in 2 days), `Walk the Cão` (priority 2, description
+`Take the **big** leash`, one comment `The plumber called`), `Old rent receipt` (completed) and `Parent 0`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look at the sidebar of **Today**. | Above the menu a "Search tasks" box with a `?` button, a **Regex** checkbox and an **Include completed** checkbox; below the menu a **Filters** heading ("No saved filters" for now). On a 375 px wide screen the box sits at the top of the page. |
+| 2 | Type `rent` in the box and press Enter. | `/todo/search/?q=rent`: the heading "Search", the search form with `rent` in it, "2 results" (`Pay the rent` and `Parent 0` -- "rent" inside "parent" --, and no completed task), each row with a line such as "Title: pay the **rent**" where the match is highlighted, and the note "matches shown without accents or formatting". `Old rent receipt` is not listed. |
+| 3 | Tick **Include completed** (in the page's form). | The list refreshes without a page reload and the address bar changes to `...?q=rent&include_completed=1`: 3 results, `Old rent receipt` last, struck through. |
+| 4 | Replace the text with `CAO` (capitals, no accent). | `Walk the Cão` is found ("Title: walk the **cao**"). Try `walk the cão!` too: found. |
+| 5 | Search `big leash`, then `**big**`. | Both find `Walk the Cão` with "Description: take the **big** leash" (the Markdown marks are not part of the text). |
+| 6 | Search `plumber`. | `Walk the Cão` is found with "Comment: the **plumber** called". |
+| 7 | Search `pay*rent`, then `pa?ent`, then `pa.ent`. | `pay*rent` finds `Pay the rent`; `pa?ent` finds `Parent 0` ("pa" + any letter + "ent"); `pa.ent` finds nothing (a dot is not a wildcard) and the list says "Nothing matches." |
+| 8 | Search `/^pay (the )?rent$/`. | `Pay the rent` only. The slashes alone make it a regular expression. Then type `^pay` with the **Regex** box ticked: `Pay the rent`. |
+| 9 | Search `/(/`. | A red line "Invalid regular expression." above the results; nothing else changes. Try `/(a)\1/` and `/a(?=b)/`: the same message. Clear the box and press Search: "Type something to search for." |
+| 10 | Type 201 characters. | The browser stops at 200 characters in the box. |
+| 11 | Open the `?` help. | A popover lists `*`, `?`, `/.../` or the Regex box, "case, accents, punctuation and formatting are ignored" and "deleted comments and earlier edits are not searched". Escape closes it. |
+| 12 | Delete the plumber comment (on the task page), then search `plumber`. | `Walk the Cão` is no longer found. Restore the comment: found again. Edit the comment to `The electrician called`: `plumber` finds nothing (the earlier text is not searched), `electrician` does. |
+| 13 | Open the filter bar: tick **Priority 1**, with the text box empty. | Only priority 1 tasks (`Pay the rent`); no text is needed when a filter is chosen. With **Labels > @Home**: the same. With **Due date > Next 7 days**: `Pay the rent`. With **No date**: the undated ones. With **Custom** two date inputs appear. |
+| 14 | Combine `rent` with Priority 2. | Nothing matches. Change the **Sort by** to Title: the order follows. |
+| 15 | Search for something with more than 50 results (create 51 tasks named `bulk N` if needed) and open page 2 from the pager. | Page 2 loads in place with the rest, and the address bar shows `&page=2`; a reload shows the same page. |
+| 16 | In the results, complete a task with its circle. | The row stays in the list, shown as completed (a search keeps completed tasks it lists). |
+| 17 | Log in as `qa.broke@example.com` and search `rent`. | None of `qa.user`'s tasks appear. |
+
+### TODO-23 Saved filters
+
+**Purpose:** a search can be saved under a name, listed in the sidebar with a count, run, updated, renamed,
+reordered and deleted.
+**Preconditions:** logged in as `qa.user@example.com` with the tasks of TODO-22.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Search `rent*` with **Include completed** ticked and click **Save as filter**. | A dialog "Save as filter" with a Name box focused. |
+| 2 | Click **Save** with the name empty. | The browser asks to fill in the field; nothing is saved. |
+| 3 | Name it `Rent stuff` and press Enter. | The page goes to `/todo/filters/<id>/` headed "Rent stuff", with a green message "Saved the filter Rent stuff." and the summary `"rent*" · including completed`; the same results as the search. The sidebar's **Filters** now lists `Rent stuff` highlighted, with a count of its **open** tasks. |
+| 4 | Save the same search again as `rent stuff` (another case). | The dialog shows "Name: You already have a filter with this name." and stays open. Cancel closes it. |
+| 5 | On the filter's page tick **Priority 1**. | The results refresh, the address bar becomes `/todo/filters/<id>/?q=rent*&include_completed=1&priorities=1&sort=date` and an **Update filter** button appears beside **Save as filter**. Untick it: the button goes away. |
+| 6 | Tick **Priority 1** again and click **Update filter**. | The page reloads at `/todo/filters/<id>/` with "Updated the filter Rent stuff."; the summary now starts `priority 1 ·`; the sidebar count changed. |
+| 7 | Open another filter in the sidebar (save `Urgent` for priority 1 from the search page first). | Each runs its own params; the sidebar entry of the current one is highlighted. |
+| 8 | Open **Filters** (the sidebar heading) `/todo/filters/`. | A list: name (a link), "N open tasks" and the summary line, a drag handle, a pencil and a trash can. |
+| 9 | Click the pencil on `Urgent`, change the name to `Rent stuff` and save; then to `Important`. | The first is refused with "Name: You already have a filter with this name." (nothing changes); the second renames it in place. Escape cancels the edit. |
+| 10 | Drag `Important` above `Rent stuff`, then reload. | The new order sticks, also in the sidebar. |
+| 11 | Delete a label that a filter uses (Labels page), then open that filter. | The filter still runs; the deleted label is simply gone from its summary. |
+| 12 | Click the trash can on a filter. | A confirmation "Delete filter" ("Your tasks are not affected."); Cancel closes it; Delete removes it and shows "Deleted the filter ...". |
+| 13 | Create 21 filters (name them `F01`..`F21`). | The sidebar lists the first 20 and "and N more" linking to the filters page, which lists all of them. The 51st is refused with "You can have up to 50 saved filters." |
+| 14 | Open `/todo/filters/<id of another user's filter>/` (log in as `qa.broke@example.com` with an id from `qa.user`). | A 404. |
+| 15 | In dark mode and at 375 px wide, open the search page, the filters page and the save dialog. | Every surface has a dark twin; the highlighted match is readable; nothing scrolls horizontally; the dialog fits. |

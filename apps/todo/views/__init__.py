@@ -14,6 +14,14 @@ from .comments import (
     comment_history_view,
     comment_restore,
 )
+from .filters import (
+    filter_delete,
+    filter_page,
+    filter_rename,
+    filter_reorder,
+    filter_update,
+    filters_page,
+)
 from .labels import label_delete, label_edit, label_reorder, labels_page
 from .lists import (
     all_page,
@@ -25,6 +33,7 @@ from .lists import (
 )
 from .parse import parse_view
 from .reminders import reminder_add, reminder_delete, reminder_edit, reminder_history
+from .search import search_list, search_page
 from .settings import settings_page
 from .tasks import (
     recurrence_stop,
@@ -58,6 +67,12 @@ __all__ = [
     'comment_history_view',
     'comment_restore',
     'completed_page',
+    'filter_delete',
+    'filter_page',
+    'filter_rename',
+    'filter_reorder',
+    'filter_update',
+    'filters_page',
     'label_delete',
     'label_edit',
     'label_reorder',
@@ -70,6 +85,8 @@ __all__ = [
     'reminder_history',
     'reorder_view',
     'reschedule_overdue_view',
+    'search_list',
+    'search_page',
     'settings_page',
     'subtask_add',
     'task_checklist',

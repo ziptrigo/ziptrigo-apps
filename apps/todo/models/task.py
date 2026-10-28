@@ -5,6 +5,7 @@ from typing import ClassVar, cast
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
+from django.utils.safestring import SafeString
 
 from apps.accounts.models import User
 from apps.core.markdown import normalize_for_search, search_text
@@ -68,6 +69,10 @@ class Task(models.Model):
     comment_count: int
     # Set by `services.reminders.with_reminder_flags` on the tasks a list shows (not stored).
     has_reminders: bool
+    # Set by `services.search` on the tasks a search shows (not stored): which field matched
+    # (`title`, `description`, `comment`, or `''`) and a highlighted snippet of the normalised text.
+    search_field: str
+    search_snippet: SafeString
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = cast(

@@ -7,7 +7,9 @@
 {% block content %}
 <div x-data="confirmModal" class="container mx-auto px-4 py-6 max-w-6xl">
     <div class="flex flex-col gap-4 md:flex-row md:gap-8">
-        <nav aria-label="To-do" class="md:w-48 md:flex-shrink-0">
+        <div class="md:w-48 md:flex-shrink-0">
+        {% if show_sidebar_search %}{% include 'todo/partials/search_box.html' %}{% endif %}
+        <nav aria-label="To-do">
             <ul class="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
                 {% for key, label, icon, url in nav_items %}
                 <li class="flex-shrink-0">
@@ -21,6 +23,8 @@
                 {% endfor %}
             </ul>
         </nav>
+        {% include 'todo/partials/sidebar_filters.html' %}
+        </div>
 
         <div class="min-w-0 flex-1">
             {% if todo_blocked %}

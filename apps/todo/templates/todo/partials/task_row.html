@@ -63,6 +63,9 @@
             <span class="text-xs text-gray-500 dark:text-gray-400">{% if task.days_left %}deleted in {{ task.days_left }} day{{ task.days_left|pluralize }}{% else %}deleted soon{% endif %}</span>
             {% endif %}
         </div>
+        {% if task.search_snippet %}
+        <p class="mt-1 text-xs text-gray-600 dark:text-gray-400 [&_mark]:rounded-sm [&_mark]:bg-yellow-200 [&_mark]:px-0.5 [&_mark]:text-gray-900 dark:[&_mark]:bg-yellow-600/60 dark:[&_mark]:text-gray-100"><span class="font-medium">{{ task.search_field|capfirst }}:</span> {{ task.search_snippet }}</p>
+        {% endif %}
     </div>
 
     <div class="flex flex-shrink-0 items-center">
