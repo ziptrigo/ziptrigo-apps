@@ -23,8 +23,8 @@ from .lists import (
     trash_page,
     upcoming_page,
 )
-from .reminders import reminder_add, reminder_delete, reminder_edit, reminder_history
 from .parse import parse_view
+from .reminders import reminder_add, reminder_delete, reminder_edit, reminder_history
 from .settings import settings_page
 from .tasks import (
     recurrence_stop,
