@@ -1,4 +1,5 @@
 {% extends 'receipts/layout.html' %}
+{% load local_time %}
 {% load static %}
 {% load receipts_ui %}
 
@@ -68,7 +69,7 @@
                 {% endif %}
             </p>
             <p id="receipt-added">
-                Added {{ receipt.created_at|date:'M j, H:i' }}{% if receipt.receipt_date %} (receipt dated {{ receipt.receipt_date|date:'M j' }}){% endif %}
+                Added {% local_time receipt.created_at 'short' %}{% if receipt.receipt_date %} (receipt dated {{ receipt.receipt_date|date:'M j' }}){% endif %}
             </p>
         </div>
     </div>

@@ -1,4 +1,4 @@
-{% load static %}
+{% load local_time static %}
 <div id="transfer-row-{{ transfer.id }}"
      x-data="{ open: false }"
      class="bg-white dark:bg-gray-800 shadow rounded-md p-4">
@@ -14,7 +14,7 @@
             <p class="font-medium text-gray-900 dark:text-gray-100 truncate">{{ transfer.display_name }}</p>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {{ transfer.files.count }} file{{ transfer.files.count|pluralize }}
-                &middot; sent {{ transfer.completed_at|date:"Y-m-d H:i" }}
+                &middot; sent {% local_time transfer.completed_at 'iso' %}
                 &middot; <span class="uppercase font-semibold">{{ transfer.get_status_display }}</span>
             </p>
             {% if transfer.status == 'taken_down' %}
@@ -27,7 +27,7 @@
             </p>
             {% endif %}
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Expires: {% if transfer.expires_at %}{{ transfer.expires_at|date:"Y-m-d H:i" }} UTC{% else %}Never{% endif %}
+                Expires: {% if transfer.expires_at %}{% local_time transfer.expires_at %}{% else %}Never{% endif %}
                 &middot; Downloads: {{ transfer.download_count }}{% if transfer.max_downloads %} / {{ transfer.max_downloads }}
                 ({{ transfer.downloads_remaining }} left){% endif %}
                 &middot; Credits charged: {{ transfer.credits_charged }}
@@ -159,7 +159,7 @@
                 <ul class="text-xs space-y-1 mt-1 max-h-40 overflow-y-auto">
                     {% for event in events %}
                     <li class="flex items-center justify-between gap-2 text-gray-500 dark:text-gray-400">
-                        <span>{{ event.created_at|date:"Y-m-d H:i" }}</span>
+                        <span>{% local_time event.created_at 'iso' %}</span>
                         <span class="truncate">{% if event.file %}{{ event.file.name }}{% else %}All files (zip){% endif %}</span>
                         <span>{{ event.ip|default:"-" }}</span>
                     </li>

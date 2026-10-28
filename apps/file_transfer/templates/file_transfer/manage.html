@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load local_time %}
 
 {% block title %}Manage your transfer - ZipTrigo{% endblock %}
 
@@ -16,7 +17,7 @@
         </p>
         <p class="text-sm text-gray-700 dark:text-gray-300">
             Expires:
-            {% if transfer.expires_at %}{{ transfer.expires_at|date:"Y-m-d H:i" }} UTC{% else %}Never{% endif %}.
+            {% if transfer.expires_at %}{% local_time transfer.expires_at %}{% else %}Never{% endif %}.
         </p>
 
         {% if transfer.status == 'active' %}
