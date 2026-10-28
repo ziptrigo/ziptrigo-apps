@@ -775,10 +775,11 @@ class TestSettingTheRule:
 
         update_task(second, changes={'rrule': 'FREQ=DAILY;COUNT=2'})
 
-        assert Recurrence.objects.get().occurrences_created == 0
-        for _ in range(3):  # a new COUNT of 2 counts the occurrences made after the change
+        # The edited task is the first occurrence of the changed series, as a new Recurrence's is.
+        assert Recurrence.objects.get().occurrences_created == 1
+        for _ in range(2):  # a COUNT of 2 means this task and one more, as it does at creation
             complete_task(occurrences(funded_user)[-1])
-        assert len(occurrences(funded_user)) == 4  # 2 before the change + 2 after it
+        assert len(occurrences(funded_user)) == 3  # 1 before the change + the 2 of the series
         assert Recurrence.objects.get().ended_at is not None
 
     def test_the_same_rule_and_mode_do_not_restart_the_count(self, funded_user, wednesday):

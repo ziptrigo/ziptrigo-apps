@@ -3142,9 +3142,11 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   - **Changing the rule** (`recurrence.change`, an edit of a running one) sets the anchor (and
     `anchor_day`) to the task's date, makes that task the one whose completion spawns the next
     (`Task.recurrence_anchor`; older open occurrences no longer do) and **resets
-    `occurrences_created` to 0**, so a new `COUNT` counts the occurrences created after the change
-    (the task being edited is not one of them; a rule given to a task with none, or after stopping,
-    is a new `Recurrence` that starts at 1). The same rule and mode change nothing.
+    `occurrences_created` to 1**: the edited task is the first occurrence of the changed series,
+    the same as a new `Recurrence` (a rule given to a task with none, or after stopping) starting at
+    1, so a `COUNT` means the same whether it was set at creation or by an edit. The same rule and mode change nothing.
+    `update_task` judges the rule change (open task, not a subtask, not becoming one) against the
+    task row it locks and re-reads, like its other checks.
   - **Uncompleting** an occurrence that already spawned the next leaves the next one (no refund, no
     deletion; the task page says so), and completing the old one again creates nothing more (see
     above). **Trashing** an occurrence does not end the rule: the confirmation of the trash button of

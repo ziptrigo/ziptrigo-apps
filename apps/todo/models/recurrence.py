@@ -25,7 +25,7 @@ class Recurrence(models.Model):
     *current* occurrence was scheduled for by the rule: postponing or editing an occurrence's due
     date never changes it, which is what makes "fixed" work. `occurrences_created` counts the
     occurrences made so far (the first included), which is how `COUNT` is tracked; editing the rule
-    starts the count again from 0 (a new `COUNT` counts the occurrences created after the change).
+    starts the count again from 1 (the edited task is the first occurrence of the changed series).
     `anchor_day` is the day of the month the schedule was set on, which `anchor_date` can differ
     from once a day-less monthly or yearly rule has been clamped to a short month (31 Jan, 28 Feb,
     31 Mar). `ended_at` is set when the user stops repeating or the rule is exhausted; the row is

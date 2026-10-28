@@ -399,8 +399,9 @@ def change(task: Task, rrule: str, mode: str, anchor: date) -> Recurrence:
     """Give `task` this rule: the running `Recurrence` is edited in place (under its row lock, so a
     completion at the same moment sees either the old rule or the new one), else a new one is made
     (also when the task's earlier one had ended). Editing the schedule sets the anchor to the
-    task's date and the occurrence count starts again from 0, so a new `COUNT` counts the occurrences
-    created after the change (the task being edited is not one of them). Call it inside the
+    task's date and the occurrence count starts again from 1: the task being edited is the first
+    occurrence of the changed series, as a new `Recurrence` starts at 1, so a `COUNT` means the same
+    whether it was set at creation or by an edit. Call it inside the
     caller's transaction. The caller sets the task's own `recurrence_anchor` to `anchor`: that is
     what makes the edited task the one whose completion creates the next occurrence (an older open
     occurrence of the same rule no longer does)."""
@@ -409,7 +410,7 @@ def change(task: Task, rrule: str, mode: str, anchor: date) -> Recurrence:
         return start(task.user, rrule, mode, anchor)
     locked = Recurrence.objects.select_for_update().get(pk=active.pk)
     locked.rrule, locked.mode, locked.anchor_date = rrule, mode, anchor
-    locked.anchor_day, locked.occurrences_created = anchor.day, 0
+    locked.anchor_day, locked.occurrences_created = anchor.day, 1
     locked.save(update_fields=['rrule', 'mode', 'anchor_date', 'anchor_day', 'occurrences_created'])
     return locked
 
