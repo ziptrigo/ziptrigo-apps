@@ -3,9 +3,11 @@ rename, update, delete and reorder them.
 
 `/todo/filters/` lists them (name, a summary of the params, the count of open tasks, inline rename,
 delete through the shared confirmation modal, drag to reorder) and takes the POST that saves a
-search as a filter. `/todo/filters/<id>/` is the search page with the filter's params applied
+search as a filter. The counts are not part of any page render: the sidebar (and the filters list)
+fetch them with one `GET /todo/filters/counts/`, which answers all of them out of band in a single
+query and spends `TODO_SEARCH_USER` once. `/todo/filters/<id>/` is the search page with the filter's params applied
 (`views.search`). Another user's filter is a 404, never a 403. Mutations spend `TODO_EDIT_USER`;
-the page of a filter spends `TODO_SEARCH_USER` like any search. The rules are
+the page of a filter and the counts spend `TODO_SEARCH_USER` like any search. The rules are
 `services.saved_filters`; a refusal is a 422 `Label: message` line in the slot of the control used.
 """
 
@@ -21,6 +23,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..models import SavedFilter
@@ -33,7 +36,8 @@ from ..services import (
     save_filter,
     update_filter_params,
 )
-from ..services.saved_filters import filter_rows
+from ..services.limits import MAX_SAVED_FILTERS
+from ..services.saved_filters import SIDEBAR_LIMIT, filter_counts, filter_rows
 from .common import limited, refuse, render_page, validation_lines
 from .search import render_search_page, requested_params
 
@@ -81,6 +85,27 @@ def _create(request: AuthenticatedHttpRequest) -> HttpResponse:
         return refuse(request, validation_lines(exc), retarget=SAVE_SLOT, fallback=fallback)
     messages.success(request, f'Saved the filter {saved.name}.')
     return hx_redirect(request, reverse('todo:filter', args=[saved.pk]))
+
+
+@login_required
+@require_GET
+def filter_counts_view(request: AuthenticatedHttpRequest) -> HttpResponse:
+    """The open-task counts of the saved filters, out of band: one span per filter for the
+    sidebar's first `SIDEBAR_LIMIT`, and with `?scope=all` (the filters page) one per filter for
+    the page's list too. One query for all of them (`services.saved_filters.filter_counts`); it
+    spends `TODO_SEARCH_USER` once, and over the limit (or on a timeout) every count is "-"."""
+    filters = list(list_filters(request.user))
+    if not filters:
+        return HttpResponse(status=204)
+    everything = request.GET.get('scope') == 'all'
+    counted = filters if everything else filters[:SIDEBAR_LIMIT]
+    if ratelimit.hit_user(request.user, 'TODO_SEARCH_USER').allowed:
+        counts = filter_counts(request.user, counted)
+    else:
+        counts = dict.fromkeys((saved.pk for saved in counted))
+    sidebar = [(saved.pk, counts[saved.pk]) for saved in filters[:SIDEBAR_LIMIT]]
+    page = [(saved.pk, counts[saved.pk]) for saved in counted] if everything else []
+    return render(request, 'todo/partials/filter_counts.html', {'sidebar': sidebar, 'page': page})
 
 
 @login_required
@@ -141,8 +166,11 @@ def filter_reorder(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Write the order SortableJS posts (`ids[]`). Answers 204."""
     if (response := limited(request, 'TODO_EDIT_USER', retarget=LIST_SLOT)) is not None:
         return response
+    raw_ids = request.POST.getlist('ids[]')
+    if len(raw_ids) > MAX_SAVED_FILTERS:  # more than a user can have: not an order SortableJS sent
+        return refuse(request, 'Could not read the new order.', retarget=LIST_SLOT)
     ids: list[UUID] = []
-    for raw in request.POST.getlist('ids[]'):
+    for raw in raw_ids:
         try:
             ids.append(UUID(raw))
         except ValueError:

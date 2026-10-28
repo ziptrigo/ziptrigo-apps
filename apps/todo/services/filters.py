@@ -28,6 +28,7 @@ from .search import (
     order_results,
     paginate,
     prepare_query,
+    search_condition,
     search_queryset,
 )
 
@@ -255,33 +256,47 @@ class FilterParams:
             return self.date_from, self.date_to
         return None, None
 
-    def narrow(self, queryset: QuerySet, user: User) -> QuerySet:
-        """`queryset` (of the user's tasks) restricted by the priorities, labels and date range.
-        The labels are an existence test on the through table, not a join, so a list's counts
-        aren't multiplied."""
+    def structured_condition(self, user: User) -> Q:
+        """The priorities, labels and date range as one condition on a `Task` (empty when they
+        select nothing). The labels are an existence test on the through table, not a join, so a
+        list's counts aren't multiplied."""
+        condition = Q()
         if self.priorities:
-            queryset = queryset.filter(priority__in=self.priorities)
+            condition &= Q(priority__in=self.priorities)
         if self.labels:
             through = Task.labels.through.objects.filter(task_id=OuterRef('pk'))
-            condition = Q()
+            any_label = Q()
             ids = [uuid.UUID(label) for label in self.labels if label != NO_LABEL]
             if ids:
-                condition |= Q(Exists(through.filter(label_id__in=ids)))
+                any_label |= Q(Exists(through.filter(label_id__in=ids)))
             if NO_LABEL in self.labels:
-                condition |= ~Q(Exists(through))
-            queryset = queryset.filter(condition)
+                any_label |= ~Q(Exists(through))
+            condition &= any_label
         today = user_today(user)
         if self.date_range == 'overdue':
-            queryset = queryset.filter(due_date__lt=today, completed_at__isnull=True)
+            condition &= Q(due_date__lt=today, completed_at__isnull=True)
         elif self.date_range == 'no_date':
-            queryset = queryset.filter(due_date__isnull=True)
+            condition &= Q(due_date__isnull=True)
         else:
             first, last = self.date_bounds(today)
             if first is not None:
-                queryset = queryset.filter(due_date__gte=first)
+                condition &= Q(due_date__gte=first)
             if last is not None:
-                queryset = queryset.filter(due_date__lte=last)
-        return queryset
+                condition &= Q(due_date__lte=last)
+        return condition
+
+    def condition(self, user: User) -> Q:
+        """Everything `params` selects, text included, as one condition on the user's tasks
+        (the search's own check on `q`: raises `ValidationError` for one that can't run). What
+        `saved_filters` counts with: several of them in one aggregate."""
+        condition = self.structured_condition(user)
+        if self.q.strip():
+            condition &= search_condition(prepare_query(self.q, self.mode).db_pattern)
+        return condition
+
+    def narrow(self, queryset: QuerySet, user: User) -> QuerySet:
+        """`queryset` (of the user's tasks) restricted by the priorities, labels and date range."""
+        return queryset.filter(self.structured_condition(user))
 
     def with_changes(self, **changes: Any) -> 'FilterParams':
         return replace(self, **changes)

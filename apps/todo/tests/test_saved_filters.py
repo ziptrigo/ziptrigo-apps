@@ -3,12 +3,15 @@ counts), the filters pages and endpoints, the sidebar, 404s and rate limits."""
 
 from datetime import date
 from html import unescape
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.db.utils import DataError, OperationalError
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from ..models import SavedFilter
@@ -26,7 +29,15 @@ from ..services import (
     sidebar_filters,
     update_filter_params,
 )
-from ..services.saved_filters import SIDEBAR_LIMIT, filter_rows, open_task_count, stored_params
+from ..services import search as search_module
+from ..services.saved_filters import (
+    SIDEBAR_LIMIT,
+    filter_counts,
+    filter_rows,
+    open_task_count,
+    open_task_counts,
+    stored_params,
+)
 from .factories import make_label, make_task, make_user
 
 pytestmark = pytest.mark.django_db
@@ -258,7 +269,7 @@ class TestCounts:
     def test_a_search_that_cannot_run_has_no_count(self, user):
         assert open_task_count(user, FilterParams(q='/(/')) is None
 
-    def test_rows_carry_params_summary_and_count(self, funded_user):
+    def test_rows_carry_params_and_summary(self, funded_user):
         home = make_label(funded_user, 'home')
         create_task(funded_user, title='Pay rent', priority=1, labels=[home])
         saved = save_filter(
@@ -267,30 +278,101 @@ class TestCounts:
 
         [row] = filter_rows(funded_user, [saved])
 
-        assert row.count == 1
         assert row.summary == 'priority 1 · @home · "rent"'
         assert row.params.q == 'rent'
+        assert filter_counts(funded_user, [saved]) == {saved.pk: 1}
 
     def test_a_deleted_label_drops_out_of_the_filter(self, funded_user):
         home = make_label(funded_user, 'home')
         create_task(funded_user, title='A', labels=[home])
         create_task(funded_user, title='B')
         saved = save_filter(funded_user, 'Home', FilterParams(labels=(str(home.pk),)))
-        assert filter_rows(funded_user, [saved])[0].count == 1
+        assert filter_counts(funded_user, [saved]) == {saved.pk: 1}
 
         home.delete()
 
-        [row] = filter_rows(funded_user, [SavedFilter.objects.get(pk=saved.pk)])
-        assert row.params.labels == () and row.summary == 'all open tasks' and row.count == 2
+        saved = SavedFilter.objects.get(pk=saved.pk)
+        [row] = filter_rows(funded_user, [saved])
+        assert row.params.labels == () and row.summary == 'all open tasks'
+        assert filter_counts(funded_user, [saved]) == {saved.pk: 2}
 
-    def test_one_count_query_per_filter(self, funded_user, django_assert_max_num_queries):
-        for n in range(4):
-            save_filter(funded_user, f'F{n}', FilterParams(priorities=(1,)))
-        filters = list(list_filters(funded_user))
+    def test_all_the_counts_are_one_query(self, funded_user):
+        home = make_label(funded_user, 'home')
+        create_task(funded_user, title='Pay rent', priority=1, labels=[home])
+        create_task(funded_user, title='Pay bills', priority=2)
+        done = create_task(funded_user, title='Pay tax', priority=1)
+        complete_task(done)
+        add_comment(create_task(funded_user, title='Quiet'), funded_user, 'the rent')
+        specs = [
+            FilterParams(priorities=(1,)),
+            FilterParams(q='pay*'),
+            FilterParams(q='/rent/'),  # a title and a comment
+            FilterParams(labels=(str(home.pk),)),
+            FilterParams(labels=('none',)),
+            FilterParams(date_range='no_date'),
+            FilterParams(q='pay', include_completed=True),  # completed are never counted
+            FilterParams(),
+        ]
+        saved = [save_filter(funded_user, f'F{n}', params) for n, params in enumerate(specs)]
 
-        # two for the labels, then one count each
-        with django_assert_max_num_queries(2 + len(filters)):
-            filter_rows(funded_user, filters)
+        with CaptureQueriesContext(connection) as queries:
+            counts = filter_counts(funded_user, saved)
+
+        counting = [q for q in queries if 'COUNT(' in q['sql'].upper() or 'CASE WHEN' in q['sql']]
+        assert len(counting) == 1
+        assert len(queries) == 2  # the user's labels, then the one aggregate
+        assert [counts[s.pk] for s in saved] == [1, 2, 2, 1, 2, 3, 2, 3]
+
+    def test_a_filter_that_cannot_run_is_none_and_the_others_are_counted(self, funded_user):
+        create_task(funded_user, title='Pay rent')
+
+        counts = open_task_counts(
+            funded_user, {'ok': FilterParams(q='rent'), 'bad': FilterParams(q='/(/')}
+        )
+
+        assert counts == {'ok': 1, 'bad': None}
+
+    def test_nothing_to_count(self, funded_user):
+        assert open_task_counts(funded_user, {}) == {}
+        assert open_task_counts(funded_user, {'bad': FilterParams(q='/(/')}) == {'bad': None}
+
+    def test_another_users_tasks_are_not_counted(self, funded_user, other_user):
+        make_task(other_user, number=1, title='Pay rent', priority=1)
+
+        assert open_task_count(funded_user, FilterParams(q='rent')) == 0
+
+    @pytest.fixture
+    def pg(self, monkeypatch):
+        fake = MagicMock()
+        fake.vendor = 'postgresql'
+        cursor = MagicMock()
+        fake.cursor.return_value.__enter__.return_value = cursor
+        monkeypatch.setattr(search_module, 'connection', fake)
+        return cursor
+
+    @pytest.mark.parametrize(
+        'error',
+        [
+            OperationalError('canceling statement due to statement timeout'),
+            DataError('invalid regular expression: parentheses () not balanced'),
+        ],
+    )
+    def test_a_timeout_makes_every_count_none(self, pg, funded_user, error):
+        create_task(funded_user, title='Pay rent', priority=1)
+        pg.execute.side_effect = [None, None, error]  # read the setting, set it, then the query
+
+        counts = open_task_counts(
+            funded_user, {'a': FilterParams(q='rent'), 'b': FilterParams(priorities=(1,))}
+        )
+
+        assert counts == {'a': None, 'b': None}
+
+    def test_the_counts_run_under_the_one_second_timeout(self, pg, funded_user):
+        create_task(funded_user, title='Pay rent')
+
+        assert open_task_counts(funded_user, {'a': FilterParams(q='rent')}) == {'a': 1}
+
+        pg.execute.assert_any_call('SET LOCAL statement_timeout = %s', ['1000'])
 
     def test_the_sidebar_lists_twenty_and_counts_the_rest(self, user):
         for n in range(SIDEBAR_LIMIT + 3):
@@ -299,7 +381,7 @@ class TestCounts:
         rows, more = sidebar_filters(user)
 
         assert len(rows) == SIDEBAR_LIMIT and more == 3
-        assert rows[0].filter.name == 'Filter 00'
+        assert rows[0].name == 'Filter 00'
 
     def test_no_filters(self, user):
         assert sidebar_filters(user) == ([], 0)
@@ -333,8 +415,11 @@ class TestFiltersPage:
 
         assert 'Rent' in html
         assert 'priority 1 · "rent" · by title' in html
-        assert '1 open task' in html
         assert 'data-sortable' in html and reverse('todo:filter-reorder') in html
+        # The count is not computed with the page: an empty slot and a request for it.
+        assert '1 open task' not in html
+        assert f'id="page-count-{SavedFilter.objects.get().pk}"' in html
+        assert f'hx-get="{reverse("todo:filter-counts")}?scope=all"' in html
 
     def test_it_creates_the_account_on_the_first_visit(self, web, funded_user):
         from ..models import TodoAccount
@@ -567,6 +652,22 @@ class TestRenameUpdateDeleteReorderEndpoints:
 
         assert response.status_code == 204 and names(funded_user) == ['Second', 'Old']
 
+    def test_reorder_refuses_more_ids_than_a_user_can_have(self, web, saved):
+        ids = [str(uuid4()) for _ in range(MAX_SAVED_FILTERS + 1)]
+
+        with CaptureQueriesContext(connection) as queries:
+            response = web.post(reverse('todo:filter-reorder'), {'ids[]': ids}, **HTMX)
+
+        assert response.status_code == 422
+        assert not [q for q in queries if 'todo_savedfilter' in q['sql']]
+        at_the_limit = [str(saved.pk), *ids[: MAX_SAVED_FILTERS - 1]]
+        response = web.post(reverse('todo:filter-reorder'), {'ids[]': at_the_limit}, **HTMX)
+        assert response.status_code == 204
+
+    def test_reordering_in_the_service_is_capped_too(self, user):
+        with pytest.raises(ValidationError):
+            reorder_filters(user, [uuid4() for _ in range(MAX_SAVED_FILTERS + 1)])
+
     def test_reorder_with_a_bad_id(self, web, saved):
         response = web.post(reverse('todo:filter-reorder'), {'ids[]': ['nope']}, **HTMX)
 
@@ -609,15 +710,38 @@ class TestOwnership:
 
 
 class TestSidebar:
-    def test_every_page_lists_the_filters_with_their_counts(self, web, funded_user):
+    def test_every_page_lists_the_filters_and_asks_for_their_counts(self, web, funded_user):
         create_task(funded_user, title='Pay rent', priority=1)
-        create_task(funded_user, title='Pay bills', priority=1)
         saved = save_filter(funded_user, 'Urgent', FilterParams(priorities=(1,)))
 
-        for name in ('todo:today', 'todo:all', 'todo:labels', 'todo:settings', 'todo:filters'):
+        for name in ('todo:today', 'todo:all', 'todo:labels', 'todo:settings'):
             html = text(web.get(reverse(name)))
             assert reverse('todo:filter', args=[saved.pk]) in html
-            assert 'Urgent' in html and '2<span class="sr-only"> open tasks' in html
+            assert 'Urgent' in html and 'open task' not in html
+            assert f'id="side-count-{saved.pk}"' in html
+            assert f'hx-get="{reverse("todo:filter-counts")}"' in html
+            assert 'scope=all' not in html
+
+    def test_rendering_a_page_runs_no_count_query(self, web, funded_user):
+        for n in range(3):
+            save_filter(funded_user, f'F{n}', FilterParams(q='rent'))
+
+        with CaptureQueriesContext(connection) as queries:
+            assert web.get(reverse('todo:today')).status_code == 200
+
+        assert not [q for q in queries if 'REGEXP' in q['sql'].upper()]
+
+    def test_the_filters_page_asks_once_and_for_everything(self, web, funded_user):
+        save_filter(funded_user, 'Urgent', FilterParams(priorities=(1,)))
+
+        html = text(web.get(reverse('todo:filters')))
+
+        assert html.count(f'hx-get="{reverse("todo:filter-counts")}') == 1
+        assert 'scope=all' in html
+
+    def test_no_request_without_filters(self, web):
+        assert 'filter-counts' not in text(web.get(reverse('todo:today')))
+        assert 'filter-counts' not in text(web.get(reverse('todo:filters')))
 
     def test_a_heading_links_to_the_filters_page_even_with_none(self, web):
         html = web.get(reverse('todo:today')).content.decode()
@@ -639,23 +763,136 @@ class TestSidebar:
 
         assert 'and 2 more' in html and 'Filter 19' in html and 'Filter 20' not in html
 
-    def test_the_count_leaves_out_completed_tasks(self, web, funded_user):
-        done = create_task(funded_user, title='done', priority=1)
-        create_task(funded_user, title='open', priority=1)
-        complete_task(done)
-        save_filter(funded_user, 'Urgent', FilterParams(priorities=(1,), include_completed=True))
-
-        html = text(web.get(reverse('todo:today')))
-
-        assert '1<span class="sr-only"> open task' in html
-
-    def test_a_filter_that_cannot_be_counted_shows_no_number(self, web, funded_user):
+    def test_a_filter_that_cannot_be_counted_still_lists(self, web, funded_user):
         saved = save_filter(funded_user, 'Odd', FilterParams(q='fine'))
         SavedFilter.objects.filter(pk=saved.pk).update(params={'q': '/(/'})
 
         response = web.get(reverse('todo:today'))
 
         assert response.status_code == 200 and 'Odd' in text(response)
+
+
+class TestCountsEndpoint:
+    url = '/todo/filters/counts/'
+
+    def test_the_url(self):
+        assert reverse('todo:filter-counts') == self.url
+
+    def test_it_answers_every_count_out_of_band(self, web, funded_user):
+        create_task(funded_user, title='Pay rent', priority=1)
+        create_task(funded_user, title='Pay bills', priority=1)
+        urgent = save_filter(funded_user, 'Urgent', FilterParams(priorities=(1,)))
+        rent = save_filter(funded_user, 'Rent', FilterParams(q='rent'))
+
+        response = web.get(self.url, **HTMX)
+
+        assert response.status_code == 200
+        html = text(response)
+        for pk, count in ((urgent.pk, 2), (rent.pk, 1)):
+            assert f'id="side-count-{pk}" hx-swap-oob="true"' in html
+            assert re_count(html, f'side-count-{pk}').startswith(
+                f'{count}<span class="sr-only"> open task'
+            )
+        assert 'page-count' not in html
+
+    def test_the_filters_page_also_gets_its_own_list(self, web, funded_user):
+        create_task(funded_user, title='Pay rent', priority=1)
+        saved = save_filter(funded_user, 'Urgent', FilterParams(priorities=(1,)))
+
+        html = text(web.get(self.url, {'scope': 'all'}, **HTMX))
+
+        assert f'id="side-count-{saved.pk}"' in html
+        assert f'id="page-count-{saved.pk}" hx-swap-oob="true"' in html
+        assert '1 open task<' in html
+
+    def test_it_counts_open_tasks_only(self, web, funded_user):
+        done = create_task(funded_user, title='done', priority=1)
+        create_task(funded_user, title='open', priority=1)
+        complete_task(done)
+        saved = save_filter(
+            funded_user, 'Urgent', FilterParams(priorities=(1,), include_completed=True)
+        )
+
+        html = text(web.get(self.url, **HTMX))
+
+        assert re_count(html, f'side-count-{saved.pk}').startswith('1<span')
+
+    def test_the_sidebar_part_is_the_first_twenty(self, web, funded_user):
+        for n in range(SIDEBAR_LIMIT + 2):
+            save_filter(funded_user, f'Filter {n:02}', FilterParams())
+
+        sidebar = text(web.get(self.url, **HTMX))
+        everything = text(web.get(self.url, {'scope': 'all'}, **HTMX))
+
+        assert sidebar.count('side-count-') == SIDEBAR_LIMIT and 'page-count' not in sidebar
+        assert everything.count('side-count-') == SIDEBAR_LIMIT
+        assert everything.count('page-count-') == SIDEBAR_LIMIT + 2
+
+    def test_all_the_counts_cost_one_aggregate(self, web, funded_user):
+        for n in range(5):
+            save_filter(funded_user, f'F{n}', FilterParams(q=f'rent{n}'))
+
+        with CaptureQueriesContext(connection) as queries:
+            web.get(self.url, {'scope': 'all'}, **HTMX)
+
+        assert len([q for q in queries if 'REGEXP' in q['sql'].upper()]) == 1
+
+    def test_a_filter_that_cannot_run_shows_a_dash_and_the_rest_a_count(self, web, funded_user):
+        create_task(funded_user, title='Pay rent', priority=1)
+        good = save_filter(funded_user, 'Good', FilterParams(priorities=(1,)))
+        odd = save_filter(funded_user, 'Odd', FilterParams(q='fine'))
+        SavedFilter.objects.filter(pk=odd.pk).update(params={'q': '/(/'})
+
+        html = text(web.get(self.url, **HTMX))
+
+        assert re_count(html, f'side-count-{good.pk}').startswith('1<span')
+        assert re_count(html, f'side-count-{odd.pk}').startswith('<span aria-hidden="true">–')
+
+    def test_a_timeout_is_a_dash_everywhere(self, web, funded_user, monkeypatch):
+        saved = [save_filter(funded_user, f'F{n}', FilterParams(q='rent')) for n in range(2)]
+        fake = MagicMock()
+        fake.vendor = 'postgresql'
+        fake.cursor.return_value.__enter__.return_value.execute.side_effect = [
+            None,
+            None,
+            OperationalError('canceling statement due to statement timeout'),
+        ]
+        monkeypatch.setattr(search_module, 'connection', fake)
+
+        response = web.get(self.url, {'scope': 'all'}, **HTMX)
+
+        assert response.status_code == 200
+        html = text(response)
+        for item in saved:
+            assert re_count(html, f'side-count-{item.pk}').startswith('<span aria-hidden="true">–')
+            assert re_count(html, f'page-count-{item.pk}').startswith('<span aria-hidden="true">–')
+
+    def test_no_filters_nothing_to_do(self, web):
+        assert web.get(self.url, **HTMX).status_code == 204
+
+    def test_it_counts_the_requesters_filters_only(self, web, other_user, funded_user):
+        make_task(other_user, number=1, title='rent', priority=1)
+        theirs = save_filter(other_user, 'Theirs', FilterParams(q='rent'))
+        mine = save_filter(funded_user, 'Mine', FilterParams(q='rent'))
+
+        html = text(web.get(self.url, {'scope': 'all'}, **HTMX))
+
+        assert str(mine.pk) in html and str(theirs.pk) not in html
+        assert re_count(html, f'side-count-{mine.pk}').startswith('0<span')
+
+    def test_anonymous_visitors_go_to_the_login_page(self, client, user):
+        save_filter(user, 'F', FilterParams())
+
+        assert client.get(self.url).status_code == 302
+
+    def test_only_get(self, web):
+        assert web.post(self.url).status_code == 405
+
+
+def re_count(html: str, slot_id: str) -> str:
+    """The start of the content of the out-of-band span `slot_id` in `html`."""
+    start = html.index('>', html.index(f'id="{slot_id}"')) + 1
+    return html[start : start + 80]
 
 
 class TestRateLimits:
@@ -690,11 +927,35 @@ class TestRateLimits:
 
         assert web.get(reverse('todo:filter', args=[saved.pk])).status_code == 429
 
-    def test_the_sidebar_counts_and_the_filters_page_spend_no_budget(self, web, funded_user):
+    def test_the_pages_themselves_spend_no_budget(self, web, funded_user):
         save_filter(funded_user, 'F', FilterParams(q='a'))
         for _ in range(5):
             assert web.get(reverse('todo:filters')).status_code == 200
             assert web.get(reverse('todo:today')).status_code == 200
+
+    def test_the_counts_spend_the_search_budget_once_per_call(self, web, funded_user):
+        for n in range(5):  # many filters, still one hit
+            save_filter(funded_user, f'F{n}', FilterParams(q='a'))
+        url = reverse('todo:filter-counts')
+        for _ in range(2):
+            html = text(web.get(url, **HTMX))
+            assert 'aria-hidden="true">–' not in html
+
+        over = web.get(url, **HTMX)
+
+        # Over the limit nothing is computed: every count is a dash, not an error page.
+        assert over.status_code == 200
+        assert text(over).count('aria-hidden="true">–') == 5
+        assert web.get(reverse('todo:search'), {'q': 'a'}).status_code == 429
+
+    def test_a_search_leaves_less_for_the_counts(self, web, funded_user):
+        save_filter(funded_user, 'F', FilterParams(q='a'))
+        for _ in range(2):
+            assert web.get(reverse('todo:search'), {'q': 'a'}).status_code == 200
+
+        over = web.get(reverse('todo:filter-counts'), **HTMX)
+
+        assert 'aria-hidden="true">–' in text(over)
 
     def test_other_users_have_their_own_budget(self, web, funded_user):
         for _ in range(3):

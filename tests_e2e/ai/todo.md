@@ -407,10 +407,10 @@ matter): `Pay the rent` (priority 1, label `Home`, due in 2 days), `Walk the Cã
 | 5 | Search `big leash`, then `**big**`. | Both find `Walk the Cão` with "Description: take the **big** leash" (the Markdown marks are not part of the text). |
 | 6 | Search `plumber`. | `Walk the Cão` is found with "Comment: the **plumber** called". |
 | 7 | Search `pay*rent`, then `pa?ent`, then `pa.ent`. | `pay*rent` finds `Pay the rent`; `pa?ent` finds `Parent 0` ("pa" + any letter + "ent"); `pa.ent` finds nothing (a dot is not a wildcard) and the list says "Nothing matches." |
-| 8 | Search `/^pay (the )?rent$/`. | `Pay the rent` only. The slashes alone make it a regular expression. Then type `^pay` with the **Regex** box ticked: `Pay the rent`. |
-| 9 | Search `/(/`. | A red line "Invalid regular expression." above the results; nothing else changes. Try `/(a)\1/` and `/a(?=b)/`: the same message. Clear the box and press Search: "Type something to search for." |
+| 8 | Search `/^pay (the )?rent$/`. | `Pay the rent` only. The slashes alone make it a regular expression. Then type `^pay` with the **Regex** box ticked: `Pay the rent`. Then `/^Pay/` (a capital): also `Pay the rent`, because the letters you type are lower-cased for you. |
+| 9 | Search `/(/`. | A red line "Invalid regular expression." above the results; nothing else changes. Try `/(a)\1/`, `/a(?=b)/`, `/(?>a+)b/`, `/a++b/` and `/(?P<x>a)b/`: the same message. Clear the box and press Search: "Type something to search for." |
 | 10 | Type 201 characters. | The browser stops at 200 characters in the box. |
-| 11 | Open the `?` help. | A popover lists `*`, `?`, `/.../` or the Regex box, "case, accents, punctuation and formatting are ignored" and "deleted comments and earlier edits are not searched". Escape closes it. |
+| 11 | Open the `?` help. | A popover lists `*`, `?`, `/.../` or the Regex box (with the note that a regular expression is matched against the normalised, lower-case text and that its letters are lower-cased for you), the shared syntax, "case, accents, punctuation and formatting are ignored" and "deleted comments and earlier edits are not searched". Escape closes it. |
 | 12 | Delete the plumber comment (on the task page), then search `plumber`. | `Walk the Cão` is no longer found. Restore the comment: found again. Edit the comment to `The electrician called`: `plumber` finds nothing (the earlier text is not searched), `electrician` does. |
 | 13 | Open the filter bar: tick **Priority 1**, with the text box empty. | Only priority 1 tasks (`Pay the rent`); no text is needed when a filter is chosen. With **Labels > @Home**: the same. With **Due date > Next 7 days**: `Pay the rent`. With **No date**: the undated ones. With **Custom** two date inputs appear. |
 | 14 | Combine `rent` with Priority 2. | Nothing matches. Change the **Sort by** to Title: the order follows. |
@@ -428,12 +428,12 @@ reordered and deleted.
 |---|---|---|
 | 1 | Search `rent*` with **Include completed** ticked and click **Save as filter**. | A dialog "Save as filter" with a Name box focused. |
 | 2 | Click **Save** with the name empty. | The browser asks to fill in the field; nothing is saved. |
-| 3 | Name it `Rent stuff` and press Enter. | The page goes to `/todo/filters/<id>/` headed "Rent stuff", with a green message "Saved the filter Rent stuff." and the summary `"rent*" · including completed`; the same results as the search. The sidebar's **Filters** now lists `Rent stuff` highlighted, with a count of its **open** tasks. |
+| 3 | Name it `Rent stuff` and press Enter. | The page goes to `/todo/filters/<id>/` headed "Rent stuff", with a green message "Saved the filter Rent stuff." and the summary `"rent*" · including completed`; the same results as the search. The sidebar's **Filters** now lists `Rent stuff` highlighted, with a count of its **open** tasks (the count appears a moment after the page, not with it). |
 | 4 | Save the same search again as `rent stuff` (another case). | The dialog shows "Name: You already have a filter with this name." and stays open. Cancel closes it. |
 | 5 | On the filter's page tick **Priority 1**. | The results refresh, the address bar becomes `/todo/filters/<id>/?q=rent*&include_completed=1&priorities=1&sort=date` and an **Update filter** button appears beside **Save as filter**. Untick it: the button goes away. |
 | 6 | Tick **Priority 1** again and click **Update filter**. | The page reloads at `/todo/filters/<id>/` with "Updated the filter Rent stuff."; the summary now starts `priority 1 ·`; the sidebar count changed. |
 | 7 | Open another filter in the sidebar (save `Urgent` for priority 1 from the search page first). | Each runs its own params; the sidebar entry of the current one is highlighted. |
-| 8 | Open **Filters** (the sidebar heading) `/todo/filters/`. | A list: name (a link), "N open tasks" and the summary line, a drag handle, a pencil and a trash can. |
+| 8 | Open **Filters** (the sidebar heading) `/todo/filters/`. | A list: name (a link), "N open tasks" (filled in just after the page shows) and the summary line, a drag handle, a pencil and a trash can. |
 | 9 | Click the pencil on `Urgent`, change the name to `Rent stuff` and save; then to `Important`. | The first is refused with "Name: You already have a filter with this name." (nothing changes); the second renames it in place. Escape cancels the edit. |
 | 10 | Drag `Important` above `Rent stuff`, then reload. | The new order sticks, also in the sidebar. |
 | 11 | Delete a label that a filter uses (Labels page), then open that filter. | The filter still runs; the deleted label is simply gone from its summary. |

@@ -2,14 +2,18 @@
 PostgreSQL timeout branch, the structured filters and the search views."""
 
 import re
+import time
 from datetime import date, timedelta
 from html import unescape
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, call
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import connection, transaction
 from django.db.utils import DataError, OperationalError
 from django.http import QueryDict
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.accounts.services.timezones import user_today
@@ -36,8 +40,10 @@ from ..services.search import (
     EMPTY_MESSAGE,
     INVALID_MESSAGE,
     MAX_QUERY_CHARS,
+    SNIPPET_TIME_BUDGET,
     TIMEOUT_MESSAGE,
     TOO_LONG_MESSAGE,
+    lower_literals,
     make_snippet,
     normalize_glob,
     prepare_query,
@@ -115,9 +121,17 @@ class TestPrepareQuery:
             query = prepare_query('/pay.*rent/', mode)
             assert query.mode == 'regex' and query.pattern == 'pay.*rent'
 
-    def test_regex_mode_uses_the_query_as_written(self):
+    def test_regex_mode_lowers_the_letters_the_user_typed(self):
         query = prepare_query('Pay.*RENT', 'regex')
-        assert query.pattern == 'Pay.*RENT'
+        assert query.pattern == 'pay.*rent'
+
+    def test_lowering_leaves_escapes_alone(self):
+        # `\D` is "not a digit", `\d` is the opposite: only literal characters are lower-cased.
+        assert prepare_query(r'\D+ \W \Bab \x4F A\.B [A-C]', 'regex').pattern == (
+            r'\D+ \W \Bab \x4f a\.b [a-c]'
+        )
+        assert lower_literals(r'\\A') == r'\\a'  # an escaped backslash, then a letter
+        assert lower_literals('İ') == 'İ'  # lowering would make two characters
 
     def test_one_character_between_slashes_is_a_regex(self):
         assert prepare_query('/a/').mode == 'regex'
@@ -160,6 +174,40 @@ class TestPrepareQuery:
     def test_lookarounds_are_refused(self, pattern):
         assert refusal(pattern, 'regex') == INVALID_MESSAGE
 
+    @pytest.mark.parametrize(
+        'pattern',
+        [
+            '(?>a+)b',  # atomic group
+            'a*+b',
+            'a++b',
+            'a?+b',
+            'a{2}+b',
+            'a{2,}+b',
+            'a{,3}+b',  # possessive quantifiers
+            '(?P<word>a)b',
+            r'\N{LATIN SMALL LETTER A}',
+        ],
+    )
+    def test_python_only_syntax_is_refused(self, pattern):
+        assert refusal(pattern, 'regex') == INVALID_MESSAGE
+
+    @pytest.mark.parametrize(
+        'pattern',
+        [
+            'a+?b',  # lazy
+            'a*?b',
+            r'a\++b',  # an escaped plus, then a quantifier
+            '[+*?]+',  # in a bracket expression they are literals
+            '[(?=]',
+            '[]a+]+',
+            'a{2}?',
+            'a{x}+',  # not a quantifier: literal text
+            r'\\N{',
+        ],
+    )
+    def test_look_alikes_are_not_refused(self, pattern):
+        assert prepare_query(pattern, 'regex')
+
     def test_an_escaped_backslash_before_a_digit_is_not_a_backreference(self):
         assert prepare_query(r'a\\1', 'regex')
 
@@ -172,6 +220,13 @@ class TestPrepareQuery:
         assert to_postgres(r'[\b]') == r'[\b]'
         assert to_postgres(r'\\b') == r'\\b'
         assert to_postgres(r'\d+') == r'\d+'
+
+    def test_a_closing_bracket_first_in_a_class_is_a_literal(self):
+        # `[]\b]` is the class of `]` and backspace: the `\b` is still inside it.
+        assert to_postgres(r'[]\b]\b') == r'[]\b]\y'
+        assert to_postgres(r'[^]\b]\b') == r'[^]\b]\y'
+        assert to_postgres(r'[a]\b') == r'[a]\y'
+        assert to_postgres(r'[\]]\b') == r'[\]]\y'
 
 
 class TestWhatIsSearched:
@@ -304,8 +359,8 @@ class TestRegex:
     def test_the_checkbox(self, user):
         assert numbers(find(user, 'pay the (rent)', mode='regex')) == [1001]
 
-    def test_the_text_is_lower_case_so_a_capital_matches_nothing(self, user):
-        assert numbers(find(user, '/Rent/')) == []
+    def test_the_text_is_lower_case_so_the_pattern_is_lowered_too(self, user):
+        assert sorted(numbers(find(user, '/Rent/'))) == [1001, 1003]
         assert sorted(numbers(find(user, '/rent/'))) == [1001, 1003]
 
     def test_anchors(self, user):
@@ -495,6 +550,230 @@ class TestSnippets:
         assert page.object_list[0].search_snippet == '' and page.object_list[0].search_field == ''
 
 
+def _four_as_then_c(text: str) -> bool:
+    index = -1
+    for _ in range(4):
+        index = text.find('a', index + 1)
+        if index < 0:
+            return False
+    return 'c' in text[index + 1 :]
+
+
+#: What PostgreSQL's linear-time engine would answer for the patterns the bound tests use, in
+#: linear time: SQLite's `REGEXP` is Python's backtracking `re`, which cannot even run them.
+LINEAR_ANSWERS = {
+    'a.*a.*a.*a.*c': _four_as_then_c,
+    '(a+)+b': lambda text: 'ab' in text,
+    '(a|aa)+$': lambda text: text.endswith('a'),
+}
+
+
+@pytest.fixture
+def database_regexp():
+    """The database side of a search as PostgreSQL would run it (see `LINEAR_ANSWERS`)."""
+    from django.db.backends.sqlite3._functions import _sqlite_regexp
+
+    def regexp(pattern, text):
+        return int(LINEAR_ANSWERS[pattern](text or ''))
+
+    connection.ensure_connection()
+    connection.connection.create_function('regexp', 2, regexp, deterministic=True)
+    yield
+    connection.connection.create_function('regexp', 2, _sqlite_regexp, deterministic=True)
+
+
+class TestSnippetBounds:
+    """The snippet pass runs the user's pattern in Python: it must be bounded (review of #196)."""
+
+    def test_the_glob_that_made_python_re_run_for_minutes(self, user, database_regexp):
+        # `a*a*a*a*c` is `a.*a.*a.*a.*c`: about n^5 steps for `re` on a 500-character title.
+        make_task(user, number=1001, title='a' * 500, description='aaaac')
+
+        started = time.monotonic()
+        page = find(user, 'a*a*a*a*c')
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 2
+        [task] = page.object_list
+        assert task.number == 1001
+        # The title did not match in the database, so it is never scanned: the snippet is the
+        # description's.
+        assert task.search_field == 'description' and '<mark>aaaac</mark>' in task.search_snippet
+
+    def test_the_nested_quantifier(self, user, database_regexp):
+        make_task(user, number=1001, title='a' * 500, description='ab')
+
+        started = time.monotonic()
+        page = find(user, '/(a+)+b/')
+
+        assert time.monotonic() - started < 2
+        assert numbers(page) == [1001]
+
+    def test_a_matching_field_that_backtracks_is_listed_without_a_snippet(
+        self, user, database_regexp
+    ):
+        # The database matches (it ends in "a"); Python's search from the start would take
+        # 2^60 steps. The row is returned, bare.
+        make_task(user, number=1001, title='a' * 60 + 'b' + 'a')
+        make_task(user, number=1002, title='ba', priority=2)
+
+        started = time.monotonic()
+        page = find(user, r'/(a|aa)+$/')
+        elapsed = time.monotonic() - started
+
+        assert elapsed < SNIPPET_TIME_BUDGET + 2
+        assert sorted(numbers(page)) == [1001, 1002]
+        hostile = next(task for task in page.object_list if task.number == 1001)
+        assert hostile.search_snippet == '' and hostile.search_field == ''
+
+    def test_an_exhausted_budget_lists_the_rows_without_snippets(self, user, monkeypatch):
+        make_task(user, number=1001, title='rent')
+        make_task(user, number=1002, title='rent too')
+        monkeypatch.setattr(search_module, 'SNIPPET_TIME_BUDGET', 0)
+
+        page = find(user, 'rent')
+
+        assert sorted(numbers(page)) == [1001, 1002]
+        assert all(task.search_snippet == '' for task in page.object_list)
+
+    def test_a_timeout_ends_the_snippets_and_keeps_the_rows(self, user, monkeypatch):
+        make_task(user, number=1001, title='rent')
+        make_task(user, number=1002, title='rent too')
+
+        class Slow:
+            calls: list[float] = []
+
+            def search(self, text, timeout):
+                self.calls.append(timeout)
+                raise TimeoutError
+
+        slow = Slow()
+        monkeypatch.setattr(search_module, 'snippet_regex', lambda pattern: slow)
+
+        page = find(user, 'rent')
+
+        assert sorted(numbers(page)) == [1001, 1002]
+        assert all(task.search_snippet == '' for task in page.object_list)
+        assert len(slow.calls) == 1  # the second row was not even tried
+        assert 0 < slow.calls[0] <= SNIPPET_TIME_BUDGET
+
+    def test_each_search_gets_what_is_left_of_the_page_budget(self, user, monkeypatch):
+        make_task(user, number=1001, title='rent')
+        make_task(user, number=1002, title='rent too')
+        clock = iter([0.0, 0.05, 0.12, 0.3, 0.4])
+        monkeypatch.setattr(search_module, 'time', SimpleNamespace(monotonic=lambda: next(clock)))
+        timeouts = []
+        real = search_module.snippet_regex
+
+        class Spy:
+            def __init__(self, compiled):
+                self.compiled = compiled
+
+            def search(self, text, timeout):
+                timeouts.append(round(timeout, 3))
+                return self.compiled.search(text, timeout=timeout)
+
+        monkeypatch.setattr(search_module, 'snippet_regex', lambda pattern: Spy(real(pattern)))
+
+        page = find(user, 'rent')
+
+        # The clock reads 0 (deadline 0.2), then 0.05 (0.15 left for the first search), 0.12
+        # (0.08 left for the second) and 0.3 (past the deadline).
+        assert timeouts == [pytest.approx(0.15), pytest.approx(0.08)]
+        assert len(page.object_list) == 2
+
+    def test_only_the_fields_the_database_matched_are_scanned(self, user, monkeypatch):
+        make_task(user, number=1001, title='zzz title ' + 'q' * 400, description='a rent here')
+        scanned = []
+        real = search_module.snippet_regex
+
+        class Spy:
+            def __init__(self, compiled):
+                self.compiled = compiled
+
+            def search(self, text, timeout):
+                scanned.append(text)
+                return self.compiled.search(text, timeout=timeout)
+
+        monkeypatch.setattr(search_module, 'snippet_regex', lambda pattern: Spy(real(pattern)))
+
+        task = find(user, 'rent').object_list[0]
+
+        assert scanned == ['a rent here'] and task.search_field == 'description'
+
+    def test_a_comment_is_read_only_when_the_title_and_description_did_not_match(self, user):
+        titled = make_task(user, number=1001, title='rent')
+        add_comment(titled, user, 'rent in a comment')
+        commented = make_task(user, number=1002, title='Quiet')
+        add_comment(commented, user, 'first, nothing')
+        add_comment(commented, user, 'the rent is late ' + 'x ' * 4000)
+        add_comment(commented, user, 'rent again')
+
+        with CaptureQueriesContext(connection) as queries:
+            page = find(user, 'rent')
+
+        by_number = {task.number: task for task in page.object_list}
+        assert by_number[1001].search_field == 'title'
+        assert by_number[1002].search_field == 'comment'
+        assert by_number[1002].search_snippet.startswith('the <mark>rent</mark> is late')
+        reads = [q['sql'] for q in queries if 'SUBSTR(' in q['sql'].upper()]
+        # One query, for the one task that needs it, and it takes one cut comment, not all three.
+        assert len(reads) == 1 and reads[0].upper().count('LIMIT 1') >= 1
+
+    def test_no_comment_query_when_every_row_matched_in_its_title(self, user):
+        task = make_task(user, number=1001, title='rent')
+        add_comment(task, user, 'rent too')
+
+        with CaptureQueriesContext(connection) as queries:
+            find(user, 'rent')
+
+        assert not [q for q in queries if 'SUBSTR(' in q['sql'].upper()]
+
+    def test_at_most_five_thousand_characters_of_a_field_are_scanned(self, user):
+        make_task(user, number=1001, title='early', description='rent ' + 'x ' * 6000)
+        make_task(user, number=1002, title='late', description='x ' * 6000 + 'rent')
+
+        by_number = {t.number: t for t in find(user, 'rent').object_list}
+
+        assert by_number[1001].search_field == 'description'
+        # Past the cut Python can't see it: listed (the database found it), no snippet.
+        assert by_number[1002].search_field == '' and by_number[1002].search_snippet == ''
+
+    def test_a_pattern_the_package_cannot_compile_gives_no_snippets(self, user, monkeypatch):
+        make_task(user, number=1001, title='rent')
+        monkeypatch.setattr(search_module, 'snippet_regex', lambda pattern: None)
+
+        page = find(user, 'rent')
+
+        assert numbers(page) == [1001] and page.object_list[0].search_snippet == ''
+
+    def test_compiling_is_cheap_and_failures_are_none(self):
+        assert search_module.snippet_regex('(') is None
+        assert search_module.snippet_regex('(?:a{0,65535}){0,65535}x') is not None
+        assert search_module.snippet_regex('a{1000}{1000}') is None
+
+    def test_a_database_refusal_while_reading_the_matches_keeps_the_rows(self, user, monkeypatch):
+        make_task(user, number=1001, title='rent')
+        fake = MagicMock()
+        fake.vendor = 'postgresql'
+        cursor = MagicMock()
+        fake.cursor.return_value.__enter__.return_value = cursor
+        # The page's guard runs (3 statements); the matches' guard times out on its first.
+        cursor.execute.side_effect = [None, None, None]
+        monkeypatch.setattr(search_module, 'connection', fake)
+        real_matched = search_module._matched_texts
+
+        def timed_out(tasks, pattern):
+            cursor.execute.side_effect = OperationalError('canceling: statement timeout')
+            return real_matched(tasks, pattern)
+
+        monkeypatch.setattr(search_module, '_matched_texts', timed_out)
+
+        page = find(user, 'rent')
+
+        assert numbers(page) == [1001] and page.object_list[0].search_snippet == ''
+
+
 class TestPostgresTimeout:
     @pytest.fixture
     def pg(self, monkeypatch):
@@ -513,7 +792,52 @@ class TestPostgresTimeout:
         page = find(user, 'rent')
 
         assert numbers(page) == [1001]
-        pg.execute.assert_called_once_with('SET LOCAL statement_timeout = %s', ['1000'])
+        assert call('SET LOCAL statement_timeout = %s', ['1000']) in pg.execute.call_args_list
+
+    def test_the_guard_puts_the_previous_timeout_back(self, pg):
+        pg.fetchone.return_value = ('30s',)
+
+        with search_module.search_guard():
+            pass
+
+        assert pg.execute.call_args_list == [
+            call('SELECT current_setting(%s)', ['statement_timeout']),
+            call('SET LOCAL statement_timeout = %s', ['1000']),
+            call('SELECT set_config(%s, %s, true)', ['statement_timeout', '30s']),
+        ]
+
+    def test_inside_an_outer_transaction_the_timeout_does_not_leak(self, pg):
+        # `SET LOCAL` outlives a released savepoint: the guard restores the value itself, before
+        # the outer transaction goes on, and in the same savepoint.
+        pg.fetchone.return_value = ('0',)
+
+        with transaction.atomic():
+            with search_module.search_guard():
+                pass
+            assert pg.execute.call_args_list[-1] == call(
+                'SELECT set_config(%s, %s, true)', ['statement_timeout', '0']
+            )
+            assert connection.in_atomic_block
+
+    def test_after_an_error_the_rollback_undoes_it(self, pg):
+        # The savepoint (or transaction) is rolled back, which reverts a `SET LOCAL` made inside
+        # it, so nothing is restored by hand -- and a restore could not run in an aborted one.
+        pg.fetchone.return_value = ('0',)
+
+        with pytest.raises(OperationalError), search_module.search_guard():
+            raise OperationalError('connection lost')
+
+        assert [c.args[0] for c in pg.execute.call_args_list] == [
+            'SELECT current_setting(%s)',
+            'SET LOCAL statement_timeout = %s',
+        ]
+
+    def test_a_nested_guard_is_a_savepoint_of_the_real_connection(self, pg):
+        # The guard uses the real `atomic()`: nested, it opens a savepoint rather than failing.
+        with transaction.atomic():
+            depth = len(connection.savepoint_ids)
+            with search_module.search_guard():
+                assert len(connection.savepoint_ids) == depth + 1
 
     def test_a_statement_timeout_is_a_validation_error(self, pg, user):
         pg.execute.side_effect = OperationalError('canceling statement due to statement timeout')

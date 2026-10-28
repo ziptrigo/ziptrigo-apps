@@ -44,6 +44,9 @@ dependencies = [
     # RRULE parsing and iteration (`dateutil.rrule`) for repeating To-do tasks (issue #179).
     'python-dateutil>=2.9,<3.0',
     'python-dotenv>=1.0,<2.0',
+    # `regex` for the search snippets only: unlike `re` its `search(timeout=...)` is bounded, so a
+    # pattern that backtracks badly can't hang a web worker (`apps.todo.services.search`, #181).
+    'regex>=2025.1,<2027.0',
     'requests>=2.32,<3.0',
     'segno>=1.6,<2.0',
     # User-agent parsing (device, browser, OS, crawler detection) for short link analytics

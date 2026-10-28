@@ -15,6 +15,7 @@ from .comments import (
     comment_restore,
 )
 from .filters import (
+    filter_counts_view,
     filter_delete,
     filter_page,
     filter_rename,
@@ -67,6 +68,7 @@ __all__ = [
     'comment_history_view',
     'comment_restore',
     'completed_page',
+    'filter_counts_view',
     'filter_delete',
     'filter_page',
     'filter_rename',

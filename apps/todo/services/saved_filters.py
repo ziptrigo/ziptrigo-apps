@@ -1,25 +1,28 @@
 """Saved filters (issue #181): a named `FilterParams`, listed in the sidebar.
 
 A refusal is a `django.core.exceptions.ValidationError` keyed by field (`'__all__'` for none), like
-the labels'. The sidebar and the filters page show how many open tasks each filter selects; that is
-one query per filter, computed when the page renders.
+the labels'. The sidebar and the filters page show how many open tasks each filter selects. Those
+counts are not computed when a page renders: the page asks for them afterwards
+(`views.filters.filter_counts_view`), and `filter_counts` answers for all the filters in **one** query
+(a conditional `Count` per filter over the user's open tasks) under the search's single
+`statement_timeout`; when it times out every count is `None` ("–") rather than one timeout per
+filter.
 """
 
 from collections.abc import Mapping, Sequence
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Max, QuerySet
+from django.db.models import Count, Max, QuerySet
 
 from apps.accounts.models import User
 
-from ..models import SavedFilter, TodoAccount
+from ..models import SavedFilter, Task, TodoAccount
 from .accounts import get_account
-from .filters import FilterParams, describe_params, filter_tasks, label_ids, label_names
+from .filters import FilterParams, describe_params, label_ids, label_names
 from .limits import MAX_SAVED_FILTERS, SAVED_FILTER_NAME_MAX
 from .search import prepare_query, search_guard
 
@@ -121,7 +124,10 @@ def delete_filter(saved: SavedFilter) -> None:
 
 
 def reorder_filters(user: User, ids: Sequence[UUID]) -> int:
-    """Write `position = index` for the given ids (the user's own; others are ignored)."""
+    """Write `position = index` for the given ids (the user's own; others are ignored). At most
+    `MAX_SAVED_FILTERS` ids: more than a user can have is refused."""
+    if len(ids) > MAX_SAVED_FILTERS:
+        raise _error('ids', 'Could not read the new order.')
     own = {saved.pk: saved for saved in SavedFilter.objects.filter(user=user, pk__in=ids)}
     changed = []
     for index, pk in enumerate(ids):
@@ -137,48 +143,76 @@ def reorder_filters(user: User, ids: Sequence[UUID]) -> int:
 # -- Counts and summaries ------------------------------------------------------------------------
 
 
-def open_task_count(user: User, params: FilterParams) -> int | None:
-    """How many open tasks `params` selects (completed ones are never counted), or `None` when
-    its search can't run (an invalid or too expensive pattern)."""
-    open_only = params.with_changes(include_completed=False)
+def open_task_counts[K](user: User, params_by_key: Mapping[K, FilterParams]) -> dict[K, int | None]:
+    """How many open tasks each of the `params_by_key` selects (completed ones are never
+    counted), all in one query: a conditional `Count` per filter over the user's open tasks, under
+    the search's one `statement_timeout`. A filter whose search can't run (an invalid pattern) is
+    `None`; if the query itself times out (or the server rejects a pattern) every count is
+    `None`."""
+    counts: dict[K, int | None] = dict.fromkeys(params_by_key)
+    aggregates = {}
+    names: dict[str, K] = {}
+    for key, params in params_by_key.items():
+        try:
+            condition = params.condition(user)
+        except ValidationError:
+            continue
+        name = f'count_{len(names)}'
+        names[name] = key
+        aggregates[name] = Count('pk', filter=condition)
+    if not aggregates:
+        return counts
+    open_tasks = Task.objects.filter(user=user, deleted_at__isnull=True, completed_at__isnull=True)
     try:
-        queryset = filter_tasks(user, open_only, ordered=False)
-        with search_guard() if params.q.strip() else nullcontext():
-            return queryset.count()
+        with search_guard():
+            totals = open_tasks.aggregate(**aggregates)
     except ValidationError:
-        return None
+        return counts
+    for name, key in names.items():
+        counts[key] = totals[name]
+    return counts
+
+
+def open_task_count(user: User, params: FilterParams) -> int | None:
+    """`open_task_counts` for one filter."""
+    return open_task_counts(user, {0: params})[0]
+
+
+def _read_params(user: User, filters: Sequence[SavedFilter]) -> dict[UUID, FilterParams]:
+    valid = label_ids(user)
+    return {
+        saved.pk: FilterParams.from_dict(saved.params, valid_label_ids=valid) for saved in filters
+    }
+
+
+def filter_counts(user: User, filters: Sequence[SavedFilter]) -> dict[UUID, int | None]:
+    """`{filter id: open task count}` for `filters` (`None`: can't be counted), in one query."""
+    return open_task_counts(user, _read_params(user, filters))
 
 
 @dataclass(slots=True)
 class FilterRow:
-    """A saved filter as a page lists it: its params (read for this user), a summary and the
-    count of its open tasks (`None` when it can't be counted)."""
+    """A saved filter as the filters page lists it: its params (read for this user) and a
+    summary. The count of its open tasks comes later (`filter_counts`)."""
 
     filter: SavedFilter
     params: FilterParams
     summary: str
-    count: int | None
 
 
 def filter_rows(user: User, filters: Sequence[SavedFilter]) -> list[FilterRow]:
-    """`FilterRow`s for `filters`, one count query each; the user's labels are read once."""
-    valid = label_ids(user)
+    """`FilterRow`s for `filters`; the user's labels are read once. No count is computed."""
+    params = _read_params(user, filters)
     names = label_names(user)
-    rows = []
-    for saved in filters:
-        params = FilterParams.from_dict(saved.params, valid_label_ids=valid)
-        rows.append(
-            FilterRow(
-                filter=saved,
-                params=params,
-                summary=describe_params(params, names),
-                count=open_task_count(user, params),
-            )
+    return [
+        FilterRow(
+            filter=saved, params=params[saved.pk], summary=describe_params(params[saved.pk], names)
         )
-    return rows
+        for saved in filters
+    ]
 
 
-def sidebar_filters(user: User) -> tuple[list[FilterRow], int]:
-    """The rows the sidebar lists (at most `SIDEBAR_LIMIT`) and how many more there are."""
+def sidebar_filters(user: User) -> tuple[list[SavedFilter], int]:
+    """The filters the sidebar lists (at most `SIDEBAR_LIMIT`) and how many more there are."""
     filters = list(list_filters(user))
-    return filter_rows(user, filters[:SIDEBAR_LIMIT]), max(len(filters) - SIDEBAR_LIMIT, 0)
+    return filters[:SIDEBAR_LIMIT], max(len(filters) - SIDEBAR_LIMIT, 0)

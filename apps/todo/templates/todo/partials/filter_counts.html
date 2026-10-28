@@ -1,0 +1,5 @@
+{% comment %} The answer of `todo:filter-counts`: out-of-band spans that replace the empty count slots of the sidebar
+   (#side-count-<id>) and, with scope=all, of the filters page (#page-count-<id>). A count that could not be worked out
+   (a pattern that can't run, a timeout, the rate limit) is an en dash. Needs `sidebar` and `page`: lists of (id, count). {% endcomment %}
+{% for pk, count in sidebar %}<span id="side-count-{{ pk }}" hx-swap-oob="true" class="ml-auto text-xs text-gray-500 dark:text-gray-400">{% if count is None %}<span aria-hidden="true">&ndash;</span><span class="sr-only">count not available</span>{% else %}{{ count }}<span class="sr-only"> open task{{ count|pluralize }}</span>{% endif %}</span>{% endfor %}
+{% for pk, count in page %}<span id="page-count-{{ pk }}" hx-swap-oob="true" class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{% if count is None %}<span aria-hidden="true">&ndash;</span><span class="sr-only">count not available</span>{% else %}{{ count }} open task{{ count|pluralize }}{% endif %}</span>{% endfor %}

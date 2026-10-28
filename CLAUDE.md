@@ -3713,15 +3713,22 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   collapsed into one** before `glob_to_regex`, so `a*****b` can't make a backtracking-heavy `.*.*.*...`),
   then `glob_to_regex` (`re.escape`, then `\*` -> `.*`, `\?` -> `.`). The pattern is **unanchored**: no wildcard
   is a substring match (`rent` finds `parent`). A query wrapped in slashes (`/.../`, at least one character
-  between) is a regex whatever `mode` says; in regex mode the query is used as written (the text is already
-  lower-case and accent-less, which the help popover says). `q` is at most `MAX_QUERY_CHARS` (200;
+  between) is a regex whatever `mode` says; in regex mode the pattern is used as written **except that its
+  literal characters are lower-cased** (`lower_literals`: the text it meets is lower-case, so `/Rent/` finds
+  "rent"; safe because only an escape's letter is case-sensitive -- `\D` is not `\d` -- and escapes are copied
+  untouched; a character whose lower case isn't one character is kept). It is still matched against the
+  *normalised* text (no accents, punctuation as spaces); the help popover says both. `q` is at most `MAX_QUERY_CHARS` (200;
   `'The pattern is too long.'` in either mode: the slashes of `/.../` don't count). Refusals are
   `ValidationError`s: empty after normalisation `'Type something to search for.'` (a lone `*` is not empty),
   an invalid regex, a backreference (`\1`..`\9`, `(?P=name)`, `(?(1)..)`) or a lookaround (`(?=`, `(?!`,
-  `(?<=`, `(?<!`) `'Invalid regular expression.'` (the dialect is what Python's `re` and PostgreSQL's
-  engine share; found by scanning with escapes skipped, so `\\1` is fine). Nested quantifiers are not
-  detected statically. **`\b` and `\B` are translated to `\y` and `\Y` for PostgreSQL only** (`to_postgres`,
-  `PreparedQuery.db_pattern`; in PostgreSQL `\b` is a backspace); the snippets use Python's own pattern.
+  `(?<=`, `(?<!`), or Python-only syntax PostgreSQL's engine rejects -- atomic groups `(?>...)`, possessive
+  quantifiers (`a*+`, `a++`, `a?+`, `a{2}+`), named groups `(?P<n>...)`, `\N{...}` -- is refused with
+  `'Invalid regular expression.'` rather than the database's "took too long or is not valid" (the dialect is
+  what Python's `re` and PostgreSQL's engine share; found by scanning with escapes skipped and bracket
+  expressions read as such -- a `]` first in a class is a literal -- so `\\1` and `[(?=]` are fine).
+  Nested quantifiers are not detected statically. **`\b` and `\B` are translated to `\y` and `\Y` for PostgreSQL only** (`to_postgres`,
+  `PreparedQuery.db_pattern`; in PostgreSQL `\b` is a backspace; a `]` first in a bracket expression, `[]a]` or
+  `[^]a]`, is a literal and doesn't end it); the snippets use Python's own pattern.
 - **The query** (`search_queryset`): the user's non-trashed tasks, `title_text__regex` OR `description_text__regex`
   OR an `Exists` over the user's non-deleted comments with `body_text__regex`. `__regex`, never `__iregex`
   (`~` on PostgreSQL, a Python `REGEXP` function on SQLite, which has no timeout); the pattern is always a
@@ -3733,16 +3740,48 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   `OperationalError` whose message contains `statement timeout`, or a `DataError` (a pattern the server
   rejects), becomes `'That search took too long or is not a valid pattern. Simplify it and try again.'`;
   any other `OperationalError` propagates. `search_queryset` / `filter_tasks` validate when called but run
-  when evaluated, so callers evaluate inside the guard (`paginate` and `open_task_count` do). **Residual
-  risk, accepted:** the snippet is computed with Python's `re.search` (as the issue says) on the rows the
-  database returned, with no timeout, so a pathological pattern (`(a+)+b`) can still cost CPU there; only the
-  database side is bounded.
+  when evaluated, so callers evaluate inside the guard (`paginate`, `attach_matches` and the counts do).
+  **`SET LOCAL` lasts until the outermost transaction ends**, and releasing a savepoint keeps it, so a guard
+  nested in someone's `atomic()` would leave a 1 s limit on everything after it. The guard therefore never
+  assumes it is outermost: it reads the value it replaces (`SELECT current_setting('statement_timeout')`) and,
+  before leaving *normally*, puts it back with `set_config('statement_timeout', previous, true)` (also local),
+  in the same savepoint. When it leaves with an error the savepoint/transaction is rolled back, which reverts
+  a `SET LOCAL` made inside it (so nothing is restored by hand, and a restore could not run in an aborted
+  transaction anyway). Chosen over asserting `not connection.in_atomic_block`, which would also trip under
+  pytest-django's wrapper transaction and would forbid a legitimate caller. Tested with a mocked PostgreSQL
+  connection (the statements issued, nested in an `atomic()`, after an error).
+- **The snippet pass is bounded** (review of #196: **the database's engine does not protect Python's**.
+  PostgreSQL's matcher answers `a.*a.*a.*a.*c` -- the glob `a*a*a*a*c` -- or `(a|aa)+$` at once, so the 1 s
+  timeout never fires, while Python's backtracking `re` spent minutes on the same 500-character title; the
+  title can be a task's own text, up to `TITLE_MAX`, and gunicorn's 30 s worker timeout is the only other
+  bound, with 60 searches a minute allowed per user). Snippets therefore use the third-party **`regex`
+  package** (a runtime dependency, used here only), whose `Pattern.search(text, timeout=...)` raises
+  `TimeoutError`: the same Python-dialect pattern, compiled with `search.snippet_regex` (a pattern it can't
+  compile means no snippets). **One time budget for the page**, `SNIPPET_TIME_BUDGET` (0.2 s) from the moment
+  `attach_matches` starts; each search gets what is left as its `timeout`; **the first timeout, or a spent
+  budget, ends the snippets: the remaining rows are still listed, without a snippet or a field** (they match;
+  only the highlight is missing). **Only the field the database said matched is scanned**: `_matched_texts`
+  asks the database, for the page's rows only and under the search guard, which of title and description
+  matched (a `Q(...__regex)` annotation each), and then, for the tasks that matched in neither, for the
+  **first matching non-deleted comment** (a `Subquery` ordered by `created_at`, `Substr`-ed to the scan cap)
+  -- one query for them all, never the bodies of every comment of the page. A title that did not match is
+  never read, however hostile. **At most `SNIPPET_SCAN_MAX` (5,000) normalised characters of a field** are
+  scanned (a match beyond them is listed without a snippet). If the database refuses those queries (a
+  timeout) the page has no snippets. The other places a user's pattern meets Python's `re` -- `re.compile` in
+  `prepare_query`, `_has_unsupported_syntax`, `lower_literals`, `to_postgres`, `normalize_glob` -- compile or
+  scan the (at most 200-character) pattern once, linearly; nothing there *matches* user text. **SQLite's
+  `REGEXP` is Python's `re` too, so the development/test database has no bound inside the query** (it is not
+  a deployment target); the regression tests (`TestSnippetBounds`) stand in PostgreSQL's linear-time answers
+  for the three hostile patterns (`a.*a.*a.*a.*c` against a 500-`a` title whose short description matches,
+  `(a+)+b`, `(a|aa)+$` against a field that matches and backtracks) by replacing SQLite's `regexp` function
+  and assert they finish in a couple of seconds with the row returned (and no snippet where the matching field
+  is the hostile one).
 - **Results.** `order_results`: the foundation's sort (`FilterParams.sort`), completed tasks after open ones
   (a `Case` prepended to the order), 50 per page (`paginate`: a `Paginator` on the ordered query, then the
   page's rows re-loaded through the lists' `decorate` so counts, labels and parent are there). Each task
   carries `search_field` (`title`, `description`, `comment`, or `''`) and `search_snippet`: the first of
-  title, description and the non-deleted comments (oldest first) the compiled regex finds in, computed in
-  Python on the **normalised** text, `SNIPPET_CONTEXT` (60) characters either side, the match in `<mark>`
+  title, description and the first matching non-deleted comment (oldest first) the `regex`-compiled pattern
+  finds in, within the budget above, computed in Python on the **normalised** text, `SNIPPET_CONTEXT` (60) characters either side, the match in `<mark>`
   (at most 100 characters of a long match; everything escaped), shown as "Title: ... rent ..." under the
   row and labelled "matches shown without accents or formatting". `search_tasks(user, *, q, mode,
   include_completed, filters, page, decorate)` is the issue's function (the explicit `q`, `mode` and
@@ -3767,12 +3806,27 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   (name cleaned and unique, `MAX_SAVED_FILTERS` = 50 per user under the user's `TodoAccount` row lock, the search
   text validated, labels that aren't the user's dropped), `rename_filter`, `update_filter_params`,
   `delete_filter`, `reorder_filters(user, ids)`. Params are re-read leniently with the user's labels, so **a
-  label deleted later simply drops out of the filter** (no cleanup hook in `delete_label`). `open_task_count`
-  counts the open tasks a filter selects (completed never counted; `None` for a search that can't run);
-  `sidebar_filters(user)` is up to 20 `FilterRow`s (params, summary, count: one query each) and how many more.
+  label deleted later simply drops out of the filter** (no cleanup hook in `delete_label`). Counts:
+  `open_task_counts(user, {key: params})` counts the open tasks several filters select **in one query** -- one
+  conditional `Count('pk', filter=params.condition(user))` per filter over the user's open tasks (completed
+  never counted), under a single `search_guard` -- and gives `None` for a filter whose search can't run (an
+  invalid pattern) and, **when the one query times out or the server rejects a pattern, `None` for every
+  filter** (shown as a dash) rather than one timeout each; `filter_counts(user, filters)` keys it by filter id,
+  `open_task_count` is the one-filter form. `FilterParams.condition(user)` / `structured_condition` are the
+  filters as one `Q` (`narrow` is `queryset.filter(structured_condition)`), `search.search_condition` the
+  text part. `filter_rows(user, filters)` (the filters page) is params + summary, with no count;
+  `sidebar_filters(user)` is up to 20 `SavedFilter`s and how many more.
 - **Web.** The search box (`q` with `autocomplete="off"`, **Regex** = `mode=regex`, **Include completed**, a `?`
   help popover) is above the menu in `todo/layout.html` (so at the top on phones) and the sidebar lists
-  "Filters" below it with counts and "and N more"; both come from `render_page`. `GET /todo/search/`
+  "Filters" below it with "and N more"; both come from `render_page`. **The counts are not part of the
+  render** (review of #196: up to 20 counts, each its own regex scan, on every To-do page and 50 on the
+  filters page): the sidebar renders an empty `#side-count-<id>` slot per filter and a hidden element that
+  `hx-get`s `GET /todo/filters/counts/` (`todo:filter-counts`, `hx-trigger="load"`, `hx-swap="none"`), whose
+  response is out-of-band `<span hx-swap-oob>`s for the slots -- the sidebar's first 20, and with `?scope=all`
+  also `#page-count-<id>` for every row of the filters page, whose list is the one that asks (once; the
+  sidebar's own request is left out on that page, and the re-rendered list after a rename asks again). One
+  query for all of them, `204` for a user with no filters, a dash (with a screen-reader "count not
+  available") for a count that is `None`. `GET /todo/search/`
   (`todo:search`) is the page: the form, the filter bar and `#search-results`; every change `hx-get`s
   `/todo/search/list/` (`todo:search-list`; opened directly it redirects to the page) whose `HX-Push-Url` is the
   canonical page URL; a refusal is a 422 line in `#search-msg` (a full page with status 422, or the partial
@@ -3789,14 +3843,18 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   `confirmModal` `.../delete/`, drag to reorder `filters/reorder/` with SortableJS and the shared `tasks.js`).
   Another user's filter is a 404.
 - **Rate limits.** `TODO_SEARCH_USER` (60 per minute) is charged by the search page, its list partial and a
-  filter's page, **before** the query, only when one runs (a refused pattern still spends it; the sidebar
-  counts and the filters page spend nothing). The filter mutations (save, rename, update, delete, reorder)
-  spend `TODO_EDIT_USER`.
+  filter's page, **before** the query, only when one runs (a refused pattern still spends it), and by
+  **`GET /todo/filters/counts/`, once per call whatever the number of filters** (so each To-do page load
+  spends one while the user has saved filters; over the limit the counts are dashes, with no query, never an
+  error). The pages themselves, the filters page included, spend nothing. The filter mutations (save, rename,
+  update, delete, reorder) spend `TODO_EDIT_USER`; `reorder` refuses more than `MAX_SAVED_FILTERS` ids (422
+  for htmx, before any query).
 - **Admin.** Read-only `SavedFilterAdmin`. **Tests.** `test_search.py` (`glob_to_regex`, normalisation,
-  refusals, what is and isn't searched, snippets, the PostgreSQL branch with `search.connection` replaced by a
-  mock and the SQLite branch for real, `FilterParams` parsing and applying, the views, the search rate limit),
-  `test_saved_filters.py` (model, services, counts, the pages and endpoints, 404s, the sidebar, rate limits,
-  admin), TODO-22 and TODO-23 in `tests_e2e/ai/todo.md`.
+  refusals, what is and isn't searched, snippets and their bounds (`TestSnippetBounds`), the PostgreSQL branch with
+  `search.connection` replaced by a mock (the guard's statements, nested in an `atomic()`, after an error) and
+  the SQLite branch for real, `FilterParams` parsing and applying, the views, the search rate limit),
+  `test_saved_filters.py` (model, services, the one-query counts and their timeout, the pages and endpoints, the
+  counts endpoint, 404s, the sidebar, rate limits, admin), TODO-22 and TODO-23 in `tests_e2e/ai/todo.md`.
 
 ### Queue and scheduler
 
