@@ -21,8 +21,9 @@ from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 from apps.core.markdown import toggle_checklist_item
 
-from ..models import Label, Priority, Task, TaskSource, TodoSettings
+from ..models import Label, Priority, Recurrence, RecurrenceMode, Task, TaskSource, TodoSettings
 from . import dates
+from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account
 from .billing import charge_task_creation
 from .limits import DESCRIPTION_MAX, TITLE_MAX
@@ -32,7 +33,17 @@ logger = logging.getLogger(__name__)
 
 #: The fields `update_task` accepts.
 UPDATABLE = frozenset(
-    {'title', 'description', 'priority', 'due_date', 'due_time', 'labels', 'parent'}
+    {
+        'title',
+        'description',
+        'priority',
+        'due_date',
+        'due_time',
+        'labels',
+        'parent',
+        'rrule',
+        'recurrence_mode',
+    }
 )
 
 POSTPONE_PRESETS = ('tomorrow', 'next_week', 'next_weekend', 'date')
@@ -174,6 +185,9 @@ def create_task(
     due_time: time | None = None,
     parent: Task | None = None,
     labels: Iterable[Label | str | UUID] = (),
+    rrule: str = '',
+    recurrence_mode: str = RecurrenceMode.FIXED,
+    recurrence: Recurrence | None = None,
     source: str = TaskSource.WEB,
     allow_unpaid: bool = False,
 ) -> Task:
@@ -185,6 +199,11 @@ def create_task(
     `InsufficientCreditsError` and rolls all of that back. `allow_unpaid` (for a task the user did
     not ask for) creates it anyway, owed, and blocks new tasks until it is settled
     (`services.billing`).
+
+    A repeating task is created with `rrule` (and `recurrence_mode`): a new `Recurrence` whose
+    anchor is the task's date, which is the rule's first date on or after today when none is given.
+    `recurrence` joins the task to an existing one (the next occurrence, `services.recurrence`).
+    Only a top-level task can repeat.
     """
     cleaned_title = clean_title(title)
     cleaned_description = clean_description(description)
@@ -192,6 +211,14 @@ def create_task(
     cleaned_date, cleaned_time = clean_due(due_date, due_time)
     cleaned_labels = clean_labels(user, labels)
     cleaned_parent = clean_parent(user, parent)
+    cleaned_rule = recurrence_service.clean_rule(rrule) if rrule else ''
+    cleaned_mode = recurrence_service.clean_mode(recurrence_mode)
+    if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
+        raise _error('rrule', 'A subtask cannot repeat.')
+    if recurrence is not None and (cleaned_rule or recurrence.user_id != user.pk):
+        raise _error('rrule', 'Unknown repeat rule.')
+    if cleaned_rule and cleaned_date is None:
+        cleaned_date = recurrence_service.first_date(cleaned_rule, user_today(user))
 
     settings = TodoSettings.load()
     account = get_account(user)
@@ -210,6 +237,9 @@ def create_task(
         charged, unpaid = charge_task_creation(
             account, settings, number=number, allow_unpaid=allow_unpaid
         )
+        if cleaned_rule:
+            assert cleaned_date is not None  # filled above
+            recurrence = recurrence_service.start(user, cleaned_rule, cleaned_mode, cleaned_date)
         task = Task(
             user=user,
             number=number,
@@ -219,6 +249,7 @@ def create_task(
             priority=cleaned_priority,
             due_date=cleaned_date,
             due_time=cleaned_time,
+            recurrence=recurrence,
             source=source,
             charged_credits=charged,
             unpaid_at=timezone.now() if unpaid else None,
@@ -239,6 +270,11 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
     Clearing `due_date` clears `due_time` too. A task moves under a `parent` only when it has no
     subtasks of its own; `parent=None` makes a subtask a top-level task. A trashed task is
     read-only.
+
+    `rrule` / `recurrence_mode` edit the repeat rule (`services.recurrence`): a rule that differs
+    from the running one replaces it (the anchor becomes the task's date, which is filled with the
+    rule's first date when the task has none); the same rule and mode change nothing, the anchor
+    included; an empty `rrule` stops repeating.
     """
     unknown = set(changes) - UPDATABLE
     if unknown:
@@ -284,6 +320,27 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
             raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
         if current.is_trashed:
             raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
+        # The repeat rule is judged against the locked row too: whether the task is completed, a
+        # subtask or already repeating is what is stored *now*.
+        rule_action = _rule_action(current, changes)
+        if rule_action is not None and rule_action[0] == 'set':
+            if current.is_completed:
+                raise _error('rrule', 'Only an open task can repeat.')
+            if (current.parent_id is not None and not (moves and new_parent is None)) or (
+                moves and new_parent is not None
+            ):
+                raise _error('rrule', 'A subtask cannot repeat.')
+            anchor = values['due_date'] if 'due_date' in values else current.due_date
+            if anchor is None:
+                anchor = values['due_date'] = recurrence_service.first_date(
+                    rule_action[1], user_today(task.user)
+                )
+                values['today_position'] = 0
+            values['recurrence'] = recurrence_service.change(
+                current, rule_action[1], rule_action[2], anchor
+            )
+        elif moves and new_parent is not None and current.active_recurrence is not None:
+            raise _error('parent', 'A repeating task cannot become a subtask.')
         if moves:
             if new_parent is not None:
                 if new_parent.pk not in locked:
@@ -302,7 +359,33 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
             task.labels.set(labels)
         if description_changed:
             sync_references(task)
+        if rule_action is not None and rule_action[0] == 'stop':
+            recurrence_service.stop(current)
+            task.recurrence = current.recurrence
     return task
+
+
+def _rule_action(task: Task, changes: Mapping[str, Any]) -> tuple[str, str, str] | None:
+    """What `changes` do to the task's repeat rule: `('set', rule, mode)`, `('stop', '', '')`, or
+    `None` for nothing (no repeat keys, or the very rule and mode the task already has)."""
+    if 'rrule' not in changes and 'recurrence_mode' not in changes:
+        return None
+    active = task.active_recurrence
+    if 'rrule' in changes:
+        if not changes['rrule']:
+            return ('stop', '', '') if active is not None else None
+        rule = recurrence_service.clean_rule(changes['rrule'])
+    elif active is not None:
+        rule = active.rrule
+    else:
+        return None  # a mode with no rule to apply it to
+    if changes.get('recurrence_mode'):
+        mode = recurrence_service.clean_mode(changes['recurrence_mode'])
+    else:
+        mode = active.mode if active is not None else RecurrenceMode.FIXED
+    if active is not None and active.rrule == rule and active.mode == mode:
+        return None
+    return ('set', rule, mode)
 
 
 def toggle_checklist(task: Task, index: int, checked: bool) -> Task:
@@ -327,7 +410,8 @@ def toggle_checklist(task: Task, index: int, checked: bool) -> Task:
 
 def complete_task(task: Task) -> Task:
     """Complete the task, and its open subtasks in the same transaction. A completed task is left
-    as it is. (The recurrence sub-issue hooks in here.)"""
+    as it is. A repeating task creates its next occurrence in the same transaction, before the open
+    subtasks are completed (they are copied to it: `services.recurrence.on_completed`)."""
     if task.is_trashed:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before completing it.')
     now = timezone.now()
@@ -338,6 +422,7 @@ def complete_task(task: Task) -> Task:
         if not won:
             task.refresh_from_db()
             return task
+        recurrence_service.on_completed(task)
         Task.objects.filter(parent=task, completed_at__isnull=True, deleted_at__isnull=True).update(
             completed_at=now, updated_at=now
         )

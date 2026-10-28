@@ -43,4 +43,143 @@
         {% endfor %}
     </div>
 </div>
+{% repeat_choices as repeat_options %}
+{% with recurrence=task.active_recurrence %}
+{% comment %} The Repeat control (static/todo/js/recurrence.js). Its controls have no name; the form submits only the
+   two hidden inputs, which the component keeps in step. The radios need a name to group, and `form="repeat-ui"` (no such
+   form) keeps them out of the submission. Without JavaScript the inputs hold the task's current rule. {% endcomment %}
+<div class="relative" x-data="repeatControl" data-rrule="{{ recurrence.rrule }}" data-mode="{{ recurrence.mode }}"
+     @click.outside="open = false" @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
+    <input type="hidden" name="rrule" value="{{ recurrence.rrule }}" :value="rrule">
+    <input type="hidden" name="recurrence_mode" value="{{ recurrence.mode|default:'fixed' }}" :value="mode">
+    <span class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Repeat</span>
+    <button type="button" x-ref="trigger" @click="open = !open" :aria-expanded="open" aria-haspopup="dialog"
+            class="inline-flex items-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <i class="fas fa-repeat mr-2 text-gray-500 dark:text-gray-400" aria-hidden="true"></i><span x-text="label">{% if recurrence %}Repeats{% else %}Repeat{% endif %}</span>
+    </button>
+    <div x-show="open" style="display: none" role="dialog" aria-label="Repeat"
+         class="absolute left-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] z-50 rounded-md shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 space-y-3 text-sm">
+        <p x-show="customRule" class="text-xs text-gray-500 dark:text-gray-400">This task has a custom repeat. It is kept until you use the options below.</p>
+        <div>
+            <label for="repeat-freq-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Frequency</label>
+            <select id="repeat-freq-{{ uid }}" x-model="freq" @change="touch()"
+                    class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <option value="">Does not repeat</option>
+                <option value="day">Day</option>
+                <option value="week">Week</option>
+                <option value="month">Month</option>
+                <option value="year">Year</option>
+            </select>
+        </div>
+        <div x-show="freq" class="space-y-3">
+            <div class="flex items-center gap-2">
+                <label for="repeat-interval-{{ uid }}" class="text-gray-700 dark:text-gray-200">Every</label>
+                <input id="repeat-interval-{{ uid }}" type="number" min="1" max="365" x-model.number="interval" @input="touch()"
+                       class="w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                <span class="text-gray-700 dark:text-gray-200" x-text="freq + (interval > 1 ? 's' : '')"></span>
+            </div>
+            <fieldset x-show="freq === 'week'">
+                <legend class="mb-1 text-xs text-gray-500 dark:text-gray-400">On</legend>
+                <div class="flex flex-wrap gap-1">
+                    {% for code, name in repeat_options.weekdays %}
+                    <label class="inline-flex items-center gap-1 rounded border border-gray-300 dark:border-gray-600 px-2 py-1">
+                        <input type="checkbox" :checked="days.includes('{{ code }}')" @change="toggleDay('{{ code }}')"
+                               class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                        <span aria-hidden="true">{{ name|slice:':3' }}</span><span class="sr-only">{{ name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </fieldset>
+            <div x-show="freq === 'month'" class="space-y-2">
+                <label for="repeat-month-kind-{{ uid }}" class="block text-xs text-gray-500 dark:text-gray-400">On</label>
+                <select id="repeat-month-kind-{{ uid }}" x-model="monthKind" @change="touch()"
+                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <option value="same">The same day of the month</option>
+                    <option value="day">Day of the month</option>
+                    <option value="last">The last day</option>
+                    <option value="nth">A weekday of the month</option>
+                </select>
+                <div x-show="monthKind === 'day'" class="flex items-center gap-2">
+                    <label for="repeat-month-day-{{ uid }}" class="text-gray-700 dark:text-gray-200">Day</label>
+                    <input id="repeat-month-day-{{ uid }}" type="number" min="1" max="31" x-model.number="monthDay" @input="touch()"
+                           class="w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                </div>
+                <div x-show="monthKind === 'nth'" class="flex gap-2">
+                    <label for="repeat-nth-{{ uid }}" class="sr-only">Which</label>
+                    <select id="repeat-nth-{{ uid }}" x-model="nth" @change="touch()"
+                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        <option value="1">first</option>
+                        <option value="2">second</option>
+                        <option value="3">third</option>
+                        <option value="4">fourth</option>
+                        <option value="-1">last</option>
+                    </select>
+                    <label for="repeat-nth-day-{{ uid }}" class="sr-only">Weekday</label>
+                    <select id="repeat-nth-day-{{ uid }}" x-model="nthDay" @change="touch()"
+                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        {% for code, name in repeat_options.weekdays %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div x-show="freq === 'year'" class="space-y-2">
+                <label for="repeat-year-kind-{{ uid }}" class="block text-xs text-gray-500 dark:text-gray-400">On</label>
+                <select id="repeat-year-kind-{{ uid }}" x-model="yearKind" @change="touch()"
+                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <option value="same">The same date</option>
+                    <option value="date">A month and day</option>
+                </select>
+                <div x-show="yearKind === 'date'" class="flex items-center gap-2">
+                    <label for="repeat-year-day-{{ uid }}" class="sr-only">Day</label>
+                    <input id="repeat-year-day-{{ uid }}" type="number" min="1" max="31" x-model.number="yearDay" @input="touch()"
+                           class="w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <label for="repeat-year-month-{{ uid }}" class="sr-only">Month</label>
+                    <select id="repeat-year-month-{{ uid }}" x-model.number="yearMonth" @change="touch()"
+                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        {% for number, name in repeat_options.months %}<option value="{{ number }}">{{ name }}</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="space-y-2">
+                <label for="repeat-ends-{{ uid }}" class="block text-xs text-gray-500 dark:text-gray-400">Ends</label>
+                <select id="repeat-ends-{{ uid }}" x-model="ends" @change="touch()"
+                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <option value="never">Never</option>
+                    <option value="count">After a number of times</option>
+                    <option value="date">On a date</option>
+                </select>
+                <div x-show="ends === 'count'" class="flex items-center gap-2">
+                    <label for="repeat-count-{{ uid }}" class="sr-only">Times</label>
+                    <input id="repeat-count-{{ uid }}" type="number" min="1" max="1000" x-model.number="count" @input="touch()"
+                           class="w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    <span class="text-gray-700 dark:text-gray-200">times</span>
+                </div>
+                <div x-show="ends === 'date'">
+                    <label for="repeat-until-{{ uid }}" class="sr-only">Last date</label>
+                    <input id="repeat-until-{{ uid }}" type="date" x-model="until" @input="touch()"
+                           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                </div>
+            </div>
+            <fieldset class="space-y-2">
+                <legend class="mb-1 text-xs text-gray-500 dark:text-gray-400">When the next one is due</legend>
+                <label class="flex items-start gap-2">
+                    <input type="radio" name="repeat-mode-{{ uid }}" form="repeat-ui" value="fixed" x-model="mode"
+                           class="mt-0.5 h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                    <span><span class="font-medium">Fixed schedule:</span> the next one is due on schedule even if this one is late</span>
+                </label>
+                <label class="flex items-start gap-2">
+                    <input type="radio" name="repeat-mode-{{ uid }}" form="repeat-ui" value="from_completion" x-model="mode"
+                           class="mt-0.5 h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                    <span><span class="font-medium">From completion:</span> the next one is counted from when I complete this one</span>
+                </label>
+            </fieldset>
+        </div>
+        <div class="flex justify-end gap-2 pt-1">
+            <button type="button" x-show="freq || customRule" @click="clear()"
+                    class="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500">Remove repeat</button>
+            <button type="button" @click="open = false; $refs.trigger.focus()"
+                    class="px-3 py-1.5 text-sm font-medium text-gray-900 bg-brand-primary hover:opacity-90 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-primary">Done</button>
+        </div>
+    </div>
+</div>
+{% endwith %}
 {% endwith %}

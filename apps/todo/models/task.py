@@ -11,6 +11,7 @@ from apps.core.markdown import normalize_for_search, search_text
 
 from ..limits import TITLE_MAX
 from .label import Label
+from .recurrence import Recurrence
 
 
 class TaskSource(models.TextChoices):
@@ -54,6 +55,7 @@ class Task(models.Model):
     pk: uuid.UUID
     user_id: uuid.UUID
     parent_id: uuid.UUID | None
+    recurrence_id: uuid.UUID | None
     # Set by `services.dates.with_subtask_counts` on the tasks a list shows (not stored).
     subtask_total: int
     subtask_done: int
@@ -112,6 +114,19 @@ class Task(models.Model):
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
     updated_at = cast(datetime, models.DateTimeField(auto_now=True))
 
+    #: The repeat rule this task is an occurrence of (shared by all of them; `None` for a task that
+    #: never repeated). Stopping keeps the link and sets `Recurrence.ended_at`.
+    recurrence = cast(
+        'Recurrence | None',
+        models.ForeignKey(
+            Recurrence,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='tasks',
+        ),
+    )
+
     labels = cast(
         'models.Manager',
         models.ManyToManyField(Label, blank=True, related_name='tasks'),
@@ -145,6 +160,14 @@ class Task(models.Model):
     def is_unpaid(self) -> bool:
         return self.unpaid_at is not None
 
+    @property
+    def active_recurrence(self) -> Recurrence | None:
+        """The repeat rule while it is still running (not stopped or exhausted), else `None`."""
+        if self.recurrence_id is None:
+            return None
+        recurrence = self.recurrence
+        return recurrence if recurrence is not None and recurrence.is_active else None
+
     def is_overdue(self, today_local: date) -> bool:
         """Open, with a due date before `today_local` (the user's today)."""
         return self.is_open and self.due_date is not None and self.due_date < today_local
@@ -157,6 +180,8 @@ class Task(models.Model):
                 raise ValidationError({'parent': 'A subtask cannot have subtasks.'})
         if self.due_time is not None and self.due_date is None:
             raise ValidationError({'due_time': 'A time needs a date.'})
+        if self.recurrence_id is not None and self.parent_id is not None:
+            raise ValidationError({'recurrence': 'A subtask cannot repeat.'})
 
     def save(self, *args, **kwargs) -> None:
         self.title_text = normalize_for_search(self.title)[:TITLE_MAX]

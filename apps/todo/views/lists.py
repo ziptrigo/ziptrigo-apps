@@ -79,11 +79,11 @@ def belongs(task: Task, view: str, today: date) -> bool:
 
 
 def decorate(queryset: QuerySet) -> QuerySet:
-    """What a row needs: the subtask and comment counts, the parent (shown on a subtask) and the
-    labels."""
+    """What a row needs: the subtask and comment counts, the parent (shown on a subtask), the
+    repeat rule and the labels."""
     return (
         with_comment_counts(with_subtask_counts(queryset))
-        .select_related('parent')
+        .select_related('parent', 'recurrence')
         .prefetch_related('labels')
     )
 

@@ -85,12 +85,30 @@
             {% if not task.is_completed %}
             <div hx-target="#task-panel" hx-swap="outerHTML">{% include 'todo/partials/postpone_menu.html' with button_label=True %}</div>
             {% endif %}
+            {% if task.active_recurrence and not task.is_completed %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'todo:trash-task' task.number %}"
+                    data-title="Move to trash"
+                    data-body="Move {{ task.title }} to the trash? It repeats: tick the box to stop repeating too, otherwise the repeat carries on."
+                    data-label="Move to trash" data-tone="primary"
+                    data-checkbox-name="stop_recurrence" data-checkbox-label="Also stop repeating"
+                    class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                <i class="fas fa-trash mr-2" aria-hidden="true"></i>Move to trash
+            </button>
+            {% else %}
             <button type="button" hx-post="{% url 'todo:trash-task' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
                     class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
                 <i class="fas fa-trash mr-2" aria-hidden="true"></i>Move to trash
             </button>
+            {% endif %}
         {% endif %}
     </div>
+
+    {% if task.is_completed and task.recurrence_id %}
+    <p id="uncomplete-note" class="-mt-6 mb-8 text-sm text-gray-500 dark:text-gray-400">
+        Uncompleting this task keeps the next occurrence of the repeat if one was already created: nothing is deleted or refunded.
+    </p>
+    {% endif %}
 
     <!-- Details -->
     <section class="mb-8" aria-labelledby="details-title">
@@ -103,6 +121,17 @@
         </dl>
         {% else %}
         {% include 'todo/partials/task_form.html' with mode='details' %}
+        {% endif %}
+        {% if task.active_recurrence %}
+        <div id="task-repeat" class="-mt-4 mb-4 flex flex-wrap items-center gap-3">
+            {% repeat_chip task detail=True %}
+            {% if not task.is_trashed %}
+            <button type="button" hx-post="{% url 'todo:recurrence-stop' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+                    class="text-sm text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">Stop repeating</button>
+            {% endif %}
+        </div>
+        {% elif task.recurrence_id %}
+        <p id="task-repeat" class="-mt-4 mb-4 text-sm text-gray-500 dark:text-gray-400"><i class="fas fa-repeat mr-1" aria-hidden="true"></i>This task no longer repeats.</p>
         {% endif %}
     </section>
 

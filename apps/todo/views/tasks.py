@@ -34,6 +34,7 @@ from ..services import (
     has_manual_order,
     order_tasks,
     postpone_task,
+    recurrence,
     referenced_by,
     reorder,
     reschedule_overdue,
@@ -368,7 +369,23 @@ def task_postpone(request: AuthenticatedHttpRequest, number: int) -> HttpRespons
 @login_required
 @require_POST
 def task_trash(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
-    return _act(request, number, trash_task, refresh_comments=True)
+    """Move to the Trash. A repeating task's confirmation offers "Also stop repeating"
+    (`stop_recurrence=1`); without it the repeat goes on."""
+    stop_repeat = request.POST.get('stop_recurrence') == '1'
+
+    def trash(task: Task) -> None:
+        trash_task(task)
+        if stop_repeat:
+            recurrence.stop(task)
+
+    return _act(request, number, trash, refresh_comments=True)
+
+
+@login_required
+@require_POST
+def recurrence_stop(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
+    """Stop repeating: the repeat rule ends, the task stays."""
+    return _act(request, number, recurrence.stop, trashed=None)
 
 
 @login_required

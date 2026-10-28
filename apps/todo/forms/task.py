@@ -5,8 +5,9 @@ from django.core.exceptions import ValidationError
 
 from apps.accounts.models import User
 
-from ..models import Label, Priority
+from ..models import Label, Priority, RecurrenceMode
 from ..services.limits import TITLE_MAX
+from ..services.recurrence import parse_rule
 from ..services.tasks import POSTPONE_PRESETS, clean_description
 
 #: The parts of the task page that save on their own (`part` in the POST): which fields each one
@@ -14,7 +15,7 @@ from ..services.tasks import POSTPONE_PRESETS, clean_description
 PARTS = {
     'title': ('title',),
     'description': ('description',),
-    'details': ('priority', 'due_date', 'due_time', 'labels'),
+    'details': ('priority', 'due_date', 'due_time', 'labels', 'rrule', 'recurrence_mode'),
 }
 
 
@@ -42,6 +43,15 @@ class TaskForm(forms.Form):
     labels = forms.ModelMultipleChoiceField(
         label='Labels', required=False, queryset=Label.objects.none()
     )
+    # The Repeat popover builds these two (`static/todo/js/recurrence.js`). An empty `rrule` means
+    # "does not repeat": on a task that repeats it stops the repeat (`services.tasks.update_task`).
+    rrule = forms.CharField(label='Repeat', required=False, strip=True)
+    recurrence_mode = forms.ChoiceField(
+        label='Repeat mode',
+        required=False,
+        choices=RecurrenceMode.choices,
+        error_messages={'invalid_choice': 'Choose a fixed schedule or from completion.'},
+    )
 
     def __init__(self, *args, user: User, part: str = '', **kwargs):
         super().__init__(*args, **kwargs)
@@ -60,6 +70,15 @@ class TaskForm(forms.Form):
         except ValidationError as exc:
             raise forms.ValidationError(exc.message_dict['description']) from None
 
+    def clean_rrule(self) -> str:
+        value = self.cleaned_data['rrule']
+        if not value:
+            return ''
+        try:
+            return parse_rule(value)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.messages) from None
+
     def clean(self):
         cleaned = super().clean()
         if cleaned.get('due_time') is not None and cleaned.get('due_date') is None:
@@ -77,7 +96,12 @@ class TaskForm(forms.Form):
         """The cleaned values of the fields this form has, as `update_task` / `create_task` take
         them (the labels as a list)."""
         values = {
-            name: self.cleaned_data[name] for name in self.fields if name in self.cleaned_data
+            name: self.cleaned_data[name]
+            for name in self.fields
+            if name in self.cleaned_data
+            # A request without the Repeat controls leaves the repeat rule alone (an empty `rrule`
+            # would stop it).
+            and (name not in ('rrule', 'recurrence_mode') or name in self.data)
         }
         if 'labels' in values:
             values['labels'] = list(values['labels'])

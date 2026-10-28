@@ -2970,7 +2970,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   two concurrent moves can't leave two levels of nesting), and refuses a trashed task. A date
   change resets `today_position`. `complete_task` is a conditional write (`completed_at IS NULL`) that also
   completes the open, non-trashed subtasks in the same transaction (the web asks first, see below;
-  the recurrence sub-issue hooks in here); `uncomplete_task` leaves a subtask's parent as it is.
+  `complete_task` also creates the next occurrence of a repeating task, see "Recurrence"); `uncomplete_task` leaves a subtask's parent as it is.
   `postpone_task(task, preset=, date=)`: `tomorrow`, `next_week` (the next Monday *after* today,
   so on a Monday it means in 7 days), `next_weekend` (the next Saturday after today, on a Saturday
   in 7 days), `date` (today or later), "today" being the owner's, keeping the time; a task without a
@@ -3064,9 +3064,80 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   limit `ratelimit.web_response` (retargeted to the control's message slot).
 - **Admin**: `TodoSettingsAdmin` (singleton, superusers), and read-only `TaskAdmin` (search title,
   number, user email; filters for priority, source, completed, trash, unpaid), `TodoAccountAdmin`,
-  `LabelAdmin` and `CommentAdmin` (revisions inline), none with add, change or
+  `LabelAdmin`, `CommentAdmin` (revisions inline) and `RecurrenceAdmin`, none with add, change or
   delete (the user admin lists `todo` in `CASCADE_WITH_USER_APP_LABELS` so deleting a user still
   works).
+- **Recurrence** (issue #179; `models/recurrence.py`, `services/recurrence.py`,
+  `static/todo/js/recurrence.js`, migration `0003_recurrence`). A repeating task is a chain of
+  ordinary `Task` rows, each billed, numbered, completed and searched like any task, sharing one
+  `Recurrence` (`Task.recurrence`, `SET_NULL`, `related_name='tasks'`): `rrule` (an RFC 5545 `RRULE`
+  value, canonical, no `RRULE:` prefix, no `DTSTART`), `mode`, `anchor_date`, `ended_at` and
+  `occurrences_created` (1 for the first task). Only a top-level task repeats. Dependency:
+  `python-dateutil` (`dateutil.rrule`).
+  - **Rules** (`services.recurrence.parse_rule`, the one place a rule is validated; the form and
+    `create_task` / `update_task` all go through it): `FREQ` `DAILY|WEEKLY|MONTHLY|YEARLY`
+    (required), `INTERVAL` 1..365, `BYDAY` (an ordinal `-1`, `1`..`4` only for `MONTHLY`: `1MO`,
+    `-1FR`), `BYMONTHDAY` 1..31 or -1, `BYMONTH` 1..12, `COUNT` 1..1000 *or* `UNTIL` `YYYYMMDD`;
+    `WKST` is ignored and anything else (`BYHOUR`, `BYSETPOS`, `SECONDLY`, ...) is
+    `ValidationError('Unsupported repeat rule.')`. It returns the canonical form (upper case, parts in
+    the order FREQ, INTERVAL, BYDAY, BYMONTHDAY, BYMONTH, COUNT/UNTIL, `INTERVAL=1` dropped, which
+    `recurrence.js` also writes); a rule over 255 characters, or with no date from yesterday on
+    (`UNTIL` in the past, 30 February), is refused. `describe(rrule)` is the sentence for the UI
+    (`Every 2 weeks on Monday, Wednesday`, `Every month on the last day`, `Every year on 3 March,
+    5 times`, `..., until 31 Dec 2026`; any other combination `Custom repeat (<rule>)`).
+    `next_date(rrule, after)` is `rrulestr(..., dtstart=after).after(dtstart, inc=False)`: **a
+    `BYMONTHDAY` beyond the month's length is skipped by dateutil, not clamped** (`31` has no
+    February), `-1` is the last day, and a monthly/yearly rule with no day of its own repeats on the
+    day of the date it is computed from (so it skips the same way). **`COUNT` is stripped from
+    `next_date`**: dateutil would restart the count at every computed date, so
+    `occurrences_created` counts instead.
+  - **Anchor and the two modes.** `anchor_date` is the date the *current* occurrence was scheduled
+    for by the rule. Postponing or editing an occurrence's `due_date` never changes it (rent
+    postponed from the 1st to the 5th still has its next one computed from the 1st). Editing the
+    *rule* (a different rule or mode, through `update_task`'s `rrule`/`recurrence_mode`, which
+    the details form posts) sets it to the task's date; the same rule and mode change nothing. A
+    task given a rule and no date gets `services.recurrence.first_date`: the first date on or
+    after today (the series starts at today and includes it, so a rule with no day of its own,
+    "every 3 months", is due today). **fixed** counts the next one from the anchor, **from
+    completion** from `user_today(user)` (the completion date in the user's zone; completing early
+    moves the next one earlier).
+  - **Completion** (`complete_task` -> `recurrence.on_completed(task)`, inside its transaction,
+    after `completed_at` is set and *before* the open subtasks are completed, so they can be
+    copied). The `Recurrence` row is `select_for_update()`d and its `anchor_date` must still be the
+    one the task was loaded with (`task.recurrence`, read first and never refreshed): a stale
+    instance finds it advanced and does nothing, so two completions create one occurrence. It ends
+    the rule (`ended_at`, no task) when `next_date` is `None` or `occurrences_created >= COUNT`;
+    otherwise it creates the next occurrence with `create_task(..., source='recurrence',
+    allow_unpaid=True)` (title, description, priority, labels, `due_time`, the `recurrence`,
+    `due_date` = the next date) and each **open** subtask the same way (title, description,
+    priority, labels, no date; a manual order is kept), then `anchor_date = next`,
+    `occurrences_created += 1`. Every row counts toward the month and is charged (or created
+    owed, see "Numbering and billing": completing always succeeds). A refusal creating the next
+    one (the open-task cap) is logged and rolled back to a savepoint and leaves the completion
+    and the rule as they were. `copy_extras(from_task, to_task)` is a no-op hook for the reminders
+    sub-issue (#182).
+  - **Uncompleting** an occurrence that already spawned the next leaves the next one (no refund, no
+    deletion; the task page says so). Since the next one already advanced the anchor, completing
+    the old one again creates another after it (known; trash the extra). **Trashing** an
+    occurrence does not end the rule: the confirmation of a repeating task's trash button (the shared
+    `confirmModal`, which learnt an optional checkbox from `data-checkbox-name` /
+    `data-checkbox-label`) offers "Also stop repeating", posted as `stop_recurrence=1`. **Stop
+    repeating** (`recurrence.stop(task)`, `POST /todo/<n>/recurrence/stop/`, `TODO_EDIT_USER`) sets
+    `ended_at` and keeps the task; an empty `rrule` in the details form does the same.
+    `Task.active_recurrence` is the rule while `ended_at` is null, which every chip and button reads.
+  - **Web.** The task form (quick add and the task page's details) has a "Repeat" button opening a
+    popover (`repeatControl`, an Alpine component in the classic script `recurrence.js`, which
+    also parses an existing rule back into the controls and keeps one the controls cannot express
+    until they are used) that builds `rrule` and `recurrence_mode` into two hidden inputs; the form
+    only reads them when the request has the keys (a request without them leaves the rule alone,
+    since an empty `rrule` means "does not repeat"). Month offers the same day of the month, a day,
+    the last day, or the nth weekday; year a month and day or the same date. Rows and the task
+    page show `{% repeat_chip task %}` (`fas fa-repeat`, the sentence, the mode: always on the page,
+    in a row only for "from completion", the mode name as the tooltip); Completed lists each
+    occurrence as its own row. The 422 for a bad rule is `Repeat: Unsupported repeat rule.`.
+  - **Admin**: read-only `RecurrenceAdmin`; `TaskAdmin` lists `recurrence`. Tests:
+    `apps/todo/tests/test_recurrence.py`; the AI plan has TODO-19 (fixed) and TODO-20 (from
+    completion).
 - **Tests**: `apps/todo/tests/` (`test_numbering_and_billing.py`: numbering, the lock, the allowance
   and price, the month in the user's zone, unpaid tasks and settling through the `credits_added`
   signal; `test_tasks_service.py`; `test_labels_and_references.py`; `test_views.py`;
@@ -3449,11 +3520,11 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   every deploy). `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
   `receipts.py` and `filetransfer.py` still carry their own copies of it.
 - To-do (#161) is built in waves. Only the foundation (#178: tasks, subtasks, labels, numbering, task
-  billing, the web pages) exists; repeating tasks, comments, search, reminders, attachments, AI date
-  parsing, email intake and the JWT API/CLI are their own sub-issues. Until the recurrence sub-issue
-  lands nothing creates an *unpaid* task, so `creation_blocked_at` is never set outside tests (the
-  settling code, the banner and the refusal are built and unit-tested). The AI plan
-  `tests_e2e/ai/todo.md` has not been run end to end by an agent yet.
+  billing, the web pages) and repeating tasks (#179) exist; comments, search, reminders, attachments,
+  AI date parsing, email intake and the JWT API/CLI are their own sub-issues. Completing a repeating
+  task whose next occurrence the balance can't cover is what creates an *unpaid* task (and sets
+  `creation_blocked_at`). The AI plan `tests_e2e/ai/todo.md` has not been run end to end by an agent
+  yet.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set); the coarse nginx `limit_req`
   that backs it up as defense-in-depth is configured in the separate `infra` repo (#119), not

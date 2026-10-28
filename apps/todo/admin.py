@@ -12,7 +12,7 @@ from django.http import HttpRequest
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
-from .models import Comment, CommentRevision, Label, Task, TodoAccount, TodoSettings
+from .models import Comment, CommentRevision, Label, Recurrence, Task, TodoAccount, TodoSettings
 from .services.billing import month_key
 
 
@@ -70,6 +70,7 @@ class TaskAdmin(ReadOnlyModelAdmin):
         'title',
         'due_date',
         'priority',
+        'recurrence',
         'charged_credits',
         'unpaid',
         'source',
@@ -84,12 +85,27 @@ class TaskAdmin(ReadOnlyModelAdmin):
         'created_at',
     ]
     search_fields = ['title', 'number', 'user__email']
-    list_select_related = ['user']
+    list_select_related = ['user', 'recurrence']
     date_hierarchy = 'created_at'
 
     @admin.display(boolean=True, description='Unpaid', ordering='unpaid_at')
     def unpaid(self, obj: Task) -> bool:
         return obj.is_unpaid
+
+
+class RecurrenceAdmin(ReadOnlyModelAdmin):
+    list_display = [
+        'user',
+        'rrule',
+        'mode',
+        'anchor_date',
+        'occurrences_created',
+        'ended_at',
+        'created_at',
+    ]
+    list_filter = ['mode', ('ended_at', admin.EmptyFieldListFilter)]
+    search_fields = ['rrule', 'user__email']
+    list_select_related = ['user']
 
 
 class TodoAccountAdmin(ReadOnlyModelAdmin):
@@ -197,6 +213,7 @@ class CommentAdmin(ReadOnlyModelAdmin):
 
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
+custom_admin_site.register(Recurrence, RecurrenceAdmin)
 custom_admin_site.register(TodoAccount, TodoAccountAdmin)
 custom_admin_site.register(Label, LabelAdmin)
 custom_admin_site.register(Comment, CommentAdmin)

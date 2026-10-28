@@ -1,4 +1,4 @@
-from . import billing, comments, dates, labels, references, tasks
+from . import billing, comments, dates, labels, recurrence, references, tasks
 from .accounts import allocate_number, get_account, update_default_due_time
 from .billing import (
     charge_task_creation,
@@ -111,6 +111,7 @@ __all__ = [
     'postpone_target',
     'postpone_task',
     'purge_trash',
+    'recurrence',
     'referenced_by',
     'references',
     'render_markdown',

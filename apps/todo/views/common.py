@@ -26,6 +26,8 @@ FIELD_LABELS = {
     'due_date': 'Date',
     'due_time': 'Time',
     'labels': 'Labels',
+    'rrule': 'Repeat',
+    'recurrence_mode': 'Repeat mode',
     'parent': 'Parent',
     'name': 'Name',
     'color': 'Colour',
