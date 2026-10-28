@@ -10,10 +10,16 @@ partials):
 3. `POST /todo/<n>/attachments/<id>/complete/` -> the object is verified and counted
    (`services.attachments.complete_upload`).
 
+A pending upload the user cancels is removed by `POST /todo/<n>/attachments/<id>/cancel/`
+(`cancel_upload`, `TODO_EDIT_USER`), so it stops counting toward the task's cap; it is idempotent
+(an upload that is already gone is `ok`) and refuses a file that is already attached.
+
 Statuses of the JSON endpoints: 422 for a refused file (size, the cap, the task's state, the
-checksum) *and* for a frozen account (with `frozen` and a `top_up_url`, which the script shows as a
+checksum, a task in the trash) *and* for a frozen account (with `frozen` and a `top_up_url`, which the script shows as a
 "Top up" link: htmx is not involved, so there is no 402 to avoid), 429 from `TODO_UPLOAD_USER`
-(start) or `TODO_UPLOAD_COMPLETE_USER` (complete), 404 for another user's task or attachment.
+(start) or `TODO_UPLOAD_COMPLETE_USER` (complete), 404 for another user's task or attachment, and
+for an upload whose row is gone (the task was deleted, or the upload cancelled or abandoned,
+meanwhile): `complete` then also deletes any object the browser's PUT left behind.
 
 Downloading redirects to a short-lived presigned URL (`?inline=1` for "Open", honoured only for a
 sniffed image or PDF); removing is a plain POST from the shared confirmation modal, redirecting
@@ -97,8 +103,6 @@ def attachment_start(request: AuthenticatedHttpRequest, number: int) -> HttpResp
     size = whole_number(body.get('size', 0))
     if size is None or size < 0:
         return JsonResponse({'error': 'The file size must be a whole number of bytes.'}, status=422)
-    if not name.strip():
-        return JsonResponse({'error': 'The file needs a name.'}, status=422)
 
     try:
         ticket = attachments.start_upload(
@@ -135,10 +139,14 @@ def attachment_complete(
     if not limit.allowed:
         return ratelimit.json_response(limit)
 
-    task = owned_task(request, number, trashed=None)
-    attachment = get_object_or_404(Attachment, pk=attachment_id, task=task, user=request.user)
     try:
+        task = owned_task(request, number, trashed=None)
+        attachment = get_object_or_404(Attachment, pk=attachment_id, task=task, user=request.user)
         attachment = attachments.complete_upload(attachment)
+    except Http404, Attachment.DoesNotExist:
+        # The row (or its task) is gone: a PUT that landed afterwards must not stay behind.
+        attachments.discard_orphan_object(request.user.pk, attachment_id)
+        return JsonResponse({'error': 'This upload no longer exists.'}, status=404)
     except ValidationError as exc:
         return JsonResponse({'error': exc.messages[0]}, status=422)
     return JsonResponse(
@@ -149,6 +157,29 @@ def attachment_complete(
             'size_bytes': attachment.size_bytes,
         }
     )
+
+
+@login_required
+@require_POST
+def attachment_cancel(
+    request: AuthenticatedHttpRequest, number: int, attachment_id: str
+) -> HttpResponse:
+    """Drop a pending upload (the upload script's Cancel button): its row and its object, if the
+    PUT landed. Answers `ok` for one that is already gone; a completed file is a 422 (remove it
+    instead)."""
+    limit = ratelimit.hit_user(request.user, 'TODO_EDIT_USER')
+    if not limit.allowed:
+        return ratelimit.json_response(limit)
+    task = owned_task(request, number, trashed=None)
+    attachment = Attachment.objects.filter(pk=attachment_id, task=task, user=request.user).first()
+    if attachment is None:
+        attachments.discard_orphan_object(request.user.pk, attachment_id)
+        return JsonResponse({'ok': True})
+    try:
+        attachments.cancel_upload(attachment)
+    except ValidationError as exc:
+        return JsonResponse({'error': exc.messages[0]}, status=422)
+    return JsonResponse({'ok': True})
 
 
 @login_required

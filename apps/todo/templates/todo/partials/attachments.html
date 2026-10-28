@@ -5,6 +5,7 @@
 <section id="attachments" aria-labelledby="attachments-title" class="mt-8 mb-8"
          data-start-url="{% url 'todo:attachment-start' task.number %}"
          data-complete-url="{% url 'todo:attachment-complete' task.number '00000000-0000-0000-0000-000000000000' %}"
+         data-cancel-url="{% url 'todo:attachment-cancel' task.number '00000000-0000-0000-0000-000000000000' %}"
          data-list-url="{% url 'todo:attachment-list' task.number %}"
          data-max-bytes="{{ attachments_max_bytes }}"
          data-frozen="{{ attachments_frozen|yesno:'true,false' }}">

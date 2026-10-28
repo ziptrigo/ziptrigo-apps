@@ -18,8 +18,10 @@ from .accounts import (
 )
 from .attachments import (
     UploadTicket,
+    cancel_upload,
     complete_upload,
     delete_attachment,
+    discard_orphan_object,
     download_url,
     start_upload,
 )
@@ -69,7 +71,7 @@ from .limits import (
     LABEL_NAME_MAX,
     TITLE_MAX,
 )
-from .metering import daily_storage_cost
+from .metering import daily_storage_cost, daily_storage_rate, describe_daily_rate
 from .references import (
     TASK_URL_PATH,
     extract_task_numbers,
@@ -102,8 +104,12 @@ __all__ = [
     'UploadTicket',
     'add_stored_bytes',
     'attachments',
+    'cancel_upload',
+    'discard_orphan_object',
     'complete_upload',
     'daily_storage_cost',
+    'daily_storage_rate',
+    'describe_daily_rate',
     'delete_attachment',
     'download_url',
     'is_frozen',

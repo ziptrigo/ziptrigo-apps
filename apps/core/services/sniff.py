@@ -8,7 +8,7 @@ caller then serves the file as a download. (Receipts has its own, wider sniffer 
 reads; this one is for products that merely store files.)
 """
 
-#: The most bytes `sniff_inline_type` looks at; a caller may read just this much of an object.
+#: The most bytes `sniff_inline_type` looks at; a caller needs to keep just this much of an object.
 SNIFF_BYTES = 12
 
 _PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'

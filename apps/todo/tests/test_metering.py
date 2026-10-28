@@ -407,6 +407,29 @@ class TestUnfreeze:
         assert metering.daily_storage_cost(50 * GB) == 5
         assert metering.daily_storage_cost(10 * GB, Decimal('0.5')) == 5
 
+    @pytest.mark.parametrize(
+        ('stored_bytes', 'text'),
+        [
+            (0, '0 credits a day'),
+            (1024, 'less than 0.01 credits a day'),
+            (200 * 1024**2, 'about 0.02 credits a day'),
+            (10 * GB, 'about 1 credit a day'),
+            (25 * GB, 'about 2.5 credits a day'),
+            (50 * GB, 'about 5 credits a day'),
+            (1000 * GB, 'about 100 credits a day'),
+        ],
+    )
+    def test_the_daily_rate_is_the_actual_cost_without_the_minimum(
+        self, billing_settings, stored_bytes, text
+    ):
+        rate = metering.daily_storage_rate(stored_bytes)
+
+        assert metering.describe_daily_rate(rate) == text
+
+    def test_the_rate_follows_the_price(self, billing_settings):
+        assert metering.daily_storage_rate(10 * GB, Decimal('0.5')) == Decimal('5')
+        assert metering.daily_storage_rate(0) == 0
+
     def test_nothing_is_deleted_while_frozen(self, stored, funded_user, fake_storage):
         from ..models import Attachment
         from ..services.storage import attachment_key

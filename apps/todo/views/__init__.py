@@ -7,6 +7,7 @@ from .comments import (
     comment_restore,
 )
 from .attachments import (
+    attachment_cancel,
     attachment_complete,
     attachment_delete,
     attachment_download,
@@ -41,6 +42,7 @@ from .tasks import (
 )
 
 __all__ = [
+    'attachment_cancel',
     'attachment_complete',
     'attachment_delete',
     'attachment_download',

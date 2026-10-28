@@ -18,6 +18,27 @@ def b64_sha256(data: bytes) -> str:
     return base64.b64encode(hashlib.sha256(data).digest()).decode()
 
 
+class _Body:
+    """The streaming body `get_object_stream` returns."""
+
+    def __init__(self, storage: 'FakeTodoStorage', data: io.BytesIO):
+        self._storage = storage
+        self._data = data
+        self._served = 0
+
+    def read(self, amt: int | None = None) -> bytes:
+        self._storage.read_sizes.append(amt)
+        limit = self._storage.fail_read_after
+        if limit is not None and self._served >= limit:
+            raise OSError('connection reset')
+        chunk = self._data.read(amt)
+        self._served += len(chunk)
+        return chunk
+
+    def close(self) -> None:
+        self._data.close()
+
+
 @dataclass
 class FakeTodoStorage:
     bucket: str = 'fake-bucket'
@@ -30,6 +51,12 @@ class FakeTodoStorage:
     #: Raise on every `delete_prefix` while true.
     failing_prefix_delete: bool = False
     deleted_prefixes: list[str] = field(default_factory=list)
+    #: False makes `head_object` answer without a checksum, like a store that doesn't echo one.
+    echo_checksums: bool = True
+    #: Raise from the body's `read` after this many bytes were served (a dropped connection).
+    fail_read_after: int | None = None
+    #: The sizes of the `read(n)` calls made on streams, to show the read-back is chunked.
+    read_sizes: list[int | None] = field(default_factory=list)
 
     def seed(self, key: str, data: bytes) -> None:
         """Test helper: stand in for the client's direct PUT."""
@@ -39,13 +66,14 @@ class FakeTodoStorage:
         if key not in self.objects:
             raise ClientError({'Error': {'Code': '404', 'Message': 'Not Found'}}, 'HeadObject')
         return ObjectInfo(
-            size=len(self.objects[key]), checksum_sha256=b64_sha256(self.objects[key])
+            size=len(self.objects[key]),
+            checksum_sha256=b64_sha256(self.objects[key]) if self.echo_checksums else '',
         )
 
     def get_object_stream(self, key: str):
         if key not in self.objects:
             raise ClientError({'Error': {'Code': 'NoSuchKey', 'Message': 'missing'}}, 'GetObject')
-        return io.BytesIO(self.objects[key])
+        return _Body(self, io.BytesIO(self.objects[key]))
 
     def object_exists(self, key: str) -> bool:
         return key in self.objects

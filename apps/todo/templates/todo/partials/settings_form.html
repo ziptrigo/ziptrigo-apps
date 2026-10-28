@@ -33,7 +33,7 @@
 <section class="mb-8" aria-labelledby="files-title">
     <h2 id="files-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Files</h2>
     {% if stored_bytes %}
-    <p class="text-sm text-gray-700 dark:text-gray-300"><strong>{{ stored_bytes|filesizeformat }}</strong> stored, about <strong>{{ storage_daily_cost }}</strong> credit{{ storage_daily_cost|pluralize }} a day.</p>
+    <p class="text-sm text-gray-700 dark:text-gray-300"><strong>{{ stored_bytes|filesizeformat }}</strong> stored, {{ storage_daily_text }}.</p>
     {% else %}
     <p class="text-sm text-gray-700 dark:text-gray-300">No files stored.</p>
     {% endif %}

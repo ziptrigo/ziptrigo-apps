@@ -16,7 +16,12 @@ from apps.core.htmx import is_htmx
 
 from ..forms import SettingsForm
 from ..models import TodoSettings
-from ..services import daily_storage_cost, get_account, update_default_due_time
+from ..services import (
+    daily_storage_rate,
+    describe_daily_rate,
+    get_account,
+    update_default_due_time,
+)
 from .common import form_error_lines, free_line, limited, refuse, render_page
 
 SLOT = '#settings-msg'
@@ -32,7 +37,7 @@ def _form_context(request: AuthenticatedHttpRequest, *, saved: bool = False) -> 
         'free_total': free,
         'task_price': config.task_price,
         'stored_bytes': account.stored_bytes,
-        'storage_daily_cost': daily_storage_cost(account.stored_bytes),
+        'storage_daily_text': describe_daily_rate(daily_storage_rate(account.stored_bytes)),
         'storage_frozen': account.is_frozen,
         'saved': saved,
     }

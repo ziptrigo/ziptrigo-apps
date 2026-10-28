@@ -8,6 +8,9 @@
  *   2. PUT the file to that URL                        -> straight to S3, never through Django
  *   3. POST /todo/<n>/attachments/<id>/complete/       -> the server checks the object and counts it
  *
+ * Cancelling (or dismissing a failed row) after step 1 also POSTs /todo/<n>/attachments/<id>/cancel/,
+ * which deletes the pending upload and its object so it stops counting toward the task's file cap.
+ *
  * The SHA-256 (base64) is computed here, before step 1, because it is signed into the URL: S3
  * refuses a body that differs from it. The browser sets Content-Length itself (it is a signed
  * header and must match the declared size); we send the headers the server returned, and nothing
@@ -30,6 +33,7 @@
 
     const startUrl = root.dataset.startUrl;
     const completeUrlTemplate = root.dataset.completeUrl;
+    const cancelUrlTemplate = root.dataset.cancelUrl;
     const listUrl = root.dataset.listUrl;
     const maxBytes = parseInt(root.dataset.maxBytes, 10);
     const frozen = root.dataset.frozen === 'true';
@@ -134,6 +138,7 @@
     // The file landed: its progress row goes and the list of attached files is fetched again.
     function showUploaded(item) {
         item.done = true;
+        item.completed = true;
         item.row.li.remove();
         if (window.htmx) {
             window.htmx.ajax('GET', listUrl, { target: '#attachment-list', swap: 'innerHTML' });
@@ -164,6 +169,15 @@
             setStatus(item, 'Waiting a moment…');
             await sleep(wait * 1000);
         }
+    }
+
+    // Tells the server to drop a pending upload (its row and, if the PUT landed, its object).
+    // Fire and forget: the row would be cleaned up after a day anyway.
+    function cancelOnServer(item) {
+        if (!item.attachmentId || item.completed) return;
+        const id = item.attachmentId;
+        item.attachmentId = null;
+        postJson(cancelUrlTemplate.replace(NIL_UUID, id), {}).catch(function () { /* cleaned up later */ });
     }
 
     function putFile(item, ticket) {
@@ -203,7 +217,11 @@
                 content_type: item.file.type,
                 checksum_sha256: checksum,
             });
-            if (item.cancelled) return;
+            if (started.response.ok) item.attachmentId = started.data.attachment_id;
+            if (item.cancelled) {
+                cancelOnServer(item);
+                return;
+            }
             if (!started.response.ok) {
                 const fallback = started.response.status === 429
                     ? 'Too many uploads at once. Try again in a minute.'
@@ -221,6 +239,7 @@
             // cancel could no longer stop that, so the button goes away.
             item.row.cancel.classList.add('hidden');
             setStatus(item, 'Finishing…');
+            item.putDone = true;
             const completed = await postWithRetry(item, completeUrlTemplate.replace(
                 NIL_UUID, ticket.attachment_id), {});
             if (!completed.response.ok) {
@@ -232,7 +251,12 @@
             }
             showUploaded(item);
         } catch (error) {
-            if (!item.cancelled) showError(item, error.message || 'The upload failed.');
+            if (!item.cancelled) {
+                // A PUT that failed leaves a pending row; release its slot (not after the PUT
+                // succeeded: `complete` decides that one).
+                if (!item.putDone) cancelOnServer(item);
+                showError(item, error.message || 'The upload failed.');
+            }
         } finally {
             item.xhr = null;
         }
@@ -254,10 +278,14 @@
 
     function addFiles(files) {
         Array.from(files).forEach(function (file) {
-            const item = { file: file, row: createRow(file), done: false, cancelled: false, xhr: null };
+            const item = {
+                file: file, row: createRow(file), done: false, cancelled: false, xhr: null,
+                attachmentId: null, putDone: false, completed: false,
+            };
             item.row.cancel.addEventListener('click', function () {
                 item.cancelled = true;
                 if (item.xhr) item.xhr.abort();
+                cancelOnServer(item);
                 item.row.li.remove();
             });
             if (file.size === 0) {

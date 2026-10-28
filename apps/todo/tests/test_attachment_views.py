@@ -6,13 +6,14 @@ against the fake storage: start -> (the browser's PUT, simulated by seeding the 
 import base64
 import hashlib
 import json
+import uuid
 
 import pytest
 from django.urls import reverse
 from django.utils import timezone
 
 from ..models import Attachment, TodoAccount, TodoSettings
-from ..services import get_account, trash_task
+from ..services import attachments, delete_forever, get_account, trash_task
 from ..services.storage import attachment_key
 from .factories import PNG_BYTES, make_attachment, make_task
 
@@ -24,6 +25,7 @@ pytestmark = [
 ]
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
+NIL_UUID = '00000000-0000-0000-0000-000000000000'
 
 
 def post_json(client, url, body):
@@ -97,11 +99,16 @@ class TestStart:
     def test_a_whole_number_sent_as_a_float_is_accepted(self, web, task):
         assert start(web, task, size=float(len(PNG_BYTES))).status_code == 201
 
-    def test_a_missing_name_is_a_422(self, web, task):
-        response = start(web, task, name='   ')
+    @pytest.mark.parametrize('name', ['', '   ', None])
+    def test_a_blank_name_becomes_file(self, web, task, name):
+        body = start_body(name=name)
+        if name is None:
+            del body['name']
 
-        assert response.status_code == 422
-        assert response.json() == {'error': 'The file needs a name.'}
+        response = post_json(web, reverse('todo:attachment-start', args=[task.number]), body)
+
+        assert response.status_code == 201
+        assert Attachment.objects.get().filename == 'file'
 
     def test_garbage_json_is_a_422(self, web, task):
         response = web.post(
@@ -237,11 +244,67 @@ class TestComplete:
 
         assert complete(web, other_task, attachment_id).status_code == 404
 
-    def test_a_task_trashed_meanwhile_still_completes(self, web, task, fake_storage):
+    def test_a_task_trashed_meanwhile_is_a_422_and_removes_the_upload(
+        self, web, task, fake_storage
+    ):
         attachment_id = self.started(web, task, fake_storage)
         trash_task(task)
 
-        assert complete(web, task, attachment_id).status_code == 200
+        response = complete(web, task, attachment_id)
+
+        assert response.status_code == 422
+        assert 'in the trash' in response.json()['error']
+        assert not Attachment.objects.exists()
+        assert not fake_storage.objects
+
+    def test_a_row_deleted_meanwhile_is_a_404_not_a_500(self, web, task, fake_storage, monkeypatch):
+        attachment_id = self.started(web, task, fake_storage)
+        real_read_back = attachments._read_back
+
+        def read_back_then_lose_the_row(storage, key):
+            result = real_read_back(storage, key)
+            Attachment.objects.filter(pk=attachment_id).delete()
+            return result
+
+        monkeypatch.setattr(attachments, '_read_back', read_back_then_lose_the_row)
+
+        response = complete(web, task, attachment_id)
+
+        assert response.status_code == 404
+        assert response.json() == {'error': 'This upload no longer exists.'}
+        assert not fake_storage.objects
+
+    def test_a_late_put_after_the_task_was_deleted_is_cleaned_up(self, web, task, fake_storage):
+        body = start(web, task).json()
+        attachment_id = body['attachment_id']
+        number = task.number
+        trash_task(task)
+        delete_forever(task)
+        key = attachment_key(task.user_id, attachment_id)
+        fake_storage.seed(key, PNG_BYTES)  # the PUT lands after the task and its rows are gone
+
+        response = web.post(reverse('todo:attachment-complete', args=[number, attachment_id]))
+
+        assert response.status_code == 404
+        assert key not in fake_storage.objects
+
+    def test_a_late_put_after_the_row_was_cleaned_up_is_deleted(self, web, task, fake_storage):
+        attachment_id = self.started(web, task, fake_storage)
+        Attachment.objects.filter(pk=attachment_id).delete()  # the abandon job, say
+
+        response = complete(web, task, attachment_id)
+
+        assert response.status_code == 404
+        assert not fake_storage.objects
+
+    def test_it_cannot_delete_another_users_object(self, web, other_user, fake_storage):
+        theirs = make_attachment(make_task(other_user), fake_storage, uploaded=False)
+        fake_storage.seed(attachment_key(other_user.pk, theirs.pk), PNG_BYTES)
+
+        web.post(reverse('todo:attachment-complete', args=[theirs.task.number, theirs.pk]))
+
+        assert attachment_key(other_user.pk, theirs.pk) in fake_storage.objects
+        assert Attachment.objects.filter(pk=theirs.pk).exists()
 
     def test_has_its_own_looser_rate_limit_charged_first(self, web, task, settings):
         settings.RATELIMIT_ENABLE = True
@@ -264,6 +327,110 @@ class TestComplete:
 
         assert start(web, task).status_code == 429
         assert complete(web, task, attachment_id).status_code == 422  # not 429
+
+
+def cancel(web, task, attachment_id):
+    return web.post(reverse('todo:attachment-cancel', args=[task.number, attachment_id]))
+
+
+class TestCancel:
+    def test_deletes_the_pending_row_and_its_object(self, web, task, fake_storage, funded_user):
+        body = start(web, task).json()
+        key = attachment_key(task.user_id, body['attachment_id'])
+        fake_storage.seed(key, PNG_BYTES)
+
+        response = cancel(web, task, body['attachment_id'])
+
+        assert response.status_code == 200 and response.json() == {'ok': True}
+        assert not Attachment.objects.exists()
+        assert key not in fake_storage.objects
+        assert get_account(funded_user).stored_bytes == 0
+
+    def test_a_row_without_an_object_is_fine(self, web, task):
+        attachment_id = start(web, task).json()['attachment_id']
+
+        assert cancel(web, task, attachment_id).status_code == 200
+        assert not Attachment.objects.exists()
+
+    def test_frees_the_slot_of_the_per_task_cap(self, web, task):
+        TodoSettings.objects.update_or_create(pk=1, defaults={'max_attachments_per_task': 1})
+        attachment_id = start(web, task).json()['attachment_id']
+        assert start(web, task).status_code == 422
+
+        cancel(web, task, attachment_id)
+
+        assert start(web, task).status_code == 201
+
+    def test_is_idempotent_and_deletes_an_orphaned_object(self, web, task, fake_storage):
+        attachment_id = start(web, task).json()['attachment_id']
+        cancel(web, task, attachment_id)
+        key = attachment_key(task.user_id, attachment_id)
+        fake_storage.seed(key, PNG_BYTES)  # a PUT that landed after the cancel
+
+        response = cancel(web, task, attachment_id)
+
+        assert response.status_code == 200
+        assert key not in fake_storage.objects
+
+    def test_a_completed_file_is_a_422_and_stays(self, web, task, fake_storage, funded_user):
+        done = make_attachment(task, fake_storage)
+
+        response = cancel(web, task, done.pk)
+
+        assert response.status_code == 422
+        assert response.json() == {'error': 'This file is already attached.'}
+        assert Attachment.objects.filter(pk=done.pk).exists()
+        assert get_account(funded_user).stored_bytes == done.size_bytes
+
+    def test_another_users_task_is_a_404_and_their_upload_stays(
+        self, web, other_user, fake_storage
+    ):
+        theirs = make_attachment(make_task(other_user), fake_storage, uploaded=False)
+
+        response = web.post(reverse('todo:attachment-cancel', args=[theirs.task.number, theirs.pk]))
+
+        assert response.status_code == 404
+        assert Attachment.objects.filter(pk=theirs.pk).exists()
+
+    def test_the_attachment_must_belong_to_that_task(self, web, task, funded_user, fake_storage):
+        other_task = make_task(funded_user)
+        attachment_id = start(web, task).json()['attachment_id']
+        fake_storage.seed(attachment_key(task.user_id, attachment_id), PNG_BYTES)
+
+        cancel(web, other_task, attachment_id)
+
+        # Not found under that task, and a row has that id: nothing of the real upload is touched.
+        assert Attachment.objects.filter(pk=attachment_id).exists()
+        assert attachment_key(task.user_id, attachment_id) in fake_storage.objects
+
+    def test_works_on_a_trashed_task(self, web, task):
+        attachment_id = start(web, task).json()['attachment_id']
+        trash_task(task)
+
+        assert cancel(web, task, attachment_id).status_code == 200
+        assert not Attachment.objects.exists()
+
+    def test_only_post(self, web, task):
+        url = reverse('todo:attachment-cancel', args=[task.number, uuid.uuid4()])
+
+        assert web.get(url).status_code == 405
+
+    def test_is_limited_by_the_edit_rule_only(self, web, task, settings):
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'TODO_EDIT_USER': (1, 60),
+            'TODO_UPLOAD_USER': (100, 60),
+            'TODO_UPLOAD_COMPLETE_USER': (100, 60),
+        }
+        first = start(web, task).json()['attachment_id']
+        second = start(web, task).json()['attachment_id']
+
+        assert cancel(web, task, first).status_code == 200
+        response = cancel(web, task, second)
+
+        assert response.status_code == 429 and response['Retry-After']
+        assert Attachment.objects.filter(pk=second).exists()
 
 
 class TestList:
@@ -438,6 +605,10 @@ class TestTaskPage:
 
         assert 'Attachments' in content and 'Drop files here' in content and 'Add files' in content
         assert f'data-start-url="{reverse("todo:attachment-start", args=[task.number])}"' in content
+        assert (
+            f'data-cancel-url="{reverse("todo:attachment-cancel", args=[task.number, NIL_UUID])}"'
+            in content
+        )
         assert 'No files attached.' in content
         # `initDropZone` lives in core's shared script, which must load before the page's own.
         assert content.index('core/js/drop_zone.js') < content.index('todo/js/attachments.js')
@@ -518,10 +689,28 @@ class TestSettingsPage:
 
         content = web.get(reverse('todo:settings')).content.decode()
 
-        # 25 GB at the default 0.1 credit/GB/day is 2.5, rounded up to 3.
+        # 25 GB at the default 0.1 credit/GB/day is 2.5 a day, shown as it is.
         assert 'Files' in content
         assert '25.0' in content and 'GB' in content
-        assert 'about <strong>3</strong> credits a day' in content
+        assert 'about 2.5 credits a day' in content
+
+    def test_a_small_amount_shows_the_real_rate_not_the_resume_minimum(self, web, funded_user):
+        get_account(funded_user)
+        TodoAccount.objects.filter(pk=funded_user.pk).update(stored_bytes=200 * 1024**2)
+
+        content = web.get(reverse('todo:settings')).content.decode()
+
+        # 200 MB at 0.1 credit/GB/day is about 0.02 credits, not the 1-credit resume minimum.
+        assert 'about 0.02 credits a day' in content
+        assert 'about 1 credit' not in content
+
+    def test_a_tiny_amount_is_less_than_a_hundredth(self, web, funded_user):
+        get_account(funded_user)
+        TodoAccount.objects.filter(pk=funded_user.pk).update(stored_bytes=5 * 1024)
+
+        content = web.get(reverse('todo:settings')).content.decode()
+
+        assert 'less than 0.01 credits a day' in content
 
     def test_nothing_stored(self, web):
         assert 'No files stored.' in web.get(reverse('todo:settings')).content.decode()

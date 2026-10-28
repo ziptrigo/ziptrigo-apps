@@ -4,6 +4,7 @@ deleting, the Trash and purge, deleting a user, and the download URL's dispositi
 import base64
 import hashlib
 import logging
+import uuid
 from datetime import timedelta
 from unittest.mock import MagicMock
 
@@ -149,6 +150,26 @@ class TestStartUpload:
         with pytest.raises(ValidationError, match='completed task'):
             start(task)
 
+    def test_the_frozen_check_is_made_under_the_lock(self, task, monkeypatch):
+        # The account freezes after the caller looked at it but before the lock is taken.
+        real_get_account = attachments.get_account
+
+        def get_account_then_freeze(user):
+            account = real_get_account(user)
+            TodoAccount.objects.filter(pk=user.pk).update(frozen_at=timezone.now())
+            return account
+
+        monkeypatch.setattr(attachments, 'get_account', get_account_then_freeze)
+
+        with pytest.raises(AccountFrozenError):
+            start(task)
+
+        assert not Attachment.objects.exists()
+
+    def test_an_empty_filename_becomes_file(self, task):
+        assert start(task, filename='').attachment.filename == 'file'
+        assert start(task, filename='  \x00 ').attachment.filename == 'file'
+
     def test_a_stale_task_object_is_rechecked_under_the_lock(self, task):
         stale = make_task(task.user)  # the caller still holds an open task...
         type(stale).objects.filter(pk=stale.pk).update(
@@ -267,6 +288,120 @@ class TestCompleteUpload:
         assert key not in fake_storage.objects
         assert not Attachment.objects.exists()
 
+    def test_a_missing_echoed_checksum_does_not_let_a_mismatch_through(self, task, fake_storage):
+        # A store that doesn't echo ChecksumSHA256 on HEAD (the check used to be skipped then).
+        fake_storage.echo_checksums = False
+        ticket = start(task)
+        key = attachment_key(task.user_id, ticket.attachment.pk)
+        fake_storage.seed(key, b'\x89PNG' + b'z' * (len(PNG_BYTES) - 4))  # same size, other bytes
+
+        with pytest.raises(ValidationError, match='did not complete correctly'):
+            complete_upload(ticket.attachment)
+
+        assert key not in fake_storage.objects
+        assert not Attachment.objects.exists()
+        assert stored(task.user) == 0
+
+    def test_the_right_bytes_complete_without_an_echoed_checksum(self, task, fake_storage):
+        fake_storage.echo_checksums = False
+
+        assert upload(task, fake_storage).uploaded is True
+
+    def test_the_read_back_is_chunked_so_memory_stays_bounded(
+        self, task, fake_storage, monkeypatch
+    ):
+        monkeypatch.setattr(attachments, 'READ_CHUNK_BYTES', 7)
+
+        upload(task, fake_storage)
+
+        assert fake_storage.read_sizes and set(fake_storage.read_sizes) == {7}
+        assert stored(task.user) == len(PNG_BYTES)
+
+    def test_a_read_back_that_fails_is_a_failure_and_keeps_the_row(self, task, fake_storage):
+        ticket = start(task)
+        key = attachment_key(task.user_id, ticket.attachment.pk)
+        fake_storage.seed(key, PNG_BYTES)
+        fake_storage.fail_read_after = 0
+
+        with pytest.raises(ValidationError, match='could not be read back'):
+            complete_upload(ticket.attachment)
+
+        assert Attachment.objects.filter(pk=ticket.attachment.pk, uploaded=False).exists()
+        assert stored(task.user) == 0
+        fake_storage.fail_read_after = None
+        assert complete_upload(ticket.attachment).uploaded is True  # a retry works
+
+    def test_a_connection_dropping_mid_body_is_a_failure_too(self, task, fake_storage, monkeypatch):
+        monkeypatch.setattr(attachments, 'READ_CHUNK_BYTES', 10)
+        ticket = start(task)
+        fake_storage.seed(attachment_key(task.user_id, ticket.attachment.pk), PNG_BYTES)
+        fake_storage.fail_read_after = 10
+
+        with pytest.raises(ValidationError, match='could not be read back'):
+            complete_upload(ticket.attachment)
+
+        assert stored(task.user) == 0
+
+    def test_a_row_deleted_meanwhile_is_a_does_not_exist_and_leaves_no_object(
+        self, task, fake_storage
+    ):
+        ticket = start(task)
+        key = attachment_key(task.user_id, ticket.attachment.pk)
+        fake_storage.seed(key, PNG_BYTES)
+        Attachment.objects.filter(pk=ticket.attachment.pk).delete()
+
+        with pytest.raises(Attachment.DoesNotExist):
+            complete_upload(ticket.attachment)
+
+        assert key not in fake_storage.objects
+        assert stored(task.user) == 0
+
+    def test_a_row_deleted_during_the_verification_is_not_a_500(
+        self, task, fake_storage, monkeypatch
+    ):
+        ticket = start(task)
+        key = attachment_key(task.user_id, ticket.attachment.pk)
+        fake_storage.seed(key, PNG_BYTES)
+        real_read_back = attachments._read_back
+
+        def read_back_then_lose_the_row(storage, object_key):
+            result = real_read_back(storage, object_key)
+            Attachment.objects.filter(pk=ticket.attachment.pk).delete()  # abandon_uploads, say
+            return result
+
+        monkeypatch.setattr(attachments, '_read_back', read_back_then_lose_the_row)
+
+        with pytest.raises(Attachment.DoesNotExist):
+            complete_upload(ticket.attachment)
+
+        assert key not in fake_storage.objects
+        assert stored(task.user) == 0
+
+    def test_a_task_in_the_trash_refuses_and_deletes_the_object(self, task, fake_storage):
+        ticket = start(task)
+        key = attachment_key(task.user_id, ticket.attachment.pk)
+        fake_storage.seed(key, PNG_BYTES)
+        trash_task(task)
+
+        with pytest.raises(ValidationError, match='in the trash'):
+            complete_upload(ticket.attachment)
+
+        assert key not in fake_storage.objects
+        assert not Attachment.objects.exists()
+        assert stored(task.user) == 0
+
+    def test_a_task_deleted_for_good_meanwhile_leaves_no_object(self, task, fake_storage):
+        ticket = start(task)
+        key = attachment_key(task.user_id, ticket.attachment.pk)
+        trash_task(task)
+        delete_forever(task)
+        fake_storage.seed(key, PNG_BYTES)  # the browser's PUT landing late
+
+        with pytest.raises(Attachment.DoesNotExist):
+            complete_upload(ticket.attachment)
+
+        assert key not in fake_storage.objects
+
     def test_an_object_that_never_arrived_is_not_an_error_that_destroys_the_row(self, task):
         ticket = start(task)
 
@@ -321,14 +456,58 @@ class TestAbandonUploads:
         bad = make_attachment(task, fake_storage, uploaded=False)
         good = make_attachment(task, fake_storage, uploaded=False)
         Attachment.objects.update(created_at=timezone.now() - timedelta(hours=25))
-        fake_storage.failing_deletes.add(attachment_key(task.user_id, bad.pk))
+        bad_key = attachment_key(task.user_id, bad.pk)
+        fake_storage.seed(bad_key, b'x')
+        fake_storage.failing_deletes.add(bad_key)
 
         with caplog.at_level(logging.ERROR):
-            assert attachments.abandon_uploads() == 1
+            assert attachments.abandon_uploads() == 2  # both rows are claimed
 
-        assert Attachment.objects.filter(pk=bad.pk).exists()
-        assert not Attachment.objects.filter(pk=good.pk).exists()
-        assert 'Failed to clean up abandoned upload' in caplog.text
+        assert not Attachment.objects.filter(pk__in=[bad.pk, good.pk]).exists()
+        assert 'Failed to clean up abandoned upload' in caplog.text  # the object is left behind
+        assert bad_key in fake_storage.objects
+
+    def test_the_row_is_claimed_before_the_object_is_deleted(self, task, fake_storage):
+        old = make_attachment(task, fake_storage, uploaded=False)
+        Attachment.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(hours=25))
+        fake_storage.seed(attachment_key(task.user_id, old.pk), PNG_BYTES)
+        row_present_at_delete = []
+        real_delete = fake_storage.delete_object
+
+        def delete_object(key):
+            row_present_at_delete.append(Attachment.objects.filter(pk=old.pk).exists())
+            real_delete(key)
+
+        fake_storage.delete_object = delete_object
+
+        attachments.abandon_uploads()
+
+        assert row_present_at_delete == [False]
+
+    def test_a_complete_arriving_after_the_cleanup_finds_no_row(self, task, fake_storage):
+        old = make_attachment(task, fake_storage, uploaded=False)
+        Attachment.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(hours=25))
+        key = attachment_key(task.user_id, old.pk)
+        fake_storage.seed(key, PNG_BYTES)
+        stale = Attachment.objects.get(pk=old.pk)  # the view had loaded it
+
+        attachments.abandon_uploads()
+
+        with pytest.raises(Attachment.DoesNotExist):
+            complete_upload(stale)
+        assert stored(task.user) == 0  # nothing counted or billed without an object
+
+    def test_a_row_completed_meanwhile_is_left_alone(self, task, fake_storage):
+        old = make_attachment(task, fake_storage, uploaded=False)
+        Attachment.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(hours=25))
+        key = attachment_key(task.user_id, old.pk)
+        fake_storage.seed(key, PNG_BYTES)
+        complete_upload(Attachment.objects.get(pk=old.pk))
+
+        assert attachments.abandon_uploads() == 0
+
+        assert key in fake_storage.objects
+        assert stored(task.user) == len(PNG_BYTES)
 
     def test_the_job_runs_it(self, task, fake_storage):
         from .. import jobs
@@ -339,6 +518,72 @@ class TestAbandonUploads:
         jobs.cleanup_uploads()
 
         assert not Attachment.objects.exists()
+
+
+class TestCancelUpload:
+    def test_removes_the_row_and_the_object_and_frees_the_slot(self, task, fake_storage):
+        ticket = start(task)
+        key = attachment_key(task.user_id, ticket.attachment.pk)
+        fake_storage.seed(key, PNG_BYTES)
+
+        attachments.cancel_upload(ticket.attachment)
+
+        assert not Attachment.objects.exists()
+        assert key not in fake_storage.objects
+        assert stored(task.user) == 0
+
+    def test_a_pending_upload_without_an_object_is_just_the_row(self, task, fake_storage):
+        ticket = start(task)
+
+        attachments.cancel_upload(ticket.attachment)
+
+        assert not Attachment.objects.exists()
+
+    def test_cancelled_uploads_no_longer_count_toward_the_cap(self, task, fake_storage):
+        TodoSettings.objects.update_or_create(pk=1, defaults={'max_attachments_per_task': 2})
+        first, second = start(task), start(task)
+        with pytest.raises(ValidationError, match='up to 2 files'):
+            start(task)
+
+        attachments.cancel_upload(first.attachment)
+        attachments.cancel_upload(second.attachment)
+
+        assert start(task) and start(task)
+
+    def test_a_completed_attachment_is_refused_and_kept(self, task, fake_storage):
+        done = upload(task, fake_storage)
+
+        with pytest.raises(ValidationError, match='already attached'):
+            attachments.cancel_upload(done)
+
+        assert Attachment.objects.filter(pk=done.pk).exists()
+        assert attachment_key(task.user_id, done.pk) in fake_storage.objects
+        assert stored(task.user) == len(PNG_BYTES)
+
+    def test_one_completed_meanwhile_is_refused_and_kept(self, task, fake_storage):
+        ticket = start(task)
+        fake_storage.seed(attachment_key(task.user_id, ticket.attachment.pk), PNG_BYTES)
+        stale = Attachment.objects.get(pk=ticket.attachment.pk)
+        complete_upload(ticket.attachment)
+
+        with pytest.raises(ValidationError, match='already attached'):
+            attachments.cancel_upload(stale)
+
+        assert stored(task.user) == len(PNG_BYTES)
+
+    def test_discard_orphan_object_deletes_only_when_no_row_has_the_id(self, task, fake_storage):
+        ticket = start(task)
+        kept = attachment_key(task.user_id, ticket.attachment.pk)
+        orphan_id = uuid.uuid4()
+        orphan = attachment_key(task.user_id, orphan_id)
+        fake_storage.seed(kept, PNG_BYTES)
+        fake_storage.seed(orphan, PNG_BYTES)
+
+        attachments.discard_orphan_object(task.user_id, ticket.attachment.pk)
+        attachments.discard_orphan_object(task.user_id, orphan_id)
+
+        assert kept in fake_storage.objects
+        assert orphan not in fake_storage.objects
 
 
 class TestDelete:
@@ -471,6 +716,52 @@ class TestTrashAndPurge:
         assert purge_trash() == 1
         assert stored(user) == 0
         assert fake_storage.objects == {}
+
+
+class TestDeleteForTasksLatePut:
+    def test_the_pending_objects_are_deleted_again_once_the_rows_are_gone(self, task, fake_storage):
+        pending = make_attachment(task, fake_storage, uploaded=False)
+        key = attachment_key(task.user_id, pending.pk)
+        real_delete_objects = fake_storage.delete_objects
+        calls = []
+
+        def delete_objects(keys):
+            calls.append(list(keys))
+            result = real_delete_objects(keys)
+            if len(calls) == 1:
+                fake_storage.seed(key, PNG_BYTES)  # the browser's PUT lands in between
+            return result
+
+        fake_storage.delete_objects = delete_objects
+
+        attachments.delete_for_tasks([task.pk])
+
+        assert len(calls) == 2 and calls[1] == [key]
+        assert key not in fake_storage.objects
+        assert not Attachment.objects.exists()
+
+    def test_a_failure_of_the_second_delete_does_not_undo_the_deletion(
+        self, task, fake_storage, caplog
+    ):
+        pending = make_attachment(task, fake_storage, uploaded=False)
+        done = make_attachment(task, fake_storage)
+        real_delete_objects = fake_storage.delete_objects
+        calls = []
+
+        def delete_objects(keys):
+            calls.append(list(keys))
+            if len(calls) == 2:
+                raise RuntimeError('S3 could not delete 1 object(s)')
+            return real_delete_objects(keys)
+
+        fake_storage.delete_objects = delete_objects
+
+        with caplog.at_level(logging.ERROR):
+            assert attachments.delete_for_tasks([task.pk]) == 2
+
+        assert not Attachment.objects.filter(pk__in=[pending.pk, done.pk]).exists()
+        assert stored(task.user) == 0
+        assert 'Could not re-delete' in caplog.text
 
 
 class TestUserDeletion:

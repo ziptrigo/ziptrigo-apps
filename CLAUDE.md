@@ -3319,20 +3319,36 @@ long reasoning.
   `apps.core.services.sniff.sniff_inline_type(head)` is the magic-byte check (Receipts keeps its own,
   wider sniffer).
 - **Uploads** (`services/attachments.py`). `start_upload(task, *, filename, size, declared_type,
-  checksum_sha256)` refuses, in this order, a frozen account (`AccountFrozenError`, a
-  `ValidationError` subclass with the fixed message "Storage is paused: top up your credits to
-  upload or download files."; catch it *before* a generic `ValidationError`), a trashed or completed
-  task, a size of 0, one over `max_attachment_bytes` ("The file is too large (max N MB)."), a
-  malformed checksum, and -- under a lock on the task row, which also re-reads its state -- more than
-  `max_attachments_per_task` rows (pending ones count); it creates `Attachment(uploaded=False)` and
+  checksum_sha256)` refuses a trashed or completed task, a size of 0, one over
+  `max_attachment_bytes` ("The file is too large (max N MB)."), a malformed checksum, and -- under a
+  lock on the task row, which also re-reads its state and **the account's frozen state**
+  (`AccountFrozenError`, a `ValidationError` subclass with the fixed message "Storage is paused:
+  top up your credits to upload or download files."; catch it *before* a generic
+  `ValidationError`) -- more than `max_attachments_per_task` rows (pending ones count). A blank
+  filename is not refused: it becomes `file`. It creates `Attachment(uploaded=False)` and
   presigns the PUT with `Content-Length` and `x-amz-checksum-sha256` signed in, returning the
-  headers to send. `complete_upload` is idempotent: `head_object` must report the declared size (and,
-  when S3 echoes one, the declared checksum) else the object **and the row** are deleted ("The upload
-  did not complete correctly."); the first 4096 bytes (`get_object_stream`) are sniffed into
+  headers to send. `complete_upload` is idempotent: `head_object` must report the declared size, then
+  the object is **read back and its SHA-256 compared with the declared one unconditionally** (the
+  way Receipts does, never "only when S3 echoes a checksum"), streamed in `READ_CHUNK_BYTES` chunks
+  so memory stays bounded for a 50 MiB file; a mismatch (size or checksum) deletes the row and then
+  the object ("The upload did not complete correctly."), while a read-back that fails (S3 error,
+  connection dropped) is a retryable 422 that keeps the row. The first `SNIFF_BYTES` (12, the
+  sniffer's own constant in `apps.core.services.sniff`) of the same pass are sniffed into
   `inline_type`; one conditional `UPDATE ... WHERE uploaded=false` marks it uploaded and calls
   `add_stored_bytes` in the same transaction, so two racing completes count once. Nothing is billed
-  before that. `abandon_uploads` (the hourly `todo.cleanup_uploads` job) deletes rows with
-  `uploaded=False` older than 24 h and their objects, one bad row logged and skipped.
+  before that. **It refuses a task in the Trash** (422, deleting the upload) and **a row that is
+  gone** raises `Attachment.DoesNotExist` (the view answers 404, never a 500), deleting any object
+  it finds (`discard_orphan_object`, which only runs while no row has that id and only on the
+  requesting user's own prefix; a `complete` for a task that no longer exists does the same).
+  `cancel_upload` (the Cancel button, `POST /todo/<n>/attachments/<id>/cancel/`, `TODO_EDIT_USER`)
+  deletes a *pending* row and then its object so it stops counting toward the per-task cap
+  (idempotent: a row that is gone is `ok`; an uploaded one is a 422 -- delete it instead; the
+  script calls it when a row is cancelled or dismissed after `start`, and after a failed PUT).
+  `abandon_uploads` (the hourly `todo.cleanup_uploads` job) and `cancel_upload` **claim the row
+  first** (a conditional `DELETE ... WHERE uploaded=false`) and delete the object only after
+  winning, so a late `complete` finds no row instead of an attachment counted and billed with no
+  object behind it; if that object delete then fails the object is left behind, logged (the row is
+  already gone), one bad row skipped.
 - **Downloads.** `download_url(attachment, *, inline)` refuses a frozen account and an upload that
   never completed, and presigns a GET: `disposition='inline'` **only** when the caller asked and
   `inline_type` is set, `content_type=inline_type or None`. So a `.exe` named `photo.png` is always a
@@ -3344,7 +3360,13 @@ long reasoning.
   subtasks) inside the transaction that deletes the task: one `delete_objects` (a per-key S3 error
   raises after deleting the rest, so the task stays for the next run: the purge logs and skips it,
   `delete_forever` turns it into a "files could not be deleted" message), then the rows and the
-  uploaded bytes under a lock. A `pre_delete(User)` receiver (`apps.py`) queues
+  uploaded bytes under a lock, then the *pending* rows' keys are deleted once more (best effort,
+  logged: the rows are already gone). **Known window, accepted:** keys are per attachment, not per
+  task, so an upload whose PUT lands *after* its task was deleted for good has no prefix to sweep.
+  The object is deleted when the browser then calls `complete` (no row: `discard_orphan_object`);
+  what remains is a PUT landing after both deletes whose tab never calls `complete` (it was closed
+  mid-upload). That object is never billed and goes with the user's prefix when the account is
+  deleted. A `pre_delete(User)` receiver (`apps.py`) queues
   `lifecycle.delete_user_storage(user_id)` (`delete_prefix(user_prefix)`; Receipts' retry shape: a
   failure queues itself again after 5 min, 30 min, 2 h, 6 h, then logs the prefix and gives up; on
   the `default` queue).
@@ -3370,34 +3392,40 @@ long reasoning.
   `#task-panel` (an action on the page re-renders the panel, which would drop the rows of an upload
   in flight), like the comments. **Page order** (`todo/task.html`): the task panel, then Attachments,
   then Comments, so the task's content comes before its discussion; `task_page` merges
-  `panel_context`, `comments_context` and `attachments_context`. Endpoints: `POST /todo/<n>/attachments/start/` (JSON in and out) and
-  `POST /todo/<n>/attachments/<id>/complete/`, `GET /todo/<n>/attachments/` (the list partial the
+  `panel_context`, `comments_context` and `attachments_context`. Endpoints:
+  `POST /todo/<n>/attachments/start/` (JSON in and out) and
+  `POST /todo/<n>/attachments/<id>/complete/`, `POST /todo/<n>/attachments/<id>/cancel/`,
+  `GET /todo/<n>/attachments/` (the list partial the
   script fetches after a file lands; opened directly it redirects to the task page),
   `GET /todo/attachments/<id>/download/` (`?inline=1` for Open; a redirect to the presigned URL,
   `no-store`; frozen: back to the task with a flash message), `POST /todo/attachments/<id>/delete/`
   (from the shared confirm modal; a plain POST ending in a redirect to the task with a message, an
-  S3 error is a message, not a 500). Statuses of the JSON endpoints: **422** for a refusal *and* for
+  S3 error is a message, not a 500). Statuses of the JSON endpoints: **422** for a refusal (including
+  a task trashed since the upload started) *and* for
   a frozen account (with `frozen: true` and `top_up_url`, which the script turns into a "Top up"
   link on the row), **429** with `Retry-After` from the rate limits, **404** for another user's task
-  or attachment (never 403), for a trashed task on `start`, and for an attachment that never
-  completed on download and delete. The size goes through `apps.core.json_numbers.whole_number`.
+  or attachment (never 403), for a trashed task on `start`, for an upload whose row is gone on
+  `complete`, and for an attachment that never completed on download and delete. The size goes through `apps.core.json_numbers.whole_number`.
   `attachments.js` mirrors Receipts' `upload.js`: SHA-256 in the browser, `start`, an XHR `PUT` with
   exactly the returned headers and a type-less Blob, `complete`, three at a time, `Retry-After`
   honoured up to 3 times; the drop zone is core's shared `initDropZone`. A completed attachment can
   be removed from a trashed task and while frozen (it saves money); an open task takes uploads, a
   trashed or completed one doesn't (the block hides the drop zone and doesn't load the script).
   `layout.html` shows the "Storage is paused" banner (with Top up) while `frozen_at` is set, and the
-  settings page's "Files" section shows "N MB stored, about N credits a day" (`daily_storage_cost`).
+  settings page's "Files" section shows "N MB stored, about 0.02 credits a day" -- the **actual**
+  rate (`metering.daily_storage_rate`, `describe_daily_rate`: fractions kept, "less than 0.01
+  credits a day" below a hundredth), not `daily_storage_cost`, whose 1-credit minimum is the resume
+  threshold only.
 - **Rate limits**: `TODO_UPLOAD_USER` (120/min, `start`), `TODO_UPLOAD_COMPLETE_USER` (240/min,
   `complete`, charged **first** like Receipts' because each call is an S3 HEAD even for an object
-  that never arrived), `TODO_DOWNLOAD_USER` (120/min) and `TODO_EDIT_USER` for removing.
+  that never arrived), `TODO_DOWNLOAD_USER` (120/min) and `TODO_EDIT_USER` for removing and for cancelling an upload.
 - **Admin**: read-only `AttachmentAdmin` (task, filename, size, uploaded, inline type, user);
   `TodoAccountAdmin` also lists `stored_bytes` and the frozen state. The new `TodoSettings` fields
   are on the singleton page.
 - **Tests**: `tests/test_attachments.py` (start/complete against the fake, sniffing, caps, frozen
   refusals, delete, Trash, purge, user deletion, download dispositions), `tests/test_metering.py`
-  (the arithmetic, freeze, email and notice, resume, the job's snapshot rule, the `credits_added`
-  wiring), `tests/test_attachment_views.py` (the JSON views, 422/429/404, `whole_number`, the
+  (the arithmetic, the daily rate text, freeze, email and notice, resume, the job's snapshot rule, the
+  `credits_added` wiring), `tests/test_attachment_views.py` (the JSON views, 422/429/404, `whole_number`, the
   banner, the settings line), `tests/test_storage_and_config.py` (keys, the SigV4 client, `todo.W002`,
   prod refusing to start) and `apps/core/tests/test_sniff.py`.
 

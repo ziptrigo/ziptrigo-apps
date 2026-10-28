@@ -26,7 +26,7 @@ day forgiven.
 
 import logging
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
 from django.db import transaction
@@ -58,6 +58,7 @@ SOURCE = 'todo'
 MIN_BALANCE_TO_RESUME = 1
 
 _BILLING_PERIOD = timedelta(hours=24)
+_BYTES_PER_GB = Decimal(1024**3)
 
 #: `Notification.key` of the in-app "storage paused" notice: one per user is enough, since an
 #: account is frozen at most once at a time, and unfreezing deletes it by this key.
@@ -70,6 +71,27 @@ def daily_storage_cost(stored_bytes: int, price_per_gb_per_day: Decimal | None =
     if price_per_gb_per_day is None:
         price_per_gb_per_day = get_storage_price_per_gb_per_day()
     return max(storage_day_cost(stored_bytes, price_per_gb_per_day), MIN_BALANCE_TO_RESUME)
+
+
+def daily_storage_rate(stored_bytes: int, price_per_gb_per_day: Decimal | None = None) -> Decimal:
+    """What one day of storing `stored_bytes` actually costs, in credits, fractions included and
+    with no minimum. This is what the account accrues each day (`meter_account` spends only its
+    whole credits and carries the rest); `daily_storage_cost` is the resume threshold instead."""
+    if price_per_gb_per_day is None:
+        price_per_gb_per_day = get_storage_price_per_gb_per_day()
+    return price_per_gb_per_day * Decimal(stored_bytes) / _BYTES_PER_GB
+
+
+def describe_daily_rate(rate: Decimal) -> str:
+    """`rate` (credits a day) for the settings page: "about 2.5 credits a day", "about 0.02
+    credits a day", "less than 0.01 credits a day"."""
+    if rate <= 0:
+        return '0 credits a day'
+    if rate < Decimal('0.01'):
+        return 'less than 0.01 credits a day'
+    shown = rate.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    unit = 'credit' if shown == 1 else 'credits'
+    return f'about {format(shown.normalize(), "f")} {unit} a day'
 
 
 def meter_account(account_pk: object, price_per_gb_per_day: Decimal | None = None) -> None:
