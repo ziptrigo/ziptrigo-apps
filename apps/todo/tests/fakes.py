@@ -1,4 +1,6 @@
-"""In-memory fake of the To-do storage: no network, deterministic.
+"""In-memory fakes for the To-do tests: no network, deterministic.
+
+`FakeTitleParser` (the AI date parsing, issue #183) is at the end of the file.
 
 `FakeTodoStorage` implements the subset of `S3Storage` the To-do services call, modelled on
 `apps.receipts.tests.fakes.FakeReceiptsStorage`.
@@ -7,11 +9,14 @@
 import base64
 import hashlib
 import io
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
 
 from apps.core.services.storage import GET_URL_EXPIRES_SECONDS, ObjectInfo
+
+from ..services.parsing import ParsedTitle, ParseRequest
 
 
 def b64_sha256(data: bytes) -> str:
@@ -146,3 +151,28 @@ class FakeTodoStorage:
         for key in keys:
             del self.objects[key]
         return len(keys)
+
+
+Reply = ParsedTitle | Callable[[ParseRequest], ParsedTitle] | Exception
+
+
+@dataclass
+class FakeTitleParser:
+    #: Title -> the reply for it. A title not in the table has no date.
+    replies: dict[str, Reply] = field(default_factory=dict)
+    requests: list[ParseRequest] = field(default_factory=list)
+
+    def parse(self, request: ParseRequest) -> ParsedTitle:
+        self.requests.append(request)
+        reply = self.replies.get(request.title)
+        if reply is None:
+            return ParsedTitle(has_date=False, clean_title=request.title)
+        if isinstance(reply, Exception):
+            raise reply
+        if isinstance(reply, ParsedTitle):
+            return reply
+        return reply(request)
+
+    @property
+    def calls(self) -> int:
+        return len(self.requests)

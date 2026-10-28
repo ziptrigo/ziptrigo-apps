@@ -15,9 +15,9 @@ from apps.billing.models import BillingSettings
 from apps.billing.services import add_credits
 
 from ..models import TodoSettings
-from ..services import storage
+from ..services import parsing, storage
 from .factories import make_user
-from .fakes import FakeTodoStorage
+from .fakes import FakeTitleParser, FakeTodoStorage
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +25,15 @@ def fake_storage(monkeypatch) -> FakeTodoStorage:
     """No test reaches S3: the process-wide storage is an in-memory fake."""
     fake = FakeTodoStorage()
     monkeypatch.setattr(storage, '_storage', fake)
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def fake_title_parser(monkeypatch) -> FakeTitleParser:
+    """No test reaches the network: the title parser is an in-memory fake (a test fills its
+    `replies`, or `monkeypatch.setattr(parsing, '_client', None)` to see the unconfigured site)."""
+    fake = FakeTitleParser()
+    monkeypatch.setattr(parsing, '_client', fake)
     return fake
 
 

@@ -12,6 +12,7 @@ urlpatterns = [
     path('trash/', views.trash_page, name='trash'),
     path('list/', views.task_list, name='list'),
     path('new/', views.task_create, name='create'),
+    path('parse/', views.parse_view, name='parse'),
     path('reorder/', views.reorder_view, name='reorder'),
     path('reschedule-overdue/', views.reschedule_overdue_view, name='reschedule-overdue'),
     path('labels/', views.labels_page, name='labels'),

@@ -14,6 +14,7 @@ class E2EConfig(AppConfig):
 
         from .receipts_fakes import E2EStorage
         from .site_fakes import FileTransferE2EStorage, install_mailbox
+        from .todo_fakes import install_title_parser
 
         storage._storage = E2EStorage()
         ai._client = FakeAIClient()
@@ -21,3 +22,5 @@ class E2EConfig(AppConfig):
         # in-memory bucket whose presigned URLs point back at this server (`site_fakes`).
         file_transfer_storage._storage = FileTransferE2EStorage()
         install_mailbox()
+        # To-do reads dates out of a title with the AI: a fake that understands one title.
+        install_title_parser()

@@ -23,6 +23,7 @@ from .lists import (
     trash_page,
     upcoming_page,
 )
+from .parse import parse_view
 from .reminders import reminder_add, reminder_delete, reminder_edit, reminder_history
 from .settings import settings_page
 from .tasks import (
@@ -61,6 +62,7 @@ __all__ = [
     'label_edit',
     'label_reorder',
     'labels_page',
+    'parse_view',
     'recurrence_stop',
     'reminder_add',
     'reminder_delete',

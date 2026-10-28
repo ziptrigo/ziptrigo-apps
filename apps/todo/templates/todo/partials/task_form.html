@@ -2,7 +2,8 @@
 {% comment %} The task form, in two modes. `mode='quick'`: the quick-add box (title, date, time, priority, labels; posts
    to todo:create and re-renders the list in `view`). `mode='details'`: the task page's details (the same
    controls without a title; saves `part=details` of the task and re-renders the panel). Needs `labels` (the user's)
-   and `selected_label_ids`; in details mode `task`. The AI date parsing sub-issue adds its chip here later. {% endcomment %}
+   and `selected_label_ids`; in details mode `task`. Both modes read dates out of text with the AI (static/todo/js/title_parse.js, the
+   `data-title-parse` containers): the title of the quick-add box, and the "Type a date" box of the details. {% endcomment %}
 {% if mode == 'quick' %}
 <form id="quick-add-form" method="post" action="{% url 'todo:create' %}"
       hx-post="{% url 'todo:create' %}" hx-target="#task-list" hx-swap="innerHTML"
@@ -12,11 +13,12 @@
     <input type="hidden" name="view" value="{{ view }}">
     <div id="quick-add-msg" class="mb-2 text-sm" aria-live="polite"></div>
     <div class="flex flex-col gap-2 sm:flex-row">
-        <div class="flex-1">
+        <div class="flex-1" data-title-parse data-parse-url="{% url 'todo:parse' %}">
             <label for="quick-title" class="sr-only">Task title</label>
             <input id="quick-title" type="text" name="title" maxlength="500" required autocomplete="off"
-                   placeholder="Add a task"
+                   placeholder="Add a task" data-parse-input
                    class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            {% include 'todo/partials/parse_chip.html' with chip_id='quick-parse-chip' %}
         </div>
         <button type="submit"
                 class="group inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
@@ -39,6 +41,14 @@
     {% csrf_token %}
     <input type="hidden" name="part" value="details">
     <input type="hidden" name="ctx" value="page">
+    <div class="mb-4" data-title-parse data-mode="date" data-parse-url="{% url 'todo:parse' %}">
+        <label for="date-words-{{ task.number }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Or type a date</label>
+        <input id="date-words-{{ task.number }}" type="text" autocomplete="off" maxlength="500" data-parse-input
+               placeholder="Type a date... (every Monday at 9am)"
+               class="w-full max-w-md rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+        <p data-parse-status class="mt-1 text-xs text-gray-500 dark:text-gray-400" aria-live="polite"></p>
+        {% include 'todo/partials/parse_chip.html' with chip_id='details-parse-chip' %}
+    </div>
     <div class="flex flex-wrap items-end gap-3">
         {% include 'todo/partials/task_form_fields.html' with show_labels_text=True %}
         <button type="submit"
