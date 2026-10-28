@@ -209,6 +209,11 @@ missing or still placeholders (`config/secret_checks.py`, also Django-free). The
 Receipts' `OPENAI_API_KEY`, `OPENAI_RECEIPTS_MODEL`, `RECEIPTS_S3_BUCKET`,
 `RECEIPTS_AWS_ACCESS_KEY_ID` and `RECEIPTS_AWS_SECRET_ACCESS_KEY`: Receipts has no feature flag, so
 infra and the env files must land before the app deploy (local and pytest need none of them).
+To-do attachments (issue #184) are the same: `TODO_S3_BUCKET`, `TODO_AWS_ACCESS_KEY_ID` and
+`TODO_AWS_SECRET_ACCESS_KEY` are required with `ENVIRONMENT=prod` (`config/secret_checks.py`; the
+infra side is issue #185 and must land first), `TODO_S3_REGION` defaults to `AWS_REGION` and
+`TODO_S3_ENDPOINT_URL` is optional (Floci locally). The same bucket again, keys under `todo/`.
+`apps.todo.checks` warns (`todo.W002`) about a partial local configuration.
 
 File transfer storage is one private S3 bucket per environment (`FILE_TRANSFER_S3_BUCKET`, keys
 `transfers/<transfer_id>/<file_id>` -- deliberately not `.../<filename>` as spec section 11 says,
@@ -2887,10 +2892,11 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
 Todoist: tasks with a Markdown description, a due date with an optional time, a priority, labels
 and subtasks one level deep, shown on Today / Upcoming / All / Completed / Trash pages. A product
 (same layer as `qr_code`/`file_transfer`/`receipts`/`short_url`), logged-in users only. **Built so
-far:** the foundation (this section) and comments with task references (#180, "Comments and
-references" below). **Later sub-issues** add their own models, fields on
-`TodoSettings`, services, `RATELIMIT_RULES` and migrations (repeating tasks #179,
-attachments #184, search #181, reminders #182, AI parsing #183, email intake #186, the JWT API and
+far:** the foundation (this section), repeating tasks (#179, "Recurrence"), comments with task
+references (#180, "Comments and references" below) and attachments (#184, "Attachments and storage
+billing" below). **Later sub-issues** add their own models, fields on `TodoSettings`,
+services, `RATELIMIT_RULES` and migrations (search #181, reminders #182, AI parsing #183, email
+intake #186, the JWT API and
 `inv todo` #187), so `services/__init__.py`, `settings.py`, the migrations and this file will see
 small merge conflicts between them.
 Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
@@ -3285,6 +3291,115 @@ Issue #180 (`models/comment.py`, `models/reference.py`, `services/comments.py`,
   TODO-18 in `tests_e2e/ai/todo.md`. Also covered: a panel action's response has no comments
   section (`TestCommentsBesidePanel`), a mention made while the target is trashed shows after the
   restore, the shared resolver and `update_task`'s lock (`test_review_fixes.py`).
+
+#### Attachments and storage billing
+
+Issue #184 (migration `0004_attachments_and_storage_billing`). Files attached to a task, uploaded straight to S3 with a presigned PUT like Receipts'
+uploads, downloaded through short-lived presigned URLs, billed by storage at the shared
+`BillingSettings` price. Everything is the Receipts pattern re-applied; read its sections for the
+long reasoning.
+
+- **Storage** (`services/storage.py`): `get_storage()` builds the core `S3Storage` from the
+  `TODO_*` settings with `signature_version='s3v4'` (required: `presigned_put_url` fails closed on a
+  client that doesn't sign `Content-Length`), `reset_storage_cache()`, keys
+  `todo/users/<user_id>/attachments/<attachment_id>` (`attachment_key`: id only, never the filename)
+  and `user_prefix(user_id)` (one `delete_prefix` removes everything of a user). The test suite
+  swaps in `tests/fakes.py::FakeTodoStorage` (autouse in `tests/conftest.py`).
+- **Models.** `Attachment` (`models/attachment.py`): `task` FK (`related_name='attachments'`,
+  `CASCADE`), `user`, `filename` (cleaned: control characters stripped, `/` and `\` become `_`,
+  empty -> `file`, at most 255), `size_bytes`, `declared_type` (what the browser said; recorded,
+  never trusted), `inline_type` (the type **sniffed from the bytes** when it is one a browser may
+  show inline -- PDF, JPEG, PNG, GIF, WebP -- else empty), `sha256` (base64, declared by the client
+  and verified by S3 through the signed checksum header), `uploaded`, `created_at`; index `(task,
+  created_at)`. `TodoAccount` gained Receipts' four billing columns (`stored_bytes`,
+  `last_billed_at`, `accrued`, `billed_days`) and `frozen_at`; `TodoSettings` gained
+  `max_attachment_bytes` (50 MiB) and `max_attachments_per_task` (20). `stored_bytes` counts only
+  uploaded attachments, changed only through `services.accounts.add_stored_bytes` (floored at 0, the
+  billing clock restarts when an empty account gets its first byte).
+  `apps.core.services.sniff.sniff_inline_type(head)` is the magic-byte check (Receipts keeps its own,
+  wider sniffer).
+- **Uploads** (`services/attachments.py`). `start_upload(task, *, filename, size, declared_type,
+  checksum_sha256)` refuses, in this order, a frozen account (`AccountFrozenError`, a
+  `ValidationError` subclass with the fixed message "Storage is paused: top up your credits to
+  upload or download files."; catch it *before* a generic `ValidationError`), a trashed or completed
+  task, a size of 0, one over `max_attachment_bytes` ("The file is too large (max N MB)."), a
+  malformed checksum, and -- under a lock on the task row, which also re-reads its state -- more than
+  `max_attachments_per_task` rows (pending ones count); it creates `Attachment(uploaded=False)` and
+  presigns the PUT with `Content-Length` and `x-amz-checksum-sha256` signed in, returning the
+  headers to send. `complete_upload` is idempotent: `head_object` must report the declared size (and,
+  when S3 echoes one, the declared checksum) else the object **and the row** are deleted ("The upload
+  did not complete correctly."); the first 4096 bytes (`get_object_stream`) are sniffed into
+  `inline_type`; one conditional `UPDATE ... WHERE uploaded=false` marks it uploaded and calls
+  `add_stored_bytes` in the same transaction, so two racing completes count once. Nothing is billed
+  before that. `abandon_uploads` (the hourly `todo.cleanup_uploads` job) deletes rows with
+  `uploaded=False` older than 24 h and their objects, one bad row logged and skipped.
+- **Downloads.** `download_url(attachment, *, inline)` refuses a frozen account and an upload that
+  never completed, and presigns a GET: `disposition='inline'` **only** when the caller asked and
+  `inline_type` is set, `content_type=inline_type or None`. So a `.exe` named `photo.png` is always a
+  download; the declared type is never consulted.
+- **Deleting.** `delete_attachment` deletes the object first (a storage error raises and leaves
+  everything as it was), then, under the row lock, the row and -- for an uploaded one, only by the
+  call that actually deleted the row -- its bytes. **Trashing a task keeps its attachments, still
+  billed.** `delete_forever` and `purge_trash` call `attachments.delete_for_tasks` (the task and its
+  subtasks) inside the transaction that deletes the task: one `delete_objects` (a per-key S3 error
+  raises after deleting the rest, so the task stays for the next run: the purge logs and skips it,
+  `delete_forever` turns it into a "files could not be deleted" message), then the rows and the
+  uploaded bytes under a lock. A `pre_delete(User)` receiver (`apps.py`) queues
+  `lifecycle.delete_user_storage(user_id)` (`delete_prefix(user_prefix)`; Receipts' retry shape: a
+  failure queues itself again after 5 min, 30 min, 2 h, 6 h, then logs the prefix and gives up; on
+  the `default` queue).
+- **Metering** (`services/metering.py`, the twin of Receipts'): `meter_account(account_pk, price)`
+  adds one day of `stored_bytes` x the shared price to `accrued` per 24 h and spends the floor
+  (`storage_charge`), under the account row lock, advancing `last_billed_at` by one period and
+  `billed_days`; the ledger line is "To-do storage, day N" (`source='todo'`). An
+  `InsufficientCreditsError` **freezes** the account (`freeze_account`: `frozen_at`, the
+  `todo/emails/storage_paused.{txt,html}` email to a confirmed address, queued on commit, and an
+  in-app notification "Your to-do file storage is paused" -> `todo:settings`, key
+  `todo_account:frozen`, in its own savepoint like Receipts'). Frozen: uploads and downloads are
+  refused, nothing is deleted, the clock stops. `resume(user_id)` (task `resume_account`, `default`
+  queue) unfreezes only when the balance covers `daily_storage_cost(stored_bytes)` (`ceil(price x
+  bytes / GiB)`, at least 1) with `last_billed_at = now` (the frozen days are never billed) and
+  deletes the notice. `billing.on_credits_added` -- the existing `credits_added` receiver's work --
+  now also queues `resume_account` for a user with a frozen `TodoAccount`, each of the two queueings
+  guarded on its own so one failing never skips the other. The daily `todo.meter_storage` job meters
+  every account with `stored_bytes > 0` and not frozen, then offers `resume` only to the accounts
+  that were **already frozen before its pass** (snapshot first), so an account frozen by this very
+  run isn't unfrozen again with the day forgiven.
+- **Web** (`views/attachments.py`, `templates/todo/partials/attachments.html` and
+  `attachment_list.html`, `static/todo/js/attachments.js`). The block sits on the task page *outside*
+  `#task-panel` (an action on the page re-renders the panel, which would drop the rows of an upload
+  in flight), like the comments. **Page order** (`todo/task.html`): the task panel, then Attachments,
+  then Comments, so the task's content comes before its discussion; `task_page` merges
+  `panel_context`, `comments_context` and `attachments_context`. Endpoints: `POST /todo/<n>/attachments/start/` (JSON in and out) and
+  `POST /todo/<n>/attachments/<id>/complete/`, `GET /todo/<n>/attachments/` (the list partial the
+  script fetches after a file lands; opened directly it redirects to the task page),
+  `GET /todo/attachments/<id>/download/` (`?inline=1` for Open; a redirect to the presigned URL,
+  `no-store`; frozen: back to the task with a flash message), `POST /todo/attachments/<id>/delete/`
+  (from the shared confirm modal; a plain POST ending in a redirect to the task with a message, an
+  S3 error is a message, not a 500). Statuses of the JSON endpoints: **422** for a refusal *and* for
+  a frozen account (with `frozen: true` and `top_up_url`, which the script turns into a "Top up"
+  link on the row), **429** with `Retry-After` from the rate limits, **404** for another user's task
+  or attachment (never 403), for a trashed task on `start`, and for an attachment that never
+  completed on download and delete. The size goes through `apps.core.json_numbers.whole_number`.
+  `attachments.js` mirrors Receipts' `upload.js`: SHA-256 in the browser, `start`, an XHR `PUT` with
+  exactly the returned headers and a type-less Blob, `complete`, three at a time, `Retry-After`
+  honoured up to 3 times; the drop zone is core's shared `initDropZone`. A completed attachment can
+  be removed from a trashed task and while frozen (it saves money); an open task takes uploads, a
+  trashed or completed one doesn't (the block hides the drop zone and doesn't load the script).
+  `layout.html` shows the "Storage is paused" banner (with Top up) while `frozen_at` is set, and the
+  settings page's "Files" section shows "N MB stored, about N credits a day" (`daily_storage_cost`).
+- **Rate limits**: `TODO_UPLOAD_USER` (120/min, `start`), `TODO_UPLOAD_COMPLETE_USER` (240/min,
+  `complete`, charged **first** like Receipts' because each call is an S3 HEAD even for an object
+  that never arrived), `TODO_DOWNLOAD_USER` (120/min) and `TODO_EDIT_USER` for removing.
+- **Admin**: read-only `AttachmentAdmin` (task, filename, size, uploaded, inline type, user);
+  `TodoAccountAdmin` also lists `stored_bytes` and the frozen state. The new `TodoSettings` fields
+  are on the singleton page.
+- **Tests**: `tests/test_attachments.py` (start/complete against the fake, sniffing, caps, frozen
+  refusals, delete, Trash, purge, user deletion, download dispositions), `tests/test_metering.py`
+  (the arithmetic, freeze, email and notice, resume, the job's snapshot rule, the `credits_added`
+  wiring), `tests/test_attachment_views.py` (the JSON views, 422/429/404, `whole_number`, the
+  banner, the settings line), `tests/test_storage_and_config.py` (keys, the SigV4 client, `todo.W002`,
+  prod refusing to start) and `apps/core/tests/test_sniff.py`.
 
 ### Queue and scheduler
 

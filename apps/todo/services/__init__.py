@@ -1,5 +1,28 @@
-from . import billing, comments, dates, labels, recurrence, references, tasks
-from .accounts import allocate_number, get_account, update_default_due_time
+from . import (
+    attachments,
+    billing,
+    comments,
+    dates,
+    labels,
+    metering,
+    recurrence,
+    references,
+    tasks,
+)
+from .accounts import (
+    add_stored_bytes,
+    allocate_number,
+    get_account,
+    is_frozen,
+    update_default_due_time,
+)
+from .attachments import (
+    UploadTicket,
+    complete_upload,
+    delete_attachment,
+    download_url,
+    start_upload,
+)
 from .billing import (
     charge_task_creation,
     month_usage,
@@ -31,6 +54,7 @@ from .dates import (
     with_open_occurrences,
     with_subtask_counts,
 )
+from .errors import AccountFrozenError
 from .labels import (
     create_label,
     delete_label,
@@ -45,6 +69,7 @@ from .limits import (
     LABEL_NAME_MAX,
     TITLE_MAX,
 )
+from .metering import daily_storage_cost
 from .references import (
     TASK_URL_PATH,
     extract_task_numbers,
@@ -73,6 +98,17 @@ from .tasks import (
 
 __all__ = [
     'COMMENT_MAX',
+    'AccountFrozenError',
+    'UploadTicket',
+    'add_stored_bytes',
+    'attachments',
+    'complete_upload',
+    'daily_storage_cost',
+    'delete_attachment',
+    'download_url',
+    'is_frozen',
+    'metering',
+    'start_upload',
     'DESCRIPTION_MAX',
     'FIRST_TASK_NUMBER',
     'LABEL_DESCRIPTION_MAX',

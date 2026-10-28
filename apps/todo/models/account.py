@@ -1,4 +1,5 @@
 from datetime import datetime, time
+from decimal import Decimal
 from typing import ClassVar, cast
 from uuid import UUID
 
@@ -20,6 +21,10 @@ class TodoAccount(models.Model):
     `month_task_count` count the tasks created in the user's current calendar month, for the free
     allowance. `creation_blocked_at` is set while a task exists whose price could not be paid
     (see `services.billing`).
+
+    Attachment storage is billed per account (issue #184, `services.metering`), with the same
+    four columns as `receipts.ReceiptsAccount`: `stored_bytes` x the shared storage price once a
+    day (`accrued` carries the fraction), and `frozen_at` set when the balance can't cover it.
     """
 
     objects: ClassVar['models.Manager']
@@ -65,6 +70,34 @@ class TodoAccount(models.Model):
             'refused until a top-up settles it.',
         ),
     )
+    stored_bytes = cast(
+        int,
+        models.PositiveBigIntegerField(
+            default=0,
+            help_text='Everything stored for this account and billed: the uploaded attachments '
+            'of every task, trashed ones included until they are purged.',
+        ),
+    )
+    last_billed_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    accrued = cast(
+        Decimal,
+        models.DecimalField(
+            max_digits=14,
+            decimal_places=6,
+            default=Decimal('0'),
+            help_text='Fractional credits owed but not yet spent (billing.spend_credits only '
+            'takes whole credits); see apps.todo.services.metering.',
+        ),
+    )
+    billed_days = cast(int, models.PositiveIntegerField(default=0))
+    frozen_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='Set when storage could not be paid for; cleared on top-up.',
+        ),
+    )
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
 
     class Meta:
@@ -76,3 +109,7 @@ class TodoAccount(models.Model):
     @property
     def is_blocked(self) -> bool:
         return self.creation_blocked_at is not None
+
+    @property
+    def is_frozen(self) -> bool:
+        return self.frozen_at is not None

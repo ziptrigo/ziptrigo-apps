@@ -6,6 +6,13 @@ from .comments import (
     comment_history_view,
     comment_restore,
 )
+from .attachments import (
+    attachment_complete,
+    attachment_delete,
+    attachment_download,
+    attachment_list,
+    attachment_start,
+)
 from .labels import label_delete, label_edit, label_reorder, labels_page
 from .lists import (
     all_page,
@@ -34,6 +41,11 @@ from .tasks import (
 )
 
 __all__ = [
+    'attachment_complete',
+    'attachment_delete',
+    'attachment_download',
+    'attachment_list',
+    'attachment_start',
     'all_page',
     'comment_add',
     'comment_delete',

@@ -29,6 +29,10 @@ OTHER_PROD_SETTINGS = {
     'JWT_SECRET': 'a-real-jwt-secret',
     'FILE_TRANSFER_AWS_ACCESS_KEY_ID': 'AKIAFT',
     'FILE_TRANSFER_AWS_SECRET_ACCESS_KEY': 'ft-secret',
+    # To-do attachments (issue #184) are required in production too.
+    'TODO_S3_BUCKET': 'ziptrigo-apps-123',
+    'TODO_AWS_ACCESS_KEY_ID': 'AKIATODO',
+    'TODO_AWS_SECRET_ACCESS_KEY': 'todo-secret',
 }
 
 # `config/settings.py` skips its "env file must exist" failure when pytest is imported (tests must

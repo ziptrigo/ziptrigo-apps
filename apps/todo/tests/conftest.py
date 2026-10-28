@@ -11,10 +11,36 @@ import pytest
 from django.test import Client
 from django.utils import timezone as dj_timezone
 
+from apps.billing.models import BillingSettings
 from apps.billing.services import add_credits
 
 from ..models import TodoSettings
+from ..services import storage
 from .factories import make_user
+from .fakes import FakeTodoStorage
+
+
+@pytest.fixture(autouse=True)
+def fake_storage(monkeypatch) -> FakeTodoStorage:
+    """No test reaches S3: the process-wide storage is an in-memory fake."""
+    fake = FakeTodoStorage()
+    monkeypatch.setattr(storage, '_storage', fake)
+    return fake
+
+
+@pytest.fixture
+def sent_emails(monkeypatch):
+    """Capture what the To-do emails hand to `send_email` instead of sending anything."""
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        'apps.todo.services.emails.send_email', lambda **kwargs: sent.append(kwargs) or (1, 0)
+    )
+    return sent
+
+
+@pytest.fixture
+def billing_settings(db) -> BillingSettings:
+    return BillingSettings.load()
 
 
 @pytest.fixture
