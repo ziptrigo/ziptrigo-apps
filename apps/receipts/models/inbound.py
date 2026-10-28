@@ -39,6 +39,9 @@ class InboundMessage(models.Model):
 
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: int
     emails: ClassVar['Manager']
 
     s3_key = cast(str, models.CharField(max_length=512, unique=True))
@@ -118,6 +121,9 @@ class InboundEmail(models.Model):
 
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
+
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: uuid.UUID
     receipts: ClassVar['Manager']
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

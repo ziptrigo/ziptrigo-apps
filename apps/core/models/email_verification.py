@@ -21,6 +21,9 @@ class EmailVerification(models.Model):
     objects: ClassVar['models.Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: uuid.UUID
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = cast(str, models.EmailField())
     purpose = cast(str, models.CharField(max_length=100))

@@ -4,7 +4,7 @@ from factory.django import DjangoModelFactory
 
 
 class UserFactory(DjangoModelFactory):
-    class Meta:
+    class Meta:  # ty: ignore[invalid-attribute-override]
         model = 'accounts.User'
 
     email = factory.Sequence(lambda n: f'user{n}@example.com')

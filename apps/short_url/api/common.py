@@ -38,7 +38,7 @@ link endpoints report what the next paid actions would cost (`costs`, `null` for
 link's state would refuse), and `POST /links/quote` prices a create without making it.
 """
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from datetime import datetime
 from uuid import UUID
@@ -92,7 +92,7 @@ def _cost_text(total: int) -> str:
 
 
 @contextmanager
-def mapped_errors() -> Iterator[None]:
+def mapped_errors() -> Generator[None]:
     """Turn the services' exceptions into the API's statuses (see the module docs). The specific
     `ValidationError` subclasses come first: each has a status of its own."""
     try:

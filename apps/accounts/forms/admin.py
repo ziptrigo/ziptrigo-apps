@@ -29,7 +29,8 @@ def _clean_email_ignoring_case(form: forms.ModelForm) -> str:
 
 
 class UserAdminCreationForm(AdminUserCreationForm):
-    class Meta:
+    # Django's `Meta` inner classes are options holders, not a class hierarchy `ty` can compare.
+    class Meta:  # ty: ignore[invalid-attribute-override]
         model = User
         fields = ('email', 'name')
 
@@ -38,7 +39,7 @@ class UserAdminCreationForm(AdminUserCreationForm):
 
 
 class UserAdminChangeForm(UserChangeForm):
-    class Meta:
+    class Meta:  # ty: ignore[invalid-attribute-override]
         model = User
         fields = '__all__'
 

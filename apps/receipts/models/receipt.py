@@ -103,6 +103,9 @@ class Receipt(models.Model):
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: uuid.UUID
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = cast(
         'User',

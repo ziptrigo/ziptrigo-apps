@@ -35,6 +35,9 @@ class ReceiptCategory(models.Model):
     objects: ClassVar['Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
+    # `ty` types `pk` as the primary key field object itself, not the value it holds.
+    pk: int
+
     user = cast(
         'User',
         models.ForeignKey(
