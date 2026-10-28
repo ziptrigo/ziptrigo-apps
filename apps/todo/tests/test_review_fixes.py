@@ -13,7 +13,7 @@ from django.utils import timezone
 from apps.billing.services import add_credits
 
 from ..forms import TaskForm
-from ..models import Task, TodoAccount
+from ..models import Task, TaskReference, TodoAccount
 from ..services import (
     DESCRIPTION_MAX,
     complete_task,
@@ -27,6 +27,7 @@ from ..services import (
 )
 from ..services.billing import settle
 from ..services.tasks import UNPAID_MESSAGE
+from .factories import make_task
 from .test_views import HTMX, text
 
 pytestmark = pytest.mark.django_db
@@ -78,7 +79,41 @@ class TestChecklistLostUpdate:
 
         toggle_checklist(task, 0, True)
 
+        # Locked by the toggle, and again (the same transaction) by `update_task`.
+        assert locks and set(locks) == {'Task'}
+
+    def test_update_task_compares_and_saves_the_description_under_the_row_lock(
+        self, user, config, locks
+    ):
+        task = create_task(user, title='T', description='first')
+        locks.clear()
+
+        update_task(task, changes={'description': 'second'})
+
         assert locks == ['Task']
+
+    def test_the_description_is_compared_with_the_stored_one_for_the_references(self, user, config):
+        target_a = make_task(user, number=2001)
+        target_b = make_task(user, number=2002)
+        task = create_task(user, title='T', description=f'#{target_a.number}')
+        stale = Task.objects.get(pk=task.pk)  # still says #A
+        update_task(task, changes={'description': f'#{target_b.number}'})  # another request
+
+        update_task(stale, changes={'description': f'#{target_a.number}'})  # the stored text is #B
+
+        rows = TaskReference.objects.filter(from_task=task, comment=None)
+        assert list(rows.values_list('to_task__number', flat=True)) == [target_a.number]
+
+    def test_a_task_trashed_meanwhile_is_not_changed(self, user, config):
+        task = create_task(user, title='T')
+        stale = Task.objects.get(pk=task.pk)
+        trash_task(task)
+
+        with pytest.raises(ValidationError):
+            update_task(stale, changes={'title': 'New'})
+
+        task.refresh_from_db()
+        assert task.title == 'T'
 
     def test_a_task_deleted_meanwhile_is_a_refusal(self, user, config):
         task = create_task(user, title='T', description='- [ ] a')

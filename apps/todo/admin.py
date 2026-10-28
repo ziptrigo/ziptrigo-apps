@@ -12,7 +12,7 @@ from django.http import HttpRequest
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
-from .models import Label, Task, TodoAccount, TodoSettings
+from .models import Comment, CommentRevision, Label, Task, TodoAccount, TodoSettings
 from .services.billing import month_key
 
 
@@ -133,7 +133,70 @@ class LabelAdmin(ReadOnlyModelAdmin):
         return obj._task_count  # ty: ignore[unresolved-attribute]
 
 
+class CommentRevisionInline(admin.TabularInline):
+    """The texts a comment had before each edit, oldest first. Read-only."""
+
+    model = CommentRevision
+    extra = 0
+    fields = ['replaced_at', 'body']
+    readonly_fields = ['replaced_at', 'body']
+    ordering = ['replaced_at']
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+class CommentAdmin(ReadOnlyModelAdmin):
+    """Comments, for support. A deleted comment shows its body here too (the user can read it)."""
+
+    list_display = [
+        'task_number',
+        'user',
+        'created_at',
+        'edited_at',
+        'revision_count',
+        'deleted_at',
+        'short_body',
+    ]
+    list_filter = [
+        ('edited_at', admin.EmptyFieldListFilter),
+        ('deleted_at', admin.EmptyFieldListFilter),
+        'created_at',
+    ]
+    search_fields = ['body', 'task__title', 'task__number', 'user__email']
+    list_select_related = ['task', 'user']
+    date_hierarchy = 'created_at'
+    ordering = ['-created_at']
+    fields = [
+        'task',
+        'user',
+        'created_at',
+        'edited_at',
+        'revision_count',
+        'deleted_at',
+        'body',
+        'body_text',
+    ]
+    readonly_fields = fields
+    inlines = [CommentRevisionInline]
+
+    @admin.display(description='Task', ordering='task__number')
+    def task_number(self, obj: Comment) -> str:
+        return f'#{obj.task.number}'
+
+    @admin.display(description='Comment')
+    def short_body(self, obj: Comment) -> str:
+        return obj.body if len(obj.body) <= 80 else f'{obj.body[:79]}…'
+
+
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
 custom_admin_site.register(TodoAccount, TodoAccountAdmin)
 custom_admin_site.register(Label, LabelAdmin)
+custom_admin_site.register(Comment, CommentAdmin)

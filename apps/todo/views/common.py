@@ -32,6 +32,7 @@ FIELD_LABELS = {
     'date': 'Date',
     'preset': 'When',
     'index': 'Item',
+    'body': 'Comment',
     'default_due_time': 'Default due time',
 }
 

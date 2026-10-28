@@ -11,6 +11,7 @@ from django.utils.safestring import SafeString
 from apps.core.markdown import (
     MAX_MARKDOWN_CHARS,
     count_checklist_items,
+    extract_references,
     normalize_for_search,
     render,
     search_text,
@@ -930,3 +931,54 @@ def test_search_text_runs_both_steps():
 
 def test_plain_text_goes_through_normalize_as_the_spec_example():
     assert normalize_for_search(to_plain_text('**Pay** the RENT')) == 'pay the rent'
+
+
+# -- extract_references --------------------------------------------------------------------------
+
+
+def test_extract_references_lists_each_number_once_in_order():
+    assert extract_references('see #1002, #1001 and #1002 again; also #1003') == [1002, 1001, 1003]
+    assert extract_references('nothing here') == []
+    assert extract_references('') == []
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        '#999',
+        '#12',
+        '`#1234`',
+        '```\n#1234\n```',
+        '[#1234](https://example.com)',
+        'a#1234',
+        '#12345678901',
+    ],
+)
+def test_extract_references_ignores_what_render_leaves_as_text(source):
+    assert extract_references(source) == []
+
+
+def test_extract_references_sees_task_urls_only_with_a_pattern(settings):
+    settings.BASE_URL = 'https://app.example.com'
+    source = (
+        '#1001 [a](/todo/1002/) https://app.example.com/todo/1003/ [b](https://x.com/todo/1004/) '
+        '[c](/todo/1005/?x=1)'
+    )
+
+    assert extract_references(source) == [1001]
+    assert extract_references(source, task_url_path=TASK_PATH) == [1001, 1002, 1003]
+
+
+def test_extract_references_agrees_with_what_render_hands_the_resolver():
+    source = '**#1234** _#1235_ [x](/todo/1236/) `#1237`\n\n- #1234\n> #1238'
+    resolve = resolver({})
+    render(source, reference_resolver=resolve, task_url_path=TASK_PATH)
+
+    assert resolve.calls == [extract_references(source, task_url_path=TASK_PATH)]
+
+
+def test_extract_references_has_the_size_guard_and_checks_the_pattern():
+    with pytest.raises(ValueError, match='Document too long'):
+        extract_references('x' * (MAX_MARKDOWN_CHARS + 1))
+    with pytest.raises(ValueError, match='number'):
+        extract_references('x', task_url_path=re.compile(r'^/todo/([0-9]+)/?$'))

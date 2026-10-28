@@ -16,7 +16,7 @@ from apps.accounts.services.timezones import user_today
 from apps.core.markdown import render
 
 from ..models import Label, Task
-from ..services.references import TASK_URL_PATH, resolver_for
+from ..services.references import TASK_URL_PATH, resolver_for_request
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,9 @@ def render_description(context, task: Task) -> SafeString:
     """The task's description as sanitised HTML; `#1234` and links to the user's own task pages
     become links to them. A description over the Markdown size guard (the services cap far below
     it) is shown unrendered rather than failing the page."""
-    user = context['request'].user
+    resolver = resolver_for_request(context['request'])
     try:
-        return render(
-            task.description, reference_resolver=resolver_for(user), task_url_path=TASK_URL_PATH
-        )
+        return render(task.description, reference_resolver=resolver, task_url_path=TASK_URL_PATH)
     except ValueError:
         logger.warning('Task %s: description shown unrendered', task.pk)
         return format_html('<p>{}</p>', linebreaksbr(task.description, autoescape=True))

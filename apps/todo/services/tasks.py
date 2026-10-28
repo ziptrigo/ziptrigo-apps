@@ -26,6 +26,7 @@ from . import dates
 from .accounts import allocate_number, get_account
 from .billing import charge_task_creation
 from .limits import DESCRIPTION_MAX, TITLE_MAX
+from .references import sync_references
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,8 @@ def create_task(
         task.save()
         if cleaned_labels:
             task.labels.set(cleaned_labels)
+        if cleaned_description:
+            sync_references(task)
     return task
 
 
@@ -270,25 +273,35 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
             values['parent'] = new_parent
 
     with transaction.atomic():
+        # The task's row (and the new parent's, in pk order) is locked and re-read first: the
+        # checks below read rows another request may be changing (a subtask being added to this
+        # task, the new parent moving under something), and the description is compared with the
+        # text stored *now*, so the references written always match the text that was saved.
+        new_parent_pk = new_parent.pk if moves and new_parent is not None else None
+        locked = _lock_tasks(*(pk for pk in (task.pk, new_parent_pk) if pk is not None))
+        current = locked.get(task.pk)
+        if current is None:
+            raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
+        if current.is_trashed:
+            raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
         if moves:
             if new_parent is not None:
-                # The checks below read rows another request may be changing (a subtask being
-                # added to this task, the new parent moving under something): lock both, in pk
-                # order, and decide on what is there now.
-                locked = _lock_tasks(task.pk, new_parent.pk)
-                if task.pk not in locked:
-                    raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
                 if new_parent.pk not in locked:
                     raise _error('parent', 'Unknown parent task.')
                 clean_parent(task.user, locked[new_parent.pk])
                 if Task.objects.filter(parent=task).exists():
                     raise _error('parent', 'A task with subtasks cannot become a subtask.')
             values['position'] = next_position(new_parent)
+        description_changed = (
+            'description' in values and values['description'] != current.description
+        )
         for name, value in values.items():
             setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
         if labels is not None:
             task.labels.set(labels)
+        if description_changed:
+            sync_references(task)
     return task
 
 

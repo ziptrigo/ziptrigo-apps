@@ -1,0 +1,16 @@
+{% comment %} "Referenced by": the tasks that mention this one (`#1234` or its URL) in their description or in a comment.
+   Hidden when there are none. Needs `referenced_by`, a list of (task, comment or None). {% endcomment %}
+{% if referenced_by %}
+<section id="referenced-by" aria-labelledby="referenced-by-title" class="mb-8">
+    <h2 id="referenced-by-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Referenced by</h2>
+    <ul class="space-y-1 text-sm">
+        {% for ref_task, ref_comment in referenced_by %}
+        <li>
+            <a href="{% url 'todo:task' ref_task.number %}{% if ref_comment %}#comment-{{ ref_comment.pk }}{% endif %}"
+               class="text-sage-600 dark:text-sage-300 hover:underline {% if ref_task.is_completed %}line-through{% endif %}">#{{ ref_task.number }} {{ ref_task.title }}</a>
+            {% if ref_comment %}<span class="text-xs text-gray-500 dark:text-gray-400">in a comment</span>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
