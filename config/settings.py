@@ -104,6 +104,11 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+# Paths `TimezoneMiddleware` leaves alone: it would otherwise resolve `request.user` (a session and
+# a user query) on the hot public ones. The short links and the download page serve visitors, not
+# accounts, static files render nothing, and the API authenticates with JWTs, not sessions, so none
+# of them has a saved zone to activate; they render in `TIME_ZONE` (UTC).
+TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = ('/go/', '/s/', '/t/', '/static/', '/api/')
 
 ROOT_URLCONF = 'config.urls'
 

@@ -7,11 +7,11 @@ from django.contrib.auth.models import (
     BaseUserManager,
     PermissionsMixin,
 )
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.utils import timezone
 
-from ..validators import UNKNOWN_TIMEZONE_MESSAGE, is_valid_timezone
+from ..validators import validate_timezone
 
 
 class UserManager(BaseUserManager):
@@ -128,7 +128,13 @@ class User(AbstractBaseUser, PermissionsMixin):  # ty: ignore[invalid-attribute-
     # previous release's container keeps inserting users while the migration runs.
     timezone = cast(
         str,
-        models.CharField(max_length=64, blank=True, default='', db_default=''),
+        models.CharField(
+            max_length=64,
+            blank=True,
+            default='',
+            db_default='',
+            validators=[validate_timezone],
+        ),
     )
     inactive_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     inactive_reason = cast(str, models.TextField(blank=True))
@@ -148,11 +154,6 @@ class User(AbstractBaseUser, PermissionsMixin):  # ty: ignore[invalid-attribute-
     # equivalent of django-stubs' plugin for that, so it doesn't know this attribute exists. See
     # the field-casting comment above for the same root cause.
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
-
-    def clean(self) -> None:
-        super().clean()
-        if not is_valid_timezone(self.timezone):
-            raise ValidationError({'timezone': UNKNOWN_TIMEZONE_MESSAGE})
 
     def mark_deleted(self) -> None:
         self.status = self.STATUS_DELETED

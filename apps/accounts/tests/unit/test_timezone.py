@@ -7,9 +7,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.http import HttpResponse
 from django.template import Context, Template
 from django.test import RequestFactory
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
@@ -26,6 +28,7 @@ from apps.accounts.services.timezones import (
 )
 from apps.accounts.signals import timezone_changed
 from apps.accounts.tokens import CustomAccessToken
+from apps.accounts.validators import validate_timezone
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -66,19 +69,39 @@ def test_timezone_column_has_a_database_default():
     assert User._meta.get_field('timezone').db_default == ''  # ty: ignore[unresolved-attribute]
 
 
-def test_model_clean_accepts_empty_and_known_zones(user):
+def test_field_validator_accepts_empty_and_known_zones(user):
     for name in ('', 'UTC', 'Europe/Lisbon'):
         user.timezone = name
-        user.clean()
+        user.full_clean(exclude=['password'])
+        validate_timezone(name)
 
 
-def test_model_clean_rejects_an_unknown_zone(user):
+def test_field_validator_rejects_an_unknown_zone(user):
     user.timezone = 'Mars/Olympus_Mons'
 
     with pytest.raises(ValidationError) as error:
-        user.clean()
+        user.full_clean(exclude=['password'])
 
     assert error.value.message_dict == {'timezone': ['Unknown time zone.']}
+
+
+def test_a_model_form_without_the_field_ignores_a_stale_zone(user):
+    """The check is the field's, not `Model.clean()`'s: a form that doesn't include the field is
+    unaffected by a stale value (`ModelForm` raises `ValueError` for a `clean()` error on a field
+    it doesn't have)."""
+    from django import forms
+
+    User.objects.filter(pk=user.pk).update(timezone='Mars/Olympus_Mons')
+    user.refresh_from_db()
+
+    class NameOnly(forms.ModelForm):
+        class Meta:
+            model = User
+            fields = ['name']
+
+    form = NameOnly({'name': 'Other'}, instance=user)
+
+    assert form.is_valid(), form.errors
 
 
 # --- user_tz, user_today ---
@@ -374,6 +397,91 @@ def test_middleware_deactivates_even_when_the_view_raises(user):
     assert dj_timezone.get_current_timezone_name() == 'UTC'
 
 
+class _WatchedUser:
+    """A user that records whether the middleware asked if it is authenticated (which, on the real
+    lazy `request.user`, is what loads the session and the user)."""
+
+    timezone = 'America/New_York'
+
+    def __init__(self):
+        self.asked = False
+
+    @property
+    def is_authenticated(self) -> bool:
+        self.asked = True
+        return True
+
+
+def _run_middleware_at(path: str) -> tuple[_WatchedUser, dict]:
+    seen: dict = {}
+
+    def view(request):
+        seen['zone'] = dj_timezone.get_current_timezone_name()
+        return HttpResponse('ok')
+
+    request = RequestFactory().get(path)
+    watched = _WatchedUser()
+    request.user = watched
+    TimezoneMiddleware(view)(request)
+    return watched, seen
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        '/go/abc123',
+        '/s/abc123',
+        '/s/abc123+',
+        '/t/some-slug/',
+        '/static/core/js/x.js',
+        '/api/account',
+    ],
+)
+def test_middleware_skips_the_public_hot_paths_without_resolving_the_user(path):
+    watched, seen = _run_middleware_at(path)
+
+    assert watched.asked is False
+    assert seen['zone'] == 'UTC'
+
+
+@pytest.mark.parametrize('path', ['/account/', '/links/', '/receipts/', '/', '/staticfiles', '/sx'])
+def test_middleware_still_serves_every_other_path(path):
+    watched, seen = _run_middleware_at(path)
+
+    assert watched.asked is True
+    assert seen['zone'] == 'America/New_York'
+
+
+def test_middleware_skip_prefixes_come_from_the_setting(settings):
+    settings.TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = ('/account/',)
+
+    skipped, _ = _run_middleware_at('/account/')
+    served, _ = _run_middleware_at('/go/abc')
+
+    assert (skipped.asked, served.asked) == (False, True)
+
+
+def test_the_default_skip_prefixes(settings):
+    assert settings.TIMEZONE_MIDDLEWARE_SKIP_PREFIXES == (
+        '/go/',
+        '/s/',
+        '/t/',
+        '/static/',
+        '/api/',
+    )
+
+
+def test_a_short_link_redirect_does_not_load_the_session_user(client, user):
+    """Through the whole stack: with a session cookie, `/go/<code>` makes no user query."""
+    client.force_login(user)
+
+    with CaptureQueriesContext(connection) as ctx:
+        client.get('/go/doesnotexist')
+
+    users = [q for q in ctx.captured_queries if 'accounts_user' in q['sql']]
+    assert users == []
+
+
 def test_middleware_is_installed_right_after_authentication(settings):
     middleware = settings.MIDDLEWARE
     auth = middleware.index('django.contrib.auth.middleware.AuthenticationMiddleware')
@@ -531,10 +639,150 @@ def test_form_with_an_empty_zone_clears_it(client, user):
     set_timezone(user, 'Europe/Lisbon')
     client.force_login(user)
 
-    _post_profile(client, name='Test User', timezone='')
+    _post_profile(client, name='Test User', timezone='', timezone_rendered='Europe/Lisbon')
 
     user.refresh_from_db()
     assert user.timezone == ''
+
+
+def test_the_form_sends_back_the_zone_it_was_rendered_with(client, user):
+    set_timezone(user, 'Europe/Lisbon')
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert '<input type="hidden" name="timezone_rendered" value="Europe/Lisbon">' in content
+
+
+def test_detection_after_the_page_loaded_survives_saving_the_profile(
+    client, user, django_capture_on_commit_callbacks, received
+):
+    """The race: the page is rendered while the account has no zone ("Not set" selected), the
+    browser's detection then saves one, and the visitor saves their name with the select untouched
+    (`timezone=''`, rendered as `''`). The zone must stay, and no second signal is sent."""
+    client.force_login(user)
+    page = client.get(reverse('accounts:account')).content.decode()
+    assert '<input type="hidden" name="timezone_rendered" value="">' in page
+    with django_capture_on_commit_callbacks(execute=True):
+        assert _detect(client, 'Europe/Lisbon').status_code == 204
+    assert received == [(user.pk, '', 'Europe/Lisbon')]
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _post_profile(client, name='New Name', timezone='', timezone_rendered='')
+
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert (user.name, user.timezone) == ('New Name', 'Europe/Lisbon')
+    assert received == [(user.pk, '', 'Europe/Lisbon')]  # nothing more
+    # The form that comes back shows the saved zone.
+    assert '<option value="Europe/Lisbon" selected>' in response.content.decode()
+
+
+def test_a_zone_that_differs_from_the_rendered_one_is_saved(
+    client, user, django_capture_on_commit_callbacks, received
+):
+    client.force_login(user)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        _post_profile(client, name='Test User', timezone='Asia/Tokyo', timezone_rendered='')
+
+    user.refresh_from_db()
+    assert user.timezone == 'Asia/Tokyo'
+    assert received == [(user.pk, '', 'Asia/Tokyo')]
+
+
+def test_an_invalid_zone_that_differs_from_the_rendered_one_is_still_refused(client, user):
+    client.force_login(user)
+
+    response = _post_profile(
+        client, name='Test User', timezone='Nowhere/Land', timezone_rendered='Europe/Lisbon'
+    )
+
+    assert response.status_code == 422
+
+
+def test_a_422_form_renders_the_stored_zone_as_the_rendered_one(client, user):
+    """After a refusal the select shows what was typed, but "rendered" stays the stored zone, so
+    posting the corrected value again counts as a change."""
+    set_timezone(user, 'Europe/Lisbon')
+    client.force_login(user)
+
+    response = _post_profile(
+        client, name='', timezone='Asia/Tokyo', timezone_rendered='Europe/Lisbon'
+    )
+
+    assert response.status_code == 422
+    assert (
+        '<input type="hidden" name="timezone_rendered" value="Europe/Lisbon">'
+        in response.content.decode()
+    )
+
+
+def test_a_stale_saved_zone_is_offered_marked_and_kept_when_untouched(
+    client, user, django_capture_on_commit_callbacks, received
+):
+    """A zone that left the tz database after it was saved: the select still shows it (labelled),
+    and saving the name alone neither fails nor turns it into UTC."""
+    User.objects.filter(pk=user.pk).update(timezone='Europe/Kiev_Gone')
+    client.force_login(user)
+    content = client.get(reverse('accounts:account')).content.decode()
+    assert (
+        '<option value="Europe/Kiev_Gone" selected>Europe/Kiev_Gone (no longer recognised)</option>'
+        in content
+    )
+    assert 'name="timezone_rendered" value="Europe/Kiev_Gone"' in content
+    assert 'Not set (UTC)' not in content
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _post_profile(
+            client,
+            name='New Name',
+            timezone='Europe/Kiev_Gone',
+            timezone_rendered='Europe/Kiev_Gone',
+        )
+
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert (user.name, user.timezone) == ('New Name', 'Europe/Kiev_Gone')
+    assert received == []
+
+
+def test_a_stale_saved_zone_can_be_replaced(client, user):
+    User.objects.filter(pk=user.pk).update(timezone='Europe/Kiev_Gone')
+    client.force_login(user)
+
+    _post_profile(client, name='Test User', timezone='UTC', timezone_rendered='Europe/Kiev_Gone')
+
+    user.refresh_from_db()
+    assert user.timezone == 'UTC'
+
+
+def test_saving_the_profile_does_not_revert_a_concurrent_zone_change(user, received):
+    """The form loaded the user with no zone; before it saves, the zone is set elsewhere (another
+    tab). Only `name` and `updated_at` are written, so the other tab's zone survives."""
+    form = ProfileForm({'name': 'New Name'}, instance=User.objects.get(pk=user.pk))
+    assert form.is_valid()
+    User.objects.filter(pk=user.pk).update(timezone='Asia/Tokyo')
+
+    form.save()
+
+    stored = User.objects.get(pk=user.pk)
+    assert (stored.name, stored.timezone) == ('New Name', 'Asia/Tokyo')
+    assert received == []
+
+
+def test_saving_the_profile_with_a_chosen_zone_does_not_revert_another_change_first(user):
+    form = ProfileForm(
+        {'name': 'New Name', 'timezone': 'Europe/Lisbon', 'timezone_rendered': ''},
+        instance=User.objects.get(pk=user.pk),
+    )
+    assert form.is_valid()
+    User.objects.filter(pk=user.pk).update(timezone='Asia/Tokyo')
+
+    form.save()
+
+    # The user's explicit choice wins over the concurrent change.
+    assert User.objects.get(pk=user.pk).timezone == 'Europe/Lisbon'
 
 
 def test_form_without_a_timezone_field_keeps_the_saved_zone(client, user):
@@ -726,6 +974,30 @@ def test_put_account_without_a_zone_leaves_it_alone(client, user):
     assert response.status_code == 200
     user.refresh_from_db()
     assert (user.name, user.timezone) == ('New Name', 'Asia/Tokyo')
+
+
+def test_put_account_never_writes_the_zone_column_itself(client, user, monkeypatch):
+    """A change made between loading the user and saving it (browser detection, another tab) is
+    not put back by an update of the name: the row is saved with `update_fields` without
+    `timezone`."""
+    real_save = User.save
+    saved_with: list = []
+
+    def save(self, *args, **kwargs):
+        if not saved_with:
+            User.objects.filter(pk=self.pk).update(timezone='Asia/Tokyo')  # the concurrent write
+        saved_with.append(kwargs.get('update_fields'))
+        return real_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(User, 'save', save)
+
+    response = _put(client, user, {'name': 'New Name'})
+
+    assert response.status_code == 200
+    assert saved_with and 'timezone' not in saved_with[0]
+    assert set(saved_with[0]) == {'name', 'updated_at'}
+    stored = User.objects.get(pk=user.pk)
+    assert (stored.name, stored.timezone) == ('New Name', 'Asia/Tokyo')
 
 
 def test_put_account_can_clear_the_zone(client, user):

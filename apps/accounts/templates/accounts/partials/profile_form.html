@@ -52,6 +52,8 @@
         <option value="{{ value }}"{% if value == current_timezone %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
+    {% comment %}The zone this form was built against: a posted zone equal to it is "untouched", so detection saving a zone after the page loaded isn't undone by saving the name.{% endcomment %}
+    <input type="hidden" name="timezone_rendered" value="{{ form.rendered_timezone }}">
     <span class="text-xs text-gray-500 dark:text-gray-400 mt-1 block">Used for due dates, reminders and what counts as today.</span>
     {% comment %}A <p>, not a span with `block`: Tailwind's `block` would override the `hidden` attribute.{% endcomment %}
     <p id="timezone-detected" hidden class="text-xs text-gray-500 dark:text-gray-400 mt-1">

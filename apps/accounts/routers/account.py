@@ -34,9 +34,15 @@ def update_account(request, payload: AccountUpdateRequest):
     # above) sets it to the authenticated `User` at runtime.
     user: User = request.auth
 
+    # The columns this request writes. Never `timezone`: only `set_timezone` writes that, so a
+    # change made since `user` was loaded (browser detection, another tab) isn't reverted by a
+    # save of the whole row.
+    update_fields = ['updated_at']
+
     # Update name if provided
     if payload.name is not None:
         user.name = payload.name
+        update_fields.append('name')
 
     # Update email if provided and different. The new address must be confirmed again, so a user
     # can't claim an address they don't own.
@@ -74,8 +80,9 @@ def update_account(request, payload: AccountUpdateRequest):
         user.email = payload.email
         user.email_confirmed = False
         user.email_confirmed_at = None
+        update_fields += ['email', 'email_confirmed', 'email_confirmed_at']
 
-    user.save()
+    user.save(update_fields=update_fields)
 
     # Through the service so `timezone_changed` is sent. The schema has validated the name. It is
     # not a security-relevant field, so it needs neither the password nor a rate limit.

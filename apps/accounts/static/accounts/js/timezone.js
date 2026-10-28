@@ -8,7 +8,8 @@
 // 2. Account page: next to the Time zone select, shows "Detected from your browser: <zone>" with a
 //    "Use it" link that picks it in the select, whenever it differs from the selected zone (and is
 //    one of the select's options). Run again on whatever htmx swaps in, since saving the profile
-//    replaces the form.
+//    replaces the form. When detection saves the zone while the page shows "Not set", it also
+//    selects the zone there.
 (function () {
   const url = document.currentScript && document.currentScript.dataset.url;
 
@@ -51,8 +52,23 @@
       credentials: 'same-origin',
       keepalive: true,
     }).then((response) => {
-      if (response.ok) html.dataset.userTimezone = zone;
+      if (!response.ok) return;
+      html.dataset.userTimezone = zone;
+      adoptDetected(zone);
     }).catch(() => {});
+  }
+
+  // The account page was rendered with "Not set" before the zone was saved. Show the saved zone in
+  // its select, unless the visitor has already picked something, so the page doesn't say "Not
+  // set" for a zone that is now saved. (The form also posts the zone it was rendered with and the
+  // server ignores an untouched select, so saving the name can't clear it either way.)
+  function adoptDetected(zone) {
+    const select = document.querySelector('select[name=timezone]');
+    if (!select || select.value !== '') return;
+    if (!Array.from(select.options).some((option) => option.value === zone)) return;
+    select.value = zone;
+    const hint = document.getElementById('timezone-detected');
+    if (hint) hint.hidden = true;
   }
 
   function showHint(root, zone) {

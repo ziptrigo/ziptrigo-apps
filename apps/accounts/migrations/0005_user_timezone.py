@@ -2,6 +2,8 @@
 
 from django.db import migrations, models
 
+import apps.accounts.validators
+
 
 class Migration(migrations.Migration):
 
@@ -13,6 +15,12 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='user',
             name='timezone',
-            field=models.CharField(blank=True, db_default='', default='', max_length=64),
+            field=models.CharField(
+                blank=True,
+                db_default='',
+                default='',
+                max_length=64,
+                validators=[apps.accounts.validators.validate_timezone],
+            ),
         ),
     ]

@@ -58,3 +58,48 @@ def test_browser_zone_is_saved_once_and_offered_on_the_account_page(
             'from apps.accounts.models import User\n'
             "User.objects.filter(email=os.environ['E2E_EMAIL']).update(timezone='')\n"
         )
+
+
+def test_detection_from_the_account_page_is_not_undone_by_saving_the_name(
+    browser: Browser, receipts_server: ReceiptsServer
+):
+    """The page is rendered with "Not set", the browser's zone is saved from that very page, and
+    the visitor then saves their name: the zone must stay."""
+    context = browser.new_context(timezone_id='Europe/Lisbon')
+    page = context.new_page()
+    original_name = ''
+    try:
+        receipts_server.login(page)
+        # Back to an account with no zone and no detection yet in this session.
+        receipts_server.shell(
+            'import os\n'
+            'from apps.accounts.models import User\n'
+            "User.objects.filter(email=os.environ['E2E_EMAIL']).update(timezone='')\n"
+        )
+        page.evaluate('sessionStorage.clear()')
+
+        with page.expect_response(lambda r: r.url.endswith('/account/timezone/')) as detection:
+            page.goto(f'{receipts_server.url}/account/')
+        assert detection.value.status == 204
+
+        # The select follows the saved zone instead of staying on "Not set".
+        select = page.locator('#profile-timezone')
+        expect(select).to_have_value('Europe/Lisbon')
+        expect(page.locator('#timezone-detected')).to_be_hidden()
+
+        # Even with the select put back on "Not set" (as the page was rendered), saving the name
+        # leaves the zone alone, because it is the zone the form was rendered with.
+        select.select_option('')
+        original_name = page.input_value('#profile-name')
+        page.fill('#profile-name', 'Renamed Account')
+        page.click('#profile-form button[type="submit"]')
+        expect(page.locator('#profile-form')).to_contain_text('Profile updated successfully.')
+        expect(page.locator('#profile-timezone')).to_have_value('Europe/Lisbon')
+    finally:
+        context.close()
+        receipts_server.shell(
+            'import os\n'
+            'from apps.accounts.models import User\n'
+            "User.objects.filter(email=os.environ['E2E_EMAIL']).update(timezone='', name=%r)\n"
+            % original_name
+        )

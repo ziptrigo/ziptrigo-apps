@@ -494,7 +494,8 @@ read-only in the user admin ("Personal info"). A visitor without a session is re
 reminders in the user's local time (the To-do app, #161). `User.timezone` is an IANA name or `''` for
 "not set yet", treated as UTC everywhere (`CharField(max_length=64, blank=True, default='',
 db_default='')`: the #102 lesson again). A non-empty value must be in `zoneinfo.available_timezones()`
-(`validators.is_valid_timezone`, cached); the model's `clean()`, the profile and admin forms, the
+(`validators.is_valid_timezone`, cached); the field's validator (`validators.validate_timezone`, so
+a `ModelForm` without the field is unaffected by a stale value), the profile and admin forms, the
 detection endpoint and the API schema all refuse anything else with `Unknown time zone.`.
 `services.timezones` is the one place to compute with it: `user_tz(user)` (a `ZoneInfo`, UTC for an
 empty or stale name, which logs a warning once per process per value and never raises),
@@ -509,14 +510,34 @@ and, **on commit and only on a change**, sends `signals.timezone_changed` (`send
 `TimezoneMiddleware` (`apps/accounts/middleware.py`, right after `AuthenticationMiddleware`)
 activates the signed-in user's zone and deactivates it again after the response (a streamed body
 is read after that, in UTC), which is why every product's `|date`/`localtime()` output follows the
-user; see "Templates and static files" for how it relates to the browser-side helpers. Ways to set it:
+user; see "Templates and static files" for how it relates to the browser-side helpers. It never
+touches `request.user` (a session and a user query) for a path starting with one of
+`settings.TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` = `('/go/', '/s/', '/t/', '/static/', '/api/')`: the
+public redirects and download page, static files and the JWT API, none of which has a session
+zone, so they render in `TIME_ZONE` (UTC) even for a signed-in owner (a visitor's browser-side
+`{% local_time %}` is unaffected). A new hot public prefix goes in that setting. **Behaviour change
+for existing users once they have a zone:** everything that asks Django for "now" or "today" while
+a request is active follows the saved zone, notably file transfer's end-of-day expiry picker (a
+bare date means the end of *that* day in the user's zone) and Receipts' date-range presets ("This
+month", "Last 30 days" ending today); with no zone they stay UTC, as before. Expect a "my expiry
+is off by a few hours" report to mean the saved zone differs from where the user is. Ways to set it:
 
-- *Account page:* the profile form (`ProfileForm`, fields `name` and `timezone`, a select with
-  `UTC` first; a user with no zone gets a leading "Not set (UTC)" option so saving the name alone
-  doesn't set one, and a valid zone outside the usual list that the account already has is added to
-  it). `save()` goes through `set_timezone`, so the signal fires; a post without the field keeps the
-  saved zone. Under the select, `accounts/js/timezone.js` shows "Detected from your browser: ..." with
-  a "Use it" link when the browser's zone differs from the selected one and is one of the options.
+- *Account page:* the profile form (`ProfileForm`, model field `name` plus a hand-validated
+  `timezone`, a select with `UTC` first; a user with no zone gets a leading "Not set (UTC)" option
+  so saving the name alone doesn't set one, a valid zone outside the usual list that the account
+  already has is added to it, and a saved name that is no longer in the tz database is still
+  offered, labelled "<name> (no longer recognised)"). The zone is not a model-form field: `save()`
+  writes only `name` and `updated_at` (`update_fields`) and the zone only through `set_timezone`
+  (so the signal fires, and a zone changed since the request loaded the user is never reverted by
+  a snapshot of the row; `PUT /api/account` does the same). The form posts a hidden
+  `timezone_rendered`, the zone it was built against (for a 422 re-render, the stored one, not the
+  typed one): a posted `timezone` equal to it means "untouched" and never writes, and is not even
+  validated, so detection saving a zone while the page still showed "Not set", or an untouched
+  stale zone, survives saving the name. A post without `timezone`, or without `timezone_rendered`
+  (an older client), still works: the former keeps the zone, the latter compares with the database.
+  Under the select, `accounts/js/timezone.js` shows "Detected from your browser: ..." with a "Use
+  it" link when the browser's zone differs from the selected one and is one of the options, and,
+  when detection saves the zone while the select shows "Not set", selects it there.
 - *Detection:* the same script (loaded deferred by `core/base.html` for signed-in users only, with
   the endpoint in its `data-url`; `<html data-user-timezone>` carries the saved zone) posts the
   browser's zone, form-encoded with the CSRF token, to `POST /account/timezone/` (`accounts:timezone`)
