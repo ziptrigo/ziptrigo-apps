@@ -79,6 +79,7 @@ class Migration(migrations.Migration):
                 ('completed_at', models.DateTimeField(blank=True, null=True)),
                 ('deleted_at', models.DateTimeField(blank=True, null=True)),
                 ('position', models.IntegerField(default=0)),
+                ('today_position', models.IntegerField(default=0)),
                 ('source', models.CharField(choices=[('web', 'Web'), ('api', 'API'), ('email', 'Email'), ('recurrence', 'Repeating task')], default='web', max_length=12)),
                 ('charged_credits', models.PositiveIntegerField(default=0, help_text='What this task cost to create (also while unpaid).')),
                 ('unpaid_at', models.DateTimeField(blank=True, help_text='Set while the price of this task is still owed (see services.billing).', null=True)),

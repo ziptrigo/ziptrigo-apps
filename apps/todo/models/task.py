@@ -83,8 +83,11 @@ class Task(models.Model):
 
     completed_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     deleted_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
-    #: Manual order, for Today and a parent's subtasks (`services.tasks.reorder`).
+    #: Manual order among a parent's subtasks (`services.tasks.reorder`, scope `subtasks`).
     position = cast(int, models.IntegerField(default=0))
+    #: Manual order of the Today list, among the tasks due today (scope `today`). A separate column
+    #: from `position`, so dragging in one list never puts the other into manual order.
+    today_position = cast(int, models.IntegerField(default=0))
     source = cast(str, models.CharField(max_length=12, choices=TaskSource, default=TaskSource.WEB))
     charged_credits = cast(
         int,

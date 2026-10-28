@@ -79,7 +79,7 @@ def render_page(
         'task_price': config.task_price,
         'nav': nav,
         'nav_items': nav_items(),
-        'today_count': today_set(request.user, account).count(),
+        'today_count': today_set(request.user).count(),
     }
     page_context.update(context or {})
     return render(request, template, page_context, status=status)

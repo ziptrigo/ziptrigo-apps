@@ -12,15 +12,17 @@ from ..models import TodoAccount
 
 def get_account(user: User) -> TodoAccount:
     """The user's `TodoAccount`, created on first use (re-read when a concurrent first visit won
-    the insert, like `load_singleton`)."""
+    the insert, like `load_singleton`). `account.user` is the `user` passed in, already loaded, so
+    billing and the pages that read it cost no extra query."""
     account = TodoAccount.objects.filter(user=user).first()
-    if account is not None:
-        return account
-    try:
-        with transaction.atomic():
-            return TodoAccount.objects.create(user=user)
-    except IntegrityError:
-        return TodoAccount.objects.get(user=user)
+    if account is None:
+        try:
+            with transaction.atomic():
+                account = TodoAccount.objects.create(user=user)
+        except IntegrityError:
+            account = TodoAccount.objects.get(user=user)
+    account.user = user
+    return account
 
 
 def allocate_number(account: TodoAccount) -> int:

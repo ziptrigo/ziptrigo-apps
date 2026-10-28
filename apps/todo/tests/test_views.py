@@ -742,7 +742,13 @@ class TestReorder:
         )
 
         assert response.status_code == 204
-        assert (Task.objects.get(pk=b.pk).position, Task.objects.get(pk=a.pk).position) == (0, 1)
+        assert (
+            Task.objects.get(pk=b.pk).today_position,
+            Task.objects.get(pk=a.pk).today_position,
+        ) == (
+            0,
+            1,
+        )
         body = text(web.get(reverse('todo:today')))
         assert body.index('>B<') < body.index('>A<')
 

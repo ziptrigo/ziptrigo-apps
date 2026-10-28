@@ -126,11 +126,22 @@ def settle(user_id: str) -> int:
                 settled += 1
         except InsufficientCreditsError:
             break
-    if not Task.objects.filter(user=user, unpaid_at__isnull=False).exists():
-        TodoAccount.objects.filter(pk=user.pk, creation_blocked_at__isnull=False).update(
-            creation_blocked_at=None
-        )
+    _unblock_if_settled(user)
     return settled
+
+
+def _unblock_if_settled(user: User) -> None:
+    """Clear `creation_blocked_at` when no unpaid task remains. The check and the write run in one
+    transaction under the account row lock (the one `accounts.allocate_number` takes), so a
+    concurrent `create_task(..., allow_unpaid=True)` either commits its unpaid task before the check
+    (which then sees it) or waits and sets the block again after: it can never be cleared over an
+    unpaid task."""
+    with transaction.atomic():
+        locked = TodoAccount.objects.select_for_update().filter(pk=user.pk).first()
+        if locked is None or locked.creation_blocked_at is None:
+            return
+        if not Task.objects.filter(user=user, unpaid_at__isnull=False).exists():
+            TodoAccount.objects.filter(pk=user.pk).update(creation_blocked_at=None)
 
 
 def on_credits_added(user: User) -> None:

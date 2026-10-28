@@ -6,7 +6,7 @@ with undated tasks last, then date-only tasks before timed ones, then the time, 
 first, none last), then oldest first.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import datetime
 
 from django.db.models import Case, Count, F, IntegerField, Q, QuerySet, Value, When
 from django.db.models.expressions import OrderBy
@@ -58,8 +58,9 @@ def default_order() -> list:
 
 def order_tasks(queryset: QuerySet, sort: str = SORT_DEFAULT) -> QuerySet:
     """`queryset` in `sort` order: `date` (the default, also for an unknown value), `priority`
-    (then date), `created` (newest first), `title`, or `manual` (`Task.position`, then the default
-    order for the tasks that tie)."""
+    (then date), `created` (newest first), `title`, `manual` (a parent's subtasks: `Task.position`)
+    or `today_manual` (the Today list: `Task.today_position`), the manual ones then in the default
+    order for the tasks that tie."""
     if sort == 'priority':
         return queryset.order_by(_priority_rank().asc(), *_date_order(), 'created_at', 'number')
     if sort == 'created':
@@ -68,14 +69,17 @@ def order_tasks(queryset: QuerySet, sort: str = SORT_DEFAULT) -> QuerySet:
         return queryset.order_by('title_text', 'created_at', 'number')
     if sort == 'manual':
         return queryset.order_by('position', *default_order())
+    if sort == 'today_manual':
+        return queryset.order_by('today_position', *default_order())
     return queryset.order_by(*default_order())
 
 
-def has_manual_order(queryset: QuerySet) -> bool:
-    """Whether anything in `queryset` was ever positioned by hand. A reorder writes 0, 1, 2, ...,
-    so any position above 0 means one happened; a task created while one exists goes after the
-    others (`tasks.next_position`), and one created before any reorder keeps 0."""
-    return queryset.filter(position__gt=0).exists()
+def has_manual_order(queryset: QuerySet, field: str = 'position') -> bool:
+    """Whether anything in `queryset` was ever positioned by hand in `field` (`position` for a
+    parent's subtasks, `today_position` for the Today list). A reorder writes 0, 1, 2, ..., so any
+    value above 0 means one happened. `queryset` must be exactly the set the list orders, and
+    `tasks.next_position` / `tasks.next_today_position` take their maximum over the same set."""
+    return queryset.filter(**{f'{field}__gt': 0}).exists()
 
 
 def with_subtask_counts(queryset: QuerySet) -> QuerySet:
@@ -94,28 +98,23 @@ def open_tasks(user: User) -> QuerySet:
     return Task.objects.filter(user=user, completed_at__isnull=True, deleted_at__isnull=True)
 
 
-def today_set(user: User, account: TodoAccount | None = None) -> QuerySet:
-    """Open, non-trashed tasks due today or earlier (the overdue ones included), unordered."""
+def today_set(user: User) -> QuerySet:
+    """Open, non-trashed tasks due today or earlier (the overdue ones included), unordered: what
+    the count beside Today counts."""
     return open_tasks(user).filter(due_date__lte=user_today(user))
+
+
+def todays_tasks(user: User) -> QuerySet:
+    """Open, non-trashed tasks due *today* (not the overdue ones), unordered: the list the user can
+    drag into a manual order, and the set `today_position` is taken over."""
+    return open_tasks(user).filter(due_date=user_today(user))
+
+
+def subtasks_of(parent: Task) -> QuerySet:
+    """The non-trashed subtasks of `parent` (completed ones included), unordered: the list a
+    parent's `position` order is taken over."""
+    return Task.objects.filter(parent=parent, deleted_at__isnull=True)
 
 
 def overdue_set(user: User) -> QuerySet:
     return open_tasks(user).filter(due_date__lt=user_today(user))
-
-
-def upcoming_groups(
-    user: User, account: TodoAccount | None = None, days: int = UPCOMING_DAYS
-) -> list[tuple[date, list[Task]]]:
-    """Open tasks due after today and up to `days` days from now, grouped by day, days in order,
-    each day's tasks in the default order. Days with nothing are left out."""
-    today = user_today(user)
-    queryset = open_tasks(user).filter(due_date__gt=today, due_date__lte=today + timedelta(days))
-    queryset = with_subtask_counts(queryset).prefetch_related('labels')
-    groups: list[tuple[date, list[Task]]] = []
-    for task in order_tasks(queryset):
-        assert task.due_date is not None  # filtered above
-        if groups and groups[-1][0] == task.due_date:
-            groups[-1][1].append(task)
-        else:
-            groups.append((task.due_date, [task]))
-    return groups

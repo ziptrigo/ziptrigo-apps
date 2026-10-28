@@ -14,7 +14,7 @@ from uuid import UUID
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -37,6 +37,10 @@ UPDATABLE = frozenset(
 POSTPONE_PRESETS = ('tomorrow', 'next_week', 'next_weekend', 'date')
 REORDER_SCOPES = ('today', 'subtasks')
 
+UNPAID_MESSAGE = (
+    'This task has not been paid for yet. Top up your credits first: it can be deleted forever '
+    'once it is settled.'
+)
 BLOCKED_MESSAGE = 'Top up your credits to add tasks: a repeating task is waiting to be paid.'
 TOO_MANY_MESSAGE = 'Too many open tasks. Complete or delete some to add more.'
 
@@ -101,6 +105,23 @@ def clean_labels(user: User, labels: Iterable[Label | str | UUID]) -> list[Label
     return found
 
 
+def _lock_tasks(*pks: UUID) -> dict[UUID, Task]:
+    """The tasks `pks`, re-read with their rows locked (in pk order, so two callers locking the same
+    rows can't deadlock). Call it inside a transaction; a task that is gone is missing from the
+    result."""
+    return {
+        task.pk: task for task in Task.objects.select_for_update().filter(pk__in=pks).order_by('pk')
+    }
+
+
+def _locked_parent(parent: Task) -> Task:
+    """`parent` re-read under its row lock (inside a transaction), or a refusal if it is gone."""
+    locked = _lock_tasks(parent.pk).get(parent.pk)
+    if locked is None:
+        raise _error('parent', 'Unknown parent task.')
+    return locked
+
+
 def clean_parent(user: User, parent: Task | None) -> Task | None:
     """`parent` if a subtask may go under it: the user's own open, non-trashed top-level task."""
     if parent is None:
@@ -114,16 +135,29 @@ def clean_parent(user: User, parent: Task | None) -> Task | None:
     return parent
 
 
-def next_position(user: User, parent: Task | None) -> int:
-    """`Task.position` of a task that joins `parent`'s subtasks (or the user's top-level tasks):
-    after the others when a manual order exists, else 0 (the default sort applies)."""
-    top = (
-        Task.objects.filter(user=user, parent=parent, deleted_at__isnull=True).aggregate(
-            top=Max('position')
-        )['top']
-        or 0
-    )
+def _after_the_others(queryset, field: str) -> int:
+    """`max(field) + 1` over `queryset` when it has a manual order (any value above 0), else 0 (the
+    default sort applies). `queryset` is the very set the list orders (`dates.has_manual_order`)."""
+    top = queryset.aggregate(top=Max(field))['top'] or 0
     return top + 1 if top > 0 else 0
+
+
+def next_position(parent: Task | None) -> int:
+    """`Task.position` of a task that joins `parent`'s subtasks: after the others when they have a
+    manual order, else 0. Only subtasks have a manual order in `position`; a top-level task is
+    ordered in Today by `today_position` (`next_today_position`) and keeps 0 here."""
+    if parent is None:
+        return 0
+    return _after_the_others(dates.subtasks_of(parent), 'position')
+
+
+def next_today_position(user: User, due_date: date | None) -> int:
+    """`Task.today_position` of a new task: after the others only when it lands in the Today list
+    (it is due today) and *that list* already has a manual order; else 0, so a task created for
+    another day, or in a list nobody reordered, never changes how Today sorts."""
+    if due_date is None or due_date != user_today(user):
+        return 0
+    return _after_the_others(dates.todays_tasks(user), 'today_position')
 
 
 # -- Create and update ---------------------------------------------------------------------------
@@ -164,6 +198,10 @@ def create_task(
         number = allocate_number(account)  # locks the account row; refreshes `account`
         if account.creation_blocked_at is not None and not allow_unpaid:
             raise _error(NON_FIELD_ERRORS, BLOCKED_MESSAGE)
+        if cleaned_parent is not None:
+            # Locked and re-read: a concurrent move of the parent under another task (`update_task`)
+            # would otherwise leave this a subtask of a subtask.
+            cleaned_parent = clean_parent(user, _locked_parent(cleaned_parent))
         if (
             dates.open_tasks(user).count() >= settings.max_open_tasks_per_user
         ):  # under the lock, so racing creations can't pass the cap together
@@ -183,7 +221,8 @@ def create_task(
             source=source,
             charged_credits=charged,
             unpaid_at=timezone.now() if unpaid else None,
-            position=next_position(user, cleaned_parent),
+            position=next_position(cleaned_parent),
+            today_position=next_today_position(user, cleaned_date),
         )
         task.save()
         if cleaned_labels:
@@ -217,21 +256,36 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
         if 'due_date' in changes and new_date is None:
             new_time = None
         values['due_date'], values['due_time'] = clean_due(new_date, new_time)
+        if values['due_date'] != task.due_date:
+            values['today_position'] = 0  # a place in another day's Today order means nothing
     labels = clean_labels(task.user, changes['labels']) if 'labels' in changes else None
+    new_parent: Task | None = None
+    moves = False
     if 'parent' in changes:
-        parent = clean_parent(task.user, changes['parent'])
-        if parent is not None:
-            if parent.pk == task.pk:
-                raise _error('parent', 'A task cannot be its own parent.')
-            if Task.objects.filter(parent=task).exists():
-                raise _error('parent', 'A task with subtasks cannot become a subtask.')
-        if parent != task.parent:
-            values['parent'] = parent
-            values['position'] = next_position(task.user, parent)
+        new_parent = clean_parent(task.user, changes['parent'])
+        if new_parent is not None and new_parent.pk == task.pk:
+            raise _error('parent', 'A task cannot be its own parent.')
+        moves = new_parent != task.parent
+        if moves:
+            values['parent'] = new_parent
 
-    for name, value in values.items():
-        setattr(task, name, value)
     with transaction.atomic():
+        if moves:
+            if new_parent is not None:
+                # The checks below read rows another request may be changing (a subtask being
+                # added to this task, the new parent moving under something): lock both, in pk
+                # order, and decide on what is there now.
+                locked = _lock_tasks(task.pk, new_parent.pk)
+                if task.pk not in locked:
+                    raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
+                if new_parent.pk not in locked:
+                    raise _error('parent', 'Unknown parent task.')
+                clean_parent(task.user, locked[new_parent.pk])
+                if Task.objects.filter(parent=task).exists():
+                    raise _error('parent', 'A task with subtasks cannot become a subtask.')
+            values['position'] = next_position(new_parent)
+        for name, value in values.items():
+            setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
         if labels is not None:
             task.labels.set(labels)
@@ -239,12 +293,20 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
 
 
 def toggle_checklist(task: Task, index: int, checked: bool) -> Task:
-    """Tick or untick the `index`th checklist item of the description (written back to the text)."""
-    try:
-        description = toggle_checklist_item(task.description, index, checked)
-    except IndexError, ValueError:
-        raise _error('index', 'No such checklist item.') from None
-    return update_task(task, changes={'description': description})
+    """Tick or untick the `index`th checklist item of the description (written back to the text).
+
+    The toggle is applied to the description as it is *now*: the row is re-read under its lock, so
+    two boxes ticked at once (two requests) both survive instead of the second overwriting the
+    first. Returns the fresh task."""
+    with transaction.atomic():
+        fresh = Task.objects.select_for_update().filter(pk=task.pk).first()
+        if fresh is None:
+            raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
+        try:
+            description = toggle_checklist_item(fresh.description, index, checked)
+        except IndexError, ValueError:
+            raise _error('index', 'No such checklist item.') from None
+        return update_task(fresh, changes={'description': description})
 
 
 # -- Completing ----------------------------------------------------------------------------------
@@ -311,15 +373,19 @@ def postpone_task(task: Task, *, preset: str, date: date | None = None) -> Task:
     if not task.is_open:
         raise _error(NON_FIELD_ERRORS, 'Only open tasks can be postponed.')
     target = postpone_target(user_today(task.user), preset, date)
-    task.due_date = target
-    task.save(update_fields=['due_date', 'updated_at'])
+    if target != task.due_date:
+        task.due_date = target
+        task.today_position = 0  # a place in another day's Today order means nothing
+    task.save(update_fields=['due_date', 'today_position', 'updated_at'])
     return task
 
 
 def reschedule_overdue(user: User) -> int:
     """Set the due date to today on every open task that is overdue, keeping the times. Returns
     how many changed."""
-    return dates.overdue_set(user).update(due_date=user_today(user), updated_at=timezone.now())
+    return dates.overdue_set(user).update(
+        due_date=user_today(user), today_position=0, updated_at=timezone.now()
+    )
 
 
 # -- Trash ---------------------------------------------------------------------------------------
@@ -370,20 +436,35 @@ def restore_task(task: Task) -> Task:
     return task
 
 
+def owes_credits(task: Task) -> bool:
+    """Whether the task, or one of its subtasks, is still unpaid (`unpaid_at`, see
+    `services.billing`)."""
+    return Task.objects.filter(Q(pk=task.pk) | Q(parent=task), unpaid_at__isnull=False).exists()
+
+
 def delete_forever(task: Task) -> None:
-    """Delete the task's rows now (its subtasks go with it). Nothing is refunded."""
+    """Delete the task's rows now (its subtasks go with it). Nothing is refunded.
+
+    **An unpaid task cannot be deleted forever** (nor can the Trash purge it): deleting the debt
+    would let the user top up 1 credit, have `billing.settle` find nothing owed and unblock
+    creation. It is refused until a top-up settles it. Trashing and restoring stay allowed.
+    """
+    if owes_credits(task):
+        raise _error(NON_FIELD_ERRORS, UNPAID_MESSAGE)
     task.delete()
 
 
 def purge_trash() -> int:
     """Delete the tasks trashed more than `TodoSettings.trash_days` ago (the daily job). One bad
-    row is logged and skipped. Returns how many tasks were deleted."""
+    row is logged and skipped. An unpaid task, or a parent with an unpaid subtask, is skipped too
+    until it is settled (see `delete_forever`). Returns how many tasks were deleted."""
     cutoff = timezone.now() - timedelta(days=TodoSettings.load().trash_days)
     deleted = 0
     failed: set[UUID] = set()
     while True:
         batch = list(
-            Task.objects.filter(deleted_at__lt=cutoff)
+            Task.objects.filter(deleted_at__lt=cutoff, unpaid_at__isnull=True)
+            .exclude(subtasks__unpaid_at__isnull=False)
             .exclude(pk__in=failed)
             .order_by('deleted_at')
             .values_list('pk', flat=True)[:200]
@@ -405,15 +486,18 @@ def purge_trash() -> int:
 
 def reorder(user: User, *, scope: str, ids: list[UUID], parent: Task | None = None) -> int:
     """Write `position = index` for the given ids, inside one transaction, ignoring ids that are
-    not in the set: `scope='today'` (the user's Today set) or `'subtasks'` (the children of
-    `parent`). One `Task.position` column serves both, so a subtask that is also in Today is
-    ordered by the same number in each. Returns how many tasks were positioned."""
+    not in the set. `scope='today'` orders the tasks due today (`dates.todays_tasks`, the list the
+    page orders; the overdue ones keep the default sort) in `Task.today_position`; `'subtasks'`
+    orders the children of `parent` in `Task.position`. The two are separate columns, so ordering
+    one list never puts the other into manual order. Returns how many tasks were positioned."""
     if scope == 'today':
-        allowed = dates.today_set(user)
+        allowed = dates.todays_tasks(user)
+        field = 'today_position'
     elif scope == 'subtasks':
         if parent is None or parent.user_id != user.pk:
             raise _error('parent', 'Choose the task whose subtasks to order.')
-        allowed = Task.objects.filter(user=user, parent=parent, deleted_at__isnull=True)
+        allowed = dates.subtasks_of(parent).filter(user=user)
+        field = 'position'
     else:
         raise _error('scope', 'Choose what to order.')
     in_set = {task.pk: task for task in allowed.filter(pk__in=ids)}
@@ -422,9 +506,9 @@ def reorder(user: User, *, scope: str, ids: list[UUID], parent: Task | None = No
     for index, pk in enumerate(ids):
         task = in_set.get(pk)
         if task is not None:
-            task.position = index
+            setattr(task, field, index)
             task.updated_at = now
             changed.append(task)
     with transaction.atomic():
-        Task.objects.bulk_update(changed, ['position', 'updated_at'])
+        Task.objects.bulk_update(changed, [field, 'updated_at'])
     return len(changed)

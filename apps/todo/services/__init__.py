@@ -15,8 +15,9 @@ from .dates import (
     open_tasks,
     order_tasks,
     overdue_set,
+    subtasks_of,
     today_set,
-    upcoming_groups,
+    todays_tasks,
     with_subtask_counts,
 )
 from .labels import (
@@ -91,14 +92,15 @@ __all__ = [
     'resolver_for',
     'restore_task',
     'settle_unpaid_tasks',
+    'subtasks_of',
     'tasks',
     'toggle_checklist',
     'today_set',
+    'todays_tasks',
     'trash_task',
     'uncomplete_task',
     'update_default_due_time',
     'update_label',
     'update_task',
-    'upcoming_groups',
     'with_subtask_counts',
 ]

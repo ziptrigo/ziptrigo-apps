@@ -2911,8 +2911,9 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   normalised copies search will run over; `Task.save()` keeps them in step, also with
   `update_fields`), `priority` (0 none, 1 highest to 3), `due_date` and `due_time` (the user's local
   date and wall-clock time, **not an instant**; a time only with a date), `completed_at`,
-  `deleted_at` (the Trash is a column, not a status), `position` (manual order), `source` (`web`,
-  `api`, `email`, `recurrence`), `charged_credits`, `unpaid_at`, `labels` (M2M). The user's time zone
+  `deleted_at` (the Trash is a column, not a status), `position` (manual order among a parent's
+  subtasks) and `today_position` (manual order of the Today list: two columns, see "Ordering"),
+  `source` (`web`, `api`, `email`, `recurrence`), `charged_credits`, `unpaid_at`, `labels` (M2M). The user's time zone
   turns the local date into an instant only when something needs one: `services.dates.due_at(task,
   account)` uses `local_datetime` with `due_time` or the account's `default_due_time`; "today" is
   always `user_today(user)` (`apps.accounts.services.timezones`).
@@ -2934,20 +2935,35 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   `billing.on_credits_added`, which only queues `settle_unpaid_tasks(user_id)` (a `default` queue
   task, through `enqueue_after_commit`, and only for a user whose account is blocked). It settles the
   user's unpaid tasks oldest first, each in its own transaction with the task row locked, stopping at
-  the first the balance can't cover, and clears the block when none remain; idempotent. Deleting an
-  unpaid task does **not** clear the block (only a settle does), and nothing is ever refunded:
-  completing, trashing, deleting forever or purging keep what was paid. `month_usage` is
+  the first the balance can't cover, and clears the block when none remain; idempotent. That last
+  step (`billing._unblock_if_settled`) runs its "none remain" check and the clearing in one
+  transaction under the account row lock (the one `allocate_number` takes), so a concurrent
+  `create_task(..., allow_unpaid=True)` can't have its block cleared over its new unpaid task.
+  **An unpaid task cannot be deleted forever** (decision on the review of #192): deleting the debt
+  would let the user top up 1 credit, have `settle` find nothing owed and unblock creation. So
+  `delete_forever` refuses a task that is unpaid, or whose subtasks are (`tasks.owes_credits`; a
+  `ValidationError` with `UNPAID_MESSAGE`, which the web shows as a 422 / flash message, the 422
+  with a Top up link to `billing:credits-history`), and `purge_trash` skips such tasks, and a
+  parent holding one, until a settle pays them; they then follow the normal Trash rules. Trashing,
+  restoring and completing an unpaid task stay allowed, and deleting one does not clear the block
+  (only a settle does). Nothing is ever refunded: completing, trashing, deleting forever or
+  purging keep what was paid. `get_account(user)` hands back an account whose `.user` is the
+  `user` passed in, so billing and the pages cost no extra query. `month_usage` is
   `(tasks created this month, free allowance)`; the pages show `min(used, free)`
   (`views.common.free_line`) as "N of F free tasks used this month".
 - **Services** (`services/tasks.py`; a refusal is a `django.core.exceptions.ValidationError` keyed
   by field, `__all__` for none). `create_task` validates before writing anything: title (stripped,
-  1 to 500), description (`\r\n` normalised, at most 20,000), priority 0 to 3, a time needs a date,
+  1 to 500), description (`\r\n` normalised, at most 20,000; the form has no `max_length` of its own and calls
+  this same check, so a browser submission at the limit is accepted), priority 0 to 3, a time needs a date,
   the parent is the user's own open non-trashed top-level task (`'A subtask cannot have
-  subtasks.'`), labels are the user's own, the blocked state and the open-task cap (both checked
+  subtasks.'`; re-read under its row lock inside the creation transaction, after the account lock,
+  so it can't be moved under another task in between), labels are the user's own, the blocked state and the open-task cap (both checked
   under the account lock). `update_task(task, *, changes)` is partial (`UPDATABLE` keys), computes
   every value before assigning any (a refusal leaves the instance untouched), clears the time when
-  the date is cleared, lets a task move under a parent only when it has no subtasks of its own, and
-  refuses a trashed task. `complete_task` is a conditional write (`completed_at IS NULL`) that also
+  the date is cleared, lets a task move under a parent only when it has no subtasks of its own (decided inside the
+  write's transaction with the task and the new parent locked, `select_for_update` in pk order, so
+  two concurrent moves can't leave two levels of nesting), and refuses a trashed task. A date
+  change resets `today_position`. `complete_task` is a conditional write (`completed_at IS NULL`) that also
   completes the open, non-trashed subtasks in the same transaction (the web asks first, see below;
   the recurrence sub-issue hooks in here); `uncomplete_task` leaves a subtask's parent as it is.
   `postpone_task(task, preset=, date=)`: `tomorrow`, `next_week` (the next Monday *after* today,
@@ -2959,10 +2975,13 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   its own stays trashed) and refuses a subtask whose parent is still trashed; `delete_forever`
   cascades; `purge_trash()` (the daily `todo.purge_trash` job, lease 1 h) deletes what was trashed
   more than `trash_days` ago in batches, logging and skipping a row that fails.
-  `toggle_checklist(task, index, checked)` is `apps.core.markdown.toggle_checklist_item` on the
-  description saved through `update_task`. `reorder(user, scope=, ids=, parent=)` writes
-  `position = index` for the ids in the set (`today`: the user's Today set, overdue included;
-  `subtasks`: the children of `parent`) and ignores the rest.
+  `toggle_checklist(task, index, checked)` is `apps.core.markdown.toggle_checklist_item` applied to
+  the description *as it is now* (the row is re-read with `select_for_update` in the same
+  transaction as the save, so two boxes ticked at once both survive) and saved through
+  `update_task`; it returns the fresh task. `reorder(user, scope=, ids=, parent=)` writes the
+  index of each id into the scope's column (`today`: `today_position` of the tasks due today,
+  `dates.todays_tasks`, the overdue ones excluded; `subtasks`: `position` of the children of
+  `parent`) and ignores the rest.
   `services/labels.py`: `create_label` (name whitespace-collapsed, unique ignoring case with a
   friendly message, the per-user cap, colour validated and lower-cased, empty = `#8fa89e`),
   `update_label` (`None` leaves a field), `delete_label` (tasks keep their other labels),
@@ -2975,16 +2994,23 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   undated last, then date-only before timed, then the time, then priority (1 first, none last),
   then oldest; done in the database (`order_tasks`, so pagination works). `?sort=` on All:
   `priority` (then date), `created` (newest), `title` (the normalised title). **Manual order exists
-  in two places only**, Today (the tasks due *today*; the overdue ones keep the default sort above
-  them) and a parent's subtasks, and one `Task.position` column serves both (a subtask that is also
-  in Today has the same number in both, which is accepted). Judgement call, since a task can't
-  otherwise tell "never positioned" from "positioned first": `reorder` writes 0, 1, 2, ..., so a set
-  with any `position > 0` is *manually ordered* (`has_manual_order`) and gets `position`-then-default
-  order, otherwise the default sort; `create_task` gives a new task `max position + 1` among its
-  user's siblings only when such an order exists, else 0, so adding a task never turns a
-  default-sorted list into a manual one. SortableJS (`sortablejs@1.15.6` from cdnjs, loaded only on
-  Today, the task page and Labels) posts the order to `POST /todo/reorder/` (`scope`, `ids[]`,
-  `parent`: the parent's number), answered 204.
+  in two lists only, each with its own column**, so ordering one never changes the other: Today
+  (the tasks due *today*, subtasks included; the overdue ones keep the default sort above them) in
+  `Task.today_position`, and a parent's subtasks in `Task.position`. Judgement call, since a task
+  can't otherwise tell "never positioned" from "positioned first": `reorder` writes 0, 1, 2, ...,
+  so a list with any value above 0 in its column is *manually ordered* (`dates.has_manual_order`)
+  and gets that column then the default order, otherwise the default sort. **The rule: the set
+  that decides, the set a new task's value is taken over and the set the view orders are the same
+  set.** Today: `dates.todays_tasks`; `create_task` gives a new task due today `max
+  today_position + 1` over that set when it is manual, and every other task 0 (so a task created
+  for another day, or while nobody reordered Today, never changes how any Today sorts, and the
+  default stays due time then priority unless the user reordered *that* list). A date change
+  (`update_task`, `postpone_task`, `reschedule_overdue`) resets `today_position` to 0, since a
+  place in one day's order means nothing on another. Subtasks: `dates.subtasks_of(parent)`;
+  `next_position` takes the max over that parent's subtasks, so a drag in one parent's list never
+  orders another's. A top-level task's `position` stays 0. SortableJS (`sortablejs@1.15.6` from
+  cdnjs, loaded only on Today, the task page and Labels) posts the order to `POST /todo/reorder/`
+  (`scope`, `ids[]`, `parent`: the parent's number), answered 204.
 - **Views and URLs** (`views/`; every one `@login_required`; another user's task, and a *trashed*
   task where a view doesn't accept one, is a **404**, never a 403: `views.common.owned_task`).
   `todo:today` `/todo/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
@@ -2996,7 +3022,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   out of band), `todo:task` `/todo/<number>/` (also a trashed task, read-only with Restore),
   `todo:edit` (`part=title|description|details`, so each part of the page saves on its own; no part
   is the whole form), `todo:complete`, `uncomplete`, `postpone` (`preset`, `date`), `trash-task`,
-  `restore`, `delete` (a trashed task, forever), `checklist` (`index`, `checked`; answers the
+  `restore`, `delete` (a trashed task, forever; an unpaid one is a 422, see "Numbering and billing"), `checklist` (`index`, `checked`; answers the
   re-rendered `#task-description`), `subtask-add`, `todo:reorder`, `todo:reschedule-overdue`,
   `todo:labels` (GET the page, POST add) with `labels/<id>/edit/`, `labels/<id>/delete/`,
   `labels/reorder/`, and `todo:settings` (GET, POST the default due time). Every page renders
@@ -3005,7 +3031,9 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   action on a row (`ctx=row`, the default, with the `view` the row is in) answers the re-rendered
   `task_row.html`, or an *empty* body when the row no longer belongs to that list
   (`views.lists.belongs`: completed from Today, postponed past the date, trashed anywhere), which
-  htmx swaps in to remove it, plus the sidebar count out of band; from the task page (`ctx=page`)
+  htmx swaps in to remove it, plus the sidebar count out of band (completing a parent that had open subtasks adds an out-of-band
+  `<li id="task-N" hx-swap-oob="delete">` per subtask it completed, so their rows leave the same
+  list instead of staying open until a reload); from the task page (`ctx=page`)
   it answers the whole `task_panel.html` (`#task-panel`); without htmx it redirects back (a POSTed
   same-site `next`, else the `Referer`, else Today). Errors follow the 422 convention with
   `HX-Retarget` to the slot of the control that was used (`#quick-add-msg`, `#task-msg`,

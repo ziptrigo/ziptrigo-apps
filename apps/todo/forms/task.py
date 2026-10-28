@@ -1,12 +1,13 @@
 from typing import Any
 
 from django import forms
+from django.core.exceptions import ValidationError
 
 from apps.accounts.models import User
 
 from ..models import Label, Priority
-from ..services.limits import DESCRIPTION_MAX, TITLE_MAX
-from ..services.tasks import POSTPONE_PRESETS
+from ..services.limits import TITLE_MAX
+from ..services.tasks import POSTPONE_PRESETS, clean_description
 
 #: The parts of the task page that save on their own (`part` in the POST): which fields each one
 #: sends. Without a `part` the form is the whole task form (the quick-add box).
@@ -26,9 +27,9 @@ class TaskForm(forms.Form):
         max_length=TITLE_MAX,
         error_messages={'required': 'Title is required.'},
     )
-    description = forms.CharField(
-        label='Description', required=False, strip=False, max_length=DESCRIPTION_MAX
-    )
+    # No `max_length`: a browser submits `\r\n`, which the field would count twice. The cap is the
+    # service's (`clean_description`, called below), which normalizes line endings first.
+    description = forms.CharField(label='Description', required=False, strip=False)
     priority = forms.TypedChoiceField(
         label='Priority',
         required=False,
@@ -52,6 +53,12 @@ class TaskForm(forms.Form):
             for name in list(self.fields):
                 if name not in keep:
                     del self.fields[name]
+
+    def clean_description(self) -> str:
+        try:
+            return clean_description(self.cleaned_data['description'])
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message_dict['description']) from None
 
     def clean(self):
         cleaned = super().clean()

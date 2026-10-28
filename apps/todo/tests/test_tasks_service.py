@@ -18,6 +18,7 @@ from ..services import (
     delete_forever,
     due_at,
     get_account,
+    has_manual_order,
     order_tasks,
     postpone_target,
     postpone_task,
@@ -25,11 +26,12 @@ from ..services import (
     reorder,
     reschedule_overdue,
     restore_task,
+    subtasks_of,
     today_set,
+    todays_tasks,
     toggle_checklist,
     trash_task,
     uncomplete_task,
-    upcoming_groups,
     update_task,
 )
 from .factories import make_label, make_task, make_user, utc
@@ -146,17 +148,88 @@ class TestCreateValidation:
         assert not Task.objects.exists()
         assert get_account(user).next_task_number == 1000
 
-    def test_position_follows_a_manual_order_only(self, user, config):
-        first = create_task(user, title='A')
-        second = create_task(user, title='B')
-        assert (first.position, second.position) == (0, 0)  # no manual order: default sort
+    def test_no_manual_order_means_position_zero_everywhere(self, user, config, wednesday):
+        first = create_task(user, title='A', due_date=wednesday)
+        second = create_task(user, title='B', due_date=wednesday)
 
-        reorder_today = [first.pk, second.pk]
-        Task.objects.filter(pk__in=reorder_today).update(due_date=date(2020, 1, 1))
-        reorder(user, scope='today', ids=reorder_today)
-        third = create_task(user, title='C')
+        assert (first.position, first.today_position) == (0, 0)  # the default sort applies
+        assert (second.position, second.today_position) == (0, 0)
 
-        assert third.position == 2  # after the others, so it joins the end of the manual order
+    def test_a_task_joins_the_end_of_todays_manual_order_only_when_it_is_due_today(
+        self, user, config, wednesday
+    ):
+        a = create_task(user, title='A', due_date=wednesday)
+        b = create_task(user, title='B', due_date=wednesday)
+        reorder(user, scope='today', ids=[b.pk, a.pk])
+
+        today = create_task(user, title='Today', due_date=wednesday)
+        tomorrow = create_task(user, title='Tomorrow', due_date=date(2026, 10, 29))
+        undated = create_task(user, title='Undated')
+
+        assert today.today_position == 2  # after the others in the list that was reordered
+        assert (tomorrow.today_position, undated.today_position) == (0, 0)  # other lists
+        assert tomorrow.position == undated.position == today.position == 0
+
+    def test_a_task_created_after_a_drag_does_not_change_a_later_days_today(
+        self, user, config, wednesday, freeze_now
+    ):
+        thursday = date(2026, 10, 29)
+        a = create_task(user, title='A', due_date=wednesday)
+        b = create_task(user, title='B', due_date=wednesday)
+        reorder(user, scope='today', ids=[b.pk, a.pk])
+        late = create_task(user, title='17:00', due_date=thursday, due_time=time(17, 0))
+        early = create_task(user, title='08:00', due_date=thursday, due_time=time(8, 0))
+
+        freeze_now(2026, 10, 29)  # the next day
+
+        assert (late.today_position, early.today_position) == (0, 0)
+        assert not has_manual_order(todays_tasks(user), 'today_position')
+        listed = order_tasks(todays_tasks(user), 'date')
+        assert [task.title for task in listed] == ['08:00', '17:00']  # due time, not creation
+
+    def test_a_subtask_drag_does_not_put_today_into_manual_order(self, user, config, wednesday):
+        parent = create_task(user, title='P')
+        first = create_task(user, title='S1', parent=parent, due_date=wednesday)
+        second = create_task(user, title='S2', parent=parent, due_date=wednesday)
+
+        reorder(user, scope='subtasks', ids=[second.pk, first.pk], parent=parent)
+
+        assert has_manual_order(subtasks_of(parent))
+        assert not has_manual_order(todays_tasks(user), 'today_position')
+        assert create_task(user, title='New', due_date=wednesday).today_position == 0
+
+    def test_a_today_drag_does_not_put_subtasks_into_manual_order(self, user, config, wednesday):
+        parent = create_task(user, title='P')
+        first = create_task(user, title='S1', parent=parent, due_date=wednesday)
+        second = create_task(user, title='S2', parent=parent, due_date=wednesday)
+
+        reorder(user, scope='today', ids=[second.pk, first.pk])
+
+        assert has_manual_order(todays_tasks(user), 'today_position')
+        assert not has_manual_order(subtasks_of(parent))
+        assert create_task(user, title='S3', parent=parent).position == 0
+
+    def test_a_subtask_joins_only_its_own_parents_manual_order(self, user, config):
+        p1, p2 = create_task(user, title='P1'), create_task(user, title='P2')
+        s1 = create_task(user, title='S1', parent=p1)
+        s2 = create_task(user, title='S2', parent=p1)
+        reorder(user, scope='subtasks', ids=[s2.pk, s1.pk], parent=p1)
+
+        assert create_task(user, title='S3', parent=p2).position == 0  # another parent's list
+        assert create_task(user, title='S4', parent=p1).position == 2  # joins the end
+
+    def test_changing_the_date_forgets_the_place_in_todays_order(self, user, config, wednesday):
+        a = create_task(user, title='A', due_date=wednesday)
+        b = create_task(user, title='B', due_date=wednesday)
+        reorder(user, scope='today', ids=[b.pk, a.pk])
+        assert a.refresh_from_db() is None and a.today_position == 1
+
+        update_task(a, changes={'due_date': date(2026, 11, 2)})
+        postpone_task(b, preset='tomorrow')
+
+        a.refresh_from_db()
+        b.refresh_from_db()
+        assert (a.today_position, b.today_position) == (0, 0)
 
 
 class TestUpdate:
@@ -526,14 +599,15 @@ class TestReorder:
     def test_today_scope(self, user, config, wednesday):
         a = make_task(user, due_date=wednesday)
         b = make_task(user, due_date=wednesday)
-        c = make_task(user, due_date=date(2026, 10, 1))  # overdue: in the Today set
-        later = make_task(user, due_date=date(2026, 12, 1))  # not in it
+        c = make_task(user, due_date=date(2026, 10, 1))  # overdue: not in the ordered list
+        later = make_task(user, due_date=date(2026, 12, 1))  # not in it either
 
-        assert reorder(user, scope='today', ids=[c.pk, later.pk, b.pk, a.pk]) == 3
+        assert reorder(user, scope='today', ids=[c.pk, later.pk, b.pk, a.pk]) == 2
 
         for task, position in ((c, 0), (b, 2), (a, 3), (later, 0)):
             task.refresh_from_db()
-            assert task.position == position
+            assert task.today_position == position
+            assert task.position == 0  # the subtasks' column is untouched
 
     def test_subtasks_scope(self, user, config):
         parent = make_task(user)
@@ -547,6 +621,7 @@ class TestReorder:
         b.refresh_from_db()
         stranger.refresh_from_db()
         assert (b.position, a.position, stranger.position) == (0, 1, 0)
+        assert (a.today_position, b.today_position) == (0, 0)  # Today's column is untouched
 
     def test_ids_of_another_user_are_ignored(self, user, other_user, config, wednesday):
         mine = make_task(user, due_date=wednesday)
@@ -555,7 +630,7 @@ class TestReorder:
         assert reorder(user, scope='today', ids=[theirs.pk, mine.pk]) == 1
 
         theirs.refresh_from_db()
-        assert theirs.position == 0
+        assert theirs.today_position == 0
 
     def test_a_parent_of_another_user_is_refused(self, user, other_user, config):
         theirs = make_task(other_user)
@@ -571,8 +646,18 @@ class TestReorder:
 
         reorder(user, scope='today', ids=[c.pk, a.pk, b.pk])
 
-        ordered = order_tasks(Task.objects.filter(user=user), 'manual')
+        ordered = order_tasks(Task.objects.filter(user=user), 'today_manual')
         assert [task.title for task in ordered] == ['C', 'A', 'B']
+
+    def test_a_manual_order_of_subtasks_sorts_by_position(self, user, config):
+        parent = make_task(user)
+        a = make_task(user, parent=parent, title='A')
+        b = make_task(user, parent=parent, title='B')
+        reorder(user, scope='subtasks', ids=[b.pk, a.pk], parent=parent)
+
+        ordered = order_tasks(Task.objects.filter(parent=parent), 'manual')
+
+        assert [task.title for task in ordered] == ['B', 'A']
 
 
 class TestDefaultOrder:
@@ -631,25 +716,17 @@ class TestDefaultOrder:
 
 
 class TestSets:
-    def test_today_set_and_upcoming_groups(self, user, other_user, config, wednesday):
+    def test_today_set(self, user, other_user, config, wednesday):
         overdue = make_task(user, due_date=date(2026, 10, 20))
         today = make_task(user, due_date=wednesday)
-        tomorrow_b = make_task(user, due_date=date(2026, 10, 29), due_time=time(10, 0))
-        tomorrow_a = make_task(user, due_date=date(2026, 10, 29))
-        in_14 = make_task(user, due_date=date(2026, 11, 11))
-        in_15 = make_task(user, due_date=date(2026, 11, 12))
+        tomorrow = make_task(user, due_date=date(2026, 10, 29))
         nodate = make_task(user)
         done = make_task(user, due_date=wednesday, completed_at=utc(2026, 10, 27))
         trashed = make_task(user, due_date=wednesday, deleted_at=utc(2026, 10, 27))
         theirs = make_task(other_user, due_date=wednesday)
 
         assert set(today_set(user)) == {overdue, today}
-        groups = upcoming_groups(user, get_account(user))
-        assert [(day, [t.pk for t in tasks]) for day, tasks in groups] == [
-            (date(2026, 10, 29), [tomorrow_a.pk, tomorrow_b.pk]),
-            (date(2026, 11, 11), [in_14.pk]),
-        ]
-        assert not {in_15, nodate, done, trashed, theirs} & set(today_set(user))
+        assert not {tomorrow, nodate, done, trashed, theirs} & set(today_set(user))
 
     def test_today_follows_the_users_zone(self, user, config, freeze_now):
         user.timezone = 'Pacific/Auckland'

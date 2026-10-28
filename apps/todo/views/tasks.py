@@ -26,7 +26,6 @@ from apps.core.htmx import hx_redirect, is_htmx
 from ..forms import ChecklistForm, PostponeForm, SubtaskForm, TaskForm
 from ..models import Label, Task, TodoSettings
 from ..services import (
-    POSTPONE_PRESETS,
     complete_task,
     create_task,
     delete_forever,
@@ -37,6 +36,7 @@ from ..services import (
     reorder,
     reschedule_overdue,
     restore_task,
+    subtasks_of,
     today_set,
     toggle_checklist,
     trash_task,
@@ -86,7 +86,7 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
     subtasks = []
     open_subtasks = 0
     if task.parent_id is None:
-        queryset = Task.objects.filter(parent=task, deleted_at__isnull=True)
+        queryset = subtasks_of(task)
         manual = has_manual_order(queryset)
         subtasks = list(decorate(order_tasks(queryset, 'manual' if manual else 'date')))
         open_subtasks = sum(1 for sub in subtasks if not sub.is_completed)
@@ -274,9 +274,18 @@ def task_checklist(request: AuthenticatedHttpRequest, number: int) -> HttpRespon
 # -- State changes -------------------------------------------------------------------------------
 
 
-def _act(request: AuthenticatedHttpRequest, number: int, action, *, trashed: bool | None = False):
-    """Look up the task, charge the edit budget, run `action(task)` and answer."""
-    task = owned_task(request, number, trashed=trashed)
+def _act(
+    request: AuthenticatedHttpRequest,
+    number: int,
+    action,
+    *,
+    trashed: bool | None = False,
+    task: Task | None = None,
+):
+    """Look up the task (unless the caller already has it), charge the edit budget, run
+    `action(task)` and answer."""
+    if task is None:
+        task = owned_task(request, number, trashed=trashed)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=_slot(request))) is not None:
         return response
     try:
@@ -289,7 +298,23 @@ def _act(request: AuthenticatedHttpRequest, number: int, action, *, trashed: boo
 @login_required
 @require_POST
 def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
-    return _act(request, number, complete_task)
+    # Completing a parent completes its open subtasks too. On a list, their rows are on the same
+    # page as the parent's, so they are removed along with it (out of band) instead of staying as
+    # open rows until a reload. (The task page re-renders its whole panel anyway.)
+    cascaded = list(
+        Task.objects.filter(
+            user=request.user,
+            parent__number=number,
+            completed_at__isnull=True,
+            deleted_at__isnull=True,
+        ).values_list('number', flat=True)
+    )
+    response = _act(request, number, complete_task)
+    if cascaded and response.status_code == 200 and is_htmx(request) and not _is_page(request):
+        response.content += ''.join(
+            f'<li id="task-{subtask}" hx-swap-oob="delete"></li>' for subtask in cascaded
+        ).encode()
+    return response
 
 
 @login_required
@@ -301,18 +326,19 @@ def task_uncomplete(request: AuthenticatedHttpRequest, number: int) -> HttpRespo
 @login_required
 @require_POST
 def task_postpone(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
-    form = PostponeForm(request.POST)
     task = owned_task(request, number)
-    if not form.is_valid():
+    form = PostponeForm(request.POST)
+    if not form.is_valid():  # includes a preset that is not one of the choices: a 422
         return refuse(
             request, form_error_lines(form), retarget=_slot(request), fallback=_task_url(task)
         )
-    preset = form.cleaned_data['preset']
-    assert preset in POSTPONE_PRESETS
     return _act(
         request,
         number,
-        lambda found: postpone_task(found, preset=preset, date=form.cleaned_data['date']),
+        lambda found: postpone_task(
+            found, preset=form.cleaned_data['preset'], date=form.cleaned_data['date']
+        ),
+        task=task,
     )
 
 
@@ -335,7 +361,16 @@ def task_delete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     task = owned_task(request, number, trashed=True)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=_slot(request))) is not None:
         return response
-    delete_forever(task)
+    try:
+        delete_forever(task)
+    except ValidationError as exc:  # unpaid: it has to be settled first
+        return refuse(
+            request,
+            validation_lines(exc),
+            retarget=_slot(request),
+            top_up=True,
+            fallback=_task_url(task) if _is_page(request) else page_url('trash'),
+        )
     if is_htmx(request) and not _is_page(request):
         return render(
             request,

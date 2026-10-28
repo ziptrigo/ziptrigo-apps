@@ -34,6 +34,7 @@ from ..services import (
     open_tasks,
     order_tasks,
     overdue_set,
+    todays_tasks,
     with_subtask_counts,
 )
 from .common import render_page
@@ -101,12 +102,12 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
 
     if view == 'today':
         overdue = list(decorate(order_tasks(overdue_set(user))))
-        todays = open_tasks(user).filter(due_date=today)
-        manual = has_manual_order(todays)
+        todays = todays_tasks(user)
+        manual = has_manual_order(todays, 'today_position')
         context.update(
             {
                 'overdue': overdue,
-                'tasks': list(decorate(order_tasks(todays, 'manual' if manual else 'date'))),
+                'tasks': list(decorate(order_tasks(todays, 'today_manual' if manual else 'date'))),
                 'manual': manual,
             }
         )
