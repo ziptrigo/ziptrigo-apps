@@ -439,11 +439,12 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
 - **nginx**: must set `X-Real-IP` from the real client address (not passed through from a
   client-supplied header) -- `file_transfer`'s download-IP logging trusts it and falls back to
   `REMOTE_ADDR` otherwise. The `infra` repo's `apps/ziptrigo-apps/nginx.conf` also applies a
-  coarse per-IP `limit_req` (20 r/s, `burst=100`; `/go/<code>` short links on their own looser
-  zone, 50 r/s, `burst=500`; both answer 429 with a short plain-text body and `Retry-After: 1`) as
-  defense-in-depth below the app's own rate limits (issue #119); those limits remain the real ones.
-  Short URLs' `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` belong in that looser zone too (#170,
-  not done yet): until then a burst of scans from one shared address can meet nginx's main zone.
+  coarse per-IP `limit_req` (20 r/s, `burst=100`; short links on their own looser zone, 50 r/s,
+  `burst=500`: QR's `/go/<code>` and Short URLs' `/s/<code>`, `/s/<code>+` and
+  `/s/<code>/unlock`, so a burst of scans from one shared address never meets nginx's 429;
+  `/s/<code>/report` stays in the main zone; both zones answer 429 with a short plain-text body and
+  `Retry-After: 1`) as defense-in-depth below the app's own rate limits (issues #119, #170); those
+  limits remain the real ones.
 
 ## Design System
 

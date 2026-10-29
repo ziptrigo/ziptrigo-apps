@@ -1215,7 +1215,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   `accounts.services.email_confirmation.send_confirmation_email` and
   `file_transfer.views.anonymous`'s confirm views both catch and swallow/surface it like the
   existing `ResendTooSoon`.
-- **nginx** (issue #119): a coarse per-IP `limit_req` sits in front of the whole site as
+- **nginx** (issues #119, #170): a coarse per-IP `limit_req` sits in front of the whole site as
   defense-in-depth below the application layer. It is configured in the separate `infra` repo
   (`apps/ziptrigo-apps/nginx.conf`, both `app.ziptrigo.com` and `app-staging.ziptrigo.com`), not
   here, and is described here as designed, not as deployed (check the issue's checkboxes). Per
@@ -1223,13 +1223,18 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   gunicorn receives; `$uri` is normalized, so it would let `/x/../go/abc` pass for a short link):
   the main zone (`ziptrigo_apps_prod` / `_staging`, keyed on `$binary_remote_addr` -- the visitor,
   since both HTTPS server blocks include `cloudflare-realip.conf` -- for everything except the
-  `/go/<code>` shape) at 20 r/s with `burst=100 nodelay`, and **`/go/<code>` on its own looser
-  zone** (`ziptrigo_apps_go_prod` / `_staging`, 50 r/s, `burst=500`) instead of an exemption: a scan
-  burst from one NAT address must never see an error, the same reason the app itself only skips the
-  scan-count write there, but a flood of made-up codes (one lookup each, which the app's own rule
-  does not shed: an unknown code over its limit is still looked up and 404s) is still shed. The
-  `/go/` shape is Django's route (`^go/(?P<short_code>[^/]+)/?$`) read off the raw URI, so
-  dot-segment, percent-encoded and `/go/a/b/c` paths are counted by the main zone. The numbers are
+  short link shapes below) at 20 r/s with `burst=100 nodelay`, and **short links on their own
+  looser zone** (`ziptrigo_apps_go_prod` / `_staging`, 50 r/s, `burst=500`) instead of an
+  exemption: a scan burst from one NAT address must never see an error, the same reason the app
+  itself only skips the click-count write there, but a flood of made-up codes (one lookup each,
+  which the app's own rule does not shed: an unknown code over its limit is still looked up and
+  404s) is still shed. The short link shapes are Django's routes read off the raw URI, each
+  followed by the end or a query string: QR's `/go/<code>`
+  (`^go/(?P<short_code>[^/]+)/?$`) and, since issue #170, Short URLs' `/s/<code>`, `/s/<code>+`
+  and `/s/<code>/unlock` (`apps/short_url/redirect_urls.py`: code `[A-Za-z0-9_-]+`, an optional
+  trailing slash; the password page throttles its attempts itself). Dot-segment, percent-encoded,
+  `/go/a/b/c` and `/s/a/b/c` paths are counted by the main zone, and so is `/s/<code>/report` (a
+  form POST that the app limits strictly per IP, `SU_REPORT_IP`). The numbers are
   far above ordinary use (the receipts list polls every 3 s, htmx search per keystroke pause, upload
   JSON calls), so the app's own limits above remain the real ones. Over the limit nginx answers
   **429** with a short plain-text body and `Retry-After: 1`, not the app's JSON or htmx partial:
@@ -3010,9 +3015,7 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   `tests_e2e/ai/short_url.md`. No `inv openapi` spec is committed in this repo, so there is none to
   regenerate.
 - **Not done / follow-ups.** Safe Browsing (or similar) checking of destinations is issue #163 (label
-  `Url`): nothing checks what a destination serves. Two infra follow-ups: nginx's coarse `limit_req`
-  must put `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser `/go/`-style zone (#170), or
-  a burst of scans from one shared address would meet nginx's 429; and the GeoLite2 database and
+  `Url`): nothing checks what a destination serves. One infra follow-up: the GeoLite2 database and
   `GEOIP_PATH` have to reach the containers (#171). A dedicated short domain, anonymous shortening,
   bulk create, a trash with restore and device/geo routing are out of scope for v1.
 
@@ -4411,8 +4414,8 @@ gunicorn must only ever be reachable from nginx's own private Docker bridge addr
 published on a public interface directly**, since `settings.TRUSTED_PROXIES`' default trust list is
 exactly that private range (see "File transfer specifics" and "Rate limiting" above's "Trusted
 proxy"). A coarse per-IP `limit_req` in nginx itself is configured in the `infra` repo
-(`apps/ziptrigo-apps/nginx.conf`, issue #119; main zone plus a looser `/go/<code>` zone, see
-"Rate limiting" above).
+(`apps/ziptrigo-apps/nginx.conf`, issue #119; main zone plus a looser short link zone for
+`/go/<code>` and `/s/<code>` (#170), see "Rate limiting" above).
 
 ## State of the test suites
 
@@ -4467,12 +4470,12 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
 - Short URLs (#162) is fully built (phases 1 to 4: links and billing, analytics, password and
   preview, abuse tooling, the JWT API and CLI; see "Short URLs" above). Destinations are **not**
   checked against Safe Browsing or any malware list: that is issue #163 (label `Url`), so the only
-  defences are the blocked-domain list, reports and takedown. Two infra follow-ups: nginx's coarse
-  `limit_req` has to put `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser `/go/`-style
-  zone (#170: until then a burst of scans from one shared address can get nginx's 429, which the
-  app itself never answers), and the GeoLite2-Country database plus `GEOIP_PATH` have to be provided
-  to the containers (#171: until then every click's country is unknown and `short_url.W001` shows at
-  every deploy). `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
+  defences are the blocked-domain list, reports and takedown. One infra follow-up remains: the
+  GeoLite2-Country database plus `GEOIP_PATH` have to be provided to the containers (#171: until
+  then every click's country is unknown and `short_url.W001` shows at every deploy). nginx's coarse
+  `limit_req` already counts `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser
+  `/go/`-style zone (#170), so a burst of scans from one shared address never meets its 429.
+  `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
   `receipts.py` and `filetransfer.py` still carry their own copies of it.
 - To-do (#161) is built in waves. Only the foundation (#178: tasks, subtasks, labels, numbering, task
   billing, the web pages) and repeating tasks (#179) exist; comments, search, reminders, attachments,
