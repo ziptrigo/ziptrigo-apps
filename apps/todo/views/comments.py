@@ -23,12 +23,13 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core.htmx import is_htmx
 
 from ..forms import CommentForm
-from ..models import Comment, Task
+from ..models import Attachment, Comment, Task, TodoSettings
 from ..services import (
     add_comment,
     comment_history,
     delete_comment,
     edit_comment,
+    get_account,
     render_markdown,
     resolver_for_request,
     restore_comment,
@@ -54,12 +55,22 @@ def comments_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
     comment mentions is looked up once."""
     resolver = resolver_for_request(request)
     comments = list(Comment.objects.filter(task=task).select_related('user'))
+    files: dict[object, list[Attachment]] = {}
+    for attachment in Attachment.objects.filter(
+        comment__in=[c.pk for c in comments if not c.is_deleted], uploaded=True
+    ).order_by('created_at', 'id'):
+        files.setdefault(attachment.comment_id, []).append(attachment)
     for comment in comments:
         comment.html = '' if comment.is_deleted else render_markdown(comment.body, resolver)
+        comment.files = files.get(comment.pk, [])
+    config = TodoSettings.load()
     return {
         'task': task,
         'comments': comments,
         'comment_total': sum(1 for comment in comments if not comment.is_deleted),
+        'comment_files_frozen': get_account(request.user).is_frozen,
+        'comment_files_max_bytes': config.max_attachment_bytes,
+        'comment_files_max_files': config.max_attachments_per_task,
     }
 
 
@@ -100,7 +111,12 @@ def comment_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     if (response := limited(request, 'TODO_COMMENT_USER', retarget=ADD_MSG)) is not None:
         return response
     try:
-        comment = add_comment(task, request.user, form.cleaned_data['body'])
+        comment = add_comment(
+            task,
+            request.user,
+            form.cleaned_data['body'],
+            attachment_ids=request.POST.getlist('attachment_ids'),
+        )
     except ValidationError as exc:
         return _refuse(request, task, validation_lines(exc))
     return _done(request, task, comment)
@@ -118,7 +134,12 @@ def comment_edit(request: AuthenticatedHttpRequest, number: int, comment_id: UUI
     if (response := limited(request, 'TODO_COMMENT_USER', retarget=slot)) is not None:
         return response
     try:
-        edit_comment(comment, form.cleaned_data['body'])
+        edit_comment(
+            comment,
+            form.cleaned_data['body'],
+            attachment_ids=request.POST.getlist('attachment_ids'),
+            remove_attachment_ids=request.POST.getlist('remove_attachment_ids'),
+        )
     except ValidationError as exc:
         return _refuse(request, task, validation_lines(exc), slot=slot)
     return _done(request, task, comment)

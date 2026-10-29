@@ -29,6 +29,16 @@ the rows are gone, which narrows it; what remains is a PUT landing after that wi
 never calls `complete` (the tab closed mid-upload). That object is never billed, and goes with the
 user's prefix when the account is deleted.
 
+**Files on comments.** A comment's files are the same rows with `for_comment` true. The browser
+uploads them (the same `start` / PUT / `complete` calls, `start_upload(..., for_comment=True)`, which
+also works on a completed task, since a completed task can be commented on) *before* the comment is
+saved, as drafts with no comment yet; `link_to_comment` then ties the uploaded drafts to the comment
+being added or edited, and `remove_from_comment` deletes ones the edit removes. The task's own
+"Attachments" list and `attachment_count` leave `for_comment` rows out. A draft never linked
+(`discard_draft`, or abandoned: `abandon_comment_files`, by `cleanup_uploads`) is deleted after a
+day. Deleting a comment keeps its files, still billed, like the comment's own text, until it is
+restored or its task is deleted. They share the task's cap on files.
+
 Trashing a task keeps its attachments, still billed (like Receipts' Trash). They go with the task
 when it is deleted for good or purged (`delete_for_tasks`, called by `services.tasks` inside the
 transaction that deletes the task), and with the user (`services.lifecycle.delete_user_storage`).
@@ -53,7 +63,7 @@ from django.utils import timezone
 
 from apps.core.services.sniff import SNIFF_BYTES, sniff_inline_type
 
-from ..models import Attachment, Task, TodoSettings
+from ..models import Attachment, Comment, Task, TodoSettings
 from .accounts import add_stored_bytes, get_account, is_frozen
 from .errors import AccountFrozenError
 from .storage import GET_URL_EXPIRES_SECONDS, PUT_URL_EXPIRES_SECONDS, attachment_key, get_storage
@@ -117,9 +127,11 @@ def start_upload(
     size: int,
     declared_type: str,
     checksum_sha256: str,
+    for_comment: bool = False,
 ) -> UploadTicket:
     """Register a new upload on `task` and presign its PUT. The caller must have checked that
-    `task` belongs to the requesting user.
+    `task` belongs to the requesting user. With `for_comment` the file is a draft for a comment
+    (see the module docstring) and a completed task is fine.
 
     Raises:
         AccountFrozenError: the account's storage is unpaid.
@@ -132,7 +144,7 @@ def start_upload(
 
     if task.is_trashed:
         raise ValidationError('Files cannot be attached to a task in the trash.')
-    if task.is_completed:
+    if task.is_completed and not for_comment:
         raise ValidationError('Files cannot be attached to a completed task.')
     if size < 1:
         raise ValidationError('The file is empty.')
@@ -150,12 +162,13 @@ def start_upload(
         declared_type=(declared_type or '').split(';')[0].strip().lower()[:100],
         sha256=checksum_sha256,
         uploaded=False,
+        for_comment=for_comment,
     )
     with transaction.atomic():
         # The task row is the lock the cap is counted under, so two starts can't both take the last
         # slot; the state is re-read under it (it may have been trashed or completed meanwhile).
         locked = Task.objects.select_for_update().get(pk=task.pk)
-        if locked.is_trashed or locked.is_completed:
+        if locked.is_trashed or (locked.is_completed and not for_comment):
             raise ValidationError('Files cannot be attached to this task any more.')
         # Checked under the lock, with the state of the task: an account frozen since the caller
         # looked takes no upload.
@@ -317,12 +330,31 @@ def abandon_uploads(*, older_than: timedelta = ABANDONED_AFTER) -> int:
     return removed
 
 
+def abandon_comment_files(*, older_than: timedelta = ABANDONED_AFTER) -> int:
+    """Delete the comment files that were uploaded but never saved with a comment within
+    `older_than` (the user closed the page, or removed the file from the form and the browser's
+    `discard` call was lost). Each goes through `delete_attachment`, so its bytes stop being billed;
+    one bad row is logged and skipped. Returns how many were removed."""
+    cutoff = timezone.now() - older_than
+    removed = 0
+    drafts = Attachment.objects.filter(
+        for_comment=True, comment__isnull=True, uploaded=True, created_at__lte=cutoff
+    )
+    for attachment in drafts:
+        try:
+            delete_attachment(attachment)
+            removed += 1
+        except Exception:
+            logger.exception('Failed to clean up the unused comment file %s', attachment.pk)
+    return removed
+
+
 def with_attachment_counts(queryset: QuerySet) -> QuerySet:
-    """Annotate `attachment_count` (uploaded attachments; a pending upload isn't one yet) on a
-    queryset of tasks. A subquery, not a join, like `comments.with_comment_counts`: a list already
+    """Annotate `attachment_count` (uploaded attachments, not the files of comments; a pending
+    upload isn't one yet) on a queryset of tasks. A subquery, not a join, like `comments.with_comment_counts`: a list already
     counts subtasks with a join, and two joins would multiply the counts."""
     counts = (
-        Attachment.objects.filter(task=OuterRef('pk'), uploaded=True)
+        Attachment.objects.filter(task=OuterRef('pk'), uploaded=True, for_comment=False)
         .order_by()
         .values('task')
         .annotate(total=Count('pk'))
@@ -409,3 +441,64 @@ def download_url(attachment: Attachment, *, inline: bool = False) -> str:
         disposition='inline' if show_inline else 'attachment',
         content_type=attachment.inline_type or None,
     )
+
+
+def discard_draft(attachment: Attachment) -> None:
+    """Delete a comment file that was uploaded but not saved with a comment (the user removed it
+    from the form). Raises `ValidationError` for any other attachment. A storage error raises and
+    leaves it as it was (`abandon_comment_files` retries)."""
+    if not attachment.for_comment or attachment.comment_id is not None:
+        raise ValidationError('This file is attached.')
+    delete_attachment(attachment)
+
+
+def link_to_comment(comment: Comment, attachment_ids: Iterable[object]) -> list[Attachment]:
+    """Tie uploaded drafts to `comment` (the caller holds the comment's lock inside a transaction).
+    Every id must be an uploaded, unlinked comment file of the same task and owner; one already on
+    this comment is left alone, so a repeated submit is harmless. Raises `ValidationError` (keyed
+    `attachment_ids`) for an id that is not such a file, or one still uploading."""
+    ids = list(dict.fromkeys(str(item) for item in attachment_ids))
+    if not ids:
+        return []
+    try:
+        rows = list(
+            Attachment.objects.select_for_update().filter(
+                pk__in=ids, task_id=comment.task_id, user_id=comment.user_id, for_comment=True
+            )
+        )
+    except ValidationError, ValueError:  # not UUIDs
+        rows = []
+    ready = [row for row in rows if row.uploaded and row.comment_id in (None, comment.pk)]
+    if len(ready) != len(ids):
+        raise ValidationError(
+            {'attachment_ids': 'A file is not ready to be attached. Wait for uploads to finish.'}
+        )
+    for row in ready:
+        if row.comment_id is None:
+            row.comment = comment
+            row.save(update_fields=['comment'])
+    return ready
+
+
+def remove_from_comment(comment: Comment, attachment_ids: Iterable[object]) -> int:
+    """Delete the files of `comment` among `attachment_ids` (others are ignored). Storage errors
+    raise `ValidationError`, after deleting what it could. Returns how many were removed."""
+    ids = list(dict.fromkeys(str(item) for item in attachment_ids))
+    if not ids:
+        return 0
+    try:
+        rows = list(Attachment.objects.filter(pk__in=ids, comment=comment))
+    except ValidationError, ValueError:  # not UUIDs
+        return 0
+    removed = 0
+    failed = False
+    for row in rows:
+        try:
+            delete_attachment(row)
+            removed += 1
+        except STORAGE_ERRORS:
+            logger.exception('Could not delete attachment %s', row.pk)
+            failed = True
+    if failed:
+        raise ValidationError('A file could not be removed right now. Try again later.')
+    return removed

@@ -45,7 +45,7 @@ def start(task, data: bytes = PNG_BYTES, **overrides):
         'checksum_sha256': checksum(data),
     }
     values.update(overrides)
-    return start_upload(task, **values)
+    return start_upload(task, **values)  # ty: ignore[invalid-argument-type]
 
 
 def upload(task, fake_storage, data: bytes = PNG_BYTES, **overrides) -> Attachment:

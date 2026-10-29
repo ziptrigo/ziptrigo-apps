@@ -1,6 +1,6 @@
 {% load local_time notification_tags %}
 {% comment %} The comments section of the task page (`#task-comments`): what every comment action answers. It sits beside `#task-panel`, not in it (a panel action does not re-render it; moving the task to the Trash or
-   back adds it to that response out of band, `oob`). Needs `task`, `comments` (each with its rendered `html`) and `comment_total` (the ones not deleted).
+   back adds it to that response out of band, `oob`). Needs `task`, `comments` (each with its rendered `html` and its `files`), `comment_total` (the ones not deleted) and the `comment_files_*` values of `comments_context`.
    A trashed task's comments are read-only: no menu, no add box. A deleted comment is a muted line; "Show" fetches its
    text. The history of an edited comment is fetched into `#comment-history-<id>`. Delete uses the page's confirm modal
    (a plain POST that redirects back). Ctrl/Cmd+Enter submits a textarea. {% endcomment %}
@@ -63,6 +63,7 @@
 
                 <div x-show="!editing" class="mt-1">
                     {% include 'todo/partials/markdown_body.html' with html=comment.html %}
+                    {% include 'todo/partials/comment_files.html' %}
                 </div>
 
                 {% if not task.is_trashed %}
@@ -79,6 +80,7 @@
                         Markdown: <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>, <code>- lists</code>, <code>&gt; quotes</code>,
                         <code>[links](https://...)</code> and <code>#1234</code> to link a task. Up to 10,000 characters.
                     </p>
+                    {% include 'todo/partials/comment_files_field.html' with files=comment.files %}
                     <div id="comment-msg-{{ comment.pk }}" class="mt-2 text-sm" aria-live="polite"></div>
                     <div class="mt-3 flex items-center justify-end gap-3">
                         <button type="button" @click="editing = false; $refs.edit.value = $refs.edit.defaultValue"
@@ -110,6 +112,7 @@
             Markdown: <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>, <code>- lists</code>, <code>&gt; quotes</code>,
             <code>[links](https://...)</code> and <code>#1234</code> to link a task. Up to 10,000 characters.
         </p>
+        {% include 'todo/partials/comment_files_field.html' with files=None %}
         <div class="mt-3 flex justify-end">
             <button type="submit"
                     class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">

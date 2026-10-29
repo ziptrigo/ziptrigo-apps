@@ -3406,7 +3406,9 @@ Issue #180 (`models/comment.py`, `models/reference.py`, `services/comments.py`,
   deleted." / "Comment restored.". "Referenced by" (`partials/referenced_by.html`, hidden when empty,
   in the panel): `#<number> <title>`
   per mention, "in a comment" and a `#comment-<id>` anchor when it is one. The section order on the
-  page is description, subtasks, referenced by, comments (the comments last, with their add box). `task_row.html` shows a comment icon
+  page is the title, the description (right under it, above the action buttons: it is what the task
+  *is*), the actions, details, reminders, subtasks, referenced by, attachments, comments (the comments
+  last, with their add box). `task_row.html` shows a comment icon
   with the count of comments that aren't deleted (`with_comment_counts`, a subquery in
   `views.lists.decorate`; a join would multiply the subtask counts).
 - **Admin.** Read-only `CommentAdmin` (newest first; task number, user, created, edited, revisions,
@@ -3548,6 +3550,35 @@ long reasoning.
 - **Rate limits**: `TODO_UPLOAD_USER` (120/min, `start`), `TODO_UPLOAD_COMPLETE_USER` (240/min,
   `complete`, charged **first** like Receipts' because each call is an S3 HEAD even for an object
   that never arrived), `TODO_DOWNLOAD_USER` (120/min) and `TODO_EDIT_USER` for removing and for cancelling an upload.
+- **Files on comments.** A comment's add and edit forms have an "Attach files" control
+  (`partials/comment_files_field.html`, `static/todo/js/comment_files.js`). A comment file is the same
+  `Attachment` row with `for_comment` true, plus a nullable `Attachment.comment` FK (migration
+  `0008_comment_attachments`): the browser uploads it as soon as it is picked, as a **draft** (`comment`
+  still null; the same `start` / PUT / `complete` calls with `for_comment: true` in the `start` body,
+  which also works on a *completed* task, since a completed task can be commented on, and refuses a
+  trashed one), and the finished file becomes a chip holding a hidden `attachment_ids` input.
+  Submitting the form posts those ids: `add_comment(task, user, body, attachment_ids)` /
+  `edit_comment(comment, body, attachment_ids, remove_attachment_ids)` tie the drafts to the comment
+  inside its transaction (`attachments.link_to_comment`: each must be an uploaded, unlinked comment
+  file of the same task and owner, else the whole comment is refused with an `attachment_ids` error --
+  all or nothing) and delete the files an edit removes, after the transaction (`remove_from_comment`:
+  a storage error is a refusal; the text is already saved). A files-only change is not an edit of the
+  text (no revision, no "(edited)"); a comment still needs text. Removing a chip before saving posts
+  `POST /todo/<n>/attachments/<id>/discard/` (`todo:attachment-discard`, `TODO_EDIT_USER`, idempotent;
+  a saved file is a 422), and the hourly `todo.cleanup_uploads` job also deletes drafts older than a day
+  (`attachments.abandon_comment_files`). Files show under the comment text (`comment_files.html`, Download
+  and, for a sniffed image or PDF, Open, through the existing download view); the edit form lists them
+  with a "Remove" checkbox each. **The task's own Attachments list, `attachment_count` and the API's
+  task `attachments` leave `for_comment` files out**; everything else is shared: billing and the
+  daily metering, the frozen state, the per-task cap on files (a comment's files count toward it), the
+  size limit, deleting with the task or user. Deleting a comment keeps its files, still billed, until it
+  is restored or the task is deleted. No API endpoint adds files to a comment yet. The upload engine is
+  `static/todo/js/uploader.js` (`TodoUploader.create`), which `attachments.js` (the task's block) and
+  `comment_files.js` both use; the script is wired from `htmx:load` because htmx swaps the comments
+  section after every action, and the form's submit button is disabled (and a submit stopped) while a
+  file is still uploading. Tests: `tests/test_comment_files.py` and the Playwright
+  `tests_e2e/test_todo_comment_files.py` (on the shared e2e server, whose To-do bucket is
+  `site_fakes.TodoE2EStorage` at `/__e2e__/todo-s3/`).
 - **Admin**: read-only `AttachmentAdmin` (task, filename, size, uploaded, inline type, user);
   `TodoAccountAdmin` also lists `stored_bytes` and the frozen state. The new `TodoSettings` fields
   are on the singleton page.

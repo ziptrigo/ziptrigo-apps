@@ -51,10 +51,14 @@ def meter_storage() -> None:
 
 
 def cleanup_uploads() -> None:
-    """Hourly: remove attachment uploads that were started but never completed within 24 hours."""
+    """Hourly: remove attachment uploads that were started but never completed within 24 hours, and
+    comment files that were uploaded but never saved with a comment."""
     removed = attachments.abandon_uploads()
     if removed:
         logger.info('Removed %d abandoned attachment upload(s).', removed)
+    unused = attachments.abandon_comment_files()
+    if unused:
+        logger.info('Removed %d comment file(s) never saved with a comment.', unused)
 
 
 def send_reminders() -> None:

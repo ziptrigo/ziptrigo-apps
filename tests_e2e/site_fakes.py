@@ -9,6 +9,8 @@ store is shared by every request. Imported lazily, like `receipts_fakes`.
   subclass here points the part and download URLs back at this server's `/__e2e__/ft-s3/<key>`
   view, which records a PUT part through `upload_part` (checking `x-amz-checksum-sha256` like S3)
   and answers with its `ETag`, so `complete_multipart_upload` assembles the real bytes.
+- **To-do bucket.** The same idea for To-do attachments and comment files: the unit tests'
+  `FakeTodoStorage` with a single presigned PUT / GET pointing back at `/__e2e__/todo-s3/<key>`.
 - **Mailbox.** Every email the site sends (still printed to the console as well) is kept, newest
   first, and listed at `/__e2e__/mail/` -- so a browser-driven test can open a confirmation or
   reset link without reading the server's output. `?to=<address>` filters by recipient.
@@ -31,6 +33,8 @@ from django.views.decorators.csrf import csrf_exempt
 from apps.core.services import email as email_service
 from apps.file_transfer.services import storage as file_transfer_storage
 from apps.file_transfer.tests.fakes import FakeS3Storage
+from apps.todo.services import storage as todo_storage
+from apps.todo.tests.fakes import FakeTodoStorage
 
 
 def bucket_cors(view: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
@@ -89,6 +93,37 @@ def ft_fake_bucket(request: HttpRequest, key: str) -> HttpResponse:
         filename = request.GET.get('filename', 'download')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+    return HttpResponse(status=405)
+
+
+class TodoE2EStorage(FakeTodoStorage):
+    """`FakeTodoStorage` with URLs that point back at `/__e2e__/todo-s3/`."""
+
+    def presigned_put_url(self, key: str, **kwargs) -> str:
+        super().presigned_put_url(key, **kwargs)
+        return f'{settings.BASE_URL}/__e2e__/todo-s3/{key}'
+
+    def presigned_get_url(self, key: str, filename: str, *args, **kwargs) -> str:
+        super().presigned_get_url(key, filename, *args, **kwargs)
+        return f'{settings.BASE_URL}/__e2e__/todo-s3/{key}?filename={quote(filename)}'
+
+
+@csrf_exempt
+@bucket_cors
+def todo_fake_bucket(request: HttpRequest, key: str) -> HttpResponse:
+    fake = todo_storage.get_storage()
+    if request.method == 'PUT':
+        declared = request.headers.get('x-amz-checksum-sha256', '')
+        actual = base64.b64encode(hashlib.sha256(request.body).digest()).decode()
+        if declared and declared != actual:
+            return HttpResponseBadRequest('BadDigest')
+        fake.objects[key] = request.body  # ty: ignore[unresolved-attribute]
+        return HttpResponse(status=200)
+    if request.method == 'GET':
+        data = fake.objects.get(key)  # ty: ignore[unresolved-attribute]
+        if data is None:
+            return HttpResponse('NoSuchKey', status=404)
+        return HttpResponse(data, content_type='application/octet-stream')
     return HttpResponse(status=405)
 
 
