@@ -63,11 +63,11 @@
     {% if view == 'all' %}
     <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span class="text-gray-500 dark:text-gray-400">Sort by</span>
-        {% for key, label in sorts.items %}
-        <a href="{{ page_url }}{% if key != 'date' %}?sort={{ key }}{% endif %}"
-           hx-get="{{ list_url }}?view=all{% if key != 'date' %}&sort={{ key }}{% endif %}" hx-target="#task-list" hx-swap="innerHTML"
-           {% if sort == key %}aria-current="true"{% endif %}
-           class="rounded focus:outline-none focus:ring-2 focus:ring-brand-primary {% if sort == key %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ label }}</a>
+        {% for link in sort_links %}
+        <a href="{{ page_url }}{% if link.query %}?{{ link.query }}{% endif %}"
+           hx-get="{{ list_url }}?view=all{% if link.query %}&{{ link.query }}{% endif %}" hx-target="#task-list" hx-swap="innerHTML"
+           {% if link.active %}aria-current="true" title="Click to sort {% if link.direction == 'asc' %}descending{% else %}ascending{% endif %}"{% endif %}
+           class="rounded focus:outline-none focus:ring-2 focus:ring-brand-primary {% if link.active %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ link.label }}{% if link.active %}<i class="fas fa-arrow-{% if link.direction == 'asc' %}up{% else %}down{% endif %} ml-1 text-xs" aria-hidden="true"></i><span class="sr-only">, sorted {% if link.direction == 'asc' %}ascending{% else %}descending{% endif %}</span>{% endif %}</a>
         {% endfor %}
     </div>
     {% elif view == 'trash' %}

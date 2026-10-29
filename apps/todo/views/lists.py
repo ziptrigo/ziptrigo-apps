@@ -26,6 +26,7 @@ from apps.core.htmx import is_htmx
 from ..forms import TaskForm
 from ..models import Label, Task, TodoSettings
 from ..services import (
+    DEFAULT_DIRECTIONS,
     SORT_DEFAULT,
     SORTS,
     UPCOMING_DAYS,
@@ -35,6 +36,7 @@ from ..services import (
     open_tasks,
     order_tasks,
     overdue_set,
+    sort_direction,
     todays_tasks,
     trash_set,
     upcoming_set,
@@ -105,6 +107,31 @@ def _query(**params: str) -> str:
     return '&'.join(f'{key}={value}' for key, value in params.items() if value)
 
 
+def sort_links(sort: str, direction: str) -> list[dict]:
+    """What the "Sort by" bar renders, one entry per sort: its `key`, `label`, the `query` of its
+    link (`?sort=...&dir=...`, without the `?`; empty for the plain default) and, for the active one,
+    its `direction`. A sort's link asks for its own default direction, except the active one, which
+    asks for the opposite: a second click reverses it."""
+    links = []
+    for key, label in SORTS.items():
+        active = key == sort
+        wanted = ('asc' if direction == 'desc' else 'desc') if active else DEFAULT_DIRECTIONS[key]
+        query = _query(
+            sort=key if key != SORT_DEFAULT else '',
+            dir=wanted if wanted != DEFAULT_DIRECTIONS[key] else '',
+        )
+        links.append(
+            {
+                'key': key,
+                'label': label,
+                'query': query,
+                'active': active,
+                'direction': direction if active else '',
+            }
+        )
+    return links
+
+
 def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     """The context of the list `view` (`today`, `upcoming`, `all`, `completed`, `trash`) for the
     requester, reading `sort` and `page` from the query string."""
@@ -112,6 +139,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     today = user_today(user)
     sort = request.GET.get('sort', '')
     sort = sort if sort in SORTS else SORT_DEFAULT
+    direction = sort_direction(sort, request.GET.get('dir'))
     context: dict = {'view': view, 'list_title': TITLES[view], 'today': today}
 
     if view == 'today':
@@ -140,7 +168,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
         return context
 
     if view == 'all':
-        queryset = order_tasks(decorate(open_tasks(user)), sort)
+        queryset = order_tasks(decorate(open_tasks(user)), sort, direction)
     elif view == 'completed':
         queryset = decorate(completed_set(user)).order_by('-completed_at', '-number')
     else:
@@ -155,13 +183,18 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
             purge_at = task.deleted_at + timedelta(days=trash_days)
             task.days_left = max(ceil((purge_at - now).total_seconds() / 86400), 0)
         context['trash_days'] = trash_days
-    base = {'sort': sort if sort != SORT_DEFAULT else ''}
+    # `dir` is only written when it is not the sort's own default, so the plain URLs stay as they were.
+    base = {
+        'sort': sort if sort != SORT_DEFAULT else '',
+        'dir': direction if direction != DEFAULT_DIRECTIONS[sort] else '',
+    }
     context.update(
         {
             'tasks': tasks,
             'page_obj': page_obj,
             'sort': sort,
             'sorts': SORTS,
+            'sort_links': sort_links(sort, direction),
             'page_query': _query(**base, page=str(page_obj.number) if page_obj.number > 1 else ''),
             'prev_query': _query(**base, page=str(page_obj.previous_page_number()))
             if page_obj.has_previous()
@@ -230,7 +263,11 @@ def task_list(request: AuthenticatedHttpRequest) -> HttpResponse:
     if view not in VIEWS:
         view = 'today'
     if not is_htmx(request):
-        query = _query(sort=request.GET.get('sort', ''), page=request.GET.get('page', ''))
+        query = _query(
+            sort=request.GET.get('sort', ''),
+            dir=request.GET.get('dir', ''),
+            page=request.GET.get('page', ''),
+        )
         return redirect(f'{page_url(view)}?{query}' if query else page_url(view))
 
     get_account(request.user)  # the partial is the first thing a stale tab may fetch

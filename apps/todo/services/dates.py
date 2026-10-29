@@ -37,6 +37,10 @@ SORTS = {
     'created': 'Newest',
     'title': 'Title',
 }
+#: The direction each sort runs in when none is asked for (`?dir=asc|desc`): the due date and the
+#: title ascending, priority 1 first (ascending), the creation time newest first (descending).
+DIRECTIONS = ('asc', 'desc')
+DEFAULT_DIRECTIONS = {'date': 'asc', 'priority': 'asc', 'created': 'desc', 'title': 'asc'}
 UPCOMING_DAYS = 14
 
 
@@ -68,11 +72,28 @@ def default_order() -> list:
     return [*_date_order(), _priority_rank().asc(), 'created_at', 'number']
 
 
-def order_tasks(queryset: QuerySet, sort: str = SORT_DEFAULT) -> QuerySet:
-    """`queryset` in `sort` order: `date` (the default, also for an unknown value), `priority`
+def sort_direction(sort: str, requested: str | None = None) -> str:
+    """The direction (`asc` or `desc`) a list sorted by `sort` runs in: `requested` when it is one
+    of `DIRECTIONS`, else the sort's default."""
+    default = DEFAULT_DIRECTIONS.get(sort, 'asc')
+    return requested if requested in DIRECTIONS else default
+
+
+def order_tasks(
+    queryset: QuerySet, sort: str = SORT_DEFAULT, direction: str | None = None
+) -> QuerySet:
+    """`queryset` in `sort` order (see `sort_direction` for `direction`; the opposite of the sort's
+    default is its exact reverse, ties included): `date` (the default, also for an unknown value), `priority`
     (then date), `created` (newest first), `title`, `manual` (a parent's subtasks: `Task.position`)
     or `today_manual` (the Today list: `Task.today_position`), the manual ones then in the default
     order for the tasks that tie."""
+    ordered = _order_tasks(queryset, sort)
+    if sort in DEFAULT_DIRECTIONS and sort_direction(sort, direction) != DEFAULT_DIRECTIONS[sort]:
+        return ordered.reverse()
+    return ordered
+
+
+def _order_tasks(queryset: QuerySet, sort: str) -> QuerySet:
     if sort == 'priority':
         return queryset.order_by(_priority_rank().asc(), *_date_order(), 'created_at', 'number')
     if sort == 'created':

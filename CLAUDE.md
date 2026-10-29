@@ -3133,7 +3133,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
 - **Ordering** (`services/dates.py`). The default sort, in every list: due date ascending with
   undated last, then date-only before timed, then the time, then priority (1 first, none last),
   then oldest; done in the database (`order_tasks`, so pagination works). `?sort=` on All:
-  `priority` (then date), `created` (newest), `title` (the normalised title). **Manual order exists
+  `priority` (then date), `created` (newest), `title` (the normalised title). **`?dir=asc|desc` reverses it** (`dates.sort_direction`; each sort has a default: `date`, `priority` and `title` ascending, `created` descending; `order_tasks(qs, sort, direction)` returns the exact reverse of the default order for the opposite direction, ties included, and an unknown `dir` means the default). The "Sort by" bar (`views.lists.sort_links`) links the active sort to the opposite direction, so a second click reverses it, shows a small up/down arrow (with an `sr-only` "sorted ascending/descending") on it, and writes `dir` into the URL only when it isn't the sort's default. Only the All page has the bar; the search page's sort `<select>` is unchanged. **Manual order exists
   in two lists only, each with its own column**, so ordering one never changes the other: Today
   (the tasks due *today*, subtasks included; the overdue ones keep the default sort above them) in
   `Task.today_position`, and a parent's subtasks in `Task.position`. Judgement call, since a task
