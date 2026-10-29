@@ -291,7 +291,8 @@ class FilterParams:
         `saved_filters` counts with: several of them in one aggregate."""
         condition = self.structured_condition(user)
         if self.q.strip():
-            condition &= search_condition(prepare_query(self.q, self.mode).db_pattern)
+            query = prepare_query(self.q, self.mode)
+            condition &= search_condition(query.db_pattern, query.number)
         return condition
 
     def narrow(self, queryset: QuerySet, user: User) -> QuerySet:

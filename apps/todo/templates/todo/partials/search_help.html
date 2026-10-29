@@ -9,6 +9,7 @@
         <ul class="list-disc space-y-1 pl-4">
             <li><code>*</code> matches any text, <code>?</code> matches one character: <code>pay*rent</code> finds "pay the rent".</li>
             <li>A word matches anywhere in a word: <code>rent</code> also finds "parent".</li>
+            <li>A task number (<code>1000</code> or <code>#1000</code>) also finds that task.</li>
             <li><code>/.../</code>, or the Regex box, reads the text as a regular expression. It is matched against the <em>normalised</em> text: lower case, no accents, punctuation as spaces. Letters you type are lower-cased for you (not escapes such as <code>\D</code>); write the pattern without accents.</li>
             <li>Regular expressions share the common syntax of Python and PostgreSQL: no backreferences, lookarounds, atomic groups, possessive quantifiers or named groups.</li>
             <li>Case, accents, punctuation and formatting are ignored.</li>

@@ -3826,7 +3826,12 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   `Task.description_text` and `Comment.body_text` (empty for a deleted comment, rebuilt on an edit or a
   restore). **Not searched:** deleted comments, comment revisions (they have no search column), tasks in the
   Trash, other users' tasks; completed tasks only with `include_completed`. A query is normalised the same
-  way, so `Cão`, `cao` and `Pay the RENT!` find what they should.
+  way, so `Cão`, `cao` and `Pay the RENT!` find what they should. **The task number too:** a glob query
+  that is only a number (`1000` or `#1000`, ASCII digits, up to 9; `PreparedQuery.number`) also matches the
+  task with exactly that number (`search_condition(pattern, number)`, so `filters.FilterParams.condition`
+  and the saved-filter counts do as well), next to everything whose text contains it. It is an exact
+  match (`100` does not find #1000), not applied to wildcards, text around it or regex mode, and a task
+  found only by its number has no snippet.
 - **Glob (the default) and regex.** `prepare_query(q, mode)` validates and compiles. In glob mode the query goes
   through `normalize_glob` (`normalize_for_search` except `*` and `?`, which stay wildcards; a separator next
   to a wildcard keeps one space, so `pay *` still means "pay", a space, anything; **a run of `*` is
