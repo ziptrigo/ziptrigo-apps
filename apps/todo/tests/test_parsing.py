@@ -268,9 +268,9 @@ class TestPrompt:
         }
 
 
-def completion(content):
+def completion(content, finish_reason='stop'):
     message = SimpleNamespace(content=content)
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason=finish_reason)])
 
 
 GOOD_REPLY = json.dumps(
@@ -322,6 +322,28 @@ class TestOpenAITitleParser:
         assert parsed.due_date == date(2026, 11, 1)
         assert parsed.rrule == MONTHLY
         assert parsed.clean_title == 'pay rent'
+
+    def test_no_provider_options_for_openai_itself(self, openai_mock, settings):
+        settings.OPENAI_BASE_URL = None
+        OpenAITitleParser().parse(ask())
+        kwargs = openai_mock.return_value.chat.completions.create.call_args.kwargs
+        assert kwargs['extra_body'] is None
+
+    def test_reasoning_is_turned_off_on_openrouter(self, openai_mock, settings):
+        # A reasoning model spent the whole token cap thinking and replied with nothing.
+        settings.OPENAI_BASE_URL = 'https://openrouter.ai/api/v1'
+        OpenAITitleParser().parse(ask())
+        kwargs = openai_mock.return_value.chat.completions.create.call_args.kwargs
+        assert kwargs['extra_body'] == {'reasoning': {'enabled': False}}
+
+    def test_a_reply_cut_off_by_the_token_cap_is_logged(self, openai_mock, caplog):
+        openai_mock.return_value.chat.completions.create.return_value = completion(
+            '', finish_reason='length'
+        )
+        with caplog.at_level('WARNING', logger='apps.todo.services.parsing'):
+            with pytest.raises(ParseUnavailable):
+                OpenAITitleParser().parse(ask())
+        assert 'cut off at 300 tokens' in caplog.text
 
     @pytest.mark.parametrize(
         'reply',

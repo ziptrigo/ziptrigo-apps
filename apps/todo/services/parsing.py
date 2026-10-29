@@ -64,6 +64,10 @@ MIN_DATE = date(2000, 1, 1)
 #: A reading the model gives less confidence than this is not shown as a chip.
 MIN_CONFIDENCE = 0.5
 _MAX_TOKENS = 300
+#: Sent to OpenRouter only (OpenAI's own API refuses the key): a reasoning model, such as the
+#: `qwen/qwen3.6-plus` that `OPENAI_TODO_MODEL` falls back to, would otherwise spend all of
+#: `_MAX_TOKENS` thinking and reply with nothing, and uncapped it takes ~20 s, over the timeout.
+_OPENROUTER_EXTRA_BODY = {'reasoning': {'enabled': False}}
 #: At most one model call open per process (see the module docstring).
 _slot = threading.BoundedSemaphore(1)
 
@@ -355,6 +359,13 @@ def parse_reply(raw: str | None, request: ParseRequest) -> ParsedTitle:
         raise ParseUnavailable(type(exc).__name__) from None
 
 
+def extra_body() -> dict[str, Any] | None:
+    """Provider-specific fields for the call: reasoning off when the endpoint is OpenRouter."""
+    if 'openrouter.ai' in (settings.OPENAI_BASE_URL or ''):
+        return _OPENROUTER_EXTRA_BODY
+    return None
+
+
 class OpenAITitleParser:
     """`AIClient` over the `openai` SDK's chat completions."""
 
@@ -371,10 +382,13 @@ class OpenAITitleParser:
                 response_format=response_format(),  # ty: ignore[invalid-argument-type]
                 temperature=0,
                 max_tokens=_MAX_TOKENS,
+                extra_body=extra_body(),
             )
             choices = completion.choices
             message = choices[0].message if choices else None
             raw = message.content if message is not None else None
+            if choices and getattr(choices[0], 'finish_reason', None) == 'length':
+                logger.warning('To-do AI reply cut off at %d tokens', _MAX_TOKENS)
         except Exception as exc:  # timeout, HTTP error, a client that is not configured, ...
             logger.warning('To-do AI call failed (%s)', type(exc).__name__)
             raise ParseUnavailable(type(exc).__name__) from exc
