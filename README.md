@@ -441,7 +441,7 @@ nginx on the VPS; the deployment itself lives in the `infra` repo (`apps/ziptrig
   `REMOTE_ADDR` otherwise. The `infra` repo's `apps/ziptrigo-apps/nginx.conf` also applies a
   coarse per-IP `limit_req` (20 r/s, `burst=100`; short links on their own looser zone, 50 r/s,
   `burst=500`: QR's `/go/<code>` and Short URLs' `/s/<code>`, `/s/<code>+` and
-  `/s/<code>/unlock`, so a burst of scans from one shared address never meets nginx's 429;
+  `/s/<code>/unlock`, sized well above what a crowd behind one shared address produces;
   `/s/<code>/report` stays in the main zone; both zones answer 429 with a short plain-text body and
   `Retry-After: 1`) as defense-in-depth below the app's own rate limits (issues #119, #170); those
   limits remain the real ones.

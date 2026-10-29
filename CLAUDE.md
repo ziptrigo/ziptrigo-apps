@@ -1222,25 +1222,31 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   environment there are two zones, routed by a pair of `map`s on the raw `$request_uri` (what
   gunicorn receives; `$uri` is normalized, so it would let `/x/../go/abc` pass for a short link):
   the main zone (`ziptrigo_apps_prod` / `_staging`, keyed on `$binary_remote_addr` -- the visitor,
-  since both HTTPS server blocks include `cloudflare-realip.conf` -- for everything except the
-  short link shapes below) at 20 r/s with `burst=100 nodelay`, and **short links on their own
-  looser zone** (`ziptrigo_apps_go_prod` / `_staging`, 50 r/s, `burst=500`) instead of an
-  exemption: a scan burst from one NAT address must never see an error, the same reason the app
-  itself only skips the click-count write there, but a flood of made-up codes (one lookup each,
-  which the app's own rule does not shed: an unknown code over its limit is still looked up and
-  404s) is still shed. The short link shapes are Django's routes read off the raw URI, each
-  followed by the end or a query string: QR's `/go/<code>`
-  (`^go/(?P<short_code>[^/]+)/?$`) and, since issue #170, Short URLs' `/s/<code>`, `/s/<code>+`
-  and `/s/<code>/unlock` (`apps/short_url/redirect_urls.py`: code `[A-Za-z0-9_-]+`, an optional
-  trailing slash; the password page throttles its attempts itself). Dot-segment, percent-encoded,
-  `/go/a/b/c` and `/s/a/b/c` paths are counted by the main zone, and so is `/s/<code>/report` (a
-  form POST that the app limits strictly per IP, `SU_REPORT_IP`). The numbers are
-  far above ordinary use (the receipts list polls every 3 s, htmx search per keystroke pause, upload
-  JSON calls), so the app's own limits above remain the real ones. Over the limit nginx answers
-  **429** with a short plain-text body and `Retry-After: 1`, not the app's JSON or htmx partial:
-  `core/base.html`'s `htmx-config` swaps 429, so an htmx request rejected by nginx swaps that text
-  into its target, acceptable during a flood. nginx keys IPv6 on the full /128, unlike the app's
-  /64. Presigned S3 uploads never reach nginx at all. Nothing in this repo depends on it.
+  since both HTTPS server blocks include `cloudflare-realip.conf` -- for everything except the short
+  link shapes below) at 20 r/s with `burst=100 nodelay`, and **short links on their own looser
+  zone** (`ziptrigo_apps_go_prod` / `_staging`, 50 r/s, `burst=500`; the `go` in the name is
+  historical, it now serves `/s/` too) instead of an exemption: a scan burst from one NAT address is
+  sized to stay well inside it, so a crowd does not see an error, the same reason the app itself
+  never refuses the redirect, but a flood of made-up codes (one lookup each, which the app's own
+  rule does not shed: an unknown code over its limit is still looked up and 404s) is still shed. The
+  short link shapes are Django's routes read off the raw URI, each followed by the end or a query
+  string: QR's `/go/<code>` (`^go/(?P<short_code>[^/]+)/?$`) and, since issue #170, Short URLs'
+  `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` (`apps/short_url/redirect_urls.py`: code
+  `[A-Za-z0-9_-]+`, an optional trailing slash). The "a crowd never sees an error" reasoning covers
+  the redirects and `GET /s/<code>/unlock` (the form, which a scan of a password-protected link
+  reaches through its 302): the app answers those whatever the load (over `SU_REDIRECT_IP` it only
+  skips recording the click, and for a link with `max_clicks` still writes the counter, without the
+  event). The preview (`SU_PREVIEW_IP`, 60/min, a plain 429) and `POST /s/<code>/unlock`
+  (`SU_PASSWORD_IP`, 15 per 10 min) have much stricter per-IP limits of their own in the app, so for
+  those the zone is only a ceiling. Dot-segment, percent-encoded, `/go/a/b/c` and `/s/a/b/c` paths
+  are counted by the main zone, and so is `/s/<code>/report` (a form POST that the app limits
+  strictly per IP, `SU_REPORT_IP`). The numbers are far above ordinary use (the receipts list polls
+  every 3 s, htmx search per keystroke pause, upload JSON calls), so the app's own limits above
+  remain the real ones. Over the limit nginx answers **429** with a short plain-text body and
+  `Retry-After: 1`, not the app's JSON or htmx partial: `core/base.html`'s `htmx-config` swaps 429,
+  so an htmx request rejected by nginx swaps that text into its target, acceptable during a flood.
+  nginx keys IPv6 on the full /128, unlike the app's /64. Presigned S3 uploads never reach nginx at
+  all. Nothing in this repo depends on it.
 
 ### API
 
@@ -2775,10 +2781,11 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   first (not counted). Otherwise a **`GET` is a click** (a `HEAD` redirects without recording) and the
   answer is a **`302`, never a `301`** (the destination can be edited) with `Cache-Control: no-store,
   private`. **Over the rate limit** a known link still redirects and an unknown code is still a 404,
-  never a 429 (a visitor must never see an error because someone else used the same address): only the
-  click *event* is skipped. **The exception is a link with `max_clicks`**: it is still counted over
-  the limit (the counter without the event, `clicks.record(with_event=False)`), because there the
-  counter is what ends the link, not a statistic. Don't "fix" this back to `/go/`'s behaviour.
+  never a 429 (a visitor must never see an error because someone else used the same address): the
+  click is simply not recorded (no counter, no event). **The exception is a link with
+  `max_clicks`**: it is still counted over the limit (the counter without the event,
+  `clicks.record(with_event=False)`), because there the counter is what ends the link, not a
+  statistic. Don't "fix" this back to `/go/`'s behaviour.
 - **Counting and bot filtering** (`services.clicks`, `services.useragents`). `record` bumps the
   counters with one conditional `UPDATE` (the cap is in the same statement, so racing clicks can't
   overshoot it; it returns False and the view answers the neutral page when the cap was reached
@@ -4415,7 +4422,7 @@ published on a public interface directly**, since `settings.TRUSTED_PROXIES`' de
 exactly that private range (see "File transfer specifics" and "Rate limiting" above's "Trusted
 proxy"). A coarse per-IP `limit_req` in nginx itself is configured in the `infra` repo
 (`apps/ziptrigo-apps/nginx.conf`, issue #119; main zone plus a looser short link zone for
-`/go/<code>` and `/s/<code>` (#170), see "Rate limiting" above).
+`/go/<code>` and the `/s/` short link shapes (#170), see "Rate limiting" above).
 
 ## State of the test suites
 
@@ -4473,8 +4480,8 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   defences are the blocked-domain list, reports and takedown. One infra follow-up remains: the
   GeoLite2-Country database plus `GEOIP_PATH` have to be provided to the containers (#171: until
   then every click's country is unknown and `short_url.W001` shows at every deploy). nginx's coarse
-  `limit_req` already counts `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser
-  `/go/`-style zone (#170), so a burst of scans from one shared address never meets its 429.
+  `limit_req` is designed to count `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser
+  short link zone (#170), sized well above what a crowd behind one shared address produces.
   `admin/shorturl.py` is the first CLI on `admin/utils.py`'s shared `api_request`;
   `receipts.py` and `filetransfer.py` still carry their own copies of it.
 - To-do (#161) is built in waves. Only the foundation (#178: tasks, subtasks, labels, numbering, task
