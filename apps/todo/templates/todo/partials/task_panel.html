@@ -47,6 +47,8 @@
     </div>
     {% endif %}
 
+    {% include 'todo/partials/description.html' %}
+
     <!-- Actions -->
     <div class="mb-8 flex flex-wrap items-center gap-3">
         {% if task.is_trashed %}
@@ -137,8 +139,6 @@
     </section>
 
     {% include 'todo/partials/reminders.html' %}
-
-    {% include 'todo/partials/description.html' %}
 
     {% if not task.parent_id %}
         {% include 'todo/partials/subtasks.html' %}
