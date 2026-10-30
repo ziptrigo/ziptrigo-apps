@@ -14,6 +14,7 @@ the bell's badge out of band, so the count follows every change.
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
+from urllib.parse import urlencode
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
@@ -51,7 +52,11 @@ def _background_login_required(view: Callable[..., HttpResponse]) -> Callable[..
 
 def _page_url(number: str | None = None) -> str:
     url = reverse('core:notifications')
-    return f'{url}?page={number}' if number and number.isdigit() else url
+    try:
+        page = int(number) if number else 0
+    except ValueError:
+        page = 0
+    return f'{url}?{urlencode({"page": page})}' if page > 0 else url
 
 
 def _dropdown_response(request: AuthenticatedHttpRequest) -> HttpResponse:

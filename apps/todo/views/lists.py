@@ -44,6 +44,7 @@ from ..services import (
     with_open_occurrences,
     with_subtask_counts,
 )
+from ..services.dates import DIRECTIONS
 from ..services.reminders import with_reminder_flags
 from .common import render_page
 
@@ -263,10 +264,14 @@ def task_list(request: AuthenticatedHttpRequest) -> HttpResponse:
     if view not in VIEWS:
         view = 'today'
     if not is_htmx(request):
+        sort = request.GET.get('sort', '')
+        sort = sort if sort in SORTS else ''
+        direction = request.GET.get('dir', '')
+        page = request.GET.get('page', '')
         query = _query(
-            sort=request.GET.get('sort', ''),
-            dir=request.GET.get('dir', ''),
-            page=request.GET.get('page', ''),
+            sort=sort,
+            dir=direction if direction in DIRECTIONS else '',
+            page=str(int(page)) if page.isascii() and page.isdigit() else '',
         )
         return redirect(f'{page_url(view)}?{query}' if query else page_url(view))
 
