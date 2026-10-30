@@ -98,4 +98,9 @@ urlpatterns = [
         views.attachment_cancel,
         name='attachment-cancel',
     ),
+    path(
+        '<int:number>/attachments/<uuid:attachment_id>/discard/',
+        views.attachment_discard,
+        name='attachment-discard',
+    ),
 ]

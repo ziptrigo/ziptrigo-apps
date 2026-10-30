@@ -18,6 +18,10 @@
 
 {% block todo_js_libs %}
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"></script>
+{% comment %} Comments take files on a completed task too, and the comment forms appear when a trashed task is restored, so these two are
+   not tied to `attachments_can_upload`. {% endcomment %}
+<script src="{% static 'todo/js/uploader.js' %}"></script>
+<script src="{% static 'todo/js/comment_files.js' %}"></script>
 {% if attachments_can_upload %}
 <script src="{% static 'core/js/drop_zone.js' %}"></script>
 <script src="{% static 'todo/js/attachments.js' %}"></script>

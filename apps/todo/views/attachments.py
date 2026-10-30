@@ -58,7 +58,9 @@ def attachments_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
     return {
         'task': task,
         'attachments': list(
-            Attachment.objects.filter(task=task, uploaded=True).order_by('created_at', 'id')
+            Attachment.objects.filter(task=task, uploaded=True, for_comment=False).order_by(
+                'created_at', 'id'
+            )
         ),
         'attachments_can_upload': not task.is_trashed and not task.is_completed,
         'attachments_frozen': account.is_frozen,
@@ -111,6 +113,7 @@ def attachment_start(request: AuthenticatedHttpRequest, number: int) -> HttpResp
             size=size,
             declared_type=str(body.get('content_type', '')),
             checksum_sha256=str(body.get('checksum_sha256', '')),
+            for_comment=body.get('for_comment') is True,
         )
     except AccountFrozenError as exc:
         return _frozen_response(exc)
@@ -179,6 +182,30 @@ def attachment_cancel(
         attachments.cancel_upload(attachment)
     except ValidationError as exc:
         return JsonResponse({'error': exc.messages[0]}, status=422)
+    return JsonResponse({'ok': True})
+
+
+@login_required
+@require_POST
+def attachment_discard(
+    request: AuthenticatedHttpRequest, number: int, attachment_id: str
+) -> HttpResponse:
+    """Delete a comment file that was uploaded but not saved with a comment yet (the user removed
+    it from the comment form). Idempotent like `cancel`; a file that is attached is a 422."""
+    limit = ratelimit.hit_user(request.user, 'TODO_EDIT_USER')
+    if not limit.allowed:
+        return ratelimit.json_response(limit)
+    task = owned_task(request, number, trashed=None)
+    attachment = Attachment.objects.filter(pk=attachment_id, task=task, user=request.user).first()
+    if attachment is None:
+        return JsonResponse({'ok': True})
+    try:
+        attachments.discard_draft(attachment)
+    except ValidationError as exc:
+        return JsonResponse({'error': exc.messages[0]}, status=422)
+    except attachments.STORAGE_ERRORS:
+        logger.exception('Could not delete the unused comment file %s', attachment.pk)
+        return JsonResponse({'error': 'The file could not be removed right now.'}, status=503)
     return JsonResponse({'ok': True})
 
 

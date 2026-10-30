@@ -11,9 +11,10 @@ class E2EConfig(AppConfig):
         from apps.file_transfer.services import storage as file_transfer_storage
         from apps.receipts.services import ai, storage
         from apps.receipts.tests.fakes import FakeAIClient
+        from apps.todo.services import storage as todo_storage
 
         from .receipts_fakes import E2EStorage
-        from .site_fakes import FileTransferE2EStorage, install_mailbox
+        from .site_fakes import FileTransferE2EStorage, TodoE2EStorage, install_mailbox
         from .todo_fakes import install_title_parser
 
         storage._storage = E2EStorage()
@@ -21,6 +22,8 @@ class E2EConfig(AppConfig):
         # File transfer's send page talks to S3 when a file is added (a multipart upload): an
         # in-memory bucket whose presigned URLs point back at this server (`site_fakes`).
         file_transfer_storage._storage = FileTransferE2EStorage()
+        # To-do attachments and comment files: the same, a bucket at `/__e2e__/todo-s3/`.
+        todo_storage._storage = TodoE2EStorage()
         install_mailbox()
         # To-do reads dates out of a title with the AI: a fake that understands one title.
         install_title_parser()

@@ -2,6 +2,7 @@ from .attachments import (
     attachment_cancel,
     attachment_complete,
     attachment_delete,
+    attachment_discard,
     attachment_download,
     attachment_list,
     attachment_start,
@@ -56,6 +57,7 @@ from .tasks import (
 
 __all__ = [
     'attachment_cancel',
+    'attachment_discard',
     'attachment_complete',
     'attachment_delete',
     'attachment_download',

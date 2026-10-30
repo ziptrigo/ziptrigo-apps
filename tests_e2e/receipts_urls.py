@@ -7,6 +7,7 @@ from . import receipts_fakes, site_fakes
 urlpatterns = [
     path('__e2e__/s3/<path:key>', receipts_fakes.fake_bucket),
     path('__e2e__/ft-s3/<path:key>', site_fakes.ft_fake_bucket),
+    path('__e2e__/todo-s3/<path:key>', site_fakes.todo_fake_bucket),
     path('__e2e__/mail/', site_fakes.mailbox_view),
     path('', include('config.urls')),
 ]

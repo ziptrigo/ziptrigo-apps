@@ -322,6 +322,59 @@ class TestWhatIsSearched:
         assert numbers(find(user, 'findme')) == []
 
 
+class TestTaskNumber:
+    def test_the_number_finds_the_task_and_what_mentions_it(self, user):
+        make_task(user, number=1000, title='Call the dentist')
+        make_task(user, number=1001, title='Ticket 1000 follow-up')
+        make_task(user, number=1002, title='Quiet', description='see 1000 for details')
+        commented = make_task(user, number=1003, title='Other')
+        add_comment(commented, user, 'duplicate of 1000')
+        make_task(user, number=1004, title='Unrelated')
+
+        assert sorted(numbers(find(user, '1000'))) == [1000, 1001, 1002, 1003]
+
+    def test_a_hash_prefix_works(self, user):
+        make_task(user, number=1000, title='Call the dentist')
+        make_task(user, number=1001, title='Unrelated')
+
+        assert numbers(find(user, '#1000')) == [1000]
+
+    def test_the_number_is_exact(self, user):
+        make_task(user, number=1000, title='A')
+        make_task(user, number=1001, title='B')
+        make_task(user, number=10000, title='C')
+
+        assert numbers(find(user, '100')) == []
+        assert numbers(find(user, '1000')) == [1000]
+
+    def test_text_is_not_a_number(self, user):
+        make_task(user, number=1000, title='Call the dentist')
+
+        assert numbers(find(user, 'dentist 1000')) == []
+        assert numbers(find(user, '10*')) == []
+        assert numbers(find(user, '/1000/', mode='regex')) == []
+
+    def test_the_number_respects_trash_completed_and_owner(self, user, other_user):
+        done = make_task(user, number=1000, title='Done')
+        complete_task(done)
+        trashed = make_task(user, number=1001, title='Gone')
+        trash_task(trashed)
+        make_task(other_user, number=1002, title='Theirs')
+
+        assert numbers(find(user, '1000')) == []
+        assert numbers(find(user, '1000', include_completed=True)) == [1000]
+        assert numbers(find(user, '1001')) == []
+        assert numbers(find(user, '1002')) == []
+
+    def test_a_saved_filter_condition_includes_the_number(self, user):
+        make_task(user, number=1000, title='Call the dentist')
+        make_task(user, number=1001, title='Unrelated')
+
+        params = FilterParams(q='1000')
+
+        assert numbers(filter_page(user, params)) == [1000]
+
+
 class TestGlobWildcards:
     @pytest.fixture(autouse=True)
     def _tasks(self, user):

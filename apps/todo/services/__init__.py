@@ -54,6 +54,7 @@ from .comments import (
     with_comment_counts,
 )
 from .dates import (
+    DEFAULT_DIRECTIONS,
     SORT_DEFAULT,
     SORTS,
     UPCOMING_DAYS,
@@ -64,6 +65,7 @@ from .dates import (
     order_tasks,
     order_today,
     overdue_set,
+    sort_direction,
     subtasks_of,
     today_set,
     todays_tasks,
@@ -162,6 +164,7 @@ __all__ = [
     'saved_filters',
     'search',
     'search_tasks',
+    'sort_direction',
     'sidebar_filters',
     'update_filter_params',
     'COMMENT_MAX',
@@ -187,6 +190,7 @@ __all__ = [
     'LABEL_NAME_MAX',
     'MAX_REVISIONS',
     'POSTPONE_PRESETS',
+    'DEFAULT_DIRECTIONS',
     'SORTS',
     'SORT_DEFAULT',
     'TASK_URL_PATH',

@@ -260,7 +260,9 @@ def attachment_data(attachment: Attachment, number: int) -> dict[str, Any]:
 def task_detail(request, task: Task) -> dict[str, Any]:
     """`task` with its uploaded attachments and the tasks that mention it (`TaskDetailSchema`)."""
     data = task_response(request, task)
-    uploaded = Attachment.objects.filter(task=task, uploaded=True).order_by('created_at', 'id')
+    uploaded = Attachment.objects.filter(task=task, uploaded=True, for_comment=False).order_by(
+        'created_at', 'id'
+    )
     data['attachments'] = [attachment_data(item, task.number) for item in uploaded]
     data['referenced_by'] = [
         {'number': source.number, 'title': source.title, 'comment': comment.pk if comment else None}

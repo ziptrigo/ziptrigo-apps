@@ -3,7 +3,7 @@
 Search runs over the normalised plain-text copies stored next to the Markdown (`Task.title_text`,
 `Task.description_text`, `Comment.body_text`; `apps.core.markdown.normalize_for_search`: accents
 stripped, case folded, punctuation turned into spaces, formatting gone), so a query is normalised
-the same way and matched against text that is already lower-case. Two dialects:
+the same way and matched against text that is already lower-case. Two dialects, plus the task number:
 
 - **glob** (the default): `*` any text, `?` one character, everything else literal. The pattern is
   *unanchored*, so a query with no wildcard is a substring match (`rent` finds `parent`).
@@ -11,6 +11,8 @@ the same way and matched against text that is already lower-case. Two dialects:
   The dialect is what Python's `re` and PostgreSQL's engine share: no backreferences, no
   lookarounds. The DB runs it (`__regex`: `~` on PostgreSQL, a Python `REGEXP` function on SQLite),
   never `__iregex`: the text is already lower-case. The pattern is always a query parameter.
+- **task number**: a glob query that is only a task number (`1000`, `#1000`) also finds the task
+  with that exact number (`PreparedQuery.number`), next to everything whose text contains it.
 
 On PostgreSQL the query runs under a 1 second `statement_timeout` (`search_guard`), the guard
 against a pattern that is too expensive (nested quantifiers are not detected statically).
@@ -61,6 +63,8 @@ from ..models import Comment, Task
 from .dates import SORT_DEFAULT, order_tasks
 
 MAX_QUERY_CHARS = 200
+#: A whole query that names a task number: `1000` or `#1000` (ASCII digits, as task URLs are).
+NUMBER_QUERY = re.compile(r'#?([0-9]{1,9})')
 PAGE_SIZE = 50
 MODES = ('glob', 'regex')
 #: Milliseconds a PostgreSQL search may run.
@@ -110,6 +114,8 @@ class PreparedQuery:
     mode: str
     pattern: str
     regex: re.Pattern[str]
+    #: The task number the query names (glob mode, digits only, optional leading `#`), else `None`.
+    number: int | None = None
 
     @property
     def db_pattern(self) -> str:
@@ -257,6 +263,7 @@ def prepare_query(q: str, mode: str = 'glob') -> PreparedQuery:
         mode = 'glob'
     if len(text) > MAX_QUERY_CHARS:
         raise ValidationError(TOO_LONG_MESSAGE)
+    number = None
     if mode == 'regex':
         if not text:
             raise ValidationError(EMPTY_MESSAGE)
@@ -268,11 +275,13 @@ def prepare_query(q: str, mode: str = 'glob') -> PreparedQuery:
         if not normalised:
             raise ValidationError(EMPTY_MESSAGE)
         pattern = glob_to_regex(normalised)
+        named = NUMBER_QUERY.fullmatch(text)
+        number = int(named.group(1)) if named else None
     try:
         regex = re.compile(pattern)
     except re.error, OverflowError, RecursionError:
         raise ValidationError(INVALID_MESSAGE) from None
-    return PreparedQuery(mode=mode, pattern=pattern, regex=regex)
+    return PreparedQuery(mode=mode, pattern=pattern, regex=regex, number=number)
 
 
 @contextmanager
@@ -308,17 +317,20 @@ def search_guard() -> Generator[None]:
         raise ValidationError(TIMEOUT_MESSAGE) from exc
 
 
-def search_condition(pattern: str) -> Q:
+def search_condition(pattern: str, number: int | None = None) -> Q:
     """The condition "title, description or a non-deleted comment matches `pattern`" (the
-    database's dialect: `PreparedQuery.db_pattern`) on a `Task`. A condition, not a join: a join
-    would repeat a task once per matching comment and multiply the subtask counts a list
-    annotates."""
+    database's dialect: `PreparedQuery.db_pattern`), or the task's number is `number`, on a `Task`.
+    A condition, not a join: a join would repeat a task once per matching comment and multiply the
+    subtask counts a list annotates."""
     comment_match = Exists(
         Comment.objects.filter(
             task=OuterRef('pk'), deleted_at__isnull=True, body_text__regex=pattern
         )
     )
-    return Q(title_text__regex=pattern) | Q(description_text__regex=pattern) | Q(comment_match)
+    condition = Q(title_text__regex=pattern) | Q(description_text__regex=pattern) | Q(comment_match)
+    if number is not None:
+        condition |= Q(number=number)
+    return condition
 
 
 def search_queryset(
@@ -331,7 +343,7 @@ def search_queryset(
     queryset = Task.objects.filter(user=user, deleted_at__isnull=True)
     if not include_completed:
         queryset = queryset.filter(completed_at__isnull=True)
-    return queryset.filter(search_condition(query.db_pattern))
+    return queryset.filter(search_condition(query.db_pattern, query.number))
 
 
 def order_results(queryset: QuerySet, sort: str = SORT_DEFAULT) -> QuerySet:

@@ -8,6 +8,7 @@ from django.db import models
 
 from apps.accounts.models import User
 
+from .comment import Comment
 from .task import Task
 
 
@@ -20,6 +21,13 @@ class Attachment(models.Model):
     `inline_type` is the type *sniffed from the bytes* when it is one a browser may show inline
     (images, PDF), else empty; `declared_type` is only what the browser claimed and is never used
     to decide how the file is served.
+
+    A file attached to a *comment* is the same row with `for_comment` true: uploaded first, as a
+    draft (`comment` still null; the comment form holds its id), then linked to the comment it is
+    saved with (`services.attachments.link_to_comment`). The task's own "Attachments" list shows only
+    the rows with `for_comment` false. A draft that is never linked is removed after a day
+    (`services.attachments.abandon_comment_files`). Everything else (billing, the per-task file cap,
+    downloads, deleting with the task) is shared.
     """
 
     objects: ClassVar['models.Manager']
@@ -29,6 +37,7 @@ class Attachment(models.Model):
     pk: uuid.UUID
     task_id: uuid.UUID
     user_id: uuid.UUID
+    comment_id: uuid.UUID | None
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     task = cast(
@@ -39,6 +48,25 @@ class Attachment(models.Model):
         'User',
         models.ForeignKey(
             settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='todo_attachments'
+        ),
+    )
+    comment = cast(
+        'Comment | None',
+        models.ForeignKey(
+            Comment,
+            on_delete=models.CASCADE,
+            related_name='attachments',
+            null=True,
+            blank=True,
+        ),
+    )
+    for_comment = cast(
+        bool,
+        models.BooleanField(
+            default=False,
+            db_default=False,
+            help_text="Uploaded for a comment: shown with the comment, not in the task's own list. "
+            'A draft (no comment yet) is removed after a day if it is never saved with one.',
         ),
     )
     filename = cast(str, models.CharField(max_length=255))

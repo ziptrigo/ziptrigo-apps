@@ -213,6 +213,90 @@ class TestListPartial:
         assert response['Location'] == f'{reverse("todo:all")}?sort=title&page=2'
 
 
+class TestSortDirection:
+    @pytest.fixture
+    def tasks(self, web, funded_user):
+        make_task(funded_user, number=1000, title='Banana', priority=2, due_date=date(2026, 11, 2))
+        make_task(funded_user, number=1001, title='Apple', priority=1, due_date=date(2026, 11, 1))
+        make_task(funded_user, number=1002, title='Cherry', priority=0)
+
+    def order(self, web, **params) -> list[int]:
+        response = web.get(reverse('todo:list'), {'view': 'all', **params}, **HTMX)
+        return [task.number for task in response.context['tasks']]
+
+    @pytest.mark.parametrize(
+        ('params', 'expected'),
+        [
+            ({}, [1001, 1000, 1002]),
+            ({'dir': 'desc'}, [1002, 1000, 1001]),
+            ({'sort': 'title'}, [1001, 1000, 1002]),
+            ({'sort': 'title', 'dir': 'desc'}, [1002, 1000, 1001]),
+            ({'sort': 'priority'}, [1001, 1000, 1002]),
+            ({'sort': 'priority', 'dir': 'desc'}, [1002, 1000, 1001]),
+            ({'sort': 'created'}, [1002, 1001, 1000]),
+            ({'sort': 'created', 'dir': 'asc'}, [1000, 1001, 1002]),
+            ({'sort': 'title', 'dir': 'sideways'}, [1001, 1000, 1002]),
+        ],
+    )
+    def test_the_order(self, web, tasks, params, expected):
+        assert self.order(web, **params) == expected
+
+    def test_the_active_sort_links_to_the_opposite_direction_and_shows_an_arrow(self, web, tasks):
+        html = (
+            web.get(reverse('todo:list'), {'view': 'all', 'sort': 'title'}, **HTMX)
+            .content.decode()
+            .replace('&amp;', '&')
+        )
+
+        assert 'sort=title&dir=desc' in html
+        assert 'fa-arrow-up' in html
+        assert 'sorted ascending' in html
+        # the other sorts keep asking for their own default direction
+        assert 'sort=priority"' in html and 'sort=created"' in html
+
+    def test_a_descending_sort_links_back_and_shows_a_down_arrow(self, web, tasks):
+        response = web.get(
+            reverse('todo:list'), {'view': 'all', 'sort': 'title', 'dir': 'desc'}, **HTMX
+        )
+        html = response.content.decode().replace('&amp;', '&')
+
+        assert 'fa-arrow-down' in html
+        assert 'sorted descending' in html
+        assert 'hx-get="/todo/list/?view=all&sort=title"' in html
+        assert response['HX-Push-Url'] == f'{reverse("todo:all")}?sort=title&dir=desc'
+
+    def test_the_default_sort_reverses_with_just_dir(self, web, tasks):
+        response = web.get(reverse('todo:list'), {'view': 'all', 'dir': 'desc'}, **HTMX)
+
+        assert response['HX-Push-Url'] == f'{reverse("todo:all")}?dir=desc'
+        assert 'fa-arrow-down' in response.content.decode().replace('&amp;', '&')
+
+    def test_newest_is_descending_by_default(self, web, tasks):
+        html = (
+            web.get(reverse('todo:list'), {'view': 'all', 'sort': 'created'}, **HTMX)
+            .content.decode()
+            .replace('&amp;', '&')
+        )
+
+        assert 'fa-arrow-down' in html
+        assert 'sort=created&dir=asc' in html
+
+    def test_opened_directly_it_keeps_the_direction(self, web):
+        response = web.get(reverse('todo:list'), {'view': 'all', 'sort': 'title', 'dir': 'desc'})
+
+        assert response['Location'] == f'{reverse("todo:all")}?sort=title&dir=desc'
+
+    def test_pagination_keeps_the_direction(self, web, funded_user):
+        for number in range(1000, 1060):
+            make_task(funded_user, number=number, title=f'Task {number}')
+
+        response = web.get(
+            reverse('todo:list'), {'view': 'all', 'sort': 'title', 'dir': 'desc'}, **HTMX
+        )
+
+        assert 'sort=title&dir=desc&page=2' in response.content.decode().replace('&amp;', '&')
+
+
 class TestOwnership:
     @pytest.mark.parametrize(
         'name',
