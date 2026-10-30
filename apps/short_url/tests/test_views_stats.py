@@ -84,12 +84,13 @@ class TestPaywall:
         assert 'secret-referrer.example' not in web.get(stats_url(link)).content.decode()
 
     def test_once_paid_the_chart_and_tables_appear(self, web, paid_link):
-        add_event(paid_link, at_day(today()), referrer='news.example.org', country='DE')
+        referrer = 'news.example.org'
+        add_event(paid_link, at_day(today()), referrer=referrer, country='DE')
         content = web.get(stats_url(paid_link)).content.decode()
         assert 'Clicks over time' in content and '<svg' in content
         for title in ('Top referrers', 'Top countries', 'Devices', 'Browsers'):
             assert title in content
-        assert 'news.example.org' in content
+        assert content.count(referrer) >= 1
         assert 'Turn on for' not in content
 
     def test_a_free_price_opens_it_for_everyone(self, web, link, prices):

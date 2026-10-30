@@ -100,8 +100,8 @@ def redirect_back(request: HttpRequest, default: str, *, not_to: str = '') -> Ht
     """Redirect to the posted (or, for the confirmation modal, queried) `next` if it is on this site (and doesn't contain `not_to`, a page
     that no longer exists), else to `default`."""
     target = request.POST.get('next') or request.GET.get('next', '')
-    if not url_has_allowed_host_and_scheme(
+    if (not not_to or not_to not in target) and url_has_allowed_host_and_scheme(
         target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
-    ) or (not_to and not_to in target):
-        target = default
-    return redirect(target)
+    ):
+        return redirect(target)
+    return redirect(default)

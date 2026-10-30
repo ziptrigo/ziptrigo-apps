@@ -17,7 +17,9 @@
 {% endblock %}
 
 {% block todo_js_libs %}
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"
+        integrity="sha512-csIng5zcB+XpulRUa+ev1zKo7zRNGpEaVfNB9On1no9KYTEY/rLGAEEpvgdw6nim1WdTuihZY1eqZ31K7/fZjw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 {% comment %} Comments take files on a completed task too, and the comment forms appear when a trashed task is restored, so these two are
    not tied to `attachments_can_upload`. {% endcomment %}
 <script src="{% static 'todo/js/uploader.js' %}"></script>
