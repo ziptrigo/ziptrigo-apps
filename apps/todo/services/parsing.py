@@ -64,9 +64,11 @@ MIN_DATE = date(2000, 1, 1)
 #: A reading the model gives less confidence than this is not shown as a chip.
 MIN_CONFIDENCE = 0.5
 _MAX_TOKENS = 300
-#: Sent to OpenRouter only (OpenAI's own API refuses the key): a reasoning model, such as the
-#: `qwen/qwen3.6-plus` that `OPENAI_TODO_MODEL` falls back to, would otherwise spend all of
-#: `_MAX_TOKENS` thinking and reply with nothing, and uncapped it takes ~20 s, over the timeout.
+#: Sent to OpenRouter only (OpenAI's own API refuses the key). Explicit even for a model that
+#: does not think unless asked, such as the `google/gemini-2.5-flash-lite` the environments set
+#: in `OPENAI_TODO_MODEL`: a reasoning model, such as the `qwen/qwen3.6-plus` that it falls back
+#: to, would otherwise spend all of `_MAX_TOKENS` thinking and reply with nothing, and uncapped
+#: it takes ~20 s, over the timeout.
 _OPENROUTER_EXTRA_BODY = {'reasoning': {'enabled': False}}
 #: At most one model call open per process (see the module docstring).
 _slot = threading.BoundedSemaphore(1)
