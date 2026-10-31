@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 from .environment import select_env
 from .secret_checks import insecure_secrets
+from .static_headers import add_static_headers
 
 # Build paths inside the project like this: PROJECT_ROOT / 'subdir'.
 # PROJECT_ROOT, aka BASE_DIR.
@@ -540,6 +541,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Every app keeps its static files namespaced under `<app>/static/<app>/`.
 STATIC_URL = '/static/'
 STATIC_ROOT = PROJECT_ROOT / 'staticfiles'
+# WhiteNoise caches unhashed static files for 60 s; the web fonts get a year (config/static_headers.py).
+WHITENOISE_ADD_HEADERS_FUNCTION = add_static_headers
 
 # Media files
 MEDIA_URL = '/media/'

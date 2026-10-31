@@ -318,7 +318,8 @@ issue #214):
 `prefers-reduced-motion: reduce` and stops the shimmer. New motion must use the tokens (or the
 `animate-*` / `.btn` / `.row-*` classes that do) so it is switched off too; never a literal
 `duration-` that bypasses them for something that moves. Hover-only effects go under
-`@media (hover: hover)` so a tap on a phone doesn't leave one stuck.
+`@media (hover: hover)` so a tap on a phone doesn't leave one stuck (the Tailwind config sets
+`future.hoverOnlyWhenSupported`, so every `hover:` utility already does).
 
 ---
 
@@ -536,18 +537,6 @@ chip sits inside the vendor field (`pointer-events-none absolute inset-y-0 right
 field is an ARIA combobox: `role="combobox"` on the input, a `role="listbox"` of `role="option"`
 entries that the arrow keys move through (`aria-activedescendant`), Enter picks, Escape closes.
 
-### 10.0 Site header
-
-Same surface as the page (`bg-white dark:bg-gray-900`) with a bottom border
-(`border-b border-gray-200 dark:border-gray-800`), not a grey band with a shadow. The wordmark is
-`text-base font-semibold`; each product is a link button (`btn rounded-lg px-2.5 py-1.5 text-sm
-font-medium`) with its icon, and **the product the visitor is in is marked** (`aria-current="true"` and a
-`bg-sage-100 dark:bg-sage-800` fill; `request.resolver_match.app_name` equals the product's app
-label). Below `md` only the icons show. On the right, the bell and the account button are outlined
-icons (`far fa-bell`, `far fa-user-circle`) in round icon buttons; the account menu is a
-`rounded-xl` panel with `rounded-lg` items. Outlined (`far`) icons are for chrome, solid (`fas`)
-for state (pills, banners, flash messages).
-
 ### 10.17 Notification bell and list
 
 The bell is the one icon in the header that carries state (`core/partials/notification_bell.html`,
@@ -576,6 +565,18 @@ the page follows the list (10.7); both render each notification with `partials/n
 - **Page**: the list page pattern with `max-w-4xl`, a toolbar row ("5 new" or "You're all caught up."
   on the left, the **Secondary** "Mark all as read" button on the right) and the pagination links of the
   Trash page. Empty state: "No notifications yet."
+
+### 10.18 Site header
+
+Same surface as the page (`bg-white dark:bg-gray-900`) with a bottom border
+(`border-b border-gray-200 dark:border-gray-800`), not a grey band with a shadow. The wordmark is
+`text-base font-semibold`; each product is a link button (`btn rounded-lg px-2.5 py-1.5 text-sm
+font-medium`) with its icon, and **the product the visitor is in is marked** (`aria-current="true"` and a
+`bg-sage-100 dark:bg-sage-800` fill; `request.resolver_match.app_name` equals the product's app
+label). Below `md` only the icons show. On the right, the bell and the account button are outlined
+icons (`far fa-bell`, `far fa-user-circle`) in round icon buttons; the account menu is a
+`rounded-xl` panel with `rounded-lg` items. Outlined (`far`) icons are for chrome, solid (`fas`)
+for state (pills, banners, flash messages).
 
 ---
 

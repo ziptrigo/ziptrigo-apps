@@ -52,7 +52,6 @@ html {
 }
 body {
   line-height: 1.6;
-  font-feature-settings: 'cv11', 'ss01';
 }
 h1, h2, h3 { text-wrap: balance; }
 
@@ -65,11 +64,15 @@ h1, h2, h3 { text-wrap: balance; }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 
-/* ---------- Utilities used by templates ---------- */
-.animate-row-in { animation: row-in var(--d-enter) var(--ease-out) both; }
-.animate-flash-in { animation: flash-in var(--d-enter) var(--ease-out) both; }
+/* ---------- Utilities used by templates ----------
+ * Entrances use a `backwards` fill: the first keyframe holds during the delay, and afterwards the element
+ * goes back to its own styles. A forwards fill would keep the end state (opacity 1, transform none)
+ * forever and beat a later hover transform or a leave transition.
+ */
+.animate-row-in { animation: row-in var(--d-enter) var(--ease-out) backwards; }
+.animate-flash-in { animation: flash-in var(--d-enter) var(--ease-out) backwards; }
 .animate-pop { animation: pop 320ms var(--ease-out); }
-.animate-rise { animation: rise var(--d-moment) var(--ease-out) both; }
+.animate-rise { animation: rise var(--d-moment) var(--ease-out) backwards; }
 
 /* A control that presses: hover colour, a 98% press. `btn` is added to every button and link-button. */
 .btn {
@@ -110,9 +113,12 @@ h1, h2, h3 { text-wrap: balance; }
 .skeleton-indicator { display: none; }
 .htmx-request .skeleton-indicator, .htmx-request.skeleton-indicator { display: block; }
 
-/* The theme change crossfade (base.html adds `theming` to <html> for 300 ms). */
-html.theming, html.theming * {
-  transition: background-color 260ms var(--ease-out), color 260ms var(--ease-out), border-color 260ms var(--ease-out) !important;
+/* The theme change crossfade (base.html adds `theming` to <html> for 300 ms). Only for people who have not
+ * asked for reduced motion: this rule is more specific than the blanket reduced-motion one below. */
+@media (prefers-reduced-motion: no-preference) {
+  html.theming, html.theming * {
+    transition: background-color 260ms var(--ease-out), color 260ms var(--ease-out), border-color 260ms var(--ease-out) !important;
+  }
 }
 
 /* ---------- A card that lifts a pixel on hover (landing product cards), only where there is a hover ---------- */

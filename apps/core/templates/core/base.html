@@ -49,6 +49,8 @@
     <script>
       tailwind.config = {
         darkMode: 'class',
+        /* hover: styles apply only where the device can hover, so a tap on a phone leaves none stuck. */
+        future: { hoverOnlyWhenSupported: true },
         theme: {
           extend: {
             colors: {
@@ -111,7 +113,9 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-    <!-- Site CSS: web fonts, motion tokens, keyframes and the htmx hooks (the little Tailwind can't say) -->
+    <!-- Site CSS: web fonts, motion tokens, keyframes and the htmx hooks (the little Tailwind can't say).
+         The text font is preloaded so the swap from the system font is short on a first visit. -->
+    <link rel="preload" href="{% static 'core/fonts/figtree-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="{% static 'core/css/site.css' %}">
 
     <!-- CSRF helper for htmx requests -->
@@ -143,7 +147,9 @@
                     <img src="{% static 'core/images/logo_32x32.png' %}" alt="" class="inline h-6 w-6 mr-1 align-text-bottom"><span class="max-[359px]:sr-only">ZipTrigo</span>
                 </a>
                 {% for product in products %}
-                {% comment %}The product the visitor is in is marked (its URL namespace is its app label).{% endcomment %}
+                {% comment %}The product the visitor is in is marked (its URL namespace is its app label).
+                It is aria-current="true", not "page": a product page already has its own "page" (To-do's sidebar
+                nav), and one page should have one.{% endcomment %}
                 <a href="{% url product.url_name %}"
                    aria-label="{{ product.name }}" title="{{ product.name }}"{% if request.resolver_match.app_name == product.label %} aria-current="true"{% endif %}
                    class="btn whitespace-nowrap rounded-lg px-1.5 min-[360px]:px-2 md:px-2.5 py-1.5 text-sm font-medium {% if request.resolver_match.app_name == product.label %}bg-sage-100 text-gray-900 dark:bg-sage-800 dark:text-gray-100{% else %}text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800{% endif %}">
