@@ -212,6 +212,10 @@ Floci also emulates SES, so local email can go through it instead of the console
 aws --endpoint-url http://localhost:4566 ses verify-email-identity --email-address no-reply@ziptrigo.com
 ```
 
+Floci stores what it is sent instead of delivering it: read the messages (subject, bodies and the
+confirmation or reset links in them) from `http://localhost:4566/_aws/ses`. Unlike real SES it does
+not enforce sender verification, so a send from an unverified address also succeeds locally.
+
 ### Shared local Postgres
 
 The app uses Postgres when `DATABASE_URL` is set and SQLite otherwise (see
