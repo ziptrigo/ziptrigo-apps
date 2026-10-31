@@ -13,3 +13,13 @@ from django.dispatch import Signal
 #: The TODO app's reminders connect to it from their `AppConfig.ready()` to recompute the
 #: instants that depend on the user's local time.
 timezone_changed = Signal()
+
+#: Sent, on commit, when a user's email address becomes confirmed: by the emailed confirmation
+#: link (`services.email_confirmation.EmailConfirmationService.confirm_token`) and by a password
+#: reset through an emailed link, which confirms the address it went to
+#: (`services.password_reset.PasswordResetService.reset_password`). Never for an account created
+#: already confirmed ("Sign in with Google"/Microsoft). `sender` is `User`; providing args: `user`.
+#:
+#: `billing` connects to it from its `AppConfig.ready()` to grant the credits of a promo code
+#: entered at signup (issue #70).
+email_confirmed = Signal()

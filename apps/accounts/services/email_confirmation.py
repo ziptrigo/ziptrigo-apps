@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from django.conf import settings
+from django.db import transaction
 from django.tasks import task
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -55,6 +56,7 @@ from apps.core.services.email_verification import (
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
+from ..signals import email_confirmed
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +164,25 @@ class EmailConfirmationService:
             user.email_confirmed = True
             user.email_confirmed_at = datetime.now(UTC)
             user.save(update_fields=['email_confirmed', 'email_confirmed_at'])
+            send_email_confirmed(user)
 
         return user
+
+
+def send_email_confirmed(user: User) -> None:
+    """Tell the apps that care (`signals.email_confirmed`) that `user`'s address is now confirmed.
+    Deferred to commit, so a receiver that writes (billing granting a promo code's credits) never
+    sees a confirmation that is then rolled back; `send_robust`, so a failing receiver is logged
+    and never turns the confirmation into an error page."""
+
+    def _send() -> None:
+        for _, result in email_confirmed.send_robust(sender=User, user=user):
+            if isinstance(result, Exception):
+                logger.exception(
+                    'email_confirmed receiver failed for user %s', user.pk, exc_info=result
+                )
+
+    transaction.on_commit(_send)
 
 
 def get_email_confirmation_service() -> EmailConfirmationService:

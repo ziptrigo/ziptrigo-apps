@@ -6,6 +6,7 @@ behind a Cloudflare Turnstile captcha when one is configured (`apps.accounts.ser
 """
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -15,12 +16,14 @@ from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 from apps.core.services.client_ip import client_ip
 
+from .. import signup_codes
 from ..forms import RegisterForm
 from ..services import captcha, google_oauth, microsoft_oauth
 from ..services.existing_account import handle_signup_for_existing_email
 from ..services.signup import EmailAlreadyRegistered, create_account
 
 CAPTCHA_ERROR = 'Please complete the captcha check and try again.'
+INVALID_PROMO_CODE = 'Invalid code.'
 
 
 @require_http_methods(['GET', 'POST'])
@@ -32,6 +35,10 @@ def register_page(request: HttpRequest) -> HttpResponse:
     1. The form (name, email format, password). An invalid submission re-renders with 422 and
        touches neither the captcha nor any rate limit (issue #52 code review: a bad password must
        not cost one of only 5 signups/hour per IP). It does *not* say whether the email is taken.
+    1b. The promo code, when one was typed (issue #70, `apps.accounts.signup_codes`): looked up
+       by the registered handler and refused with its message (422) before the captcha, so a typo
+       doesn't spend a token. The lookup is rate limited per IP (`PROMO_REDEEM_IP`, the same
+       budget as the redeem form) so the page can't be used to guess codes.
     2. The captcha, when configured (`_check_captcha`). A failure is a form error (422).
     3. `SIGNUP_IP`, so only a submission a person actually got through counts against it.
     4. `create_account`. An already-registered email is *not* reported to the visitor (issue
@@ -55,7 +62,11 @@ def register_page(request: HttpRequest) -> HttpResponse:
             if response is not None:
                 return response
     else:
-        form = RegisterForm()
+        # `?promo=CODE` prefills the code: the login page's "Create one" link forwards it from a
+        # redeem link opened without a session (`apps.billing.views.promo`).
+        form = RegisterForm(
+            initial={'promo_code': request.GET.get(signup_codes.QUERY_PARAM, '')[:32]}
+        )
         status = 200
 
     template = (
@@ -74,8 +85,23 @@ def register_page(request: HttpRequest) -> HttpResponse:
 
 
 def _create(request: HttpRequest, form: RegisterForm, captcha_enabled: bool) -> HttpResponse | None:
-    """Steps 2-4 for a valid form. Returns the response to send (a redirect or a 429), or `None`
+    """Steps 1b-4 for a valid form. Returns the response to send (a redirect or a 429), or `None`
     after adding an error to `form`, which the caller re-renders with 422."""
+    promo_code = form.cleaned_data.get('promo_code', '')
+    handler = signup_codes.get_handler()
+    if promo_code:
+        if handler is None:
+            form.add_error('promo_code', INVALID_PROMO_CODE)
+            return None
+        limited = ratelimit.hit_ip(request, 'PROMO_REDEEM_IP')
+        if not limited.allowed:
+            return ratelimit.web_response(request, limited, retarget='#register-msg')
+        try:
+            handler.validate(promo_code, form.cleaned_data['email'])
+        except ValidationError as exc:
+            form.add_error('promo_code', exc)
+            return None
+
     if captcha_enabled:
         outcome = _check_captcha(request)
         if isinstance(outcome, HttpResponse):
@@ -90,13 +116,18 @@ def _create(request: HttpRequest, form: RegisterForm, captcha_enabled: bool) -> 
 
     already_registered: str | None = None
     try:
-        create_account(
+        user = create_account(
             name=form.cleaned_data['name'],
             email=form.cleaned_data['email'],
             password=form.cleaned_data['password'],
         )
     except EmailAlreadyRegistered as exc:
         already_registered = exc.email
+    else:
+        if promo_code and handler is not None:
+            # Reserves one of the code's uses for the new account; the credits come when the
+            # email is confirmed. Never raises (the handler logs a code that no longer fits).
+            handler.attach(user, promo_code)
     if already_registered is not None:
         # Same status, redirect and page as a new account -- see the docstring above. Handled
         # outside the `except` block so that anything logged there doesn't chain this exception

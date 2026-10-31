@@ -328,6 +328,13 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # one account can probe, and a real change is a once-in-a-blue-moon event (a few typos at most).
     # A name-only update, or resubmitting the current address, is not a change and costs nothing.
     'ACCOUNT_EMAIL_CHANGE_USER': (5, 60 * 60),
+    # -- billing: promo codes (issue #70) --
+    # Redeeming a code on the account/credits pages, per user and per IP, charged before the code
+    # is looked up, so neither a stolen session nor a script can guess codes through the form; a
+    # person has one or two codes to type. The register page's code check (before any account
+    # exists, so no user to key on) shares the per-IP budget.
+    'PROMO_REDEEM_USER': (10, 60 * 60),
+    'PROMO_REDEEM_IP': (30, 60 * 60),
     # The browser's automatic time zone detection (`POST /account/timezone/`, issue #177), per
     # user and charged for every call. A real client posts once per browser session and only
     # while the account has no zone, so it needs a handful at most; the rest is headroom for
@@ -910,6 +917,8 @@ JAZZMIN_SETTINGS = {
         'accounts.User': 'fas fa-user-circle',
         'billing.CreditTransaction': 'fas fa-coins',
         'billing.CreditAccount': 'fas fa-wallet',
+        'billing.PromoCode': 'fas fa-ticket-alt',
+        'billing.PromoRedemption': 'fas fa-tags',
         'qr_code.QRCode': 'fas fa-qrcode',
         'core.ScheduledJob': 'fas fa-clock',
         'feedback.Feedback': 'fas fa-comment-dots',

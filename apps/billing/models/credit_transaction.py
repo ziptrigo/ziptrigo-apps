@@ -18,6 +18,8 @@ class CreditTransactionType(models.TextChoices):
     SPEND = 'spend', 'Spend'
     ADJUSTMENT = 'adjustment', 'Adjustment'
     REFUND = 'refund', 'Refund'
+    # Credits granted by a promo code (issue #70); the description names the code.
+    PROMO = 'promo', 'Promo code'
 
 
 class CreditTransaction(models.Model):
