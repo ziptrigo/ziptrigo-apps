@@ -419,12 +419,13 @@ class LinkReportAdmin(_AbuseActionPermissionMixin, ReadOnlyModelAdmin):
         'id',
         'link_link',
         'reason',
+        'source',
         'status',
         'reporter_email',
         'reporter_ip',
         'created_at',
     ]
-    list_filter = ['status', 'reason', 'created_at']
+    list_filter = ['status', 'source', 'reason', 'created_at']
     search_fields = ['link__code_key', 'link__destination', 'reporter_email', 'reporter_ip']
     list_select_related = ['link']
     date_hierarchy = 'created_at'

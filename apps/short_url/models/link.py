@@ -127,6 +127,14 @@ class ShortLink(models.Model):
     #: Abuse review (`services.hold`): a held link is unavailable and frozen for its owner, who
     #: can only disable it. A plain flag, not a status, so it survives whatever the owner does.
     held_for_review_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
+    #: Safe Browsing (`services.reputation`): when the destination was last found clean (null:
+    #: never, or not since it changed), which the periodic recheck orders by, and the one
+    #: destination staff cleared by releasing a hold or dismissing its automated report, which
+    #: the recheck then leaves alone until the owner points the link somewhere else.
+    reputation_checked_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
+    reputation_cleared_destination = cast(
+        str, models.CharField(max_length=2048, blank=True, default='', db_default='')
+    )
     taken_down_at = cast('datetime | None', models.DateTimeField(null=True, blank=True))
     taken_down_by = cast(
         'User | None',
@@ -150,6 +158,9 @@ class ShortLink(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=['owner', 'status', '-created_at'], name='short_link_owner_idx'),
+            models.Index(
+                fields=['status', 'reputation_checked_at'], name='short_link_reputation_idx'
+            ),
         ]
         ordering = ['-created_at']
         permissions = [

@@ -877,6 +877,14 @@ SHORT_URL_PATH = '/s/'
 # `manage.py check` warns (`short_url.W001`); nothing else is affected. See README, "Short URLs".
 GEOIP_PATH = os.getenv('GEOIP_PATH', '')
 
+# Google Safe Browsing (Lookup API v4; `apps.short_url.services.safe_browsing`): every short link
+# destination is checked when it is created or changed, and active links again every day. Unset,
+# the check is skipped and `manage.py check` warns (`short_url.W002`); a failing API never blocks
+# anything. The key comes from a Google Cloud project with the Safe Browsing API enabled.
+SAFE_BROWSING_API_KEY = os.getenv('SAFE_BROWSING_API_KEY', '')
+# A person is waiting on a create or an edit, so the call is short.
+SAFE_BROWSING_TIMEOUT_SECONDS = float(os.getenv('SAFE_BROWSING_TIMEOUT_SECONDS', '3'))
+
 
 # Jazzmin configuration
 JAZZMIN_SETTINGS = {

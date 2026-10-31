@@ -378,6 +378,39 @@ it when the image is built; that lives in the `infra` repo, not here (#171). Not
 the country is stored: a click keeps a keyed hash of the address that changes every day, never the
 address.
 
+### Short URLs: Safe Browsing
+
+Short link destinations are checked against [Google Safe Browsing](https://developers.google.com/safe-browsing)
+(Lookup API v4: malware, phishing, unwanted software, harmful apps). It is optional: without a key
+the check is skipped and `manage.py check` (and the container's `migrate` step) prints
+`short_url.W002`.
+
+| Variable | Value |
+|---|---|
+| `SAFE_BROWSING_API_KEY` | API key of a Google Cloud project with the *Safe Browsing API* enabled (unset: no checks) |
+| `SAFE_BROWSING_TIMEOUT_SECONDS` | per-request timeout, default `3` |
+
+To get a key, create (or pick) a Google Cloud project, enable *Safe Browsing API* under
+*APIs & Services*, and create an API key under *Credentials*; restrict it to that API. Put it in
+`.env.prod` and `.env.staging`, which are copied to the VPS (see `admin/secrets_files.txt`).
+
+What it does:
+
+- **Creating a link, or changing its destination**: a flagged destination is refused with the
+  same neutral message as a blocked host ("That address cannot be used.", a 403 from the API).
+- **Every day**: active links are checked again (a scheduler job, one API request an hour for up to
+  500 destinations). A link whose destination became flagged is put on hold (unavailable, its owner
+  can only disable it) and shows up in the admin's *Link reports* as a pending report from
+  *Safe Browsing*, for staff to take down or release. Releasing it, or dismissing that report,
+  tells the check to leave that destination alone until the owner changes it.
+- **When Google can't be reached** (timeout, quota, outage) nothing is refused or held; the link is
+  simply checked on a later run.
+
+The Lookup API receives the destination URLs themselves, so the privacy policy should say that links
+are checked with Google. Google offers it for non-commercial use; for commercial use it points to
+[Web Risk](https://cloud.google.com/web-risk), which has the same shape and would only change
+`apps/short_url/services/safe_browsing.py`.
+
 ## Development Workflow
 
 ```bash

@@ -3,6 +3,7 @@ from .abuse import (
     BlockedDomain,
     LinkReport,
     ReportReason,
+    ReportSource,
     ReportStatus,
     normalize_blocked_value,
 )
@@ -21,6 +22,7 @@ __all__ = [
     'LinkReport',
     'LinkStatus',
     'ReportReason',
+    'ReportSource',
     'ReportStatus',
     'RetiredCode',
     'ShortLink',

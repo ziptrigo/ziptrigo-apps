@@ -30,7 +30,7 @@ from apps.accounts.models import User
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import LinkStatus, ShortLink, ShortUrlSettings
-from . import billing, blocklist, codes, limits, passwords
+from . import billing, blocklist, codes, limits, passwords, reputation
 from .destinations import apply_utm, destination_host, validate_destination
 from .errors import (
     AliasTakenError,
@@ -263,11 +263,15 @@ class _Prepared:
     expires_at: datetime | None
     max_clicks: int | None
     alias: str
+    #: Safe Browsing found the destination clean (False: it could not be checked).
+    verified: bool = False
 
 
 def _prepare(data: LinkInput) -> _Prepared:
     """Validate every field of a new link (no database writes), raising `ValidationError`."""
     destination = _destination_with_utm(data.destination, data.utm)
+    # A network call, so it comes here, before `create_link` opens its transaction.
+    verified = reputation.check_destination(destination)
     title = validate_title(data.title)
     tags = normalize_tags(data.tags)
     expires_at = validate_expiry(data.expires_at)
@@ -277,7 +281,7 @@ def _prepare(data: LinkInput) -> _Prepared:
         codes.validate_alias(alias)
     if data.password:
         passwords.validate_password(data.password)
-    return _Prepared(destination, title, tags, expires_at, max_clicks, alias)
+    return _Prepared(destination, title, tags, expires_at, max_clicks, alias, verified)
 
 
 def check_new_link(owner: User, data: LinkInput) -> billing.Quote:
@@ -333,6 +337,7 @@ def create_link(owner: User, data: LinkInput, *, expected_cost: int | None = Non
             max_clicks=max_clicks,
             password_hash=password_hash,
             filter_bots=data.filter_bots,
+            reputation_checked_at=timezone.now() if prepared.verified else None,
         )
         # Not `objects.create`: two requests for the same alias race on the unique key, and the
         # loser must say "not available", not 500.
@@ -397,6 +402,19 @@ def update_link(
     if password is not UNSET:
         # Hashed before the transaction: a slow hash must not hold the link's row lock.
         new_hash = passwords.hash_password(password) if password is not None else None
+    # Safe Browsing is a network call, so a new destination is looked up before the row lock is
+    # taken. A destination that fails validation is left to the transaction below, so the errors
+    # keep their order; one that only shows up there (the link changed meanwhile) is looked up
+    # under the lock.
+    looked_up: dict[str, bool] = {}
+    if destination is not UNSET or utm:
+        base = link.destination if destination is UNSET else destination
+        try:
+            candidate = _destination_with_utm(base, utm, current=link.destination)
+        except ValidationError:
+            candidate = None
+        if candidate is not None and candidate != link.destination:
+            looked_up[candidate] = reputation.check_destination(candidate)
     with transaction.atomic():
         _require_active_owner(link.owner_id)
         locked = ShortLink.objects.select_for_update().get(pk=link.pk)
@@ -409,6 +427,12 @@ def update_link(
             new_destination = _destination_with_utm(base, utm, current=locked.destination)
             if new_destination != locked.destination:
                 changes['destination'] = new_destination
+                if new_destination not in looked_up:
+                    looked_up[new_destination] = reputation.check_destination(new_destination)
+                # Null until the recheck has seen the new destination.
+                changes['reputation_checked_at'] = (
+                    timezone.now() if looked_up[new_destination] else None
+                )
         if title is not UNSET:
             changes['title'] = validate_title(title)
         if tags is not UNSET:
@@ -478,14 +502,16 @@ def check_update(
     """The refusals `update_link` would raise that need no transaction, without writing or
     charging anything: a link that can't be changed (taken down, deleted), one held for review
     (`LinkHeldError`), an owner whose account is not active, and a field that isn't valid
-    (including a destination on the block list). A dry run for a caller that wants to refuse
+    (including a destination on the block list or that Safe Browsing flags). A dry run for a caller that wants to refuse
     before it spends rate-limit budget (the API's `PATCH`). Races, and the cost check, stay with
     `update_link`, which re-checks everything under the row lock."""
     _require_editable(link)
     _require_active_owner(link.owner_id)
     if destination is not UNSET or utm:
         base = link.destination if destination is UNSET else destination
-        _destination_with_utm(base, utm, current=link.destination)
+        new_destination = _destination_with_utm(base, utm, current=link.destination)
+        if new_destination != link.destination:
+            reputation.check_destination(new_destination)
     if title is not UNSET:
         validate_title(title)
     if tags is not UNSET:

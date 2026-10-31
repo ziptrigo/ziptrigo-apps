@@ -66,3 +66,9 @@ class LinkHeldError(ValidationError):
 
     def __init__(self) -> None:
         super().__init__(self.MESSAGE)
+
+
+class UnsafeDestinationError(BlockedDomainError):
+    """Google Safe Browsing flags the destination (`services.reputation`). The same neutral
+    refusal, and the same 403 from the API, as a blocked host: it never says which list, which
+    threat or that a check exists, so nothing helps tune a URL past it."""

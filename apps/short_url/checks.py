@@ -24,3 +24,20 @@ def check_geoip_database(*args, **kwargs):
             id='short_url.W001',
         )
     ]
+
+
+@register()
+def check_safe_browsing_key(*args, **kwargs):
+    """Warn when destinations are not checked against Safe Browsing (`SAFE_BROWSING_API_KEY`
+    unset). Never an error: the destination rules, the block list, reports and takedown remain."""
+    if getattr(settings, 'SAFE_BROWSING_API_KEY', ''):
+        return []
+    return [
+        Warning(
+            'SAFE_BROWSING_API_KEY is not set: Short URL destinations are not checked against '
+            'Google Safe Browsing.',
+            hint='Create an API key for the Safe Browsing API in a Google Cloud project and set '
+            'SAFE_BROWSING_API_KEY; see README, "Short URLs: Safe Browsing".',
+            id='short_url.W002',
+        )
+    ]
