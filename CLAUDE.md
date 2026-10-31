@@ -21,6 +21,8 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       unwrapping Receipts and To-do share (`apps.core.services.ai`, issue #183),
                       the inbound-email parser and sender-authentication code they share
                       (`apps.core.services.mail`, issue #186, see "Mail parsing"),
+                      per-field form errors for the 422 partials
+                      (`apps.core.field_errors`, issue #219, see "HTMX form views"),
                       and the Alpine components every product
                       shares (`core/js/components.js`: `copyText`, `confirmModal`,
                       `notificationBell`).
@@ -1588,6 +1590,29 @@ package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
   view and the API endpoint both call it and enforce the same rules (e.g.
   `apps.qr_code.services.create_qrcode` / `validate_content`). Forms call the service validators
   to show friendly errors; the API maps the service's `ValidationError` to a 400.
+
+- **Field errors** (issue #219): the message slot keeps its `Label: message` lines, and each field's error
+  also shows under the field that failed. `apps.core.field_errors` collects them (`from_form`, `form_lines(form)`,
+  `validation_lines(exc, labels, names)`, `message_lines(exc)`; the last three return an `ErrorLines`, the slot's
+  list of lines that also carries `.field_errors`, `{html input name: [messages]}`; `field_errors_of(source)` reads a
+  form, an `ErrorLines` or a dict). The errors partial adds `{% load field_errors %}{% field_errors source %}`
+  (`core/templatetags/field_errors.py`, `core/partials/field_errors.html`), which renders only a hidden
+  `<ul data-field-errors>` with one `<li data-field-error="<input name>">` per message (`scope="<id>"` names the
+  element to look in when the data isn't inside the form and the request wasn't sent by it; `fallback=True`, for a form
+  with no slot, also lists the messages in a `<noscript>`). `core/js/field_errors.js` (loaded by `base.html`) applies it
+  after every htmx settle and on `DOMContentLoaded`: it puts a `<p id="…-error">` under the control (after its
+  wrapping label, `.relative` box or flex/grid row), sets `aria-invalid="true"` and puts the message's id first in
+  `aria-describedby`, moves focus to the first invalid control unless the person is typing in one of the form's fields,
+  and removes a field's message as soon as it is edited (all of the form's when it is submitted again). A name with no
+  matching control and every non-field error stay in the slot only. The products' `form_error_lines` /
+  `validation_lines` (receipts, short_url and todo `views/common.py`) are thin wrappers over the core ones, so every
+  `message_response` / `refuse` call carries the field data with no change at the call site; a view that builds the
+  response by hand passes the form (QR editor, accounts, feedback, file transfer's send forms) or a dict. `site.css`
+  draws the red border from `aria-invalid`. Not covered, on purpose: the file transfer dashboard row (it re-renders
+  collapsed, its error is the row's banner), the promo-code form and the vendor rename dialog (single-field forms with
+  their own message), and the plain-POST password pages (`/t/<slug>/`, `/s/<code>/unlock`), which keep their
+  server-rendered message. Tests: `apps/core/tests/test_field_errors.py` (helpers, tag), a `test_field_errors.py` in
+  `qr_code`, `short_url` and `todo` (real forms), `tests_e2e/test_field_errors.py` (browser).
 
 QR code specifics: a tracked code encodes `<BASE_URL>/go/<code>`, so in prod every printed code
 reads `https://app.ziptrigo.com/go/...` -- the chosen short-link host (issue #49; there is no

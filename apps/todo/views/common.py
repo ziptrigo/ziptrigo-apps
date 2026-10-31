@@ -6,7 +6,7 @@ A trashed task is a 404 too, except where a view says it accepts one (`trashed=T
 """
 
 from django.contrib import messages
-from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
+from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -14,6 +14,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
+from apps.core.field_errors import ErrorLines, form_lines
+from apps.core.field_errors import validation_lines as core_validation_lines
 from apps.core.htmx import is_htmx
 
 from ..models import Task, TodoSettings
@@ -114,36 +116,15 @@ def credits_url() -> str:
     return reverse('billing:credits-history')
 
 
-def validation_lines(exc: ValidationError) -> list[str]:
+def validation_lines(exc: ValidationError) -> ErrorLines:
     """`Label: message` per error of a service `ValidationError`, non-field errors plain."""
-    if not hasattr(exc, 'error_dict'):
-        return list(exc.messages)
-    lines: list[str] = []
-    for field, errors in exc.message_dict.items():
-        for message in errors:
-            if field == NON_FIELD_ERRORS:
-                lines.append(message)
-            else:
-                lines.append(
-                    f'{FIELD_LABELS.get(field, field.replace("_", " ").capitalize())}: {message}'
-                )
-    return lines
+    return core_validation_lines(exc, FIELD_LABELS)
 
 
-def form_error_lines(form) -> list[str]:
-    """`Label: message` per error, non-field errors first (the design system's error format)."""
-    lines = [str(error) for error in form.non_field_errors()]
-    for name, errors in form.errors.items():
-        if name == NON_FIELD_ERRORS:
-            continue
-        field = form.fields.get(name)
-        label = (
-            field.label
-            if field is not None and field.label
-            else name.replace('_', ' ').capitalize()
-        )
-        lines += [f'{label}: {error}' for error in errors]
-    return lines
+def form_error_lines(form) -> ErrorLines:
+    """`Label: message` per error, non-field errors first (the design system's error format).
+    The lines also carry each field's messages, which the slot's partial hands to the page."""
+    return form_lines(form)
 
 
 def message_response(

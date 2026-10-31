@@ -18,6 +18,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
+from apps.core.field_errors import message_lines
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import CategoryNameForm, InboxSettingsForm
@@ -119,7 +120,7 @@ def update_inbox(request: AuthenticatedHttpRequest) -> HttpResponse:
                 default_currency=form.cleaned_data['default_currency'],
             )
         except ValidationError as exc:
-            lines = exc.messages
+            lines = message_lines(exc)
         else:
             if not is_htmx(request):
                 messages.success(request, 'Saved.')
@@ -176,7 +177,7 @@ def category_create(request: AuthenticatedHttpRequest) -> HttpResponse:
     try:
         create_category(request.user, form.cleaned_data['name'])
     except ValidationError as exc:
-        return _category_error(request, exc.messages)
+        return _category_error(request, message_lines(exc))
     return _categories_response(request)
 
 
@@ -190,7 +191,7 @@ def category_rename(request: AuthenticatedHttpRequest, category_id: int) -> Http
     try:
         rename_category(category, form.cleaned_data['name'])
     except ValidationError as exc:
-        return _category_error(request, exc.messages)
+        return _category_error(request, message_lines(exc))
     return _categories_response(request)
 
 

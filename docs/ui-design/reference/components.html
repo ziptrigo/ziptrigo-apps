@@ -260,6 +260,26 @@
                         </div>
                     </div>
                 </div>
+
+                <h3 class="text-sm font-medium mt-8 mb-2">Under the field that failed</h3>
+                <p class="mb-4 text-sm text-gray-700 dark:text-gray-300">
+                    The same errors also go under their fields. The errors partial carries them as hidden data
+                    (<code>{% field_errors %}</code>) and <code>core/js/field_errors.js</code> places each message
+                    directly under its control, sets <code>aria-invalid="true"</code> (<code>site.css</code> draws the red
+                    border) and puts the message's id first in <code>aria-describedby</code>, ahead of any help text. It goes
+                    away as soon as the person edits the field. Errors that belong to no field stay in the slot only.
+                    Shown here as it looks once the script has run:
+                </p>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 max-w-xl" data-example>
+                    <div id="ex-url-field" class="mb-4">
+                        <label for="ex-url" class="block mb-1 text-sm font-medium">Expires</label>
+                        <input id="ex-url" type="text" name="expires_at" value="01/01/2001 10:00" aria-invalid="true"
+                               aria-describedby="ex-url-error ex-url-help"
+                               class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+                        <p id="ex-url-error" class="mt-1.5 text-xs text-red-600 dark:text-red-400"><i class="fas fa-circle-exclamation mr-1" aria-hidden="true"></i>The expiry must be in the future.</p>
+                        <p id="ex-url-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">In your own time zone. After this the link stops working.</p>
+                    </div>
+                </div>
             </section>
 
             <!-- ============================================================ Search & toolbar -->

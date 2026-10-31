@@ -1,4 +1,4 @@
-<form id="register-form"
+{% load field_errors %}<form id="register-form"
       method="post"
       action="{% url 'accounts:register' %}"
       hx-post="{% url 'accounts:register' %}"
@@ -6,6 +6,7 @@
       hx-swap="outerHTML"
       hx-disabled-elt="find button[type='submit']">
   {% csrf_token %}
+  {% field_errors form %}
 
   {% if form.errors %}
     <div class="mb-4 text-sm text-red-600" style="white-space: pre-line">

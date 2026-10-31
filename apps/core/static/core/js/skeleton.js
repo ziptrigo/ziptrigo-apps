@@ -15,6 +15,7 @@
 (function () {
     var DELAY = 250;
     var timers = new WeakMap();
+    var inflight = new Map(); // xhr -> the list it was sent for (the answer may be retargeted elsewhere)
 
     function isList(target) {
         return !!target && !!target.hasAttribute && target.hasAttribute('data-list');
@@ -46,6 +47,7 @@
         if (!isList(target) || !config.triggeringEvent) return;
         clearTimeout(timers.get(target));
         timers.set(target, setTimeout(function () { show(target); }, DELAY));
+        inflight.set(event.detail.xhr, target);
     });
 
     // The answer was swapped in (the rows went with the old content), or the request ended: either way
@@ -53,13 +55,15 @@
     document.addEventListener('htmx:afterSwap', function (event) {
         if (isList(event.detail.target)) clear(event.detail.target);
     });
+    // The request ended. An answer retargeted away from the list (a refused form's message goes to its own
+    // slot) never swaps into it, so `afterSwap` above never fires for the list: find it by the request, not by
+    // the target the answer ended up with. A request replaced by a newer one (hx-sync) must not clear the
+    // newer one's rows, so only clear when no other request for the list is still in flight.
     document.addEventListener('htmx:afterRequest', function (event) {
-        var target = event.detail.target;
-        if (!isList(target)) return;
-        // After the swap, if any: a request that was replaced by a newer one (hx-sync) must not
-        // clear the newer request's timer, so only clear when no other request is pending.
-        setTimeout(function () {
-            if (!target.querySelector('.htmx-request') && !document.querySelector('.htmx-request[hx-target="#' + target.id + '"]')) clear(target);
-        }, 0);
+        var target = inflight.get(event.detail.xhr);
+        if (!target) return;
+        inflight.delete(event.detail.xhr);
+        var others = Array.from(inflight.values()).some(function (other) { return other === target; });
+        if (!others) clear(target);
     });
 })();

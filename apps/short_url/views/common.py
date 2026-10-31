@@ -12,6 +12,8 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core.field_errors import ErrorLines, form_lines
+from apps.core.field_errors import validation_lines as core_validation_lines
 
 from ..models import LinkStatus, ShortLink
 
@@ -61,26 +63,15 @@ def message_response(
     return response
 
 
-def form_error_lines(form) -> list[str]:
-    """`Label: message` per error, non-field errors first (the design system's error format)."""
-    lines = [str(error) for error in form.non_field_errors()]
-    for name, errors in form.errors.items():
-        if name == '__all__':
-            continue
-        label = form.fields[name].label or name.replace('_', ' ').capitalize()
-        lines += [f'{label}: {error}' for error in errors]
-    return lines
+def form_error_lines(form) -> ErrorLines:
+    """`Label: message` per error, non-field errors first (the design system's error format).
+    The lines also carry each field's messages, which the slot's partial hands to the page."""
+    return form_lines(form)
 
 
-def validation_lines(exc: ValidationError) -> list[str]:
+def validation_lines(exc: ValidationError) -> ErrorLines:
     """The lines to show for a service's `ValidationError`: `Label: message` for a field's."""
-    if hasattr(exc, 'error_dict'):
-        return [
-            f'{FIELD_LABELS.get(field, field.replace("_", " ").capitalize())}: {message}'
-            for field, messages in exc.message_dict.items()
-            for message in messages
-        ]
-    return list(exc.messages)
+    return core_validation_lines(exc, FIELD_LABELS)
 
 
 def credits_url() -> str:
