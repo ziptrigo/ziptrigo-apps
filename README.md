@@ -204,6 +204,14 @@ aws --endpoint-url http://localhost:4566 s3api put-bucket-cors --bucket ziptrigo
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:8000","http://127.0.0.1:8000"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3000}]}'
 ```
 
+Floci also emulates SES, so local email can go through it instead of the console: set
+`EMAIL_BACKENDS=ses`, `AWS_ENDPOINT_URL_SES=http://localhost:4566` and any `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` in `.env.local`, and verify the sender once:
+
+```bash
+aws --endpoint-url http://localhost:4566 ses verify-email-identity --email-address no-reply@ziptrigo.com
+```
+
 ### Shared local Postgres
 
 The app uses Postgres when `DATABASE_URL` is set and SQLite otherwise (see
