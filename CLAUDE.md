@@ -46,8 +46,8 @@ apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks wi
                       Completed / Trash pages, task billing (a monthly free allowance, then a price),
                       tasks added by email, the JWT API (`/api/todo/`) and the `admin/todo.py` CLI
                       (see "To-do").
-admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/qrcode/filetransfer/receipts/
-                      shorturl/todo. Via `inv`.
+admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/users/qrcode/filetransfer/
+                      receipts/shorturl/todo. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
                       test plans run by an AI agent driving a browser, one per area (see its README).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
@@ -117,11 +117,29 @@ inv todo filters local | filter-run local <id-or-name> [--limit 20]
 inv todo settings local [--default-due-time 09:00 --default-reminder 15|none --default-channel both]
 inv todo inbox local                            # the address tasks can be emailed to
 inv todo regenerate local [--yes]               # retire the address and issue a new one
+inv users create local me@example.com [<password>] [--superuser | --staff] [--confirm]
+inv users confirm local me@example.com          # what following the emailed link does, without the email
 ```
 
 Every command accepts `--dry` to print the shell command without running it (the JWT HTTP-client
 CLIs -- `qrcode`, `filetransfer`, `receipts`, `shorturl`, `todo` -- run no shell command, so they have no `--dry`). The app names `inv`
 accepts come from `admin/django_app.py`, which discovers them from `apps/*/apps.py`.
+
+**`inv users`** (`admin/users.py`) is not an HTTP client: it runs the management commands
+`create_user` and `confirm_email` (`apps/accounts/management/commands/`) in the environment you
+name, so it acts on that environment's database. `create <env> <email> [<password>]` takes
+`--superuser` (also staff) or `--staff` (mutually exclusive) and `--confirm`; the password may be
+omitted (typed with the echo hidden) or come from `USERS_PASSWORD`, and reaches the management
+command through its environment, never its arguments, so it isn't in `ps`; an argument stays in
+shell history. It must pass the sign-up rules (`PasswordValidator`), and an email that differs
+from an existing one only in case is refused (unlike `createsuperuser`). Creation is one
+transaction with the confirmation. `confirm <env> <email>` goes through
+`accounts.services.email_confirmation.confirm_user`, the function the emailed link uses too, so
+the `email_confirmed` signal fires (billing grants a promo code's credits then), pending
+confirmation links for the address are retired, and an already confirmed account is untouched.
+`prod` loads `.env.prod`, whose `DATABASE_URL` host is only reachable inside the server's
+network: use a tunnel with `DATABASE_URL` overridden, or run the management command in the
+container. Tests: `apps/accounts/tests/test_user_commands.py`, `admin/tests/test_users.py`.
 
 `admin/server.py` and `admin/openapi.py` each define one typer command, which typer collapses away
 when the module is run directly (`python3 -m admin.server`) but which `inv` preserves
@@ -361,8 +379,8 @@ part as typed) and its unique constraint is **case-sensitive**, so the database 
   never a second row (Google linking matches `iexact` and refuses two rows as `AccountConflict`).
   Where legacy case-duplicates exist, that path picks the row spelled exactly like the signup
   address, else the oldest (`created_at`, `pk`), and locks down / mails the *stored* spelling.
-- *Not covered:* `createsuperuser` (`create_user`) and the Django shell still rely on the
-  case-sensitive constraint alone. **Open race:** two concurrent signups of a *new* address in
+- *Not covered:* `createsuperuser` and the Django shell still rely on the
+  case-sensitive constraint alone (`inv users create` / `manage.py create_user` check `iexact`). **Open race:** two concurrent signups of a *new* address in
   different case both pass the `iexact` pre-check and both insert; only a database constraint
   closes it. `UniqueConstraint(Lower('email'))` is deliberately not added yet: prod data needs
   checking for existing duplicates first (`SELECT lower(email), count(*) FROM accounts_user GROUP BY
