@@ -108,3 +108,4 @@ release_notes.md
 !.env.example
 !.env.deploy.example
 .mcp.json
+admin/emails.yaml

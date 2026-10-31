@@ -43,8 +43,7 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 
-# Each base declares its own abstract `Meta`; Django merges them at runtime, `ty` can't.
-class User(AbstractBaseUser, PermissionsMixin):  # ty: ignore[invalid-attribute-override]
+class User(AbstractBaseUser, PermissionsMixin):
     STATUS_ACTIVE = 'ACTIVE'
     STATUS_INACTIVE = 'INACTIVE'
     STATUS_DELETED = 'DELETED'
