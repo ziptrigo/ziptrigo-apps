@@ -8,7 +8,7 @@
                class="min-w-0 truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded"><span class="sr-only" x-ref="text">{% short_link_url link %}</span><span aria-hidden="true">{% short_link_path link %}</span></a>
             <button type="button" @click="copy()" aria-label="Copy the short link"
                     class="shrink-0 inline-flex items-center px-2 py-1 text-xs font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
-                <i class="fas" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+                <i data-copy-icon class="fas" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
                 <span class="ml-1.5" x-text="copied ? 'Copied' : 'Copy'">Copy</span>
             </button>
         </div>

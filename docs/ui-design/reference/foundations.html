@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Foundations - UI reference - ZipTrigo</title>
     <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
     <script src="assets/reference.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../../../apps/core/static/core/css/site.css">
 </head>
 <body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
     <!-- Site header, as in apps/core/templates/core/base.html -->
@@ -129,13 +130,13 @@
                 <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Contrast</h2>
                 <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">WCAG 2.x ratios. 4.5:1 is the minimum for body-size text.</p>
                 <div class="grid sm:grid-cols-2 gap-4">
-                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-sage-300 text-gray-900"><span class="text-sm font-medium">gray-900 on sage-300</span><span class="text-sm">6.98 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-sage-300 text-gray-900"><span class="text-sm font-medium">gray-900 on sage-300</span><span class="text-sm">6.57 <i class="fas fa-check ml-1"></i></span></div>
                     <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-sage-300 text-white"><span class="text-sm font-medium">white on sage-300</span><span class="text-sm">2.54 <i class="fas fa-xmark ml-1"></i></span></div>
                     <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-sage-300"><span class="text-sm font-medium">sage-300 on white</span><span class="text-sm">2.54 <i class="fas fa-xmark ml-1"></i></span></div>
                     <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-sage-600"><span class="text-sm font-medium">sage-600 on white</span><span class="text-sm">7.35 <i class="fas fa-check ml-1"></i></span></div>
                     <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-sage-700"><span class="text-sm font-medium">sage-700 on white</span><span class="text-sm">9.31 <i class="fas fa-check ml-1"></i></span></div>
-                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-gray-800 text-sage-300"><span class="text-sm font-medium">sage-300 on gray-800</span><span class="text-sm">5.78 <i class="fas fa-check ml-1"></i></span></div>
-                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-gray-500"><span class="text-sm font-medium">gray-500 on white</span><span class="text-sm">4.83 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-gray-800 text-sage-300"><span class="text-sm font-medium">sage-300 on gray-800</span><span class="text-sm">5.45 <i class="fas fa-check ml-1"></i></span></div>
+                    <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-gray-500"><span class="text-sm font-medium">gray-500 on white</span><span class="text-sm">5.06 <i class="fas fa-check ml-1"></i></span></div>
                     <div class="flex items-center justify-between gap-4 p-4 rounded-md bg-white border border-gray-200 text-red-600"><span class="text-sm font-medium">red-600 on white</span><span class="text-sm">4.83 <i class="fas fa-check ml-1"></i></span></div>
                 </div>
                 <ul class="mt-6 text-sm text-gray-700 dark:text-gray-300 list-disc pl-5 space-y-1">
@@ -148,15 +149,19 @@
             <!-- ============================================================ Typography -->
             <section id="type" class="mb-14 scroll-mt-4">
                 <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Typography</h2>
-                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">System sans (Tailwind default). Tailwind's scale only.</p>
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    <strong>Figtree</strong> for text (<code>font-sans</code>, the default), <strong>IBM Plex Mono</strong> for codes and
+                    addresses (<code>font-mono</code>), <code>tabular-nums</code> where digits line up. Self-hosted; Tailwind's scale only.
+                    If the font files are missing the system stack shows instead.
+                </p>
                 <div class="divide-y divide-gray-200 dark:divide-gray-700">
                     <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
-                        <code class="text-xs text-gray-500 dark:text-gray-400">Landing hero<br>text-4xl font-bold text-sage-700 dark:text-sage-300</code>
-                        <p class="sm:col-span-2 text-4xl font-bold text-sage-700 dark:text-sage-300">Welcome to ZipTrigo</p>
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Landing hero<br>text-4xl font-bold tracking-tight text-sage-700 dark:text-sage-300</code>
+                        <p class="sm:col-span-2 text-4xl font-bold tracking-tight text-sage-700 dark:text-sage-300">Welcome to ZipTrigo</p>
                     </div>
                     <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
-                        <code class="text-xs text-gray-500 dark:text-gray-400">Page title (h1)<br>text-3xl font-bold</code>
-                        <p class="sm:col-span-2 text-3xl font-bold text-gray-900 dark:text-gray-100">Create QR code</p>
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Page title (h1)<br>text-3xl font-semibold tracking-tight</code>
+                        <p class="sm:col-span-2 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Create QR code</p>
                     </div>
                     <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
                         <code class="text-xs text-gray-500 dark:text-gray-400">Section title (h2)<br>text-xl font-semibold</code>
@@ -167,8 +172,8 @@
                         <p class="sm:col-span-2 text-lg font-semibold text-gray-900 dark:text-gray-100">Delete QR code</p>
                     </div>
                     <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
-                        <code class="text-xs text-gray-500 dark:text-gray-400">Nav link<br>text-lg</code>
-                        <p class="sm:col-span-2 text-lg"><i class="fas fa-qrcode mr-1"></i>QR Codes</p>
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Nav link<br>text-sm font-medium</code>
+                        <p class="sm:col-span-2 text-sm font-medium"><i class="fas fa-qrcode mr-1.5 text-sage-600 dark:text-sage-300"></i>QR Codes</p>
                     </div>
                     <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
                         <code class="text-xs text-gray-500 dark:text-gray-400">Body<br>text-base text-gray-700</code>
@@ -181,6 +186,10 @@
                     <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
                         <code class="text-xs text-gray-500 dark:text-gray-400">Meta / help<br>text-xs text-gray-500</code>
                         <p class="sm:col-span-2 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters.</p>
+                    </div>
+                    <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
+                        <code class="text-xs text-gray-500 dark:text-gray-400">Code / address<br>font-mono text-sm, numbers tabular-nums</code>
+                        <p class="sm:col-span-2 text-sm"><span class="font-mono">receipts+k7m2xq4p@ziptrigo.com</span> · <span class="tabular-nums">€ 1.234,56 · #1042</span></p>
                     </div>
                     <div class="py-4 grid sm:grid-cols-3 gap-2 items-baseline">
                         <code class="text-xs text-gray-500 dark:text-gray-400">Error<br>text-sm text-red-600</code>
@@ -265,20 +274,44 @@
             <!-- ============================================================ Motion -->
             <section id="motion" class="mb-6 scroll-mt-4">
                 <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Motion</h2>
-                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">150 ms, ease-out. Hover the samples.</p>
-                <div class="flex flex-wrap items-center gap-8">
-                    <button type="button" class="focus:outline-none group" aria-label="Thumbnail hover sample">
+                <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
+                    Motion answers an action and is over before you notice it. Five durations (press 90, hover 150, enter 200,
+                    exit 140, modal 220 ms) and two easings, defined as CSS variables in <code>core/css/site.css</code>; all of them
+                    drop to zero under <code>prefers-reduced-motion</code>. Try the samples below.
+                </p>
+                <div class="flex flex-wrap items-center gap-6">
+                    <button type="button" class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-900 bg-brand-primary hover:bg-sage-400">Press me</button>
+                    <span class="text-xs text-gray-500 dark:text-gray-400"><code>btn</code>: hover darkens one step, press scales to 98%. Tab to it: the ring shows for the keyboard only.</span>
+                </div>
+                <div class="mt-6 flex flex-wrap items-center gap-6">
+                    <button type="button" class="btn inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
+                            onclick="const i=this.querySelector('[data-copy-icon]'); i.className='fas fa-check mr-2 animate-pop'; this.querySelector('span').textContent='Copied'; setTimeout(()=>{i.className='fas fa-copy mr-2'; this.querySelector('span').textContent='Copy'}, 2000)">
+                        <i data-copy-icon class="fas fa-copy mr-2" aria-hidden="true"></i><span>Copy</span>
+                    </button>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">Copy: the check pops (<code>animate-pop</code>), the label says Copied for two seconds.</span>
+                </div>
+                <div class="mt-6 flex flex-wrap items-center gap-6">
+                    <button type="button" class="group focus:outline-none" aria-label="Thumbnail hover sample">
                         <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
                              src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="">
                     </button>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">Thumbnail: <code>group-hover:scale-110</code></span>
-                    <button type="button" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors" aria-label="Icon button sample">
-                        <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
-                    </button>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">Controls: <code>transition-colors</code></span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">Thumbnail: <code>group-hover:scale-110</code>, 150 ms.</span>
+                </div>
+                <div class="mt-6 overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead><tr class="text-left text-gray-500 dark:text-gray-400"><th class="py-2 pr-6 font-medium">Token</th><th class="py-2 pr-6 font-medium">Value</th><th class="py-2 font-medium">Used for</th></tr></thead>
+                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
+                            <tr><td class="py-2 pr-6 font-mono text-xs">--d-press</td><td class="py-2 pr-6 tabular-nums">90 ms</td><td class="py-2">Button press</td></tr>
+                            <tr><td class="py-2 pr-6 font-mono text-xs">--d-hover</td><td class="py-2 pr-6 tabular-nums">150 ms</td><td class="py-2">Hover colour, border, shadow</td></tr>
+                            <tr><td class="py-2 pr-6 font-mono text-xs">--d-enter</td><td class="py-2 pr-6 tabular-nums">200 ms</td><td class="py-2">Menus, flash messages, rows, tab indicator</td></tr>
+                            <tr><td class="py-2 pr-6 font-mono text-xs">--d-exit</td><td class="py-2 pr-6 tabular-nums">140 ms</td><td class="py-2">Anything leaving (always faster than it arrived)</td></tr>
+                            <tr><td class="py-2 pr-6 font-mono text-xs">--d-modal</td><td class="py-2 pr-6 tabular-nums">220 ms</td><td class="py-2">Modal backdrop and panel</td></tr>
+                            <tr><td class="py-2 pr-6 font-mono text-xs">--d-moment</td><td class="py-2 pr-6 tabular-nums">480 ms</td><td class="py-2">The landing page reveal, the only motion that starts by itself</td></tr>
+                        </tbody>
+                    </table>
                 </div>
                 <p class="mt-6 text-sm text-gray-700 dark:text-gray-300">
-                    Modals fade (<code>opacity-0</code> → 100) and scale (<code>scale-95</code> → 100) over 150 ms.
+                    Modals fade in 220 ms and the panel rises 8 px from 97%; they leave in 140 ms.
                     See <a href="components.html#modal" class="text-sage-600 dark:text-sage-300 underline">Components → Confirmation modal</a>.
                 </p>
             </section>

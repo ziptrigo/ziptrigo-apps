@@ -10,9 +10,11 @@ The source of truth is the **QR code product**, the most finished UI in the repo
 - `apps/qr_code/templates/qr_code/partials/`: HTMX partials (errors, preview, short URL)
 - `apps/core/templates/core/base.html`: the shell every page extends (header, footer, theme, Tailwind config)
 
-This document describes those pages; it doesn't redesign them. Where the current code is
-inconsistent with itself, [Known deviations](#15-known-deviations-in-the-current-code) says which
-variant to follow.
+This document is the **target**: every new page and component follows it (the
+[checklist](#16-checklist-for-a-new-page) at the end is what a UI pull request is reviewed against).
+Where existing templates still differ,
+[Known deviations](#15-known-deviations-in-the-current-code) says which variant to follow and what is
+queued to change (issue #214, the refresh).
 
 ## Reference pages
 
@@ -48,19 +50,25 @@ theme toggle and the demo behaviour. If the palette in `base.html` changes, upda
 4. **Server-rendered, HTMX-enhanced.** Pages are Django templates. Interactivity is htmx first,
    then a little vanilla JS or Alpine. Forms post form-encoded data to session views and swap
    partials back, and they still work as plain redirects without htmx.
-5. **Utility classes only.** No site stylesheet. Styling is Tailwind classes in templates. The only
-   custom CSS is the admin theme (`core/css/jazzmin_custom.css`).
+5. **Utility classes, plus one small site stylesheet.** Styling is Tailwind classes in templates.
+   `core/css/site.css` holds only what utilities cannot say: the web fonts, the motion tokens and
+   keyframes, the htmx hooks. The admin theme is `core/css/jazzmin_custom.css`.
 6. **Sentence case, plain words.** "Generate QR code", "Save", "No QR codes found."
+7. **Motion answers an action.** Things move because someone did something (pressed, opened,
+   completed, copied) and the movement shows what changed. Nothing animates on its own, except
+   the landing page's one reveal. Every motion is off under `prefers-reduced-motion`
+   ([9. Motion](#9-motion)).
 
 ## 2. Stack
 
 | Concern | What | Loaded by |
 |---|---|---|
-| Styling | Tailwind CSS (Play CDN) with a `sage` scale and `brand-*` aliases | `core/base.html` |
+| Styling | Tailwind CSS (Play CDN, pinned to 3.4.17) with a `sage` scale, `brand-*` aliases, sage-tinted `gray` and the font stacks | `core/base.html` |
+| Site CSS | `core/css/site.css`: `@font-face`, motion tokens, keyframes, htmx hooks, reduced motion | `core/base.html` |
 | Interactivity | htmx 2.0.3; 422 responses are swapped (`htmx-config` meta tag) | `core/base.html` |
 | Small client state | Alpine.js 3 (available; the qr_code pages use vanilla JS) | `core/base.html` |
 | Icons | Font Awesome 6.5.1 (`fas fa-*`) | `core/base.html` |
-| Font | Tailwind's default system sans stack; no web fonts | n/a |
+| Font | **Figtree** (text) and **IBM Plex Mono** (codes, addresses), self-hosted under `core/static/core/fonts/`, latin subset, `font-display: swap`; `font-sans` / `font-mono` in the Tailwind config, with the system stack as fallback | `core/css/site.css` |
 
 Templates and static files are always namespaced: `apps/<app>/templates/<app>/…`,
 `apps/<app>/static/<app>/…`. Partials go in `templates/<app>/partials/`.
@@ -85,9 +93,21 @@ aliases for `sage-300` / `sage-800`.
 | `sage-800` = `brand-dark` | `#2c3432` | Deep Charcoal: tinted card background (dark) |
 | `sage-900` | `#1e2422` | Not used yet |
 
-### Neutrals: Tailwind `gray`
+### Neutrals: sage-tinted `gray`
 
-All structure (page background, surfaces, borders, body text) is Tailwind's `gray`, not sage.
+All structure (page background, surfaces, borders, body text) is `gray`, not sage. The `gray` scale
+is **overridden in the Tailwind config** with neutrals tinted a few degrees toward sage (Tailwind's own
+gray leans blue and fights the green brand, most of all in dark mode), so every `gray-*` class in the
+templates uses it; don't reach for `slate`, `zinc` or `neutral`.
+
+| Step | Hex | Step | Hex |
+|---|---|---|---|
+| `gray-50` | `#f6f8f7` | `gray-600` | `#4f5956` |
+| `gray-100` | `#eef1f0` | `gray-700` | `#3c4441` |
+| `gray-200` | `#dfe4e2` | `gray-800` | `#282e2c` |
+| `gray-300` | `#c6cecb` | `gray-900` | `#1a1f1d` |
+| `gray-400` | `#98a39f` | `gray-950` | `#111514` |
+| `gray-500` | `#66716d` | | |
 
 | Role | Light | Dark |
 |---|---|---|
@@ -124,7 +144,7 @@ Status colours (first used by the Receipts status pills, [10.13](#1013-status-pi
 Steps are `-600` on light and `-400` on dark, with one exception: label **text** in green and amber
 is `-700` on light, because `-600` on white is only 3.3:1 (green) and 3.2:1 (amber), below the 4.5:1
 needed for small text (`blue-600` is 5.2:1, `red-600` 4.8:1). On dark, `green-400`, `amber-400` and
-`blue-400` are 8.4, 8.8 and 5.8:1 on `gray-800`.
+`blue-400` are 7.9, 8.3 and 5.4:1 on `gray-800`.
 
 ### Contrast rules
 
@@ -132,15 +152,16 @@ WCAG 2.x ratios for the pairs that come up:
 
 | Foreground on background | Ratio | Verdict |
 |---|---|---|
-| `gray-900` on `sage-300` (primary button) | 6.98 | ✅ Text on sage buttons is **always `text-gray-900`** |
+| `gray-900` on `sage-300` (primary button) | 6.57 | ✅ Text on sage buttons is **always `text-gray-900`** |
 | `white` on `sage-300` | 2.54 | ❌ Never white text on sage |
 | `sage-300` on `white` | 2.54 | ❌ Not for text on light backgrounds; OK for focus rings, borders, icons, checkboxes |
 | `sage-600` on `white` | 7.35 | ✅ Use for brand-coloured text on light |
 | `sage-700` on `white` | 9.31 | ✅ Brand headings (light) |
-| `sage-300` on `gray-800` / `gray-900` | 5.78 / 6.98 | ✅ Brand text in dark mode |
-| `gray-500` on `white` | 4.83 | ✅ Muted text, minimum for small text |
+| `sage-300` on `gray-800` / `gray-900` | 5.45 / 6.57 | ✅ Brand text in dark mode |
+| `gray-500` on `white` | 5.06 | ✅ Muted text, minimum for small text |
+| `gray-400` on `gray-800` / `gray-900` | 5.32 / 6.42 | ✅ Muted text in dark mode, the minimum |
 | `red-600` on `white` | 4.83 | ✅ |
-| `red-400` on `gray-800` | 5.31 | ✅ |
+| `red-400` on `gray-800` | 5.00 | ✅ |
 
 ## 4. Dark mode
 
@@ -161,12 +182,16 @@ WCAG 2.x ratios for the pairs that come up:
 
 ## 5. Typography
 
-System sans (Tailwind default). Sizes come from Tailwind's scale; don't use arbitrary values.
+**Figtree** for all text (`font-sans`, the default on every page) and **IBM Plex Mono** for codes,
+short links and inbox addresses (`font-mono`). One family keeps headings and body related; weight
+and size carry the hierarchy. Use `tabular-nums` wherever digits line up (amounts, counts, times,
+task numbers). Body line-height is 1.6 (set on `body` in `site.css`) and running text stays under
+about 70 characters wide. Sizes come from Tailwind's scale; don't use arbitrary values.
 
 | Role | Classes | Example |
 |---|---|---|
-| Landing hero | `text-4xl font-bold text-sage-700 dark:text-sage-300` | "Welcome to ZipTrigo" |
-| Page title (h1) | `text-3xl font-bold text-gray-900 dark:text-gray-100` | "QR codes", "Create QR code" |
+| Landing hero | `text-4xl font-bold tracking-tight text-sage-700 dark:text-sage-300` | "Welcome to ZipTrigo" |
+| Page title (h1) | `text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100` | "QR codes", "Create QR code" |
 | Section title (h2) | `text-xl font-semibold` (+ `pb-2 border-b border-sage-200 dark:border-sage-700` for a ruled section) | "Your transfers" |
 | Modal / card title (h3) | `text-lg font-semibold text-gray-900 dark:text-gray-100` | "Delete QR code" |
 | Nav link | `text-lg` | Header |
@@ -249,14 +274,51 @@ Mobile-first; `sm:` (640px) is the one breakpoint that matters today.
 
 ## 9. Motion
 
-Short and functional: **150 ms, ease-out**.
+The rule: **motion answers something the person did, shows what changed, and is over before they
+notice it.** No entrance animations on dashboards, no hover lift on every card. The only motion that
+starts by itself is the landing page's reveal (logo, headline, line and product cards rise in order
+over about half a second, once per visit).
 
-- Hover colour changes: `transition-colors` (buttons, menu items, icon buttons).
-- List row hover: `transition duration-150 ease-in-out`.
-- Thumbnails grow on hover: `transform transition-transform duration-150 ease-out group-hover:scale-110`.
-- Modals fade in and scale from 95%: overlay `transition-opacity duration-150 ease-out`, panel
-  `transform transition-transform duration-150 ease-out scale-95`; the JS removes `opacity-0` /
-  `scale-95` on the next frame to open, and adds them back and hides after 150 ms to close.
+Five durations and two easings do all of it (CSS variables in `core/css/site.css`):
+
+| Token | Value | Used for |
+|---|---|---|
+| `--d-press` | 90 ms | A button pressing to 98% (`.btn:active`) |
+| `--d-hover` | 150 ms | Hover colour, border and shadow changes (`.btn`, `transition-colors`) |
+| `--d-enter` | 200 ms | Something appearing: a menu, a flash message, a row, the tab indicator |
+| `--d-exit` | 140 ms | Something leaving. Always faster than it arrived |
+| `--d-modal` | 220 ms | A modal's backdrop and panel |
+| `--d-moment` | 480 ms | The landing reveal only |
+| `--ease-out` | `cubic-bezier(.2,.8,.2,1)` | Everything that arrives |
+| `--ease-in` | `cubic-bezier(.4,0,1,1)` | Everything that leaves |
+
+Patterns (live in [`reference/foundations.html`](reference/foundations.html) and the mock review on
+issue #214):
+
+- **Buttons**: `class="btn ..."` gives the colour transition and a 98% press. Hover darkens one step
+  (primary: `sage-300` to `sage-400`); never `hover:opacity-90`, which washes the label out.
+- **Focus** shows for the keyboard only (`:focus-visible`, a 2 px sage ring in `site.css`). A mouse
+  click leaves no ring behind.
+- **Modal**: backdrop fades in 220 ms with a light blur; the panel rises 8 px and scales from 97%;
+  it leaves in 140 ms (`confirm_modal.html`).
+- **Menus and dropdowns** (account menu, bell): scale from 95% at their corner and fade, 200 ms in,
+  150 ms out (Alpine `x-transition`).
+- **Flash messages** slide down 6 px and fade in (`animate-flash-in`), have a dismiss button and
+  are never auto-dismissed, so an error is not missed.
+- **Copy** buttons: the check that replaces the copy glyph pops (`data-copy-icon`, `copyText`).
+  The bell badge pops when its count goes up.
+- **htmx**: `htmx-added` and `htmx-swapping` are opt-in. A row that should slide in carries
+  `row-enter`; one that should fade out carries `row-leave` with `hx-swap="outerHTML swap:220ms"`.
+  A list that re-fetches may show a `skeleton-indicator` (shimmering rows) with `hx-indicator`.
+  Never animate a whole list on search or paging.
+- **Theme change** cross-fades colours over 260 ms (`html.theming`, added by `base.html`).
+- **Landing page**: `animate-rise` with an `animation-delay` per element is the one orchestrated moment.
+
+**Reduced motion is not optional.** `site.css` sets every duration and delay to zero under
+`prefers-reduced-motion: reduce` and stops the shimmer. New motion must use the tokens (or the
+`animate-*` / `.btn` / `.row-*` classes that do) so it is switched off too; never a literal
+`duration-` that bypasses them for something that moves. Hover-only effects go under
+`@media (hover: hover)` so a tap on a phone doesn't leave one stuck.
 
 ---
 
@@ -474,6 +536,18 @@ chip sits inside the vendor field (`pointer-events-none absolute inset-y-0 right
 field is an ARIA combobox: `role="combobox"` on the input, a `role="listbox"` of `role="option"`
 entries that the arrow keys move through (`aria-activedescendant`), Enter picks, Escape closes.
 
+### 10.0 Site header
+
+Same surface as the page (`bg-white dark:bg-gray-900`) with a bottom border
+(`border-b border-gray-200 dark:border-gray-800`), not a grey band with a shadow. The wordmark is
+`text-base font-semibold`; each product is a link button (`btn rounded-lg px-2.5 py-1.5 text-sm
+font-medium`) with its icon, and **the product the visitor is in is marked** (`aria-current="true"` and a
+`bg-sage-100 dark:bg-sage-800` fill; `request.resolver_match.app_name` equals the product's app
+label). Below `md` only the icons show. On the right, the bell and the account button are outlined
+icons (`far fa-bell`, `far fa-user-circle`) in round icon buttons; the account menu is a
+`rounded-xl` panel with `rounded-lg` items. Outlined (`far`) icons are for chrome, solid (`fas`)
+for state (pills, banners, flash messages).
+
 ### 10.17 Notification bell and list
 
 The bell is the one icon in the header that carries state (`core/partials/notification_bell.html`,
@@ -564,7 +638,10 @@ creation become read-only, and create-only controls (Preview, Type/Format, Track
 - Every control has a label. Pair `<label for>` with an `id`, or wrap the control in the
   `<label>`.
 - Icon-only buttons have `aria-label` (see the row menu, clear search, modal close).
-- Keep the `focus:ring-*` classes. Never `focus:outline-none` without a ring.
+- Keep a visible keyboard focus on every control. `site.css` draws the sage ring for
+  `:focus-visible` on buttons, links, selects and summaries; fields use a sage border and a soft
+  halo. Never remove an outline without something in its place.
+- Respect `prefers-reduced-motion` ([9. Motion](#9-motion)): use the motion tokens and classes.
 - Follow the [contrast rules](#contrast-rules). Muted text doesn't go lighter than `gray-500` on
   white or `gray-400` on `gray-800`.
 - Images have `alt`: the object's name for thumbnails, empty `alt=""` for decorative logos
@@ -590,6 +667,11 @@ as they are (no code changes in this document).
 | Delete failure | `alert(…)` | Inline error in the modal or the page's message slot |
 | Modals | No `role="dialog"` / focus handling | See [Accessibility](#14-accessibility) |
 | Accent class name | qr_code uses `brand-primary`, accounts uses `sage-300` (same colour) | `brand-primary` for action accents (primary button, focus ring, checkbox), `sage-*` elsewhere |
+| Corner radius | `rounded` inputs, `rounded-md` buttons and cards, `rounded-lg` modals | By role: pills `rounded-full`, controls `rounded-lg`, containers `rounded-xl`, modals `rounded-2xl` (queued for the component pass, #214) |
+| Primary / secondary buttons | Three primary recipes (QR/Receipts/Short URL/To-do, File Transfer rows, accounts), `hover:opacity-90`, `focus:ring-offset-2` on click | One recipe in two sizes with `btn`, `hover:bg-sage-400`, `focus-visible` rings (component pass, #214) |
+| Status pills, chips, tags, tab counts | Outlined status pills, tinted label chips, grey tags, bare To-do due and priority text | One tinted pill (`rounded-full px-2 py-0.5 text-xs font-medium` on a 10% tint) from a shared tag (component pass, #214) |
+| Tabs | Underline tabs, a filled toggle, bordered pills, a sidebar | Underline tabs with the sliding indicator for filtering a list, a segmented control for choosing a value (component pass, #214) |
+| Page titles | `text-3xl font-bold` | `text-3xl font-semibold tracking-tight` (component pass, #214) |
 
 ## 16. Checklist for a new page
 
@@ -597,6 +679,8 @@ as they are (no code changes in this document).
 - [ ] Container and max width from [Layout](#6-layout-and-spacing); h1 uses the page-title classes.
 - [ ] At most one primary (sage) button per view; buttons right-aligned, primary last.
 - [ ] Every colour class has its `dark:` twin; checked in light **and** dark.
+- [ ] Text is the default `font-sans` (Figtree); codes and addresses are `font-mono`; numbers that line up are `tabular-nums`.
+- [ ] Motion uses the tokens and classes of [9. Motion](#9-motion) (`btn`, `animate-*`, `row-enter`); nothing moves on its own; checked with reduced motion on.
 - [ ] Forms: labels tied to controls, one message slot, 422 error partial, `hx-disabled-elt`.
 - [ ] Destructive actions go through a confirmation modal.
 - [ ] Icon-only controls have `aria-label`; focus rings intact.

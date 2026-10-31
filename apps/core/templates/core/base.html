@@ -31,16 +31,21 @@
           document.addEventListener('themeChanged', (e) => {
             const theme = e.detail && e.detail.theme;
             if (theme !== 'system' && theme !== 'light' && theme !== 'dark') return;
+            // Cross-fade colours over ~260 ms instead of snapping (core/css/site.css `.theming`).
+            html.classList.add('theming');
             html.setAttribute('data-theme', theme);
             apply();
+            setTimeout(() => html.classList.remove('theming'), 300);
           });
         } catch (_) { /* noop */ }
       })();
     </script>
 
     <!-- Tailwind (Play CDN) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Configure Tailwind with Sage Green palette -->
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <!-- Configure Tailwind: the Sage Green palette, sage-tinted neutrals in place of the blue-tinted
+         `gray`, and the font stacks (Figtree and IBM Plex Mono are self-hosted by core/css/site.css).
+         docs/ui-design/reference/assets/reference.js keeps a copy of this config. -->
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -63,7 +68,25 @@
               brand: {
                 primary: '#8fa89e',
                 dark: '#2c3432'
+              },
+              /* Neutrals tinted a few degrees toward sage; every existing gray-* class picks them up. */
+              gray: {
+                50: '#f6f8f7',
+                100: '#eef1f0',
+                200: '#dfe4e2',
+                300: '#c6cecb',
+                400: '#98a39f',
+                500: '#66716d',
+                600: '#4f5956',
+                700: '#3c4441',
+                800: '#282e2c',
+                900: '#1a1f1d',
+                950: '#111514'
               }
+            },
+            fontFamily: {
+              sans: ['Figtree', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+              mono: ['IBM Plex Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace']
             }
           }
         }
@@ -88,6 +111,9 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
+    <!-- Site CSS: web fonts, motion tokens, keyframes and the htmx hooks (the little Tailwind can't say) -->
+    <link rel="stylesheet" href="{% static 'core/css/site.css' %}">
+
     <!-- CSRF helper for htmx requests -->
     <script>
       function getCookie(name) {
@@ -105,25 +131,27 @@
 
     {% block extra_css %}{% endblock %}
 </head>
-<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
-    <header class="relative bg-gray-100 dark:bg-gray-800 shadow">
+<body class="min-h-screen flex flex-col antialiased bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+    <header class="relative bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
         {% comment %}Below `md` the product links show only their icons (the name stays as the
         accessible name and tooltip; with four products the names only fit from 768 px), the
         gaps are tighter, the wordmark is screen-reader only under 360 px, and the right-hand
         controls never shrink, so the bar stays one line down to 320 px. The header is `relative` so the notification dropdown can span it on a phone.{% endcomment %}
-        <nav class="container mx-auto px-4 py-4 flex justify-between items-center gap-3 sm:gap-4">
-            <div class="flex flex-wrap items-center gap-x-3 md:gap-x-6 gap-y-1 min-w-0">
-                <a href="{% url 'core:home' %}" class="text-lg font-semibold hover:text-sage-300 whitespace-nowrap">
+        <nav class="container mx-auto px-4 py-3 flex justify-between items-center gap-2 sm:gap-4">
+            <div class="flex flex-wrap items-center gap-x-0.5 md:gap-x-1.5 gap-y-1 min-w-0">
+                <a href="{% url 'core:home' %}" class="btn rounded-lg text-base font-semibold whitespace-nowrap mr-1 md:mr-3">
                     <img src="{% static 'core/images/logo_32x32.png' %}" alt="" class="inline h-6 w-6 mr-1 align-text-bottom"><span class="max-[359px]:sr-only">ZipTrigo</span>
                 </a>
                 {% for product in products %}
-                <a href="{% url product.url_name %}" class="text-lg hover:text-sage-300 whitespace-nowrap"
-                   aria-label="{{ product.name }}" title="{{ product.name }}">
-                    <i class="{{ product.icon }} md:mr-1" aria-hidden="true"></i><span class="hidden md:inline">{{ product.name }}</span>
+                {% comment %}The product the visitor is in is marked (its URL namespace is its app label).{% endcomment %}
+                <a href="{% url product.url_name %}"
+                   aria-label="{{ product.name }}" title="{{ product.name }}"{% if request.resolver_match.app_name == product.label %} aria-current="true"{% endif %}
+                   class="btn whitespace-nowrap rounded-lg px-1.5 min-[360px]:px-2 md:px-2.5 py-1.5 text-sm font-medium {% if request.resolver_match.app_name == product.label %}bg-sage-100 text-gray-900 dark:bg-sage-800 dark:text-gray-100{% else %}text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800{% endif %}">
+                    <i class="{{ product.icon }} md:mr-1.5 text-sage-600 dark:text-sage-300" aria-hidden="true"></i><span class="hidden md:inline">{{ product.name }}</span>
                 </a>
                 {% endfor %}
             </div>
-            <div class="flex items-center space-x-3 sm:space-x-4 shrink-0">
+            <div class="flex items-center sm:gap-1 shrink-0">
                 {% if user.is_authenticated %}{% include 'core/partials/notification_bell.html' %}{% endif %}
 
                 <div id="auth-nav">
@@ -132,29 +160,35 @@
                          @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
                         <button type="button" x-ref="trigger" @click="open = !open"
                                 aria-label="Account menu" title="Account" :aria-expanded="open"
-                                class="p-1 rounded text-2xl leading-none hover:text-sage-300">
-                            <i class="fas fa-user-circle"></i>
+                                class="btn block p-1.5 sm:p-2 rounded-full text-xl leading-none text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
+                            <i class="far fa-user-circle" aria-hidden="true"></i>
                         </button>
                         <div x-show="open" style="display: none"
-                             class="absolute right-0 mt-2 min-w-[10rem] max-w-[16rem] rounded-md shadow-lg bg-white dark:bg-gray-700 ring-1 ring-black/10 dark:ring-white/10 py-1 z-50">
+                             x-transition:enter="transition ease-out duration-200"
+                             x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
+                             x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                             x-transition:leave="transition ease-in duration-150"
+                             x-transition:leave-start="opacity-100 scale-100"
+                             x-transition:leave-end="opacity-0 scale-95"
+                             class="absolute right-0 mt-2 min-w-[10rem] max-w-[16rem] origin-top-right rounded-xl shadow-lg bg-white dark:bg-gray-800 ring-1 ring-gray-900/10 dark:ring-white/10 p-1 z-50">
                             <div id="account-menu-name"
-                                 class="px-4 py-2 text-sm font-semibold truncate border-b border-gray-200 dark:border-gray-600 cursor-default select-text"
+                                 class="px-3 py-2 mb-1 text-sm font-semibold truncate border-b border-gray-200 dark:border-gray-700 cursor-default select-text"
                                  title="{{ user.name|default:user.email }}">{{ user.name|default:user.email }}</div>
                             <a href="{% url 'accounts:account' %}"
-                               class="block px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-600">
+                               class="block rounded-lg px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                 <i class="fas fa-cog mr-2 w-4 text-center"></i>Settings
                             </a>
                             <form method="post" action="{% url 'accounts:logout' %}">
                                 {% csrf_token %}
                                 <button type="submit"
-                                        class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-600">
+                                        class="block w-full text-left rounded-lg px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                     <i class="fas fa-sign-out-alt mr-2 w-4 text-center"></i>Logout
                                 </button>
                             </form>
                         </div>
                     </div>
                     {% else %}
-                    <a href="{% url 'accounts:login' %}" class="text-lg hover:text-sage-300">Login</a>
+                    <a href="{% url 'accounts:login' %}" class="btn rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800">Login</a>
                     {% endif %}
                 </div>
             </div>
@@ -165,8 +199,17 @@
         {% if messages %}
         <div class="container mx-auto px-4 pt-4 space-y-2">
             {% for message in messages %}
-            <div class="rounded px-4 py-2 {% if message.tags == 'error' %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100{% else %}bg-sage-100 text-sage-800 dark:bg-sage-800 dark:text-sage-100{% endif %}">
-                {{ message }}
+            {% comment %}Stays until dismissed or the next page; never auto-dismissed, so an error is not missed.{% endcomment %}
+            <div x-data="{ show: true }" x-show="show"
+                 x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                 role="{% if message.tags == 'error' %}alert{% else %}status{% endif %}"
+                 class="animate-flash-in flex items-start gap-3 rounded-xl px-4 py-2.5 text-sm {% if message.tags == 'error' %}bg-red-50 text-red-800 dark:bg-red-400/10 dark:text-red-200{% else %}bg-sage-100 text-sage-800 dark:bg-sage-800 dark:text-sage-100{% endif %}">
+                <i class="fas {% if message.tags == 'error' %}fa-circle-exclamation{% else %}fa-circle-check{% endif %} mt-0.5" aria-hidden="true"></i>
+                <span class="min-w-0 flex-1">{{ message }}</span>
+                <button type="button" @click="show = false" aria-label="Dismiss"
+                        class="btn -m-1 rounded-full p-1 leading-none hover:bg-black/5 dark:hover:bg-white/10">
+                    <i class="fas fa-times w-4 text-center" aria-hidden="true"></i>
+                </button>
             </div>
             {% endfor %}
         </div>

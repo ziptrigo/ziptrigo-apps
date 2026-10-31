@@ -3,7 +3,7 @@
  *
  * Load it right after the Tailwind Play CDN script. It:
  *   1. applies the same Tailwind config as apps/core/templates/core/base.html (sage palette,
- *      brand-* aliases, class-based dark mode),
+ *      brand-* aliases, sage-tinted gray, font stacks, class-based dark mode),
  *   2. applies the saved theme before first paint and wires the header theme toggle,
  *   3. wires the demo behaviours (dropdowns, modals, search clear) the way the qr_code pages do,
  *   4. renders an "HTML" disclosure under every [data-example] block, generated from the live
@@ -32,7 +32,25 @@ tailwind.config = {
         brand: {
           primary: '#8fa89e',
           dark: '#2c3432'
+        },
+        // Neutrals tinted toward sage (replaces Tailwind's blue-tinted gray; same as base.html).
+        gray: {
+          50: '#f6f8f7',
+          100: '#eef1f0',
+          200: '#dfe4e2',
+          300: '#c6cecb',
+          400: '#98a39f',
+          500: '#66716d',
+          600: '#4f5956',
+          700: '#3c4441',
+          800: '#282e2c',
+          900: '#1a1f1d',
+          950: '#111514'
         }
+      },
+      fontFamily: {
+        sans: ['Figtree', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        mono: ['IBM Plex Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace']
       }
     }
   }
