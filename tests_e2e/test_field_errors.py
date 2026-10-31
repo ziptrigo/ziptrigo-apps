@@ -71,6 +71,10 @@ def test_the_first_refused_field_takes_the_focus_and_a_new_attempt_starts_clean(
     expect(page.locator('[data-field-error-message]')).to_have_count(1)
     expect(page.locator('#id_destination-error')).to_have_count(1)
     expect(page.locator('#link-form-msg')).to_contain_text('Destination:')
+    # ... and the ids don't pile up in the description either: the message, then the help text, once.
+    expect(destination).to_have_attribute(
+        'aria-describedby', 'id_destination-error destination-help'
+    )
 
     # A good address goes through, and nothing is left on the page that points at the old attempt.
     destination.fill('https://example.com/ok')
@@ -129,7 +133,9 @@ def test_a_refused_quick_add_marks_the_time_and_leaves_the_task_list_alone(
     # The first refused field takes the focus (the submit button had it).
     expect(time_input).to_be_focused()
 
-    page.wait_for_timeout(600)  # past the skeleton's 250 ms delay
+    # A fixed sleep on purpose: it has to outlast the skeleton's 250 ms timer, and an auto-waiting
+    # assertion on "no skeleton" would pass at once, before the timer could have shown the rows.
+    page.wait_for_timeout(600)
     expect(page.locator('#task-list')).not_to_have_attribute('data-skeleton', '')
     expect(page.locator('#task-list')).not_to_have_attribute('aria-busy', 'true')
 
@@ -139,3 +145,176 @@ def test_a_refused_quick_add_marks_the_time_and_leaves_the_task_list_alone(
     time_input.fill('10:30')
     expect(time_input).not_to_have_attribute('aria-invalid', 'true')
     expect(page.locator('[data-field-error-message]')).to_have_count(0)
+
+
+COMMENT_FORM = '#task-comments form[hx-post$="/comments/"]'
+COMMENT_BODY = f'{COMMENT_FORM} textarea[name="body"]'
+
+
+def _open_task(page: Page, server: ReceiptsServer, title: str) -> None:
+    """Create a task and open its page."""
+    server.login(page)
+    page.goto(f'{server.url}/todo/all/')
+    page.locator('#quick-title').fill(title)
+    page.click('#quick-add-form button[type="submit"]')
+    page.locator('#task-list').get_by_role('link', name=title).first.click()
+    expect(page.locator(COMMENT_FORM)).to_be_visible()
+
+
+def _refuse_comment(page: Page) -> None:
+    """Send the task page's comment form empty: refused into `#comment-msg`, a slot above the form
+    and outside it, so the form the errors belong to is the one that sent the request."""
+    page.click(f'{COMMENT_FORM} button[type="submit"]')
+
+
+def test_the_errors_go_to_the_form_that_sent_the_request_not_the_latest_one_on_the_page(
+    page: Page, receipts_server: ReceiptsServer
+):
+    """A request from another form while the submit is in flight (the Receipts list polls from inside
+    its filter form) must not take the answer's errors away from the form that was submitted."""
+    _open_task(page, receipts_server, 'plan the move')
+
+    held = []
+    page.route('**/todo/*/comments/', lambda route: held.append(route))
+    _refuse_comment(page)
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    assert held, 'the form was not submitted'
+
+    # Meanwhile another form makes a request of its own (as a poll would).
+    page.evaluate(
+        """() => { document.body.insertAdjacentHTML('beforeend',
+            '<form id="other-form"><input id="other-input" name="q"></form>'); }"""
+    )
+    with page.expect_response('**/todo/filters/counts/**'):
+        page.evaluate(
+            "() => htmx.ajax('GET', '/todo/filters/counts/', {source: '#other-input', swap: 'none'})"
+        )
+
+    held[0].continue_()
+    page.unroute('**/todo/*/comments/')
+
+    body = page.locator(COMMENT_BODY)
+    expect(page.locator('#comment-msg')).to_contain_text('Write a comment.')
+    expect(body).to_have_attribute('aria-invalid', 'true')
+    expect(body.locator('xpath=following-sibling::p[1]')).to_have_text('Write a comment.')
+    expect(page.locator('#other-form [data-field-error-message]')).to_have_count(0)
+
+
+def test_a_poll_inside_the_form_does_not_take_its_messages_away(
+    page: Page, receipts_server: ReceiptsServer
+):
+    """Only a new attempt at the whole form (the form or its submit button) clears its messages."""
+    _open_task(page, receipts_server, 'book the venue')
+    _refuse_comment(page)
+    body = page.locator(COMMENT_BODY)
+    expect(body).to_have_attribute('aria-invalid', 'true')
+
+    page.evaluate(
+        """(selector) => { const form = document.querySelector(selector);
+                   form.insertAdjacentHTML('beforeend', '<div id="poller" hx-get="/todo/filters/counts/" ' +
+                       'hx-trigger="every 200ms" hx-swap="none" hx-disabled-elt="unset"></div>');
+                   htmx.process(form); }""",
+        COMMENT_FORM,
+    )
+    for _ in range(2):
+        with page.expect_response('**/todo/filters/counts/**'):
+            pass
+
+    expect(body).to_have_attribute('aria-invalid', 'true')
+    expect(page.locator(f'{COMMENT_FORM} [data-field-error-message]')).to_have_count(1)
+
+    # Submitting the form again does start clean: one message again, not a second one.
+    _refuse_comment(page)
+    expect(page.locator('#comment-msg')).to_contain_text('Write a comment.')
+    expect(page.locator(f'{COMMENT_FORM} [data-field-error-message]')).to_have_count(1)
+    expect(body).to_have_attribute('aria-invalid', 'true')
+
+
+_INJECT = """([html]) => {
+    document.body.insertAdjacentHTML('beforeend', html);
+    const form = document.getElementById('probe-form');
+    form.dispatchEvent(new CustomEvent('htmx:afterSettle', {bubbles: true, detail: {}}));
+}"""
+
+
+def test_two_errors_for_one_control_both_stay_described_and_both_go_when_it_is_edited(
+    page: Page, receipts_server: ReceiptsServer
+):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    page.evaluate(
+        _INJECT,
+        [
+            '<form id="probe-form"><label>Name <input id="probe" name="a" data-error-for="b" '
+            'aria-describedby="probe-help"></label><span id="probe-help">Help.</span>'
+            '<ul hidden data-field-errors><li data-field-error="a">First.</li>'
+            '<li data-field-error="b">Second.</li></ul></form>'
+        ],
+    )
+    probe = page.locator('#probe')
+
+    expect(page.locator('#probe-form [data-field-error-message]')).to_have_count(2)
+    # Both are in the description, in the order shown, ahead of the help text that was there.
+    expect(probe).to_have_attribute('aria-describedby', 'probe-error probe-error-2 probe-help')
+    expect(page.locator('#probe-error')).to_contain_text('First.')
+    expect(page.locator('#probe-error + #probe-error-2')).to_contain_text('Second.')
+
+    probe.fill('x')
+    expect(page.locator('#probe-form [data-field-error-message]')).to_have_count(0)
+    expect(probe).not_to_have_attribute('aria-invalid', 'true')
+    expect(probe).to_have_attribute('aria-describedby', 'probe-help')
+
+
+def test_names_and_ids_with_quotes_and_backslashes_are_found(
+    page: Page, receipts_server: ReceiptsServer
+):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    page.evaluate(
+        _INJECT,
+        [
+            '<form id="probe-form"><input id="plain" name="we&quot;ird\\name">'
+            '<input type="hidden" id="mirror&quot;id" name="mirror">'
+            '<input id="shown" type="text" data-utc-target="mirror&quot;id">'
+            '<ul hidden data-field-errors><li data-field-error="we&quot;ird\\name">One.</li>'
+            '<li data-field-error="mirror">Two.</li></ul></form>'
+        ],
+    )
+
+    expect(page.locator('#plain')).to_have_attribute('aria-invalid', 'true')
+    expect(page.locator('#shown')).to_have_attribute('aria-invalid', 'true')
+    expect(page.locator('#probe-form [data-field-error-message]')).to_have_count(2)
+
+
+def test_a_click_in_the_date_picker_edits_its_field_but_a_click_in_any_relative_box_does_not(
+    page: Page, receipts_server: ReceiptsServer
+):
+    """The picker's button is the control of a hidden date value, so choosing a day (a click, not an
+    input event) must clear its message. That is tied to the picker's own `data-field-wrap`, not to
+    the very common `.relative` class."""
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    page.evaluate(
+        _INJECT,
+        [
+            '<form id="probe-form">'
+            '<div class="relative" id="plain-box"><input type="hidden" name="d1">'
+            '<button type="button" id="b1">Pick</button><button type="button" id="other1">Other</button></div>'
+            '<div data-field-wrap id="wrap-box"><input type="hidden" name="d2">'
+            '<button type="button" id="b2">Pick</button><button type="button" id="other2">Other</button></div>'
+            '<ul hidden data-field-errors><li data-field-error="d1">One.</li>'
+            '<li data-field-error="d2">Two.</li></ul></form>'
+        ],
+    )
+    expect(page.locator('#b1')).to_have_attribute('aria-invalid', 'true')
+    expect(page.locator('#b2')).to_have_attribute('aria-invalid', 'true')
+
+    page.click('#other1')  # inside a plain `.relative` box: not the picker
+    expect(page.locator('#b1')).to_have_attribute('aria-invalid', 'true')
+
+    page.click('#other2')  # inside the picker's wrapper
+    expect(page.locator('#b2')).not_to_have_attribute('aria-invalid', 'true')
+    expect(page.locator('#b1')).to_have_attribute('aria-invalid', 'true')

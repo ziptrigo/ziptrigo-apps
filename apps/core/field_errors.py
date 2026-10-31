@@ -23,6 +23,7 @@ from typing import Any
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.forms import BaseForm
+from django.utils.functional import Promise
 
 #: `{html input name: [message, ...]}`, in the order the form reports them.
 FieldErrors = dict[str, list[str]]
@@ -43,6 +44,17 @@ def _label(name: str, labels: Mapping[str, str] | None) -> str:
     if labels and name in labels:
         return labels[name]
     return name.replace('_', ' ').capitalize()
+
+
+def _texts(messages: Any) -> list[str]:
+    """The messages of one entry as plain strings: a string or lazy translation is one message
+    (never iterated character by character), a `ValidationError` its messages, anything else is
+    walked (a list, an `ErrorList`)."""
+    if isinstance(messages, (str, Promise)):
+        return [str(messages)]
+    if isinstance(messages, ValidationError):
+        return [str(message) for message in messages.messages]
+    return [text for message in messages for text in _texts(message)]
 
 
 def from_form(form: BaseForm) -> FieldErrors:
@@ -76,20 +88,22 @@ def validation_lines(
     names: Mapping[str, str] | None = None,
 ) -> ErrorLines:
     """The lines to show for a service's `ValidationError`: `Label: message` for a field's,
-    plain for one that belongs to no field. `labels` maps a service field to its label; `names`
-    maps it to the name of the input when they differ (default: the same)."""
+    plain for one that belongs to no field, which come first (as in `form_lines`). `labels` maps a
+    service field to its label; `names` maps it to the name of the input when they differ
+    (default: the same)."""
     if not hasattr(exc, 'error_dict'):
         return ErrorLines(exc.messages)
-    lines: list[str] = []
+    general: list[str] = []
+    fielded: list[str] = []
     field_errors: FieldErrors = {}
     for field, messages in exc.message_dict.items():
         for message in messages:
             if field == NON_FIELD_ERRORS:
-                lines.append(message)
+                general.append(message)
             else:
-                lines.append(f'{_label(field, labels)}: {message}')
+                fielded.append(f'{_label(field, labels)}: {message}')
                 field_errors.setdefault((names or {}).get(field, field), []).append(message)
-    return ErrorLines(lines, field_errors)
+    return ErrorLines(general + fielded, field_errors)
 
 
 def message_lines(exc: ValidationError, names: Mapping[str, str] | None = None) -> ErrorLines:
@@ -99,7 +113,7 @@ def message_lines(exc: ValidationError, names: Mapping[str, str] | None = None) 
     if hasattr(exc, 'error_dict'):
         for field, messages in exc.message_dict.items():
             if field != NON_FIELD_ERRORS:
-                field_errors[(names or {}).get(field, field)] = list(messages)
+                field_errors.setdefault((names or {}).get(field, field), []).extend(messages)
     return ErrorLines(exc.messages, field_errors)
 
 
@@ -111,8 +125,5 @@ def field_errors_of(source: Any) -> FieldErrors:
     if isinstance(source, ErrorLines):
         return source.field_errors
     if isinstance(source, Mapping):
-        return {
-            str(name): [messages] if isinstance(messages, str) else [str(m) for m in messages]
-            for name, messages in source.items()
-        }
+        return {str(name): _texts(messages) for name, messages in source.items()}
     return {}

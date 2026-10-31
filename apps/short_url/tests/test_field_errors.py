@@ -4,7 +4,10 @@ form says it as before, and the same message is also hidden data for the field's
 import re
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.urls import reverse
+
+from apps.short_url.views.common import validation_lines
 
 from .factories import make_user
 
@@ -62,3 +65,14 @@ def test_a_refusal_that_belongs_to_no_field_is_only_in_the_slot(client):
     assert 'have enough credits for this link.' in html
     assert _field_messages(html) == {}
     assert 'data-field-errors' not in html
+
+
+def test_a_line_for_no_field_is_plain_and_comes_before_the_labelled_ones():
+    """A service can report a field and something general in one error: the general line is
+    printed as it is (not "All: ..."), first, and only the field's message is field data."""
+    exc = ValidationError({'expires_at': ['Must be in the future.'], '__all__': ['Nope.']})
+
+    lines = validation_lines(exc)
+
+    assert list(lines) == ['Nope.', 'Expires: Must be in the future.']
+    assert lines.field_errors == {'expires_at': ['Must be in the future.']}

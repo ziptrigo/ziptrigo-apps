@@ -5,6 +5,8 @@ Ownership: a link that is not the requester's (or that they deleted) is a 404, n
 id can't be probed.
 """
 
+from collections.abc import Mapping
+
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -69,9 +71,14 @@ def form_error_lines(form) -> ErrorLines:
     return form_lines(form)
 
 
-def validation_lines(exc: ValidationError) -> ErrorLines:
-    """The lines to show for a service's `ValidationError`: `Label: message` for a field's."""
-    return core_validation_lines(exc, FIELD_LABELS)
+def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = None) -> ErrorLines:
+    """`Label: message` per error of a service `ValidationError`, non-field errors plain and first.
+    The lines also carry each field's messages, keyed by the service's field name, which is the
+    input's name too here (`FIELD_LABELS` lists them), so nothing is passed normally. When a
+    service reports a field under a name the form's input doesn't have (the input is `label_ids`,
+    the service says `labels`), pass `names={'labels': 'label_ids'}` so the message lands under
+    that input. An unmatched name is harmless: the message is still in the slot."""
+    return core_validation_lines(exc, FIELD_LABELS, names)
 
 
 def credits_url() -> str:

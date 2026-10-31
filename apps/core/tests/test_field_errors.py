@@ -6,6 +6,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.template import Context, Template
 from django.template.loader import render_to_string
+from django.utils.translation import gettext_lazy
 
 from apps.core.field_errors import (
     ErrorLines,
@@ -93,7 +94,7 @@ class TestValidationLines:
 
         lines = validation_lines(exc, {'expires_at': 'Expires'})
 
-        assert list(lines) == ['Expires: Must be in the future.', 'Nope.']
+        assert list(lines) == ['Nope.', 'Expires: Must be in the future.']
         assert lines.field_errors == {'expires_at': ['Must be in the future.']}
 
     def test_an_unlabelled_field_is_named_from_its_key(self):
@@ -107,6 +108,21 @@ class TestValidationLines:
         )
 
         assert lines.field_errors == {'new_password': ['Too short.']}
+
+    def test_a_non_field_error_comes_first_whatever_the_order_the_exception_lists_it(self):
+        exc = ValidationError({'alias': ['Taken.'], '__all__': ['Nope.'], 'title': ['Too long.']})
+
+        lines = validation_lines(exc, {'alias': 'Alias', 'title': 'Title'})
+
+        assert list(lines) == ['Nope.', 'Alias: Taken.', 'Title: Too long.']
+        assert lines.field_errors == {'alias': ['Taken.'], 'title': ['Too long.']}
+
+    def test_two_service_fields_for_one_input_keep_both_messages(self):
+        exc = ValidationError({'utm_source': ['Bad.'], 'utm_medium': ['Worse.']})
+
+        lines = validation_lines(exc, names={'utm_source': 'utm', 'utm_medium': 'utm'})
+
+        assert lines.field_errors == {'utm': ['Bad.', 'Worse.']}
 
     def test_an_error_with_no_field_has_no_field_data(self):
         lines = validation_lines(ValidationError('Not allowed.'))
@@ -137,6 +153,28 @@ class TestFieldErrorsOf:
         assert field_errors_of({'a': 'one', 'b': ['two', 'three']}) == {
             'a': ['one'],
             'b': ['two', 'three'],
+        }
+
+    def test_a_lazy_translation_is_one_message_not_a_string_of_characters(self):
+        errors = field_errors_of({'a': gettext_lazy('Fix this.'), 'b': [gettext_lazy('And this.')]})
+
+        assert errors == {'a': ['Fix this.'], 'b': ['And this.']}
+        assert all(type(m) is str for messages in errors.values() for m in messages)
+
+    def test_validation_errors_and_an_error_list_are_read_as_their_messages(self):
+        form = _bad_form()
+        errors = field_errors_of(
+            {
+                'a': ValidationError('One.'),
+                'b': [ValidationError('Two.'), 'Three.'],
+                'c': form.errors['email'],  # an ErrorList
+            }
+        )
+
+        assert errors == {
+            'a': ['One.'],
+            'b': ['Two.', 'Three.'],
+            'c': ['Enter a valid email address.'],
         }
 
     @pytest.mark.parametrize('source', [None, '', 'a message', ['a', 'b']])
@@ -178,8 +216,25 @@ class TestTheTag:
         assert '<noscript>' in html
         assert '<li>Fix this.</li>' in html
 
+    def test_the_noscript_list_is_escaped_and_does_not_hold_the_hidden_data(self):
+        html = _render({'name': ['<b>Fix</b> this.']}, args='fallback=True')
+
+        noscript = html.split('<noscript>')[1].split('</noscript>')[0]
+        assert '&lt;b&gt;Fix&lt;/b&gt; this.' in noscript
+        assert '<b>' not in html
+        assert 'data-field-error' not in noscript
+
 
 def test_the_script_is_loaded_by_every_page():
     html = render_to_string('core/base.html', {'products': []})
 
     assert 'core/js/field_errors.js' in html
+
+
+def test_the_date_picker_marks_its_wrapper_so_a_click_inside_it_counts_as_editing():
+    """`field_errors.js` clears a picker's message on a click inside `[data-field-wrap]`, not inside
+    any `.relative` box."""
+    html = render_to_string('core/components/date_picker.html', {'name': 'expiry_date'})
+
+    assert 'data-field-wrap' in html
+    assert html.index('data-field-wrap') < html.index('<input type="hidden" name="expiry_date"')

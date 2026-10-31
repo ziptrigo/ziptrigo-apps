@@ -5,6 +5,8 @@ Ownership: a task that is not the requester's is a 404, never a 403, so a number
 A trashed task is a 404 too, except where a view says it accepts one (`trashed=True`/`None`).
 """
 
+from collections.abc import Mapping
+
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse
@@ -116,9 +118,14 @@ def credits_url() -> str:
     return reverse('billing:credits-history')
 
 
-def validation_lines(exc: ValidationError) -> ErrorLines:
-    """`Label: message` per error of a service `ValidationError`, non-field errors plain."""
-    return core_validation_lines(exc, FIELD_LABELS)
+def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = None) -> ErrorLines:
+    """`Label: message` per error of a service `ValidationError`, non-field errors plain and first.
+    The lines also carry each field's messages, keyed by the service's field name, which is the
+    input's name too here (`FIELD_LABELS` lists them), so nothing is passed normally. When a
+    service reports a field under a name the form's input doesn't have (the input is `label_ids`,
+    the service says `labels`), pass `names={'labels': 'label_ids'}` so the message lands under
+    that input. An unmatched name is harmless: the message is still in the slot."""
+    return core_validation_lines(exc, FIELD_LABELS, names)
 
 
 def form_error_lines(form) -> ErrorLines:

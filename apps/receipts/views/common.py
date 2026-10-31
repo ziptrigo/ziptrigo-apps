@@ -72,7 +72,13 @@ def message_response(
 
 def form_error_lines(form) -> ErrorLines:
     """`Label: message` per error, non-field errors first (the design system's error format).
-    The lines also carry each field's messages, which the slot's partial hands to the page."""
+    The lines also carry each field's messages, which the slot's partial hands to the page.
+
+    A refusal that comes from a *service* instead of a form uses `message_lines(exc)` or
+    `validation_lines(exc, labels, names)` from `apps.core.field_errors` directly. The messages are
+    found by the service's field name, which is normally the input's; when it isn't (a `vendor_id`
+    error for the input called `vendor`), pass `names={'vendor_id': 'vendor'}`. A name that matches
+    no control is harmless: the message is still in the slot."""
     return form_lines(form)
 
 

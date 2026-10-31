@@ -1592,27 +1592,47 @@ package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
   to show friendly errors; the API maps the service's `ValidationError` to a 400.
 
 - **Field errors** (issue #219): the message slot keeps its `Label: message` lines, and each field's error
-  also shows under the field that failed. `apps.core.field_errors` collects them (`from_form`, `form_lines(form)`,
-  `validation_lines(exc, labels, names)`, `message_lines(exc)`; the last three return an `ErrorLines`, the slot's
-  list of lines that also carries `.field_errors`, `{html input name: [messages]}`; `field_errors_of(source)` reads a
-  form, an `ErrorLines` or a dict). The errors partial adds `{% load field_errors %}{% field_errors source %}`
-  (`core/templatetags/field_errors.py`, `core/partials/field_errors.html`), which renders only a hidden
-  `<ul data-field-errors>` with one `<li data-field-error="<input name>">` per message (`scope="<id>"` names the
-  element to look in when the data isn't inside the form and the request wasn't sent by it; `fallback=True`, for a form
-  with no slot, also lists the messages in a `<noscript>`). `core/js/field_errors.js` (loaded by `base.html`) applies it
-  after every htmx settle and on `DOMContentLoaded`: it puts a `<p id="…-error">` under the control (after its
-  wrapping label, `.relative` box or flex/grid row), sets `aria-invalid="true"` and puts the message's id first in
-  `aria-describedby`, moves focus to the first invalid control unless the person is typing in one of the form's fields,
-  and removes a field's message as soon as it is edited (all of the form's when it is submitted again). A name with no
-  matching control and every non-field error stay in the slot only. The products' `form_error_lines` /
-  `validation_lines` (receipts, short_url and todo `views/common.py`) are thin wrappers over the core ones, so every
-  `message_response` / `refuse` call carries the field data with no change at the call site; a view that builds the
-  response by hand passes the form (QR editor, accounts, feedback, file transfer's send forms) or a dict. `site.css`
-  draws the red border from `aria-invalid`. Not covered, on purpose: the file transfer dashboard row (it re-renders
-  collapsed, its error is the row's banner), the promo-code form and the vendor rename dialog (single-field forms with
-  their own message), and the plain-POST password pages (`/t/<slug>/`, `/s/<code>/unlock`), which keep their
-  server-rendered message. Tests: `apps/core/tests/test_field_errors.py` (helpers, tag), a `test_field_errors.py` in
-  `qr_code`, `short_url` and `todo` (real forms), `tests_e2e/test_field_errors.py` (browser).
+  also shows under the field that failed.
+  - *Server side.* `apps.core.field_errors` collects them: `from_form`, `form_lines(form)`,
+    `validation_lines(exc, labels, names)` (a non-field line is plain and first, as in `form_lines`) and
+    `message_lines(exc, names)`; the last three return an `ErrorLines`, the slot's list of lines that also carries
+    `.field_errors`, `{html input name: [messages]}`. `names` maps a service field to the input's name and is only
+    needed when they differ (the products' `views/common.py` wrappers say when). `field_errors_of(source)` reads a
+    form, an `ErrorLines` or a dict (a string or lazy translation is one message). The errors partial adds
+    `{% load field_errors %}{% field_errors source %}` (`core/templatetags/field_errors.py`,
+    `core/partials/field_errors.html`), which renders only a hidden `<ul data-field-errors>` with one
+    `<li data-field-error="<input name>">` per message (`scope="<id>"` names the element to look in when the data
+    isn't inside the form and the request wasn't sent by it; `fallback=True`, for a form with no slot, also lists the
+    messages in a `<noscript>`). The products' `form_error_lines` / `validation_lines` (receipts, short_url and todo
+    `views/common.py`) are thin wrappers over the core ones, so every `message_response` / `refuse` call carries the
+    field data with no change at the call site; a view that builds the response by hand passes the form (QR editor,
+    accounts, feedback, file transfer's send forms) or a dict.
+  - *Browser side.* `core/js/field_errors.js` (loaded by `base.html`) applies the data after every htmx settle
+    and on `DOMContentLoaded`. **Which form a list belongs to is decided per request**: `data-scope`, else the form the
+    list sits in, else the form that sent the request whose answer swapped it in (a `WeakMap` xhr -> form filled in
+    `htmx:beforeRequest`; `afterSettle` runs for each element a response swapped in, out-of-band ones too, so only
+    the lists that response brought are applied). Never a "latest request" global: the Receipts list polls from
+    inside its filter form. It puts a `<p id="…-error">` under the control (after its wrapping label, `.relative` box
+    or flex/grid row; a `<form>` that is itself a flex row or grid needs its fields wrapped in a block), sets
+    `aria-invalid="true"` and puts the message's id first in `aria-describedby`, moves focus to the first invalid
+    control unless the person is typing in one of the form's fields, and removes a field's message as soon as it is
+    edited. A form's messages are cleared when the **form or one of its submit buttons** sends a request, not for a
+    poll or a live check from a control inside it. Two names that resolve to one control each keep their message
+    (the control's `data-field-error-id` holds every id) and editing it removes both. A widget made of buttons (the
+    date picker) marks its wrapper `data-field-wrap`: a click inside it counts as an edit. Every attribute selector
+    escapes with `CSS.escape`. A name with no matching control and every non-field error stay in the slot only.
+    `site.css` draws the red border from `aria-invalid`. `skeleton.js` ties its in-flight bookkeeping to the xhr's
+    own `loadend` for the same reason (a refused request retargeted away from its list must still end the shimmer).
+  - *Not covered, on purpose:* the file transfer dashboard row (it re-renders collapsed, its error is the row's
+    banner), the promo-code form and the vendor rename dialog (single-field forms with their own message), and the
+    plain-POST password pages (`/t/<slug>/`, `/s/<code>/unlock`), which keep their server-rendered message. *Known
+    limitation:* a message about two related inputs ("A time needs a date.") stays under the field it names until
+    that field is edited; clearing every message of a form on its first edit, or letting a message name related
+    inputs, is a product decision left for a follow-up.
+  - *Tests:* `apps/core/tests/test_field_errors.py` (helpers, tag, the date picker's `data-field-wrap`), a
+    `test_field_errors.py` in `qr_code`, `short_url` and `todo` (real forms), `tests_e2e/test_field_errors.py`
+    (browser, including a request racing a refused submit, a poll inside the form and two names for one control) and
+    `tests_e2e/test_list_skeleton.py`.
 
 QR code specifics: a tracked code encodes `<BASE_URL>/go/<code>`, so in prod every printed code
 reads `https://app.ziptrigo.com/go/...` -- the chosen short-link host (issue #49; there is no
