@@ -92,7 +92,7 @@ def test_transfer_list_partial_filters_active_vs_ended(client, draft_transfer):
         str(draft_transfer.id) in active_response.content.decode()
         or 'transfer-row' in active_response.content.decode()
     )
-    assert 'No ended transfers.' in ended_response.content.decode()
+    assert 'No ended transfers' in ended_response.content.decode()
 
 
 def test_disable_and_reenable_round_trip(client, draft_transfer):

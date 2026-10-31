@@ -4,20 +4,20 @@
      @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
     <button type="button" x-ref="trigger" @click="open = !open" :aria-expanded="open"
             aria-label="Postpone {{ task.title }}" title="Postpone"
-            class="{% if button_label %}inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700{% else %}p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600{% endif %} focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors">
+            class="btn {% if button_label %}inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700{% else %}p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600{% endif %} transition-colors">
         <i class="far fa-calendar-plus {% if not button_label %}text-gray-500 dark:text-gray-400{% else %}mr-2{% endif %}" aria-hidden="true"></i>{% if button_label %}Postpone{% endif %}
     </button>
-    <div x-show="open" style="display: none"
-         class="absolute right-0 top-full mt-2 w-56 z-50 origin-top-right rounded-md shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+    <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none"
+         class="absolute right-0 top-full mt-2 w-56 z-50 origin-top-right rounded-xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-1">
         <button type="button" hx-post="{% url 'todo:postpone' task.number %}" hx-vals='{"preset": "tomorrow"}'
                 @click="open = false"
-                class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">Tomorrow</button>
+                class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">Tomorrow</button>
         <button type="button" hx-post="{% url 'todo:postpone' task.number %}" hx-vals='{"preset": "next_week"}'
                 @click="open = false"
-                class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">Next week</button>
+                class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">Next week</button>
         <button type="button" hx-post="{% url 'todo:postpone' task.number %}" hx-vals='{"preset": "next_weekend"}'
                 @click="open = false"
-                class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">Next weekend</button>
+                class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">Next weekend</button>
         <form method="post" action="{% url 'todo:postpone' task.number %}" hx-post="{% url 'todo:postpone' task.number %}"
               class="flex items-end gap-2 border-t border-gray-200 dark:border-gray-700 px-4 py-2">
             {% csrf_token %}
@@ -25,10 +25,10 @@
             <div class="min-w-0 flex-1">
                 <label for="postpone-date-{{ task.number }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Pick a date</label>
                 <input id="postpone-date-{{ task.number }}" type="date" name="date" required min="{{ today|date:'Y-m-d' }}"
-                       class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                       class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
             </div>
             <button type="submit" @click="open = false"
-                    class="px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors">Set</button>
+                    class="btn px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Set</button>
         </form>
     </div>
 </div>

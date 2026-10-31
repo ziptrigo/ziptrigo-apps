@@ -7,11 +7,8 @@ classes the account profile form uses (`accounts/partials/profile_form.html`).
 
 from django import forms
 
-WIDGET_CLASSES = (
-    'w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 '
-    'px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sage-300'
-)
-CHECKBOX_CLASSES = 'rounded border-gray-300 dark:border-gray-600 text-sage-500 focus:ring-sage-300'
+WIDGET_CLASSES = 'w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2'
+CHECKBOX_CLASSES = 'rounded border-gray-300 dark:border-gray-600 accent-sage-500'
 
 
 class StyledFormMixin:

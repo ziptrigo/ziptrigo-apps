@@ -5,17 +5,17 @@
 <div>
     <label for="due-date-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Date</label>
     <input id="due-date-{{ uid }}" type="date" name="due_date" value="{{ task.due_date|date:'Y-m-d' }}"
-           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
 </div>
 <div>
     <label for="due-time-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Time</label>
     <input id="due-time-{{ uid }}" type="time" name="due_time" value="{{ task.due_time|time:'H:i' }}"
-           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
 </div>
 <div>
     <label for="priority-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Priority</label>
     <select id="priority-{{ uid }}" name="priority"
-            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
         <option value="0" {% if not task.priority %}selected{% endif %}>None</option>
         <option value="1" {% if task.priority == 1 %}selected{% endif %}>Priority 1</option>
         <option value="2" {% if task.priority == 2 %}selected{% endif %}>Priority 2</option>
@@ -26,16 +26,16 @@
      @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
     <span class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Labels</span>
     <button type="button" x-ref="trigger" @click="open = !open" :aria-expanded="open"
-            class="inline-flex items-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            class="btn inline-flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
         <i class="fas fa-tag mr-2 text-gray-500 dark:text-gray-400" aria-hidden="true"></i>{% if selected_label_ids %}{{ selected_label_ids|length }} selected{% else %}Add labels{% endif %}
     </button>
-    <div x-show="open" style="display: none"
-         class="absolute left-0 top-full mt-1 w-60 max-h-64 overflow-y-auto z-50 rounded-md shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 py-1">
+    <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none"
+         class="absolute left-0 top-full mt-1 w-60 max-h-64 overflow-y-auto z-50 rounded-xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 py-1 origin-top">
         {% for label in labels %}
         <label class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
             <input type="checkbox" name="labels" value="{{ label.pk }}"
                    {% if label.pk|stringformat:'s' in selected_label_ids %}checked{% endif %}
-                   class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                   class="h-4 w-4 rounded border-gray-300 accent-sage-500">
             {% label_chip label %}
         </label>
         {% empty %}
@@ -54,16 +54,16 @@
     <input type="hidden" name="recurrence_mode" value="{{ recurrence.mode|default:'fixed' }}" :value="mode">
     <span class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Repeat</span>
     <button type="button" x-ref="trigger" @click="open = !open" :aria-expanded="open" aria-haspopup="dialog"
-            class="inline-flex items-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            class="btn inline-flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
         <i class="fas fa-repeat mr-2 text-gray-500 dark:text-gray-400" aria-hidden="true"></i><span x-text="label">{% if recurrence %}Repeats{% else %}Repeat{% endif %}</span>
     </button>
-    <div x-show="open" style="display: none" role="dialog" aria-label="Repeat"
-         class="absolute left-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] z-50 rounded-md shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 space-y-3 text-sm">
+    <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none" role="dialog" aria-label="Repeat"
+         class="absolute left-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] z-50 rounded-xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 space-y-3 text-sm origin-top">
         <p x-show="customRule" class="text-xs text-gray-500 dark:text-gray-400">This task has a custom repeat. It is kept until you use the options below.</p>
         <div>
             <label for="repeat-freq-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Frequency</label>
             <select id="repeat-freq-{{ uid }}" x-model="freq" @change="touch()"
-                    class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5">
                 <option value="">Does not repeat</option>
                 <option value="day">Day</option>
                 <option value="week">Week</option>
@@ -75,16 +75,16 @@
             <div class="flex items-center gap-2">
                 <label for="repeat-interval-{{ uid }}" class="text-gray-700 dark:text-gray-200">Every</label>
                 <input id="repeat-interval-{{ uid }}" type="number" min="1" max="365" x-model.number="interval" @input="touch()"
-                       class="w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                       class="w-20 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
                 <span class="text-gray-700 dark:text-gray-200" x-text="freq + (interval > 1 ? 's' : '')"></span>
             </div>
             <fieldset x-show="freq === 'week'">
                 <legend class="mb-1 text-xs text-gray-500 dark:text-gray-400">On</legend>
                 <div class="flex flex-wrap gap-1">
                     {% for code, name in repeat_options.weekdays %}
-                    <label class="inline-flex items-center gap-1 rounded border border-gray-300 dark:border-gray-600 px-2 py-1">
+                    <label class="inline-flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1">
                         <input type="checkbox" :checked="days.includes('{{ code }}')" @change="toggleDay('{{ code }}')"
-                               class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                               class="h-4 w-4 rounded border-gray-300 accent-sage-500">
                         <span aria-hidden="true">{{ name|slice:':3' }}</span><span class="sr-only">{{ name }}</span>
                     </label>
                     {% endfor %}
@@ -93,7 +93,7 @@
             <div x-show="freq === 'month'" class="space-y-2">
                 <label for="repeat-month-kind-{{ uid }}" class="block text-xs text-gray-500 dark:text-gray-400">On</label>
                 <select id="repeat-month-kind-{{ uid }}" x-model="monthKind" @change="touch()"
-                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5">
                     <option value="same">The same day of the month</option>
                     <option value="day">Day of the month</option>
                     <option value="last">The last day</option>
@@ -102,12 +102,12 @@
                 <div x-show="monthKind === 'day'" class="flex items-center gap-2">
                     <label for="repeat-month-day-{{ uid }}" class="text-gray-700 dark:text-gray-200">Day</label>
                     <input id="repeat-month-day-{{ uid }}" type="number" min="1" max="31" x-model.number="monthDay" @input="touch()"
-                           class="w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                           class="w-20 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
                 </div>
                 <div x-show="monthKind === 'nth'" class="flex gap-2">
                     <label for="repeat-nth-{{ uid }}" class="sr-only">Which</label>
                     <select id="repeat-nth-{{ uid }}" x-model="nth" @change="touch()"
-                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                            class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5">
                         <option value="1">first</option>
                         <option value="2">second</option>
                         <option value="3">third</option>
@@ -116,7 +116,7 @@
                     </select>
                     <label for="repeat-nth-day-{{ uid }}" class="sr-only">Weekday</label>
                     <select id="repeat-nth-day-{{ uid }}" x-model="nthDay" @change="touch()"
-                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                            class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5">
                         {% for code, name in repeat_options.weekdays %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
                     </select>
                 </div>
@@ -124,17 +124,17 @@
             <div x-show="freq === 'year'" class="space-y-2">
                 <label for="repeat-year-kind-{{ uid }}" class="block text-xs text-gray-500 dark:text-gray-400">On</label>
                 <select id="repeat-year-kind-{{ uid }}" x-model="yearKind" @change="touch()"
-                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5">
                     <option value="same">The same date</option>
                     <option value="date">A month and day</option>
                 </select>
                 <div x-show="yearKind === 'date'" class="flex items-center gap-2">
                     <label for="repeat-year-day-{{ uid }}" class="sr-only">Day</label>
                     <input id="repeat-year-day-{{ uid }}" type="number" min="1" max="31" x-model.number="yearDay" @input="touch()"
-                           class="w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                           class="w-20 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
                     <label for="repeat-year-month-{{ uid }}" class="sr-only">Month</label>
                     <select id="repeat-year-month-{{ uid }}" x-model.number="yearMonth" @change="touch()"
-                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                            class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5">
                         {% for number, name in repeat_options.months %}<option value="{{ number }}">{{ name }}</option>{% endfor %}
                     </select>
                 </div>
@@ -142,7 +142,7 @@
             <div class="space-y-2">
                 <label for="repeat-ends-{{ uid }}" class="block text-xs text-gray-500 dark:text-gray-400">Ends</label>
                 <select id="repeat-ends-{{ uid }}" x-model="ends" @change="touch()"
-                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                        class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5">
                     <option value="never">Never</option>
                     <option value="count">After a number of times</option>
                     <option value="date">On a date</option>
@@ -150,34 +150,34 @@
                 <div x-show="ends === 'count'" class="flex items-center gap-2">
                     <label for="repeat-count-{{ uid }}" class="sr-only">Times</label>
                     <input id="repeat-count-{{ uid }}" type="number" min="1" max="1000" x-model.number="count" @input="touch()"
-                           class="w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                           class="w-24 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
                     <span class="text-gray-700 dark:text-gray-200">times</span>
                 </div>
                 <div x-show="ends === 'date'">
                     <label for="repeat-until-{{ uid }}" class="sr-only">Last date</label>
                     <input id="repeat-until-{{ uid }}" type="date" x-model="until" @input="touch()"
-                           class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
                 </div>
             </div>
             <fieldset class="space-y-2">
                 <legend class="mb-1 text-xs text-gray-500 dark:text-gray-400">When the next one is due</legend>
                 <label class="flex items-start gap-2">
                     <input type="radio" name="repeat-mode-{{ uid }}" form="repeat-ui" value="fixed" x-model="mode"
-                           class="mt-0.5 h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                           class="mt-0.5 h-4 w-4 border-gray-300 accent-sage-500">
                     <span><span class="font-medium">Fixed schedule:</span> the next one is due on schedule even if this one is late</span>
                 </label>
                 <label class="flex items-start gap-2">
                     <input type="radio" name="repeat-mode-{{ uid }}" form="repeat-ui" value="from_completion" x-model="mode"
-                           class="mt-0.5 h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                           class="mt-0.5 h-4 w-4 border-gray-300 accent-sage-500">
                     <span><span class="font-medium">From completion:</span> the next one is counted from when I complete this one</span>
                 </label>
             </fieldset>
         </div>
         <div class="flex justify-end gap-2 pt-1">
             <button type="button" x-show="freq || customRule" @click="clear()"
-                    class="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500">Remove repeat</button>
+                    class="btn px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg">Remove repeat</button>
             <button type="button" @click="open = false; $refs.trigger.focus()"
-                    class="px-3 py-1.5 text-sm font-medium text-gray-900 bg-brand-primary hover:opacity-90 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-primary">Done</button>
+                    class="btn px-3 py-1.5 text-sm font-medium text-gray-900 bg-brand-primary rounded-lg hover:bg-sage-400">Done</button>
         </div>
     </div>
 </div>

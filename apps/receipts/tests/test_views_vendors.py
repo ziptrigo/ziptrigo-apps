@@ -115,7 +115,7 @@ class TestPage:
         assert 'aria-label="Vendor status"' in content
         tabs = content.split('aria-label="Vendor status"')[1].split('</nav>')[0]
         assert '>3</span>' in tabs and '>2</span>' in tabs and '>1</span>' in tabs
-        assert 'bg-amber-100' in tabs  # the "To vet" count
+        assert 'bg-amber-50' in tabs  # the "To vet" count
 
     def test_a_tab_filters_and_the_list_says_when_nothing_matches(self, web, acme, funded_user):
         create_vendor(funded_user, 'Blue Bottle')

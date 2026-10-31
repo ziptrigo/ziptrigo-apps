@@ -5,9 +5,9 @@
             {% comment %} The row shows the path (`/s/code`); the full address is what "Copy" copies and what
                screen readers get. {% endcomment %}
             <a href="{% url 'short_url:detail' link.pk %}" title="{% short_link_url link %}"
-               class="min-w-0 truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded"><span class="sr-only" x-ref="text">{% short_link_url link %}</span><span aria-hidden="true">{% short_link_path link %}</span></a>
+               class="min-w-0 truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline rounded-md"><span class="sr-only" x-ref="text">{% short_link_url link %}</span><span aria-hidden="true">{% short_link_path link %}</span></a>
             <button type="button" @click="copy()" aria-label="Copy the short link"
-                    class="shrink-0 inline-flex items-center px-2 py-1 text-xs font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                    class="btn shrink-0 inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                 <i data-copy-icon class="fas" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
                 <span class="ml-1.5" x-text="copied ? 'Copied' : 'Copy'">Copy</span>
             </button>
@@ -20,7 +20,7 @@
             {% elif link.held_for_review_at %}<p class="text-xs text-amber-700 dark:text-amber-400">Under review: it can't be changed for now.</p>{% endif %}
             {% if link.tags %}
             <p class="mt-1 flex flex-wrap gap-1">
-                {% for tag in link.tags %}<span class="rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs text-gray-700 dark:text-gray-300">{{ tag }}</span>{% endfor %}
+                {% for tag in link.tags %}<span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-300">{{ tag }}</span>{% endfor %}
             </p>
             {% endif %}
         </div>

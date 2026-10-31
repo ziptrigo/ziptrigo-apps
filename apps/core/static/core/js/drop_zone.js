@@ -16,7 +16,9 @@ function initDropZone(zoneEl, onFiles, options) {
     const onEmpty = (options && options.onEmpty) || function () {
         alert('No files found in what you dropped (an empty folder, or one that could not be read).');
     };
-    const activeClasses = ['border-brand-primary', 'bg-gray-50', 'dark:bg-gray-700'];
+    // Dragging over tints the zone sage and grows it 1%; the transition makes it a gentle change, not a jump.
+    const activeClasses = ['border-brand-primary', 'bg-sage-50', 'dark:bg-sage-800/50', 'scale-[1.01]'];
+    zoneEl.classList.add('transition', 'duration-150', 'ease-out');
     let depth = 0;
 
     function hasFiles(e) {

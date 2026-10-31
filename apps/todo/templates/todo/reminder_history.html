@@ -4,10 +4,10 @@
 
 {% block todo_content %}
 <a href="{% url 'todo:settings' %}" class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Settings</a>
-<h1 class="mt-2 mb-6 text-3xl font-bold text-gray-900 dark:text-gray-100">Reminder history</h1>
+<h1 class="mt-2 mb-6 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Reminder history</h1>
 
 {% if deliveries %}
-<ul id="reminder-history" class="divide-y divide-gray-200 dark:divide-gray-700 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+<ul id="reminder-history" class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
     {% for delivery in deliveries %}
     <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-3 text-sm">
         <span class="text-xs text-gray-500 dark:text-gray-400">{{ delivery.sent_at|date:'j M Y, H:i' }}</span>

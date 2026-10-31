@@ -1,0 +1,17 @@
+{% comment %}An empty list or page: an icon, one line that says what is missing, an optional line of help and an optional
+   action. Empty is an invitation to act, not an error. Context: `icon` (Font Awesome classes, solid), `title`, `text`,
+   `action_url` and `action_label` (a primary button; leave both out for "no results" after a search or a filter).
+   Put it inside the list's own wrapper (a `<li>`, or the card). {% endcomment %}
+<div class="px-4 py-10 text-center sm:px-6">
+    {% if icon %}
+    <div class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-sage-50 text-sage-500 dark:bg-sage-800 dark:text-sage-300">
+        <i class="{{ icon }} text-lg" aria-hidden="true"></i>
+    </div>
+    {% endif %}
+    <p class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ title }}</p>
+    {% if text %}<p class="mx-auto mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">{{ text }}</p>{% endif %}
+    {% if action_url %}
+    <a href="{{ action_url }}"
+       class="btn mt-4 inline-flex items-center rounded-lg bg-brand-primary px-4 py-2 text-sm font-medium text-gray-900 hover:bg-sage-400">{{ action_label }}</a>
+    {% endif %}
+</div>

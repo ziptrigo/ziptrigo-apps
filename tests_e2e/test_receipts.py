@@ -109,7 +109,7 @@ def test_the_dashboard_filters_and_the_search_update_the_list_and_the_url(
     page.goto(f'{url}/receipts/')
 
     page.fill('#q', 'no such vendor')
-    expect(page.locator('#receipt-list')).to_contain_text('No receipts found.')
+    expect(page.locator('#receipt-list')).to_contain_text('No receipts found')
     expect(page).to_have_url(re.compile(r'\?q=no\+such\+vendor'))
     assert page.get_attribute('#export-link', 'href') == '/receipts/export.csv?q=no+such+vendor'
 

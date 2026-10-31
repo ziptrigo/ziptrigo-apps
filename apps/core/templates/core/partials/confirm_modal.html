@@ -25,16 +25,16 @@
             <template x-if="checkboxName">
                 <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-6">
                     <input type="checkbox" :name="checkboxName" value="1"
-                           class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                           class="h-4 w-4 rounded border-gray-300 accent-sage-500">
                     <span x-text="checkboxLabel"></span>
                 </label>
             </template>
             <div class="flex justify-end gap-3">
                 <button type="button" x-ref="cancel" @click="close()"
-                        class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">Cancel</button>
+                        class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Cancel</button>
                 <button type="submit" x-text="label"
-                        :class="tone === 'primary' ? 'text-gray-900 bg-brand-primary hover:opacity-90 focus:ring-brand-primary' : 'text-white bg-red-600 hover:bg-red-700 focus:ring-red-500'"
-                        class="px-4 py-2 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors"></button>
+                        :class="tone === 'primary' ? 'text-gray-900 bg-brand-primary hover:bg-sage-400' : 'text-white bg-red-600 hover:bg-red-700'"
+                        class="btn px-4 py-2 text-sm font-medium rounded-lg transition-colors"></button>
             </div>
         </form>
     </div>

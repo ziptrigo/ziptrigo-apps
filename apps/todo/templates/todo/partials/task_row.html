@@ -5,9 +5,9 @@
    nothing when the row no longer belongs to the list (`views.tasks.after_action`); the <li> carries the
    target and the values every action sends. {% endcomment %}
 <li id="task-{{ task.number }}" data-task-id="{{ task.pk }}"
-    hx-target="#task-{{ task.number }}" hx-swap="outerHTML"
+    hx-target="#task-{{ task.number }}" hx-swap="outerHTML swap:200ms"
     hx-vals='{"view": "{{ view }}", "ctx": "row"{% if sortable %}, "sortable": "1"{% endif %}}'
-    class="flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
+    class="task-row row-leave flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
     {% if sortable %}
     <span class="drag-handle mt-0.5 cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Drag to reorder" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
     {% endif %}
@@ -17,8 +17,8 @@
     {% elif task.is_completed %}
     <button type="button" hx-post="{% url 'todo:uncomplete' task.number %}"
             aria-label="Mark {{ task.title }} as not done" title="Uncomplete"
-            class="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 border-sage-400 bg-sage-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
-        <i class="fas fa-check text-[10px]" aria-hidden="true"></i>
+            class="is-done btn mt-0.5 flex-shrink-0 rounded-full text-sage-400">
+        <svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M6 10.3l2.6 2.6L14 7.6"/></svg>
     </button>
     {% elif task.subtask_open %}
     <button type="button" @click="show($el)"
@@ -27,17 +27,19 @@
             data-body="{{ task.title }} has {{ task.subtask_open }} open subtask{{ task.subtask_open|pluralize }}. Completing it completes {{ task.subtask_open|pluralize:'it,them' }} too."
             data-label="Complete" data-tone="primary"
             aria-label="Complete {{ task.title }}" title="Complete"
-            class="mt-0.5 h-5 w-5 flex-shrink-0 rounded-full border-2 border-gray-400 dark:border-gray-500 hover:bg-sage-100 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary"></button>
+            class="btn mt-0.5 flex-shrink-0 rounded-full text-gray-400 hover:text-sage-400 dark:text-gray-500 dark:hover:text-sage-300"><svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M6 10.3l2.6 2.6L14 7.6"/></svg></button>
     {% else %}
-    <button type="button" hx-post="{% url 'todo:complete' task.number %}"
+    {% comment %}`data-complete`: tasks.js marks the row done the moment it is clicked, so the check draws and the title
+       strikes through while the request runs; the row then leaves (`swap:200ms` above) instead of vanishing.{% endcomment %}
+    <button type="button" hx-post="{% url 'todo:complete' task.number %}" data-complete
             aria-label="Complete {{ task.title }}" title="Complete"
-            class="mt-0.5 h-5 w-5 flex-shrink-0 rounded-full border-2 border-gray-400 dark:border-gray-500 hover:bg-sage-100 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary"></button>
+            class="btn mt-0.5 flex-shrink-0 rounded-full text-gray-400 hover:text-sage-400 dark:text-gray-500 dark:hover:text-sage-300"><svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M6 10.3l2.6 2.6L14 7.6"/></svg></button>
     {% endif %}
 
     <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2">
             <a href="{% url 'todo:task' task.number %}"
-               class="min-w-0 truncate text-sm font-medium {% if task.is_completed or task.is_trashed %}text-gray-500 dark:text-gray-400 line-through{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">{{ task.title }}</a>
+               class="task-title min-w-0 truncate text-sm font-medium {% if task.is_completed or task.is_trashed %}text-gray-500 dark:text-gray-400 line-through{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline rounded-md">{{ task.title }}</a>
             <span class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">#{{ task.number }}</span>
         </div>
         <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -71,7 +73,7 @@
     <div class="flex flex-shrink-0 items-center">
         {% if task.is_trashed %}
         <button type="button" hx-post="{% url 'todo:restore' task.number %}"
-                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors">
+                class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
             <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore
         </button>
         <button type="button" @click="show($el)"
@@ -79,7 +81,7 @@
                 data-title="Delete forever"
                 data-body="Are you sure you want to delete {{ task.title }} forever? This can't be undone."
                 data-label="Delete forever"
-                class="p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                class="btn p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 aria-label="Delete {{ task.title }} forever" title="Delete forever">
             <i class="fas fa-trash" aria-hidden="true"></i>
         </button>
@@ -92,13 +94,13 @@
                 data-body="Move {{ task.title }} to the trash? It repeats: tick the box to stop repeating too, otherwise the repeat carries on."
                 data-label="Move to trash" data-tone="primary"
                 data-checkbox-name="stop_recurrence" data-checkbox-label="Also stop repeating"
-                class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 aria-label="Move {{ task.title }} to the trash" title="Move to trash">
             <i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
         </button>
         {% else %}
         <button type="button" hx-post="{% url 'todo:trash-task' task.number %}"
-                class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                 aria-label="Move {{ task.title }} to the trash" title="Move to trash">
             <i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
         </button>

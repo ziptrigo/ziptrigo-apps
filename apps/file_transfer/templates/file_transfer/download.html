@@ -5,8 +5,8 @@
 
 {% block content %}
 <div class="container mx-auto px-4 py-8 max-w-2xl" x-data="{ reportOpen: false }">
-    <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6">
-        <h1 class="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">{{ transfer.display_name }}</h1>
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+        <h1 class="text-2xl font-semibold tracking-tight mb-4 text-gray-900 dark:text-gray-100">{{ transfer.display_name }}</h1>
 
         {% if transfer.message %}
         <p class="text-gray-700 dark:text-gray-300 whitespace-pre-line mb-6">{{ transfer.message }}</p>
@@ -27,7 +27,7 @@
                 </div>
                 {% if unlocked %}
                 <a href="{% url 't:download-file' transfer.slug file.id %}"
-                   class="px-3 py-1.5 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90 whitespace-nowrap">
+                   class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 whitespace-nowrap hover:bg-sage-400">
                     <i class="fas fa-download mr-1"></i>Download
                 </a>
                 {% else %}
@@ -43,7 +43,7 @@
         <div class="mb-6">
             <button type="button" id="zip-area"
                     hx-get="{% url 't:zip-status' transfer.slug %}" hx-target="#zip-area" hx-swap="outerHTML"
-                    class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                    class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
                 <i class="fas fa-file-zipper mr-1"></i>Download all (.zip)
             </button>
         </div>
@@ -59,7 +59,7 @@
             {% for error in password_form.password.errors %}
             <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
             {% endfor %}
-            <button type="submit" class="px-4 py-2 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90">Unlock</button>
+            <button type="submit" class="btn px-4 py-2 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">Unlock</button>
         </form>
         {% endif %}
 

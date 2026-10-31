@@ -82,12 +82,25 @@ h1, h2, h3 { text-wrap: balance; }
 }
 .btn:active { transform: scale(0.98); }
 
-/* Focus ring only for the keyboard: a mouse click leaves nothing behind. */
-:is(button, a, select, summary, [tabindex]):focus { outline: none; }
-:is(button, a, select, summary, [tabindex]):focus-visible {
+/* Focus ring only for the keyboard: a mouse click leaves nothing behind. Templates don't carry focus:ring-*. */
+:is(button, a, summary, [tabindex]):focus { outline: none; }
+:is(button, a, summary, [tabindex]):focus-visible {
   box-shadow: 0 0 0 2px var(--ring-offset, #fff), 0 0 0 4px #8fa89e;
 }
-.dark :is(button, a, select, summary, [tabindex]):focus-visible { --ring-offset: #1a1f1d; }
+.dark :is(button, a, summary, [tabindex]):focus-visible { --ring-offset: #1a1f1d; }
+
+/* Fields: a sage border and a soft 3 px halo, with no offset so fields in a row don't jump. This one shows
+ * for the mouse too, since clicking into a field is how you start typing. */
+:is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='hidden']), textarea, select) {
+  transition: border-color var(--d-hover) var(--ease-out), box-shadow var(--d-hover) var(--ease-out);
+}
+:is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='hidden']), textarea, select):focus {
+  outline: none;
+  border-color: #728e84;
+  box-shadow: 0 0 0 3px rgb(143 168 158 / 0.35);
+}
+input[type='checkbox'], input[type='radio'] { accent-color: #5a736a; }
+input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outline: 2px solid #8fa89e; outline-offset: 2px; }
 
 /* Skeleton rows shimmer while an htmx list loads. */
 .shimmer { position: relative; overflow: hidden; }
@@ -109,9 +122,33 @@ h1, h2, h3 { text-wrap: balance; }
 .row-enter { transition: opacity var(--d-enter) var(--ease-out), transform var(--d-enter) var(--ease-out); }
 .row-enter.htmx-added { opacity: 0; transform: translateY(-4px); }
 .row-leave.htmx-swapping { opacity: 0; transition: opacity var(--d-exit) var(--ease-in); }
-/* A skeleton shown only while its request runs: <div class="skeleton-indicator">...</div> with hx-indicator. */
-.skeleton-indicator { display: none; }
-.htmx-request .skeleton-indicator, .htmx-request.skeleton-indicator { display: block; }
+
+/* The To-do check: a circle whose tick draws itself. `.done` is put on the row by tasks.js when it is clicked (animated);
+ * `.is-done` is a task that was already completed when the page rendered (drawn, no animation). */
+.check-svg { width: 20px; height: 20px; display: block; }
+.check-svg circle { fill: none; stroke: currentColor; stroke-width: 2; transition: fill var(--d-enter) var(--ease-out), stroke var(--d-enter) var(--ease-out); }
+.check-svg path { fill: none; stroke: #1a1f1d; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 16; stroke-dashoffset: 16; }
+.done .check-svg circle, .is-done .check-svg circle { fill: #8fa89e; stroke: #728e84; }
+.done .check-svg path { animation: draw 220ms var(--ease-out) 60ms forwards; }
+.is-done .check-svg path { stroke-dashoffset: 0; }
+/* The strike draws left to right as a background line (not text-decoration, which would hide hover:underline). */
+.task-title {
+  background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0 1px;
+  transition: background-size var(--d-enter) var(--ease-out), opacity var(--d-enter) var(--ease-out);
+}
+.done .task-title { background-size: 100% 1px; opacity: 0.6; }
+
+/* The sliding underline of the filter tabs (core/js/tabs.js). Without the script the current tab keeps its static underline. */
+[data-tabs] { position: relative; }
+.tab-indicator {
+  position: absolute;
+  height: 2px;
+  border-radius: 1px;
+  background: #8fa89e;
+  pointer-events: none;
+  transition: left var(--d-enter) var(--ease-out), width var(--d-enter) var(--ease-out), top var(--d-enter) var(--ease-out);
+}
+[data-tabs].has-indicator [aria-current='page'] { border-bottom-color: transparent; }
 
 /* The theme change crossfade (base.html adds `theming` to <html> for 300 ms). Only for people who have not
  * asked for reduced motion: this rule is more specific than the blanket reduced-motion one below. */

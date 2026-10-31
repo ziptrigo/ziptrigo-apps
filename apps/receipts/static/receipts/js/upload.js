@@ -83,11 +83,11 @@
     }
 
     function createRow(file) {
-        const li = el('li', 'rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3');
+        const li = el('li', 'rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3');
         const top = el('div', 'flex items-center gap-3');
         const name = el('span', 'min-w-0 flex-1 truncate text-sm font-medium text-gray-900 dark:text-gray-100', file.name);
         const size = el('span', 'text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap', formatSize(file.size));
-        const cancel = el('button', 'p-1 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors');
+        const cancel = el('button', 'btn p-1 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors');
         cancel.type = 'button';
         cancel.setAttribute('aria-label', 'Cancel upload of ' + file.name);
         const cancelIcon = el('i', 'fas fa-times');

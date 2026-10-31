@@ -143,10 +143,10 @@ class TestList:
 
     def test_empty_states(self, web, make):
         content = web.get(reverse('receipts:dashboard')).content.decode()
-        assert 'No receipts yet.' in content
+        assert 'No receipts yet' in content
 
         filtered = web.get(reverse('receipts:dashboard'), {'q': 'nothing like this'})
-        assert 'No receipts found.' in filtered.content.decode()
+        assert 'No receipts found' in filtered.content.decode()
 
     def test_the_default_order_is_newest_receipt_date_first_with_undated_on_top(self, web, make):
         old = make(vendor='Old', receipt_date=date(2026, 1, 1))

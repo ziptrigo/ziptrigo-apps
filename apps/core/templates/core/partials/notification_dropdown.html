@@ -7,7 +7,7 @@
     <form method="post" action="{% url 'core:notification-read-all' %}"
           hx-post="{% url 'core:notification-read-all' %}" hx-target="#notification-dropdown-body" hx-swap="innerHTML" hx-disabled-elt="find button">
         {% include 'core/partials/notification_fields.html' with scope='dropdown' %}
-        <button type="submit" class="text-xs text-sage-600 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary dark:text-sage-300">Mark all as read</button>
+        <button type="submit" class="text-xs text-sage-600 hover:underline dark:text-sage-300">Mark all as read</button>
     </form>
     {% endif %}
 </div>
@@ -19,6 +19,6 @@
     {% endfor %}
 </ul>
 <div class="border-t border-gray-200 px-4 py-2 text-center text-sm dark:border-gray-700">
-    <a href="{% url 'core:notifications' %}" class="text-sage-600 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary dark:text-sage-300">View all notifications</a>
+    <a href="{% url 'core:notifications' %}" class="text-sage-600 hover:underline dark:text-sage-300">View all notifications</a>
 </div>
 {% include 'core/partials/notification_badge.html' with count=unread_count oob=True %}

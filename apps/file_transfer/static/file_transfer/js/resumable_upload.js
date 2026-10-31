@@ -96,7 +96,7 @@ function initFileTransferUpload(options) {
         nameSpan.textContent = entry.name + ' (' + formatSize(entry.size) + ')';
 
         const barOuter = document.createElement('span');
-        barOuter.className = 'w-32 bg-gray-200 dark:bg-gray-700 rounded h-2 overflow-hidden';
+        barOuter.className = 'w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden';
         const barInner = document.createElement('span');
         barInner.className = 'block h-2 bg-brand-primary';
         barInner.style.width = pct + '%';

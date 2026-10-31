@@ -109,6 +109,55 @@ def test_flash_message_text_is_escaped(client):
     assert '&lt;script&gt;' in html
 
 
+def test_shared_scripts_are_loaded_and_the_skeleton_rows_exist(client):
+    html = client.get(reverse('core:home')).content.decode()
+    assert 'core/js/tabs.js' in html
+    assert 'core/js/skeleton.js' in html
+    assert '<template id="skeleton-rows">' in html
+    assert html.count('class="flex items-center gap-4 px-4 py-3 sm:px-6"') == 3
+
+
+def _template_files():
+    root = Path(__file__).resolve().parents[2]
+    return [
+        path
+        for path in root.glob('*/templates/**/*.html')
+        if '/templates/admin/' not in path.as_posix()
+    ]
+
+
+@pytest.mark.parametrize(
+    'stale',
+    [
+        'hover:opacity-90',
+        'focus:ring-',
+        'focus:outline-none',
+        'text-brand-primary',
+        'sm:rounded-md',
+    ],
+)
+def test_templates_do_not_bring_back_the_old_class_patterns(stale):
+    """The refresh took these out: the site draws focus (site.css), buttons darken instead of fading, and
+    brand-coloured text is sage-600 (docs/ui-design/README.md)."""
+    offenders = [
+        f'{path.relative_to(path.parents[3])}'
+        for path in _template_files()
+        if stale in path.read_text()
+        # the checkbox in the confirm modal and similar only ever use accent-sage-500 now
+    ]
+    assert not offenders, offenders
+
+
+def test_every_underline_tab_bar_is_marked_for_the_sliding_indicator():
+    root = Path(__file__).resolve().parents[2]
+    for name in (
+        'receipts/templates/receipts/partials/tabs.html',
+        'receipts/templates/receipts/partials/vendor_tabs.html',
+        'short_url/templates/short_url/partials/tabs.html',
+    ):
+        assert '<nav data-tabs ' in (root / name).read_text(), name
+
+
 class TestFontCacheHeader:
     def test_fonts_are_cached_for_a_year(self):
         headers = Headers([('Cache-Control', 'max-age=60, public')])

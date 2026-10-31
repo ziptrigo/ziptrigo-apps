@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
-  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
     <div class="flex items-center gap-3 mb-6">
       <img src="{% static 'accounts/images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
       <h1 class="text-xl font-semibold">Create account</h1>
@@ -20,7 +20,7 @@
     {% endif %}
 
     <p class="mt-4 text-sm text-gray-600 dark:text-gray-300">
-      Already have an account? <a href="{% url 'accounts:login' %}" class="text-sage-300 underline">Sign in</a>
+      Already have an account? <a href="{% url 'accounts:login' %}" class="text-sage-600 dark:text-sage-300 underline decoration-sage-300/70 dark:decoration-sage-500 underline-offset-2 hover:decoration-sage-600 dark:hover:decoration-sage-300 transition-colors">Sign in</a>
     </p>
   </div>
 </div>

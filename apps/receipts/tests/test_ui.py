@@ -30,17 +30,26 @@ class TestStatusPill:
         html = render('{% status_pill status %}', status=status.value)
 
         assert label in html
-        assert f'dark:text-{colour}-400' in html or colour == 'gray'
-        assert 'dark:text-gray-400' in html if colour == 'gray' else f'text-{colour}-' in html
+        # one tinted pill (apps.core.templatetags.core_ui): a fill and text with a dark twin each
+        assert 'rounded-full' in html
+        if colour == 'gray':
+            assert (
+                'bg-gray-100' in html
+                and 'dark:bg-gray-700' in html
+                and 'dark:text-gray-300' in html
+            )
+        else:
+            assert f'bg-{colour}-50' in html and f'dark:bg-{colour}-400/10' in html
+            assert f'text-{colour}-700' in html and f'dark:text-{colour}-300' in html
         assert 'aria-hidden="true"' in html  # the icon is decoration; the label is the meaning
 
     def test_light_text_steps_follow_the_contrast_rules(self):
-        # -600 on white is 3.3:1 (green) and 3.2:1 (amber): too low for 12px text, so those two use
-        # -700; blue and red are fine at -600 (docs/ui-design/README.md, "Status pills").
+        # -700 text on a -50 fill is 4.5:1 or better for every coloured tone, which 12px text needs
+        # (docs/ui-design/README.md, "Pills").
         assert 'text-green-700' in render('{% status_pill "processed" %}')
         assert 'text-amber-700' in render('{% status_pill "needs_review" %}')
-        assert 'text-blue-600' in render('{% status_pill "processing" %}')
-        assert 'text-red-600' in render('{% status_pill "failed" %}')
+        assert 'text-blue-700' in render('{% status_pill "processing" %}')
+        assert 'text-red-700' in render('{% status_pill "failed" %}')
 
     def test_an_unknown_status_still_renders(self):
         html = render('{% status_pill "mystery_state" %}')
@@ -59,13 +68,13 @@ class TestVendorChip:
     def test_a_vetted_vendor(self):
         html = render('{% vendor_chip True %}')
 
-        assert 'Vetted' in html and 'text-green-700' in html and 'dark:text-green-400' in html
+        assert 'Vetted' in html and 'text-green-700' in html and 'dark:text-green-300' in html
         assert 'fa-circle-check' in html and 'aria-hidden="true"' in html
 
     def test_a_new_vendor_is_a_neutral_gray_not_a_warning(self):
         html = render('{% vendor_chip False %}')
 
-        assert 'New vendor' in html and 'text-gray-600' in html and 'dark:text-gray-400' in html
+        assert 'New vendor' in html and 'text-gray-600' in html and 'dark:text-gray-300' in html
         assert 'amber' not in html and 'red' not in html
 
     def test_the_short_form_for_the_vendors_page(self):

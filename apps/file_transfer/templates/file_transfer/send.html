@@ -5,32 +5,32 @@
 
 {% block content %}
 <div class="container mx-auto px-4 py-8 max-w-3xl">
-    <h1 class="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">Send files</h1>
+    <h1 class="text-3xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">Send files</h1>
     <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
         Your balance: {{ balance }} credit{{ balance|pluralize }}. Sending needs at least
         {{ min_balance_to_send }}.
         {% if balance < min_balance_to_send %}
-        <a href="{% url 'billing:credits-history' %}" class="text-brand-primary hover:underline">Buy credits</a>.
+        <a href="{% url 'billing:credits-history' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Buy credits</a>.
         {% endif %}
     </p>
 
     <div id="send-errors"></div>
 
-    <div class="bg-white dark:bg-gray-800 shadow rounded-md p-6 mb-6">
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 mb-6 border border-gray-200 dark:border-gray-700">
         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Files</label>
         <div id="drop-zone"
-             class="flex flex-col items-center justify-center gap-3 text-center rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-8 transition-colors">
+             class="flex flex-col items-center justify-center gap-3 text-center rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-8 transition-colors">
             <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 dark:text-gray-500"></i>
             <p class="text-sm text-gray-700 dark:text-gray-300">Drag &amp; drop files or folders here, or</p>
             <input type="file" id="file-input" multiple class="hidden">
             <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
             <div class="flex items-center gap-3">
                 <button type="button" id="pick-files-btn"
-                        class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                        class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
                     <i class="fas fa-file mr-1"></i>Choose files
                 </button>
                 <button type="button" id="pick-folder-btn"
-                        class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                        class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
                     <i class="fas fa-folder-open mr-1"></i>Add folder
                 </button>
             </div>
@@ -39,7 +39,7 @@
     </div>
 
     <form id="send-form" hx-post="{% url 'file_transfer:send-submit' draft_id %}" hx-target="#send-errors"
-          hx-swap="innerHTML" class="bg-white dark:bg-gray-800 shadow rounded-md p-6 space-y-4">
+          hx-swap="innerHTML" class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 space-y-4 border border-gray-200 dark:border-gray-700">
         {% csrf_token %}
         <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.recipients.label }}</label>
@@ -78,7 +78,7 @@
         </div>
 
         <button type="submit" id="send-submit-btn" disabled
-                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-sage-400">
             <i class="fas fa-paper-plane mr-2"></i>Send
         </button>
         <p class="text-xs text-gray-500 dark:text-gray-400">Add at least one file that has finished uploading.</p>

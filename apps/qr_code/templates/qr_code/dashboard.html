@@ -6,9 +6,9 @@
 {% block content %}
 <div class="container mx-auto px-4 py-8 max-w-4xl">
     <div class="flex items-center justify-between mb-8">
-        <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">QR codes</h1>
+        <h1 class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">QR codes</h1>
         <a href="{% url 'qr_code:create' %}"
-           class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+           class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
             <i class="fas fa-plus mr-2"></i>New QR code
         </a>
     </div>
@@ -22,7 +22,7 @@
                 </svg>
             </div>
             <input type="text" name="q" id="search-input" value="{{ query|default:'' }}" 
-                class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
+                class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:placeholder-gray-400 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
                 placeholder="Search by name">
             <button type="button" id="clear-search" 
                 class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors{% if not query %} hidden{% endif %}"
@@ -33,13 +33,13 @@
     </div>
 
     <!-- Table -->
-    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+    <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
             <!-- Header -->
             <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between sm:px-6">
                 <div class="flex items-center">
                     <div class="flex items-center h-5">
-                        <input type="checkbox" id="select-all" class="focus:ring-brand-primary h-4 w-4 text-brand-primary border-gray-300 rounded">
+                        <input type="checkbox" id="select-all" class="h-4 w-4 accent-sage-500 border-gray-300 rounded">
                     </div>
                     <div class="ml-4 flex items-center">
                          <span class="text-sm font-medium text-gray-900 dark:text-gray-100 mr-4">Select all</span>
@@ -58,22 +58,22 @@
             <li class="px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
                 <div class="flex items-center min-w-0 flex-1">
                     <div class="flex items-center h-5 mr-4">
-                        <input type="checkbox" name="selected_qr" value="{{ qr.id }}" class="qr-checkbox focus:ring-brand-primary h-4 w-4 text-brand-primary border-gray-300 rounded">
+                        <input type="checkbox" name="selected_qr" value="{{ qr.id }}" class="qr-checkbox h-4 w-4 accent-sage-500 border-gray-300 rounded">
                     </div>
                     <div class="flex-shrink-0">
                         <!-- QR thumbnail is clickable to open a larger modal preview -->
                         <button type="button"
-                                class="focus:outline-none group"
+                                class="group"
                                 data-full-src="{% url 'qr_code:image' qr.id %}"
                                 aria-label="Open QR code preview">
-                            <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                            <img class="h-12 w-12 rounded-md object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
                                  src="{% url 'qr_code:image' qr.id %}"
                                  alt="{{ qr.name }}">
                         </button>
                     </div>
                     <div class="min-w-0 flex-1 px-4 md:grid md:grid-cols-2 md:gap-4">
                         <div>
-                            <p class="text-sm font-medium text-brand-primary truncate">{{ qr.name }}</p>
+                            <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ qr.name }}</p>
                             <p class="mt-2 flex items-center text-xs text-gray-500 dark:text-gray-400">
                                 <span class="truncate">{{ qr.content }}</span>
                             </p>
@@ -83,29 +83,29 @@
                 <!-- Dropdown menu -->
                 <div class="relative ml-4 flex-shrink-0">
                     <button type="button"
-                            class="qr-dropdown-btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                            class="btn qr-dropdown-btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                             data-qr-id="{{ qr.id }}"
                             aria-label="QR code actions">
                         <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
                     </button>
-                    <div class="qr-dropdown-menu hidden absolute top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right"
+                    <div class="qr-dropdown-menu hidden absolute top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right p-1"
                          data-qr-id="{{ qr.id }}"
                          style="right: 0;">
                         <a href="{% url 'qr_code:edit' qr.id %}"
-                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">
+                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">
                             <i class="fas fa-edit mr-2"></i>Edit
                         </a>
                         <a href="{% url 'qr_code:duplicate' qr.id %}"
-                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">
+                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">
                             <i class="fas fa-clone mr-2"></i>Duplicate
                         </a>
                         <a href="{% url 'qr_code:image' qr.id %}?download=1"
                            download
-                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md">
+                           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">
                             <i class="fas fa-download mr-2"></i>Download
                         </a>
                         <button type="button"
-                                class="qr-delete-btn w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"
+                                class="qr-delete-btn w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"
                                 data-qr-id="{{ qr.id }}"
                                 data-qr-name="{{ qr.name }}"
                                 data-delete-url="{% url 'qr_code:delete' qr.id %}">
@@ -115,8 +115,9 @@
                 </div>
             </li>
             {% empty %}
-            <li class="px-4 py-12 text-center sm:px-6">
-                <p class="text-sm text-gray-500 dark:text-gray-400">No QR codes found.</p>
+            <li>
+                {% if query %}{% include 'core/partials/empty_state.html' with icon='fas fa-magnifying-glass' title='No QR codes found' text='Try another name.' %}
+                {% else %}{% url 'qr_code:create' as create_url %}{% include 'core/partials/empty_state.html' with icon='fas fa-qrcode' title='No QR codes yet' text='Your first code takes a minute.' action_url=create_url action_label='Create QR code' %}{% endif %}
             </li>
             {% endfor %}
         </ul>
@@ -126,24 +127,24 @@
 <!-- QR Code Modal Preview -->
 <div id="qr-modal-overlay"
      class="fixed inset-0 z-40 hidden bg-black/60 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
-    <div class="bg-gray-900 dark:bg-black p-24 rounded-lg relative max-w-full max-h-full flex items-center justify-center transform transition-transform duration-150 ease-out scale-95">
+    <div class="bg-gray-900 dark:bg-black p-24 rounded-xl relative max-w-full max-h-full flex items-center justify-center transform transition-transform duration-150 ease-out scale-95">
         <button type="button"
                 id="qr-modal-close"
-                class="absolute top-4 right-4 text-gray-300 hover:text-white text-xl font-semibold focus:outline-none"
+                class="absolute top-4 right-4 text-gray-300 hover:text-white text-xl font-semibold"
                 aria-label="Close QR code preview">
             &times;
         </button>
         <img id="qr-modal-image"
              src=""
              alt="QR code preview"
-             class="max-h-[70vh] max-w-[70vw] object-contain bg-white rounded" />
+             class="max-h-[70vh] max-w-[70vw] object-contain bg-white rounded-md" />
     </div>
 </div>
 
 <!-- Delete Confirmation Modal -->
 <div id="delete-modal-overlay"
      class="fixed inset-0 z-50 hidden bg-black/50 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
         <div class="p-6">
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR Code</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
@@ -152,12 +153,12 @@
             <div class="flex justify-end gap-3">
                 <button type="button"
                         id="delete-modal-cancel"
-                        class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                        class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">
                     Cancel
                 </button>
                 <button type="button"
                         id="delete-modal-confirm"
-                        class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                        class="btn px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
                     Delete
                 </button>
             </div>

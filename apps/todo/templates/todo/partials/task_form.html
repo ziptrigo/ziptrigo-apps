@@ -8,7 +8,7 @@
 <form id="quick-add-form" method="post" action="{% url 'todo:create' %}"
       hx-post="{% url 'todo:create' %}" hx-target="#task-list" hx-swap="innerHTML"
       hx-disabled-elt="find button[type='submit']"
-      class="mb-6 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
+      class="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
     {% csrf_token %}
     <input type="hidden" name="view" value="{{ view }}">
     <div id="quick-add-msg" class="mb-2 text-sm" aria-live="polite"></div>
@@ -17,11 +17,11 @@
             <label for="quick-title" class="sr-only">Task title</label>
             <input id="quick-title" type="text" name="title" maxlength="500" required autocomplete="off"
                    placeholder="Add a task" data-parse-input
-                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             {% include 'todo/partials/parse_chip.html' with chip_id='quick-parse-chip' %}
         </div>
         <button type="submit"
-                class="group inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+                class="btn group inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
             <span class="group-disabled:hidden"><i class="fas fa-plus mr-2" aria-hidden="true"></i>Add task</span>
             <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2" aria-hidden="true"></i>Adding&hellip;</span>
         </button>
@@ -45,14 +45,14 @@
         <label for="date-words-{{ task.number }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Or type a date</label>
         <input id="date-words-{{ task.number }}" type="text" autocomplete="off" maxlength="500" data-parse-input
                placeholder="Type a date... (every Monday at 9am)"
-               class="w-full max-w-md rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+               class="w-full max-w-md rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm">
         <p data-parse-status class="mt-1 text-xs text-gray-500 dark:text-gray-400" aria-live="polite"></p>
         {% include 'todo/partials/parse_chip.html' with chip_id='details-parse-chip' %}
     </div>
     <div class="flex flex-wrap items-end gap-3">
         {% include 'todo/partials/task_form_fields.html' with show_labels_text=True %}
         <button type="submit"
-                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save</button>
     </div>
 </form>
 {% endif %}

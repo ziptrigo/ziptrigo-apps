@@ -6,10 +6,7 @@ from django import forms
 
 from ..models import MAX_DETAILS_LENGTH, ReportReason
 
-_INPUT = (
-    'w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 '
-    'px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary'
-)
+_INPUT = 'w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2'
 
 
 class ReportForm(forms.Form):

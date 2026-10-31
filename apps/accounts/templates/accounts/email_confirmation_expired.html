@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
-  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-lg shadow p-6 text-center">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6 text-center">
     <div class="flex items-center justify-center gap-3 mb-6">
       <img src="{% static 'accounts/images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
       <h1 class="text-xl font-semibold text-red-600">Link Expired</h1>
@@ -22,7 +22,7 @@
 
     <button type="button"
             onclick="window.location='{% url 'core:home' %}';"
-            class="mt-4 inline-flex justify-center items-center rounded border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm">
+            class="btn mt-4 inline-flex justify-center items-center rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm">
       Go to Home
     </button>
   </div>

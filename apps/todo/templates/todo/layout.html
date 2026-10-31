@@ -14,7 +14,7 @@
                 {% for key, label, icon, url in nav_items %}
                 <li class="flex-shrink-0">
                     <a href="{{ url }}"{% if nav == key %} aria-current="page"{% endif %}
-                       class="flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors {% if nav == key %}bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100{% else %}text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800{% endif %}">
+                       class="btn flex items-center gap-2 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors {% if nav == key %}bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100{% else %}text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800{% endif %}">
                         <i class="{{ icon }} w-4 text-center text-sage-400" aria-hidden="true"></i>
                         <span>{{ label }}</span>
                         {% if key == 'today' %}<span class="ml-auto text-xs text-gray-500 dark:text-gray-400">{% include 'todo/partials/nav_count.html' %}</span>{% endif %}
@@ -29,28 +29,28 @@
         <div class="min-w-0 flex-1">
             {% if todo_blocked %}
             <div role="alert"
-                 class="mb-4 flex flex-col gap-3 rounded-md border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">
+                 class="mb-4 flex flex-col gap-3 rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">
                 <i class="fas fa-triangle-exclamation text-amber-600 dark:text-amber-400" aria-hidden="true"></i>
                 <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">
                     <span class="font-medium text-gray-900 dark:text-gray-100">Tasks are blocked.</span>
                     A repeating task is waiting to be paid. Adding tasks resumes when you add credits.
                 </p>
                 <a href="{% url 'billing:credits-history' %}"
-                   class="inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                   class="btn inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                     Top up
                 </a>
             </div>
             {% endif %}
             {% if todo_frozen %}
             <div role="alert"
-                 class="mb-4 flex flex-col gap-3 rounded-md border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">
+                 class="mb-4 flex flex-col gap-3 rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">
                 <i class="fas fa-triangle-exclamation text-amber-600 dark:text-amber-400" aria-hidden="true"></i>
                 <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">
                     <span class="font-medium text-gray-900 dark:text-gray-100">Storage is paused.</span>
                     Your credits couldn't cover the storage for your attachments. Nothing was deleted; uploads and downloads resume when you add credits.
                 </p>
                 <a href="{% url 'billing:credits-history' %}"
-                   class="inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                   class="btn inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                     Top up
                 </a>
             </div>

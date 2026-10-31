@@ -20,18 +20,18 @@
         <a href="{{ dashboard_url }}{% if clear_vendor_query %}?{{ clear_vendor_query }}{% endif %}"
            hx-get="{{ list_url }}{% if clear_vendor_query %}?{{ clear_vendor_query }}{% endif %}" hx-target="#receipt-list" hx-swap="innerHTML" hx-sync="#receipt-filters:replace"
            aria-label="Remove the vendor filter"
-           class="rounded-full p-1 hover:bg-sage-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-primary"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></a>
+           class="rounded-full p-1 hover:bg-sage-100 dark:hover:bg-gray-700"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></a>
     </span>
 </div>
 {% endif %}
 
-<div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+<div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
     <ul class="divide-y divide-gray-200 dark:divide-gray-700">
         <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 sm:px-6 sm:rounded-t-md">
             <div class="flex items-center gap-4 md:grid md:grid-cols-[6.5rem_minmax(0,1fr)_9.5rem_7rem_8.5rem] md:gap-x-4">
                 {% with sort=sort_links.receipt_date %}
                 <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#receipt-list" hx-swap="innerHTML" hx-sync="#receipt-filters:replace"
-                   class="group flex items-center text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-primary rounded {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200{% endif %}">
+                   class="group flex items-center text-sm font-medium rounded-md {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200{% endif %}">
                     Receipt date{% if sort.active %}<span class="sr-only"> (sorted {% if sort.descending %}descending{% else %}ascending{% endif %})</span>{% endif %}
                     <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
                 </a>
@@ -40,7 +40,7 @@
                     <span class="hidden md:inline">Vendor</span>
                     {% with sort=sort_links.created_at %}
                     <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#receipt-list" hx-swap="innerHTML" hx-sync="#receipt-filters:replace"
-                       class="group flex items-center focus:outline-none focus:ring-2 focus:ring-brand-primary rounded {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+                       class="group flex items-center rounded-md {% if sort.active %}text-gray-900 dark:text-gray-100{% else %}hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
                         Added{% if sort.active %}<span class="sr-only"> (sorted {% if sort.descending %}descending{% else %}ascending{% endif %})</span>{% endif %}
                         <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
                     </a>
@@ -55,10 +55,9 @@
         {% for receipt in receipts %}
         {% include 'receipts/partials/receipt_row.html' %}
         {% empty %}
-        <li class="px-4 py-12 text-center sm:px-6">
-            <p class="text-sm text-gray-500 dark:text-gray-400">
-                {% if parsed.is_filtered %}No receipts found.{% else %}No receipts yet. Upload one, or email it to your address above.{% endif %}
-            </p>
+        <li>
+            {% if parsed.is_filtered %}{% include 'core/partials/empty_state.html' with icon='fas fa-magnifying-glass' title='No receipts found' text='Try other filters or a different search.' %}
+            {% else %}{% url 'receipts:upload' as upload_url %}{% include 'core/partials/empty_state.html' with icon='fas fa-receipt' title='No receipts yet' text='Upload one, or email it to your address above.' action_url=upload_url action_label='Upload receipts' %}{% endif %}
         </li>
         {% endfor %}
     </ul>

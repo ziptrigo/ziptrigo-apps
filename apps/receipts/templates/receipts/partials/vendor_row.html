@@ -5,11 +5,11 @@
 <li id="vendor-{{ vendor.pk }}"
     class="relative grid grid-cols-[1.5rem_minmax(0,1fr)_2.5rem] md:grid-cols-[1.5rem_minmax(0,1fr)_7rem_7rem_2.5rem] gap-x-4 gap-y-1 px-4 py-3 items-center has-[:checked]:bg-sage-50/60 dark:has-[:checked]:bg-gray-800/60">
     <input type="checkbox" name="ids" value="{{ vendor.pk }}" form="vendor-bulk" aria-label="Select {{ vendor.name }}"
-           class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+           class="h-4 w-4 rounded border-gray-300 accent-sage-500">
     <div class="min-w-0">
         <p class="flex flex-wrap items-center gap-2">
             <a href="{% url 'receipts:dashboard' %}?vendor={{ vendor.pk }}"
-               class="truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">{{ vendor.name }}</a>
+               class="truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline rounded-md">{{ vendor.name }}</a>
             {% vendor_chip vendor.vetted True %}
         </p>
         {% if vendor.also_shown %}
@@ -20,35 +20,35 @@
         </p>
     </div>
     <a href="{% url 'receipts:dashboard' %}?vendor={{ vendor.pk }}"
-       class="hidden md:block text-right text-sm tabular-nums text-sage-600 dark:text-sage-300 underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-brand-primary rounded"
+       class="hidden md:block text-right text-sm tabular-nums text-sage-600 dark:text-sage-300 underline underline-offset-2 rounded-md"
        aria-label="{{ vendor.receipt_count }} receipt{{ vendor.receipt_count|pluralize }} from {{ vendor.name }}">{{ vendor.receipt_count }}{% if vendor.trashed_count %}<span class="block text-xs font-normal no-underline text-gray-500 dark:text-gray-400">+{{ vendor.trashed_count }} in Trash</span>{% endif %}</a>
     <span class="hidden md:block text-sm tabular-nums text-gray-700 dark:text-gray-300">{% if vendor.last_receipt_date %}{{ vendor.last_receipt_date|date:'Y-m-d' }}{% else %}&mdash;{% endif %}</span>
 
     <div class="relative justify-self-end" x-data="{ menu: false }" @keydown.escape.window="menu = false" @click.outside="menu = false">
         <button type="button" @click="menu = !menu" aria-haspopup="menu" :aria-expanded="menu ? 'true' : 'false'"
                 aria-label="Actions for {{ vendor.name }}"
-                class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors">
+                class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
             <i class="fas fa-ellipsis-vertical text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
         </button>
-        <div x-show="menu" style="display: none" role="menu"
-             class="absolute right-0 top-full z-50 mt-1 w-52 origin-top-right rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-1 text-sm shadow-lg">
+        <div x-show="menu" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none" role="menu"
+             class="absolute right-0 top-full z-50 mt-1 w-52 origin-top-right rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-1 text-sm shadow-lg">
             <a href="{% url 'receipts:dashboard' %}?vendor={{ vendor.pk }}" role="menuitem"
-               class="block rounded-md px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-list mr-2 w-4" aria-hidden="true"></i>View receipts</a>
+               class="block rounded-lg px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-list mr-2 w-4" aria-hidden="true"></i>View receipts</a>
             <button type="button" role="menuitem" @click="menu = false"
                     hx-get="{% url 'receipts:vendor-rename' vendor.pk %}?next={{ self_url|urlencode:'' }}"
                     hx-target="#vendor-modal" hx-swap="innerHTML"
-                    class="block w-full rounded-md px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-pen mr-2 w-4" aria-hidden="true"></i>Rename&hellip;</button>
+                    class="block w-full rounded-lg px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-pen mr-2 w-4" aria-hidden="true"></i>Rename&hellip;</button>
             <button type="button" role="menuitem" @click="menu = false"
                     hx-post="{% url 'receipts:vendor-vet' %}"
                     hx-vals='{"ids": "{{ vendor.pk }}", "vetted": "{% if vendor.vetted %}0{% else %}1{% endif %}"}'
                     hx-target="#vendor-list" hx-swap="innerHTML"
-                    class="block w-full rounded-md px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    class="block w-full rounded-lg px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                 {% if vendor.vetted %}<i class="fas fa-circle-xmark mr-2 w-4" aria-hidden="true"></i>Mark as not vetted{% else %}<i class="fas fa-circle-check mr-2 w-4" aria-hidden="true"></i>Mark as vetted{% endif %}
             </button>
             <button type="button" role="menuitem" @click="menu = false"
                     hx-get="{% url 'receipts:vendor-merge' %}?from={{ vendor.pk }}&amp;next={{ self_url|urlencode:'' }}"
                     hx-target="#vendor-modal" hx-swap="innerHTML"
-                    class="block w-full rounded-md px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-code-merge mr-2 w-4" aria-hidden="true"></i>Merge into&hellip;</button>
+                    class="block w-full rounded-lg px-4 py-2 text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-code-merge mr-2 w-4" aria-hidden="true"></i>Merge into&hellip;</button>
             {% if vendor.receipt_count or vendor.trashed_count %}
             <span role="menuitem" aria-disabled="true" title="Only a vendor with no receipts can be deleted. Merge it into another vendor instead."
                   class="block cursor-not-allowed rounded-md px-4 py-2 text-gray-400 dark:text-gray-500"><i class="fas fa-trash mr-2 w-4" aria-hidden="true"></i>Delete</span>
@@ -58,7 +58,7 @@
                     data-title="Delete vendor"
                     data-body="Are you sure you want to delete {{ vendor.name }}? No receipts are filed under it."
                     data-label="Delete"
-                    class="block w-full rounded-md px-4 py-2 text-left text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-trash mr-2 w-4" aria-hidden="true"></i>Delete</button>
+                    class="block w-full rounded-lg px-4 py-2 text-left text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"><i class="fas fa-trash mr-2 w-4" aria-hidden="true"></i>Delete</button>
             {% endif %}
         </div>
     </div>

@@ -98,15 +98,16 @@ class TestTags:
         for task, text, red in ((overdue, '20 Oct', True), (today, 'Today 09:05', False)):
             html = self.render('{% due_badge task %}', task=task, user=user)
             assert text in html
-            assert ('text-red-600' in html) is red
+            assert ('bg-red-50' in html) is red
         assert '1 Dec' in self.render('{% due_badge task %}', task=later, user=user)
         assert self.render('{% due_badge task %}', task=undated, user=user) == ''
         assert 'overdue' in self.render('{% due_badge task %}', task=overdue, user=user)
 
     def test_priority_flag(self, user):
-        for priority, color in ((1, 'text-red-600'), (2, 'text-amber-500'), (3, 'text-sky-600')):
+        for priority, tone in ((1, 'red'), (2, 'amber'), (3, 'sky')):
             html = self.render('{% priority_flag task %}', task=make_task(user, priority=priority))
-            assert color in html and f'Priority {priority}' in html and 'dark:' in html
+            assert f'bg-{tone}-50' in html and f'Priority {priority}' in html and 'dark:' in html
+            assert f'>P{priority}' in html and 'rounded-full' in html
         assert self.render('{% priority_flag task %}', task=make_task(user)) == ''
 
     def test_label_chip_uses_its_colour_at_20_percent_and_escapes(self, user):

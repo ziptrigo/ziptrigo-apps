@@ -4487,9 +4487,15 @@ extends `core/base.html`, which loads Tailwind (Play CDN pinned to 3.4.17, confi
 sage palette, `brand-*` aliases, a sage-tinted `gray` scale that replaces Tailwind's and the `font-sans`
 / `font-mono` stacks), htmx, Alpine.js, Font Awesome and `core/css/site.css` (issue #214: the
 self-hosted Figtree and IBM Plex Mono `@font-face`s under `core/static/core/fonts/`, the motion tokens
-and keyframes, the opt-in htmx hooks `row-enter` / `row-leave` / `skeleton-indicator`, the `btn` press
-and the `:focus-visible` ring, and the `prefers-reduced-motion` switch-off). The only un-namespaced
-templates are core's `admin/` overrides.
+and keyframes, the opt-in htmx hooks `row-enter` / `row-leave`, the `btn` press
+and the `:focus-visible` ring, and the `prefers-reduced-motion` switch-off). Templates carry no
+`focus:ring-*` classes: `site.css` draws the keyboard ring for buttons and links and a sage halo for
+fields. Three small shared scripts sit next to the Alpine components: `core/js/tabs.js` (the sliding
+underline of `<nav data-tabs>`), `core/js/skeleton.js` (skeleton rows after 250 ms for a `data-list`
+container that htmx refreshes) and the badge/copy pops in `components.js`. Statuses, chips, counts and
+tags are one tinted pill from `apps/core/templatetags/core_ui.py` (`{% pill %}`, `pill_html`), which the
+products' own tags (`status_pill`, `link_status_pill`, `due_badge`, ...) wrap; an empty list is
+`core/partials/empty_state.html`. The only un-namespaced templates are core's `admin/` overrides.
 
 **Times of day have two zones, on purpose.** `TIME_ZONE` is UTC and the database holds UTC. A
 signed-in user may also have a saved time zone (`User.timezone`, issue #177, see "Auth" > "Time
