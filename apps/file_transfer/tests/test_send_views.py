@@ -162,3 +162,20 @@ def test_sent_page_requires_active_ownership(client, draft_transfer, uploaded_fi
     response = client.get(url)
     assert response.status_code == 200
     assert draft_transfer.slug in response.content.decode()
+
+
+def test_send_submit_error_names_the_field_for_the_page(client, draft_transfer, uploaded_file):
+    """Issue #219: the slot keeps its `Label: message` list; the same message is also data for the
+    field. Errors of a field the form lacks a control for (here none) stay in the slot."""
+    client.force_login(draft_transfer.owner)
+    url = reverse('file_transfer:send-submit', args=[draft_transfer.id])
+
+    response = client.post(
+        url, data={'recipients': '', 'expiry_choice': 'none'}, HTTP_HX_REQUEST='true'
+    )
+    html = response.content.decode()
+
+    assert response['HX-Retarget'] == '#send-errors'
+    assert 'Recipients: ' in html
+    assert html.count('<li data-field-error="recipients">') == 1
+    assert 'data-field-error="expiry_choice"' not in html

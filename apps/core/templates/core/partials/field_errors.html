@@ -1,0 +1,6 @@
+{% comment %}The per-field errors of a refused form, as data for core/js/field_errors.js (issue #219): one hidden
+   <li data-field-error="<input name>"> per message. Hidden, so a screen reader never reads them here; the script
+   puts each under its field (aria-describedby), and the form's message slot still says everything. A form with no
+   slot passes fallback=True: without JavaScript its messages are then listed here instead, so none is lost.
+   Use through {% field_errors source %} (core/templatetags/field_errors.py). {% endcomment %}
+{% if field_errors %}<ul hidden data-field-errors{% if scope %} data-scope="{{ scope }}"{% endif %}>{% for name, messages in field_errors.items %}{% for message in messages %}<li data-field-error="{{ name }}">{{ message }}</li>{% endfor %}{% endfor %}</ul>{% if fallback %}<noscript><ul class="mb-3 list-disc list-inside text-sm text-red-600 dark:text-red-400" role="alert">{% for name, messages in field_errors.items %}{% for message in messages %}<li>{{ message }}</li>{% endfor %}{% endfor %}</ul></noscript>{% endif %}{% endif %}

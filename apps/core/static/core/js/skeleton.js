@@ -15,6 +15,11 @@
 (function () {
     var DELAY = 250;
     var timers = new WeakMap();
+    // xhr -> the list it was sent for (the answer may be retargeted elsewhere). An entry lives exactly as long as
+    // its request: it is added when the request starts and removed by the xhr's own `loadend`, which the browser
+    // fires for a load, an error, an abort and a timeout alike, whatever happens to the element that sent it
+    // (htmx dispatches `afterRequest` on that element, and on a detached one it never reaches `document`).
+    var inflight = new Map();
 
     function isList(target) {
         return !!target && !!target.hasAttribute && target.hasAttribute('data-list');
@@ -43,23 +48,38 @@
     document.addEventListener('htmx:beforeRequest', function (event) {
         var target = event.detail.target;
         var config = event.detail.requestConfig || {};
+        var xhr = event.detail.xhr;
+        // A listener that cancelled the request: the xhr is never sent, so no `loadend` would ever remove it.
+        if (event.defaultPrevented || !xhr) return;
         if (!isList(target) || !config.triggeringEvent) return;
         clearTimeout(timers.get(target));
         timers.set(target, setTimeout(function () { show(target); }, DELAY));
+        inflight.set(xhr, target);
+        xhr.addEventListener('loadend', function () { ended(xhr); });
     });
 
-    // The answer was swapped in (the rows went with the old content), or the request ended: either way
-    // there is nothing left to wait for. Removing is harmless when they are already gone.
+    // The answer was swapped in (the rows went with the old content): there is nothing left to wait for, and
+    // no request still in flight for this list needs its entry any more (it has nothing to clear).
     document.addEventListener('htmx:afterSwap', function (event) {
-        if (isList(event.detail.target)) clear(event.detail.target);
-    });
-    document.addEventListener('htmx:afterRequest', function (event) {
         var target = event.detail.target;
         if (!isList(target)) return;
-        // After the swap, if any: a request that was replaced by a newer one (hx-sync) must not
-        // clear the newer request's timer, so only clear when no other request is pending.
-        setTimeout(function () {
-            if (!target.querySelector('.htmx-request') && !document.querySelector('.htmx-request[hx-target="#' + target.id + '"]')) clear(target);
-        }, 0);
+        clear(target);
+        inflight.forEach(function (list, xhr) { if (list === target) inflight.delete(xhr); });
     });
+
+    // The request ended, however it ended. An answer retargeted away from the list (a refused form's message
+    // goes to its own slot) never swaps into it, so `afterSwap` above never fires for the list: find it by the
+    // request, not by the target the answer ended up with. A request replaced by a newer one (hx-sync) must not
+    // clear the newer one's rows, so only clear when no other request for the list is still in flight.
+    //
+    // This runs at the end of the request, after htmx has started the swap. With a synchronous swap (the
+    // default) the new content is already in; with an asynchronous one (`swap:` delay, view transitions) the
+    // rows go a moment before it arrives, which is harmless: the old content simply shows again until then.
+    function ended(xhr) {
+        var target = inflight.get(xhr);
+        if (!target) return;
+        inflight.delete(xhr);
+        var others = Array.from(inflight.values()).some(function (other) { return other === target; });
+        if (!others) clear(target);
+    }
 })();

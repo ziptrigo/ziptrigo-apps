@@ -310,3 +310,22 @@ def test_duplicate_email_spends_the_captcha_and_signup_ip_like_a_new_one(
     assert first.status_code == 200
     assert second.status_code == 429
     assert verify_calls == [('token-1', '127.0.0.1'), ('token-2', '127.0.0.1')]
+
+
+def test_a_refused_field_is_named_for_the_page_and_the_slot_keeps_its_line(client):
+    """Issue #219: the message is also hidden data (`core/js/field_errors.js` shows it under the
+    password), inside the form so the script finds the controls; the line above is unchanged."""
+    response = _register(client, password='pass1')
+    html = response.content.decode()
+
+    assert response.status_code == 422
+    assert 'Password: ' in html
+    assert html.count('<li data-field-error="password">') == 1
+    assert 'data-field-error="email"' not in html
+    assert html.index('data-field-errors') < html.index('name="password"')
+
+
+def test_a_fresh_register_form_carries_no_field_data(client):
+    html = client.get(reverse('accounts:register')).content.decode()
+
+    assert 'data-field-error' not in html

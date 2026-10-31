@@ -106,6 +106,7 @@
     <script defer src="{% static 'core/js/local_time.js' %}"></script>
     <script defer src="{% static 'core/js/tabs.js' %}"></script>
     <script defer src="{% static 'core/js/skeleton.js' %}"></script>
+    <script defer src="{% static 'core/js/field_errors.js' %}"></script>
     {% if user.is_authenticated %}
     {% comment %}Saves the browser's time zone for an account with none and offers it on the account page (issue #177). Separate from local_time.js, which only shows times in the browser's zone.{% endcomment %}
     <script defer src="{% static 'accounts/js/timezone.js' %}" data-url="{% url 'accounts:timezone' %}"></script>

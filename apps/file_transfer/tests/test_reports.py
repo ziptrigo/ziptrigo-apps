@@ -246,3 +246,22 @@ def test_report_transfer_htmx_refresh_when_transfer_unavailable(client, draft_tr
 
     assert response.status_code == 204
     assert response['HX-Refresh'] == 'true'
+
+
+def test_report_form_errors_name_the_field_and_list_it_for_a_visitor_without_javascript(
+    client, draft_transfer, uploaded_file
+):
+    """Issue #219: the report form has no message slot, so a refusal is hidden data for the field
+    (`core/js/field_errors.js`) plus a `<noscript>` list."""
+    _active(draft_transfer)
+
+    response = client.post(
+        reverse('t:report', args=[draft_transfer.slug]),
+        data={'reason': 'not-a-choice'},
+        HTTP_HX_REQUEST='true',
+    )
+    html = response.content.decode()
+
+    assert response.status_code == 422
+    assert html.count('<li data-field-error="reason">') == 1
+    assert '<noscript>' in html

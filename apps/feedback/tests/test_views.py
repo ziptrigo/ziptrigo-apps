@@ -96,7 +96,8 @@ def test_invalid_post_returns_422_partial_and_saves_nothing(client, user, sent_e
     html = response.content.decode()
     assert response.status_code == 422
     assert 'Please write your feedback.' in html
-    assert 'border-red-500' in html
+    # The message goes under the textarea (core/js/field_errors.js), carried as hidden data.
+    assert '<li data-field-error="description">Please write your feedback.</li>' in html
     assert '<html' not in html
     # Clears a rate-limit message left over from an earlier 429, out of band.
     assert html.count('id="feedback-msg"') == 1
@@ -220,3 +221,23 @@ def test_post_to_thanks_is_not_allowed(client, user):
     client.force_login(user)
 
     assert client.post(reverse('feedback:thanks')).status_code == 405
+
+
+def test_the_refused_field_is_named_for_the_page_and_the_form_has_a_noscript_fallback(client, user):
+    """Issue #219: the form has no message slot, so the field's message is hidden data for
+    `core/js/field_errors.js`, and listed in a `<noscript>` for a visitor without JavaScript."""
+    client.force_login(user)
+
+    html = client.post(reverse('feedback:submit'), {'description': ' '}, **HTMX).content.decode()
+
+    assert html.count('data-field-error="description"') == 1
+    assert '<noscript>' in html
+    assert '<li>Please write your feedback.</li>' in html
+
+
+def test_a_fresh_form_carries_no_field_data(client, user):
+    client.force_login(user)
+
+    html = client.get(reverse('feedback:submit')).content.decode()
+
+    assert 'data-field-error' not in html

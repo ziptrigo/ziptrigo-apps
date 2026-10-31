@@ -27,6 +27,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
+from apps.core.field_errors import message_lines
 from apps.core.htmx import hx_redirect, is_htmx
 from apps.core.services.storage import ObjectTooLargeError
 
@@ -190,7 +191,7 @@ def _save(request: AuthenticatedHttpRequest, receipt: Receipt) -> HttpResponse:
     try:
         saved = update_receipt(receipt, form.cleaned_data)
     except ValidationError as exc:
-        return _fail(request, receipt, exc.messages)
+        return _fail(request, receipt, message_lines(exc))
     messages.success(request, 'Saved.')
     typed = clean_name(form.cleaned_data.get('vendor'))
     if typed and saved.vendor_ref_id is not None and typed != saved.vendor:

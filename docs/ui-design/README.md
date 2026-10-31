@@ -421,6 +421,38 @@ to the list) then Primary Save (`type="submit"`).
 - Use `HX-Retarget` when an error from a secondary request (Preview) belongs in the main slot, and
   `hx-swap-oob` to clear the slot after a later success (`qr_code/partials/preview_image.html`).
 - Client-side checks (`form.checkValidity()`) write to the same slot with the same style.
+- **Each field's error also goes under the field that failed**, so a person fixing a long form sees what is
+  wrong where they are looking. The errors partial adds `{% field_errors <form, ErrorLines or dict> %}` (for a
+  form with no message slot, also `fallback=True`, which lists the messages in a `<noscript>`), which only renders
+  hidden data, one `<li data-field-error="<input name>">` per message. `core/js/field_errors.js` (loaded by
+  `base.html`) then puts a
+  `<p id="…-error" class="mt-1.5 text-xs text-red-600 dark:text-red-400"><i class="fas fa-circle-exclamation mr-1"></i>message</p>`
+  under the control (after its wrapping label, or the `.relative` box or flex row it sits in), sets `aria-invalid="true"`
+  on the control and puts the message's id first in its `aria-describedby`, ahead of any help text. `site.css` draws the
+  red border and halo from `aria-invalid`, so templates add no `border-red-*` class. The message is **not** a live region (the
+  slot is what is announced); the first invalid field takes the focus unless the person is already typing in one of the
+  form's fields, so a person using a screen reader hears the message once, through the focus move (the label, then the
+  message as the field's description), rather than twice; the message goes away, with its attributes, as soon as that
+  field is edited, and all of them when the form is submitted again (the form or its submit button; a poll or a live
+  check from a control inside the form leaves them alone). The slot keeps every line, `Label: message`, and is the only
+  place for an error that belongs to no field or whose field has no control on the page.
+  - In a view: `form_error_lines(form)` / `validation_lines(exc)` (per product, over `apps.core.field_errors`) return the
+    slot's lines *with* the per-field data, so passing them to `message_response` is enough; a hand-built error is a
+    dict, `{'recipients': ['Add at least one address.']}`. Input names, not labels, are the keys.
+  - Under the field the message has no `Label:` prefix (the label is right above it), so it must stand on its own and
+    say how to fix it (`The expiry must be in the future.`, not `Invalid.`).
+  - A field whose control is not the named input (a date picker's hidden value, a mirror of a `datetime-local`) is found
+    through the first visible control in the same box, or mark any element `data-error-for="<name>"`. A widget made
+    of buttons marks its wrapper `data-field-wrap`, so a click inside it counts as editing the field (the date picker
+    has it).
+  - The data is looked for in the form it sits in, else in the form that sent the request. A slot outside any form that
+    the request did not come from (a row re-rendered by a request one of its forms sent) names where to look:
+    `{% field_errors lines scope="<id of the form or card>" %}`.
+  - Layout: the message goes after the control's label, or its `.relative` box, or the flex/grid row it sits in. A
+    `<form>` that is *itself* a flex row or a grid has no block to climb to, so the message would become one more cell:
+    wrap its fields in a block (`<div>`) inside the form.
+  - A single-field form that already shows its own message with the same attributes (the rename-vendor dialog, the password
+    pages of a transfer and a short link, the promo-code form) doesn't need it.
 - Don't use `alert()`; see [Known deviations](#15-known-deviations-in-the-current-code).
 
 ### 10.5 Search input
@@ -737,7 +769,6 @@ The refresh (#214) brought every product page onto this document. What is left:
 | Search / sort icons | Inline Heroicons SVGs | Font Awesome (`fa-magnifying-glass`, `fa-chevron-down`), like the rest |
 | Delete failure | `alert(…)` | Inline error in the modal or the page's message slot |
 | Modals | Some have no `role="dialog"` / focus handling | See [Accessibility](#14-accessibility) |
-| Field errors | One message above the form | The same message under the field that failed (needs the 422 partial to carry per-field errors; a later issue) |
 
 **Follow the guideline column in new work.** Admin pages (jazzmin) have their own theme and are out of scope.
 
@@ -754,6 +785,7 @@ The refresh (#214) brought every product page onto this document. What is left:
 - [ ] Text is the default `font-sans` (Figtree); codes and addresses are `font-mono`; numbers that line up are `tabular-nums`.
 - [ ] Motion uses the tokens and classes of [9. Motion](#9-motion) (`btn`, `animate-*`, `row-enter`); nothing moves on its own; checked with reduced motion on.
 - [ ] Forms: labels tied to controls, one message slot, 422 error partial, `hx-disabled-elt`.
+- [ ] The 422 partial carries each field's error (`{% field_errors %}`, [10.4](#104-messages-and-validation-errors)), so it shows under the field with `aria-invalid` and `aria-describedby`; the message says how to fix it.
 - [ ] Destructive actions go through a confirmation modal.
 - [ ] Icon-only controls have `aria-label`; focus rings intact.
 - [ ] Sentence-case copy; empty state written.

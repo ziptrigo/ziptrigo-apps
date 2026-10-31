@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core.field_errors import ErrorLines, form_lines
 
 from ..models import Receipt
 from ..services import get_account
@@ -69,15 +70,16 @@ def message_response(
     return response
 
 
-def form_error_lines(form) -> list[str]:
-    """`Label: message` per error, non-field errors first (the design system's error format)."""
-    lines = [str(error) for error in form.non_field_errors()]
-    for name, errors in form.errors.items():
-        if name == '__all__':
-            continue
-        label = form.fields[name].label or name.replace('_', ' ').capitalize()
-        lines += [f'{label}: {error}' for error in errors]
-    return lines
+def form_error_lines(form) -> ErrorLines:
+    """`Label: message` per error, non-field errors first (the design system's error format).
+    The lines also carry each field's messages, which the slot's partial hands to the page.
+
+    A refusal that comes from a *service* instead of a form uses `message_lines(exc)` or
+    `validation_lines(exc, labels, names)` from `apps.core.field_errors` directly. The messages are
+    found by the service's field name, which is normally the input's; when it isn't (a `vendor_id`
+    error for the input called `vendor`), pass `names={'vendor_id': 'vendor'}`. A name that matches
+    no control is harmless: the message is still in the slot."""
+    return form_lines(form)
 
 
 def credits_url() -> str:

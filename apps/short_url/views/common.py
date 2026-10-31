@@ -5,6 +5,8 @@ Ownership: a link that is not the requester's (or that they deleted) is a 404, n
 id can't be probed.
 """
 
+from collections.abc import Mapping
+
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -12,6 +14,8 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core.field_errors import ErrorLines, form_lines
+from apps.core.field_errors import validation_lines as core_validation_lines
 
 from ..models import LinkStatus, ShortLink
 
@@ -61,26 +65,20 @@ def message_response(
     return response
 
 
-def form_error_lines(form) -> list[str]:
-    """`Label: message` per error, non-field errors first (the design system's error format)."""
-    lines = [str(error) for error in form.non_field_errors()]
-    for name, errors in form.errors.items():
-        if name == '__all__':
-            continue
-        label = form.fields[name].label or name.replace('_', ' ').capitalize()
-        lines += [f'{label}: {error}' for error in errors]
-    return lines
+def form_error_lines(form) -> ErrorLines:
+    """`Label: message` per error, non-field errors first (the design system's error format).
+    The lines also carry each field's messages, which the slot's partial hands to the page."""
+    return form_lines(form)
 
 
-def validation_lines(exc: ValidationError) -> list[str]:
-    """The lines to show for a service's `ValidationError`: `Label: message` for a field's."""
-    if hasattr(exc, 'error_dict'):
-        return [
-            f'{FIELD_LABELS.get(field, field.replace("_", " ").capitalize())}: {message}'
-            for field, messages in exc.message_dict.items()
-            for message in messages
-        ]
-    return list(exc.messages)
+def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = None) -> ErrorLines:
+    """`Label: message` per error of a service `ValidationError`, non-field errors plain and first.
+    The lines also carry each field's messages, keyed by the service's field name, which is the
+    input's name too here (`FIELD_LABELS` lists them), so nothing is passed normally. When a
+    service reports a field under a name the form's input doesn't have (the input is `label_ids`,
+    the service says `labels`), pass `names={'labels': 'label_ids'}` so the message lands under
+    that input. An unmatched name is harmless: the message is still in the slot."""
+    return core_validation_lines(exc, FIELD_LABELS, names)
 
 
 def credits_url() -> str:

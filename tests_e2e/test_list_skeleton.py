@@ -90,3 +90,52 @@ def test_a_failed_refresh_removes_the_rows_and_the_list_still_works(
     # htmx still drives the page: another tab loads its list.
     page.locator('[data-tabs]').get_by_role('link', name='Failed').click()
     expect(page.locator('[data-tabs] [aria-current="page"]')).to_contain_text('Failed')
+
+
+def test_a_request_that_ends_without_its_events_leaves_nothing_behind_for_the_next_one(
+    page: Page, receipts_server: ReceiptsServer
+):
+    """The To-do quick add posts for `#task-list` but answers a refusal into its own slot, so the
+    list is never swapped. If the form that sent a request is gone from the page when it ends, htmx
+    dispatches `afterRequest` on a detached element and the event never reaches `document`: the
+    bookkeeping must not depend on it (the xhr's own `loadend` fires either way), or the list keeps
+    its shimmer, and every later refused request finds a phantom request still in flight."""
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    task_list = page.locator('#task-list')
+    submit = '#quick-add-form button[type="submit"]'
+
+    held = []
+    page.route('**/todo/new/', lambda route: held.append(route))
+    page.locator('#quick-title').fill('stale entry')
+    page.locator('#quick-add-form input[name="due_time"]').fill(
+        '09:00'
+    )  # refused: a time needs a date
+    page.click(submit)
+    _wait_for(page, held, 1)
+
+    # The form leaves the page while its request is open, and the request then fails.
+    page.evaluate(
+        """() => { const form = document.getElementById('quick-add-form');
+                   window.__form = form; window.__parent = form.parentNode; window.__next = form.nextSibling;
+                   form.remove(); }"""
+    )
+    held[0].abort()
+    page.wait_for_timeout(
+        500
+    )  # deliberate: the shimmer's timer is 250 ms, and a stale one would fire in it
+    expect(task_list).not_to_have_attribute('data-skeleton', '')
+
+    # The form comes back and is refused again, slowly: the rows show, and the answer, which goes to the
+    # form's own slot, takes them away.
+    page.evaluate('() => window.__parent.insertBefore(window.__form, window.__next)')
+    page.click(submit)
+    _wait_for(page, held, 2)
+    expect(task_list).to_have_attribute('data-skeleton', '')
+    held[1].continue_()
+    page.unroute('**/todo/new/')
+
+    expect(page.locator('#quick-add-msg')).to_contain_text('A time needs a date.')
+    expect(task_list).not_to_have_attribute('data-skeleton', '')
+    expect(task_list).not_to_have_attribute('aria-busy', 'true')
+    expect(page.locator('#task-list [data-skeleton-rows]')).to_have_count(0)

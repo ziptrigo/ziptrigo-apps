@@ -4,9 +4,10 @@ Reusable date picker (date only). Include it with:
 `value`, `min`, `max` are optional YYYY-MM-DD strings; `id` goes on the button (for a <label for>).
 Submits a single hidden input `name` with a YYYY-MM-DD value ('' when nothing is chosen).
 Behaviour: static/core/js/date_picker.js (Alpine). Also used by core.forms.DatePickerWidget.
+`data-field-wrap` on the wrapper tells core/js/field_errors.js that a click inside it edits the field.
 {% endcomment %}
 <div x-data="datePicker" data-value="{{ value }}" data-min="{{ min }}" data-max="{{ max }}"
-     class="relative" @keydown.escape="open = false" @click.outside="open = false">
+     class="relative" data-field-wrap @keydown.escape="open = false" @click.outside="open = false">
   <input type="hidden" name="{{ name }}" :value="value">
   <button type="button" {% if id %}id="{{ id }}"{% endif %} @click="toggle()"
           :aria-expanded="open" aria-haspopup="dialog"

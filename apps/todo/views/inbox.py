@@ -16,6 +16,7 @@ from django.views.decorators.http import require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
+from apps.core.field_errors import message_lines
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import InboxSettingsForm
@@ -86,7 +87,7 @@ def inbox_update(request: AuthenticatedHttpRequest) -> HttpResponse:
                 request.user, sender_allowlist=form.cleaned_data['sender_allowlist']
             )
         except ValidationError as exc:
-            lines = exc.messages
+            lines = message_lines(exc)
         else:
             if not is_htmx(request):
                 messages.success(request, 'Saved.')
