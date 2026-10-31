@@ -5,15 +5,15 @@
 {% block content %}
 <div class="container mx-auto px-4 py-8 max-w-5xl">
     <div class="flex items-center justify-between mb-8">
-        <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">Your transfers</h1>
+        <h1 class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Your transfers</h1>
         <a href="{% url 'file_transfer:send' %}"
-           class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+           class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
             <i class="fas fa-paper-plane mr-2"></i>New transfer
         </a>
     </div>
 
     {% if resumable_draft %}
-    <div class="mb-6 rounded px-4 py-2 bg-sage-100 text-sage-800 dark:bg-sage-800 dark:text-sage-100 flex items-center justify-between">
+    <div class="mb-6 rounded-xl px-4 py-2 bg-sage-100 text-sage-800 dark:bg-sage-800 dark:text-sage-100 flex items-center justify-between">
         <span><i class="fas fa-circle-pause mr-2"></i>You have an unfinished upload.</span>
         <a href="{% url 'file_transfer:send' %}?resume={{ resumable_draft.id }}" class="font-medium underline">
             Resume it
@@ -21,22 +21,25 @@
     </div>
     {% endif %}
 
-    <div class="mb-6 flex gap-2" role="tablist">
-        <a href="?filter=active"
+    {% comment %}A segmented control: choosing one of a few values (the design system's other tab kind is the underline row that filters a list).
+       The selected option is `aria-selected="true"` and styled from that (core/css/site.css `.segmented`); tabs.js moves it on a click,
+       because only the list below is swapped.{% endcomment %}
+    <div class="segmented mb-6 inline-flex rounded-lg bg-gray-100 p-0.5 dark:bg-gray-800" role="tablist">
+        <a href="?filter=active" role="tab" aria-selected="{% if filter == 'active' %}true{% else %}false{% endif %}"
            hx-get="{% url 'file_transfer:transfer-list' %}?filter=active"
            hx-target="#transfer-list" hx-push-url="?filter=active"
-           class="px-3 py-1.5 rounded-md text-sm font-medium {% if filter == 'active' %}bg-brand-primary text-gray-900{% else %}bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300{% endif %}">
+           class="btn rounded-md px-3 py-1.5 text-sm font-medium">
             Active
         </a>
-        <a href="?filter=ended"
+        <a href="?filter=ended" role="tab" aria-selected="{% if filter == 'ended' %}true{% else %}false{% endif %}"
            hx-get="{% url 'file_transfer:transfer-list' %}?filter=ended"
            hx-target="#transfer-list" hx-push-url="?filter=ended"
-           class="px-3 py-1.5 rounded-md text-sm font-medium {% if filter == 'ended' %}bg-brand-primary text-gray-900{% else %}bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300{% endif %}">
+           class="btn rounded-md px-3 py-1.5 text-sm font-medium">
             Ended
         </a>
     </div>
 
-    <div id="transfer-list">
+    <div id="transfer-list" data-list>
         {% include 'file_transfer/partials/transfer_list.html' %}
     </div>
 </div>

@@ -19,7 +19,7 @@
   labels tied with for/id, sentence-case "Track QR code" / "QR code preview".
 -->
 <body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
-    <header class="bg-gray-100 dark:bg-gray-800 shadow">
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
         <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
             <div class="flex space-x-6">
                 <a href="index.html" class="text-lg font-semibold hover:text-sage-300">
@@ -29,7 +29,7 @@
                 <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
             </div>
             <div class="flex items-center space-x-4">
-                <button id="theme-toggle" type="button" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                <button id="theme-toggle" type="button" class="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
                     <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
                          src="../../../apps/core/static/core/images/theme-system_128x128.png"
                          data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
@@ -55,9 +55,9 @@
             <a href="form-page.html" class="font-semibold text-gray-900 dark:text-gray-100">Form page</a>
             <span class="flex items-center gap-2 text-xs">
                 State:
-                <a href="#create" data-state-link="create" class="px-2 py-0.5 rounded">Create</a>
-                <a href="#edit" data-state-link="edit" class="px-2 py-0.5 rounded">Edit</a>
-                <a href="#errors" data-state-link="errors" class="px-2 py-0.5 rounded">With errors</a>
+                <a href="#create" data-state-link="create" class="px-2 py-0.5 rounded-lg">Create</a>
+                <a href="#edit" data-state-link="edit" class="px-2 py-0.5 rounded-lg">Edit</a>
+                <a href="#errors" data-state-link="errors" class="px-2 py-0.5 rounded-lg">With errors</a>
             </span>
             <span class="ml-auto text-xs">Theme: <span id="theme-label" class="font-medium">system</span></span>
         </div>
@@ -65,7 +65,7 @@
 
     <main class="flex-grow flex flex-col">
         <div class="container mx-auto px-4 py-8 max-w-3xl">
-            <h1 class="text-3xl font-bold mb-6 text-gray-900 dark:text-gray-100"><span id="title-verb">Create</span> QR code</h1>
+            <h1 class="text-3xl font-semibold tracking-tight mb-6 text-gray-900 dark:text-gray-100"><span id="title-verb">Create</span> QR code</h1>
 
             <!-- Message slot: the form's hx-target. Errors arrive here as a 422 partial. -->
             <div id="qrcode-msg" class="mb-4 text-sm"></div>
@@ -75,13 +75,13 @@
                 <div class="mb-4">
                     <label for="name" class="block mb-1 text-sm font-medium">Name</label>
                     <input id="name" type="text" name="name" maxlength="255" required value="Summer menu"
-                           class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
                 </div>
 
                 <!-- Type: read-only value, edit mode only -->
                 <div class="mb-4" data-mode="edit">
                     <span class="block mb-1 text-sm font-medium">Type</span>
-                    <div class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
+                    <div class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
                         URL
                     </div>
                 </div>
@@ -90,7 +90,7 @@
                 <div class="mb-4" data-mode="create">
                     <label for="content" class="block mb-1 text-sm font-medium">Text / URL to encode</label>
                     <textarea id="content" name="url" maxlength="1000" rows="4" required
-                              class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu/summer-2026</textarea>
+                              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">https://example.com/menu/summer-2026</textarea>
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters. Can be any text; short URL is only meaningful when the content is a URL.</p>
                 </div>
 
@@ -98,7 +98,7 @@
                 <div class="mb-4" data-mode="edit">
                     <label for="content-ro" class="block mb-1 text-sm font-medium">Text / URL (read-only)</label>
                     <textarea id="content-ro" name="url" rows="4" disabled
-                              class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu/summer-2026</textarea>
+                              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed px-3 py-2">https://example.com/menu/summer-2026</textarea>
                 </div>
 
                 <!-- Options row: create mode only -->
@@ -107,7 +107,7 @@
                         <div>
                             <label for="qr_type" class="block mb-1 text-sm font-medium">Type</label>
                             <select id="qr_type" name="qr_type"
-                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                    class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
                                 <option value="text">Text</option>
                                 <option value="url" selected>URL</option>
                             </select>
@@ -115,7 +115,7 @@
                         <div>
                             <label for="qr_format" class="block mb-1 text-sm font-medium">Format</label>
                             <select id="qr_format" name="qr_format"
-                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                    class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
                                 <option value="png" selected>PNG</option>
                                 <option value="svg">SVG</option>
                                 <option value="pdf">PDF</option>
@@ -124,7 +124,7 @@
                         <div class="flex items-end">
                             <label class="inline-flex items-center gap-2 pb-2">
                                 <input id="use_url_shortening" type="checkbox" name="use_url_shortening" value="true"
-                                       class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                       class="h-4 w-4 rounded border-gray-300 accent-sage-500">
                                 <span class="text-sm">Track QR code</span>
                                 <i class="fas fa-question-circle text-gray-500 dark:text-gray-400 cursor-help"
                                    title="This tracks the QR code usage and gives you analytical data about its usage."></i>
@@ -136,19 +136,19 @@
                     <div id="short-url-container" class="hidden">
                         <label for="short-url-display" class="block mb-1 text-sm font-medium">Short URL</label>
                         <input id="short-url-display" type="text" readonly value="https://ziptrigo.com/go/a1B2c3"
-                               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default">
+                               class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default">
                     </div>
                 </div>
 
                 <!-- Preview row -->
                 <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <button type="button" data-mode="create"
-                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                            class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                         Preview
                     </button>
                     <div data-mode="edit" class="text-sm font-medium text-gray-700 dark:text-gray-300">QR code preview:</div>
 
-                    <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-md p-2 min-h-[96px] min-w-[96px] self-start">
+                    <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-2 min-h-[96px] min-w-[96px] self-start">
                         <img id="qrcode-preview-img" src="../../../apps/qr_code/static/qr_code/images/logo_128x128.png"
                              alt="QR code preview" class="h-24 w-24 object-contain">
                     </div>
@@ -157,11 +157,11 @@
                 <!-- Actions: Cancel + Save -->
                 <div class="mt-6 flex items-center justify-end gap-3">
                     <a href="list-page.html"
-                       class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                       class="btn inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                         Cancel
                     </a>
                     <button type="submit"
-                            class="inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                            class="btn inline-flex justify-center items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                         Save
                     </button>
                 </div>

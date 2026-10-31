@@ -3,7 +3,7 @@
 {% block title %}To-do settings - ZipTrigo{% endblock %}
 
 {% block todo_content %}
-<h1 class="mb-6 text-3xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+<h1 class="mb-6 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Settings</h1>
 
 <div id="settings-form">
     {% include 'todo/partials/settings_form.html' %}
@@ -15,7 +15,7 @@
     <div x-data="copyText" class="flex flex-wrap items-center gap-x-3 gap-y-2">
         <code x-ref="text" class="break-all text-sm font-medium text-gray-900 dark:text-gray-100">{{ inbox_address }}</code>
         <button type="button" @click="copy()"
-                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
             <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
             <span x-text="copied ? 'Copied' : 'Copy'">Copy</span>
         </button>
@@ -24,7 +24,7 @@
                 data-title="Regenerate address"
                 data-body="Your old address stops working immediately. Mail already sent to it is dropped, so update any contacts or rules that use it."
                 data-label="Regenerate"
-                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
             <i class="fas fa-arrows-rotate mr-2" aria-hidden="true"></i>Regenerate&hellip;
         </button>
     </div>

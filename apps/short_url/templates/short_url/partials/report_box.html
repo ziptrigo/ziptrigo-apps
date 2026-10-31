@@ -2,7 +2,7 @@
    `reported` (the thank-you) or `report_form`. Posts without htmx too (the view then renders the whole page). {% endcomment %}
 <div id="report-box">
     {% if reported %}
-    <div class="rounded px-4 py-2 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 text-sm" role="status">
+    <div class="rounded-xl px-4 py-2 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 text-sm" role="status">
         Thank you, your report has been submitted.
     </div>
     {% else %}
@@ -14,7 +14,7 @@
         {% csrf_token %}
 
         {% if report_form.non_field_errors %}
-        <div class="rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm" role="alert">
+        <div class="rounded-xl px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-sm" role="alert">
             {% for message in report_form.non_field_errors %}<p>{{ message }}</p>{% endfor %}
         </div>
         {% endif %}
@@ -39,7 +39,7 @@
         </div>
 
         <button type="submit"
-                class="px-4 py-2 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                class="btn px-4 py-2 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">
             Submit report
         </button>
     </form>

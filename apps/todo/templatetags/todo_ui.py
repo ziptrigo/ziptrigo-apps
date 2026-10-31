@@ -10,10 +10,11 @@ from datetime import date, timedelta
 from django import template
 from django.template.defaultfilters import linebreaksbr
 from django.utils.html import format_html
-from django.utils.safestring import SafeString, mark_safe
+from django.utils.safestring import SafeString
 
 from apps.accounts.services.timezones import user_today
 from apps.core.markdown import render
+from apps.core.templatetags.core_ui import pill_html
 
 from ..models import Label, Task
 from ..services.recurrence import MONTH_NAMES, WEEKDAY_NAMES, describe, mode_label
@@ -23,12 +24,8 @@ logger = logging.getLogger(__name__)
 
 register = template.Library()
 
-#: Priority -> Font Awesome flag colour (red, amber, sky; with a dark-mode twin each).
-_FLAGS = {
-    1: 'text-red-600 dark:text-red-400',
-    2: 'text-amber-500 dark:text-amber-400',
-    3: 'text-sky-600 dark:text-sky-400',
-}
+#: Priority -> pill tone (red, amber, sky).
+_FLAG_TONES = {1: 'red', 2: 'amber', 3: 'sky'}
 
 
 @register.simple_tag(takes_context=True)
@@ -66,38 +63,29 @@ def due_badge(context, task: Task) -> SafeString:
     today = context.get('today') or user_today(context['request'].user)
     overdue = task.is_overdue(today)
     text = due_text(task.due_date, today)
-    tone = (
-        'text-red-600 dark:text-red-400'
-        if overdue
-        else 'text-green-700 dark:text-green-400'
-        if text == 'Today'
-        else 'text-gray-600 dark:text-gray-400'
-    )
+    tone = 'red' if overdue else 'green' if text == 'Today' else 'gray'
     time = f' {task.due_time:%H:%M}' if task.due_time is not None else ''
-    return format_html(
-        '<span class="inline-flex items-center whitespace-nowrap text-xs {}" title="{}">'
-        '<i class="far fa-calendar mr-1" aria-hidden="true"></i>{}{}'
-        '{}</span>',
+    return pill_html(
         tone,
-        f'Due {task.due_date.isoformat()}{time}',
-        text,
-        time,
-        mark_safe('<span class="sr-only"> (overdue)</span>') if overdue else '',
+        f'{text}{time}',
+        icon='far fa-calendar',
+        title=f'Due {task.due_date.isoformat()}{time}',
+        sr_only=' (overdue)' if overdue else '',
     )
 
 
 @register.simple_tag
 def priority_flag(task: Task) -> SafeString:
-    """A coloured flag for priority 1, 2 or 3; nothing for none."""
-    classes = _FLAGS.get(task.priority)
-    if classes is None:
+    """A pill for priority 1, 2 or 3 (`P1`, with a flag); nothing for none."""
+    tone = _FLAG_TONES.get(task.priority)
+    if tone is None:
         return SafeString('')
-    return format_html(
-        '<span class="text-xs {}" title="Priority {}"><i class="fas fa-flag" aria-hidden="true">'
-        '</i><span class="sr-only">Priority {}</span></span>',
-        classes,
-        task.priority,
-        task.priority,
+    return pill_html(
+        tone,
+        f'P{task.priority}',
+        icon='fas fa-flag',
+        title=f'Priority {task.priority}',
+        sr_only=f' (priority {task.priority})',
     )
 
 
@@ -134,17 +122,14 @@ def repeat_chip(task: Task, detail: bool = False) -> SafeString:
         return SafeString('')
     label = mode_label(recurrence.mode)
     show_mode = detail or recurrence.mode == 'from_completion'
-    return format_html(
-        '<span class="inline-flex items-center whitespace-nowrap text-xs text-gray-600 dark:text-gray-400"'
-        ' title="{}"><i class="fas fa-repeat mr-1" aria-hidden="true"></i>{}{}</span>',
-        label,
+    text = format_html(
+        '{}{}',
         describe(recurrence.rrule),
-        format_html(
-            ' <span class="ml-1 text-gray-500 dark:text-gray-400">({})</span>', label.lower()
-        )
+        format_html(' <span class="font-normal opacity-80">({})</span>', label.lower())
         if show_mode
         else '',
     )
+    return pill_html('gray', text, icon='fas fa-repeat', title=label)
 
 
 @register.simple_tag

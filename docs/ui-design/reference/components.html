@@ -12,7 +12,7 @@
 </head>
 <body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
     <!-- Site header, as in apps/core/templates/core/base.html -->
-    <header class="bg-gray-100 dark:bg-gray-800 shadow">
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
         <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
             <div class="flex space-x-6">
                 <a href="index.html" class="text-lg font-semibold hover:text-sage-300">
@@ -22,7 +22,7 @@
                 <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
             </div>
             <div class="flex items-center space-x-4">
-                <button id="theme-toggle" type="button" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                <button id="theme-toggle" type="button" class="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
                     <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
                          src="../../../apps/core/static/core/images/theme-system_128x128.png"
                          data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
@@ -52,7 +52,7 @@
 
     <main class="flex-grow flex flex-col">
         <div class="container mx-auto px-4 py-8 max-w-4xl">
-            <h1 class="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">Components</h1>
+            <h1 class="text-3xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">Components</h1>
             <p class="mb-2 text-gray-700 dark:text-gray-300">
                 Each example is live. Open <span class="font-medium">HTML</span> under it for the markup to copy.
             </p>
@@ -74,6 +74,9 @@
                 <a href="#modal" class="text-sage-600 dark:text-sage-300 hover:underline">Confirmation modal</a>
                 <a href="#lightbox" class="text-sage-600 dark:text-sage-300 hover:underline">Image preview</a>
                 <a href="#well" class="text-sage-600 dark:text-sage-300 hover:underline">Preview well</a>
+                <a href="#pills" class="text-sage-600 dark:text-sage-300 hover:underline">Pills</a>
+                <a href="#tabs" class="text-sage-600 dark:text-sage-300 hover:underline">Tabs</a>
+                <a href="#empty" class="text-sage-600 dark:text-sage-300 hover:underline">Empty states</a>
                 <a href="#cards" class="text-sage-600 dark:text-sage-300 hover:underline">Cards &amp; sections</a>
             </nav>
 
@@ -87,45 +90,45 @@
                 <div class="grid sm:grid-cols-2 gap-6">
                     <div>
                         <h3 class="text-sm font-medium mb-2">Primary</h3>
-                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                        <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                             <button type="button"
-                                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                                    class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                                 Save
                             </button>
                         </div>
                     </div>
                     <div>
                         <h3 class="text-sm font-medium mb-2">Secondary</h3>
-                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                        <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                             <a href="#"
-                               class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                               class="btn inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                                 Cancel
                             </a>
                         </div>
                     </div>
                     <div>
                         <h3 class="text-sm font-medium mb-2">Subtle <span class="font-normal text-gray-500 dark:text-gray-400">(Cancel inside a modal)</span></h3>
-                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                        <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                             <button type="button"
-                                    class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                                    class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">
                                 Cancel
                             </button>
                         </div>
                     </div>
                     <div>
                         <h3 class="text-sm font-medium mb-2">Danger</h3>
-                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                        <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                             <button type="button"
-                                    class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                                    class="btn px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
                                 Delete
                             </button>
                         </div>
                     </div>
                     <div>
                         <h3 class="text-sm font-medium mb-2">Icon</h3>
-                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                        <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                             <button type="button"
-                                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                                     aria-label="QR code actions">
                                 <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
                             </button>
@@ -133,9 +136,9 @@
                     </div>
                     <div>
                         <h3 class="text-sm font-medium mb-2">Busy <span class="font-normal text-gray-500 dark:text-gray-400">(shown disabled; htmx sets it via <code>hx-disabled-elt</code>)</span></h3>
-                        <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                        <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                             <button type="submit" disabled
-                                    class="group inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                                    class="btn group inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
                                 <span class="group-disabled:hidden">Save</span>
                                 <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2"></i>Saving…</span>
                             </button>
@@ -152,31 +155,31 @@
                 </p>
 
                 <h3 class="text-sm font-medium mb-2">Text input</h3>
-                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="mb-8 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="mb-4">
                         <label for="ex-name" class="block mb-1 text-sm font-medium">Name</label>
                         <input id="ex-name" type="text" name="name" maxlength="255" required value="Summer menu"
-                               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                               class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
                     </div>
                 </div>
 
                 <h3 class="text-sm font-medium mb-2">Textarea with help text</h3>
-                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="mb-8 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="mb-4">
                         <label for="ex-content" class="block mb-1 text-sm font-medium">Text / URL to encode</label>
                         <textarea id="ex-content" name="url" maxlength="1000" rows="4" required
-                                  class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu</textarea>
+                                  class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">https://example.com/menu</textarea>
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters. Can be any text; short URL is only meaningful when the content is a URL.</p>
                     </div>
                 </div>
 
                 <h3 class="text-sm font-medium mb-2">Option row: selects + dependent checkbox with help hint</h3>
-                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="mb-8 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="flex flex-col sm:flex-row sm:items-end gap-4">
                         <div>
                             <label for="ex-type" class="block mb-1 text-sm font-medium">Type</label>
                             <select id="ex-type" name="qr_type"
-                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                    class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
                                 <option value="text">Text</option>
                                 <option value="url" selected>URL</option>
                             </select>
@@ -184,7 +187,7 @@
                         <div>
                             <label for="ex-format" class="block mb-1 text-sm font-medium">Format</label>
                             <select id="ex-format" name="qr_format"
-                                    class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                                    class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
                                 <option value="png">PNG</option>
                                 <option value="svg">SVG</option>
                                 <option value="pdf">PDF</option>
@@ -193,7 +196,7 @@
                         <div class="flex items-end">
                             <label class="inline-flex items-center gap-2 pb-2">
                                 <input type="checkbox" name="use_url_shortening" value="true"
-                                       class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                       class="h-4 w-4 rounded border-gray-300 accent-sage-500">
                                 <span class="text-sm">Track QR code</span>
                                 <i class="fas fa-question-circle text-gray-500 dark:text-gray-400 cursor-help"
                                    title="This tracks the QR code usage and gives you analytical data about its usage."></i>
@@ -203,22 +206,22 @@
                 </div>
 
                 <h3 class="text-sm font-medium mb-2">Read-only value, disabled control, generated value</h3>
-                <div class="mb-2 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="mb-2 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="mb-4">
                         <span class="block mb-1 text-sm font-medium">Type</span>
-                        <div class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
+                        <div class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
                             URL
                         </div>
                     </div>
                     <div class="mb-4">
                         <label for="ex-content-ro" class="block mb-1 text-sm font-medium">Text / URL (read-only)</label>
                         <textarea id="ex-content-ro" rows="2" disabled
-                                  class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">https://example.com/menu</textarea>
+                                  class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed px-3 py-2">https://example.com/menu</textarea>
                     </div>
                     <div>
                         <label for="ex-short-url" class="block mb-1 text-sm font-medium">Short URL</label>
                         <input id="ex-short-url" type="text" readonly value="https://ziptrigo.com/go/a1B2c3"
-                               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default">
+                               class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default">
                     </div>
                 </div>
                 <p class="text-xs text-gray-500 dark:text-gray-400">A value fixed after creation is a <code>&lt;div&gt;</code>; a control shown but not editable is <code>disabled</code> and says "(read-only)"; a server-issued value is <code>readonly</code>.</p>
@@ -228,14 +231,14 @@
             <section id="actions" class="mb-14 scroll-mt-4">
                 <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Form actions</h2>
                 <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">Last block of the form. Cancel links back to the list; Save submits.</p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="mt-6 flex items-center justify-end gap-3">
                         <a href="#"
-                           class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                           class="btn inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                             Cancel
                         </a>
                         <button type="submit"
-                                class="inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                                class="btn inline-flex justify-center items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                             Save
                         </button>
                     </div>
@@ -249,7 +252,7 @@
                     One slot above the fields (<code>id="&lt;form&gt;-msg" class="mb-4 text-sm"</code>). The view returns
                     the errors partial with status <strong>422</strong>; htmx swaps it into the slot.
                 </p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div id="qrcode-msg" class="mb-4 text-sm">
                         <div class="text-red-600">
                             Name: This field is required.<br>
@@ -265,14 +268,14 @@
                 <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
                     A GET form. The clear button appears once there's text (type to see it). The toolbar puts the page's primary action on the right.
                 </p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="flex items-center justify-between gap-4">
                         <form method="get" class="relative flex-1" onsubmit="return false">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <i class="fas fa-magnifying-glass text-gray-400"></i>
                             </div>
                             <input type="text" name="q" placeholder="Search by name" aria-label="Search by name"
-                                   class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                   class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:placeholder-gray-400 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
                             <button type="button" data-demo-search-clear
                                     class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors hidden"
                                     aria-label="Clear search">
@@ -280,7 +283,7 @@
                             </button>
                         </form>
                         <a href="#"
-                           class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                           class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                             Generate QR code
                         </a>
                     </div>
@@ -294,13 +297,13 @@
                     A stacked list in a card, not a <code>&lt;table&gt;</code>. <code>overflow-visible</code> so row menus aren't clipped.
                     Row titles use <code>text-sage-600 dark:text-sage-300</code> (not <code>text-brand-primary</code>, which fails contrast on white).
                 </p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
-                    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
                         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
                             <!-- Header -->
                             <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between sm:px-6">
                                 <div class="flex items-center">
-                                    <input type="checkbox" id="ex-select-all" class="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
+                                    <input type="checkbox" id="ex-select-all" class="h-4 w-4 rounded border-gray-300 accent-sage-500">
                                     <label for="ex-select-all" class="ml-4 mr-4 text-sm font-medium text-gray-900 dark:text-gray-100">Select all</label>
                                     <a href="#" class="group flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                                         Name
@@ -313,9 +316,9 @@
                             <li class="px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
                                 <div class="flex items-center min-w-0 flex-1">
                                     <input type="checkbox" name="selected_qr" value="1" aria-label="Select Summer menu"
-                                           class="mr-4 h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
-                                    <button type="button" class="flex-shrink-0 focus:outline-none group" aria-label="Open QR code preview">
-                                        <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                                           class="mr-4 h-4 w-4 rounded border-gray-300 accent-sage-500">
+                                    <button type="button" class="flex-shrink-0 group" aria-label="Open QR code preview">
+                                        <img class="h-12 w-12 rounded-md object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
                                              src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="Summer menu">
                                     </button>
                                     <div class="min-w-0 flex-1 px-4">
@@ -325,16 +328,16 @@
                                 </div>
                                 <div class="relative ml-4 flex-shrink-0">
                                     <button type="button" data-demo-dropdown
-                                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                                             aria-label="QR code actions">
                                         <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
                                     </button>
                                     <div data-demo-dropdown-menu
-                                         class="hidden absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right">
-                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-edit mr-2"></i>Edit</a>
-                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-clone mr-2"></i>Duplicate</a>
+                                         class="hidden absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right">
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-edit mr-2"></i>Edit</a>
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-clone mr-2"></i>Duplicate</a>
                                         <button type="button" data-demo-modal-open="ex-delete-modal"
-                                                class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-trash mr-2"></i>Delete</button>
+                                                class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-trash mr-2"></i>Delete</button>
                                     </div>
                                 </div>
                             </li>
@@ -343,9 +346,9 @@
                             <li class="px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
                                 <div class="flex items-center min-w-0 flex-1">
                                     <input type="checkbox" name="selected_qr" value="2" aria-label="Select Wi-Fi guest note"
-                                           class="mr-4 h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary">
-                                    <button type="button" class="flex-shrink-0 focus:outline-none group" aria-label="Open QR code preview">
-                                        <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                                           class="mr-4 h-4 w-4 rounded border-gray-300 accent-sage-500">
+                                    <button type="button" class="flex-shrink-0 group" aria-label="Open QR code preview">
+                                        <img class="h-12 w-12 rounded-md object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
                                              src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="Wi-Fi guest note">
                                     </button>
                                     <div class="min-w-0 flex-1 px-4">
@@ -355,16 +358,16 @@
                                 </div>
                                 <div class="relative ml-4 flex-shrink-0">
                                     <button type="button" data-demo-dropdown
-                                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"
+                                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                                             aria-label="QR code actions">
                                         <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
                                     </button>
                                     <div data-demo-dropdown-menu
-                                         class="hidden absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right">
-                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-edit mr-2"></i>Edit</a>
-                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-clone mr-2"></i>Duplicate</a>
+                                         class="hidden absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right">
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-edit mr-2"></i>Edit</a>
+                                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-clone mr-2"></i>Duplicate</a>
                                         <button type="button" data-demo-modal-open="ex-delete-modal"
-                                                class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-trash mr-2"></i>Delete</button>
+                                                class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-trash mr-2"></i>Delete</button>
                                     </div>
                                 </div>
                             </li>
@@ -373,8 +376,8 @@
                 </div>
 
                 <h3 class="text-sm font-medium mt-8 mb-2">Empty state</h3>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
-                    <div class="bg-white dark:bg-gray-800 shadow sm:rounded-md">
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="bg-white dark:bg-gray-800 shadow-sm sm:rounded-xl border border-gray-200 dark:border-gray-700">
                         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
                             <li class="px-4 py-12 text-center sm:px-6">
                                 <p class="text-sm text-gray-500 dark:text-gray-400">No QR codes found.</p>
@@ -391,11 +394,11 @@
                     Shown open. Destructive item last, in red, opening a confirmation. One menu at a time; closes on
                     outside click or Esc; flips above the trigger near the viewport bottom.
                 </p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
-                    <div class="w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700">
-                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-edit mr-2"></i>Edit</a>
-                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-clone mr-2"></i>Duplicate</a>
-                        <button type="button" class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md"><i class="fas fa-trash mr-2"></i>Delete</button>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-edit mr-2"></i>Edit</a>
+                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-clone mr-2"></i>Duplicate</a>
+                        <button type="button" class="w-full text-left block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg"><i class="fas fa-trash mr-2"></i>Delete</button>
                     </div>
                 </div>
             </section>
@@ -406,16 +409,16 @@
                 <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
                     Names the object. Subtle Cancel, Danger confirm on the right. Closes on Cancel, Esc and a backdrop click.
                 </p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <button type="button" data-demo-modal-open="ex-delete-modal"
-                            class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                            class="btn px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
                         Open delete confirmation
                     </button>
 
                     <div id="ex-delete-modal" data-demo-modal
                          class="fixed inset-0 z-50 hidden opacity-0 bg-black/50 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
                         <div role="dialog" aria-modal="true" aria-labelledby="ex-delete-title"
-                             class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
+                             class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
                             <div class="p-6">
                                 <h3 id="ex-delete-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR code</h3>
                                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
@@ -423,11 +426,11 @@
                                 </p>
                                 <div class="flex justify-end gap-3">
                                     <button type="button" data-demo-modal-close
-                                            class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                                            class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">
                                         Cancel
                                     </button>
                                     <button type="button" data-demo-modal-close
-                                            class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                                            class="btn px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
                                         Delete
                                     </button>
                                 </div>
@@ -443,23 +446,23 @@
                 <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
                     Click the thumbnail. The image sits on white so a QR code still scans in dark mode.
                 </p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
-                    <button type="button" data-demo-modal-open="ex-image-modal" class="focus:outline-none group" aria-label="Open QR code preview">
-                        <img class="h-12 w-12 rounded object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <button type="button" data-demo-modal-open="ex-image-modal" class="group" aria-label="Open QR code preview">
+                        <img class="h-12 w-12 rounded-md object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
                              src="../../../apps/qr_code/static/qr_code/images/logo_32x32.png" alt="Summer menu">
                     </button>
 
                     <div id="ex-image-modal" data-demo-modal
                          class="fixed inset-0 z-40 hidden opacity-0 bg-black/60 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
                         <div role="dialog" aria-modal="true" aria-label="QR code preview"
-                             class="bg-gray-900 dark:bg-black p-24 rounded-lg relative max-w-full max-h-full flex items-center justify-center transform transition-transform duration-150 ease-out scale-95">
+                             class="bg-gray-900 dark:bg-black p-24 rounded-xl relative max-w-full max-h-full flex items-center justify-center transform transition-transform duration-150 ease-out scale-95">
                             <button type="button" data-demo-modal-close
-                                    class="absolute top-4 right-4 text-gray-300 hover:text-white text-xl font-semibold focus:outline-none"
+                                    class="absolute top-4 right-4 text-gray-300 hover:text-white text-xl font-semibold"
                                     aria-label="Close QR code preview">
                                 &times;
                             </button>
                             <img src="../../../apps/qr_code/static/qr_code/images/logo_128x128.png" alt="QR code preview"
-                                 class="max-h-[70vh] max-w-[70vw] object-contain bg-white rounded">
+                                 class="max-h-[70vh] max-w-[70vw] object-contain bg-white rounded-md">
                         </div>
                     </div>
                 </div>
@@ -471,15 +474,73 @@
                 <p class="mb-6 text-sm text-gray-700 dark:text-gray-300">
                     Holds a generated preview in place, showing the product logo until there is one. The htmx Preview button swaps the <code>&lt;img&gt;</code>.
                 </p>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                         <button type="button"
-                                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                             Preview
                         </button>
-                        <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-md p-2 min-h-[96px] min-w-[96px] self-start">
+                        <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-2 min-h-[96px] min-w-[96px] self-start">
                             <img id="qrcode-preview-img" src="../../../apps/qr_code/static/qr_code/images/logo_128x128.png"
                                  alt="QR code preview" class="h-24 w-24 object-contain">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Pills -->
+            <section id="pills" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Pills</h2>
+                <p class="mb-4 text-sm text-gray-700 dark:text-gray-300">
+                    One tinted shape for every status, chip, tag, count and badge. In templates:
+                    <code>{% pill 'green' 'Processed' icon='fas fa-check' %}</code> (<code>core_ui</code>); here the markup it renders.
+                </p>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 flex flex-wrap items-center gap-2" data-example>
+                    <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium gap-1.5 bg-green-50 text-green-700 dark:bg-green-400/10 dark:text-green-300"><i class="fas fa-check text-[10px]" aria-hidden="true"></i>Processed</span> <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium gap-1.5 bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300"><i class="fas fa-triangle-exclamation text-[10px]" aria-hidden="true"></i>Needs review</span> <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium gap-1.5 bg-blue-50 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300"><i class="fas fa-spinner fa-spin text-[10px]" aria-hidden="true"></i>Processing</span> <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium gap-1.5 bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-300"><i class="fas fa-circle-xmark text-[10px]" aria-hidden="true"></i>Failed</span> <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium gap-1.5 bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"><i class="fas fa-coins text-[10px]" aria-hidden="true"></i>Waiting for credits</span> <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium gap-1.5 bg-sky-50 text-sky-700 dark:bg-sky-400/10 dark:text-sky-300"><i class="fas fa-flag text-[10px]" aria-hidden="true"></i>P3</span> <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium gap-1.5 bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-300"><i class="far fa-calendar text-[10px]" aria-hidden="true"></i>Overdue</span> <span class="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300">3</span>
+                </div>
+            </section>
+
+            <!-- ============================================================ Tabs -->
+            <section id="tabs" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Tabs</h2>
+                <h3 class="text-sm font-medium mb-2">Underline tabs <span class="font-normal text-gray-500 dark:text-gray-400">(filter a list; the underline slides in the product pages)</span></h3>
+                <div class="mb-8 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="border-b border-gray-200 dark:border-gray-700">
+                        <nav data-tabs aria-label="Example status" class="-mb-px flex flex-wrap gap-x-1">
+                            <a href="#tabs" aria-current="page" class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium border-brand-primary text-gray-900 dark:text-gray-100">All <span class="ml-1.5 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">42</span></a>
+                            <a href="#tabs" class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200">Needs review <span class="ml-1.5 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300">3</span></a>
+                            <a href="#tabs" class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200">Failed</a>
+                        </nav>
+                    </div>
+                </div>
+                <h3 class="text-sm font-medium mb-2">Segmented control <span class="font-normal text-gray-500 dark:text-gray-400">(choose one of a few values)</span></h3>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                    <div class="segmented inline-flex rounded-lg bg-gray-100 p-0.5 dark:bg-gray-800" role="tablist">
+                        <a href="#tabs" role="tab" aria-selected="true" class="btn rounded-md px-3 py-1.5 text-sm font-medium">7 days</a>
+                        <a href="#tabs" role="tab" aria-selected="false" class="btn rounded-md px-3 py-1.5 text-sm font-medium">30 days</a>
+                        <a href="#tabs" role="tab" aria-selected="false" class="btn rounded-md px-3 py-1.5 text-sm font-medium">90 days</a>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ Empty states -->
+            <section id="empty" class="mb-14 scroll-mt-4">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Empty states</h2>
+                <p class="mb-4 text-sm text-gray-700 dark:text-gray-300">An invitation to act, not an error. Partial: <code>core/partials/empty_state.html</code>.</p>
+                <div class="grid gap-4 sm:grid-cols-2" data-example>
+                    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div class="px-4 py-10 text-center sm:px-6">
+                            <div class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-sage-50 text-sage-500 dark:bg-sage-800 dark:text-sage-300"><i class="fas fa-receipt text-lg" aria-hidden="true"></i></div>
+                            <p class="text-sm font-medium text-gray-900 dark:text-gray-100">No receipts yet</p>
+                            <p class="mx-auto mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">Upload one, or email it to your address above.</p>
+                            <a href="#empty" class="btn mt-4 inline-flex items-center rounded-lg bg-brand-primary px-4 py-2 text-sm font-medium text-gray-900 hover:bg-sage-400">Upload receipts</a>
+                        </div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div class="px-4 py-10 text-center sm:px-6">
+                            <div class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-sage-50 text-sage-500 dark:bg-sage-800 dark:text-sage-300"><i class="fas fa-magnifying-glass text-lg" aria-hidden="true"></i></div>
+                            <p class="text-sm font-medium text-gray-900 dark:text-gray-100">No receipts found</p>
+                            <p class="mx-auto mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">Try other filters or a different search.</p>
                         </div>
                     </div>
                 </div>
@@ -490,9 +551,9 @@
                 <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Cards &amp; sections</h2>
 
                 <h3 class="text-sm font-medium mb-2">Product card <span class="font-normal text-gray-500 dark:text-gray-400">(landing page; the one place sage is a surface)</span></h3>
-                <div class="mb-8 p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="mb-8 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <a href="#"
-                       class="block text-left p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
+                       class="lift block text-left p-6 rounded-xl border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
                         <div class="flex items-center gap-3 mb-2">
                             <i class="fas fa-qrcode text-2xl text-sage-400"></i>
                             <h2 class="text-xl font-semibold">QR Codes</h2>
@@ -502,14 +563,14 @@
                 </div>
 
                 <h3 class="text-sm font-medium mb-2">Product page header + ruled section</h3>
-                <div class="p-6 rounded-lg border border-dashed border-gray-300 dark:border-gray-700" data-example>
+                <div class="p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-700" data-example>
                     <div class="flex items-center gap-3 mb-6">
                         <i class="fas fa-paper-plane text-2xl text-sage-400"></i>
                         <h1 class="text-3xl font-semibold">File Transfer</h1>
                     </div>
                     <section>
                         <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-sage-200 dark:border-sage-700">Your transfers</h2>
-                        <p class="text-gray-500 dark:text-gray-400">No transfers yet.</p>
+                        <p class="text-gray-500 dark:text-gray-400">No transfers yet. Send a file to anyone with a link that expires.</p>
                     </section>
                 </div>
             </section>

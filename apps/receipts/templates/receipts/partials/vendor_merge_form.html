@@ -22,7 +22,7 @@
     {% if into %}
     <label for="vendor-merge-keep" class="block mb-1 text-sm font-medium">Merge into</label>
     <select id="vendor-merge-keep" name="keep" required data-autofocus
-            class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
         <option value="">Choose a vendor&hellip;</option>
         {% for v in targets %}
         <option value="{{ v.pk }}" {% if v.pk == keep_id %}selected{% endif %}>{{ v.name }}{% if v.vetted %} (vetted){% endif %} &middot; {{ v.receipt_count }} receipt{{ v.receipt_count|pluralize }}</option>
@@ -32,10 +32,10 @@
     <fieldset class="space-y-2">
         <legend class="sr-only">Name to keep</legend>
         {% for v in vendors %}
-        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-gray-300 dark:border-gray-600 px-3 py-2 has-[:checked]:border-brand-primary">
+        <label class="flex cursor-pointer items-center gap-3 rounded-lg border-2 border-gray-300 dark:border-gray-600 px-3 py-2 has-[:checked]:border-brand-primary">
             <input type="radio" name="keep" value="{{ v.pk }}" {% if v.pk == keep_id %}checked{% endif %}
                    data-name="{{ v.name }}" @change="keep = $event.target.dataset.name"
-                   class="h-4 w-4 border-gray-300 text-brand-primary focus:ring-brand-primary">
+                   class="h-4 w-4 border-gray-300 accent-sage-500">
             <span class="min-w-0 flex-1 truncate"><span class="font-medium">{{ v.name }}</span>{% if v.vetted %} <span class="text-xs text-green-700 dark:text-green-400"><i class="fas fa-circle-check" aria-hidden="true"></i> vetted</span>{% endif %}</span>
             <span class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">{{ v.receipt_count }} receipt{{ v.receipt_count|pluralize }}</span>
         </label>
@@ -45,9 +45,9 @@
     <p class="mt-4 text-xs text-gray-500 dark:text-gray-400">This changes the vendor shown on receipts you already have. It can't be undone, but a receipt can always be moved to another vendor from its page.</p>
     <div class="mt-6 flex justify-end gap-3">
         <button type="button" @click="close()"
-                class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">Cancel</button>
+                class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Cancel</button>
         <button type="submit"
-                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
             <i class="fas fa-code-merge mr-2" aria-hidden="true"></i>{% if into %}Merge{% else %}<span>Merge into <span x-text="keep"></span></span>{% endif %}
         </button>
     </div>

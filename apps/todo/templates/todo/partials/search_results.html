@@ -2,7 +2,7 @@
    Needs the context of `views.search.build_context`. {% endcomment %}
 {% if clear_message %}<div id="search-msg" hx-swap-oob="innerHTML"></div>{% endif %}
 {% if not ran %}
-<p class="rounded-md border border-dashed border-gray-300 dark:border-gray-600 px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+<p class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
     {% if error_lines %}Fix the search above to see results.{% else %}Type something to search for, or choose a priority, label or date above.{% endif %}
 </p>
 {% else %}
@@ -19,19 +19,19 @@
                 {% csrf_token %}
                 {% for key, value in hidden_pairs %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
                 <button type="submit"
-                        class="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+                        class="btn inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
                     <i class="fas fa-rotate mr-2" aria-hidden="true"></i>Update filter
                 </button>
             </form>
             {% endif %}
             <button type="button" @click="saving = true; $nextTick(() => $refs.filterName.focus())"
-                    class="inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                    class="btn inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="far fa-bookmark mr-2" aria-hidden="true"></i>Save as filter
             </button>
         </div>
     </div>
 
-    <div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+    <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
             {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
             {% empty %}
@@ -59,7 +59,7 @@
     <div x-show="saving" style="display: none" @click.self="saving = false"
          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70">
         <div role="dialog" aria-modal="true" aria-labelledby="save-filter-title"
-             class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
+             class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4">
             <form method="post" action="{% url 'todo:filters' %}" hx-post="{% url 'todo:filters' %}" hx-target="#filter-save-msg" hx-swap="innerHTML"
                   hx-disabled-elt="find button[type='submit']" class="p-6">
                 {% csrf_token %}
@@ -69,12 +69,12 @@
                 <div id="filter-save-msg" class="mb-3 text-sm" aria-live="polite"></div>
                 <label for="filter-name" class="block mb-1 text-sm font-medium">Name</label>
                 <input id="filter-name" x-ref="filterName" name="name" type="text" maxlength="50" required autocomplete="off"
-                       class="mb-6 w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                       class="mb-6 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
                 <div class="flex justify-end gap-3">
                     <button type="button" @click="saving = false"
-                            class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">Cancel</button>
+                            class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Cancel</button>
                     <button type="submit"
-                            class="px-4 py-2 text-sm font-medium rounded-md text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+                            class="btn px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save</button>
                 </div>
             </form>
         </div>

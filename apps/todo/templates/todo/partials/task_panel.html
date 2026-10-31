@@ -20,14 +20,14 @@
 
     <!-- Title -->
     {% if task.is_trashed %}
-    <h1 class="mb-6 text-3xl font-bold text-gray-500 dark:text-gray-400 line-through">{{ task.title }}</h1>
+    <h1 class="mb-6 text-3xl font-semibold tracking-tight text-gray-500 dark:text-gray-400 line-through">{{ task.title }}</h1>
     {% else %}
     <div x-data="{ editing: false }" class="mb-6">
         <div x-show="!editing" class="flex items-start gap-3">
-            <h1 class="min-w-0 flex-1 break-words text-3xl font-bold {% if task.is_completed %}text-gray-500 dark:text-gray-400 line-through{% else %}text-gray-900 dark:text-gray-100{% endif %}">{{ task.title }}</h1>
+            <h1 class="min-w-0 flex-1 break-words text-3xl font-semibold tracking-tight {% if task.is_completed %}text-gray-500 dark:text-gray-400 line-through{% else %}text-gray-900 dark:text-gray-100{% endif %}">{{ task.title }}</h1>
             <button type="button" @click="editing = true; $nextTick(() => $refs.title.focus())"
                     aria-label="Edit the title" title="Edit title"
-                    class="mt-1 p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                    class="btn mt-1 p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
         </div>
         <form x-show="editing" style="display: none" method="post" action="{% url 'todo:edit' task.number %}"
               hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
@@ -38,11 +38,11 @@
             <input type="hidden" name="ctx" value="page">
             <label for="task-title" class="sr-only">Title</label>
             <input id="task-title" x-ref="title" name="title" type="text" value="{{ task.title }}" maxlength="500" required
-                   class="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xl focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                   class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xl">
             <button type="submit" aria-label="Save the title" title="Save"
-                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
             <button type="button" @click="editing = false" aria-label="Cancel editing the title" title="Cancel"
-                    class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
         </form>
     </div>
     {% endif %}
@@ -53,7 +53,7 @@
     <div class="mb-8 flex flex-wrap items-center gap-3">
         {% if task.is_trashed %}
         <button type="button" hx-post="{% url 'todo:restore' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
-                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
             <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore
         </button>
         <button type="button" @click="show($el)"
@@ -61,13 +61,13 @@
                 data-title="Delete forever"
                 data-body="Are you sure you want to delete {{ task.title }} forever? This can't be undone."
                 data-label="Delete forever"
-                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
             <i class="fas fa-trash mr-2" aria-hidden="true"></i>Delete forever
         </button>
         {% else %}
             {% if task.is_completed %}
             <button type="button" hx-post="{% url 'todo:uncomplete' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
-                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                    class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                 <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Uncomplete
             </button>
             {% elif open_subtasks %}
@@ -76,12 +76,12 @@
                     data-title="Complete task"
                     data-body="{{ task.title }} has {{ open_subtasks }} open subtask{{ open_subtasks|pluralize }}. Completing it completes {{ open_subtasks|pluralize:'it,them' }} too."
                     data-label="Complete" data-tone="primary"
-                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                    class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                 <i class="fas fa-check mr-2" aria-hidden="true"></i>Complete
             </button>
             {% else %}
             <button type="button" hx-post="{% url 'todo:complete' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
-                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                    class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
                 <i class="fas fa-check mr-2" aria-hidden="true"></i>Complete
             </button>
             {% endif %}
@@ -95,12 +95,12 @@
                     data-body="Move {{ task.title }} to the trash? It repeats: tick the box to stop repeating too, otherwise the repeat carries on."
                     data-label="Move to trash" data-tone="primary"
                     data-checkbox-name="stop_recurrence" data-checkbox-label="Also stop repeating"
-                    class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                    class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="fas fa-trash mr-2" aria-hidden="true"></i>Move to trash
             </button>
             {% else %}
             <button type="button" hx-post="{% url 'todo:trash-task' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
-                    class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                    class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="fas fa-trash mr-2" aria-hidden="true"></i>Move to trash
             </button>
             {% endif %}
@@ -130,7 +130,7 @@
             {% repeat_chip task detail=True %}
             {% if not task.is_trashed %}
             <button type="button" hx-post="{% url 'todo:recurrence-stop' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
-                    class="text-sm text-sage-600 dark:text-sage-300 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">Stop repeating</button>
+                    class="text-sm text-sage-600 dark:text-sage-300 hover:underline rounded-md">Stop repeating</button>
             {% endif %}
         </div>
         {% elif task.recurrence_id %}

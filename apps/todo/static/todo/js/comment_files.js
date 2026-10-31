@@ -21,7 +21,7 @@
         icon.setAttribute('aria-hidden', 'true');
         const name = TodoUploader.el('span', 'min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100', file.filename);
         const size = TodoUploader.el('span', 'text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap', TodoUploader.formatSize(file.size_bytes));
-        const remove = TodoUploader.el('button', 'text-xs text-red-600 dark:text-red-400 hover:underline focus:outline-none focus:ring-2 focus:ring-red-500 rounded', 'Remove');
+        const remove = TodoUploader.el('button', 'text-xs text-red-600 dark:text-red-400 hover:underline rounded-md', 'Remove');
         remove.type = 'button';
         remove.setAttribute('aria-label', 'Remove ' + file.filename);
         const input = document.createElement('input');

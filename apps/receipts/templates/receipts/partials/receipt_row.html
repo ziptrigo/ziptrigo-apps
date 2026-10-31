@@ -1,7 +1,7 @@
 {% load receipts_ui %}
 <li id="receipt-{{ receipt.pk }}">
     <a href="{% url 'receipts:detail' receipt.pk %}"
-       class="block px-4 py-4 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-primary">
+       class="block px-4 py-4 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
         <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 md:grid-cols-[6.5rem_minmax(0,1fr)_9.5rem_7rem_8.5rem] md:items-center">
             <span class="hidden md:block text-sm text-gray-700 dark:text-gray-300 tabular-nums">{{ receipt.receipt_date|date:'Y-m-d'|default:'—' }}</span>
             <span class="min-w-0 truncate text-sm font-medium text-sage-600 dark:text-sage-300">

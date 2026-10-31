@@ -4,11 +4,11 @@
     <label for="todo-search-q" class="sr-only">Search tasks</label>
     <div class="flex items-center gap-1">
         <input id="todo-search-q" type="search" name="q" maxlength="200" autocomplete="off" placeholder="Search tasks"
-               class="min-w-0 flex-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+               class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
         {% include 'todo/partials/search_help.html' with help_id='side' %}
     </div>
     <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-gray-600 dark:text-gray-400">
-        <label class="inline-flex items-center gap-1"><input type="checkbox" name="mode" value="regex" class="rounded border-gray-300 dark:border-gray-600"> Regex</label>
-        <label class="inline-flex items-center gap-1"><input type="checkbox" name="include_completed" value="1" class="rounded border-gray-300 dark:border-gray-600"> Include completed</label>
+        <label class="inline-flex items-center gap-1"><input type="checkbox" name="mode" value="regex" class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> Regex</label>
+        <label class="inline-flex items-center gap-1"><input type="checkbox" name="include_completed" value="1" class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> Include completed</label>
     </div>
 </form>

@@ -246,23 +246,37 @@ Mobile-first; `sm:` (640px) is the one breakpoint that matters today.
 
 ## 7. Shape, elevation and layering
 
-| | Class | Used on |
+The radius grows with the element, so the hierarchy reads from the corners alone: a pill is round,
+a control is 8 px, a container 12 px, an overlay 16 px.
+
+| Role | Class | Used on |
 |---|---|---|
-| Radius | `rounded` | Text inputs, selects, textareas, thumbnails |
-| | `rounded-md` | Buttons, list card, dropdown menu and its items, search input, preview well |
-| | `rounded-lg` | Modals, landing product cards, auth card |
-| | `rounded-full` | Icon-only buttons |
-| Shadow | `shadow-sm` | Buttons |
-| | `shadow` | Header, list card, auth card |
+| Text-like elements | `rounded-full` | Pills, chips, tags, count bubbles, icon-only buttons, avatars, the task circle |
+| Controls | `rounded-lg` | Buttons, text inputs, selects, textareas, menu items, nav items |
+| Small things | `rounded-md` | Thumbnails, inline code, links and text buttons (the shape of their focus ring) |
+| Containers | `rounded-xl` | List cards, panels, banners, dropdown menus, product cards, the auth card, dashed drop zones |
+| Overlays | `rounded-2xl` | Modals, the lightbox |
+| Shadow | `shadow-sm` | Containers (always with a `border border-gray-200 dark:border-gray-700`), the selected segment |
 | | `shadow-md` | Product card on hover |
 | | `shadow-lg` | Dropdown menus |
-| | `shadow-xl` | Modals |
+| | `shadow-2xl` | Modals |
 | Z-index | `z-40` | Image preview overlay |
 | | `z-50` | Dropdown menus, confirmation modals |
 
+Buttons carry no shadow. A container's border does the separating, which is what holds it apart
+from the page in dark mode too.
+
+**How the radius is chosen** (it is decided by what the element *is*, not by the class it had): an `<input>`,
+`<textarea>`, `<select>`, or a button or link with padding is a control (`rounded-lg`); a bordered, shadowed or tinted
+`<div>`, `<ul>`, `<form>` or `<section>` is a container (`rounded-xl`); a fixed overlay panel is an overlay
+(`rounded-2xl`); `<img>`, `<code>`, fixed-size boxes and padding-less links are small (`rounded-md`); anything with
+`rounded-full` stays a pill. The refresh applied this by script; new markup follows the same rule by hand.
+
 ## 8. Icons
 
-- Font Awesome 6 solid: `<i class="fas fa-…"></i>`.
+- Font Awesome 6: `<i class="fas fa-…"></i>` for state and product icons (solid says "this is a state"), `far` (outlined)
+  for chrome such as the header's bell and account button. What the pages used before the refresh is kept in
+  [`deprecated-icons/ICONS.md`](deprecated-icons/ICONS.md), with copies of the logo images beside it.
 - Icons next to text take a right margin: `mr-1` in nav/links, `mr-2` in menu items and buttons.
 - Product icons (registered on `ProductApp.icon`): `fas fa-qrcode`, `fas fa-paper-plane`. On a
   product page header or card: `text-2xl text-sage-400`.
@@ -308,9 +322,12 @@ issue #214):
 - **Copy** buttons: the check that replaces the copy glyph pops (`data-copy-icon`, `copyText`).
   The bell badge pops when its count goes up.
 - **htmx**: `htmx-added` and `htmx-swapping` are opt-in. A row that should slide in carries
-  `row-enter`; one that should fade out carries `row-leave` with `hx-swap="outerHTML swap:220ms"`.
-  A list that re-fetches may show a `skeleton-indicator` (shimmering rows) with `hx-indicator`.
+  `row-enter`; one that should fade out carries `row-leave` with `hx-swap="outerHTML swap:200ms"`.
+  A list that is slow to refresh shows skeleton rows ([10.20](#1020-loading-a-list)).
   Never animate a whole list on search or paging.
+- **Tabs**: the underline slides to the chosen tab ([10.15](#1015-tabs)). **Completing a task**: the tick
+  draws, the title strikes, the row fades out ([10.21](#1021-completing-a-task)).
+- **Drop zones** tint sage and grow 1% while a file is dragged over them (`core/js/drop_zone.js`).
 - **Theme change** cross-fades colours over 260 ms (`html.theming`, added by `base.html`).
 - **Landing page**: `animate-rise` with an `animation-delay` per element is the one orchestrated moment.
 
@@ -329,19 +346,22 @@ Live versions and copyable markup: [`reference/components.html`](reference/compo
 
 ### 10.1 Buttons
 
-All buttons share `inline-flex items-center px-4 py-2 text-sm font-medium rounded-md` plus a
-`focus:outline-none focus:ring-2 focus:ring-offset-2` ring.
+One recipe in two sizes. All buttons share `btn inline-flex items-center text-sm font-medium rounded-lg`
+(`btn` is in `core/css/site.css`: the colour transition and the 98% press), `px-4 py-2` by default and
+`px-3 py-1.5` (or `py-1`) inside a table row or a card. There are no `focus:ring-*` classes on a button:
+`site.css` draws the keyboard focus ring for every button and link.
 
 | Variant | When | Classes (beyond the shared base) |
 |---|---|---|
-| **Primary** | The one main action: Save, Generate QR code, Preview | `border border-transparent shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:ring-brand-primary` |
-| **Secondary** | Cancel / back on a page | `border border-gray-300 dark:border-gray-600 shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:ring-brand-primary` |
-| **Subtle** | Cancel inside a modal | `text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:ring-gray-500 transition-colors` |
-| **Danger** | Confirming a destructive action | `text-white bg-red-600 hover:bg-red-700 focus:ring-red-500 transition-colors` |
-| **Icon** | Row menu trigger, other icon-only actions | `p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors`, icon `text-gray-500 dark:text-gray-400`, plus `aria-label` |
+| **Primary** | The one main action: Save, Generate QR code, Preview | `text-gray-900 bg-brand-primary hover:bg-sage-400` |
+| **Secondary** | Cancel / back on a page | `border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700` |
+| **Subtle** | Cancel inside a modal, small row actions | `text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600` |
+| **Danger** | Confirming a destructive action | `text-white bg-red-600 hover:bg-red-700` |
+| **Icon** | Row menu trigger, other icon-only actions | `btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors`, icon `text-gray-500 dark:text-gray-400`, plus `aria-label` |
 
 Rules:
 
+- Hover darkens one step (primary: `sage-300` to `sage-400`). Never `hover:opacity-90`, which washes the label out.
 - Button groups right-align (`flex items-center justify-end gap-3`) with the **primary last**
   (rightmost): `[Cancel] [Save]`, `[Cancel] [Delete]`.
 - Use `<a>` for navigation (Cancel → dashboard, Generate → create page), `<button>` for actions.
@@ -362,13 +382,15 @@ Rules:
 <div class="mb-4">
   <label for="name" class="block mb-1 text-sm font-medium">Name</label>
   <input id="name" type="text" name="name"
-         class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+         class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Help text.</p>
 </div>
 ```
 
 - **Text input, textarea, select** share the control classes above. Textareas set `rows`; selects
-  that hold short enums get a fixed width (`w-40`) instead of `w-full`.
+  that hold short enums get a fixed width (`w-40`) instead of `w-full`. **No focus classes:** `site.css`
+  gives every field a sage border and a soft 3 px halo on focus (no offset, so fields in a row don't
+  jump), for the mouse as well as the keyboard.
 - **Read-only value** (the type after creation) is a `<div>`, not a disabled input: control classes
   with `bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400` instead of the white
   background.
@@ -376,7 +398,7 @@ Rules:
   `cursor-not-allowed`, and say so in the label: "Text / URL (read-only)".
 - **Generated read-only input** (short URL): `readonly`, muted background,
   `text-gray-600 dark:text-gray-300 cursor-default`.
-- **Checkbox**: `h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary`,
+- **Checkbox**: `h-4 w-4 rounded border-gray-300 accent-sage-500` (a sage tick; `site.css` gives it a focus outline),
   inside `<label class="inline-flex items-center gap-2">` with the text in `<span class="text-sm">`.
   A dependent checkbox is `disabled` until its condition holds (Track needs type = URL).
 - **Conditional fields** (short URL) start `hidden` and are revealed by JS or an htmx swap. Don't
@@ -406,7 +428,7 @@ to the list) then Primary Save (`type="submit"`).
 A GET form (`?q=`) that fills the toolbar: magnifier on the left, clear (`fa-times`) on the right,
 shown only when there's a value.
 
-- Input: `block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white`
+- Input: `block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:placeholder-gray-400 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white`
 - Icons: `absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none`, `h-5 w-5 text-gray-400`.
 - Clear button: `absolute inset-y-0 right-0 pr-3 … text-gray-400 hover:text-gray-600 dark:hover:text-gray-300`,
   `aria-label="Clear search"`. Clearing navigates to the unfiltered URL.
@@ -423,24 +445,26 @@ The dashboard's "table" is a stacked list in a card, not a `<table>`:
 
 | Part | Classes |
 |---|---|
-| Card | `bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md` (`overflow-visible` so row menus aren't clipped) |
+| Card | `bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm overflow-visible sm:rounded-xl` (`overflow-visible` so row menus aren't clipped) |
 | List | `<ul class="divide-y divide-gray-200 dark:divide-gray-700">` |
 | Header row | `bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between sm:px-6`: select-all checkbox, sort links |
 | Sort link | `group flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200` + chevron `ml-1 h-4 w-4` |
 | Row | `px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out` |
 | Row: checkbox | `mr-4`, same checkbox classes as forms |
-| Row: thumbnail | a button (opens a preview) wrapping `h-12 w-12 rounded object-cover bg-gray-100` with the hover-grow |
+| Row: thumbnail | a button (opens a preview) wrapping `h-12 w-12 rounded-md object-cover bg-gray-100` with the hover-grow |
 | Row: text | `min-w-0 flex-1 px-4`; title `text-sm font-medium truncate`, meta `mt-2 text-xs text-gray-500 dark:text-gray-400 truncate` |
 | Row: actions | `relative ml-4 flex-shrink-0` wrapping an icon button + dropdown menu |
-| Empty state | `<li class="px-4 py-12 text-center sm:px-6">` + `text-sm text-gray-500 dark:text-gray-400` "No QR codes found." |
+| Empty state | the shared partial, [10.19](#1019-empty-states) |
 
-Row title colour: see [Known deviations](#15-known-deviations-in-the-current-code).
+A row's title is `font-medium` in the primary text colour (`text-gray-900 dark:text-gray-100`) with `hover:underline`, not
+sage: brand-coloured text on white is 2.5:1.
 
 ### 10.8 Dropdown menu (row actions)
 
-- Menu: `hidden absolute top-full mt-2 right-0 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right`.
+- Menu: `hidden absolute top-full mt-2 right-0 w-48 bg-white dark:bg-gray-800 rounded-xl p-1 shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right`.
+  It scales from 95% at its corner and fades, 200 ms in and 150 ms out (Alpine `x-transition`, the classes in `core/base.html`'s account menu).
 - Item (`<a>` for navigation, `<button class="w-full text-left">` for actions):
-  `block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-md`, leading icon `mr-2`.
+  `block px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg`, leading icon `mr-2`.
 - Destructive item goes last: `text-red-600 dark:text-red-400`, and it opens a confirmation
   modal rather than acting straight away.
 - Behaviour: one menu open at a time; the trigger toggles; clicking outside or pressing Esc
@@ -449,8 +473,8 @@ Row title colour: see [Known deviations](#15-known-deviations-in-the-current-cod
 ### 10.9 Confirmation modal
 
 ```
-overlay  fixed inset-0 z-50 hidden bg-black/50 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out
-panel    bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95
+overlay  fixed inset-0 z-50 hidden bg-black/50 dark:bg-black/70 backdrop-blur-[2px] flex items-center justify-center, fades in 220 ms, out 140 ms
+panel    bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4, rises 8 px and scales from 97% (Alpine x-transition)
 body     p-6
 title    h3  text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2
 text     p   text-sm text-gray-600 dark:text-gray-400 mb-6   (item name in font-medium text-gray-900 dark:text-gray-100)
@@ -477,25 +501,43 @@ image `h-24 w-24 object-contain`. The Preview button sits to its left
 ### 10.12 Product card (landing page)
 
 From `core/home.html`, for anything that links into a product:
-`block p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition`,
+`lift animate-rise block p-6 rounded-xl border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition` (`lift` raises it 1 px on hover, `animate-rise` is the landing reveal),
 icon `text-2xl text-sage-400`, title `text-xl font-semibold`, text `text-gray-700 dark:text-gray-300`.
 This is the one place sage is used as a surface.
 
-### 10.13 Status pills
+### 10.13 Pills
 
-A small rounded label with an icon and the status in words, so colour is never the only signal.
-Used for a record's state in lists and page headers (`receipts/templatetags/receipts_ui.py`,
-`{% status_pill receipt.status %}`):
+One shape for every status, chip, tag, count and badge: a small `rounded-full` label with a **tinted
+fill**, the darker shade of the same colour as text, and an icon when colour alone wouldn't say it.
+Rendered by one shared tag, `apps/core/templatetags/core_ui.py`, so the products stop keeping their own
+colour tables:
 
-```html
-<span class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border
-             text-green-700 dark:text-green-400 border-green-600/40 dark:border-green-400/40
-             px-2 py-0.5 text-xs font-medium">
-  <i class="fas fa-check text-green-600 dark:text-green-400" aria-hidden="true"></i>Processed
-</span>
+```django
+{% load core_ui %}
+{% pill 'green' 'Processed' icon='fas fa-check' %}
+<span class="{% pill_class 'amber' %}">3</span>   {# a count or tag you write yourself #}
 ```
 
-| Status | Colour | Icon |
+From Python, `pill_html(tone, label, icon=, title=, sr_only=)`. The product helpers
+(`status_pill`, `vendor_chip`, `link_status_pill`, `due_badge`, `priority_flag`, `repeat_chip`) are thin wrappers
+that choose the tone and icon.
+
+| Tone | Light | Dark | Means |
+|---|---|---|---|
+| `green` | `bg-green-50 text-green-700` | `bg-green-400/10 text-green-300` | Done, healthy, today |
+| `amber` | `bg-amber-50 text-amber-700` | `bg-amber-400/10 text-amber-300` | Needs attention |
+| `blue` | `bg-blue-50 text-blue-700` | `bg-blue-400/10 text-blue-300` | In progress |
+| `red` | `bg-red-50 text-red-700` | `bg-red-400/10 text-red-300` | Failed, overdue, priority 1 |
+| `sky` | `bg-sky-50 text-sky-700` | `bg-sky-400/10 text-sky-300` | Priority 3 |
+| `gray` | `bg-gray-100 text-gray-600` | `bg-gray-700 text-gray-300` | Neutral, waiting, counts, tags |
+
+The shared shape is `inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium`;
+an icon is `text-[10px]` with `gap-1.5`. Contrast: the light pairs are at least 4.5:1 (green 4.8, amber 4.8, red 5.9, sky 5.6,
+blue 6.2, gray 6.4); the dark ones are at least 6.2:1 on a `gray-800` card (blue 6.5, red 6.3, sky 6.9, gray 6.3, amber 7.8,
+green 7.9) and 7.7:1 or better on the page background. A user's own label colour (To-do's `label_chip`) is the one exception: it tints with
+the colour they chose.
+
+| Status (Receipts) | Tone | Icon |
 |---|---|---|
 | Processed | green | `fa-check` |
 | Needs review | amber | `fa-triangle-exclamation` |
@@ -504,32 +546,43 @@ Used for a record's state in lists and page headers (`receipts/templatetags/rece
 | Waiting for credits | gray | `fa-coins` |
 | Failed | red | `fa-circle-xmark` |
 
-Colours and contrast: [Semantic](#semantic). Other products add their own statuses to the helper's
-table rather than writing pill markup by hand.
+Colours and contrast: [Semantic](#semantic). A new status goes in the product's helper table, never as pill
+markup written by hand.
 
 ### 10.14 Banners
 
 A full-width notice above a page's content (Receipts: "Storage is paused", "Possible duplicate").
-`rounded-md border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3`,
+`rounded-xl border border-amber-600/30 dark:border-amber-400/30 bg-amber-50 dark:bg-amber-400/5 px-4 py-3`,
 the icon in the status colour, body text `text-sm text-gray-700 dark:text-gray-300` with the lead
 words in `font-medium text-gray-900 dark:text-gray-100`, and the action on the right as a
 **Secondary** button (a banner never adds a second primary button), stacked under the text on
 phones (`flex flex-col gap-3 sm:flex-row sm:items-center`). `role="alert"` for something that
 blocks work, none for the rest.
 
-### 10.15 Filter tabs
+### 10.15 Tabs
 
-Links that filter a list, with counts: an underlined row (`border-b border-gray-200
-dark:border-gray-700`), each tab `border-b-2 px-3 py-2 text-sm font-medium`; the current one has
-`border-brand-primary text-gray-900 dark:text-gray-100` and `aria-current="page"`, the others
-`border-transparent text-gray-500 dark:text-gray-400` plus a hover. The count is a small pill
-(`rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs`; amber for something that needs
-the user). Tabs and filters re-fetch the list with htmx and the server sends `HX-Push-Url`, so the
-address bar always holds the full page's URL.
+Two kinds, for two jobs.
+
+**Underline tabs** filter a list, with counts: an underlined row (`border-b border-gray-200
+dark:border-gray-700`, the `<nav>` carries `data-tabs`), each tab `border-b-2 px-3 py-2 text-sm font-medium`;
+the current one has `border-brand-primary text-gray-900 dark:text-gray-100` and `aria-current="page"`, the others
+`border-transparent text-gray-500 dark:text-gray-400` plus a hover. The count is a [pill](#1013-pills) (amber for
+something that needs the user). The underline **slides** to the tab you pick (`core/js/tabs.js` remembers where it
+sat before htmx swaps the bar and moves a fresh indicator from there; without JS the static underline stays).
+Tabs and filters re-fetch the list with htmx and the server sends `HX-Push-Url`, so the address bar always holds
+the full page's URL.
+
+**Segmented control** chooses one of a few values (Active / Ended, 7 / 30 / 90 days): a `segmented inline-flex
+rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5` track; each option `btn rounded-md px-3 py-1.5 text-sm font-medium`.
+The selected option is `aria-selected="true"` (a tablist) or `aria-current="true"` (links) and is styled from that
+attribute (`.segmented` in `site.css`: raised, white or `gray-700`), not from classes, so `tabs.js` can move it after
+an htmx click that swaps only the list below.
+
+Underline tabs don't use `btn` (a press scale on a tab looks wrong; their hover already transitions).
 
 ### 10.16 Vendor chips
 
-The same pill shape as the status pills (10.13), for the state of a vendor: **Vetted** (green,
+The same [pill](#1013-pills) (10.13), for the state of a vendor: **Vetted** (green,
 `fa-circle-check`: the user confirmed it) and **New vendor** (neutral gray, `fa-seedling`: only what
 the AI read, so it reads as a state rather than a problem; "New" in a list row). Rendered by
 `{% vendor_chip vendor.vetted %}` (`receipts/templatetags/receipts_ui.py`). On a receipt's page the
@@ -577,6 +630,28 @@ label). Below `md` only the icons show. On the right, the bell and the account b
 icons (`far fa-bell`, `far fa-user-circle`) in round icon buttons; the account menu is a
 `rounded-xl` panel with `rounded-lg` items. Outlined (`far`) icons are for chrome, solid (`fas`)
 for state (pills, banners, flash messages).
+
+### 10.19 Empty states
+
+An empty list is an invitation to act, not an error: one shared partial, `core/partials/empty_state.html`, with an
+icon in a round sage tint, a title that says what is missing (`No receipts yet`), one line of help, and, for a list
+the user hasn't started, a primary button that starts it (`Upload receipts`). After a search or filter that matched
+nothing it has no button: `No receipts found` and "Try other filters or a different search." Put it in the list's own
+wrapper (`<li>` or the card).
+
+### 10.20 Loading a list
+
+A list the user refreshes (search, a tab, a page) shows three shimmering skeleton rows if the answer takes longer than
+250 ms (`core/js/skeleton.js`; mark the container `data-list`; the rows are `<template id="skeleton-rows">` in
+`base.html`). A fast answer never shows them, polling never does, and an answer that isn't swapped in brings the old
+list back. Don't add spinners to lists.
+
+### 10.21 Completing a task
+
+The To-do circle is an inline SVG whose tick draws itself in 220 ms the moment it is clicked (`data-complete`, the
+`.done` class `tasks.js` puts on the row), the title strikes through left to right, and the row then leaves with a
+140 ms fade (`row-leave` with `hx-swap="outerHTML swap:200ms"`). A task that was already completed when the page rendered
+is drawn complete (`.is-done`) with no animation. If the request fails the row is not done after all.
 
 ---
 
@@ -653,32 +728,28 @@ creation become read-only, and create-only controls (Preview, Type/Format, Track
 
 ## 15. Known deviations in the current code
 
-The qr_code pages are the reference, but a few details disagree with the rest of the design or
-with the rules above. **Follow the guideline column in new work.** The existing templates are left
-as they are (no code changes in this document).
+The refresh (#214) brought every product page onto this document. What is left:
 
 | Where | Current | Guideline |
 |---|---|---|
-| Dashboard row title | `text-brand-primary` on white: 2.54:1, too low for `text-sm` | `text-sage-600 dark:text-sage-300` |
-| Login links | `text-sage-300 underline` on white (2.54:1) | `text-sage-600 dark:text-sage-300 underline` |
 | Casing | "Delete QR Code", "Track QR Code", "QR Code Preview:" | Sentence case: "Delete QR code", … |
 | Editor labels | `<label>` without `for`, so not tied to its control | Add `for`/`id`, or wrap the control |
 | Search / sort icons | Inline Heroicons SVGs | Font Awesome (`fa-magnifying-glass`, `fa-chevron-down`), like the rest |
-| Search focus | `focus:ring-1` | `focus:ring-2`, like the other fields (keep `focus:border-brand-primary`) |
 | Delete failure | `alert(…)` | Inline error in the modal or the page's message slot |
-| Modals | No `role="dialog"` / focus handling | See [Accessibility](#14-accessibility) |
-| Accent class name | qr_code uses `brand-primary`, accounts uses `sage-300` (same colour) | `brand-primary` for action accents (primary button, focus ring, checkbox), `sage-*` elsewhere |
-| Corner radius | `rounded` inputs, `rounded-md` buttons and cards, `rounded-lg` modals | By role: pills `rounded-full`, controls `rounded-lg`, containers `rounded-xl`, modals `rounded-2xl` (queued for the component pass, #214) |
-| Primary / secondary buttons | Three primary recipes (QR/Receipts/Short URL/To-do, File Transfer rows, accounts), `hover:opacity-90`, `focus:ring-offset-2` on click | One recipe in two sizes with `btn`, `hover:bg-sage-400`, `focus-visible` rings (component pass, #214) |
-| Status pills, chips, tags, tab counts | Outlined status pills, tinted label chips, grey tags, bare To-do due and priority text | One tinted pill (`rounded-full px-2 py-0.5 text-xs font-medium` on a 10% tint) from a shared tag (component pass, #214) |
-| Tabs | Underline tabs, a filled toggle, bordered pills, a sidebar | Underline tabs with the sliding indicator for filtering a list, a segmented control for choosing a value (component pass, #214) |
-| Page titles | `text-3xl font-bold` | `text-3xl font-semibold tracking-tight` (component pass, #214) |
+| Modals | Some have no `role="dialog"` / focus handling | See [Accessibility](#14-accessibility) |
+| Field errors | One message above the form | The same message under the field that failed (needs the 422 partial to carry per-field errors; a later issue) |
+
+**Follow the guideline column in new work.** Admin pages (jazzmin) have their own theme and are out of scope.
 
 ## 16. Checklist for a new page
 
 - [ ] Extends `core/base.html`, sets `{% block title %}<Page> - ZipTrigo{% endblock %}`.
 - [ ] Container and max width from [Layout](#6-layout-and-spacing); h1 uses the page-title classes.
 - [ ] At most one primary (sage) button per view; buttons right-aligned, primary last.
+- [ ] Radius by role (pill `rounded-full`, control `rounded-lg`, container `rounded-xl`, overlay `rounded-2xl`); containers have a border and `shadow-sm`.
+- [ ] Buttons are the one recipe (`btn`, `rounded-lg`, `hover:bg-sage-400` for primary); no `focus:ring-*` classes on controls.
+- [ ] Statuses, counts and tags are the shared pill (`{% pill %}` / `core_ui`), never hand-written colours.
+- [ ] An empty list uses the empty-state partial; a refreshing list is `data-list`.
 - [ ] Every colour class has its `dark:` twin; checked in light **and** dark.
 - [ ] Text is the default `font-sans` (Figtree); codes and addresses are `font-mono`; numbers that line up are `tabular-nums`.
 - [ ] Motion uses the tokens and classes of [9. Motion](#9-motion) (`btn`, `animate-*`, `row-enter`); nothing moves on its own; checked with reduced motion on.

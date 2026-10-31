@@ -11,14 +11,14 @@
           hx-post="{% url 'core:notification-read-all' %}" hx-target="#notification-list" hx-swap="innerHTML" hx-disabled-elt="find button">
         {% include 'core/partials/notification_fields.html' with scope='page' page_number=page_obj.number %}
         <button type="submit"
-                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
             <i class="fas fa-check-double mr-2" aria-hidden="true"></i>Mark all as read
         </button>
     </form>
     {% endif %}
 </div>
 
-<div class="bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+<div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
     <ul class="divide-y divide-gray-200 dark:divide-gray-700">
         {% for n in page_obj %}
         {% include 'core/partials/notification_item.html' with scope='page' target='#notification-list' page_number=page_obj.number %}

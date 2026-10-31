@@ -3,9 +3,9 @@
 {% block title %}Trash - To-do - ZipTrigo{% endblock %}
 
 {% block todo_content %}
-<h1 class="mb-6 text-3xl font-bold text-gray-900 dark:text-gray-100">Trash</h1>
+<h1 class="mb-6 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Trash</h1>
 
-<div id="task-list">
+<div id="task-list" data-list>
     {% include 'todo/partials/task_list.html' %}
 </div>
 {% endblock %}

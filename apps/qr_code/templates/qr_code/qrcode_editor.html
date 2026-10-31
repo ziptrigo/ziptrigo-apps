@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="container mx-auto px-4 py-8 max-w-3xl">
-  <h1 class="text-3xl font-bold mb-6 text-gray-900 dark:text-gray-100">{% if qrcode %}Edit{% else %}Create{% endif %} QR code</h1>
+  <h1 class="text-3xl font-semibold tracking-tight mb-6 text-gray-900 dark:text-gray-100">{% if qrcode %}Edit{% else %}Create{% endif %} QR code</h1>
 
   <div id="qrcode-msg" class="mb-4 text-sm"></div>
 
@@ -21,14 +21,14 @@
     <div class="mb-4">
       <label class="block mb-1 text-sm font-medium">Name</label>
       <input type="text" name="name" maxlength="255" required value="{% if qrcode %}{{ qrcode.name }}{% else %}{{ prefill.name|default:'' }}{% endif %}"
-             class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+             class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
     </div>
 
     <!-- Type (read-only in edit mode) -->
     {% if qrcode %}
     <div class="mb-4">
       <label class="block mb-1 text-sm font-medium">Type</label>
-      <div class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
+      <div class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
         {{ qrcode.get_qr_type_display }}
       </div>
     </div>
@@ -38,7 +38,7 @@
     <div class="mb-4">
       <label class="block mb-1 text-sm font-medium">Text / URL{% if qrcode %} (read-only){% else %} to encode{% endif %}</label>
       <textarea name="url" maxlength="1000" rows="4" {% if qrcode %}disabled{% else %}required{% endif %}
-                class="w-full rounded border border-gray-300 dark:border-gray-600 {% if qrcode %}bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed{% else %}bg-white dark:bg-gray-800{% endif %} px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">{% if qrcode %}{{ qrcode.content }}{% else %}{{ prefill.content|default:'' }}{% endif %}</textarea>
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 {% if qrcode %}bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed{% else %}bg-white dark:bg-gray-800{% endif %} px-3 py-2">{% if qrcode %}{{ qrcode.content }}{% else %}{{ prefill.content|default:'' }}{% endif %}</textarea>
       {% if not qrcode %}<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters. Can be any text; short URL is only meaningful when the content is a URL.</p>{% endif %}
     </div>
 
@@ -50,7 +50,7 @@
         <div>
           <label class="block mb-1 text-sm font-medium">Type</label>
           <select id="qr_type" name="qr_type"
-                  class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                  class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             <option value="text" {% if prefill.qr_type == 'text' or not prefill.qr_type %}selected{% endif %}>Text</option>
             <option value="url" {% if prefill.qr_type == 'url' %}selected{% endif %}>URL</option>
           </select>
@@ -59,7 +59,7 @@
         <div>
           <label class="block mb-1 text-sm font-medium">Format</label>
           <select name="qr_format"
-                  class="w-40 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                  class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             <option value="png" {% if prefill.qr_format == 'png' or not prefill.qr_format %}selected{% endif %}>PNG</option>
             <option value="svg" {% if prefill.qr_format == 'svg' %}selected{% endif %}>SVG</option>
             <option value="pdf" {% if prefill.qr_format == 'pdf' %}selected{% endif %}>PDF</option>
@@ -68,7 +68,7 @@
 
         <div class="flex items-end">
           <label class="inline-flex items-center gap-2 pb-2">
-            <input id="use_url_shortening" type="checkbox" name="use_url_shortening" value="true" class="rounded" disabled {% if prefill.use_url_shortening %}checked{% endif %}>
+            <input id="use_url_shortening" type="checkbox" name="use_url_shortening" value="true" class="rounded accent-sage-500" disabled {% if prefill.use_url_shortening %}checked{% endif %}>
             <span class="text-sm">Track QR Code</span>
             <i class="fas fa-question-circle text-gray-500 dark:text-gray-400 cursor-help" 
                title="This tracks the QR Code usage and gives you analytical data about its usage."></i>
@@ -80,7 +80,7 @@
       <div id="short-url-container" class="hidden">
         <label class="block mb-1 text-sm font-medium">Short URL</label>
         <input id="short-url-display" type="text" readonly
-               class="w-full rounded border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default"
+               class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default"
                placeholder="Short URL will be generated...">
       </div>
     </div>
@@ -97,14 +97,14 @@
               hx-target="#qrcode-preview-img"
               hx-swap="outerHTML"
               hx-disabled-elt="this"
-              class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+              class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
         Preview
       </button>
       {% else %}
       <div class="text-sm font-medium text-gray-700 dark:text-gray-300">QR Code Preview:</div>
       {% endif %}
 
-      <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-md p-2 min-h-[96px] min-w-[96px] self-start">
+      <div class="flex items-center justify-center border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-2 min-h-[96px] min-w-[96px] self-start">
         <img id="qrcode-preview-img"
              src="{% if qrcode %}{% url 'qr_code:image' qrcode.id %}{% else %}{% static 'qr_code/images/logo_128x128.png' %}{% endif %}"
              alt="QR code preview"
@@ -115,11 +115,11 @@
     <!-- Final actions: Cancel + Save -->
     <div class="mt-6 flex items-center justify-end gap-3">
       <a href="{% url 'qr_code:dashboard' %}"
-         class="inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md shadow-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+         class="btn inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
         Cancel
       </a>
       <button type="submit"
-              class="inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+              class="btn inline-flex justify-center items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
         Save
       </button>
     </div>

@@ -104,6 +104,8 @@
     <script defer src="{% static 'core/js/date_picker.js' %}"></script>
     <script defer src="{% static 'core/js/components.js' %}"></script>
     <script defer src="{% static 'core/js/local_time.js' %}"></script>
+    <script defer src="{% static 'core/js/tabs.js' %}"></script>
+    <script defer src="{% static 'core/js/skeleton.js' %}"></script>
     {% if user.is_authenticated %}
     {% comment %}Saves the browser's time zone for an account with none and offers it on the account page (issue #177). Separate from local_time.js, which only shows times in the browser's zone.{% endcomment %}
     <script defer src="{% static 'accounts/js/timezone.js' %}" data-url="{% url 'accounts:timezone' %}"></script>
@@ -234,6 +236,16 @@
             </div>
         </div>
     </footer>
+
+
+    {% comment %}Three shimmering rows (divs, not list items: some tests and screen readers count the page's list items) core/js/skeleton.js shows in a `data-list` container when its refresh is slow.{% endcomment %}
+    <template id="skeleton-rows">
+        <div class="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-800" role="status" aria-label="Loading">
+            <div class="flex items-center gap-4 px-4 py-3 sm:px-6"><div class="h-9 w-9 shrink-0 rounded-lg bg-gray-100 dark:bg-gray-700 shimmer"></div><div class="flex-1 space-y-2"><div class="h-3 w-2/5 rounded bg-gray-100 dark:bg-gray-700 shimmer"></div><div class="h-2.5 w-3/5 rounded bg-gray-100 dark:bg-gray-700 shimmer"></div></div></div>
+            <div class="flex items-center gap-4 px-4 py-3 sm:px-6"><div class="h-9 w-9 shrink-0 rounded-lg bg-gray-100 dark:bg-gray-700 shimmer"></div><div class="flex-1 space-y-2"><div class="h-3 w-1/3 rounded bg-gray-100 dark:bg-gray-700 shimmer"></div><div class="h-2.5 w-1/2 rounded bg-gray-100 dark:bg-gray-700 shimmer"></div></div></div>
+            <div class="flex items-center gap-4 px-4 py-3 sm:px-6"><div class="h-9 w-9 shrink-0 rounded-lg bg-gray-100 dark:bg-gray-700 shimmer"></div><div class="flex-1 space-y-2"><div class="h-3 w-1/2 rounded bg-gray-100 dark:bg-gray-700 shimmer"></div><div class="h-2.5 w-2/5 rounded bg-gray-100 dark:bg-gray-700 shimmer"></div></div></div>
+        </div>
+    </template>
 
     {% block extra_js %}{% endblock %}
 </body>

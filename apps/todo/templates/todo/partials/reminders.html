@@ -6,7 +6,7 @@
     <div id="reminder-msg" class="mb-3 text-sm" aria-live="polite"></div>
 
     {% if reminders %}
-    <ul class="mb-4 divide-y divide-gray-200 dark:divide-gray-700 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <ul class="mb-4 divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         {% for reminder in reminders %}
         <li x-data="{ editing: false }" class="px-4 py-3 text-sm">
             <div x-show="!editing" class="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -19,11 +19,11 @@
                 <span class="ml-auto flex items-center gap-1">
                     <button type="button" @click="editing = true"
                             aria-label="Edit the reminder {{ reminder.offset_text }}" title="Edit"
-                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
                     <button type="button" hx-post="{% url 'todo:reminder-delete' task.number reminder.pk %}"
                             hx-target="#task-panel" hx-swap="outerHTML"
                             aria-label="Remove the reminder {{ reminder.offset_text }}" title="Remove"
-                            class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary transition-colors"><i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                            class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-trash text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
                 </span>
                 {% endif %}
             </div>
@@ -37,26 +37,26 @@
                 <div>
                     <label for="reminder-amount-{{ reminder.pk }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Amount</label>
                     <input id="reminder-amount-{{ reminder.pk }}" type="number" name="amount" min="0" value="{{ reminder.amount }}" required
-                           class="w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                           class="w-24 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
                 </div>
                 <div>
                     <label for="reminder-unit-{{ reminder.pk }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Unit</label>
                     <select id="reminder-unit-{{ reminder.pk }}" name="unit"
-                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                            class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
                         {% for value, label in reminder_units %}<option value="{{ value }}" {% if value == reminder.unit %}selected{% endif %}>{{ label }} before</option>{% endfor %}
                     </select>
                 </div>
                 <div>
                     <label for="reminder-channel-{{ reminder.pk }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Channel</label>
                     <select id="reminder-channel-{{ reminder.pk }}" name="channel"
-                            class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                            class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
                         {% for value, label in reminder_channels %}<option value="{{ value }}" {% if value == reminder.channel %}selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>
                 </div>
                 <button type="submit"
-                        class="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">Save</button>
+                        class="btn inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save</button>
                 <button type="button" @click="editing = false"
-                        class="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500">Cancel</button>
+                        class="btn px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg">Cancel</button>
             </form>
             {% endif %}
         </li>
@@ -78,31 +78,31 @@
         <div>
             <label for="reminder-preset" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Add reminder</label>
             <select id="reminder-preset" name="preset" x-model="preset"
-                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
                 {% for value, label in reminder_presets %}<option value="{{ value }}" {% if value == '5' %}selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
         </div>
         <div x-show="preset === 'custom'" style="display: none">
             <label for="reminder-new-amount" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Amount</label>
             <input id="reminder-new-amount" type="number" name="amount" min="0" :required="preset === 'custom'"
-                   class="w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                   class="w-24 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
         </div>
         <div x-show="preset === 'custom'" style="display: none">
             <label for="reminder-new-unit" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Unit</label>
             <select id="reminder-new-unit" name="unit"
-                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
                 {% for value, label in reminder_units %}<option value="{{ value }}">{{ label }} before</option>{% endfor %}
             </select>
         </div>
         <div>
             <label for="reminder-new-channel" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Channel</label>
             <select id="reminder-new-channel" name="channel"
-                    class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
                 {% for value, label in reminder_channels %}<option value="{{ value }}" {% if value == default_reminder_channel %}selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
         </div>
         <button type="submit"
-                class="inline-flex items-center px-4 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50"><i class="fas fa-plus mr-2" aria-hidden="true"></i>Add</button>
+                class="btn inline-flex items-center px-4 py-1.5 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400"><i class="fas fa-plus mr-2" aria-hidden="true"></i>Add</button>
     </form>
     {% endif %}
 

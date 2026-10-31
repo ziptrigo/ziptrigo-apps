@@ -4,43 +4,12 @@ Load with `{% load receipts_ui %}`.
 """
 
 from django import template
-from django.utils.html import format_html
+
+from apps.core.templatetags.core_ui import pill_html
 
 from ..models import FailureReason, ReceiptStatus
 
 register = template.Library()
-
-# label, Font Awesome icon, text classes, border classes, icon classes. The dot/icon and the border use
-# the -600 (light) / -400 (dark) steps from the design system; the label text is -700 on light for
-# green and amber because -600 on white is only 3.3:1 / 3.2:1 (docs/ui-design/README.md, "Status
-# pills").
-_TONES = {
-    'green': (
-        'text-green-700 dark:text-green-400',
-        'border-green-600/40 dark:border-green-400/40',
-        'text-green-600 dark:text-green-400',
-    ),
-    'amber': (
-        'text-amber-700 dark:text-amber-400',
-        'border-amber-600/40 dark:border-amber-400/40',
-        'text-amber-600 dark:text-amber-400',
-    ),
-    'blue': (
-        'text-blue-600 dark:text-blue-400',
-        'border-blue-600/40 dark:border-blue-400/40',
-        'text-blue-600 dark:text-blue-400',
-    ),
-    'red': (
-        'text-red-600 dark:text-red-400',
-        'border-red-600/40 dark:border-red-400/40',
-        'text-red-600 dark:text-red-400',
-    ),
-    'gray': (
-        'text-gray-600 dark:text-gray-400',
-        'border-gray-400/60 dark:border-gray-500/60',
-        'text-gray-500 dark:text-gray-400',
-    ),
-}
 
 _PILLS = {
     ReceiptStatus.PROCESSED: ('Processed', 'fas fa-check', 'green'),
@@ -54,19 +23,9 @@ _PILLS = {
 
 @register.simple_tag
 def status_pill(status: str) -> str:
-    """The coloured pill for a receipt status (`receipt.status`)."""
+    """The pill for a receipt status (`receipt.status`)."""
     label, icon, tone = _PILLS.get(status, (str(status).replace('_', ' ').capitalize(), '', 'gray'))
-    text, border, icon_color = _TONES[tone]
-    return format_html(
-        '<span class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border '
-        '{} {} px-2 py-0.5 text-xs font-medium">'
-        '<i class="{} {}" aria-hidden="true"></i>{}</span>',
-        text,
-        border,
-        icon,
-        icon_color,
-        label,
-    )
+    return pill_html(tone, label, icon=icon)
 
 
 @register.simple_tag
@@ -74,20 +33,8 @@ def vendor_chip(vetted: bool, short: bool = False) -> str:
     """The "Vetted" / "New vendor" chip of a vendor (`short`: just "New", for the Vendors page).
     Neutral gray for a vendor nobody confirmed yet, so it doesn't read as a problem."""
     if vetted:
-        label, icon, tone = 'Vetted', 'fas fa-circle-check', 'green'
-    else:
-        label, icon, tone = ('New' if short else 'New vendor'), 'fas fa-seedling', 'gray'
-    text, border, icon_color = _TONES[tone]
-    return format_html(
-        '<span class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border '
-        '{} {} px-2 py-0.5 text-xs font-medium">'
-        '<i class="{} {}" aria-hidden="true"></i>{}</span>',
-        text,
-        border,
-        icon,
-        icon_color,
-        label,
-    )
+        return pill_html('green', 'Vetted', icon='fas fa-circle-check')
+    return pill_html('gray', 'New' if short else 'New vendor', icon='fas fa-seedling')
 
 
 #: What to tell the user about a failed receipt, and the next step. `refundable` reasons mean no AI

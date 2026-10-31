@@ -109,6 +109,95 @@ def test_flash_message_text_is_escaped(client):
     assert '&lt;script&gt;' in html
 
 
+def test_shared_scripts_are_loaded_and_the_skeleton_rows_exist(client):
+    html = client.get(reverse('core:home')).content.decode()
+    assert 'core/js/tabs.js' in html
+    assert 'core/js/skeleton.js' in html
+    assert '<template id="skeleton-rows">' in html
+    assert html.count('class="flex items-center gap-4 px-4 py-3 sm:px-6"') == 3
+
+
+def _template_files():
+    root = Path(__file__).resolve().parents[2]
+    return [
+        path
+        for path in root.glob('*/templates/**/*.html')
+        if '/templates/admin/' not in path.as_posix()
+    ]
+
+
+@pytest.mark.parametrize(
+    'stale',
+    [
+        'hover:opacity-90',
+        'focus:ring-',
+        'focus:outline-none',
+        'text-brand-primary',
+        'sm:rounded-md',
+    ],
+)
+def test_templates_do_not_bring_back_the_old_class_patterns(stale):
+    """The refresh took these out: the site draws focus (site.css), buttons darken instead of fading, and
+    brand-coloured text is sage-600 (docs/ui-design/README.md)."""
+    offenders = [
+        f'{path.relative_to(path.parents[3])}'
+        for path in _template_files()
+        if stale in path.read_text()
+        # the checkbox in the confirm modal and similar only ever use accent-sage-500 now
+    ]
+    assert not offenders, offenders
+
+
+def test_field_focus_does_not_erase_an_error_border():
+    css = SITE_CSS.read_text()
+    assert ":not([class*='border-red-'], [aria-invalid='true'])" in css
+    assert "[class*='border-red-']" in css
+
+
+def test_the_segmented_control_is_styled_from_its_aria_state():
+    css = SITE_CSS.read_text()
+    assert ".segmented > [aria-selected='true']" in css
+    assert ".segmented > [aria-current='true']" in css
+    root = Path(__file__).resolve().parents[2]
+    for name in (
+        'file_transfer/templates/file_transfer/dashboard.html',
+        'short_url/templates/short_url/stats.html',
+    ):
+        html = (root / name).read_text()
+        assert 'class="segmented ' in html, name
+        assert 'shadow-sm dark:bg-gray-700' not in html, (
+            f'{name}: the selected look must come from aria, not classes'
+        )
+
+
+def test_underline_tabs_do_not_press_like_buttons():
+    root = Path(__file__).resolve().parents[2]
+    for name in (
+        'receipts/templates/receipts/partials/tabs.html',
+        'receipts/templates/receipts/partials/vendor_tabs.html',
+        'short_url/templates/short_url/partials/tabs.html',
+    ):
+        assert 'btn inline-flex items-center border-b-2' not in (root / name).read_text(), name
+
+
+def test_the_skeleton_keeps_the_lists_content_in_the_dom():
+    """The list holds hidden inputs the next request reads (status, sort, vendor): the rows go beside it."""
+    css = SITE_CSS.read_text()
+    assert '[data-list][data-skeleton] > :not([data-skeleton-rows]) { display: none; }' in css
+    script = (CORE_STATIC / 'js' / 'skeleton.js').read_text()
+    assert 'target.innerHTML =' not in script, 'the list must not be rebuilt from a string'
+
+
+def test_every_underline_tab_bar_is_marked_for_the_sliding_indicator():
+    root = Path(__file__).resolve().parents[2]
+    for name in (
+        'receipts/templates/receipts/partials/tabs.html',
+        'receipts/templates/receipts/partials/vendor_tabs.html',
+        'short_url/templates/short_url/partials/tabs.html',
+    ):
+        assert '<nav data-tabs ' in (root / name).read_text(), name
+
+
 class TestFontCacheHeader:
     def test_fonts_are_cached_for_a_year(self):
         headers = Headers([('Cache-Control', 'max-age=60, public')])

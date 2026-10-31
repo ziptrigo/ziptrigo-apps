@@ -7,7 +7,7 @@
 <div x-data="confirmModal">
     <a href="{% url 'receipts:dashboard' %}"
        class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Receipts</a>
-    <h1 class="mt-2 mb-8 text-3xl font-bold text-gray-900 dark:text-gray-100">Receipts settings</h1>
+    <h1 class="mt-2 mb-8 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Receipts settings</h1>
 
     <!-- Your receipts address -->
     <section class="mb-8" aria-labelledby="address-title">
@@ -15,7 +15,7 @@
         <div x-data="copyText" class="flex flex-wrap items-center gap-x-3 gap-y-2">
             <code x-ref="text" class="break-all text-sm font-medium text-gray-900 dark:text-gray-100">{{ inbox_address }}</code>
             <button type="button" @click="copy()"
-                    class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                    class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                 <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
                 <span x-text="copied ? 'Copied' : 'Copy'">Copy</span>
             </button>
@@ -24,14 +24,14 @@
                     data-title="Regenerate address"
                     data-body="Your old address stops working immediately. Mail already sent to it is dropped, so update any forwarding rules."
                     data-label="Regenerate"
-                    class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                    class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                 <i class="fas fa-arrows-rotate mr-2" aria-hidden="true"></i>Regenerate&hellip;
             </button>
         </div>
         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Forward receipts here, or set an auto-forward rule in your mail app.</p>
 
         {% if confirmation %}
-        <div class="mt-4 flex flex-col gap-2 rounded-md border border-blue-600/40 dark:border-blue-400/40 bg-blue-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center" role="status">
+        <div class="mt-4 flex flex-col gap-2 rounded-xl border border-blue-600/40 dark:border-blue-400/40 bg-blue-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center" role="status">
             <i class="fas fa-circle-info text-blue-600 dark:text-blue-400" aria-hidden="true"></i>
             <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">
                 Gmail forwarding confirmation received {{ confirmation.received_at|date:'M j' }}
@@ -39,7 +39,7 @@
             </p>
             {% if confirmation.url %}
             <a href="{{ confirmation.url }}" target="_blank" rel="noopener noreferrer"
-               class="inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+               class="btn inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                 Open <i class="fas fa-arrow-up-right-from-square ml-2" aria-hidden="true"></i>
             </a>
             {% endif %}

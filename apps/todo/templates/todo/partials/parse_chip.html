@@ -2,16 +2,16 @@
    AI read a date in it: the interpretation, with Accept and Dismiss. Hidden until then. Focusable (Tab), Enter accepts and
    Escape dismisses; the tooltip is the words that were interpreted. Needs `chip_id` (unique on the page). {% endcomment %}
 <div data-parse-chip hidden tabindex="0" role="group" aria-label="Suggested date" id="{{ chip_id }}"
-     class="mt-2 focus:outline-none">
+     class="mt-2">
     <span class="inline-flex items-center gap-2 rounded-full border border-sage-300 dark:border-gray-600 bg-sage-50 dark:bg-gray-700 px-3 py-1 text-sm text-gray-800 dark:text-gray-100">
         <i class="far fa-calendar text-sage-500" aria-hidden="true"></i>
         <span data-parse-label></span>
         <button type="button" data-parse-accept
-                class="rounded p-1 text-green-700 dark:text-green-400 hover:bg-sage-100 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                class="rounded-lg p-1 text-green-700 dark:text-green-400 hover:bg-sage-100 dark:hover:bg-gray-600">
             <i class="fas fa-check" aria-hidden="true"></i><span class="sr-only">Accept</span>
         </button>
         <button type="button" data-parse-dismiss
-                class="rounded p-1 text-gray-500 dark:text-gray-300 hover:bg-sage-100 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                class="rounded-lg p-1 text-gray-500 dark:text-gray-300 hover:bg-sage-100 dark:hover:bg-gray-600">
             <i class="fas fa-xmark" aria-hidden="true"></i><span class="sr-only">Dismiss</span>
         </button>
     </span>

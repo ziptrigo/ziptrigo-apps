@@ -1,5 +1,5 @@
 {% if error %}
-<div class="mb-4 rounded px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100">
+<div class="mb-4 rounded-xl px-4 py-2 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100">
     {{ error }}
 </div>
 {% endif %}
@@ -8,10 +8,9 @@
     {% for transfer in transfers %}
         {% include 'file_transfer/partials/transfer_row.html' %}
     {% empty %}
-    <div class="bg-white dark:bg-gray-800 shadow rounded-md px-4 py-12 text-center">
-        <p class="text-sm text-gray-500 dark:text-gray-400">
-            {% if filter == 'ended' %}No ended transfers.{% else %}No transfers yet.{% endif %}
-        </p>
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl border border-gray-200 dark:border-gray-700">
+        {% if filter == 'ended' %}{% include 'core/partials/empty_state.html' with icon='fas fa-box-archive' title='No ended transfers' text='Transfers that expire or are deleted appear here.' %}
+        {% else %}{% url 'file_transfer:send' as send_url %}{% include 'core/partials/empty_state.html' with icon='fas fa-paper-plane' title='No transfers yet' text='Send a file to anyone with a link that expires.' action_url=send_url action_label='Send files' %}{% endif %}
     </div>
     {% endfor %}
 </div>

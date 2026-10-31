@@ -13,12 +13,12 @@
 
     {% if attachments_can_upload %}
     <div id="attachment-drop-zone"
-         class="flex flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-6 text-center transition-colors">
+         class="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-6 text-center transition-colors">
         <i class="fas fa-cloud-arrow-up text-2xl text-gray-400" aria-hidden="true"></i>
         <p class="text-sm text-gray-700 dark:text-gray-300">Drop files here, or</p>
         <input type="file" id="attachment-file-input" multiple class="hidden" tabindex="-1">
         <button type="button" id="attachment-pick-btn"
-                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 {% if attachments_frozen %}disabled{% endif %}>
             <i class="fas fa-paperclip mr-2" aria-hidden="true"></i>Add files
         </button>

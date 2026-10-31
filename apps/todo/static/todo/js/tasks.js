@@ -80,6 +80,23 @@
     }
 
     // Clearing the date of a task removes its reminders (they are due relative to the date): ask first.
+    // Completing a task: mark the row done the moment the circle is clicked (the check draws, the title strikes
+    // through; core/css/site.css `.done`), while the request runs and the row's 200 ms swap delay lets it show.
+    // If the request fails the row is not done after all.
+    document.addEventListener('click', function (event) {
+        var circle = event.target instanceof Element ? event.target.closest('[data-complete]') : null;
+        if (circle) {
+            var row = circle.closest('.task-row');
+            if (row) row.classList.add('done');
+        }
+    });
+    document.addEventListener('htmx:afterRequest', function (event) {
+        if (event.detail.successful) return;
+        var circle = event.target instanceof Element ? event.target.closest('[data-complete]') : null;
+        var row = circle && circle.closest('.task-row');
+        if (row) row.classList.remove('done');
+    });
+
     // The details form carries the number of reminders in `data-reminder-count`. htmx raises
     // `htmx:confirm` before every request; cancelling it and calling `issueRequest(true)` sends it.
     document.addEventListener('htmx:confirm', function (event) {

@@ -4,7 +4,7 @@
     <h2 id="subtasks-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Subtasks</h2>
     <div id="subtask-msg" class="mb-2 text-sm" aria-live="polite"></div>
     {% if subtasks %}
-    <div class="mb-4 bg-white dark:bg-gray-800 shadow overflow-visible sm:rounded-md">
+    <div class="mb-4 bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
         <ul class="divide-y divide-gray-200 dark:divide-gray-700"
             data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="subtasks" data-parent="{{ task.number }}">
             {% for task in subtasks %}{% include 'todo/partials/task_row.html' with view='subtask' sortable=True oob_nav=False %}{% endfor %}
@@ -22,10 +22,10 @@
         <div class="min-w-0 flex-1">
             <label for="subtask-title" class="block mb-1 text-sm font-medium">New subtask</label>
             <input id="subtask-title" name="title" type="text" maxlength="500" required autocomplete="off" placeholder="Subtask title"
-                   class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
         </div>
         <button type="submit"
-                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50">
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">
             <i class="fas fa-plus mr-2" aria-hidden="true"></i>Add
         </button>
     </form>

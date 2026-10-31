@@ -1,10 +1,10 @@
 {% load local_time static %}
 <div id="transfer-row-{{ transfer.id }}"
      x-data="{ open: false }"
-     class="bg-white dark:bg-gray-800 shadow rounded-md p-4">
+     class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-4 border border-gray-200 dark:border-gray-700">
 
     {% if error %}
-    <div class="mb-3 rounded px-3 py-2 text-sm bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100">
+    <div class="mb-3 rounded-xl px-3 py-2 text-sm bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100">
         {{ error }}
     </div>
     {% endif %}
@@ -37,7 +37,7 @@
         <div class="flex items-center gap-2 flex-wrap">
             <button type="button"
                     data-copy-url="{{ transfer.absolute_download_url }}"
-                    class="copy-link-btn px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                    class="btn copy-link-btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
                 <i class="fas fa-link mr-1" aria-hidden="true"></i><span class="copy-link-label" aria-live="polite">Copy link</span>
             </button>
 
@@ -46,7 +46,7 @@
                   hx-post="{% url 'file_transfer:disable' transfer.id %}"
                   hx-target="#transfer-row-{{ transfer.id }}" hx-swap="outerHTML">
                 {% csrf_token %}
-                <button type="submit" class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">Disable</button>
+                <button type="submit" class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">Disable</button>
             </form>
             {% elif transfer.status == 'disabled' or transfer.status == 'suspended' %}
                 {% if not transfer.held_for_review_at %}
@@ -54,14 +54,14 @@
                   hx-post="{% url 'file_transfer:reenable' transfer.id %}"
                   hx-target="#transfer-row-{{ transfer.id }}" hx-swap="outerHTML">
                 {% csrf_token %}
-                <button type="submit" class="px-3 py-1.5 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90">Re-enable</button>
+                <button type="submit" class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">Re-enable</button>
             </form>
                 {% endif %}
             {% endif %}
 
             {% if transfer.is_actionable and not transfer.held_for_review_at %}
             <button type="button" @click="open = !open"
-                    class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">
+                    class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">
                 <i class="fas fa-cog mr-1"></i>Manage
             </button>
 
@@ -70,7 +70,7 @@
                   hx-target="#transfer-row-{{ transfer.id }}" hx-swap="outerHTML"
                   hx-confirm="Delete this transfer now? Its files will be removed immediately.">
                 {% csrf_token %}
-                <button type="submit" class="px-3 py-1.5 rounded-md text-sm bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-100">
+                <button type="submit" class="btn px-3 py-1.5 rounded-lg text-sm bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-100">
                     <i class="fas fa-trash mr-1"></i>Delete
                 </button>
             </form>
@@ -91,7 +91,7 @@
                  class="space-y-2">
             <label class="block text-xs text-gray-500 dark:text-gray-400">
                 Expiry
-                <select name="expiry_choice" class="mt-1 block w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
+                <select name="expiry_choice" class="mt-1 block w-full text-sm rounded-lg border-gray-300 dark:bg-gray-700 dark:border-gray-600">
                     <option value="1">1 day</option>
                     <option value="5">5 days</option>
                     <option value="15">15 days</option>
@@ -110,18 +110,18 @@
             <label class="block text-xs text-gray-500 dark:text-gray-400">
                 Max downloads (blank = uncapped)
                 <input type="number" min="1" name="max_downloads" value="{{ transfer.max_downloads|default_if_none:'' }}"
-                       class="mt-1 block w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
+                       class="mt-1 block w-full text-sm rounded-lg border-gray-300 dark:bg-gray-700 dark:border-gray-600">
             </label>
             <label class="block text-xs text-gray-500 dark:text-gray-400">
                 Password ({% if transfer.password_hash %}set{% else %}none{% endif %}; leave blank to keep it unchanged)
                 <input type="password" name="password"
-                       class="mt-1 block w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
+                       class="mt-1 block w-full text-sm rounded-lg border-gray-300 dark:bg-gray-700 dark:border-gray-600">
             </label>
             <label class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                 <input type="checkbox" name="remove_password" value="true">
                 Remove password
             </label>
-            <button type="submit" class="px-3 py-1.5 rounded-md text-sm bg-brand-primary text-gray-900 hover:opacity-90">Save</button>
+            <button type="submit" class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">Save</button>
         </form>
 
         <div class="space-y-3">
@@ -134,7 +134,7 @@
                           hx-post="{% url 'file_transfer:resend-recipient' transfer.id recipient.id %}"
                           hx-target="#transfer-row-{{ transfer.id }}" hx-swap="outerHTML">
                         {% csrf_token %}
-                        <button type="submit" class="text-xs text-brand-primary hover:underline">Resend</button>
+                        <button type="submit" class="text-xs text-sage-600 dark:text-sage-300 hover:underline">Resend</button>
                     </form>
                 </li>
                 {% endfor %}
@@ -147,9 +147,9 @@
                 <label class="block text-xs text-gray-500 dark:text-gray-400">
                     Add recipients
                     <textarea name="recipients" rows="2" placeholder="one@example.com"
-                              class="mt-1 block w-full text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600"></textarea>
+                              class="mt-1 block w-full text-sm rounded-lg border-gray-300 dark:bg-gray-700 dark:border-gray-600"></textarea>
                 </label>
-                <button type="submit" class="px-3 py-1.5 rounded-md text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">Add</button>
+                <button type="submit" class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">Add</button>
             </form>
 
             {% with events=transfer.recent_download_events %}

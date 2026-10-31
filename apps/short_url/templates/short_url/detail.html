@@ -11,31 +11,31 @@
     <a href="{% url 'short_url:dashboard' %}"
        class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Short URLs</a>
     <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h1 class="min-w-0 break-words text-3xl font-bold text-gray-900 dark:text-gray-100">{% firstof link.title link.code %}</h1>
+        <h1 class="min-w-0 break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{% firstof link.title link.code %}</h1>
         {% link_status_pill link state %}
     </div>
 </div>
 
 {% if state == 'taken_down' %}
-<div class="mb-6 rounded-md border border-red-600/40 dark:border-red-400/40 px-4 py-3 text-sm text-red-700 dark:text-red-400" role="alert">
+<div class="mb-6 rounded-xl border border-red-600/40 dark:border-red-400/40 px-4 py-3 text-sm text-red-700 dark:text-red-400" role="alert">
     <i class="fas fa-ban mr-1" aria-hidden="true"></i>This link was taken down{% if link.takedown_reason %}: {{ link.takedown_reason }}{% else %}.{% endif %}
 </div>
 {% elif link.held_for_review_at %}
-<div class="mb-6 rounded-md border border-amber-600/40 dark:border-amber-400/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400" role="status">
+<div class="mb-6 rounded-xl border border-amber-600/40 dark:border-amber-400/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400" role="status">
     <i class="fas fa-flag mr-1" aria-hidden="true"></i>This link is under review, so it doesn't work for visitors and can't be changed right now.{% if link.status == 'active' %} You can still disable it.{% endif %}
 </div>
 {% elif state == 'blocked' %}
-<div class="mb-6 rounded-md border border-amber-600/40 dark:border-amber-400/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400" role="status">
+<div class="mb-6 rounded-xl border border-amber-600/40 dark:border-amber-400/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400" role="status">
     <i class="fas fa-ban mr-1" aria-hidden="true"></i>This link doesn't work because its destination can't be used. Edit it to point somewhere else.
 </div>
 {% endif %}
 
 <div x-data="copyText"
-     class="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3">
+     class="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3">
     <i class="fas fa-link text-sage-400" aria-hidden="true"></i>
     <code x-ref="text" class="break-all text-sm font-medium text-gray-900 dark:text-gray-100">{{ short_url }}</code>
     <button type="button" @click="copy()"
-            class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+            class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
         <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
         <span x-text="copied ? 'Copied' : 'Copy'">Copy</span>
     </button>
@@ -57,7 +57,7 @@
         <div>
             <dt class="text-gray-500 dark:text-gray-400">Tags</dt>
             <dd class="mt-1 flex flex-wrap gap-1">
-                {% for tag in link.tags %}<span class="rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs text-gray-700 dark:text-gray-300">{{ tag }}</span>{% endfor %}
+                {% for tag in link.tags %}<span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-300">{{ tag }}</span>{% endfor %}
             </dd>
         </div>
         {% endif %}
@@ -99,7 +99,7 @@
 
     <div class="justify-self-start md:justify-self-end">
         <img src="{% url 'short_url:qr' link.pk %}" width="180" height="180" alt="QR code of {{ short_url }}"
-             class="rounded border border-gray-200 bg-white p-2">
+             class="rounded-md border border-gray-200 bg-white p-2">
         <a href="{% url 'short_url:qr' link.pk %}?download=1" download
            class="mt-2 inline-flex items-center text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-download mr-1.5" aria-hidden="true"></i>Download QR code</a>
     </div>
@@ -108,16 +108,16 @@
 <div class="mt-8 flex flex-wrap items-center gap-3">
     {% if not frozen %}
     <a href="{% url 'short_url:edit' link.pk %}"
-       class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-gray-900 bg-brand-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+       class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
         <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit
     </a>
     {% endif %}
     <a href="{% url 'short_url:stats' link.pk %}"
-       class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+       class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
         <i class="fas fa-chart-simple mr-2" aria-hidden="true"></i>Stats
     </a>
     <a href="{% url 's:redirect' link.code %}+" target="_blank" rel="noopener"
-       class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+       class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
         <i class="fas fa-eye mr-2" aria-hidden="true"></i>Preview
     </a>
     {% if link.status == 'active' %}
@@ -125,7 +125,7 @@
         {% csrf_token %}
         <input type="hidden" name="next" value="{% url 'short_url:detail' link.pk %}">
         <button type="submit"
-                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
             <i class="fas fa-pause mr-2" aria-hidden="true"></i>Disable
         </button>
     </form>
@@ -135,7 +135,7 @@
             data-url="{% url 'short_url:enable' link.pk %}?next={% url 'short_url:detail' link.pk %}" data-tone="primary" data-label="Enable for {{ link.enable_cost }} credit{{ link.enable_cost|pluralize }}"
             data-cost="{{ link.enable_cost }}" data-title="Enable this link?"
             data-body="This link would go beyond your free active links, so enabling it costs {{ link.enable_cost }} credit{{ link.enable_cost|pluralize }}, once. It won't be charged again for this link."
-            class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+            class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
         <i class="fas fa-play mr-2" aria-hidden="true"></i>Enable
     </button>
     {% else %}
@@ -143,7 +143,7 @@
         {% csrf_token %}
         <input type="hidden" name="next" value="{% url 'short_url:detail' link.pk %}">
         <button type="submit"
-                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary">
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
             <i class="fas fa-play mr-2" aria-hidden="true"></i>Enable
         </button>
     </form>
@@ -153,7 +153,7 @@
     <button type="button" @click="show($el)"
             data-url="{% url 'short_url:delete' link.pk %}" data-title="Delete this link?" data-label="Delete"
             data-body="{{ link.code }} will stop working for good, and its code can never be used again."
-            class="ml-auto inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+            class="ml-auto inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700">
         <i class="fas fa-trash mr-2" aria-hidden="true"></i>Delete
     </button>
     {% endif %}

@@ -1,11 +1,11 @@
 {% load local_time %}
 {% comment %} The earlier texts of a comment, newest first (`revisions`, each with its rendered `html`), swapped into the
    comment's `#comment-history-<id>` slot. {% endcomment %}
-<div class="mt-3 rounded border border-sage-200 dark:border-sage-700 p-3">
+<div class="mt-3 rounded-xl border border-sage-200 dark:border-sage-700 p-3">
     <div class="flex items-center justify-between">
         <h3 class="text-sm font-semibold">Earlier versions</h3>
         <button type="button" @click="document.getElementById('comment-history-{{ comment.pk }}').innerHTML = ''"
-                class="text-xs text-gray-500 dark:text-gray-400 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary rounded">Hide</button>
+                class="text-xs text-gray-500 dark:text-gray-400 hover:underline rounded-md">Hide</button>
     </div>
     {% for revision in revisions %}
     <div class="mt-3 border-t border-sage-200 dark:border-sage-700 pt-3">

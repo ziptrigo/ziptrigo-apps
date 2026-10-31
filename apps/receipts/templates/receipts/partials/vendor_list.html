@@ -14,24 +14,24 @@
 
 <div x-data="vendorSelection" @change="update()">
     <div x-show="count > 0" style="display: none" role="region" aria-label="Actions for the selected vendors"
-         class="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-gray-800 px-3 py-2 text-sm">
+         class="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-gray-800 px-3 py-2 text-sm">
         <span class="font-medium"><span x-text="count"></span> selected</span>
         <button type="button" hx-post="{% url 'receipts:vendor-vet' %}" hx-include="#vendor-bulk"
                 hx-target="#vendor-list" hx-swap="innerHTML" hx-disabled-elt="this"
-                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:opacity-50">
+                class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50">
             <i class="fas fa-circle-check mr-2" aria-hidden="true"></i>Mark as vetted
         </button>
         <button type="button" :disabled="count < 2"
                 hx-get="{% url 'receipts:vendor-merge' %}?next={{ self_url|urlencode:'' }}" hx-include="#vendor-bulk"
                 hx-target="#vendor-modal" hx-swap="innerHTML"
-                class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:opacity-50">
+                class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50">
             <i class="fas fa-code-merge mr-2" aria-hidden="true"></i>Merge&hellip;
         </button>
         <button type="button" @click="clear()"
-                class="ml-auto rounded text-gray-500 dark:text-gray-400 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-primary">Clear</button>
+                class="ml-auto rounded-md text-gray-500 dark:text-gray-400 hover:underline">Clear</button>
     </div>
 
-    <ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-md border border-gray-200 dark:border-gray-700">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700">
         <li class="hidden md:grid grid-cols-[1.5rem_minmax(0,1fr)_7rem_7rem_2.5rem] gap-x-4 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
             <span></span><span>Vendor</span><span class="text-right">Receipts</span><span>Last receipt</span><span></span>
         </li>
