@@ -1,5 +1,12 @@
 from .credit_account import CreditAccount
 from .credit_transaction import CreditTransaction, CreditTransactionType
+from .promo import (
+    PromoCode,
+    PromoCodeEffect,
+    PromoRedemption,
+    PromoRedemptionSource,
+    PromoRedemptionStatus,
+)
 from .settings import BillingSettings
 
 __all__ = [
@@ -7,4 +14,9 @@ __all__ = [
     'CreditAccount',
     'CreditTransaction',
     'CreditTransactionType',
+    'PromoCode',
+    'PromoCodeEffect',
+    'PromoRedemption',
+    'PromoRedemptionSource',
+    'PromoRedemptionStatus',
 ]

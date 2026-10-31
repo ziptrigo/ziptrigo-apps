@@ -19,7 +19,7 @@
 
     <div class="mt-4 flex flex-col gap-2 text-sm text-gray-600 dark:text-gray-300">
       <p>
-        No account? <a href="{% url 'accounts:register' %}" class="text-sage-300 underline">Create one</a>
+        No account? <a href="{% url 'accounts:register' %}{% if request.GET.promo %}?promo={{ request.GET.promo|urlencode }}{% endif %}" class="text-sage-300 underline">Create one</a>
       </p>
       <p>
         <a href="{% url 'accounts:forgot-password' %}" class="text-sage-300 underline">Forgot your password?</a>

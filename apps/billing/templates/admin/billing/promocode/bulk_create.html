@@ -1,0 +1,30 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <h1>Create many promo codes</h1>
+
+    <div class="module">
+        <h2>Batch</h2>
+        <p>Creates up to {{ bulk_max }} unique, single-use codes (max 1 redemption each) that share a campaign,
+           credits, dates and notes. Codes look like <code>PREFIX-7K3M9QX2WD</code>, or just the random part without a prefix.
+           Afterwards the list shows the campaign, with a link to download it as CSV.</p>
+        <form method="post" action="{% url 'custom_admin:billing_promocode_bulk' %}" style="margin-top: 15px;">
+            {% csrf_token %}
+            {% if form.non_field_errors %}<div class="errornote">{{ form.non_field_errors }}</div>{% endif %}
+            {% for field in form %}
+            <div style="margin-bottom: 12px;">
+                {{ field.errors }}
+                <label for="{{ field.id_for_label }}" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ field.label }}:</label>
+                {{ field }}
+                {% if field.help_text %}<div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ field.help_text }}</div>{% endif %}
+            </div>
+            {% endfor %}
+            <div style="margin-top: 10px;">
+                <input type="submit" value="Create codes" class="button" style="padding: 8px 16px;">
+                <a href="{% url 'custom_admin:billing_promocode_changelist' %}" class="button" style="padding: 8px 16px; margin-left: 8px;">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

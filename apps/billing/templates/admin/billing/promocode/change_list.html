@@ -1,0 +1,15 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools-items %}
+    {% if has_add_permission %}
+    <a href="{% url 'custom_admin:billing_promocode_bulk' %}" class="btn btn-block btn-outline-primary btn-sm">
+        <i class="fas fa-layer-group"></i> Create many
+    </a>
+    {% endif %}
+    {% if request.GET.campaign %}
+    <a href="{% url 'custom_admin:billing_promocode_export' %}?campaign={{ request.GET.campaign|urlencode }}" class="btn btn-block btn-outline-secondary btn-sm">
+        <i class="fas fa-file-csv"></i> Export campaign CSV
+    </a>
+    {% endif %}
+    {{ block.super }}
+{% endblock %}

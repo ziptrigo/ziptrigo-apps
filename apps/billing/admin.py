@@ -1,4 +1,5 @@
-"""Admin registrations for the billing app, plus the manual credit adjustment tool."""
+"""Admin registrations for the billing app, plus the manual credit adjustment tool. The promo code
+section (issue #70) is in `admin_promo.py`."""
 
 from django import forms
 from django.contrib import admin, messages
@@ -11,7 +12,15 @@ from apps.accounts.models import User
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
-from .models import BillingSettings, CreditAccount, CreditTransaction, CreditTransactionType
+from .admin_promo import PromoCodeAdmin, PromoRedemptionAdmin
+from .models import (
+    BillingSettings,
+    CreditAccount,
+    CreditTransaction,
+    CreditTransactionType,
+    PromoCode,
+    PromoRedemption,
+)
 from .services import InsufficientCreditsError, add_credits, get_balance, spend_credits
 
 
@@ -173,3 +182,5 @@ class BillingSettingsAdmin(SingletonSettingsAdmin):
 custom_admin_site.register(CreditTransaction, CreditTransactionAdmin)
 custom_admin_site.register(CreditAccount, CreditAccountAdmin)
 custom_admin_site.register(BillingSettings, BillingSettingsAdmin)
+custom_admin_site.register(PromoCode, PromoCodeAdmin)
+custom_admin_site.register(PromoRedemption, PromoRedemptionAdmin)

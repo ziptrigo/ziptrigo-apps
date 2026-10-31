@@ -45,7 +45,7 @@ from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
 from ..tokens import RESET_EMAIL_CLAIM, PasswordResetToken, matches_password
-from .email_confirmation import get_email_confirmation_service
+from .email_confirmation import get_email_confirmation_service, send_email_confirmed
 
 
 class InvalidResetTokenError(Exception):
@@ -147,6 +147,7 @@ class PasswordResetService:
                         user.email_confirmed_at = now
                         # Any confirmation link still out for the address is moot now.
                         get_email_confirmation_service().invalidate_pending_for_email(current.email)
+                        send_email_confirmed(user)
         if not valid:
             raise InvalidResetTokenError
 

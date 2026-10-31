@@ -32,6 +32,11 @@
           Usage History
         </a>
       </div>
+
+      {% comment %} The promo code form (issue #70) is billing's: a template include, not an import. {% endcomment %}
+      <div class="mt-4">
+        {% include 'billing/partials/redeem_form.html' %}
+      </div>
     </section>
 
     <!-- Appearance Section -->

@@ -26,7 +26,9 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       `notificationBell`).
 apps/accounts/        User model, auth pages + API, JWT auth classes.
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
-                      shared storage price (BillingSettings).
+                      shared storage price (BillingSettings), promo codes (issue #70, see "Promo
+                      codes": PromoCode + PromoRedemption, the redeem form and link, the admin
+                      section).
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
                       to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
@@ -204,6 +206,13 @@ Each app may import only from layers below it. Enforced by the import-linter con
 - The same shape covers background jobs: `core` can't import a product to discover its jobs, so
   `apps.core.scheduler` is a registry (like `apps.core.products`) that a product fills from its own
   `AppConfig.ready()`. See "Queue and scheduler" below.
+- `accounts` can't import `billing` either, so the register page's optional promo code field
+  (issue #70) is a hook: `apps.accounts.signup_codes` holds one `SignupCodeHandler` (`validate(code,
+  email)` raising a `ValidationError` the form shows, `attach(user, code)` after the row exists)
+  that `BillingConfig.ready()` registers; without one a typed code is "Invalid code". And
+  `accounts` emits `signals.email_confirmed` (on commit, `send_robust`, from `confirm_token` and
+  from a password reset that confirms the address) for `billing` to grant the credits a signup
+  code reserved. See "Promo codes".
 - Cross-app links in templates (`{% url 'billing:credits-history' %}` in a file_transfer template)
   are fine; they aren't imports.
 
@@ -1911,6 +1920,81 @@ entries. `take_down_action`, `release_hold_action` (both on `TransferAdmin`) and
 check in this project. `take_down_action` and `block_sender_action` go through an intermediate
 confirmation page before applying; `release_hold_action` and `dismiss_action` apply immediately
 from the changelist, same as Django's own built-in actions.
+
+### Promo codes
+
+`apps.billing` (issue #70; `models/promo.py`, `services/promo.py`, `views/promo.py`,
+`forms/redeem.py`, `admin_promo.py`, `jobs.py`, migration `0003_promo_codes`). A **promo code grants
+credits** on redemption (`PromoCode.effect`, only `credits` so far: there is no purchase flow yet, #54,
+so a discount has nothing to attach to; the field is the hook for percent-off / bonus-on-purchase
+effects later, and "apply automatically at checkout" waits for #54 too). The design decisions are on
+the issue (comment of 2026-10-31); the short version:
+
+- **`PromoCode`**: `code` (unique, stored upper-case, letters/digits/hyphens 4-32,
+  `models.promo.CODE_PATTERN`; matched ignoring case through `services.promo.normalize_code`; blank
+  in the admin generates one from an alphabet without `0 O 1 I`), `credits` (1 to 1,000,000),
+  `campaign` (free text, filterable, shown in the ledger line), `notes`, `active`, optional
+  `starts_at`/`ends_at`, optional `max_redemptions` across all users, `claimed_count` (granted
+  redemptions plus pending signup reservations, bumped with one conditional `UPDATE` so racing
+  redemptions can't overshoot the cap), optional `new_accounts_within_days` (the account's
+  `created_at` must be within it), `allowed_emails` (lower-cased list; empty = anyone),
+  `created_by`. **`PromoRedemption`** is one user's use of one code: `status` `pending` (reserved
+  at signup) / `granted` (`transaction` is the ledger row) / `released`; `source` `form`/`signup`;
+  `credits` as granted. A partial unique constraint on `(code, user)` for pending+granted rows is
+  the **once per user** rule (a user may redeem any number of *different* codes; a released
+  reservation lets them redeem that code on the form later). `code` is `PROTECT`: a code with
+  redemptions is deactivated, never deleted (the admin refuses it first). The ledger row is
+  `CreditTransactionType.PROMO`, `source='billing'`, description `Promo code LAUNCH2026 (campaign)`,
+  which is how the credits history names the code.
+- **`services.promo.redeem(user, raw, source=)`**: one transaction with the code row locked:
+  `find_code` (unknown, malformed or inactive -> `InvalidPromoCode`; `PromoCodeNotStarted`;
+  `PromoCodeExpired`), `check_eligibility` (in this order: the email binding, where an outsider gets
+  `InvalidPromoCode` so a guesser never learns whose a code is; `PromoCodeAlreadyRedeemed`;
+  `PromoCodeExhausted`; `PromoCodeNewAccountsOnly`; `EmailNotConfirmed`, always required: no farming
+  codes with throwaway signups), the conditional claim, the row (an `IntegrityError` is
+  `AlreadyRedeemed`), `add_credits`. Refusals are `PromoCodeError` subclasses whose `message` is
+  what the user sees, **specific where harmless**. An inactive or deleted user is `InvalidPromoCode`.
+- **Signup** (the register page's optional field, through `apps.accounts.signup_codes`, see
+  "Dependency rules"): `validate_for_signup(raw, email)` judges the code, its dates and the email
+  binding (no account yet, so not the new-accounts window or the confirmed email) before the captcha,
+  rate limited per IP; after `create_account` the handler's `attach` calls `reserve_for_signup`,
+  which claims a use and writes a `pending` row (a cap reached in between is logged, never raised).
+  **A reservation is honoured as judged at signup**: `grant_reservations(user)`, run by the
+  `email_confirmed` receiver in `BillingConfig.ready()`, adds the credits without re-checking the
+  code's validity, and leaves an in-app notification ("Your promo code added N credits", key
+  `promo_granted:<code id>`, since the user isn't on a page that could show a flash).
+  `release_stale_reservations()` (the daily `billing.release_promo_reservations` job) gives back the
+  uses of reservations whose account is still unconfirmed `RESERVATION_MAX_AGE` (30 days) later. For
+  an address that already has an account the register page's answer is unchanged whatever the code
+  (#125) and nothing is reserved.
+- **Web**: `billing/partials/redeem_form.html` ("Have a promo code?") is included by the account
+  page's Credits section, the credits history page and the redeem link page; it needs no form object
+  (`promo_code`, `promo_next`, `promo_error` are optional context). `POST /billing/redeem/`
+  (`billing:redeem`, `views/promo.py`, the 422 convention: success is a flash "Added N credits with
+  promo code X." and `hx_redirect` to the same-site `next`, a refusal re-renders the partial with the
+  message; without htmx a refusal is an error flash). **Rate limits** `PROMO_REDEEM_USER` (10/hour)
+  and `PROMO_REDEEM_IP` (30/hour) are charged before the lookup, so codes can't be guessed; the
+  register page's code check shares the IP rule. The **redeem link** `GET /billing/redeem/<code>/`
+  (`billing:redeem-code`) only shows the form prefilled; without a session it redirects to the login
+  page with `next` and `promo=<code>`, the login page's "Create one" link forwards `?promo=` to the
+  register page, which prefills its field from it (`signup_codes.QUERY_PARAM`).
+- **Admin** (`admin_promo.py`, icons `fa-ticket-alt` / `fa-tags`): `PromoCodeAdmin` (list: usage
+  "granted (+pending) / max", credits granted, last redeemed; `StateFilter` live / scheduled /
+  expired / fully redeemed / inactive; search over code, campaign, notes and emails; the add form
+  generates a blank code and takes `allowed_emails` as a textarea; **once claimed the code, effect and
+  credits are read-only**, dates, cap, eligibility and notes stay editable; **delete only while never
+  redeemed**; actions **Duplicate** (a copy with a fresh code) and **Export CSV**; the **Create many**
+  tool at `bulk/` makes up to `BULK_MAX` (1,000) single-use codes with an optional prefix
+  (`FAIR-7K3M9QX2WD`) under one required campaign and redirects to the list filtered by it with a
+  "Download them as CSV" link, `export/?campaign=`), a read-only `PromoRedemptionInline` on the code
+  page, and the read-only `PromoRedemptionAdmin` (search by user email or code, filter by status,
+  source, campaign). `billing` is in `CASCADE_WITH_USER_APP_LABELS`, so deleting a user takes their
+  redemptions (the code's use stays spent).
+- **Not in v1** (deferred on the issue): discount effects and automatic application (#54), welcome
+  credits (#160), credit expiry, revoking a redemption, email-domain eligibility, a per-user count,
+  a credits budget per code, a Campaign model, a JWT endpoint, an email on redemption.
+- **Tests**: `apps/billing/tests/test_promo_services.py`, `test_promo_views.py`, `test_promo_admin.py`,
+  `apps/accounts/tests/test_register_promo.py`.
 
 ### Feedback
 

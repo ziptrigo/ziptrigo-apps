@@ -5,8 +5,8 @@ from django.shortcuts import render
 
 from apps.accounts.http import AuthenticatedHttpRequest
 
-from .models import CreditTransaction
-from .services import get_balance
+from ..models import CreditTransaction
+from ..services import get_balance
 
 
 @login_required

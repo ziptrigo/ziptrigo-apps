@@ -142,7 +142,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
-    created_at = models.DateTimeField(auto_now_add=True)
+    # `datetime | None`: `auto_now_add` only fills it on save (see `CreditTransaction.created_at`).
+    created_at = cast(datetime | None, models.DateTimeField(auto_now_add=True))
     updated_at = models.DateTimeField(auto_now=True)
 
     USERNAME_FIELD = 'email'

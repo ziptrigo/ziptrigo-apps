@@ -19,6 +19,13 @@ class RegisterForm(NormalizedEmailMixin, forms.Form):
     # and `SIGNUP_IP` have passed (`apps.accounts.views.register`).
     email = forms.EmailField()
     password = forms.CharField(strip=False, widget=forms.PasswordInput)
+    # Optional (issue #70). Only its shape is checked here; whether it is a real, valid code is
+    # the view's job (`apps.accounts.signup_codes`, rate limited per IP), so an invalid form never
+    # looks a code up.
+    promo_code = forms.CharField(required=False, max_length=32, label='Promo code')
+
+    def clean_promo_code(self) -> str:
+        return (self.cleaned_data.get('promo_code') or '').strip()
 
     def clean_password(self) -> str:
         password = self.cleaned_data.get('password', '')

@@ -21,6 +21,10 @@
       </a>
     </div>
 
+    <div class="mb-6 max-w-md">
+      {% include 'billing/partials/redeem_form.html' %}
+    </div>
+
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead>
@@ -40,7 +44,7 @@
               {% else %}
                 <span class="text-red-700 dark:text-red-400 font-medium">{{ tx.amount }}</span>
               {% endif %}
-              <span class="text-xs text-gray-500 dark:text-gray-400">({{ tx.type }})</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">({{ tx.get_type_display|lower }})</span>
             </td>
             <td class="py-2">
               {% if tx.description %}
