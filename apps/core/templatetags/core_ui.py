@@ -4,7 +4,7 @@ Every status, chip and badge in the product pages (receipt status, vendor chip, 
 priority, repeat) is this shape, so they read as one family. Tinted fill, a darker shade of the same
 colour as the text, a leading icon when the state needs more than colour to be understood. Contrast
 (WCAG 2.x): the `-700` text on the `-50` tint is at least 4.5:1 in the light theme; the `-300` text on a
-10% tint over `gray-800` is 7:1 or better in the dark one (docs/ui-design/README.md, "Status pills").
+10% tint over a `gray-800` card is at least 6.2:1 in the dark one (docs/ui-design/README.md, "Pills").
 
 From a template: `{% load core_ui %}{% pill 'green' 'Processed' icon='fas fa-check' %}`. From a Python
 helper that already builds its own HTML (the products' `*_ui` tags): `pill_html(...)`.

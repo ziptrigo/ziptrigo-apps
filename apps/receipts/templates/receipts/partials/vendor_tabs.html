@@ -7,7 +7,7 @@
            hx-get="{{ tab.list_url }}" hx-target="#vendor-list" hx-swap="innerHTML"
            hx-sync="#vendor-filters:replace"
            {% if tab.active %}aria-current="page"{% endif %}
-           class="btn inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium {% if tab.active %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+           class="inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium {% if tab.active %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
             {{ tab.label }}
             {% if tab.count %}
             <span class="ml-1.5 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums {% if tab.key == 'to_vet' %}bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300{% else %}bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300{% endif %}">{{ tab.count }}</span>

@@ -25,14 +25,36 @@ def test_completing_a_task_marks_the_row_done_then_it_leaves(
     _add_task(page, 'water the plants')
     row = page.locator('#task-list li.task-row', has_text='water the plants').first
 
+    # Hold the request, so the "done" state can be looked at for as long as the test needs.
+    held = []
+    page.route('**/todo/*/complete/', lambda route: held.append(route))
     row.locator('[data-complete]').click()
 
-    # The row is `done` the moment the circle is clicked (the tick draws, the title strikes) ...
+    # The row is `done` the moment the circle is clicked: the tick is drawn and the title struck.
     expect(row).to_have_class(re.compile(r'\bdone\b'))
-    # ... and then it leaves instead of staying: on the All page a completed task moves to Completed.
+    expect(row.locator('.check-svg path')).to_have_css('stroke-dashoffset', '0px')
+    expect(row.locator('.task-title')).to_have_css('background-size', re.compile(r'^100%'))
+    expect(page.locator('#task-list').get_by_text('water the plants')).to_have_count(1)
+
+    # Releasing the request lets the row leave: on the All page a completed task moves to Completed.
+    held[0].continue_()
+    page.unroute('**/todo/*/complete/')
     expect(page.locator('#task-list').get_by_text('water the plants')).to_have_count(0)
     page.goto(f'{receipts_server.url}/todo/completed/')
     expect(page.locator('#task-list').get_by_text('water the plants').first).to_be_visible()
+
+
+def test_a_failed_completion_is_not_left_done(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    _add_task(page, 'renew the passport')
+    row = page.locator('#task-list li.task-row', has_text='renew the passport').first
+
+    page.route('**/todo/*/complete/', lambda route: route.abort())
+    row.locator('[data-complete]').click()
+
+    expect(row).not_to_have_class(re.compile(r'\bdone\b'))
+    expect(page.locator('#task-list').get_by_text('renew the passport').first).to_be_visible()
 
 
 def test_a_completed_task_is_drawn_complete_without_animating(

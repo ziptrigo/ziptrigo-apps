@@ -7,7 +7,7 @@
 <li id="task-{{ task.number }}" data-task-id="{{ task.pk }}"
     hx-target="#task-{{ task.number }}" hx-swap="outerHTML swap:200ms"
     hx-vals='{"view": "{{ view }}", "ctx": "row"{% if sortable %}, "sortable": "1"{% endif %}}'
-    class="task-row row-leave flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
+    class="task-row row-leave row-enter flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
     {% if sortable %}
     <span class="drag-handle mt-0.5 cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Drag to reorder" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
     {% endif %}

@@ -1,6 +1,7 @@
 /*
- * The sliding underline of the filter tabs (`<nav data-tabs>` with the current tab marked
- * `aria-current="page"`, e.g. the Receipts, Vendors and Short URLs status tabs).
+ * Tabs. First the sliding underline of the filter tabs (`<nav data-tabs>` with the current tab marked
+ * `aria-current="page"`, e.g. the Receipts, Vendors and Short URLs status tabs); at the end, the selected state
+ * of a segmented control.
  *
  * The tabs are re-sent with every list refresh (htmx swaps the whole bar), so the indicator can't
  * live inside the swapped markup and animate by itself. Instead: before a swap, remember where each
@@ -67,7 +68,21 @@
         });
     });
     document.addEventListener('htmx:afterSettle', placeAll);
-    window.addEventListener('resize', function () { remembered = {}; placeAll(); });
+    var resizeTimer;
+    window.addEventListener('resize', function () {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function () { remembered = {}; placeAll(); }, 100);
+    });
+
+    // A segmented control (`.segmented`, role="tablist") whose options swap only a list below it: move
+    // `aria-selected` to the option that was clicked, since the control itself is not re-rendered.
+    document.addEventListener('click', function (event) {
+        var option = event.target instanceof Element ? event.target.closest('.segmented [role="tab"]') : null;
+        if (!option) return;
+        option.parentElement.querySelectorAll('[role="tab"]').forEach(function (other) {
+            other.setAttribute('aria-selected', other === option ? 'true' : 'false');
+        });
+    });
     document.addEventListener('DOMContentLoaded', function () {
         placeAll();
         if (document.fonts && document.fonts.ready) document.fonts.ready.then(placeAll);

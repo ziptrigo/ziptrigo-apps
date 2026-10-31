@@ -148,6 +148,46 @@ def test_templates_do_not_bring_back_the_old_class_patterns(stale):
     assert not offenders, offenders
 
 
+def test_field_focus_does_not_erase_an_error_border():
+    css = SITE_CSS.read_text()
+    assert ":not([class*='border-red-'], [aria-invalid='true'])" in css
+    assert "[class*='border-red-']" in css
+
+
+def test_the_segmented_control_is_styled_from_its_aria_state():
+    css = SITE_CSS.read_text()
+    assert ".segmented > [aria-selected='true']" in css
+    assert ".segmented > [aria-current='true']" in css
+    root = Path(__file__).resolve().parents[2]
+    for name in (
+        'file_transfer/templates/file_transfer/dashboard.html',
+        'short_url/templates/short_url/stats.html',
+    ):
+        html = (root / name).read_text()
+        assert 'class="segmented ' in html, name
+        assert 'shadow-sm dark:bg-gray-700' not in html, (
+            f'{name}: the selected look must come from aria, not classes'
+        )
+
+
+def test_underline_tabs_do_not_press_like_buttons():
+    root = Path(__file__).resolve().parents[2]
+    for name in (
+        'receipts/templates/receipts/partials/tabs.html',
+        'receipts/templates/receipts/partials/vendor_tabs.html',
+        'short_url/templates/short_url/partials/tabs.html',
+    ):
+        assert 'btn inline-flex items-center border-b-2' not in (root / name).read_text(), name
+
+
+def test_the_skeleton_keeps_the_lists_content_in_the_dom():
+    """The list holds hidden inputs the next request reads (status, sort, vendor): the rows go beside it."""
+    css = SITE_CSS.read_text()
+    assert '[data-list][data-skeleton] > :not([data-skeleton-rows]) { display: none; }' in css
+    script = (CORE_STATIC / 'js' / 'skeleton.js').read_text()
+    assert 'target.innerHTML =' not in script, 'the list must not be rebuilt from a string'
+
+
 def test_every_underline_tab_bar_is_marked_for_the_sliding_indicator():
     root = Path(__file__).resolve().parents[2]
     for name in (

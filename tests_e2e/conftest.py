@@ -3,6 +3,7 @@ import secrets
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -30,25 +31,34 @@ def site_server():
         capture_output=True,
         text=True,
     )
+    server_log = _server_log()
     process = subprocess.Popen(
         [sys.executable, 'manage.py', 'runserver', '8000', '--noreload'],
         env=env,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=server_log,
         text=True,
     )
     try:
-        _wait_until_up(process, 'http://localhost:8000')
+        _wait_until_up(process, 'http://localhost:8000', server_log)
         yield 'http://localhost:8000'
     finally:
         process.terminate()
         process.wait()
+        server_log.close()
 
 
-def _wait_until_up(process: subprocess.Popen, url: str) -> None:
+def _server_log():
+    """Where a test server writes its output. A file, not a pipe: runserver logs a line per request, and
+    a pipe nobody reads fills up and blocks the server (the suite wedged once enough pages had loaded)."""
+    return tempfile.TemporaryFile(mode='w+', encoding='utf-8')
+
+
+def _wait_until_up(process: subprocess.Popen, url: str, server_log) -> None:
     for _ in range(60):
         if process.poll() is not None:
-            pytest.fail(f'Server failed to start:\n{process.stderr.read()}')
+            server_log.seek(0)
+            pytest.fail(f'Server failed to start:\n{server_log.read()}')
         try:
             urllib.request.urlopen(f'{url}/account/login/', timeout=1)
             return
@@ -133,17 +143,19 @@ def receipts_server():
         "add_credits(user, 50, description='e2e', source='e2e')\n"
     )
 
+    server_log = _server_log()
     process = subprocess.Popen(
         [sys.executable, 'manage.py', 'runserver', str(port), '--noreload'],
         env=env,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=server_log,
         text=True,
     )
     try:
-        _wait_until_up(process, url)
+        _wait_until_up(process, url, server_log)
         yield server
     finally:
         process.terminate()
         process.wait()
+        server_log.close()
         database.unlink(missing_ok=True)

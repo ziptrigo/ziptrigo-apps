@@ -266,6 +266,12 @@ a control is 8 px, a container 12 px, an overlay 16 px.
 Buttons carry no shadow. A container's border does the separating, which is what holds it apart
 from the page in dark mode too.
 
+**How the radius is chosen** (it is decided by what the element *is*, not by the class it had): an `<input>`,
+`<textarea>`, `<select>`, or a button or link with padding is a control (`rounded-lg`); a bordered, shadowed or tinted
+`<div>`, `<ul>`, `<form>` or `<section>` is a container (`rounded-xl`); a fixed overlay panel is an overlay
+(`rounded-2xl`); `<img>`, `<code>`, fixed-size boxes and padding-less links are small (`rounded-md`); anything with
+`rounded-full` stays a pill. The refresh applied this by script; new markup follows the same rule by hand.
+
 ## 8. Icons
 
 - Font Awesome 6: `<i class="fas fa-…"></i>` for state and product icons (solid says "this is a state"), `far` (outlined)
@@ -526,8 +532,9 @@ that choose the tone and icon.
 | `gray` | `bg-gray-100 text-gray-600` | `bg-gray-700 text-gray-300` | Neutral, waiting, counts, tags |
 
 The shared shape is `inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium`;
-an icon is `text-[10px]` with `gap-1.5`. Contrast: the light pairs are at least 4.5:1 (green 4.8, amber 4.8, blue 6.2),
-the dark ones 7:1 or better. A user's own label colour (To-do's `label_chip`) is the one exception: it tints with
+an icon is `text-[10px]` with `gap-1.5`. Contrast: the light pairs are at least 4.5:1 (green 4.8, amber 4.8, red 5.9, sky 5.6,
+blue 6.2, gray 6.4); the dark ones are at least 6.2:1 on a `gray-800` card (blue 6.5, red 6.3, sky 6.9, gray 6.3, amber 7.8,
+green 7.9) and 7.7:1 or better on the page background. A user's own label colour (To-do's `label_chip`) is the one exception: it tints with
 the colour they chose.
 
 | Status (Receipts) | Tone | Icon |
@@ -565,11 +572,13 @@ sat before htmx swaps the bar and moves a fresh indicator from there; without JS
 Tabs and filters re-fetch the list with htmx and the server sends `HX-Push-Url`, so the address bar always holds
 the full page's URL.
 
-**Segmented control** chooses one of a few values (Active / Ended, 7 / 30 / 90 days): a `inline-flex rounded-lg
-bg-gray-100 dark:bg-gray-800 p-0.5` track; each option `btn rounded-md px-3 py-1.5 text-sm font-medium`; the
-selected one `bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100`, the others
-`text-gray-600 hover:text-gray-900 dark:text-gray-300`. The selected option has `aria-selected="true"` (a tablist)
-or `aria-current="true"` (links).
+**Segmented control** chooses one of a few values (Active / Ended, 7 / 30 / 90 days): a `segmented inline-flex
+rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5` track; each option `btn rounded-md px-3 py-1.5 text-sm font-medium`.
+The selected option is `aria-selected="true"` (a tablist) or `aria-current="true"` (links) and is styled from that
+attribute (`.segmented` in `site.css`: raised, white or `gray-700`), not from classes, so `tabs.js` can move it after
+an htmx click that swaps only the list below.
+
+Underline tabs don't use `btn` (a press scale on a tab looks wrong; their hover already transitions).
 
 ### 10.16 Vendor chips
 

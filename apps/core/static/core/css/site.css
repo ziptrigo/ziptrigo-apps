@@ -90,14 +90,21 @@ h1, h2, h3 { text-wrap: balance; }
 .dark :is(button, a, summary, [tabindex]):focus-visible { --ring-offset: #1a1f1d; }
 
 /* Fields: a sage border and a soft 3 px halo, with no offset so fields in a row don't jump. This one shows
- * for the mouse too, since clicking into a field is how you start typing. */
+ * for the mouse too, since clicking into a field is how you start typing. A field that carries an error
+ * (a `border-red-*` class, or `aria-invalid`) keeps its red border and gets a red halo instead, so the
+ * error doesn't disappear exactly when the person is fixing it. */
 :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='hidden']), textarea, select) {
   transition: border-color var(--d-hover) var(--ease-out), box-shadow var(--d-hover) var(--ease-out);
 }
 :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='hidden']), textarea, select):focus {
   outline: none;
-  border-color: #728e84;
   box-shadow: 0 0 0 3px rgb(143 168 158 / 0.35);
+}
+:is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='submit'], [type='button'], [type='hidden']), textarea, select):focus:not([class*='border-red-'], [aria-invalid='true']) {
+  border-color: #728e84;
+}
+:is(input, textarea, select):focus:is([class*='border-red-'], [aria-invalid='true']) {
+  box-shadow: 0 0 0 3px rgb(239 68 68 / 0.25);
 }
 input[type='checkbox'], input[type='radio'] { accent-color: #5a736a; }
 input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outline: 2px solid #8fa89e; outline-offset: 2px; }
@@ -122,6 +129,24 @@ input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outlin
 .row-enter { transition: opacity var(--d-enter) var(--ease-out), transform var(--d-enter) var(--ease-out); }
 .row-enter.htmx-added { opacity: 0; transform: translateY(-4px); }
 .row-leave.htmx-swapping { opacity: 0; transition: opacity var(--d-exit) var(--ease-in); }
+/* A row that leaves and is replaced (an action that keeps it in the list) fades out and the new one fades in, so
+ * it doesn't blink: put both `row-leave` and `row-enter` on it. */
+
+/* The segmented control (choose one of a few values): the selected option is raised on a grey track. It is
+ * driven by `aria-selected="true"` (a tablist) or `aria-current="true"` (links), so a script can move it after an
+ * htmx click without touching classes; the layout classes stay in the template. core/js/tabs.js moves aria-selected. */
+.segmented > * { color: #4f5956; }
+.segmented > *:hover { color: #1a1f1d; }
+.segmented > [aria-selected='true'], .segmented > [aria-current='true'] {
+  background: #fff; color: #1a1f1d; box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+.dark .segmented > * { color: #c6cecb; }
+.dark .segmented > *:hover { color: #eef1f0; }
+.dark .segmented > [aria-selected='true'], .dark .segmented > [aria-current='true'] { background: #3c4441; color: #eef1f0; }
+
+/* A `data-list` while its refresh is slow (core/js/skeleton.js): the skeleton rows show, the list's own content
+ * stays in the DOM (its hidden inputs still travel with the form) but is not displayed. */
+[data-list][data-skeleton] > :not([data-skeleton-rows]) { display: none; }
 
 /* The To-do check: a circle whose tick draws itself. `.done` is put on the row by tasks.js when it is clicked (animated);
  * `.is-done` is a task that was already completed when the page rendered (drawn, no animation). */
