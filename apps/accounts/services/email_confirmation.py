@@ -160,13 +160,22 @@ class EmailConfirmationService:
         except User.DoesNotExist:
             return None
 
-        if not user.email_confirmed:
-            user.email_confirmed = True
-            user.email_confirmed_at = datetime.now(UTC)
-            user.save(update_fields=['email_confirmed', 'email_confirmed_at'])
-            send_email_confirmed(user)
-
+        confirm_user(user)
         return user
+
+
+def confirm_user(user: User) -> bool:
+    """Mark `user`'s email confirmed, if it isn't already, and tell the apps that care (the
+    `email_confirmed` signal: billing grants a promo code's credits when it fires). Returns whether
+    anything changed. The one place that does it for a confirmation *link* and for an operator
+    confirming an account by hand (`inv users confirm`), so the side effects can't drift."""
+    if user.email_confirmed:
+        return False
+    user.email_confirmed = True
+    user.email_confirmed_at = datetime.now(UTC)
+    user.save(update_fields=['email_confirmed', 'email_confirmed_at'])
+    send_email_confirmed(user)
+    return True
 
 
 def send_email_confirmed(user: User) -> None:
