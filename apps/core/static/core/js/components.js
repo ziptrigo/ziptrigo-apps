@@ -25,6 +25,13 @@ document.addEventListener('alpine:init', function () {
                     document.body.removeChild(area);
                 }
                 this.copied = true;
+                // A small pop on whatever element is marked `data-copy-icon` (the check that replaces the copy glyph).
+                const icon = this.$root.querySelector('[data-copy-icon]');
+                if (icon) {
+                    icon.classList.remove('animate-pop');
+                    void icon.offsetWidth; // restart the animation on a second copy
+                    icon.classList.add('animate-pop');
+                }
                 clearTimeout(this.timer);
                 this.timer = setTimeout(() => { this.copied = false; }, 2000);
             },
@@ -87,3 +94,27 @@ document.addEventListener('alpine:init', function () {
         };
     });
 });
+
+// The bell's badge pops when the number goes up. The badge replaces itself every 60 s (and is swapped out
+// of band by other responses), so compare the count it carries with the last one seen.
+(function () {
+    let last = null;
+    function badgeCount() {
+        const badge = document.getElementById('notification-badge');
+        return badge ? parseInt(badge.dataset.count || '0', 10) : null;
+    }
+    function check() {
+        const now = badgeCount();
+        if (now === null) return;
+        if (last !== null && now > last) {
+            const badge = document.getElementById('notification-badge');
+            badge.classList.remove('animate-pop');
+            void badge.offsetWidth;
+            badge.classList.add('animate-pop');
+        }
+        last = now;
+    }
+    document.addEventListener('DOMContentLoaded', function () { last = badgeCount(); });
+    document.addEventListener('htmx:afterSwap', check);
+    document.addEventListener('htmx:oobAfterSwap', check);
+})();

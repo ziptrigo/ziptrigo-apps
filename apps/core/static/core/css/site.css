@@ -1,0 +1,143 @@
+/*
+ * Site-wide CSS for what Tailwind utilities cannot express: the web fonts, the motion tokens and
+ * keyframes, and the htmx hooks. Everything else is utility classes in templates.
+ * Loaded by `core/base.html` after the Tailwind CDN. The spec is docs/ui-design/README.md.
+ *
+ * Motion rules: motion answers something the person did, shows what changed, and is over before
+ * they notice it. Five durations do all of it (the tokens below). Every duration collapses to 0
+ * under `prefers-reduced-motion`.
+ */
+
+/* ---------- Fonts (self-hosted, latin subset; see core/fonts/README.md) ---------- */
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url('../fonts/figtree-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/ibm-plex-mono-400-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/ibm-plex-mono-500-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ---------- Tokens ---------- */
+:root {
+  --d-press: 90ms;
+  --d-hover: 150ms;
+  --d-enter: 200ms;
+  --d-exit: 140ms;
+  --d-modal: 220ms;
+  --d-moment: 480ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+body {
+  line-height: 1.6;
+}
+h1, h2, h3 { text-wrap: balance; }
+
+/* ---------- Keyframes ---------- */
+@keyframes row-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes row-out { to { opacity: 0; } }
+@keyframes flash-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes pop { 0% { transform: scale(0.7); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@keyframes shimmer { to { transform: translateX(100%); } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+
+/* ---------- Utilities used by templates ----------
+ * Entrances use a `backwards` fill: the first keyframe holds during the delay, and afterwards the element
+ * goes back to its own styles. A forwards fill would keep the end state (opacity 1, transform none)
+ * forever and beat a later hover transform or a leave transition.
+ */
+.animate-row-in { animation: row-in var(--d-enter) var(--ease-out) backwards; }
+.animate-flash-in { animation: flash-in var(--d-enter) var(--ease-out) backwards; }
+.animate-pop { animation: pop 320ms var(--ease-out); }
+.animate-rise { animation: rise var(--d-moment) var(--ease-out) backwards; }
+
+/* A control that presses: hover colour, a 98% press. `btn` is added to every button and link-button. */
+.btn {
+  transition: background-color var(--d-hover) var(--ease-out), border-color var(--d-hover) var(--ease-out),
+    color var(--d-hover) var(--ease-out), transform var(--d-press) var(--ease-out),
+    box-shadow var(--d-hover) var(--ease-out);
+}
+.btn:active { transform: scale(0.98); }
+
+/* Focus ring only for the keyboard: a mouse click leaves nothing behind. */
+:is(button, a, select, summary, [tabindex]):focus { outline: none; }
+:is(button, a, select, summary, [tabindex]):focus-visible {
+  box-shadow: 0 0 0 2px var(--ring-offset, #fff), 0 0 0 4px #8fa89e;
+}
+.dark :is(button, a, select, summary, [tabindex]):focus-visible { --ring-offset: #1a1f1d; }
+
+/* Skeleton rows shimmer while an htmx list loads. */
+.shimmer { position: relative; overflow: hidden; }
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+  animation: shimmer 1.6s var(--ease-out) infinite;
+}
+.dark .shimmer::after { background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.12), transparent); }
+
+/* ---------- htmx hooks ----------
+ * htmx puts `htmx-added` on new content for ~20 ms and `htmx-swapping` on content that is leaving (only
+ * when the swap has a delay, `hx-swap="outerHTML swap:220ms"`). Both work as transitions from that state,
+ * so they are opt-in classes: nothing animates unless the template asks (never a whole list on search).
+ */
+.row-enter { transition: opacity var(--d-enter) var(--ease-out), transform var(--d-enter) var(--ease-out); }
+.row-enter.htmx-added { opacity: 0; transform: translateY(-4px); }
+.row-leave.htmx-swapping { opacity: 0; transition: opacity var(--d-exit) var(--ease-in); }
+/* A skeleton shown only while its request runs: <div class="skeleton-indicator">...</div> with hx-indicator. */
+.skeleton-indicator { display: none; }
+.htmx-request .skeleton-indicator, .htmx-request.skeleton-indicator { display: block; }
+
+/* The theme change crossfade (base.html adds `theming` to <html> for 300 ms). Only for people who have not
+ * asked for reduced motion: this rule is more specific than the blanket reduced-motion one below. */
+@media (prefers-reduced-motion: no-preference) {
+  html.theming, html.theming * {
+    transition: background-color 260ms var(--ease-out), color 260ms var(--ease-out), border-color 260ms var(--ease-out) !important;
+  }
+}
+
+/* ---------- A card that lifts a pixel on hover (landing product cards), only where there is a hover ---------- */
+.lift { transition: border-color var(--d-hover), box-shadow var(--d-hover), transform var(--d-hover); }
+@media (hover: hover) {
+  .lift:hover { transform: translateY(-1px); }
+}
+
+/* ---------- Reduced motion: every duration is 0 and nothing loops ---------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-press: 0ms; --d-hover: 0ms; --d-enter: 0ms; --d-exit: 0ms; --d-modal: 0ms; --d-moment: 0ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .shimmer::after { display: none; }
+}

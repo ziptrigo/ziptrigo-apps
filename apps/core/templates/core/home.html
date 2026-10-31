@@ -4,21 +4,23 @@
 {% block title %}ZipTrigo{% endblock %}
 
 {% block content %}
+{% comment %}The one place the page moves on its own: logo, headline, line and the cards rise in order, once per visit.
+   The delays are in the style attributes; `animate-rise` is in core/css/site.css and is off under reduced motion.{% endcomment %}
 <div class="container mx-auto px-4 py-12 flex flex-col items-center text-center">
-    <div class="mb-8">
+    <div class="mb-8 animate-rise">
         <img src="{% static 'core/images/logo_128x128.png' %}" alt="ZipTrigo logo" class="w-32 h-32 object-contain">
     </div>
 
-    <h1 class="text-4xl font-bold mb-6 text-sage-700 dark:text-sage-300">Welcome to ZipTrigo</h1>
+    <h1 class="text-4xl font-bold tracking-tight mb-6 text-sage-700 dark:text-sage-300 animate-rise" style="animation-delay: 80ms">Welcome to ZipTrigo</h1>
 
-    <p class="text-xl mb-10 max-w-2xl text-gray-700 dark:text-gray-300">
+    <p class="text-xl mb-10 max-w-2xl text-gray-700 dark:text-gray-300 animate-rise" style="animation-delay: 160ms">
         A set of small tools under one account.
     </p>
 
     <div class="grid gap-6 w-full max-w-4xl sm:grid-cols-2">
         {% for product in products %}
-        <a href="{% url product.url_name %}"
-           class="block text-left p-6 rounded-lg border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
+        <a href="{% url product.url_name %}" style="animation-delay: {{ forloop.counter0|add:3 }}00ms"
+           class="lift animate-rise block text-left p-6 rounded-xl border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800 hover:border-sage-300 hover:shadow-md transition">
             <div class="flex items-center gap-3 mb-2">
                 <i class="{{ product.icon }} text-2xl text-sage-400"></i>
                 <h2 class="text-xl font-semibold">{{ product.name }}</h2>

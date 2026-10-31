@@ -4483,8 +4483,13 @@ interval too).
 ### Templates and static files
 
 Always namespaced: `apps/<app>/templates/<app>/…` and `apps/<app>/static/<app>/…`. Every page
-extends `core/base.html`, which loads Tailwind (CDN, with the sage palette plus `brand-*` aliases),
-htmx, Alpine.js and Font Awesome. The only un-namespaced templates are core's `admin/` overrides.
+extends `core/base.html`, which loads Tailwind (Play CDN pinned to 3.4.17, configured inline with the
+sage palette, `brand-*` aliases, a sage-tinted `gray` scale that replaces Tailwind's and the `font-sans`
+/ `font-mono` stacks), htmx, Alpine.js, Font Awesome and `core/css/site.css` (issue #214: the
+self-hosted Figtree and IBM Plex Mono `@font-face`s under `core/static/core/fonts/`, the motion tokens
+and keyframes, the opt-in htmx hooks `row-enter` / `row-leave` / `skeleton-indicator`, the `btn` press
+and the `:focus-visible` ring, and the `prefers-reduced-motion` switch-off). The only un-namespaced
+templates are core's `admin/` overrides.
 
 **Times of day have two zones, on purpose.** `TIME_ZONE` is UTC and the database holds UTC. A
 signed-in user may also have a saved time zone (`User.timezone`, issue #177, see "Auth" > "Time
@@ -4700,6 +4705,13 @@ Label every issue with the app(s) it applies to: `Users` (accounts), `Billing`, 
 
 ## Design system
 
+**`docs/ui-design/README.md` is the source of truth for every web page** (principles, colour, type,
+shape, motion, each component with its markup, and the checklist in section 16), with live pages in
+`docs/ui-design/reference/`. A PR that adds or changes UI is reviewed against that checklist; its
+"Known deviations" table lists what existing templates still do differently. Text is Figtree
+(`font-sans`), codes and addresses IBM Plex Mono (`font-mono`); motion answers an action, uses the
+tokens in `core/css/site.css` and is off under reduced motion. The look refresh is issue #214.
+
 Sage green palette derived from the logos. Use it for any new web interface.
 
 | Token | Hex | Use |
@@ -4712,6 +4724,10 @@ Sage green palette derived from the logos. Use it for any new web interface.
 
 Tailwind scale: `50 #f4f7f6 · 100 #d4e0da · 200 #b5c7be · 300 #8fa89e · 400 #728e84 · 500 #5a736a ·
 600 #475a53 · 700 #3b4a47 · 800 #2c3432 · 900 #1e2422`.
+
+Neutrals are the `gray` scale, overridden in the Tailwind config with sage-tinted values (`50 #f6f8f7 ·
+100 #eef1f0 · 200 #dfe4e2 · 300 #c6cecb · 400 #98a39f · 500 #66716d · 600 #4f5956 · 700 #3c4441 ·
+800 #282e2c · 900 #1a1f1d · 950 #111514`); keep using `gray-*`, not `slate`/`zinc`/`neutral`.
 
 The admin uses django-jazzmin, themed via `JAZZMIN_SETTINGS` in `config/settings.py` with
 `core/css/jazzmin_custom.css` and a `core/js/admin_theme_toggle.js` light/dark toggle.

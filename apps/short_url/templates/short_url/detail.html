@@ -36,7 +36,7 @@
     <code x-ref="text" class="break-all text-sm font-medium text-gray-900 dark:text-gray-100">{{ short_url }}</code>
     <button type="button" @click="copy()"
             class="inline-flex items-center px-3 py-1 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
-        <i class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+        <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
         <span x-text="copied ? 'Copied' : 'Copy'">Copy</span>
     </button>
 </div>
