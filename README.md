@@ -173,8 +173,9 @@ it in `.env.local` to point elsewhere.
 
 ### Local AWS/S3 emulation (Floci)
 
-File transfer stores uploaded files in S3 (settings `FILE_TRANSFER_S3_*`, see `.env.example`;
-`admin/aws.py` is unrelated — it's SSO login for the AWS CLI). Locally it runs against
+File transfer, To-do attachments and Receipts store files in S3 (settings `FILE_TRANSFER_S3_*`,
+`TODO_S3_*` and `RECEIPTS_S3_*`, see `.env.example`; all three use the same bucket, `ziptrigo-dev`
+locally; `admin/aws.py` is unrelated — it's SSO login for the AWS CLI). Locally it runs against
 [Floci](https://github.com/floci/floci), a local, MIT-licensed LocalStack replacement, instead of a
 real AWS account. It lives in its own compose file, `docker-compose.floci.yml`, rather than
 `docker-compose.yml`, because the same container is shared with the `wsa` and `pfo` repos (see the
@@ -189,6 +190,19 @@ docker compose -f docker-compose.floci.yml down           # stop
 Stopping it also stops it for `wsa`/`pfo` if either has it running — it's the same container. See
 wsa's `docs/playbooks/backend/LOCAL_AWS.md` for the fuller rationale, troubleshooting and
 version-bump procedure.
+
+Point each `*_S3_ENDPOINT_URL` in `.env.local` at `http://localhost:4566` (from inside a container,
+`http://host.docker.internal:4566`); any access key and secret work, e.g. `test`. Floci persists to
+a named volume, so the bucket and its CORS rules survive a restart. Create them once (the browser
+uploads straight to the bucket with presigned URLs, so CORS must allow the checksum header and expose
+`ETag`):
+
+```bash
+export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
+aws --endpoint-url http://localhost:4566 s3 mb s3://ziptrigo-dev
+aws --endpoint-url http://localhost:4566 s3api put-bucket-cors --bucket ziptrigo-dev \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:8000","http://127.0.0.1:8000"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3000}]}'
+```
 
 ### Shared local Postgres
 
@@ -213,12 +227,13 @@ can't run in the same transaction as `CREATE ROLE`):
 
 ```bash
 PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
-psql "$PG" -c "CREATE ROLE ziptrigo LOGIN PASSWORD '...';"
+psql "$PG" -c "CREATE ROLE ziptrigo LOGIN CREATEDB PASSWORD '...';"
 psql "$PG" -c "CREATE DATABASE ziptrigo OWNER ziptrigo;"
 ```
 
 then set `DATABASE_URL=postgres://ziptrigo:...@127.0.0.1:5432/ziptrigo` in `.env.local` and run
-`python manage.py migrate`.
+`python manage.py migrate`. `CREATEDB` is there so pytest can create its `test_ziptrigo` database
+when it runs against this server (an existing role: `ALTER ROLE ziptrigo CREATEDB;`).
 
 ## Configuration
 

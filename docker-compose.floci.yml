@@ -2,9 +2,9 @@
 # docker-compose.yml.
 #
 # Floci is an MIT-licensed, drop-in LocalStack replacement: it emulates AWS services (S3 among
-# them) locally, so app code can talk to "AWS" without a real account or a real bucket. This repo
-# has no code wired to it yet (see README.md) — this file just makes the emulator available for
-# whenever qr_code, file_transfer or another app here starts storing things in S3.
+# them) locally, so app code can talk to "AWS" without a real account or a real bucket. File
+# transfer, To-do and Receipts all store files in S3; `.env.local` points their `*_S3_ENDPOINT_URL`
+# at this container (see README.md, "Local AWS/S3 emulation (Floci)").
 #
 # SHARED COMPOSE PROJECT — read before editing.
 # The top-level `name` below is `floci`, not this repo's directory name (`ziptrigo-apps`), and on
@@ -48,8 +48,7 @@
 # same one.
 #
 # For the fuller rationale, troubleshooting and version-bump procedure, see wsa's
-# docs/playbooks/backend/LOCAL_AWS.md (/Users/joao/code/wsa/docs/playbooks/backend/LOCAL_AWS.md) —
-# not duplicated here since this repo doesn't consume Floci yet.
+# docs/playbooks/backend/LOCAL_AWS.md (/Users/joao/code/wsa/docs/playbooks/backend/LOCAL_AWS.md).
 name: floci
 
 services:
