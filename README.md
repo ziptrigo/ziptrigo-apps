@@ -373,8 +373,10 @@ step) prints `short_url.W001`, and the rest of the statistics are unaffected.
 To get the file, create a free [MaxMind account](https://www.maxmind.com/en/geolite2/signup),
 accept the GeoLite2 licence and download *GeoLite2 Country* (the `.mmdb` inside the tarball), or let
 `geoipupdate` keep it current. The file is opened once per process (memory-mapped), so a worker
-restart picks up a new one. In a deployment the file has to be in the container: mount it, or fetch
-it when the image is built; that lives in the `infra` repo, not here (#171). Nothing about a visitor but
+restart picks up a new one. In a deployment the file is mounted from the host at `/geoip`, with
+`GEOIP_PATH=/geoip/GeoLite2-Country.mmdb` set by the compose file, and refreshed twice a week by a
+cron job on the VPS (which restarts the containers when it changed); that setup and the MaxMind
+credentials live in the `infra` repo (`apps/ziptrigo-apps/README.md`), not here (#171). Nothing about a visitor but
 the country is stored: a click keeps a keyed hash of the address that changes every day, never the
 address.
 
