@@ -364,21 +364,34 @@ and "Sign up with Google" have no captcha.
 
 Short links record the country of each click from a MaxMind **GeoLite2-Country** database. It is
 optional: without it every country is "unknown", `manage.py check` (and the container's `migrate`
-step) prints `short_url.W001`, and the rest of the statistics are unaffected.
+step) prints `short_url.W001`, and the rest of the statistics are unaffected. Nothing about a visitor
+but the country is stored: a click keeps a keyed hash of the address that changes every day, never
+the address.
 
 | Variable | Value |
 |---|---|
 | `GEOIP_PATH` | path to the `GeoLite2-Country.mmdb` file (unset: countries unknown) |
 
-To get the file, create a free [MaxMind account](https://www.maxmind.com/en/geolite2/signup),
-accept the GeoLite2 licence and download *GeoLite2 Country* (the `.mmdb` inside the tarball), or let
-`geoipupdate` keep it current. The file is opened once per process (memory-mapped), so a worker
-restart picks up a new one. In a deployment the file is mounted from the host at `/geoip`, with
-`GEOIP_PATH=/geoip/GeoLite2-Country.mmdb` set by the compose file, and refreshed twice a week by a
-cron job on the VPS (which restarts the containers when it changed); that setup and the MaxMind
-credentials live in the `infra` repo (`apps/ziptrigo-apps/README.md`), not here (#171). Nothing about a visitor but
-the country is stored: a click keeps a keyed hash of the address that changes every day, never the
-address.
+**Where to get the file** (the file is MaxMind's and its licence forbids committing it here):
+
+1. Create a free [MaxMind account](https://www.maxmind.com/en/geolite2/signup) and accept the
+   GeoLite2 licence.
+2. Download *GeoLite2 Country* (format: GeoIP2 Binary, `.mmdb`) from
+   [your account's database downloads](https://www.maxmind.com/en/accounts/current/geoip/downloads);
+   the `.mmdb` is inside the tarball. For something that stays current, use MaxMind's
+   [`geoipupdate`](https://dev.maxmind.com/geoip/updating-databases/) with a license key from the
+   same account.
+3. Point `GEOIP_PATH` at the file, e.g. in `.env.local`. The file is opened once per process
+   (memory-mapped), so restart the server after replacing it.
+
+**In staging and prod** the file is not managed from this repository. It lives on the host, is
+refreshed twice a week by a cron job there, is mounted read-only into the containers (which get
+`GEOIP_PATH` from the compose file, so the env files here need no `GEOIP_PATH`), and is shared with
+any other container that wants it. How it is retrieved and kept current, the MaxMind credentials,
+how to check it and how to use it from another container are documented in the `infra` repository:
+[`docs/geoip.md`](https://github.com/joaonc/infra/blob/main/docs/geoip.md) (and
+[`apps/ziptrigo-apps/README.md`](https://github.com/joaonc/infra/blob/main/apps/ziptrigo-apps/README.md)
+for this app's part).
 
 ## Development Workflow
 
