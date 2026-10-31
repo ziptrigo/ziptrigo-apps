@@ -40,6 +40,15 @@ class ReportStatus(models.TextChoices):
     DISMISSED = 'dismissed', 'Dismissed'
 
 
+class ReportSource(models.TextChoices):
+    """Who made a report: a visitor, through the public form, or the periodic Safe Browsing
+    recheck (`services.reputation`), whose reports have no reporter and are never counted
+    toward the visitors' auto-hold threshold."""
+
+    VISITOR = 'visitor', 'Visitor'
+    SAFE_BROWSING = 'safe_browsing', 'Safe Browsing'
+
+
 class LinkReport(models.Model):
     """One "report this link" submission from the public preview page. No login is needed to
     send one. `reporter_email` is optional; `reporter_ip` is the best-effort client address
@@ -62,6 +71,15 @@ class LinkReport(models.Model):
     reporter_email = cast(str, models.EmailField(blank=True, default=''))
     reporter_ip = cast('str | None', models.GenericIPAddressField(null=True, blank=True))
 
+    source = cast(
+        str,
+        models.CharField(
+            max_length=16,
+            choices=ReportSource.choices,
+            default=ReportSource.VISITOR,
+            db_default=ReportSource.VISITOR,
+        ),
+    )
     status = cast(
         str,
         models.CharField(max_length=16, choices=ReportStatus.choices, default=ReportStatus.PENDING),

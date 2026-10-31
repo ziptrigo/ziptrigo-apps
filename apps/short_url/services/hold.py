@@ -13,11 +13,20 @@ staff dismiss the last pending report (`reports.dismiss_report`) or release it f
 Taking the link down clears the hold (moot once it is terminal).
 """
 
+from django.db import transaction
 from django.utils import timezone
 
 from apps.core.ratelimit import normalize_ip_for_key
 
-from ..models import LinkStatus, ReportStatus, ShortLink, ShortUrlSettings
+from ..models import (
+    LinkReport,
+    LinkStatus,
+    ReportReason,
+    ReportSource,
+    ReportStatus,
+    ShortLink,
+    ShortUrlSettings,
+)
 
 _HOLDABLE = (LinkStatus.ACTIVE, LinkStatus.DISABLED)
 
@@ -62,6 +71,49 @@ def maybe_hold_for_reports(link: ShortLink, settings_row: ShortUrlSettings | Non
         link.held_for_review_at = now
         link.updated_at = now
     return bool(held)
+
+
+#: The report reason that fits each Safe Browsing threat type.
+_THREAT_REASONS = {
+    'SOCIAL_ENGINEERING': ReportReason.PHISHING,
+    'MALWARE': ReportReason.MALWARE,
+    'UNWANTED_SOFTWARE': ReportReason.MALWARE,
+    'POTENTIALLY_HARMFUL_APPLICATION': ReportReason.MALWARE,
+}
+
+
+def hold_for_threat(link: ShortLink, destination: str, threat: str) -> bool:
+    """Put `link` on hold because Safe Browsing flagged `destination` (`reputation.recheck`),
+    and file a pending report saying so, which is how staff find it in the report list to take
+    the link down or release it. Returns whether this call did.
+
+    A no-op when the link is no longer active or disabled, is already held (a held link has its
+    report already), has since been pointed somewhere else, or staff already cleared this very
+    destination. The link row is locked, so a recheck racing an owner's edit or a visitor's report
+    holds it once. The report has no reporter and does not count toward the visitors' threshold
+    (`maybe_hold_for_reports` counts reporter addresses, and this one has none).
+    """
+    with transaction.atomic():
+        locked = ShortLink.objects.select_for_update().filter(pk=link.pk).first()
+        if (
+            locked is None
+            or locked.status not in _HOLDABLE
+            or locked.held_for_review_at
+            or locked.destination != destination
+            or locked.reputation_cleared_destination == destination
+        ):
+            return False
+        now = timezone.now()
+        ShortLink.objects.filter(pk=locked.pk).update(held_for_review_at=now, updated_at=now)
+        LinkReport.objects.create(
+            link=locked,
+            reason=_THREAT_REASONS.get(threat, ReportReason.OTHER),
+            details=f'Google Safe Browsing flags the destination ({threat.lower()}).',
+            source=ReportSource.SAFE_BROWSING,
+        )
+    link.held_for_review_at = now
+    link.updated_at = now
+    return True
 
 
 def release_hold(link: ShortLink) -> ShortLink:

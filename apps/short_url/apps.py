@@ -65,3 +65,11 @@ class ShortUrlConfig(AppConfig):
                 lease=timedelta(hours=1),
             )
         )
+        register_job(
+            JobSpec(
+                name='short_url.recheck_destinations',
+                func=jobs.recheck_destinations,
+                interval=timedelta(hours=1),
+                lease=timedelta(minutes=10),
+            )
+        )

@@ -2922,6 +2922,52 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
     caller; optionally also takes down the owner's other active links). Deactivation sets
     `User.status` inactive, which the API and new sign-ins refuse, and `create_link`/`set_enabled`
     refuse for a session that outlived it. Superusers pass implicitly.
+- **Safe Browsing** (issue #163; `services/safe_browsing.py` the client, `services/reputation.py`
+  the policy, `hold.hold_for_threat`; migration `0005_safe_browsing`). Destinations are checked
+  against Google's **Lookup API v4** (`threatMatches:find`: malware, social engineering, unwanted
+  software, harmful apps), only when `SAFE_BROWSING_API_KEY` is set. Unset, every check is skipped
+  and `manage.py check` warns `short_url.W002` (a Warning, never an Error: `migrate` runs the
+  checks), like `GEOIP_PATH`. Settings: `SAFE_BROWSING_API_KEY`, `SAFE_BROWSING_TIMEOUT_SECONDS`
+  (3: a person is waiting). The Lookup API sends the **URL itself** to Google (the hash-prefix
+  privacy is the Update API's, which keeps a local database and was not built); the key is a
+  query parameter, so errors raise `SafeBrowsingUnavailable` carrying only the exception type or
+  status, never the request. Google offers it for non-commercial use and points commercial use to
+  Web Risk (same shape, `uris:search`): a swap would be a change to `safe_browsing.py` only.
+  - **Create and edit.** `reputation.check_destination(url)` raises `UnsafeDestinationError` (a
+    `BlockedDomainError` subclass: the same neutral "That address cannot be used.", the same 403
+    from the API, nothing about the list or the threat) and returns whether the URL was verified
+    clean. It is called by `links._prepare` (so by `create_link` *and* the dry run
+    `check_new_link`, before the transaction opens), by `update_link` (for a destination or UTM
+    change, **before the row lock** is taken; a destination that only shows up under the lock is
+    looked up there) and by `check_update`, so a refused request spends no rate-limit budget. An
+    unchanged destination is never looked up. A verdict is remembered per process for 10 minutes
+    (`CACHE_TTL`, at most `CACHE_MAX` entries), so a dry run and its real call make one lookup. A
+    verified destination stamps `ShortLink.reputation_checked_at`; an unverified one (off, or
+    failed open) leaves it null, which is what the recheck looks for.
+  - **Fails open**, everywhere: not configured, a timeout, a non-200 or an unreadable reply never
+    refuses a create or edit and never holds a link (logged at warning level). The destination
+    rules, the block list, reports and takedown remain the baseline.
+  - **The recheck** (`short_url.recheck_destinations`, hourly, lease 10 min; `reputation.recheck`):
+    active, not-held links whose `reputation_checked_at` is null or older than `RECHECK_INTERVAL`
+    (24 h), oldest first, up to `RECHECK_BATCH` (500) **distinct destinations** per run, which is
+    **one API request** (hourly runs are 24 requests a day, far below the default quota; capacity
+    is about 12,000 links a day, the backlog is worked oldest first). Clean destinations get
+    `reputation_checked_at = now`; a flagged one puts each link on the abuse-review hold from #162
+    (`hold.hold_for_threat`: unavailable, frozen for the owner except disabling) and files a
+    **pending `LinkReport`** (`source='safe_browsing'`, reason phishing for social engineering,
+    malware for the other threats, details naming the threat, no reporter) so it shows in the
+    admin's report list (new `source` column and filter) for staff to take down or release. That
+    report has no address, so it never counts toward `auto_hold_report_threshold`. An API failure
+    **propagates** (it shows in `ScheduledJob.last_error`) and marks nothing, so the next run
+    takes the same links. Disabled links are not rechecked (enabling one makes it due again soon).
+  - **Releasing is remembered.** Dismissing the automated report, or "Release abuse-review hold",
+    stores the destination in `ShortLink.reputation_cleared_destination`, and the recheck skips a
+    link whose destination equals it: otherwise a false positive would be held again within a day.
+    Changing the destination makes the link due again. (Editing a link *back* to a cleared
+    destination is still refused at the edit, since Google still flags it.)
+  - **Not done:** no check at redirect time (a link flagged since its last check keeps working
+    until the next recheck, at most about a day), no Update API, and nothing for the owner beyond
+    the "under review" state.
 - **Web** (`urls.py` under `/links/`, `views/`, `templates/short_url/`): the dashboard (`/links/`, tabs
   All/Active/Disabled/Expired/Click limit reached/Taken down matching `display_state`, search over code,
   destination, title and tags, tag filter, sort by created/clicks, 25 per page, htmx list with
@@ -3021,8 +3067,8 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   browser couldn't load, and headless Chromium would count as a bot) and the AI plan
   `tests_e2e/ai/short_url.md`. No `inv openapi` spec is committed in this repo, so there is none to
   regenerate.
-- **Not done / follow-ups.** Safe Browsing (or similar) checking of destinations is issue #163 (label
-  `Url`): nothing checks what a destination serves. One infra follow-up: the GeoLite2 database and
+- **Not done / follow-ups.** Safe Browsing (#163) is built (see its bullet above; it needs
+  `SAFE_BROWSING_API_KEY` in the env files, a manual step). One infra follow-up: the GeoLite2 database and
   `GEOIP_PATH` have to reach the containers (#171). A dedicated short domain, anonymous shortening,
   bulk create, a trash with restore and device/geo routing are out of scope for v1.
 
@@ -4511,9 +4557,10 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   `Return-Path` and `Received`) is recommended to confirm what SES writes, and that a legitimate
   EHLO or MAIL FROM it renders differently from what the grammars expect is not being rejected.
 - Short URLs (#162) is fully built (phases 1 to 4: links and billing, analytics, password and
-  preview, abuse tooling, the JWT API and CLI; see "Short URLs" above). Destinations are **not**
-  checked against Safe Browsing or any malware list: that is issue #163 (label `Url`), so the only
-  defences are the blocked-domain list, reports and takedown. One infra follow-up remains: the
+  preview, abuse tooling, the JWT API and CLI; see "Short URLs" above). Destinations are checked
+  against Google Safe Browsing (#163) once `SAFE_BROWSING_API_KEY` is set in the env files; until
+  then (`short_url.W002`) the only defences are the blocked-domain list, reports and takedown. One
+  infra follow-up remains: the
   GeoLite2-Country database plus `GEOIP_PATH` have to be provided to the containers (#171: until
   then every click's country is unknown and `short_url.W001` shows at every deploy). nginx's coarse
   `limit_req` is designed to count `/s/<code>`, `/s/<code>+` and `/s/<code>/unlock` in the looser

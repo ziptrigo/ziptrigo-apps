@@ -13,7 +13,7 @@ from django.test import Client
 from apps.billing.services import add_credits
 
 from ..models import ShortUrlSettings
-from ..services import titles
+from ..services import reputation, safe_browsing, titles
 from .factories import make_user
 
 
@@ -24,6 +24,19 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr(titles, 'resolve_public', _refuse)
     monkeypatch.setattr(titles, 'http_get', _refuse)
+    monkeypatch.setattr(safe_browsing.requests, 'post', _refuse)
+
+
+@pytest.fixture(autouse=True)
+def safe_browsing_off(settings):
+    """No Safe Browsing key unless a test sets one, and no verdict or client left over from
+    another test."""
+    settings.SAFE_BROWSING_API_KEY = ''
+    reputation.reset_cache()
+    safe_browsing.set_client(None)
+    yield
+    reputation.reset_cache()
+    safe_browsing.set_client(None)
 
 
 #: What a browser sends. A request with no `User-Agent` counts as a bot, which the test client

@@ -17,6 +17,7 @@ from ..models import (
     LinkReport,
     LinkStatus,
     ReportReason,
+    ReportSource,
     ReportStatus,
     ShortLink,
 )
@@ -98,8 +99,17 @@ def dismiss_report(report: LinkReport, *, by: User, note: str = '') -> bool:
         report.reviewed_at = now
         report.resolution_note = note
         if link is not None:
+            if report.source == ReportSource.SAFE_BROWSING:
+                _clear_destination(link)
             _release_hold_if_clear(link)
     return True
+
+
+def _clear_destination(link: ShortLink) -> None:
+    """Staff looked at a Safe Browsing flag and decided it is fine: the recheck leaves this
+    destination alone (`reputation`) until the owner changes it."""
+    ShortLink.objects.filter(pk=link.pk).update(reputation_cleared_destination=link.destination)
+    link.reputation_cleared_destination = link.destination
 
 
 def _release_hold_if_clear(link: ShortLink) -> None:
@@ -114,6 +124,8 @@ def release_hold_and_dismiss(link: ShortLink, *, by: User, note: str = '') -> No
     very next report doesn't hold the link again at once."""
     with transaction.atomic():
         release_hold(link)
+        if link.reports.filter(status=ReportStatus.PENDING, source=ReportSource.SAFE_BROWSING):
+            _clear_destination(link)
         link.reports.filter(status=ReportStatus.PENDING).update(
             status=ReportStatus.DISMISSED,
             reviewed_by=by,
