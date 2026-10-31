@@ -173,8 +173,9 @@ it in `.env.local` to point elsewhere.
 
 ### Local AWS/S3 emulation (Floci)
 
-File transfer stores uploaded files in S3 (settings `FILE_TRANSFER_S3_*`, see `.env.example`;
-`admin/aws.py` is unrelated — it's SSO login for the AWS CLI). Locally it runs against
+File transfer, To-do attachments and Receipts store files in S3 (settings `FILE_TRANSFER_S3_*`,
+`TODO_S3_*` and `RECEIPTS_S3_*`, see `.env.example`; all three use the same bucket, `ziptrigo-dev`
+locally; `admin/aws.py` is unrelated — it's SSO login for the AWS CLI). Locally it runs against
 [Floci](https://github.com/floci/floci), a local, MIT-licensed LocalStack replacement, instead of a
 real AWS account. It lives in its own compose file, `docker-compose.floci.yml`, rather than
 `docker-compose.yml`, because the same container is shared with the `wsa` and `pfo` repos (see the
@@ -189,6 +190,19 @@ docker compose -f docker-compose.floci.yml down           # stop
 Stopping it also stops it for `wsa`/`pfo` if either has it running — it's the same container. See
 wsa's `docs/playbooks/backend/LOCAL_AWS.md` for the fuller rationale, troubleshooting and
 version-bump procedure.
+
+Point each `*_S3_ENDPOINT_URL` in `.env.local` at `http://localhost:4566` (from inside a container,
+`http://host.docker.internal:4566`); any access key and secret work, e.g. `test`. Floci persists to
+a named volume, so the bucket and its CORS rules survive a restart. Create them once (the browser
+uploads straight to the bucket with presigned URLs, so CORS must allow the checksum header and expose
+`ETag`):
+
+```bash
+export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
+aws --endpoint-url http://localhost:4566 s3 mb s3://ziptrigo-dev
+aws --endpoint-url http://localhost:4566 s3api put-bucket-cors --bucket ziptrigo-dev \
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:8000","http://127.0.0.1:8000"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3000}]}'
+```
 
 ### Shared local Postgres
 
@@ -213,12 +227,13 @@ can't run in the same transaction as `CREATE ROLE`):
 
 ```bash
 PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
-psql "$PG" -c "CREATE ROLE ziptrigo LOGIN PASSWORD '...';"
+psql "$PG" -c "CREATE ROLE ziptrigo LOGIN CREATEDB PASSWORD '...';"
 psql "$PG" -c "CREATE DATABASE ziptrigo OWNER ziptrigo;"
 ```
 
 then set `DATABASE_URL=postgres://ziptrigo:...@127.0.0.1:5432/ziptrigo` in `.env.local` and run
-`python manage.py migrate`.
+`python manage.py migrate`. `CREATEDB` is there so pytest can create its `test_ziptrigo` database
+when it runs against this server (an existing role: `ALTER ROLE ziptrigo CREATEDB;`).
 
 ## Configuration
 
@@ -364,19 +379,34 @@ and "Sign up with Google" have no captcha.
 
 Short links record the country of each click from a MaxMind **GeoLite2-Country** database. It is
 optional: without it every country is "unknown", `manage.py check` (and the container's `migrate`
-step) prints `short_url.W001`, and the rest of the statistics are unaffected.
+step) prints `short_url.W001`, and the rest of the statistics are unaffected. Nothing about a visitor
+but the country is stored: a click keeps a keyed hash of the address that changes every day, never
+the address.
 
 | Variable | Value |
 |---|---|
 | `GEOIP_PATH` | path to the `GeoLite2-Country.mmdb` file (unset: countries unknown) |
 
-To get the file, create a free [MaxMind account](https://www.maxmind.com/en/geolite2/signup),
-accept the GeoLite2 licence and download *GeoLite2 Country* (the `.mmdb` inside the tarball), or let
-`geoipupdate` keep it current. The file is opened once per process (memory-mapped), so a worker
-restart picks up a new one. In a deployment the file has to be in the container: mount it, or fetch
-it when the image is built; that lives in the `infra` repo, not here (#171). Nothing about a visitor but
-the country is stored: a click keeps a keyed hash of the address that changes every day, never the
-address.
+**Where to get the file** (the file is MaxMind's and its licence forbids committing it here):
+
+1. Create a free [MaxMind account](https://www.maxmind.com/en/geolite2/signup) and accept the
+   GeoLite2 licence.
+2. Download *GeoLite2 Country* (format: GeoIP2 Binary, `.mmdb`) from
+   [your account's database downloads](https://www.maxmind.com/en/accounts/current/geoip/downloads);
+   the `.mmdb` is inside the tarball. For something that stays current, use MaxMind's
+   [`geoipupdate`](https://dev.maxmind.com/geoip/updating-databases/) with a license key from the
+   same account.
+3. Point `GEOIP_PATH` at the file, e.g. in `.env.local`. The file is opened once per process
+   (memory-mapped), so restart the server after replacing it.
+
+**In staging and prod** the file is not managed from this repository. It lives on the host, is
+refreshed twice a week by a cron job there, is mounted read-only into the containers (which get
+`GEOIP_PATH` from the compose file, so the env files here need no `GEOIP_PATH`), and is shared with
+any other container that wants it. How it is retrieved and kept current, the MaxMind credentials,
+how to check it and how to use it from another container are documented in the `infra` repository:
+[`docs/geoip.md`](https://github.com/joaonc/infra/blob/main/docs/geoip.md) (and
+[`apps/ziptrigo-apps/README.md`](https://github.com/joaonc/infra/blob/main/apps/ziptrigo-apps/README.md)
+for this app's part).
 
 ### Short URLs: Safe Browsing
 
