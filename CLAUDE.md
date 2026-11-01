@@ -53,7 +53,9 @@ apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks wi
 admin/                Typer CLIs for lint/test/server/pip/openapi/aws/email/users/qrcode/filetransfer/
                       receipts/shorturl/todo. Via `inv`.
 tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `tests_e2e/ai/`: Markdown
-                      test plans run by an AI agent driving a browser, one per area (see its README).
+                      test plans run by an AI agent driving a browser, one per area, against local
+                      Postgres, Floci and a real SMTP/IMAP mailbox (see its README and "AI-agent
+                      test plans" under Conventions).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
 pyproject.toml        Deps, ruff/ty/pytest/import-linter config, `inv` module registry.
 .github/workflows/    CI (`ci.yml`): `inv lint all --check` then `inv test unit` on every push/PR.
@@ -2195,9 +2197,11 @@ superusers) and `core` can't import `accounts`; it sits in the same layer as `bi
 - **Emails** (`services/emails.py`) are `django.tasks` tasks enqueued in `transaction.on_commit`
   from `submit_feedback`: a receipt to the submitter and a notification to every superuser who is
   `is_active`, has `status=ACTIVE` and a non-empty email (one `send_email` each; no active
-  superuser logs a warning). Both pass an explicit autoescaped `html_body` -- without one
-  `SesEmailBackend` wraps `text_body` in an unescaped `<pre>`, so feedback containing HTML would
-  render as HTML in the admins' inboxes -- and no feedback text ever goes into a subject.
+  superuser logs a warning). Both pass an explicit autoescaped `html_body` (without one,
+  `SesEmailBackend` sends `text_body` HTML-escaped inside a `<pre>`: since the E2E plan audit it
+  escapes it, so a text-only email -- every file transfer email is one, carrying the sender's
+  message and file names -- can't render markup; it used to be unescaped) and no feedback text
+  ever goes into a subject.
   The receipt goes only to a user whose `email_confirmed` is true: `PUT /api/account` un-confirms
   an account on an email change but leaves the session valid, so otherwise someone could aim a
   receipt (their text and name) at a third party's address. Submitting is *not* blocked for an
@@ -2927,8 +2931,10 @@ Layout like `file_transfer`: `models/`, `services/`, `jobs.py`, `admin.py`, `che
     at `/__e2e__/mail/`, answers CORS on both fake buckets, and opens SQLite with
     `transaction_mode: IMMEDIATE` (threaded runserver, parallel uploads). Run it with `inv test e2e`
     (needs `.env.local`). The AI-agent plans in `tests_e2e/ai/` use the same settings through
-    `tests_e2e/ai/serve.py` (own `db.e2e-ai*.sqlite3`, seeded accounts, `--port`/`--host
-    <name>.localhost` to run several at once).
+    `tests_e2e/ai/serve.py`, by default with `E2E_SERVICES=real` (local Postgres, Floci and
+    SMTP/IMAP instead of the fakes, see "AI-agent test plans" under Conventions; `--fakes` keeps the
+    SQLite file and in-memory fakes), seeded accounts, `--port`/`--host <name>.localhost` to run
+    several at once.
 - **API and CLI** (phase 4). The endpoints, status codes (400/402/404/429) and shared rate-limit
   budgets are in "API" above. Two service additions came with it: `services.forwarding`
   (`forwarding_confirmation(user)`, the Gmail confirmation code/link of the last 7 days, moved out of
@@ -4911,6 +4917,25 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
 
 ## Conventions
 
+- **AI-agent test plans** (`tests_e2e/ai/*.md`, one per area plus `preflight.md`, `emails.md` and
+  `notifications.md`): **a change that adds, removes or changes something a user or an admin can
+  see or do updates the plan of its area in the same PR**, like unit tests -- new cases for a new
+  feature (happy path, every refusal with its message quoted from the code, permissions, its emails
+  in `emails.md`, its notifications in `notifications.md`, its admin in `admin.md`), edited cases for
+  a changed one, and a preflight check in `tests_e2e/real_services.py` for a new external service.
+  The rules are in `tests_e2e/ai/README.md`, "Keeping the plans current". The plans run on demand
+  (not in CI) against `python tests_e2e/ai/serve.py`, which uses the local services in docker:
+  Postgres (`docker-compose.postgres.yml`, its own `ziptrigo_e2e_ai` database, recreated per start),
+  Floci (one `ziptrigo-e2e-ai` bucket for every product, emptied per start; endpoint and keys are
+  forced to Floci's, so a run can never reach real AWS) and email over SMTP read back over IMAP
+  with the credentials in `tests_e2e/ai/emails.yaml` (gitignored; `emails.example.yaml` documents
+  it). Every email is *delivered* to that one mailbox, with the site's recipient in `To:` and
+  `X-E2E-Run` / `X-E2E-Original-To` headers, and `/__e2e__/mail/` lists the run's emails
+  (`tests_e2e/real_services.py`; nothing in `apps/` changed for it). Before serving, `serve.py` runs
+  the preflight checks (database, each product's S3 storage incl. CORS and presigned PUT/GET, the
+  SMTP/IMAP round trip; `tests_e2e/ai/preflight.py`, also at `/__e2e__/preflight/`) and refuses to
+  start on a failure. Shell steps of the plans go through `tests_e2e/ai/manage.py [--port N]`,
+  which runs `manage.py` with the environment `serve.py` recorded in `tests_e2e/ai/.run/<port>.json`.
 - Python 3.14 (pinned by `.python-version`; the Dockerfile builds on `python:3.14-slim`),
   100-column lines, PEP 8. Ruff lint set is `E,F,W,I` with `E266,E501,E701,F811` ignored;
   migrations are excluded.

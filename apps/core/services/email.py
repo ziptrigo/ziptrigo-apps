@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
+from django.utils.html import escape
 
 if TYPE_CHECKING:
     # `mypy_boto3_ses` ships in the dev-only `boto3-stubs` group (see `pyproject.toml`), so it
@@ -48,7 +49,10 @@ class SesEmailBackend:
         html_body: str | None = None,
     ):
         if html_body is None:
-            html_body = f'<pre>{text_body}</pre>'
+            # A text-only email still needs an HTML part for SES. Its text is plain text, often
+            # with something a sender typed in it (a transfer's message, a file name), so it is
+            # escaped: `<b>` must show as `<b>` in the recipient's mail client, not as bold.
+            html_body = f'<pre>{escape(text_body)}</pre>'
 
         region = getattr(settings, 'AWS_REGION', 'us-east-1')
         client: SESClient = boto3.client('ses', region_name=region)
