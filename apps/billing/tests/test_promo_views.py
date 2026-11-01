@@ -69,7 +69,7 @@ def test_history_line_names_the_code(client, user, code):
     html = client.get(HISTORY).content.decode()
     assert 'Promo code LAUNCH2026 (Launch)' in html
     assert '+250' in html
-    assert '(promo code)' in html
+    assert '>Promo code</span>' in html
 
 
 def test_refusal_is_a_422_partial_with_the_message(client, user, code):

@@ -1,4 +1,4 @@
-{% load field_errors %}{% if reset_message %}<div id="feedback-msg" hx-swap-oob="true" class="text-sm"></div>{% endif %}
+{% load field_errors %}{% if reset_message %}<div id="feedback-msg" hx-swap-oob="true" class="text-sm" aria-live="polite"></div>{% endif %}
 <form id="feedback-form"
       method="post"
       action="{% url 'feedback:submit' %}"
@@ -19,7 +19,7 @@
               class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">{{ form.description.value|default:'' }}</textarea>
     <span class="flex justify-between gap-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
       <span>{% if user.email_confirmed %}A copy will be emailed to {{ user.email }}.{% endif %}</span>
-      <span class="whitespace-nowrap" :class="count > {{ max_length }} ? 'text-red-600' : ''"><span x-text="count.toLocaleString('en-US')">0</span> / {{ max_length_label }}</span>
+      <span class="whitespace-nowrap" :class="count > {{ max_length }} ? 'text-red-600 dark:text-red-400' : ''"><span x-text="count.toLocaleString('en-US')">0</span> / {{ max_length_label }}</span>
     </span>
   </label>
 

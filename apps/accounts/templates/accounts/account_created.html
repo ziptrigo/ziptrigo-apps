@@ -1,7 +1,7 @@
 {% extends "core/base.html" %}
 {% load static %}
 
-{% block title %}Check your email{% endblock %}
+{% block title %}Check your email - ZipTrigo{% endblock %}
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
@@ -19,11 +19,10 @@
       A confirmation link expires in {{ confirmation_validity }}.
     </p>
     
-    <button type="button"
-            onclick="window.location='{% url 'accounts:login' %}';"
+    <a href="{% url 'accounts:login' %}"
             class="btn inline-flex justify-center items-center rounded-lg bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:bg-sage-400 text-sm">
       Go to Login
-    </button>
+    </a>
   </div>
 </div>
 {% endblock %}

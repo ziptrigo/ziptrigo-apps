@@ -11,10 +11,12 @@
         <div class="flex items-center gap-3">
             <a href="{% url 'receipts:detail' duplicate_of.pk %}"
                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">View</a>
+            {% if not receipt.deleted_at %}{# a trashed receipt's page is read-only #}
             <button type="button"
                     hx-post="{% url 'receipts:dismiss-duplicate' receipt.pk %}"
                     hx-target="#duplicate-banner" hx-swap="outerHTML" hx-disabled-elt="this"
                     class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">Not a duplicate</button>
+            {% endif %}
         </div>
     </div>
     {% endif %}

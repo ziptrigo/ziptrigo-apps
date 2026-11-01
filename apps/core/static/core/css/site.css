@@ -88,6 +88,8 @@ h1, h2, h3 { text-wrap: balance; }
   box-shadow: 0 0 0 2px var(--ring-offset, #fff), 0 0 0 4px #8fa89e;
 }
 .dark :is(button, a, summary, [tabindex]):focus-visible { --ring-offset: #1a1f1d; }
+/* The skip link moves focus to <main> (tabindex=-1); a ring around the whole page would only distract. */
+main[tabindex='-1']:focus-visible { box-shadow: none; }
 
 /* Fields: a sage border and a soft 3 px halo, with no offset so fields in a row don't jump. This one shows
  * for the mouse too, since clicking into a field is how you start typing. A field that carries an error

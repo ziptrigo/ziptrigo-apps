@@ -26,6 +26,7 @@ from django.utils.html import format_html
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.models import User
+from apps.core import admin_log
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
@@ -137,16 +138,22 @@ def _takedown_confirm_response(
     if request.POST.get('apply') == 'yes':
         form = TakedownForm(request.POST)
         if form.is_valid():
-            taken_down = sum(
-                take_down_link(
+            done = [
+                link
+                for link in live
+                if take_down_link(
                     link,
                     by=request.user,
                     reason=form.cleaned_data['reason'],
                     internal_note=form.cleaned_data['internal_note'],
                     notify=form.cleaned_data['notify_owner'],
                 )
-                for link in live
+            ]
+            reason = form.cleaned_data['reason']
+            admin_log.log_change(
+                request, done, f'Taken down: {reason}' if reason else 'Taken down.'
             )
+            taken_down = len(done)
             message = f'Took down {taken_down} link(s).'
             if taken_down < len(live):
                 message += _skipped_note(len(live) - taken_down)
@@ -186,7 +193,11 @@ def _block_domain_confirm_response(
                     reason=form.cleaned_data['reason'],
                     include_subdomains=form.cleaned_data['include_subdomains'],
                 )
-                added += entry is not None
+                if entry is not None:
+                    admin_log.log_addition(
+                        request, [entry], f'Blocked the destination of {link.code}.'
+                    )
+                    added += 1
             messages.success(
                 request,
                 f'Added {added} block-list entry/entries. Links pointing there stop working at '
@@ -250,6 +261,7 @@ def _deactivate_owner_confirm_response(
             for owner in owners:
                 if owner.status != User.STATUS_INACTIVE:
                     owner.deactivate(reason=reason)
+                    admin_log.log_change(request, [owner], 'Deactivated: link owner.')
                     changed += 1
             message = f'Deactivated {changed} account(s).'
             if changed < len(all_owners):
@@ -260,17 +272,19 @@ def _deactivate_owner_confirm_response(
                 targets = ShortLink.objects.filter(
                     owner__in=owners, status__in=(LinkStatus.ACTIVE, LinkStatus.DISABLED)
                 )
-                done = sum(
-                    take_down_link(
+                taken = [
+                    target
+                    for target in targets
+                    if take_down_link(
                         target,
                         by=request.user,
                         reason=reason,
                         internal_note='Owner deactivated.',
                         notify=False,
                     )
-                    for target in targets
-                )
-                message += f' Took down {done} link(s).'
+                ]
+                admin_log.log_change(request, taken, 'Taken down: owner deactivated.')
+                message += f' Took down {len(taken)} link(s).'
             messages.success(request, message)
             return redirect(request.path)
     else:
@@ -407,6 +421,7 @@ class ShortLinkAdmin(_AbuseActionPermissionMixin, ReadOnlyModelAdmin):
         count = 0
         for link in queryset.filter(held_for_review_at__isnull=False):
             reports.release_hold_and_dismiss(link, by=request.user, note='Hold released via admin.')
+            admin_log.log_change(request, [link], 'Released the abuse-review hold.')
             count += 1
         messages.success(request, f'Released the hold on {count} link(s).')
 
@@ -445,7 +460,9 @@ class LinkReportAdmin(_AbuseActionPermissionMixin, ReadOnlyModelAdmin):
     def dismiss_action(self, request: AuthenticatedHttpRequest, queryset) -> None:
         count = 0
         for report in queryset.filter(status=ReportStatus.PENDING):
-            count += reports.dismiss_report(report, by=request.user, note='Dismissed via admin.')
+            if reports.dismiss_report(report, by=request.user, note='Dismissed via admin.'):
+                admin_log.log_change(request, [report], 'Dismissed.')
+                count += 1
         messages.success(request, f'Dismissed {count} report(s).')
 
     @admin.action(description='Take down the reported link(s)', permissions=['takedown_link'])

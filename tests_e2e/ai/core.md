@@ -2,7 +2,7 @@
 
 **Scope.** Everything every page shares (`apps/core/templates/core/base.html`) and the landing page
 (`core/home.html`): the header (logo, one link per registered product, Login link or
-account menu), the footer (FAQ, Feedback, copyright), the product cards on `/`, the "login
+account menu), the footer (Feedback, copyright), the product cards on `/`, the "login
 required" redirects of the product and account pages, unknown URLs, the API docs at `/api/docs`,
 light/dark theme, the layout at phone width (375 px), page titles, favicon and logo, and console
 errors. Signing in itself is covered in `accounts.md`; here it is only a step.
@@ -54,9 +54,9 @@ them in this order:
 |---|---|---|
 | 1 | Look at the header (top bar). | Left: a small logo plus the text **ZipTrigo**, then the links **QR Codes**, **File Transfer**, **Receipts**, each with its icon. Right: a **Login** link (no theme button: the theme is chosen on the account page). There is no person icon / account menu. |
 | 2 | Look for a credit balance in the header. | None is shown (the base template has no balance in the header; the balance is on the account page, see CORE-08). |
-| 3 | Look at the footer. | Links **FAQ** and **Feedback** in the middle; on the right, in small grey text, `© <current year> Joao Coelho. Licensed under MIT.` (the year is the current one, e.g. `© 2026`). The footer sits at the bottom of the window even though the page content is short (no gap below it). |
+| 3 | Look at the footer. | A **Feedback** link in the middle (no FAQ link: there is no FAQ page); on the right, in small grey text, `© <current year> Joao Coelho. Licensed under MIT.` (the year is the current one, e.g. `© 2026`). The footer sits at the bottom of the window even though the page content is short (no gap below it). |
 | 4 | Click **ZipTrigo** in the header. | Stays on / reloads `/`. |
-| 5 | Click **Login**. | Goes to `/account/login/` (title `Login`, heading **Sign in**, fields **Email** and **Password**, button **Sign in**, links "Create one" and "Forgot your password?"). The header and footer are the same as on `/`. |
+| 5 | Click **Login**. | Goes to `/account/login/` (title `Login - ZipTrigo`, heading **Sign in**, fields **Email** and **Password**, button **Sign in**, links "Create one" and "Forgot your password?"). The header and footer are the same as on `/`. |
 
 ### CORE-03 Product links require login and keep `next`
 
@@ -67,7 +67,7 @@ parameter, and signing in returns them to the product.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | On `/`, click the **QR Codes** card. | The URL becomes `/account/login/?next=/qr/`. The login page is shown (no error, no flash of the QR page). |
-| 2 | Sign in as `qa.user@example.com`. | You land on `/qr/` (heading **QR codes**, title `Dashboard - ZipTrigo`), not on the account page. The header now shows the person icon instead of **Login**. |
+| 2 | Sign in as `qa.user@example.com`. | You land on `/qr/` (heading **QR codes**, title `QR codes - ZipTrigo`), not on the account page. The header now shows the person icon instead of **Login**. |
 | 3 | Log out (account menu > **Logout**). | You are on `/`; the header shows **Login** again. |
 | 4 | Click the **File Transfer** header link. | URL `/account/login/?next=/transfer/`. |
 | 5 | Sign in as `qa.user@example.com`. | You land on `/transfer/` (heading **Your transfers**, title `File Transfer - ZipTrigo`). |
@@ -145,9 +145,9 @@ none.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click **Feedback** in the footer. | Goes to `/feedback/` (title `Send feedback`, heading **Send feedback**). |
+| 1 | Click **Feedback** in the footer. | Goes to `/feedback/` (title `Send feedback - ZipTrigo`, heading **Send feedback**). |
 | 2 | Inspect the **Feedback** footer link on `/feedback/` (read the page's accessibility tree). | It carries `aria-current="page"`. On `/` and on `/account/` it does **not**. |
-| 3 | Click **FAQ** in the footer. | Expected: an FAQ page (or no FAQ link at all). Known at the time of writing: the link is a placeholder (`href="#"`), so it only appends `#` to the current URL and does nothing. Record **FAIL (known: placeholder link)** if so. |
+| 3 | Look for an **FAQ** link in the footer. | None (there is no FAQ page, and no placeholder `href="#"` link). |
 | 4 | Log out, then click **Feedback** in the footer. | Redirected to `/account/login/?next=/feedback/`. |
 
 ### CORE-10 Unknown URLs
@@ -242,7 +242,7 @@ dark mode is readable. There is no toggle in the header.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visit each page and read the tab title. | Titles at the time of writing: `/` `ZipTrigo`; `/qr/` `Dashboard - ZipTrigo`; `/transfer/` `File Transfer - ZipTrigo`; `/transfer/send/` `Send files - ZipTrigo`; `/receipts/` `Receipts - ZipTrigo`; `/receipts/upload/` `Upload receipts - ZipTrigo`; `/account/` `Account Settings`; `/billing/credits/` `Credits History`; `/feedback/` `Send feedback`; `/account/login/` `Login`; `/account/register/` `Register`; `/api/docs` `ZipTrigo API`. None is empty, `None` or a raw template tag. |
+| 1 | Visit each page and read the tab title. | Titles at the time of writing: `/` `ZipTrigo`; `/qr/` `QR codes - ZipTrigo`; `/transfer/` `File Transfer - ZipTrigo`; `/transfer/send/` `Send files - ZipTrigo`; `/receipts/` `Receipts - ZipTrigo`; `/receipts/upload/` `Upload receipts - ZipTrigo`; `/account/` `Account Settings - ZipTrigo`; `/billing/credits/` `Credits History - ZipTrigo`; `/feedback/` `Send feedback - ZipTrigo`; `/account/login/` `Login - ZipTrigo`; `/account/register/` `Register - ZipTrigo`; `/api/docs` `ZipTrigo API`. None is empty, `None` or a raw template tag. |
 | 2 | Compare them. | Record as a UX observation (not a failure) that the account, billing, feedback, login and register titles lack the ` - ZipTrigo` suffix the product pages use, and that `/qr/` is just "Dashboard". |
 
 ### CORE-17 Console errors and broken assets

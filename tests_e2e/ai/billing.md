@@ -54,11 +54,11 @@ Create these local files before starting (the fake AI reads any real image as a 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the page. | Tab title `Credits History`. A card with a coins icon, heading **Credits History** and "Current balance: **100** credits". At the top right of the card a **Back to Account** link with a left arrow. |
+| 1 | Look at the page. | Tab title `Credits History - ZipTrigo`. A card with a coins icon, heading **Credits History** and "Current balance: **100** credits". At the top right of the card a **Back to Account** link with a left arrow. |
 | 2 | Look at the table header. | Three columns, in this order: **Date**, **Change**, **Description**. |
-| 3 | Look at the rows. | Exactly one row: Date = today's date and a time in UTC (`YYYY-MM-DD HH:MM`, close to when the server was started); Change = **+100** in green followed by a small grey `(purchase)`; Description = `e2e seed`. |
+| 3 | Look at the rows. | Exactly one row: Date = today's date and a time in UTC (`YYYY-MM-DD HH:MM`, close to when the server was started); Change = **+100** in green followed by a small grey pill `Purchase`; Description = `e2e seed`. |
 | 4 | Look below the table. | No pagination bar ("Page 1 of 1" is **not** shown when there is only one page). |
-| 5 | Note the transaction type label. | It reads the raw value `(purchase)` in lower case rather than the display label "Purchase". Record as a minor UX observation, not a failure. |
+| 5 | Note the transaction type label. | A grey pill with the display label, `Purchase`. |
 | 6 | Click **Back to Account**. | Goes to `/account/`: section **Credits**, "Current balance" **100 credits**, and a **Usage History** button. |
 | 7 | Click **Usage History**. | Back on `/billing/credits/`. |
 
@@ -96,7 +96,7 @@ everywhere.
 | 1 | Go to `/receipts/upload/`. | "Balance: **100 credits**". |
 | 2 | Click **Choose files** and pick `receipt-1.png`. | A row appears for the file; its status goes through "Preparing…", "Uploading…", "Finishing…" and ends with "✓ Uploaded. View receipt". |
 | 3 | Look at the balance at the top of the upload page without reloading. | It may still say 100 (it is rendered when the page loads). Reload the page: now "Balance: **99 credits**". |
-| 4 | Click the balance link. | `/billing/credits/`: "Current balance: **99** credits". Two rows, newest first: **-1** in red with `(spend)`, description `Receipt processing: receipt-1.png`; then the `+100 (purchase)` `e2e seed` row. |
+| 4 | Click the balance link. | `/billing/credits/`: "Current balance: **99** credits". Two rows, newest first: **-1** in red with a `Spend` pill, description `Receipt processing: receipt-1.png`; then the `+100 Purchase` `e2e seed` row. |
 | 5 | Go to `/account/`. | **99 credits**. |
 | 6 | Go to `/receipts/`. | The receipt is listed as processed (vendor **Staples**, amount 42.10). |
 
@@ -152,7 +152,7 @@ is repetitive: it needs 25 more rows.
 |---|---|---|
 | 1 | On `/admin/billing/credittransaction/adjust/`, add `1` credit to `qa.admin@example.com` with description `page test 1`; repeat with `page test 2` ... `page test 25` (the form clears after each success). | 25 success messages in turn; the last says "New balance: 125." |
 | 2 | Go to `/billing/credits/`. | Balance **125**. 25 rows, the newest (`page test 25`) on top and `page test 1` last. Under the table "Page 1 of 2" and a **Next** link only (no Previous). |
-| 3 | Click **Next**. | URL `?page=2`: one row, the `+100 (purchase)` `e2e seed` row; "Page 2 of 2" and a **Previous** link only. |
+| 3 | Click **Next**. | URL `?page=2`: one row, the `+100 Purchase` `e2e seed` row; "Page 2 of 2" and a **Previous** link only. |
 | 4 | Click **Previous**. | Back to page 1. |
 | 5 | Go to `/billing/credits/?page=999`, then `?page=0`, then `?page=-1`, then `?page=abc`. | The three out-of-range numbers show the last page (`Page 2 of 2`, Django's `get_page`); `abc` shows page 1. Never an error page. |
 | 6 | Log out, log in as `qa.user@example.com`, open `/billing/credits/`. | None of the `page test` rows appear (they belong to `qa.admin`). |

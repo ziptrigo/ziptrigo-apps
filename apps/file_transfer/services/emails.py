@@ -31,18 +31,43 @@ def send_transfer_notification(transfer_id: str, recipient_email: str) -> None:
         return
 
     name = transfer_display_name(transfer)
-    body_lines = [f'You have received files: {name}.', '']
+    names = [f.name for f in transfer.files.filter(uploaded=True)]
+    body_lines = [_received_line(names, name), '']
     if transfer.message:
         body_lines += [transfer.message, '']
     body_lines.append(f'Download: {transfer.absolute_download_url}')
     if transfer.expires_at:
         body_lines.append(f'This link expires on {transfer.expires_at:%Y-%m-%d %H:%M} UTC.')
 
+    # The same list as the body: `name` is the first file of any state, which may be one still
+    # uploading and so not part of the transfer.
+    first = names[0] if names else name
+    others = len(names) - 1
+    subject_name = (
+        f'{first} and {others} more file{"s" if others != 1 else ""}' if others > 0 else first
+    )
     send_email(
         to=recipient_email,
-        subject=f'{name} was sent to you via ZipTrigo',
+        subject=f'{subject_name} {"were" if others > 0 else "was"} sent to you via ZipTrigo',
         text_body='\n'.join(body_lines),
     )
+
+
+#: How many file names the recipient email lists before it says how many more there are.
+MAX_LISTED_FILES = 20
+
+
+def _received_line(names: list[str], fallback: str) -> str:
+    """ "You have received ...", naming every file (issue #152: it used to name only the first)."""
+    if not names:
+        return f'You have received files: {fallback}.'
+    if len(names) == 1:
+        return f'You have received a file: {names[0]}.'
+    listed = names[:MAX_LISTED_FILES]
+    lines = [f'You have received {len(names)} files:'] + [f'- {n}' for n in listed]
+    if len(names) > len(listed):
+        lines.append(f'- and {len(names) - len(listed)} more')
+    return '\n'.join(lines)
 
 
 @task

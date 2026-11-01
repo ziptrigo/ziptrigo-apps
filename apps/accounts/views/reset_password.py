@@ -44,7 +44,7 @@ def reset_password_page(request: HttpRequest, token: str) -> HttpResponse:
             except InvalidResetTokenError:
                 # Lost a race with another use of the same link: it's the expired page now.
                 return hx_redirect(request, request.path)
-            messages.success(request, 'Your password has been reset. You can now log in.')
+            messages.success(request, 'Your password is set. You can now log in.')
             return hx_redirect(request, reverse('accounts:login'))
         status = 422
     else:

@@ -2,8 +2,10 @@
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.qr_code.forms import QRCodeCreateForm
 from apps.qr_code.models import QRCode, QRCodeType
 from apps.qr_code.views.editor import SHORT_CODE_SESSION_KEY
 
@@ -334,3 +336,48 @@ class TestTooBigToEncode:
         )
 
         assert response.status_code == 422
+
+
+@pytest.mark.django_db
+class TestIssue152Fixes:
+    """Findings of the E2E browser run (issue #152)."""
+
+    def _deleted(self, user):
+        qr = QRCode.objects.create(
+            name='Gone', content='x', qr_type='text', created_by=user, short_code='gone152'
+        )
+        qr.deleted_at = timezone.now()
+        qr.save()
+        return qr
+
+    def test_edit_and_duplicate_of_a_deleted_code_are_404(self, client, user):
+        qr = self._deleted(user)
+        client.force_login(user)
+
+        assert client.get(reverse('qr_code:edit', args=[qr.id])).status_code == 404
+        assert client.get(reverse('qr_code:duplicate', args=[qr.id])).status_code == 404
+
+    def test_go_link_of_a_deleted_or_unknown_code_is_the_neutral_page(self, client, user):
+        qr = self._deleted(user)
+
+        for path in (f'/go/{qr.short_code}/', '/go/nosuchcode/'):
+            response = client.get(path)
+            assert response.status_code == 404
+            assert "This QR code isn't available" in response.content.decode()
+
+    def test_sort_links_encode_the_search_and_offer_newest(self, client, user):
+        client.force_login(user)
+
+        html = client.get(reverse('qr_code:dashboard'), {'q': 'R&D'}).content.decode()
+
+        assert 'href="?sort=name&amp;q=R%26D"' in html
+        assert 'href="?sort=newest&amp;q=R%26D" aria-current="true"' in html
+        assert 'select-all' not in html
+
+    def test_too_long_text_gives_advice_the_editor_can_follow(self):
+        form = QRCodeCreateForm(
+            data={'name': 'x', 'qr_type': 'text', 'qr_format': 'png', 'url': '한' * 1000}
+        )
+
+        assert not form.is_valid()
+        assert form.errors['url'] == ['That is too long for a QR code. Please shorten it.']

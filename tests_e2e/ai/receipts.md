@@ -164,7 +164,7 @@ Example: `rcptPick([{ name: 'staples-1.png', type: 'image/png', base64: PNG_A }]
 | 1 | Supply one file: `rcptPick([{ name: 'staples-1.png', type: 'image/png', base64: PNG_A }])`. | A row appears with the name "staples-1.png", the size "1 KB", a progress bar (role progressbar, aria-label "Upload progress of staples-1.png") and a cancel (x) button labelled "Cancel upload of staples-1.png". The status line moves through "Preparing…" / "Uploading…" / "Finishing…" (may be too fast to see). |
 | 2 | Wait for it to finish. | Status turns green: "✓ Uploaded. View receipt"; the bar is full (`aria-valuenow="100"`); the cancel button is gone. |
 | 3 | Click **View receipt**. | The receipt's page `/receipts/<uuid>/` opens with heading "Staples · 2026-10-09" and a green **Processed** pill. **Record** the id as `R1_ID`. |
-| 4 | Go to `/billing/credits/`. | "Current balance: 99 credits". The newest row: change "-1" (red) "(spend)", description "Receipt processing: staples-1.png". The seed row "+100 (purchase)" "e2e seed" is below it. |
+| 4 | Go to `/billing/credits/`. | "Current balance: 99 credits". The newest row: change "-1" (red) "Spend" pill, description "Receipt processing: staples-1.png". The seed row "+100 Purchase" "e2e seed" is below it. |
 | 5 | Go to `/receipts/`. | One row: date 2026-10-09, vendor **Staples**, category Office supplies, amount "USD 42.10", pill **Processed**; second line "upload · receipt #R-55102 · Visa ••4242 · added <Mon D>". The **Vendors** link now shows an amber "1 to vet" badge. |
 
 ### RCPT-06 Files refused in the browser: wrong type, empty, too large

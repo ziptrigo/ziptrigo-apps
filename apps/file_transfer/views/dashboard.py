@@ -125,18 +125,28 @@ def _owned_transfer(request: AuthenticatedHttpRequest, transfer_id: str) -> Tran
 
 
 def _row_response(
-    request: AuthenticatedHttpRequest, transfer: Transfer, *, error: str = '', status: int = 200
+    request: AuthenticatedHttpRequest,
+    transfer: Transfer,
+    *,
+    error: str = '',
+    notice: str = '',
+    status: int = 200,
 ) -> HttpResponse:
     return render(
         request,
         'file_transfer/partials/transfer_row.html',
-        {'transfer': transfer, 'error': error},
+        {'transfer': transfer, 'error': error, 'notice': notice},
         status=status,
     )
 
 
 def _respond(
-    request: AuthenticatedHttpRequest, transfer: Transfer, *, error: str = '', status: int = 200
+    request: AuthenticatedHttpRequest,
+    transfer: Transfer,
+    *,
+    error: str = '',
+    notice: str = '',
+    status: int = 200,
 ) -> HttpResponse:
     """The htmx conventions from `CLAUDE.md`: on success, the updated row partial for htmx, a
     plain redirect back to the dashboard otherwise. A non-htmx request (JS disabled, or a script)
@@ -146,8 +156,10 @@ def _respond(
     if not is_htmx(request):
         if error:
             messages.error(request, error)
+        elif notice:
+            messages.success(request, notice)
         return redirect('file_transfer:dashboard')
-    return _row_response(request, transfer, error=error, status=status)
+    return _row_response(request, transfer, error=error, notice=notice, status=status)
 
 
 def _recipient_email_limited(
@@ -269,4 +281,4 @@ def resend_recipient(
         return _recipient_email_limited(request, transfer, exc)
     except ValidationError as exc:
         return _respond(request, transfer, error=exc.messages[0], status=422)
-    return _respond(request, transfer)
+    return _respond(request, transfer, notice=f'Sent the email to {recipient.email} again.')

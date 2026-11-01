@@ -4,6 +4,7 @@ from django.apps import AppConfig
 class QrCodeConfig(AppConfig):
     name = 'apps.qr_code'
     label = 'qr_code'
+    verbose_name = 'QR codes'
 
     def ready(self):
         from apps.core.products import ProductApp, register

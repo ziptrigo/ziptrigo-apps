@@ -1,0 +1,32 @@
+{% load static %}<!DOCTYPE html>
+{% comment %}What a scan of `/go/<code>` shows when the code is unknown or was deleted; it never says which.
+   Standalone on purpose, not `core/base.html`: the site layout reads the session and the user (a query or
+   two), and this page answers scans of made-up codes, so it renders from no context at all.{% endcomment %}
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>QR code unavailable - ZipTrigo</title>
+    <link rel="icon" type="image/png" href="{% static 'core/images/logo_32x32.png' %}">
+    <style>
+        :root { color-scheme: light dark; --bg: #ffffff; --text: #1a1f1d; --muted: #66716d; --link: #475a53; }
+        @media (prefers-color-scheme: dark) { :root { --bg: #1a1f1d; --text: #eef1f0; --muted: #98a39f; --link: #b5c7be; } }
+        body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+               background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+        main { max-width: 32rem; padding: 2rem 1rem; text-align: center; }
+        img { width: 48px; height: 48px; }
+        h1 { font-size: 1.5rem; margin: 1rem 0 0.5rem; }
+        p { color: var(--muted); margin: 0 0 1.5rem; }
+        a { color: var(--link); }
+    </style>
+</head>
+<body>
+    <main>
+        <img src="{% static 'core/images/logo_32x32.png' %}" alt="">
+        <h1>This QR code isn't available</h1>
+        <p>It may have been removed by its owner.</p>
+        <a href="/">Go to ZipTrigo</a>
+    </main>
+</body>
+</html>

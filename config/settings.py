@@ -103,6 +103,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     # Activates the signed-in user's time zone for the request (issue #177); needs `request.user`.
     'apps.accounts.middleware.TimezoneMiddleware',
+    # An htmx request that lost its session navigates to the login page instead of swapping it in.
+    'apps.core.middleware.HtmxLoginRedirectMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -937,7 +939,10 @@ JAZZMIN_SETTINGS = {
         {
             'name': 'Admin Tools',
             'url': 'custom_admin:admin_tools',
-            'permissions': ['accounts.add_user'],
+            # The tools page is superuser-only. jazzmin can only test permissions, and no one is
+            # granted this one (it doesn't exist), so only a superuser, who has every permission,
+            # sees the link.
+            'permissions': ['core.superuser_only'],
         },
     ],
 }

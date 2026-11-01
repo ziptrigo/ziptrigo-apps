@@ -144,3 +144,37 @@ def test_deleted_user_is_shown_as_such(client, admin_user, user):
     response = client.get(reverse(CHANGELIST))
 
     assert '(deleted user)' in response.content.decode()
+
+
+def test_bulk_actions_leave_a_history_entry_per_changed_row(client, admin_user, items):
+    from django.contrib.admin.models import LogEntry
+
+    client.force_login(admin_user)
+
+    client.post(
+        reverse(CHANGELIST),
+        {
+            'action': 'mark_closed',
+            '_selected_action': [str(items['new'].pk), str(items['closed'].pk)],
+        },
+    )
+
+    entries = LogEntry.objects.filter(user=admin_user)
+    assert [(e.object_id, e.change_message) for e in entries] == [
+        (str(items['new'].pk), 'Marked as Closed.')
+    ]
+
+
+def test_bulk_action_message_counts_only_the_rows_it_changed(client, admin_user, items):
+    client.force_login(admin_user)
+
+    response = client.post(
+        reverse(CHANGELIST),
+        {
+            'action': 'mark_closed',
+            '_selected_action': [str(items['new'].pk), str(items['closed'].pk)],
+        },
+        follow=True,
+    )
+
+    assert 'Marked 1 feedback as Closed.' in response.content.decode()

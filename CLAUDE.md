@@ -1549,11 +1549,23 @@ history:** `CreditAccount`/`CreditTransaction` cascade from the user and Django 
 row's admin `has_delete_permission`, so `UserAdmin.get_deleted_objects` (`apps/accounts/admin.py`,
 `CASCADE_WITH_USER_APP_LABELS`) drops a billing model from `perms_needed` when the caller holds its
 `delete_<model>` permission (what the default check asked before): superusers pass, staff still
-need it granted. The receipts and file_transfer read-only admins already refuse delete the same way,
-so a user with receipts or transfers still can't be deleted from the admin (not changed here). `short_url` and `todo` are in that list too, so their rows go with the user.
+need it granted. `receipts`, `short_url` and `todo` are in that list too, so their rows go with the
+user (Receipts' files go through its own `pre_delete(User)` receiver; a user who had opened Receipts
+used to be undeletable, E2E run #152). The file_transfer read-only admins still refuse delete, so a
+user with transfers can't be deleted from the admin.
 The user admin builds on Django's `UserAdmin` with email-based forms (`apps/accounts/forms/admin.py`),
-so passwords are only ever set through hashed password fields. Jazzmin's top menu links to the site
-and to the admin tools page.
+so passwords are only ever set through hashed password fields; its add page has its own
+`admin/accounts/user/add_form.html` (jazzmin's says "enter a username"). Jazzmin's top menu links to
+the site and to the admin tools page, the latter only for superusers: jazzmin can only test
+permissions, so the link asks for `core.superuser_only`, which exists nowhere and so only a
+superuser has (`test_admin_tools.py` fails if it is ever created); the dashboard's "Admin Tools" box is also superuser-only, and a staff user who opens
+the page anyway gets a 403 that shows none of the tools. The light/dark toggle
+(`core/js/admin_theme_toggle.js`) sets jazzmin 3's `data-bs-theme` and stores it under jazzmin's
+own `jazzmin-theme-mode` key, which jazzmin's early script reads before the page paints.
+**Admin actions leave History** (`apps.core.admin_log.log_change` / `log_addition`, one `LogEntry`
+per object): Django logs only change-form saves, so the moderation actions (take down, block
+sender/domain, deactivate owner, release hold, dismiss) and the feedback status actions log what
+they did themselves; a takedown's line carries the reason the sender sees, never the internal note.
 
 Singleton settings pages (superusers only, one row, `changelist_view` redirects straight to the
 change form): `CoreSettingsAdmin` (`/admin/core/coresettings/`, email verification knobs -- issue
@@ -1561,8 +1573,8 @@ change form): `CoreSettingsAdmin` (`/admin/core/coresettings/`, email verificati
 products -- issue #98) and `FileTransferSettingsAdmin`
 (`/admin/file_transfer/filetransfersettings/`, spec section 9, plus the issue #59
 `auto_hold_report_threshold`). All three share the
-`apps.core.admin_singleton.SingletonSettingsAdmin` base (superusers only, add only while no row
-exists, never delete, changelist redirects to the change form; the URL name is derived from the
+`apps.core.admin_singleton.SingletonSettingsAdmin` base (superusers only, never "Add" -- the
+changelist creates the row on first visit --, never delete, changelist redirects to the change form; the URL name is derived from the
 model), and each loads its row with the model's own `.load()` classmethod
 (`apps.core.models.singleton.load_singleton`, which re-reads the row if a concurrent first use
 loses the insert race) rather than a fixture. The free-text fields are checked in the model's
@@ -1592,6 +1604,12 @@ package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
 - On validation errors, return the partial with status **422**. `core/base.html` configures htmx
   (`htmx-config` meta tag) to swap 422 responses; use `HX-Retarget` to send errors somewhere
   other than the request's target (see `apps/qr_code/views/editor.py`).
+- **An htmx request without a session** gets `HX-Redirect` to the login page instead of the 302
+  `@login_required` answers (`apps.core.middleware.HtmxLoginRedirectMiddleware`, after
+  `TimezoneMiddleware`; sync and async): htmx's XHR would follow the 302 and swap the whole login
+  page into the target. The `next` it carries is the page htmx was on (`HX-Current-URL`, same-site
+  only, else `/`), not the partial endpoint. Only a redirect to `LOGIN_URL` is rewritten, so the
+  notification bell's own 204 and every other redirect are untouched.
 - Put shared create/update logic *and its validation rules* in the app's `services/`, so the web
   view and the API endpoint both call it and enforce the same rules (e.g.
   `apps.qr_code.services.create_qrcode` / `validate_content`). Forms call the service validators
@@ -1650,6 +1668,12 @@ writes lives in `MEDIA_ROOT` on the container's disk, which `static()` serves on
 `DEBUG=True` and a redeploy empties: nothing displays it. Short codes
 for tracked QR codes are issued by the server (`qr_code:short-code`) and kept in the session until
 the save, so users can't choose their own; a code taken in the meantime is replaced.
+A scan of an unknown or a *deleted* code gets the same neutral 404 page (`qr_code/unavailable.html`,
+standalone rather than the site layout and rendered without the request, so a made-up code costs no
+session or user query; a deleted code used to send the public to the login-only dashboard), and the edit and duplicate pages 404 for a
+deleted code. The dashboard sorts by Newest (default) or Name (`?sort=`, the search URL-encoded
+into the links); it has no row checkboxes. The editor can't set the error-correction level, so its
+"too long" message only says to shorten the text (or, for a URL, to turn on tracking).
 The image options only the API sets (`size`, `border`, `qr_format`, `error_correction`, the two
 colours) are checked by `services.validate_render_options`, called by `create_qrcode` and
 `render_preview` before anything is saved or rendered (so a bad one is a 400 and leaves no row):

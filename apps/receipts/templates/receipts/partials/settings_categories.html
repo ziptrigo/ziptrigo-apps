@@ -15,7 +15,7 @@
             </div>
             <form x-show="editing" style="display: none" method="post" action="{% url 'receipts:category-rename' category.pk %}"
                   hx-post="{% url 'receipts:category-rename' category.pk %}" hx-target="#categories" hx-swap="innerHTML"
-                  class="flex items-center gap-2" @keydown.escape="editing = false">
+                  class="flex items-center gap-2" @keydown.escape="$el.reset(); editing = false">
                 {% csrf_token %}
                 <label for="rename-{{ category.pk }}" class="sr-only">Category name</label>
                 <input id="rename-{{ category.pk }}" name="name" type="text" value="{{ category.name }}" maxlength="100" required
@@ -23,7 +23,7 @@
                        class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
                 <button type="submit" aria-label="Save name" title="Save"
                         class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
-                <button type="button" @click="editing = false" aria-label="Cancel renaming" title="Cancel"
+                <button type="button" @click="$el.form.reset(); editing = false" aria-label="Cancel renaming" title="Cancel"
                         class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
             </form>
         </div>

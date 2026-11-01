@@ -3,6 +3,7 @@
 from asgiref.sync import sync_to_async
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
+from django.template.loader import render_to_string
 
 from apps.core import ratelimit
 
@@ -29,11 +30,12 @@ async def redirect_short_url(request: HttpRequest, short_code: str) -> HttpRespo
     try:
         qrcode = await sync_to_async(QRCode.objects.get)(short_code=short_code)
     except QRCode.DoesNotExist:
-        return HttpResponse('QR Code not found', status=404)
+        return await _unavailable(request)
 
-    # Redirect to dashboard if QR code is soft-deleted
+    # A deleted code answers like an unknown one: the person scanning it is not its owner, so
+    # sending them to the (login-only) dashboard only led to the login page.
     if qrcode.deleted_at:
-        return redirect('qr_code:dashboard')
+        return await _unavailable(request)
 
     if limited.allowed:
         await qrcode.aincrement_scan_count()
@@ -43,3 +45,9 @@ async def redirect_short_url(request: HttpRequest, short_code: str) -> HttpRespo
         return redirect(qrcode.original_url)
 
     return HttpResponse('No redirect URL available for this QR code', status=400)
+
+
+async def _unavailable(request: HttpRequest) -> HttpResponse:
+    """The neutral 404 page for an unknown or deleted code. Rendered without the request (so no
+    context processor, no session, no query): this path also answers made-up codes."""
+    return HttpResponse(render_to_string('qr_code/unavailable.html'), status=404)

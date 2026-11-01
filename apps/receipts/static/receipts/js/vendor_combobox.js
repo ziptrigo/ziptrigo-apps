@@ -20,6 +20,9 @@ document.addEventListener('alpine:init', function () {
             originalId: '',
             extracted: '',
             open: false,
+            // Escape closed the list: suggestions still in flight must not reopen it until the
+            // text changes or the arrows ask for it.
+            dismissed: false,
             active: -1,
             activeId: '',
 
@@ -51,12 +54,15 @@ document.addEventListener('alpine:init', function () {
             // Typing turns a picked vendor back into a plain name.
             edited() {
                 this.vendorId = '';
+                this.dismissed = false;
             },
 
             // The listbox was just filled by htmx.
             onSwap() {
                 this.setActive(-1);
-                this.open = this.options().length > 0 && document.activeElement === this.$refs.input;
+                this.open = !this.dismissed
+                    && this.options().length > 0
+                    && document.activeElement === this.$refs.input;
             },
 
             close() {
@@ -98,6 +104,7 @@ document.addEventListener('alpine:init', function () {
                     case 'ArrowUp': {
                         if (options.length === 0) return;
                         event.preventDefault();
+                        this.dismissed = false;
                         this.open = true;
                         const step = event.key === 'ArrowDown' ? 1 : -1;
                         this.setActive((this.active + step + options.length) % options.length);
@@ -111,6 +118,8 @@ document.addEventListener('alpine:init', function () {
                         }
                         break;
                     case 'Escape':
+                        // Also when the list hasn't opened yet: a reply still on its way stays closed.
+                        this.dismissed = true;
                         if (this.open) {
                             event.preventDefault();
                             event.stopPropagation();

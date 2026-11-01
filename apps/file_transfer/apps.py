@@ -6,6 +6,7 @@ from django.apps import AppConfig
 class FileTransferConfig(AppConfig):
     name = 'apps.file_transfer'
     label = 'file_transfer'
+    verbose_name = 'File transfer'
 
     def ready(self):
         from apps.core.products import ProductApp, register

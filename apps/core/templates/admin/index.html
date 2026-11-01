@@ -3,6 +3,7 @@
 {% block content %}
 {{ block.super }}
 
+{% if request.user.is_superuser %}
 <div class="module">
     <h2>Admin Tools</h2>
     <p>
@@ -14,4 +15,5 @@
         Access utilities such as sending test emails or viewing masked environment variables.
     </p>
 </div>
+{% endif %}
 {% endblock %}

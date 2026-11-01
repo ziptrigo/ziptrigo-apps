@@ -72,7 +72,7 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/` and click **QR Codes** in the top navigation (qrcode icon). | Lands on `/qr/`. Browser tab title "Dashboard - ZipTrigo". |
-| 2 | Look at the page. | Heading "QR codes"; a **New QR code** button (plus icon) at the top right; a search box with placeholder "Search by name" and no clear (×) button visible; a list header with a "Select all" checkbox and a sortable "Name" link; one row reading "No QR codes found.". No broken images, no raw `{{ }}`/`{% %}`, no console errors. |
+| 2 | Look at the page. | Heading "QR codes"; a **New QR code** button (plus icon) at the top right; a search box with placeholder "Search by name" and no clear (×) button visible; a list header "Sort by" with **Newest** (marked current) and **Name** links, and no checkboxes; one row reading "No QR codes found.". No broken images, no raw `{{ }}`/`{% %}`, no console errors. |
 | 3 | Click **New QR code**. | Goes to `/qr/create/`. |
 
 ### QR-03 Editor layout in create mode
@@ -188,8 +188,8 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 |---|---|---|
 | 1 | Open `SHORT_URL` (`http://localhost:8765/go/<CODE>`) in the browser. | Redirected (302) to `http://localhost:8765/?from=qr`: the ZipTrigo home page loads. |
 | 2 | Open `http://localhost:8765/go/<CODE>/` (trailing slash). | Same redirect to `/?from=qr`. |
-| 3 | Open `/go/<CODE>` with the case of one letter flipped (e.g. `a` ↔ `A`). | 404 with the plain-text body "QR Code not found" (codes are case-sensitive). |
-| 4 | Open `/go/doesnotexist`. | 404, plain text "QR Code not found". |
+| 3 | Open `/go/<CODE>` with the case of one letter flipped (e.g. `a` ↔ `A`). | 404 page in the site layout: "This QR code isn't available" (codes are case-sensitive). |
+| 4 | Open `/go/doesnotexist`. | The same 404 page, "This QR code isn't available". |
 | 5 | Open `/go/`. | 404 (Django "Page not found", since the server runs with `DEBUG=True`); no redirect. |
 | 6 | Log out (account icon → **Logout**), open `SHORT_URL` again, then log back in as `qa.user`. | Logged out, the short link still redirects to `/?from=qr` (short links are public). |
 
@@ -259,8 +259,9 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 | 3 | Press **Enter**. | URL becomes `/qr/?q=tracked`; only the two "QA Tracked…" rows are listed; the box keeps `tracked`. |
 | 4 | Click the × button. | Back to `/qr/` with all four rows and an empty box. |
 | 5 | Search `zzz`. | "No QR codes found." |
-| 6 | Search `plain`, then click the **Name** header link. | URL is `/qr/?sort=name&q=plain`; still only `QA Plain URL`. |
+| 6 | Search `plain`, then click the **Name** sort link. | URL is `/qr/?sort=name&q=plain`; still only `QA Plain URL`; **Name** is now the current sort. |
 | 7 | Clear the search, then click **Name**. | Alphabetical: `QA Plain URL`, `QA Text`, `QA Tracked (renamed)`, `QA Tracked copy`. |
+| 8 | Click **Newest**. | Back to newest first, as in step 1. |
 
 ### QR-17 Search terms with special characters survive sorting
 
@@ -271,7 +272,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 |---|---|---|
 | 1 | Create a Text QR code named `R&D Lab` with content `R&D`. | Saved; five rows. |
 | 2 | Search `R&D`. | URL `/qr/?q=R%26D`; only `R&D Lab` is listed. |
-| 3 | Click the **Name** header link. | Still only `R&D Lab`, and the search box still says `R&D` (the link should be `?sort=name&q=R%26D`). If other codes appear too (every name containing "r"), or the box shows only `R`, mark FAIL: the term is not URL-encoded in the sort link (it becomes `?sort=name&q=R&D`). |
+| 3 | Click the **Name** sort link. | Still only `R&D Lab`, and the search box still says `R&D` (the link should be `?sort=name&q=R%26D`). If other codes appear too (every name containing "r"), or the box shows only `R`, mark FAIL: the term is not URL-encoded in the sort link (it becomes `?sort=name&q=R&D`). |
 
 ### QR-18 Too long, and too big for a QR code
 
@@ -284,7 +285,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 | 2 | Click **Preview**. | A QR code is rendered (1,000 ASCII characters fit). |
 | 3 | In the console run `const t = document.querySelector('textarea[name=url]'); t.removeAttribute('maxlength'); t.value = 'a'.repeat(1001);` then click **Preview**. | Red message: "Text / URL: Ensure this value has at most 1000 characters (it has 1001)." |
 | 4 | Click **Save** (the textarea still holds 1,001 characters). | The same message; still on `/qr/create/`; no row is created. |
-| 5 | Reload. Name `Too big`, Type `Text`, then in the console set `document.querySelector('textarea[name=url]').value = '한'.repeat(1000)` and click **Preview**. | Red message: "Text / URL: That is too long for a QR code at this error correction level. Please shorten it or choose a lower error correction level." (Observation to report: the web editor has no error-correction control, so the second suggestion can't be followed here.) |
+| 5 | Reload. Name `Too big`, Type `Text`, then in the console set `document.querySelector('textarea[name=url]').value = '한'.repeat(1000)` and click **Preview**. | Red message: "Text / URL: That is too long for a QR code. Please shorten it." (For a URL it adds: or turn on "Track QR Code".) |
 | 6 | Click **Save**. | Same message; nothing is created. |
 | 7 | Replace the content with `'😀'.repeat(500)` (console) and click **Preview**. | A (dense) QR code renders: 500 emoji fit. |
 | 8 | Click **Cancel**, check `/qr/`. | Still five rows (`Too long`/`Too big` were never saved). |
@@ -338,8 +339,8 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Delete `QA Tracked copy` through the menu and the modal. | It disappears from the list. |
-| 2 | Open its short URL while logged in. | Redirected to `/qr/` (the dashboard), not to `/?from=qr`. |
-| 3 | Log out and open the same short URL. | Redirected to `/qr/`, which sends the logged-out visitor on to `/account/login/?next=/qr/`. Record this as an observation: a member of the public scanning a deleted code lands on a login page rather than a neutral "no longer available" page. |
+| 2 | Open its short URL while logged in. | 404 page in the site layout, "This QR code isn't available"; not redirected to `/?from=qr`. |
+| 3 | Log out and open the same short URL. | The same 404 page, with no login redirect. |
 | 4 | Open `SHORT_URL` (`QA Tracked (renamed)`, not deleted). | Still redirects to `/?from=qr`. |
 | 5 | Sign back in as `qa.user`. | — |
 

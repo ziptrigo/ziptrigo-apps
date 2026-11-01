@@ -544,3 +544,60 @@ def test_block_sender_take_down_checkbox_requires_takedown_permission(
     assert not BlockedSender.objects.filter(
         kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email.lower()
     ).exists()
+
+
+def test_take_down_and_dismiss_leave_admin_history(
+    client, admin_user, draft_transfer, uploaded_file
+):
+    """Issue #152: moderation actions used to leave no LogEntry."""
+    from django.contrib.admin.models import LogEntry
+
+    from ..services.reports import create_report
+
+    _active(draft_transfer)
+    first = create_report(draft_transfer, reason=AbuseReportReason.OTHER)
+    client.force_login(admin_user)
+    client.post(
+        reverse('custom_admin:file_transfer_abusereport_changelist'),
+        data={'action': 'dismiss_action', '_selected_action': [str(first.id)]},
+    )
+    client.post(
+        reverse('custom_admin:file_transfer_transfer_changelist'),
+        data={
+            'action': 'take_down_action',
+            '_selected_action': [str(draft_transfer.id)],
+            'apply': 'yes',
+            'reason': 'spam',
+        },
+    )
+
+    messages = {e.object_id: e.change_message for e in LogEntry.objects.filter(user=admin_user)}
+    assert messages == {str(first.id): 'Dismissed.', str(draft_transfer.id): 'Taken down: spam'}
+
+
+def test_block_sender_does_not_log_or_count_an_already_inactive_owner(
+    client, admin_user, draft_transfer, uploaded_file
+):
+    from django.contrib.admin.models import LogEntry
+
+    from apps.accounts.models import User
+
+    _active(draft_transfer)
+    User.objects.filter(pk=draft_transfer.owner_id).update(status=User.STATUS_INACTIVE)
+    client.force_login(admin_user)
+
+    response = client.post(
+        reverse('custom_admin:file_transfer_transfer_changelist'),
+        data={
+            'action': 'block_sender_action',
+            '_selected_action': [str(draft_transfer.id)],
+            'apply': 'yes',
+            'block_email': 'on',
+            'reason': 'spam',
+            'deactivate_account': 'on',
+        },
+        follow=True,
+    )
+
+    assert 'Deactivated 0 account(s).' in response.content.decode()
+    assert not LogEntry.objects.filter(object_id=str(draft_transfer.owner_id)).exists()

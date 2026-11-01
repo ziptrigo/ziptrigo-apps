@@ -9,8 +9,10 @@ class ResetPasswordForm(forms.Form):
     URL (`apps.accounts.views.reset_password.reset_password_page`), not a form field.
     """
 
-    password = forms.CharField(strip=False, widget=forms.PasswordInput)
-    password_confirm = forms.CharField(strip=False, widget=forms.PasswordInput)
+    password = forms.CharField(label='New password', strip=False, widget=forms.PasswordInput)
+    password_confirm = forms.CharField(
+        label='Confirm password', strip=False, widget=forms.PasswordInput
+    )
 
     def clean_password(self) -> str:
         password = self.cleaned_data.get('password', '')

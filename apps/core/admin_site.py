@@ -118,14 +118,8 @@ class CustomAdminSite(admin.AdminSite):
         email_form: forms.Form = TestEmailForm(initial={'recipient': initial_email})
 
         if not request.user.is_superuser:
-            messages.error(request, 'You do not have permission to access this page.')
-            context = {
-                **self.each_context(request),
-                'title': 'Admin Tools',
-                'email_form': email_form,
-                'environment': environment,
-                'environment_variables': None,
-            }
+            # The page says why and shows none of the tools (it used to render their forms).
+            context = {**self.each_context(request), 'title': 'Admin Tools', 'denied': True}
             return render(request, 'admin/tools.html', context, status=403)
 
         if request.method == 'POST' and 'send_test_email' in request.POST:

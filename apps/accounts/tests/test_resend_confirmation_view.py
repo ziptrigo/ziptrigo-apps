@@ -7,7 +7,7 @@ from django.urls import reverse
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
-SENT_MESSAGE = 'If the account exists and is not yet confirmed, a confirmation email will be sent.'
+SENT_MESSAGE = "If the account exists and is not yet confirmed, we'll send a confirmation email."
 
 
 def _resend(client, email, **extra):

@@ -1,7 +1,7 @@
 {% extends "core/base.html" %}
-{% load local_time %}
+{% load core_ui local_time %}
 
-{% block title %}Credits History{% endblock %}
+{% block title %}Credits History - ZipTrigo{% endblock %}
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
@@ -12,7 +12,7 @@
         <div>
           <h1 class="text-2xl font-semibold">Credits History</h1>
           <p class="text-sm text-gray-600 dark:text-gray-300">
-            Current balance: <span class="font-medium">{{ credits_balance }}</span> credits
+            Current balance: <span class="font-medium">{{ credits_balance }}</span> credit{{ credits_balance|pluralize }}
           </p>
         </div>
       </div>
@@ -44,7 +44,7 @@
               {% else %}
                 <span class="text-red-700 dark:text-red-400 font-medium">{{ tx.amount }}</span>
               {% endif %}
-              <span class="text-xs text-gray-500 dark:text-gray-400">({{ tx.get_type_display|lower }})</span>
+              <span class="ml-1">{% pill 'gray' tx.get_type_display %}</span>
             </td>
             <td class="py-2">
               {% if tx.description %}

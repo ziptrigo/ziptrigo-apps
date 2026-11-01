@@ -155,10 +155,16 @@ def test_without_htmx_errors_render_full_page(client, user):
 
 
 def test_requires_login(client):
-    response = _change(client)
+    response = _change(client, htmx=False)
 
     assert response.status_code == 302
     assert response['Location'].startswith(reverse('accounts:login'))
+
+
+def test_requires_login_htmx_navigates_to_the_login_page(client):
+    response = _change(client)
+
+    assert response['HX-Redirect'].startswith(reverse('accounts:login'))
 
 
 def test_get_not_allowed(client, user):

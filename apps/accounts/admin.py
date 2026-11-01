@@ -14,8 +14,8 @@ from .services.timezones import set_timezone
 # Apps whose rows hang off a user with `on_delete=CASCADE` and are meant to go with it, although
 # their own admins refuse delete (a ledger row must not be removed by hand, but deleting the
 # account removes ledger and balance together, which keeps them consistent). Named by label because
-# `accounts` can't import them.
-CASCADE_WITH_USER_APP_LABELS = ('billing', 'short_url', 'todo')
+# `accounts` can't import them. Receipts' files are deleted by its own `pre_delete(User)` receiver.
+CASCADE_WITH_USER_APP_LABELS = ('billing', 'receipts', 'short_url', 'todo')
 # The same, for single models (`'<app label>.<model name>'`) of an app that has other models which
 # must keep asking: `core` is a grab bag, so only its notifications (read-only in the admin) are
 # listed, and a future `core` model with a user FK is not exempted without anyone deciding so.
@@ -31,6 +31,7 @@ class UserAdmin(DjangoUserAdmin):
 
     form = UserAdminChangeForm
     add_form = UserAdminCreationForm
+    add_form_template = 'admin/accounts/user/add_form.html'
 
     list_display = [
         'email',

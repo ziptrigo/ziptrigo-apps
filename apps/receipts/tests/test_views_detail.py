@@ -378,6 +378,20 @@ class TestStates:
         assert f'href="{url("detail", processed)}"' in content
         assert 'Not a duplicate' in content and url('dismiss-duplicate', dup) in content
 
+    def test_a_trashed_duplicate_keeps_the_banner_without_the_button(
+        self, web, processed, make_receipt
+    ):
+        dup = make_receipt(
+            status=ReceiptStatus.PROCESSED,
+            possible_duplicate_of=processed,
+            deleted_at=timezone.now(),
+        )
+
+        content = web.get(url('detail', dup)).content.decode()
+
+        assert 'Possible duplicate' in content
+        assert url('dismiss-duplicate', dup) not in content
+
     def test_a_dismissed_duplicate_shows_no_banner(self, web, processed, make_receipt):
         dup = make_receipt(
             status=ReceiptStatus.PROCESSED,

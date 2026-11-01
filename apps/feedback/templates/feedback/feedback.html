@@ -1,6 +1,6 @@
 {% extends "core/base.html" %}
 
-{% block title %}Send feedback{% endblock %}
+{% block title %}Send feedback - ZipTrigo{% endblock %}
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
@@ -13,7 +13,7 @@
       Found a bug, have an idea, or want to tell us what you think? Every message is read.
     </p>
 
-    <div id="feedback-msg" class="text-sm"></div>
+    <div id="feedback-msg" class="text-sm" aria-live="polite"></div>
 
     {% include 'feedback/partials/feedback_form.html' %}
   </div>
