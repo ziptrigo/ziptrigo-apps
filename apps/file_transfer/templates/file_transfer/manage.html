@@ -20,9 +20,12 @@
         </p>
 
         {% if transfer.status == 'active' %}
-        {% comment %}Disabling can't be undone from here, so it asks first (the shared confirm modal posts the same form).{% endcomment %}
+        {% comment %}Disabling can't be undone from here, so it asks first: with Alpine the button opens the shared
+           confirm modal (which posts to the same URL); without JavaScript it simply submits the form.{% endcomment %}
         <div x-data="confirmModal">
-            <button type="button" @click="show($el)"
+            <form method="post" action="{% url 't:manage-disable' transfer.slug transfer.manage_token %}">
+            {% csrf_token %}
+            <button type="submit" @click.prevent="show($el)"
                     data-url="{% url 't:manage-disable' transfer.slug transfer.manage_token %}"
                     data-title="Disable this transfer?"
                     data-body="The download link stops working for everyone, and it can't be turned back on."
@@ -30,6 +33,7 @@
                     class="btn px-4 py-2 rounded-lg text-sm bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-100">
                 Disable this transfer
             </button>
+            </form>
             {% include 'core/partials/confirm_modal.html' %}
         </div>
         {% elif transfer.status == 'disabled' %}

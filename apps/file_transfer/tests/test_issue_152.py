@@ -41,6 +41,16 @@ class TestRecipientEmail:
         assert 'paused.bin' not in kwargs['text_body']
         assert kwargs['subject'] == 'a.txt and 2 more files were sent to you via ZipTrigo'
 
+    def test_subject_skips_a_file_still_uploading(self, user):
+        transfer = Transfer.objects.create(owner=user, status=TransferStatus.ACTIVE)
+        _file(transfer, 'paused.bin', uploaded=False)
+        _file(transfer, 'a.txt')
+        _file(transfer, 'b.txt')
+
+        assert _sent(transfer).call_args.kwargs['subject'] == (
+            'a.txt and 1 more file were sent to you via ZipTrigo'
+        )
+
     def test_one_file(self, user):
         transfer = Transfer.objects.create(owner=user, status=TransferStatus.ACTIVE)
         _file(transfer, 'only.pdf')
@@ -107,4 +117,9 @@ class TestManagePage:
 
         assert 'Downloaded 0 times.' in html
         assert 'x-data="confirmModal"' in html
+        # Without JavaScript the button still submits a plain form.
+        assert (
+            f'<form method="post" action="/t/{transfer.slug}/manage/{transfer.manage_token}/disable/">'
+            in html
+        )
         assert 'data-title="Disable this transfer?"' in html

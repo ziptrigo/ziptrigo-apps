@@ -129,8 +129,16 @@ class CreditTransactionAdmin(admin.ModelAdmin):
         # matches several legacy rows only in case must be typed exactly as stored.
         matches = list(User.objects.filter(email__iexact=user_email))
         if len(matches) > 1:
-            matches = [u for u in matches if u.email == user_email]
-        if len(matches) != 1:
+            exact = [u for u in matches if u.email == user_email]
+            if len(exact) != 1:
+                messages.error(
+                    request,
+                    f'Several accounts match {user_email} in different case; type the address '
+                    'exactly as it is stored.',
+                )
+                return False
+            matches = exact
+        if not matches:
             messages.error(request, f'No user found with email: {user_email}')
             return False
         target = matches[0]

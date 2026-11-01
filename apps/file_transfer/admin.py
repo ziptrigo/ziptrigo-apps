@@ -290,11 +290,14 @@ def _block_sender_confirm_response(
             if form.cleaned_data['deactivate_account']:
                 owners = {t.owner for t in transfers if t.owner is not None}
                 for owner in owners:
-                    User.objects.filter(pk=owner.pk).exclude(status=User.STATUS_INACTIVE).update(
-                        status=User.STATUS_INACTIVE
-                    )
-                    admin_log.log_change(request, [owner], 'Deactivated: sender blocked.')
-                    deactivated_count += 1
+                    # Only an account that was still active counts (and gets a History entry).
+                    if (
+                        User.objects.filter(pk=owner.pk)
+                        .exclude(status=User.STATUS_INACTIVE)
+                        .update(status=User.STATUS_INACTIVE)
+                    ):
+                        admin_log.log_change(request, [owner], 'Deactivated: sender blocked.')
+                        deactivated_count += 1
 
             message = f'Added {len(created)} block-list entry/entries.'
             if form.cleaned_data['take_down_active_transfers']:

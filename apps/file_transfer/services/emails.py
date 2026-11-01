@@ -39,9 +39,12 @@ def send_transfer_notification(transfer_id: str, recipient_email: str) -> None:
     if transfer.expires_at:
         body_lines.append(f'This link expires on {transfer.expires_at:%Y-%m-%d %H:%M} UTC.')
 
+    # The same list as the body: `name` is the first file of any state, which may be one still
+    # uploading and so not part of the transfer.
+    first = names[0] if names else name
     others = len(names) - 1
     subject_name = (
-        f'{name} and {others} more file{"s" if others != 1 else ""}' if others > 0 else name
+        f'{first} and {others} more file{"s" if others != 1 else ""}' if others > 0 else first
     )
     send_email(
         to=recipient_email,

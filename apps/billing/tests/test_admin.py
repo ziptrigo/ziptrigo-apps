@@ -258,3 +258,18 @@ def test_balance_changes_move_updated_at(regular_user):
 
     account.refresh_from_db()
     assert account.updated_at.year != 2000
+
+
+def test_adjustment_refuses_an_email_that_matches_several_accounts_only_in_case(client, admin_user):
+    UserFactory(email='dup@example.com')
+    UserFactory(email='Dup@example.com')
+    client.force_login(admin_user)
+
+    response = client.post(
+        reverse(URL),
+        {'user_email': 'DUP@example.com', 'direction': 'add', 'amount': 3},
+        follow=True,
+    )
+
+    assert 'Several accounts match DUP@example.com' in response.content.decode()
+    assert not CreditTransaction.objects.exists()
