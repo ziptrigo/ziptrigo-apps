@@ -47,3 +47,4 @@
     <li class="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No saved filters yet. Search for something, then choose "Save as filter".</li>
     {% endfor %}
 </ul>
+{% if clear_msg %}{% comment %} A success clears a refusal an earlier request left in the message slot. {% endcomment %}<div id="filter-msg" hx-swap-oob="true" class="mb-4 text-sm" aria-live="polite"></div>{% endif %}

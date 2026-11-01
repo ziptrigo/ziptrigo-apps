@@ -3,8 +3,9 @@
    labels), `view` (the list it is in: today, upcoming, all, completed, trash, or subtask on the task page),
    `today`, and `sortable` for a drag handle. Its actions are htmx posts that answer this row again, or
    nothing when the row no longer belongs to the list (`views.tasks.after_action`); the <li> carries the
-   target and the values every action sends. {% endcomment %}
-<li id="task-{{ task.number }}" data-task-id="{{ task.pk }}"
+   target and the values every action sends. With `oob` the row is sent out of band, to refresh a row the action
+   did not answer. {% endcomment %}
+<li id="task-{{ task.number }}" data-task-id="{{ task.pk }}"{% if oob %} hx-swap-oob="true"{% endif %}
     hx-target="#task-{{ task.number }}" hx-swap="outerHTML swap:200ms"
     hx-vals='{"view": "{{ view }}", "ctx": "row"{% if sortable %}, "sortable": "1"{% endif %}}'
     class="task-row row-leave row-enter flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">

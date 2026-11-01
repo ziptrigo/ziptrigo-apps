@@ -60,7 +60,7 @@ def _list_response(request: AuthenticatedHttpRequest) -> HttpResponse:
     if not is_htmx(request):
         return redirect(_filters_url())
     rows = filter_rows(request.user, list(list_filters(request.user)))
-    return render(request, 'todo/partials/filter_list.html', {'rows': rows})
+    return render(request, 'todo/partials/filter_list.html', {'rows': rows, 'clear_msg': True})
 
 
 @login_required

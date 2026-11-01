@@ -187,3 +187,23 @@ def test_the_header_is_positioned_for_the_dropdown_on_a_phone(client, user):
 
     assert '<header class="relative ' in html
     assert 'sm:right-0' in html
+
+
+def test_escape_closes_the_dropdown_wherever_the_focus_is(client, user):
+    """Focus can end on <body> (a swapped-out button), and a keydown there never reaches the
+    wrapper, so the handler listens on the window."""
+    client.force_login(user)
+
+    html = client.get(reverse('core:home')).content.decode()
+
+    assert '@keydown.escape.window="if (open)' in html
+
+
+def test_the_lists_the_actions_swap_keep_keyboard_focus(client, user):
+    client.force_login(user)
+
+    home = client.get(reverse('core:home')).content.decode()
+    page = client.get(reverse('core:notifications')).content.decode()
+
+    assert 'id="notification-dropdown-body" aria-live="polite" data-keep-focus' in home
+    assert 'id="notification-list" data-keep-focus' in page
