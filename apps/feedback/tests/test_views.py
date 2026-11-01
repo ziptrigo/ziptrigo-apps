@@ -95,13 +95,17 @@ def test_invalid_post_returns_422_partial_and_saves_nothing(client, user, sent_e
 
     html = response.content.decode()
     assert response.status_code == 422
-    assert 'Please write your feedback.' in html
+    assert 'Write something before sending.' in html
     # The message goes under the textarea (core/js/field_errors.js), carried as hidden data.
-    assert '<li data-field-error="description">Please write your feedback.</li>' in html
+    assert '<li data-field-error="description">Write something before sending.</li>' in html
     assert '<html' not in html
     # Clears a rate-limit message left over from an earlier 429, out of band.
     assert html.count('id="feedback-msg"') == 1
     assert 'id="feedback-msg" hx-swap-oob="true"' in html
+    # The slot (out of band) says it too, as a `Label: message` line in a live region.
+    slot = html.split('id="feedback-msg"', 1)[1].split('</div></div>', 1)[0]
+    assert 'role="alert"' in slot
+    assert 'Your feedback: Write something before sending.' in slot
     assert not Feedback.objects.exists()
     assert sent_emails == []
 
@@ -127,6 +131,10 @@ def test_invalid_post_without_htmx_renders_the_full_page(client, user):
     assert '<html' in html
     assert html.count('id="feedback-msg"') == 1
     assert 'hx-swap-oob' not in html
+    # Without htmx the page's own slot carries the line.
+    slot = html.split('id="feedback-msg"', 1)[1]
+    assert 'role="alert"' in slot.split('</form>', 1)[0]
+    assert 'Your feedback: Write something before sending.' in slot.split('<form', 1)[0]
 
 
 def test_over_the_rate_limit_returns_429(client, user, settings):
@@ -223,16 +231,15 @@ def test_post_to_thanks_is_not_allowed(client, user):
     assert client.post(reverse('feedback:thanks')).status_code == 405
 
 
-def test_the_refused_field_is_named_for_the_page_and_the_form_has_a_noscript_fallback(client, user):
-    """Issue #219: the form has no message slot, so the field's message is hidden data for
-    `core/js/field_errors.js`, and listed in a `<noscript>` for a visitor without JavaScript."""
+def test_the_refused_field_is_named_for_the_page(client, user):
+    """Issue #219: the field's message is hidden data for `core/js/field_errors.js`; the slot has
+    the `Label: message` line, so the form needs no `<noscript>` copy."""
     client.force_login(user)
 
     html = client.post(reverse('feedback:submit'), {'description': ' '}, **HTMX).content.decode()
 
     assert html.count('data-field-error="description"') == 1
-    assert '<noscript>' in html
-    assert '<li>Please write your feedback.</li>' in html
+    assert '<noscript>' not in html
 
 
 def test_a_fresh_form_carries_no_field_data(client, user):

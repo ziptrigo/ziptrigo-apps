@@ -11,7 +11,7 @@ def test_blank_is_rejected(value):
     form = FeedbackForm({'description': value})
 
     assert not form.is_valid()
-    assert form.errors['description'] == ['Please write your feedback.']
+    assert form.errors['description'] == ['Write something before sending.']
 
 
 def test_too_long_is_rejected():
