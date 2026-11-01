@@ -30,11 +30,24 @@ class QRCodeCreateForm(forms.Form):
                 validate_content(cleaned['qr_type'], cleaned['url'])
                 # The editor can't set the error correction level; a tracked URL encodes the
                 # short link, which always fits.
-                if not (cleaned['qr_type'] == QRCodeType.URL and cleaned['use_url_shortening']):
-                    check_content_fits(cleaned['url'], QRCode().error_correction)
+                is_url = cleaned['qr_type'] == QRCodeType.URL
+                if not (is_url and cleaned['use_url_shortening']):
+                    self._check_fits(cleaned['url'], is_url)
             except forms.ValidationError as e:
                 self.add_error('url', e)
         return cleaned
+
+    @staticmethod
+    def _check_fits(content: str, is_url: bool) -> None:
+        """`check_content_fits`, with advice the editor can follow (it has no error-correction
+        level to lower; a long URL fits once tracked, since the code then holds the short link)."""
+        try:
+            check_content_fits(content, QRCode().error_correction)
+        except forms.ValidationError:
+            advice = ' or turn on "Track QR Code"' if is_url else ''
+            raise forms.ValidationError(
+                f'That is too long for a QR code. Please shorten it{advice}.'
+            ) from None
 
     def qrcode_fields(self) -> dict:
         """Keyword arguments for `services.create_qrcode` / `services.render_preview`."""

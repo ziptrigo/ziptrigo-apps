@@ -19,15 +19,15 @@
 
     <!-- Name -->
     <div class="mb-4">
-      <label class="block mb-1 text-sm font-medium">Name</label>
-      <input type="text" name="name" maxlength="255" required value="{% if qrcode %}{{ qrcode.name }}{% else %}{{ prefill.name|default:'' }}{% endif %}"
+      <label for="qr-name" class="block mb-1 text-sm font-medium">Name</label>
+      <input id="qr-name" type="text" name="name" maxlength="255" required value="{% if qrcode %}{{ qrcode.name }}{% else %}{{ prefill.name|default:'' }}{% endif %}"
              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
     </div>
 
     <!-- Type (read-only in edit mode) -->
     {% if qrcode %}
     <div class="mb-4">
-      <label class="block mb-1 text-sm font-medium">Type</label>
+      <span class="block mb-1 text-sm font-medium">Type</span>
       <div class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 px-3 py-2">
         {{ qrcode.get_qr_type_display }}
       </div>
@@ -36,8 +36,8 @@
 
     <!-- Text / URL -->
     <div class="mb-4">
-      <label class="block mb-1 text-sm font-medium">Text / URL{% if qrcode %} (read-only){% else %} to encode{% endif %}</label>
-      <textarea name="url" maxlength="1000" rows="4" {% if qrcode %}disabled{% else %}required{% endif %}
+      <label for="qr-content" class="block mb-1 text-sm font-medium">Text / URL{% if qrcode %} (read-only){% else %} to encode{% endif %}</label>
+      <textarea id="qr-content" name="url" maxlength="1000" rows="4" {% if qrcode %}disabled{% else %}required{% endif %}
                 class="w-full rounded-lg border border-gray-300 dark:border-gray-600 {% if qrcode %}bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400 cursor-not-allowed{% else %}bg-white dark:bg-gray-800{% endif %} px-3 py-2">{% if qrcode %}{{ qrcode.content }}{% else %}{{ prefill.content|default:'' }}{% endif %}</textarea>
       {% if not qrcode %}<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Up to 1000 characters. Can be any text; short URL is only meaningful when the content is a URL.</p>{% endif %}
     </div>
@@ -48,7 +48,7 @@
       <!-- Type and Format dropdowns -->
       <div class="flex flex-col sm:flex-row sm:items-end gap-4">
         <div>
-          <label class="block mb-1 text-sm font-medium">Type</label>
+          <label for="qr_type" class="block mb-1 text-sm font-medium">Type</label>
           <select id="qr_type" name="qr_type"
                   class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             <option value="text" {% if prefill.qr_type == 'text' or not prefill.qr_type %}selected{% endif %}>Text</option>
@@ -57,8 +57,8 @@
         </div>
 
         <div>
-          <label class="block mb-1 text-sm font-medium">Format</label>
-          <select name="qr_format"
+          <label for="qr_format" class="block mb-1 text-sm font-medium">Format</label>
+          <select id="qr_format" name="qr_format"
                   class="w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
             <option value="png" {% if prefill.qr_format == 'png' or not prefill.qr_format %}selected{% endif %}>PNG</option>
             <option value="svg" {% if prefill.qr_format == 'svg' %}selected{% endif %}>SVG</option>
@@ -78,7 +78,7 @@
 
       <!-- Short URL display (only visible when tracking is enabled) -->
       <div id="short-url-container" class="hidden">
-        <label class="block mb-1 text-sm font-medium">Short URL</label>
+        <label for="short-url-display" class="block mb-1 text-sm font-medium">Short URL</label>
         <input id="short-url-display" type="text" readonly
                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300 px-3 py-2 cursor-default"
                placeholder="Short URL will be generated...">

@@ -35,6 +35,8 @@ def dashboard(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
     context = {
         'qrcodes': qrcodes,
         'query': query,
+        'sort': 'name' if sort == 'name' else 'newest',
+        'sort_options': [('newest', 'Newest'), ('name', 'Name')],
     }
     return render(request, 'qr_code/dashboard.html', context)
 
@@ -57,9 +59,9 @@ def qrcode_editor(request: MaybeAuthenticatedHttpRequest, qr_id: str | None = No
     if qr_id:
         # Edit mode: fetch the QR code and validate ownership
         try:
-            qrcode = QRCode.objects.get(id=qr_id, created_by=user)
+            qrcode = QRCode.objects.get(id=qr_id, created_by=user, deleted_at__isnull=True)
         except QRCode.DoesNotExist:
-            # Return 404 if QR code doesn't exist or doesn't belong to the user
+            # 404 if the QR code doesn't exist, isn't the user's or was deleted
             from django.http import Http404
 
             raise Http404('QR Code not found')
@@ -78,7 +80,7 @@ def qrcode_duplicate(request: MaybeAuthenticatedHttpRequest, qr_id: str) -> Http
         raise RuntimeError('Authenticated user required')
 
     try:
-        source = QRCode.objects.get(id=qr_id, created_by=user)
+        source = QRCode.objects.get(id=qr_id, created_by=user, deleted_at__isnull=True)
     except QRCode.DoesNotExist:
         from django.http import Http404
 

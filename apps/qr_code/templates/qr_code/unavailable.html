@@ -1,0 +1,12 @@
+{% extends 'core/base.html' %}
+
+{% block title %}QR code unavailable - ZipTrigo{% endblock %}
+
+{% comment %} What a scan of `/go/<code>` shows when the code is unknown or was deleted: it never says which. {% endcomment %}
+{% block content %}
+<div class="container mx-auto px-4 py-16 max-w-xl text-center">
+    <i class="fas fa-circle-exclamation text-4xl text-gray-400 mb-4" aria-hidden="true"></i>
+    <h1 class="text-2xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">This QR code isn't available</h1>
+    <p class="text-gray-500 dark:text-gray-400">It may have been removed by its owner.</p>
+</div>
+{% endblock %}

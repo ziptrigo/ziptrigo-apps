@@ -36,39 +36,29 @@
     <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
             <!-- Header -->
-            <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 flex items-center justify-between sm:px-6">
-                <div class="flex items-center">
-                    <div class="flex items-center h-5">
-                        <input type="checkbox" id="select-all" class="h-4 w-4 accent-sage-500 border-gray-300 rounded">
-                    </div>
-                    <div class="ml-4 flex items-center">
-                         <span class="text-sm font-medium text-gray-900 dark:text-gray-100 mr-4">Select all</span>
-                         <a href="?sort=name&q={{ query|default:'' }}" class="group flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-                            Name
-                            <svg class="ml-1 h-4 w-4 text-gray-400 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                            </svg>
-                        </a>
-                    </div>
-                </div>
+            <li class="bg-gray-50 dark:bg-gray-900 px-4 py-3 sm:px-6">
+                <nav aria-label="Sort QR codes" class="flex items-center gap-3 text-sm">
+                    <span class="text-gray-500 dark:text-gray-400">Sort by</span>
+                    {% for key, label in sort_options %}
+                    <a href="?sort={{ key }}{% if query %}&amp;q={{ query|urlencode }}{% endif %}"{% if sort == key %} aria-current="true"{% endif %}
+                       class="rounded-md px-2 py-1 font-medium {% if sort == key %}bg-sage-100 text-gray-900 dark:bg-sage-800 dark:text-gray-100{% else %}text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200{% endif %}">{{ label }}</a>
+                    {% endfor %}
+                </nav>
             </li>
 
             <!-- List -->
             {% for qr in qrcodes %}
             <li class="px-4 py-4 flex items-center sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
                 <div class="flex items-center min-w-0 flex-1">
-                    <div class="flex items-center h-5 mr-4">
-                        <input type="checkbox" name="selected_qr" value="{{ qr.id }}" class="qr-checkbox h-4 w-4 accent-sage-500 border-gray-300 rounded">
-                    </div>
                     <div class="flex-shrink-0">
                         <!-- QR thumbnail is clickable to open a larger modal preview -->
                         <button type="button"
                                 class="group"
                                 data-full-src="{% url 'qr_code:image' qr.id %}"
-                                aria-label="Open QR code preview">
-                            <img class="h-12 w-12 rounded-md object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
+                                aria-label="Preview {{ qr.name }}">
+                                <img class="h-12 w-12 rounded-md object-cover bg-gray-100 transform transition-transform duration-150 ease-out group-hover:scale-110"
                                  src="{% url 'qr_code:image' qr.id %}"
-                                 alt="{{ qr.name }}">
+                                 alt="">
                         </button>
                     </div>
                     <div class="min-w-0 flex-1 px-4 md:grid md:grid-cols-2 md:gap-4">
@@ -85,7 +75,7 @@
                     <button type="button"
                             class="btn qr-dropdown-btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                             data-qr-id="{{ qr.id }}"
-                            aria-label="QR code actions">
+                            aria-label="Actions for {{ qr.name }}">
                         <i class="fas fa-ellipsis-v text-gray-500 dark:text-gray-400"></i>
                     </button>
                     <div class="qr-dropdown-menu hidden absolute top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg z-50 border border-gray-200 dark:border-gray-700 origin-top-right p-1"
@@ -125,7 +115,7 @@
 </div>
 
 <!-- QR Code Modal Preview -->
-<div id="qr-modal-overlay"
+<div id="qr-modal-overlay" role="dialog" aria-modal="true" aria-label="QR code preview"
      class="fixed inset-0 z-40 hidden bg-black/60 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
     <div class="bg-gray-900 dark:bg-black p-24 rounded-xl relative max-w-full max-h-full flex items-center justify-center transform transition-transform duration-150 ease-out scale-95">
         <button type="button"
@@ -142,11 +132,11 @@
 </div>
 
 <!-- Delete Confirmation Modal -->
-<div id="delete-modal-overlay"
+<div id="delete-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title"
      class="fixed inset-0 z-50 hidden bg-black/50 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
         <div class="p-6">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR Code</h3>
+            <h3 id="delete-modal-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR Code</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
                 Are you sure you want to delete <span id="delete-qr-name" class="font-medium text-gray-900 dark:text-gray-100"></span>?
             </p>
@@ -193,8 +183,12 @@
     const modalImg = document.getElementById('qr-modal-image');
     const closeBtn = document.getElementById('qr-modal-close');
 
+    // The element that had focus when a dialog opened gets it back when the dialog closes.
+    let returnFocus = null;
+
     function openModal(src) {
       if (!overlay || !modalImg) return;
+      returnFocus = document.activeElement;
       // Only same-origin http(s) URLs may be loaded; anything else is rejected.
       let safeUrl;
       try {
@@ -206,6 +200,7 @@
       }
       modalImg.src = safeUrl;
       overlay.classList.remove('hidden');
+      if (closeBtn) closeBtn.focus();
       // trigger fade/scale in
       requestAnimationFrame(function() {
         overlay.classList.remove('opacity-0');
@@ -228,6 +223,7 @@
         overlay.classList.add('hidden');
         modalImg.src = '';
       }, 150);
+      if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
     }
 
     document.addEventListener('click', function(ev) {
@@ -266,17 +262,6 @@
         }
       }
     });
-
-    // Select all checkbox functionality
-    const selectAllCheckbox = document.getElementById('select-all');
-    if (selectAllCheckbox) {
-      selectAllCheckbox.addEventListener('change', function() {
-        const qrCheckboxes = document.querySelectorAll('.qr-checkbox');
-        qrCheckboxes.forEach(function(checkbox) {
-          checkbox.checked = selectAllCheckbox.checked;
-        });
-      });
-    }
 
     // Dropdown menu functionality
     const dropdownButtons = document.querySelectorAll('.qr-dropdown-btn');
@@ -355,8 +340,10 @@
     function openDeleteModal(qrId, qrName) {
       if (!deleteOverlay || !deleteQrName) return;
       currentDeleteQrId = qrId;
+      returnFocus = document.querySelector('.qr-dropdown-btn[data-qr-id="' + qrId + '"]');
       deleteQrName.textContent = qrName;
       deleteOverlay.classList.remove('hidden');
+      if (deleteCancelBtn) deleteCancelBtn.focus();
       // trigger fade/scale in
       requestAnimationFrame(function() {
         deleteOverlay.classList.remove('opacity-0');
@@ -379,6 +366,7 @@
         deleteOverlay.classList.add('hidden');
         currentDeleteQrId = null;
       }, 150);
+      if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
     }
 
     function getCookie(name) {
