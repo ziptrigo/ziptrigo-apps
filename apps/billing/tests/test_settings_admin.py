@@ -55,12 +55,42 @@ def test_price_can_be_edited_from_the_admin(client, admin_user):
 
     response = client.post(
         reverse('custom_admin:billing_billingsettings_change', args=[settings_row.pk]),
-        {'storage_price_per_gb_per_day': '0.2500', '_save': 'Save'},
+        {'storage_price_per_gb_per_day': '0.2500', 'welcome_credits': '1000', '_save': 'Save'},
     )
 
     assert response.status_code == 302
     settings_row.refresh_from_db()
     assert settings_row.storage_price_per_gb_per_day == Decimal('0.25')
+
+
+def test_welcome_credits_can_be_edited_and_turned_off_from_the_admin(client, admin_user):
+    client.force_login(admin_user)
+    settings_row = BillingSettings.load()
+    assert settings_row.welcome_credits == 1000  # the default
+
+    for value in ('250', '0'):
+        response = client.post(
+            reverse('custom_admin:billing_billingsettings_change', args=[settings_row.pk]),
+            {'storage_price_per_gb_per_day': '0.1', 'welcome_credits': value, '_save': 'Save'},
+        )
+        assert response.status_code == 302
+        settings_row.refresh_from_db()
+        assert settings_row.welcome_credits == int(value)
+
+
+@pytest.mark.parametrize('value', ['-1', '1000001', 'lots'])
+def test_bad_welcome_credits_are_rejected(client, admin_user, value):
+    client.force_login(admin_user)
+    settings_row = BillingSettings.load()
+
+    response = client.post(
+        reverse('custom_admin:billing_billingsettings_change', args=[settings_row.pk]),
+        {'storage_price_per_gb_per_day': '0.1', 'welcome_credits': value, '_save': 'Save'},
+    )
+
+    assert response.status_code == 200
+    settings_row.refresh_from_db()
+    assert settings_row.welcome_credits == 1000
 
 
 def test_negative_price_is_rejected(client, admin_user):
@@ -69,7 +99,7 @@ def test_negative_price_is_rejected(client, admin_user):
 
     response = client.post(
         reverse('custom_admin:billing_billingsettings_change', args=[settings_row.pk]),
-        {'storage_price_per_gb_per_day': '-1', '_save': 'Save'},
+        {'storage_price_per_gb_per_day': '-1', 'welcome_credits': '1000', '_save': 'Save'},
     )
 
     assert response.status_code == 200

@@ -20,6 +20,7 @@ from .models import (
     CreditTransactionType,
     PromoCode,
     PromoRedemption,
+    WelcomeCredit,
 )
 from .services import InsufficientCreditsError, add_credits, get_balance, spend_credits
 
@@ -184,3 +185,34 @@ custom_admin_site.register(CreditAccount, CreditAccountAdmin)
 custom_admin_site.register(BillingSettings, BillingSettingsAdmin)
 custom_admin_site.register(PromoCode, PromoCodeAdmin)
 custom_admin_site.register(PromoRedemption, PromoRedemptionAdmin)
+
+
+class WelcomeCreditAdmin(admin.ModelAdmin):
+    """Read-only view of who got, or was refused, the welcome credits (issue #160)."""
+
+    list_display = ['user', 'status', 'reason', 'credits', 'created_at', 'decided_at']
+    list_filter = ['status', 'reason', 'created_at']
+    search_fields = ['user__email', 'user__name']
+    readonly_fields = [
+        'id',
+        'user',
+        'status',
+        'reason',
+        'credits',
+        'transaction',
+        'refusal_emailed_at',
+        'created_at',
+        'decided_at',
+    ]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: WelcomeCredit | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: WelcomeCredit | None = None) -> bool:
+        return False
+
+
+custom_admin_site.register(WelcomeCredit, WelcomeCreditAdmin)

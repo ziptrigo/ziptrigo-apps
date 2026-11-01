@@ -4,6 +4,7 @@ scheduler"). Exceptions propagate: the runner records them in `ScheduledJob.last
 import logging
 
 from .services.promo import release_stale_reservations
+from .services.welcome import settle_pending
 
 logger = logging.getLogger(__name__)
 
@@ -14,3 +15,11 @@ def release_promo_reservations() -> None:
     released = release_stale_reservations()
     if released:
         logger.info('release_promo_reservations released %d reservation(s)', released)
+
+
+def settle_welcome_credits() -> None:
+    """Daily safety net for the welcome credits (issue #160): settle pending rows of confirmed
+    users and send a refusal email whose task was lost. Idempotent."""
+    done = settle_pending()
+    if done:
+        logger.info('settle_welcome_credits settled %d row(s)', done)

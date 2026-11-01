@@ -26,11 +26,13 @@ apps/core/            Site shell: base.html, landing page, ProductApp registry, 
                       and the Alpine components every product
                       shares (`core/js/components.js`: `copyText`, `confirmModal`,
                       `notificationBell`).
-apps/accounts/        User model, auth pages + API, JWT auth classes.
+apps/accounts/        User model, auth pages + API, JWT auth classes, the memory of confirmed
+                      addresses (`KnownEmail`, issue #160).
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
                       shared storage price (BillingSettings), promo codes (issue #70, see "Promo
                       codes": PromoCode + PromoRedemption, the redeem form and link, the admin
-                      section).
+                      section), the welcome credits of a new account (issue #160, see "Welcome
+                      credits").
 apps/feedback/        Footer "Feedback" page: saves a user's message, emails a receipt and a notice
                       to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
@@ -232,7 +234,11 @@ Each app may import only from layers below it. Enforced by the import-linter con
   that `BillingConfig.ready()` registers; without one a typed code is "Invalid code". And
   `accounts` emits `signals.email_confirmed` (on commit, `send_robust`, from `confirm_token` and
   from a password reset that confirms the address) for `billing` to grant the credits a signup
-  code reserved. See "Promo codes".
+  code reserved. See "Promo codes". It also emits `signals.account_created` (every new `User` row,
+  in the creating transaction, `send_robust`, from a `post_save` receiver in `AccountsConfig`) for
+  `billing` to open the welcome credits of a genuinely new account, including one created already
+  confirmed by "Sign in with Google/Microsoft", which gets no `email_confirmed`. See "Welcome
+  credits".
 - Cross-app links in templates (`{% url 'billing:credits-history' %}` in a file_transfer template)
   are fine; they aren't imports.
 
@@ -2053,11 +2059,77 @@ the issue (comment of 2026-10-31); the short version:
   page, and the read-only `PromoRedemptionAdmin` (search by user email or code, filter by status,
   source, campaign). `billing` is in `CASCADE_WITH_USER_APP_LABELS`, so deleting a user takes their
   redemptions (the code's use stays spent).
-- **Not in v1** (deferred on the issue): discount effects and automatic application (#54), welcome
-  credits (#160), credit expiry, revoking a redemption, email-domain eligibility, a per-user count,
-  a credits budget per code, a Campaign model, a JWT endpoint, an email on redemption.
+- **Not in v1** (deferred on the issue): discount effects and automatic application (#54), credit
+  expiry (welcome credits, #160, are built apart from promo codes: see "Welcome credits"), revoking
+  a redemption, email-domain eligibility, a per-user count, a credits budget per code, a Campaign
+  model, a JWT endpoint, an email on redemption.
 - **Tests**: `apps/billing/tests/test_promo_services.py`, `test_promo_views.py`, `test_promo_admin.py`,
   `apps/accounts/tests/test_register_promo.py`.
+
+### Welcome credits
+
+Issue #160 (`billing/models/welcome.py`, `billing/services/welcome.py`, `accounts/models/known_email.py`,
+`accounts/services/known_emails.py`; migrations `accounts.0006_known_emails`,
+`billing.0004_welcome_credits`; `docs/welcome-credits.md` has the admin-facing write-up). A
+genuinely new account gets `BillingSettings.welcome_credits` credits (default 1,000, `db_default`
+too; **0 turns it off**) once its email is confirmed, with no code to type. It is its own mechanism,
+not a `PromoCode`: a promo code needs someone to type it and says nothing about whether the address
+was ever used.
+
+- **The rule.** A `WelcomeCredit` row (`billing`, one per user: a `OneToOneField`, the once-per-user
+  guard) is opened `pending` by the `accounts.account_created` receiver
+  (`welcome.on_account_created`, in the creating transaction and its own savepoint) for every new
+  account **except staff and superusers, and only while the setting is above 0**. Accounts that
+  existed before, and accounts created while it was 0, have no row and never get anything (turning
+  it on later is not retroactive). `welcome.settle(user_id)` -- the `settle_welcome_credit` task,
+  queued on commit by `on_account_created` for an account created already confirmed and by
+  `on_email_confirmed` (the `email_confirmed` receiver) for the emailed link and a reset -- does
+  nothing unless the row is `pending`, the user is confirmed and active and the setting is still
+  above 0 (set to 0 meanwhile, the row waits) and is not staff (made staff later, e.g. by the
+  admin's add form, it waits forever). Then it asks `known_emails.remember(user)`: true only
+  for the **first account to have confirmed the address, or any variant of it, ever**. True: one
+  transaction with `add_credits(type=WELCOME, description='Welcome credits', source='billing')`
+  (`CreditTransactionType.WELCOME`), the row `granted` (`credits`, `transaction`) and an in-app
+  notification (key `welcome_credits`, its own savepoint). False: the row is `refused` with reason
+  `address_seen`, and **final** (moving to a fresh address afterwards does not reopen it), and the
+  user is emailed once.
+- **Remembered addresses** (`accounts.KnownEmail`: `fingerprint` the primary key, `first_user_id` a
+  plain UUID, `created_at`). The fingerprint is `HMAC-SHA256(SECRET_KEY, 'known-email:' +
+  canonical)`, so the table keeps no address; **rows are never deleted with the user**, which is the
+  point: closing an account, or moving it to another address, does not make the old address new.
+  `known_emails.canonical_email`: lower-case, everything from the first `+` of the local part
+  dropped for **every** domain, and for `gmail.com`/`googlemail.com` only also the dots, with
+  `googlemail.com` read as `gmail.com`. It only ever *refuses* a grant, so it errs on being generous.
+  **It is written when an address is confirmed, not at signup** (a deliberate narrowing of the
+  issue's "at signup"): a signup proves nothing about the address, and if registering claimed it,
+  anyone could register a victim's address, or a `+tag` of it, and have the owner refused. The places
+  an address becomes confirmed call `remember`: `email_confirmation.send_email_confirmed` (the link,
+  a reset, `inv users confirm`, all of which also use it) and the `post_save` receiver for an
+  account created already confirmed, and the user admin when staff tick `email_confirmed` (it
+  goes through `send_email_confirmed`). Both callers use `remember_quietly` (own savepoint, errors
+  logged): remembering an address must never fail a confirmation or a sign-up. `remember` is
+  first-come and idempotent, the primary key decides a race. `settle` calls it again itself, so
+  an account that has a welcome row is covered even if a path forgot; one without a row is not. Two unconfirmed `a@` and `a+shop@` signups: whoever confirms first is the holder and the
+  other is refused. The migration backfills confirmed accounts, oldest first; an address an existing
+  account has already moved away from cannot be recovered. **Rotating `SECRET_KEY` silently makes
+  every remembered address new again** (nothing else here is keyed so persistently): don't, or
+  re-fingerprint first.
+- **The refusal email** (`welcome.send_welcome_refused_email`, a `default` queue task through
+  `enqueue_after_commit`; template `billing/emails/welcome_refused.html`, autoescaped, the greeting
+  carries the user's free-text name; a fixed subject; nothing about the other account): sent to the
+  confirmed address of an active user whose row is `refused`, claimed by a conditional `UPDATE` of
+  `refusal_emailed_at`, so once per account however many times it runs. A switched-off setting sends
+  nothing (there is no row to refuse).
+- **Safety net.** The daily `billing.settle_welcome_credits` job (`welcome.settle_pending`) settles
+  `pending` rows of confirmed, active, non-staff users and sends the email of a `refused` row whose
+  task was lost (or whose send failed: when every backend fails the claim on `refusal_emailed_at` is
+  released); both are idempotent, paged oldest first by keyset so rows it can never settle cannot
+  starve the rest, and it does nothing while the setting is 0.
+- **Admin.** The setting is on `BillingSettings`; `WelcomeCreditAdmin` is read-only (status, reason,
+  credits, dates; filter by status and reason). `KnownEmail` has no admin on purpose (hashes).
+- **Tests.** `apps/billing/tests/test_welcome_credits.py` (marked `welcome_credits`: the root
+  `conftest.py` has an autouse fixture that patches `welcome.configured_credits` to 0 for every other
+  test, so no test creates rows or credits by accident) and `apps/accounts/tests/test_known_emails.py`.
 
 ### Feedback
 
@@ -4731,6 +4803,11 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
   task whose next occurrence the balance can't cover is what creates an *unpaid* task (and sets
   `creation_blocked_at`). The AI plan `tests_e2e/ai/todo.md` has not been run end to end by an agent
   yet.
+- Welcome credits (#160) are built and **on by default** (1,000 credits; set `BillingSettings.
+  welcome_credits` to 0 to turn them off). Limits worth knowing: the remembered addresses start with
+  the confirmed accounts that exist when `accounts.0006` runs, so an address an existing account has
+  already left is new again; rotating `SECRET_KEY` has the same effect (see "Welcome credits");
+  someone with several mailboxes (not aliases of one) can still get the credits once per mailbox.
 - Rate limiting (#53) is in place site-wide (see "Rate limiting" above) using an in-house limiter
   on a dedicated DB-backed model (or Redis, when `CACHE_URL` is set); the coarse nginx `limit_req`
   that backs it up as defense-in-depth is configured in the separate `infra` repo (#119), not

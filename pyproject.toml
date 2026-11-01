@@ -124,6 +124,7 @@ markers = [
   'unit: Unit tests',
   'integration: Integration tests',
   'slow: Slow running tests',
+  'welcome_credits: Keep the welcome credits (issue #160) on; every other test has them off',
 ]
 
 [tool.coverage.run]

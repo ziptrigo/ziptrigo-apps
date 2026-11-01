@@ -23,3 +23,14 @@ timezone_changed = Signal()
 #: `billing` connects to it from its `AppConfig.ready()` to grant the credits of a promo code
 #: entered at signup (issue #70).
 email_confirmed = Signal()
+
+#: Sent, in the creating transaction, right after a new `User` row is inserted, whatever created it
+#: (the register page, "Sign in with Google/Microsoft", the admin, `inv users create`). Unlike
+#: `email_confirmed` this includes accounts created already confirmed. `sender` is `User`;
+#: providing args: `user`. `send_robust`: a failing receiver is logged and never loses the account,
+#: but one that writes must do it in its own savepoint (a database error aborts a Postgres
+#: transaction even when the exception is caught).
+#:
+#: `billing` connects to it from its `AppConfig.ready()` to open the welcome credits of a genuinely
+#: new account (issue #160).
+account_created = Signal()

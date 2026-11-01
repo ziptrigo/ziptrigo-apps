@@ -57,6 +57,7 @@ from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
 from ..signals import email_confirmed
+from . import known_emails
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,10 @@ def send_email_confirmed(user: User) -> None:
     """Tell the apps that care (`signals.email_confirmed`) that `user`'s address is now confirmed.
     Deferred to commit, so a receiver that writes (billing granting a promo code's credits) never
     sees a confirmation that is then rolled back; `send_robust`, so a failing receiver is logged
-    and never turns the confirmation into an error page."""
+    and never turns the confirmation into an error page. The address is remembered as confirmed
+    first (`known_emails.remember`, issue #160), in the confirming transaction, so a receiver sees
+    who holds it."""
+    known_emails.remember_quietly(user)
 
     def _send() -> None:
         for _, result in email_confirmed.send_robust(sender=User, user=user):
