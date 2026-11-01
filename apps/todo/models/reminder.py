@@ -162,6 +162,7 @@ class ReminderDelivery(models.Model):
     class Meta:
         ordering = ['-sent_at']
         indexes = [models.Index(fields=['user', '-sent_at'])]
+        verbose_name_plural = 'reminder deliveries'  # Django would say "deliverys"
 
     def __str__(self) -> str:
         return f'{DeliveryChannel(self.channel).label} reminder for #{self.task_number}'

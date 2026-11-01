@@ -8,6 +8,12 @@
 <h1 class="mb-1 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ heading }}</h1>
 {% if saved %}
 <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Saved filter: {{ filter_summary }}</p>
+{% if dropped_labels %}
+<p id="filter-dropped-labels" class="mb-4 rounded-lg border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+    <i class="fas fa-triangle-exclamation mr-1 text-amber-600 dark:text-amber-400" aria-hidden="true"></i>
+    {% if dropped_labels == 1 %}A label{% else %}{{ dropped_labels }} labels{% endif %} this filter used {% if dropped_labels == 1 %}has{% else %}have{% endif %} been deleted, so {% if dropped_labels == 1 %}it no longer narrows{% else %}they no longer narrow{% endif %} the results{% if not params.has_criteria %}: this filter now selects every open task{% endif %}. Change the filter and choose "Update filter" to fix it.
+</p>
+{% endif %}
 {% else %}
 <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Search the titles, descriptions and comments of your tasks.</p>
 {% endif %}

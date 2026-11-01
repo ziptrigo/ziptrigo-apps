@@ -105,9 +105,10 @@ class TaskAdmin(ReadOnlyModelAdmin):
     list_select_related = ['user', 'recurrence']
     date_hierarchy = 'created_at'
 
-    @admin.display(boolean=True, description='Unpaid', ordering='unpaid_at')
-    def unpaid(self, obj: Task) -> bool:
-        return obj.is_unpaid
+    @admin.display(description='Unpaid', ordering='unpaid_at')
+    def unpaid(self, obj: Task) -> str:
+        """Text for the exception only: a red cross for the normal state read as an alarm."""
+        return 'Unpaid' if obj.is_unpaid else ''  # an empty value shows as the admin's dash
 
 
 class RecurrenceAdmin(ReadOnlyModelAdmin):

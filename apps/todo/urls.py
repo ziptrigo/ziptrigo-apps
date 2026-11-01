@@ -38,6 +38,7 @@ urlpatterns = [
     path('filters/', views.filters_page, name='filters'),
     path('filters/counts/', views.filter_counts_view, name='filter-counts'),
     path('filters/reorder/', views.filter_reorder, name='filter-reorder'),
+    path('filters/sidebar/', views.sidebar_view, name='filter-sidebar'),
     path('filters/<uuid:filter_id>/', views.filter_page, name='filter'),
     path('filters/<uuid:filter_id>/rename/', views.filter_rename, name='filter-rename'),
     path('filters/<uuid:filter_id>/update/', views.filter_update, name='filter-update'),

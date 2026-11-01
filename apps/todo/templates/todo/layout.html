@@ -5,12 +5,26 @@
    page-level message slot and the one confirmation modal the whole page shares. Pages that reorder
    load SortableJS in `todo_js_libs`. {% endcomment %}
 {% block content %}
+{% comment %} `data-scroll-hint` (tasks.js sets `data-more-right` while there is more to scroll to): on a phone the menus are
+   horizontal scrollers with no scrollbar, so the last visible item fades out as the hint. The checkbox rule gives the
+   checklist boxes of a rendered Markdown text the dark native look (they stayed white on the dark card), and a label chip
+   its lightened text colour (`--chip-dark`, `todo_ui.dark_mode_color`: the raw colour can be unreadable on the dark card). {% endcomment %}
+<style>
+@media (max-width: 767px) {
+    [data-scroll-hint][data-more-right="true"] {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3rem), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 3rem), transparent);
+    }
+}
+.dark input.task-list-item-checkbox { color-scheme: dark; }
+.dark .label-chip { color: var(--chip-dark) !important; }
+</style>
 <div x-data="confirmModal" class="container mx-auto px-4 py-6 max-w-6xl">
     <div class="flex flex-col gap-4 md:flex-row md:gap-8">
         <div class="md:w-48 md:flex-shrink-0">
         {% if show_sidebar_search %}{% include 'todo/partials/search_box.html' %}{% endif %}
         <nav aria-label="To-do">
-            <ul class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
+            <ul data-scroll-hint class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
                 {% for key, label, icon, url in nav_items %}
                 <li class="flex-shrink-0">
                     <a href="{{ url }}"{% if nav == key %} aria-current="page"{% endif %}
@@ -27,20 +41,7 @@
         </div>
 
         <div class="min-w-0 flex-1">
-            {% if todo_blocked %}
-            <div role="alert"
-                 class="mb-4 flex flex-col gap-3 rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">
-                <i class="fas fa-triangle-exclamation text-amber-600 dark:text-amber-400" aria-hidden="true"></i>
-                <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">
-                    <span class="font-medium text-gray-900 dark:text-gray-100">Tasks are blocked.</span>
-                    A repeating task is waiting to be paid. Adding tasks resumes when you add credits.
-                </p>
-                <a href="{% url 'billing:credits-history' %}"
-                   class="btn inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-                    Top up
-                </a>
-            </div>
-            {% endif %}
+            {% include 'todo/partials/blocked_banner.html' %}
             {% if todo_frozen %}
             <div role="alert"
                  class="mb-4 flex flex-col gap-3 rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center">

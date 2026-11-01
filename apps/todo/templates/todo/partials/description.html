@@ -24,7 +24,7 @@
     <form x-show="editing" style="display: none" method="post" action="{% url 'todo:edit' task.number %}"
           hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
           hx-disabled-elt="find button[type='submit']"
-          @keydown.escape="editing = false">
+          @keydown.escape="editing = false; todoCancelEdit($el, '#task-msg')">
         {% csrf_token %}
         <input type="hidden" name="part" value="description">
         <input type="hidden" name="ctx" value="page">
@@ -37,7 +37,7 @@
             <code>&gt; quotes</code>, <code>[links](https://...)</code> and <code>#1234</code> to link a task. Up to 20,000 characters.
         </p>
         <div class="mt-3 flex items-center justify-end gap-3">
-            <button type="button" @click="editing = false"
+            <button type="button" @click="editing = false; todoCancelEdit($el.form, '#task-msg')"
                     class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
             <button type="submit"
                     class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save</button>

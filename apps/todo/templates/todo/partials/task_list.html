@@ -1,7 +1,10 @@
 {% load todo_ui %}
 {% comment %} The list of the current view, what every page's tabs, sort links and pager swap into #task-list (and
    what the quick-add form re-renders, with `oob_form`/`oob_nav` refreshing the form and the sidebar count out
-   of band). Needs `view`, `today` and the view's own data (`overdue` + `tasks`, `days`, or `tasks` + `page_obj`). {% endcomment %}
+   of band). Needs `view`, `today` and the view's own data (`overdue` + `tasks`, `days`, or `tasks` + `page_obj`).
+   A list marked `data-empty-list` shows its `<template data-empty-state>` (or, without one, hides the section marked
+   `data-vanish-when-empty`) as soon as its last row leaves, and takes it away again when a row comes back (tasks.js):
+   an action removes the row without re-rendering the list. {% endcomment %}
 {% if oob_form %}
 <div id="quick-add" hx-swap-oob="true">{% include 'todo/partials/task_form.html' with mode='quick' %}</div>
 {% endif %}
@@ -9,7 +12,7 @@
 
 {% if view == 'today' %}
     {% if overdue %}
-    <section class="mb-8" aria-labelledby="overdue-title">
+    <section class="mb-8" aria-labelledby="overdue-title" data-vanish-when-empty>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
             <h2 id="overdue-title" class="text-lg font-semibold text-red-600 dark:text-red-400">Overdue</h2>
             <button type="button" @click="show($el)"
@@ -22,7 +25,7 @@
             </button>
         </div>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
-            <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
                 {% for task in overdue %}{% include 'todo/partials/task_row.html' with oob_nav=False %}{% endfor %}
             </ul>
         </div>
@@ -32,7 +35,7 @@
         <h2 id="today-title" class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">Today <span class="text-sm font-normal text-gray-500 dark:text-gray-400">{{ today|date:'l j M' }}</span></h2>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
             <ul class="divide-y divide-gray-200 dark:divide-gray-700"
-                data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="today">
+                data-sortable data-empty-list data-reorder-url="{% url 'todo:reorder' %}" data-scope="today">
                 {% for task in tasks %}{% include 'todo/partials/task_row.html' with sortable=True oob_nav=False %}
                 {% empty %}
                 <li data-empty>
@@ -40,6 +43,7 @@
                     {% else %}{% include 'core/partials/empty_state.html' with icon='fas fa-circle-check' title='Nothing due today' text='Add a task above.' %}{% endif %}
                 </li>
                 {% endfor %}
+                <template data-empty-state><li data-empty>{% include 'core/partials/empty_state.html' with icon='fas fa-circle-check' title='Nothing due today' text='Add a task above.' %}</li></template>
             </ul>
         </div>
     </section>
@@ -49,11 +53,12 @@
     <section class="mb-6" aria-label="{{ day|date:'l j M' }}">
         <h2 class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">{% day_heading day today %}</h2>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
-            <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
                 {% for task in day_tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
                 {% empty %}
-                <li class="px-4 py-3 sm:px-6 text-sm text-gray-500 dark:text-gray-400">Nothing due</li>
+                <li data-empty class="px-4 py-3 sm:px-6 text-sm text-gray-500 dark:text-gray-400">Nothing due</li>
                 {% endfor %}
+                <template data-empty-state><li data-empty class="px-4 py-3 sm:px-6 text-sm text-gray-500 dark:text-gray-400">Nothing due</li></template>
             </ul>
         </div>
     </section>
@@ -77,13 +82,14 @@
     </p>
     {% endif %}
     <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
-        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
             {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
             {% empty %}
-            <li class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">
+            <li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">
                 {% if view == 'completed' %}No completed tasks yet.{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}
             </li>
             {% endfor %}
+            <template data-empty-state><li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">{% if view == 'completed' %}No completed tasks yet.{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}</li></template>
         </ul>
     </div>
 

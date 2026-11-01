@@ -5,7 +5,8 @@
     data-sortable data-reorder-url="{% url 'todo:label-reorder' %}" data-msg="#label-msg">
     {% for label in labels %}
     <li x-data="{ editing: false }" data-task-id="{{ label.pk }}" class="flex items-center gap-3 px-3 py-2">
-        <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Drag to reorder" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
+        <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
+              data-name="{{ label.name }}" aria-label="Reorder {{ label.name }}: use the up and down arrow keys" title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
         <span class="h-4 w-4 flex-shrink-0 rounded-full border border-gray-300 dark:border-gray-600" style="background-color: {{ label.color }}" aria-hidden="true"></span>
         <div class="min-w-0 flex-1">
             <div x-show="!editing" class="flex flex-wrap items-baseline gap-x-3">
@@ -16,21 +17,21 @@
             <form x-show="editing" style="display: none" method="post" action="{% url 'todo:label-edit' label.pk %}"
                   hx-post="{% url 'todo:label-edit' label.pk %}" hx-target="#labels" hx-swap="innerHTML"
                   hx-disabled-elt="find button[type='submit']"
-                  class="flex flex-wrap items-center gap-2" @keydown.escape="editing = false">
+                  class="flex flex-wrap items-center gap-2" @keydown.escape="editing = false; todoCancelEdit($el, '#label-msg')">
                 {% csrf_token %}
                 <label for="label-name-{{ label.pk }}" class="sr-only">Name</label>
                 <input id="label-name-{{ label.pk }}" name="name" type="text" value="{{ label.name }}" maxlength="50" required
                        x-effect="if (editing) $nextTick(() => $el.focus())"
-                       class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                       class="min-w-[9rem] flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
                 <label for="label-color-{{ label.pk }}" class="sr-only">Colour</label>
                 <input id="label-color-{{ label.pk }}" name="color" type="color" value="{{ label.color }}"
                        class="h-8 w-10 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-0.5">
                 <label for="label-description-{{ label.pk }}" class="sr-only">Description</label>
                 <input id="label-description-{{ label.pk }}" name="description" type="text" value="{{ label.description }}" maxlength="255" placeholder="Description (shown on hover)"
-                       class="min-w-0 flex-[2] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                       class="min-w-[11rem] flex-[2] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
                 <button type="submit" aria-label="Save the label" title="Save"
                         class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
-                <button type="button" @click="editing = false" aria-label="Cancel editing" title="Cancel"
+                <button type="button" @click="editing = false; todoCancelEdit($el.form, '#label-msg')" aria-label="Cancel editing" title="Cancel"
                         class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
             </form>
         </div>

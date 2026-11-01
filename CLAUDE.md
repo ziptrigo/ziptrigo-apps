@@ -3479,7 +3479,12 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   `next_position` takes the max over that parent's subtasks, so a drag in one parent's list never
   orders another's. A top-level task's `position` stays 0. SortableJS (`sortablejs@1.15.6` from
   cdnjs, loaded only on Today, the task page, Labels and Filters) posts the order to `POST /todo/reorder/`
-  (`scope`, `ids[]`, `parent`: the parent's number), answered 204.
+  (`scope`, `ids[]`, `parent`: the parent's number), answered 204. The handle (`.drag-handle`) is a
+  focusable `role="button"` span (not a `<button>`: Firefox won't start a drag from one inside the
+  draggable row) named "Reorder <name>"; the **up and down arrow keys move the row** and post the order
+  (one request per burst, announced in a polite live region), so ordering needs no mouse (`tasks.js`).
+  The filters list also fetches `todo:filter-sidebar` into `#sidebar-filters` after a save
+  (`data-after-reorder-url`), so the sidebar shows the new order.
 - **Views and URLs** (`views/`; every one `@login_required`; another user's task, and a *trashed*
   task where a view doesn't accept one, is a **404**, never a 403: `views.common.owned_task`).
   `todo:today` `/todo/`, `todo:upcoming` `/todo/upcoming/` (14 days, every day listed, "Nothing
@@ -3519,14 +3524,37 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   when overdue, `Today`, `Tomorrow`, the weekday for the next 6 days, else `5 Nov`, with the year
   when it isn't this year's; the time when set), `{% priority_flag task %}` (red / amber / sky for
   1 / 2 / 3, each with a dark twin), `{% label_chip label %}` (the colour at 20% as the background
-  and as the text, the description as `title`). Times a page shows (`completed_at`, `deleted_at`) go
+  and as the text, the description as `title`; in dark mode the text is `--chip-dark`, the colour lightened
+  until it has 4.5:1 on the dark card, `todo_ui.dark_mode_color`, applied by the layout's `.dark .label-chip`). Times a page shows (`completed_at`, `deleted_at`) go
   through `|date`, so they follow the user's saved zone.
 - **A row action refreshes what else on the page it changes** (`views.tasks.after_action` /
   `_refreshed_neighbours`, out of band, ignored by htmx when the target is not on the page): the other
   open occurrences of a repeating task (`offers_stop_repeating` depends on how many are left) and, for a
   subtask, the parent's Complete button (`partials/complete_button.html`, its question names the open
   subtasks). A success on the Labels and Filters pages clears the earlier refusal in `#label-msg` /
-  `#filter-msg` (`clear_msg`).
+  `#filter-msg` (`clear_msg`), and a successful row action clears `#todo-msg` (`CLEAR_PAGE_MSG`).
+  **Trashing, restoring or deleting forever a parent also removes its subtasks' rows** (out of band,
+  `_rows_removed`: only the subtasks the action really moved, so one trashed on its own stays listed), as
+  completing it already did, and a completion that makes task creation blocked fills the always-present
+  `#todo-blocked` slot with the "Tasks are blocked" banner (`partials/blocked_banner.html`) instead of
+  waiting for a reload. **A list whose last row has left shows its empty state**: lists marked
+  `data-empty-list` carry a `<template data-empty-state>` (or, like the Overdue section, a
+  `data-vanish-when-empty` section) that `tasks.js` shows or removes as rows leave and come back, since an
+  action answers the row, not the list. The filter rename and delete answers carry the sidebar's filters
+  block out of band (`#sidebar-filters`).
+- **Editors discard on Cancel and Escape** (title, description, label, filter rename): the Alpine handlers
+  call `todoCancelEdit(form, slot)` (`tasks.js`), which resets the form to the saved text and clears the
+  refusal an earlier save left in the slot, as the comment editor already did. The Repeat control is not
+  rendered on a subtask or a completed task (it could only answer "A subtask cannot repeat."); its button
+  label writes an `until` date as `2 Nov 2026` like the chip (`recurrence.js`, `untilText`). An inline rename
+  updates the tab title (`#task-panel[data-document-title]`); the settings page is "Settings - To-do - ZipTrigo".
+  Accessibility: a rendered checklist box is named from its item's text (`tasks.js`), looks dark in dark mode
+  (`color-scheme`), and the sidebar's "Filters" label is a plain paragraph inside the labelled nav, not an
+  `h2` that came before the page's `h1`. On a phone the sidebar menus are horizontal scrollers:
+  `[data-scroll-hint]` lists get `data-more-right` from `tasks.js` while items are hidden to the right, and
+  the layout's CSS fades their right edge. A trashed task's page has no Subtasks section (its subtasks are
+  trashed with it). Admin: `ReminderDelivery`'s plural is "reminder deliveries", the Tasks changelist's
+  Unpaid column says "Unpaid" only for an owed task (a red cross for the normal state read as an alarm).
 - **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
   creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
   minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`).
@@ -3964,8 +3992,8 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
   cap, a time outside 0..30 days, an unknown channel, `'Only an open task has reminders.'`). The task row
   is locked, so racing adds can't pass the cap together. A reminder is created with `sent_at`
   null even when its time has passed, so one added a little late fires at the next job run; one
-  more than `LATE_GRACE` (24 h) overdue is created already sent and `skipped`, with a `skipped`
-  history row. Editing the time recomputes `fire_at` and arms it again (`sent_at` null, same
+  more than `LATE_GRACE` (24 h) overdue is created already sent and `skipped`, with no history row
+  (see "Delivery"). Editing the time recomputes `fire_at` and arms it again (`sent_at` null, same
   `LATE_GRACE` rule, `failures` reset); editing only the channel leaves a sent reminder sent.
 - **Rescheduling.** Two kinds, on purpose:
   - *The user changed the due moment* (`update_task` when the date or the time changed,
@@ -3996,7 +4024,11 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
   delivery (a long-dated edit, a job that was down), and, when its task is open and its owner
   active, gets a `ReminderDelivery` with `note='skipped'` so the history says why nothing came
   (a completed or trashed task or an inactive owner is only flagged: there was nothing to miss, and
-  a row per reminder would bury the history). The task panel and the history show "Skipped" where a
+  a row per reminder would bury the history; **neither is a reminder that was already due when it
+  was created**, `fire_at <= created_at`, such as the default reminder of a task made for today after
+  its time: it was never ahead of the user, and a row for every such task buried the real deliveries.
+  The task page still shows it as "Skipped". A reminder whose time the user edited into the past is
+  recorded). The task panel and the history show "Skipped" where a
   delivered one says "Sent". Then, in batches of 200 under `select_for_update(skip_locked=True,
   of=('self',))`, the reminders that are unsent, due and **whose task is open and owner active**
   (the query filters these, so a reminder of a completed or trashed task or an inactive user stays
@@ -4297,7 +4329,11 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   (name cleaned and unique, `MAX_SAVED_FILTERS` = 50 per user under the user's `TodoAccount` row lock, the search
   text validated, labels that aren't the user's dropped), `rename_filter`, `update_filter_params`,
   `delete_filter`, `reorder_filters(user, ids)`. Params are re-read leniently with the user's labels, so **a
-  label deleted later simply drops out of the filter** (no cleanup hook in `delete_label`). Counts:
+  label deleted later simply drops out of the filter** (no cleanup hook in `delete_label`); so that this is
+  not a silent surprise (a filter whose only criterion was the label then selects every open task) the
+  filter's page and its row on the filters list say that N labels it used were deleted
+  (`saved_filters.dropped_label_count`, `FilterRow.dropped_labels`; the notice goes when the filter is
+  updated). Counts:
   `open_task_counts(user, {key: params})` counts the open tasks several filters select **in one query** -- one
   conditional `Count('pk', filter=params.condition(user))` per filter over the user's open tasks (completed
   never counted), under a single `search_guard` -- and gives `None` for a filter whose search can't run (an

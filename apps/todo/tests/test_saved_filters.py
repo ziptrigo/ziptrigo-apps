@@ -1,6 +1,7 @@
 """Saved filters (issue #181): the model, the services (CRUD, the cap, uniqueness, reordering,
 counts), the filters pages and endpoints, the sidebar, 404s and rate limits."""
 
+import re
 from datetime import date
 from html import unescape
 from unittest.mock import MagicMock
@@ -717,7 +718,8 @@ class TestSidebar:
         for name in ('todo:today', 'todo:all', 'todo:labels', 'todo:settings'):
             html = text(web.get(reverse(name)))
             assert reverse('todo:filter', args=[saved.pk]) in html
-            assert 'Urgent' in html and 'open task' not in html
+            visible = re.sub(r'<template.*?</template>', '', html, flags=re.S)  # empty states
+            assert 'Urgent' in html and 'open task' not in visible
             assert f'id="side-count-{saved.pk}"' in html
             assert f'hx-get="{reverse("todo:filter-counts")}"' in html
             assert 'scope=all' not in html

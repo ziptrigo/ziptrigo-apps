@@ -25,7 +25,7 @@ from apps.core.htmx import is_htmx
 from ..models import Label, SavedFilter
 from ..services import SORTS, FilterParams, describe_params, filter_page, parse_filter_params
 from ..services.filters import DATE_RANGES, QUERY_KEYS, label_names
-from ..services.saved_filters import stored_params
+from ..services.saved_filters import dropped_label_count, stored_params
 from ..services.search import MAX_QUERY_CHARS
 from .common import limited, message_response, render_page, validation_lines
 from .lists import decorate
@@ -93,9 +93,11 @@ def build_context(
         'show_sidebar_search': False,
         'differs': saved is not None and params != stored_params(saved, user),
         'filter_summary': '',
+        'dropped_labels': 0,
     }
     if saved is not None:
         context['filter_summary'] = describe_params(stored_params(saved, user), label_names(user))
+        context['dropped_labels'] = dropped_label_count(saved, user)
     if not runs_search(user, params, saved):
         return context
     try:

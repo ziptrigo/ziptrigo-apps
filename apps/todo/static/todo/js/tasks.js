@@ -8,13 +8,46 @@
  *  - Clearing a task's date asks first when it has reminders (they are removed with the date).
  *  - Drag and drop. A list with `data-sortable` is sorted with SortableJS by its `.drag-handle`;
  *    the new order of the rows' `data-task-id`s is posted to `data-reorder-url` as `ids[]`, with
- *    `scope` and `parent` when the list has them (`data-scope`, `data-parent`).
+ *    `scope` and `parent` when the list has them (`data-scope`, `data-parent`). The handle is
+ *    focusable too: the up and down arrow keys move its row and post the order the same way (an
+ *    announcement goes to a polite live region), so ordering does not need a mouse. A list with
+ *    `data-after-reorder-url` fetches that URL into `data-after-reorder-target` once the order is
+ *    saved (the filters page refreshes the sidebar's copy of the list).
+ *  - Empty lists. A row action removes the row without re-rendering its list, so a list marked
+ *    `data-empty-list` shows its `<template data-empty-state>` when the last row has left (or hides
+ *    the section marked `data-vanish-when-empty`) and takes it away when a row is back.
+ *  - The tab title follows an inline rename (`#task-panel[data-document-title]`).
+ *  - `[data-scroll-hint]` menus (a phone's horizontal scrollers) say whether there is more to
+ *    scroll to (`data-more-right`, which the layout's CSS turns into a fade).
+ *  - Checklist boxes get an accessible name from their item's text.
  *
  * The completion confirmation for a parent with open subtasks and the Postpone menu need no code
  * here: they use the shared `confirmModal` component and Alpine in the templates.
  */
 (function () {
     'use strict';
+
+    // Closing an editor with Cancel or Escape throws away what was typed: the form goes back to the
+    // saved text, and the refusal an earlier save left in `slot` (a selector) goes with it. Called
+    // from the templates' Alpine handlers.
+    window.todoCancelEdit = function (form, slot) {
+        if (form && form.reset) form.reset();
+        const message = slot ? document.querySelector(slot) : null;
+        if (message) message.replaceChildren();
+    };
+
+    // The accessible name of a rendered checklist box: the text of its own item (not of a nested list).
+    function nameChecklistBoxes(root) {
+        root.querySelectorAll('input.task-list-item-checkbox').forEach(function (box) {
+            if (box.hasAttribute('aria-label')) return;
+            const item = box.closest('li');
+            if (!item) return;
+            const copy = item.cloneNode(true);
+            copy.querySelectorAll('ul, ol, input').forEach(function (node) { node.remove(); });
+            const text = copy.textContent.replace(/\s+/g, ' ').trim();
+            box.setAttribute('aria-label', text.length > 120 ? text.slice(0, 117) + '...' : (text || 'Checklist item'));
+        });
+    }
 
     function enableChecklist(section) {
         const url = section.dataset.checklistUrl;
@@ -25,14 +58,14 @@
             box.disabled = false;
             box.addEventListener('change', function () {
                 box.disabled = true;
+                // A refusal swaps its message elsewhere and leaves this box in place; a failed request
+                // (rejected promise) must not leave the box disabled, nor surface as an unhandled rejection.
+                const enable = function () { box.disabled = false; };
                 htmx.ajax('POST', url, {
                     target: '#' + section.id,
                     swap: 'outerHTML',
                     values: { index: box.dataset.index, checked: box.checked ? 'true' : 'false' },
-                }).then(function () {
-                    // A refusal swaps its message elsewhere and leaves this box in place.
-                    box.disabled = false;
-                });
+                }).then(enable, enable);
             });
         });
     }
@@ -60,8 +93,13 @@
             body: body,
             credentials: 'same-origin',
         }).then(function (response) {
-            if (response.ok) return showProblem(list, '');
-            return response.text().then(function (html) { showProblem(list, html); });
+            if (!response.ok) return response.text().then(function (html) { showProblem(list, html); });
+            showProblem(list, '');
+            const url = list.dataset.afterReorderUrl;
+            const target = list.dataset.afterReorderTarget;
+            if (url && target && document.querySelector(target)) {
+                htmx.ajax('GET', url, { target: target, swap: 'outerHTML' }).catch(function () {});
+            }
         }).catch(function () {
             showProblem(list, '<p class="text-red-600 dark:text-red-400" role="alert">Could not save the new order.</p>');
         });
@@ -78,6 +116,92 @@
             },
         });
     }
+
+    // Keyboard ordering: the up and down arrow keys on a row's handle move the row and save the order
+    // (one request for a burst of key presses). The move is announced in a polite live region.
+    let live = null;
+    function announce(text) {
+        if (!live) {
+            live = document.createElement('div');
+            live.className = 'sr-only';
+            live.setAttribute('aria-live', 'polite');
+            document.body.appendChild(live);
+        }
+        live.textContent = '';
+        window.setTimeout(function () { live.textContent = text; }, 30);
+    }
+    const saveTimers = new WeakMap();
+    function rowsOf(list) {
+        return Array.from(list.children).filter(function (child) { return child.hasAttribute('data-task-id'); });
+    }
+    document.addEventListener('keydown', function (event) {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        const handle = event.target instanceof Element ? event.target.closest('.drag-handle') : null;
+        const row = handle && handle.closest('[data-task-id]');
+        const list = row && row.parentElement;
+        if (!list || !list.hasAttribute('data-sortable')) return;
+        event.preventDefault();
+        const rows = rowsOf(list);
+        const from = rows.indexOf(row);
+        const to = from + (event.key === 'ArrowUp' ? -1 : 1);
+        if (to < 0 || to >= rows.length) return;
+        if (event.key === 'ArrowUp') list.insertBefore(row, rows[to]);
+        else list.insertBefore(row, rows[to].nextElementSibling);
+        handle.focus();
+        const name = handle.dataset.name || 'Item';
+        announce(name + ' moved to position ' + (to + 1) + ' of ' + rows.length + '.');
+        window.clearTimeout(saveTimers.get(list));
+        saveTimers.set(list, window.setTimeout(function () { postOrder(list); }, 400));
+    });
+
+    // Lists whose last row has left (an action answered with an empty body) or got one back.
+    function refreshEmpty() {
+        document.querySelectorAll('ul[data-empty-list]').forEach(function (list) {
+            const hasRows = rowsOf(list).length > 0;
+            const placeholder = list.querySelector(':scope > [data-empty]');
+            const template = list.querySelector(':scope > template[data-empty-state]');
+            const section = list.closest('[data-vanish-when-empty]');
+            if (hasRows) {
+                if (placeholder) placeholder.remove();
+                if (section) section.hidden = false;
+            } else if (section) {
+                section.hidden = true;
+            } else if (template && !placeholder) {
+                list.insertBefore(template.content.cloneNode(true), template);
+            }
+        });
+    }
+    // A timer, not requestAnimationFrame: a tab in the background never runs those.
+    let emptyTimer = 0;
+    new MutationObserver(function () {
+        if (emptyTimer) return;
+        emptyTimer = window.setTimeout(function () {
+            emptyTimer = 0;
+            refreshEmpty();
+        }, 30);
+    }).observe(document.body, { childList: true, subtree: true });
+
+    // The tab title follows an inline rename of the task page.
+    document.addEventListener('htmx:afterSettle', function (event) {
+        const panel = document.getElementById('task-panel');
+        if (panel && panel.dataset.documentTitle) document.title = panel.dataset.documentTitle;
+    });
+
+    // Phone menus: tell the layout's CSS whether more items are hidden to the right.
+    function updateScrollHint(list) {
+        const more = list.scrollWidth - list.clientWidth - list.scrollLeft > 4;
+        list.setAttribute('data-more-right', more ? 'true' : 'false');
+    }
+    function wireScrollHints(scope) {
+        scope.querySelectorAll('[data-scroll-hint]').forEach(function (list) {
+            if (!list.dataset.hintReady) {
+                list.dataset.hintReady = '1';
+                list.addEventListener('scroll', function () { updateScrollHint(list); }, { passive: true });
+            }
+            updateScrollHint(list);
+        });
+    }
+    window.addEventListener('resize', function () { wireScrollHints(document); });
 
     // Clearing the date of a task removes its reminders (they are due relative to the date): ask first.
     // Completing a task: mark the row done the moment the circle is clicked (the check draws, the title strikes
@@ -114,6 +238,8 @@
 
     htmx.onLoad(function (root) {
         const scope = root.querySelectorAll ? root : document;
+        nameChecklistBoxes(scope);
+        wireScrollHints(scope);
         scope.querySelectorAll('[data-checklist-url]').forEach(enableChecklist);
         if (root.matches && root.matches('[data-checklist-url]')) enableChecklist(root);
         scope.querySelectorAll('[data-sortable]').forEach(makeSortable);

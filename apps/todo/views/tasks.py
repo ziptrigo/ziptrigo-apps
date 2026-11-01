@@ -12,6 +12,7 @@ from uuid import UUID
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db.models import F
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
@@ -67,6 +68,9 @@ from .lists import VIEWS, belongs, decorate, list_context, page_url, row_task
 PANEL_MSG = '#task-msg'
 CREDITS_LINE = 'You do not have enough credits to add this task.'
 NEIGHBOUR_ROWS = 20
+CLEAR_PAGE_MSG = (
+    b'<div id="todo-msg" hx-swap-oob="true" class="mb-4 text-sm" aria-live="polite"></div>'
+)
 
 
 def _view_of(request: AuthenticatedHttpRequest) -> str:
@@ -170,6 +174,8 @@ def after_action(
     )
     response = render(request, template, context)
     response.content += _refreshed_neighbours(request, fresh, view, today)
+    # A success clears a refusal an earlier action left in the page's message slot.
+    response.content += CLEAR_PAGE_MSG
     return response
 
 
@@ -203,6 +209,25 @@ def _refreshed_neighbours(request: AuthenticatedHttpRequest, task: Task, view: s
             )
         )
     return ''.join(parts).encode()
+
+
+def _rows_removed(numbers: list[int]) -> bytes:
+    """Out-of-band deletes of the rows of `numbers`: the subtasks an action on their parent took out
+    of the list with it (a row that is not on the page is ignored)."""
+    return ''.join(
+        f'<li id="task-{number}" hx-swap-oob="delete"></li>' for number in numbers
+    ).encode()
+
+
+def _blocked_banner(request: AuthenticatedHttpRequest) -> bytes:
+    """The "Tasks are blocked" banner, out of band, when the account is blocked now: completing a
+    repeating task whose next occurrence the balance can't cover creates it owed and blocks task
+    creation, which the page would otherwise show only after a reload."""
+    if not get_account(request.user).is_blocked:
+        return b''
+    return render_to_string(
+        'todo/partials/blocked_banner.html', {'todo_blocked': True, 'oob': True}, request=request
+    ).encode()
 
 
 def _refuse_validation(
@@ -381,10 +406,10 @@ def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpRespons
         ).values_list('number', flat=True)
     )
     response = _act(request, number, complete_task)
-    if cascaded and response.status_code == 200 and is_htmx(request) and not _is_page(request):
-        response.content += ''.join(
-            f'<li id="task-{subtask}" hx-swap-oob="delete"></li>' for subtask in cascaded
-        ).encode()
+    if response.status_code == 200 and is_htmx(request):
+        if cascaded and not _is_page(request):
+            response.content += _rows_removed(cascaded)
+        response.content += _blocked_banner(request)
     return response
 
 
@@ -419,13 +444,22 @@ def task_trash(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Move to the Trash. A repeating task's confirmation offers "Also stop repeating"
     (`stop_recurrence=1`); without it the repeat goes on."""
     stop_repeat = request.POST.get('stop_recurrence') == '1'
+    # The subtasks go to the Trash with their parent: their rows leave the list too.
+    cascaded = list(
+        Task.objects.filter(
+            user=request.user, parent__number=number, deleted_at__isnull=True
+        ).values_list('number', flat=True)
+    )
 
     def trash(task: Task) -> None:
         trash_task(task)
         if stop_repeat:
             recurrence.stop(task)
 
-    return _act(request, number, trash, refresh_comments=True)
+    response = _act(request, number, trash, refresh_comments=True)
+    if cascaded and response.status_code == 200 and is_htmx(request) and not _is_page(request):
+        response.content += _rows_removed(cascaded)
+    return response
 
 
 @login_required
@@ -438,7 +472,20 @@ def recurrence_stop(request: AuthenticatedHttpRequest, number: int) -> HttpRespo
 @login_required
 @require_POST
 def task_restore(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
-    return _act(request, number, restore_task, trashed=True, refresh_comments=True)
+    # Restoring a parent restores the subtasks trashed with it (the same `deleted_at`): on the Trash
+    # page their rows are removed with it, instead of staying as rows whose Restore answers a 404.
+    cascaded = list(
+        Task.objects.filter(
+            user=request.user,
+            parent__number=number,
+            deleted_at__isnull=False,
+            deleted_at=F('parent__deleted_at'),
+        ).values_list('number', flat=True)
+    )
+    response = _act(request, number, restore_task, trashed=True, refresh_comments=True)
+    if cascaded and response.status_code == 200 and is_htmx(request) and not _is_page(request):
+        response.content += _rows_removed(cascaded)
+    return response
 
 
 @login_required
@@ -448,6 +495,9 @@ def task_delete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     task = owned_task(request, number, trashed=True)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=_slot(request))) is not None:
         return response
+    cascaded = list(
+        Task.objects.filter(user=request.user, parent=task).values_list('number', flat=True)
+    )
     try:
         delete_forever(task)
     except ValidationError as exc:  # unpaid: it has to be settled first
@@ -459,11 +509,13 @@ def task_delete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
             fallback=_task_url(task) if _is_page(request) else page_url('trash'),
         )
     if is_htmx(request) and not _is_page(request):
-        return render(
+        response = render(
             request,
             'todo/partials/row_gone.html',
             {'oob_nav': True, 'today_count': today_set(request.user).count(), 'task': task},
         )
+        response.content += _rows_removed(cascaded) + CLEAR_PAGE_MSG
+        return response
     messages.success(request, 'Task deleted.')
     return hx_redirect(request, reverse('todo:trash'))
 

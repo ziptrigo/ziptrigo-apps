@@ -44,6 +44,7 @@
     </div>
 </div>
 {% repeat_choices as repeat_options %}
+{% if task.parent_id or task.is_completed %}{% comment %} A subtask never repeats and only an open task can: the control would only answer with a refusal. {% endcomment %}{% else %}
 {% with recurrence=task.active_recurrence %}
 {% comment %} The Repeat control (static/todo/js/recurrence.js). Its controls have no name; the form submits only the
    two hidden inputs, which the component keeps in step. The radios need a name to group, and `form="repeat-ui"` (no such
@@ -182,4 +183,5 @@
     </div>
 </div>
 {% endwith %}
+{% endif %}
 {% endwith %}

@@ -71,6 +71,14 @@ def stored_params(saved: SavedFilter, user: User | None = None) -> FilterParams:
     )
 
 
+def dropped_label_count(saved: SavedFilter, user: User) -> int:
+    """How many labels the filter was saved with that no longer exist (deleted since). They simply
+    drop out of the filter when it runs; a filter whose only criterion was one then selects every
+    open task, which the pages say instead of leaving it as a surprise."""
+    saved_with = set(FilterParams.from_dict(saved.params).labels)
+    return len(saved_with - set(stored_params(saved, user).labels))
+
+
 def list_filters(user: User) -> QuerySet:
     """The user's saved filters in their order."""
     return SavedFilter.objects.filter(user=user).order_by('position', 'created_at')
@@ -198,6 +206,7 @@ class FilterRow:
     filter: SavedFilter
     params: FilterParams
     summary: str
+    dropped_labels: int = 0
 
 
 def filter_rows(user: User, filters: Sequence[SavedFilter]) -> list[FilterRow]:
@@ -206,7 +215,12 @@ def filter_rows(user: User, filters: Sequence[SavedFilter]) -> list[FilterRow]:
     names = label_names(user)
     return [
         FilterRow(
-            filter=saved, params=params[saved.pk], summary=describe_params(params[saved.pk], names)
+            filter=saved,
+            params=params[saved.pk],
+            summary=describe_params(params[saved.pk], names),
+            dropped_labels=len(
+                set(FilterParams.from_dict(saved.params).labels) - set(params[saved.pk].labels)
+            ),
         )
         for saved in filters
     ]

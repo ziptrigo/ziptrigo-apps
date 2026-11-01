@@ -3,7 +3,7 @@
    Needs `task` (with subtask counts), `subtasks`, `labels`, `selected_label_ids`, `today` and `referenced_by`.
    The comments are not in it (`comments.html`, beside it on the page), so these actions leave a draft alone. A trashed task is
    read-only: Restore (and Delete forever), no editing. {% endcomment %}
-<div id="task-panel" hx-vals='{"ctx": "page"}'>
+<div id="task-panel" hx-vals='{"ctx": "page"}' data-document-title="{{ task.title }} - To-do - ZipTrigo">
     <div id="task-msg" class="mb-4 text-sm" aria-live="polite"></div>
 
     <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
@@ -32,7 +32,7 @@
         <form x-show="editing" style="display: none" method="post" action="{% url 'todo:edit' task.number %}"
               hx-post="{% url 'todo:edit' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
               hx-disabled-elt="find button[type='submit']"
-              class="flex items-center gap-2" @keydown.escape="editing = false">
+              class="flex items-center gap-2" @keydown.escape="editing = false; todoCancelEdit($el, '#task-msg')">
             {% csrf_token %}
             <input type="hidden" name="part" value="title">
             <input type="hidden" name="ctx" value="page">
@@ -41,7 +41,7 @@
                    class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xl">
             <button type="submit" aria-label="Save the title" title="Save"
                     class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
-            <button type="button" @click="editing = false" aria-label="Cancel editing the title" title="Cancel"
+            <button type="button" @click="editing = false; todoCancelEdit($el.form, '#task-msg')" aria-label="Cancel editing the title" title="Cancel"
                     class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
         </form>
     </div>
