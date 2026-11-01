@@ -21,6 +21,7 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
             </div>
+            <label for="search-input" class="sr-only">Search QR codes by name</label>
             <input type="text" name="q" id="search-input" value="{{ query|default:'' }}" 
                 class="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:placeholder-gray-400 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
                 placeholder="Search by name">
@@ -124,8 +125,9 @@
                 aria-label="Close QR code preview">
             &times;
         </button>
+        {# No src until a preview is opened (set in the script below): an empty src is invalid. #}
         <img id="qr-modal-image"
-             src=""
+             hidden
              alt="QR code preview"
              class="max-h-[70vh] max-w-[70vw] object-contain bg-white rounded-md" />
     </div>
@@ -136,7 +138,7 @@
      class="fixed inset-0 z-50 hidden bg-black/50 dark:bg-black/70 flex items-center justify-center transition-opacity duration-150 ease-out">
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 transform transition-transform duration-150 ease-out scale-95">
         <div class="p-6">
-            <h3 id="delete-modal-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR Code</h3>
+            <h2 id="delete-modal-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Delete QR Code</h2>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
                 Are you sure you want to delete <span id="delete-qr-name" class="font-medium text-gray-900 dark:text-gray-100"></span>?
             </p>
@@ -199,6 +201,7 @@
         return;
       }
       modalImg.src = safeUrl;
+      modalImg.hidden = false;
       overlay.classList.remove('hidden');
       if (closeBtn) closeBtn.focus();
       // trigger fade/scale in
@@ -221,7 +224,8 @@
       }
       setTimeout(function() {
         overlay.classList.add('hidden');
-        modalImg.src = '';
+        modalImg.removeAttribute('src');
+        modalImg.hidden = true;
       }, 150);
       if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
     }
@@ -260,6 +264,43 @@
         if (!overlay.classList.contains('hidden')) {
           closeModal();
         }
+      }
+    });
+
+    // Focus trap: Tab and Shift+Tab cycle inside whichever dialog is open (both are aria-modal),
+    // and a Tab pressed with focus outside it moves back in. Escape and the focus return are above.
+    function openDialog() {
+      const dialogs = [overlay, document.getElementById('delete-modal-overlay')];
+      for (const d of dialogs) {
+        if (d && !d.classList.contains('hidden') && !d.classList.contains('opacity-0')) return d;
+      }
+      return null;
+    }
+
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key !== 'Tab') return;
+      const dialog = openDialog();
+      if (!dialog) return;
+      const items = Array.from(dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]'))
+        .filter(function(el) {
+          return !el.disabled && el.tabIndex >= 0 && !el.hidden && el.getClientRects().length > 0;
+        });
+      if (!items.length) {
+        ev.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!dialog.contains(active)) {
+        ev.preventDefault();
+        (ev.shiftKey ? last : first).focus();
+      } else if (ev.shiftKey && active === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && active === last) {
+        ev.preventDefault();
+        first.focus();
       }
     });
 
