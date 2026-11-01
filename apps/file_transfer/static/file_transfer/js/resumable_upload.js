@@ -364,8 +364,11 @@ function initFileTransferUpload(options) {
                     interrupted(candidate.fileId, file.name);
                 });
             } else {
-                uploadFile(file).catch(function () {
-                    alert('Could not add ' + file.name + ': network error. Try again.');
+                uploadFile(file).catch(function (error) {
+                    // `fetch` rejects with a TypeError when the network fails; anything else (the
+                    // file couldn't be read or hashed) gets a neutral message.
+                    const why = error instanceof TypeError ? 'network error' : 'something went wrong';
+                    alert('Could not add ' + file.name + ' (' + why + '). Try again.');
                 });
             }
         });

@@ -472,8 +472,8 @@ def test_the_default_skip_prefixes(settings):
 
 
 def test_a_short_link_redirect_does_not_load_the_session_user(client, user):
-    """Through the whole stack: with a session cookie, `/go/<code>` makes no user query. (An
-    unknown code renders the site's 404 page, whose layout does read the session.)"""
+    """Through the whole stack: with a session cookie, `/go/<code>` makes no user query, for a
+    real code or a made-up one (its 404 page renders without the session)."""
     from apps.qr_code.models import QRCode
 
     QRCode.objects.create(
@@ -490,6 +490,9 @@ def test_a_short_link_redirect_does_not_load_the_session_user(client, user):
         response = client.get('/go/tzskip')
 
     assert response.status_code == 302
+    with CaptureQueriesContext(connection) as unknown:
+        assert client.get('/go/doesnotexist').status_code == 404
+    assert [q for q in unknown.captured_queries if 'accounts_user' in q['sql']] == []
 
     users = [q for q in ctx.captured_queries if 'accounts_user' in q['sql']]
     assert users == []

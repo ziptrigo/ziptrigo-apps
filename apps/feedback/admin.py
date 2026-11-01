@@ -46,10 +46,12 @@ class FeedbackAdmin(admin.ModelAdmin):
     def _mark(self, request: HttpRequest, queryset: QuerySet, status: FeedbackStatus) -> None:
         changed = list(queryset.exclude(status=status))
         # `update()` skips `auto_now`, so `updated_at` is set explicitly.
-        count = queryset.update(status=status, updated_at=timezone.now())
+        queryset.update(status=status, updated_at=timezone.now())
+        # The message counts what changed, like the History entries (a row already in that
+        # status is left as it was).
         admin_log.log_change(request, changed, f'Marked as {status.label}.')
         self.message_user(
-            request, f'Marked {count} feedback as {status.label}.', level=messages.SUCCESS
+            request, f'Marked {len(changed)} feedback as {status.label}.', level=messages.SUCCESS
         )
 
     @admin.action(description='Mark selected as New', permissions=['change'])

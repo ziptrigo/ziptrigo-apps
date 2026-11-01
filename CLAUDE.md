@@ -1552,7 +1552,7 @@ so passwords are only ever set through hashed password fields; its add page has 
 `admin/accounts/user/add_form.html` (jazzmin's says "enter a username"). Jazzmin's top menu links to
 the site and to the admin tools page, the latter only for superusers: jazzmin can only test
 permissions, so the link asks for `core.superuser_only`, which exists nowhere and so only a
-superuser has; the dashboard's "Admin Tools" box is also superuser-only, and a staff user who opens
+superuser has (`test_admin_tools.py` fails if it is ever created); the dashboard's "Admin Tools" box is also superuser-only, and a staff user who opens
 the page anyway gets a 403 that shows none of the tools. The light/dark toggle
 (`core/js/admin_theme_toggle.js`) sets jazzmin 3's `data-bs-theme` and stores it under jazzmin's
 own `jazzmin-theme-mode` key, which jazzmin's early script reads before the page paints.
@@ -1662,9 +1662,9 @@ writes lives in `MEDIA_ROOT` on the container's disk, which `static()` serves on
 `DEBUG=True` and a redeploy empties: nothing displays it. Short codes
 for tracked QR codes are issued by the server (`qr_code:short-code`) and kept in the session until
 the save, so users can't choose their own; a code taken in the meantime is replaced.
-A scan of an unknown or a *deleted* code gets the same neutral 404 page in the site layout
-(`qr_code/unavailable.html`, rendered in a thread since the layout reads the session; a deleted code
-used to send the public to the login-only dashboard), and the edit and duplicate pages 404 for a
+A scan of an unknown or a *deleted* code gets the same neutral 404 page (`qr_code/unavailable.html`,
+standalone rather than the site layout and rendered without the request, so a made-up code costs no
+session or user query; a deleted code used to send the public to the login-only dashboard), and the edit and duplicate pages 404 for a
 deleted code. The dashboard sorts by Newest (default) or Name (`?sort=`, the search URL-encoded
 into the links); it has no row checkboxes. The editor can't set the error-correction level, so its
 "too long" message only says to shorten the text (or, for a URL, to turn on tracking).

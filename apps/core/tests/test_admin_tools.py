@@ -166,3 +166,31 @@ def test_show_environment_masks_credentials_in_urls_and_access_key_ids(
     assert env['PASSWORD_RESET_TOKEN_TTL_HOURS'] == '4'
     assert 'db-password-123' not in response.content.decode()
     assert 'AKIAEXAMPLEEXAMPLE12' not in response.content.decode()
+
+
+def test_the_admin_tools_link_permission_exists_nowhere(settings):
+    """The jazzmin menu shows Admin Tools only to holders of `core.superuser_only`, a permission
+    that must never exist: only superusers, who have every permission, may pass. Creating it, or
+    a group granting it, would show the link to staff the page then refuses."""
+    from django.contrib.auth.models import Permission
+
+    [link] = [
+        item for item in settings.JAZZMIN_SETTINGS['topmenu_links'] if item['name'] == 'Admin Tools'
+    ]
+    assert link['permissions'] == ['core.superuser_only']
+    assert not Permission.objects.filter(
+        content_type__app_label='core', codename='superuser_only'
+    ).exists()
+
+
+def test_staff_holding_every_real_permission_still_does_not_see_the_link(client):
+    from django.contrib.auth.models import Permission
+
+    staff = UserFactory(is_staff=True, is_superuser=False)
+    # `ty` sees `user_permissions` as the declared `ManyToManyField`, not the related manager.
+    staff.user_permissions.set(Permission.objects.all())  # ty: ignore[unresolved-attribute]
+    client.force_login(staff)
+
+    html = client.get(reverse('custom_admin:index')).content.decode()
+
+    assert reverse('custom_admin:admin_tools') not in html

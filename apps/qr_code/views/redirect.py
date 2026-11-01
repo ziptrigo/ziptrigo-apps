@@ -2,7 +2,8 @@
 
 from asgiref.sync import sync_to_async
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import redirect
+from django.template.loader import render_to_string
 
 from apps.core import ratelimit
 
@@ -47,6 +48,6 @@ async def redirect_short_url(request: HttpRequest, short_code: str) -> HttpRespo
 
 
 async def _unavailable(request: HttpRequest) -> HttpResponse:
-    """The neutral 404 page for an unknown or deleted code. Rendered in a thread: the site layout
-    reads the session (`request.user`), which is a database query."""
-    return await sync_to_async(render)(request, 'qr_code/unavailable.html', status=404)
+    """The neutral 404 page for an unknown or deleted code. Rendered without the request (so no
+    context processor, no session, no query): this path also answers made-up codes."""
+    return HttpResponse(render_to_string('qr_code/unavailable.html'), status=404)

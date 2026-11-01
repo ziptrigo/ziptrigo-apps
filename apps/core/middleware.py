@@ -24,6 +24,10 @@ def HtmxLoginRedirectMiddleware(get_response):
     page the user was on (`HX-Current-URL`), not the partial endpoint that was posted to, which
     would render a fragment after sign-in. Views that answer an anonymous htmx request on their own
     (the notification bell's 204) never reach this: only a redirect to `LOGIN_URL` is rewritten.
+
+    Every such redirect is rewritten, and the `next` the view put in it is replaced by the current
+    page: for an htmx request that is always where the person should land. A view that wants an
+    htmx request to land somewhere else after sign-in should answer `HX-Redirect` itself.
     """
     if inspect.iscoroutinefunction(get_response):
 
