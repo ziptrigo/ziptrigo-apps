@@ -12,8 +12,7 @@
             Status: <span class="uppercase font-semibold">{{ transfer.get_status_display }}</span>
         </p>
         <p class="text-sm text-gray-700 dark:text-gray-300">
-            Downloaded {{ transfer.download_count }} time{{ transfer.download_count|pluralize }}
-            {% if transfer.max_downloads %} (max {{ transfer.max_downloads }}){% endif %}.
+            Downloaded {{ transfer.download_count }} time{{ transfer.download_count|pluralize }}{% if transfer.max_downloads %} (max {{ transfer.max_downloads }}){% endif %}.
         </p>
         <p class="text-sm text-gray-700 dark:text-gray-300">
             Expires:
@@ -21,12 +20,18 @@
         </p>
 
         {% if transfer.status == 'active' %}
-        <form method="post" action="{% url 't:manage-disable' transfer.slug transfer.manage_token %}">
-            {% csrf_token %}
-            <button type="submit" class="btn px-4 py-2 rounded-lg text-sm bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-100">
+        {% comment %}Disabling can't be undone from here, so it asks first (the shared confirm modal posts the same form).{% endcomment %}
+        <div x-data="confirmModal">
+            <button type="button" @click="show($el)"
+                    data-url="{% url 't:manage-disable' transfer.slug transfer.manage_token %}"
+                    data-title="Disable this transfer?"
+                    data-body="The download link stops working for everyone, and it can't be turned back on."
+                    data-label="Disable"
+                    class="btn px-4 py-2 rounded-lg text-sm bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-100">
                 Disable this transfer
             </button>
-        </form>
+            {% include 'core/partials/confirm_modal.html' %}
+        </div>
         {% elif transfer.status == 'disabled' %}
         <p class="text-sm text-gray-500 dark:text-gray-400">This transfer is disabled -- the link no longer works.</p>
         {% endif %}

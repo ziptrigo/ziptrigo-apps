@@ -76,7 +76,7 @@
                 class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-sage-400">
             <i class="fas fa-paper-plane mr-2"></i>Send
         </button>
-        <p class="text-xs text-gray-500 dark:text-gray-400">Add at least one file that has finished uploading.</p>
+        <p id="send-hint" class="text-xs text-gray-500 dark:text-gray-400">Add at least one file that has finished uploading.</p>
     </form>
 </div>
 
@@ -103,6 +103,7 @@ document.addEventListener('DOMContentLoaded', function () {
         base: '/transfer/send/anon/' + draftId,
         fileListEl: fileListEl,
         submitBtn: submitBtn,
+        hintEl: document.getElementById('send-hint'),
         csrftoken: csrftoken,
         existingFiles: existingFiles,
     });

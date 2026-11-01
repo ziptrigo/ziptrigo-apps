@@ -14,7 +14,7 @@
                class="flex-1 text-sm bg-transparent text-gray-900 dark:text-gray-100 border-none">
         <button type="button" id="copy-link-btn"
                 class="btn px-3 py-1.5 rounded-lg text-sm bg-brand-primary text-gray-900 hover:bg-sage-400">
-            <i class="fas fa-copy mr-1"></i>Copy
+            <i class="fas fa-copy mr-1" aria-hidden="true"></i><span id="copy-link-label" aria-live="polite">Copy</span>
         </button>
     </div>
     <a href="{% url 'file_transfer:dashboard' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Back to your transfers</a>
@@ -22,8 +22,16 @@
 <script>
 document.getElementById('copy-link-btn').addEventListener('click', function () {
     const input = document.getElementById('download-url-input');
+    const label = document.getElementById('copy-link-label');
     input.select();
-    navigator.clipboard.writeText(input.value).catch(function () { document.execCommand('copy'); });
+    const copied = function () {
+        label.textContent = 'Copied';
+        clearTimeout(label._timer);
+        label._timer = setTimeout(function () { label.textContent = 'Copy'; }, 2000);
+    };
+    navigator.clipboard.writeText(input.value).then(copied, function () {
+        if (document.execCommand('copy')) copied();
+    });
 });
 </script>
 {% endblock %}

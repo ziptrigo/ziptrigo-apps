@@ -45,9 +45,11 @@ function initFileTransferUpload(options) {
         return Array.from(files.values()).some(function (f) { return f.resumable && !f.uploaded; });
     }
 
+    // The hint under Send (`options.hintEl`) explains why it is disabled, so it goes with it.
     function updateSubmitState() {
         const anyUploaded = Array.from(files.values()).some(function (f) { return f.uploaded; });
         submitBtn.disabled = !anyUploaded;
+        if (options.hintEl) options.hintEl.hidden = anyUploaded;
     }
 
     // Base64-encode a SHA-256 digest of `blob`, for the S3 per-part integrity check (spec section
@@ -64,14 +66,43 @@ function initFileTransferUpload(options) {
         return btoa(binary);
     }
 
-    // GB from 1 GB up, MB from 1 MB up, KB below that (binary units, like the sizes it replaced).
+    // The same as Django's `filesizeformat`, which the download page uses: bytes below 1 KB, then
+    // KB, MB and GB with one decimal (binary units).
     function formatSize(bytes) {
         const KB = 1024;
         const MB = KB * 1024;
         const GB = MB * 1024;
         if (bytes >= GB) return (bytes / GB).toFixed(1) + ' GB';
         if (bytes >= MB) return (bytes / MB).toFixed(1) + ' MB';
-        return Math.round(bytes / KB).toLocaleString() + ' KB';
+        if (bytes >= KB) return (bytes / KB).toFixed(1) + ' KB';
+        return bytes + (bytes === 1 ? ' byte' : ' bytes');
+    }
+
+    // A network error (connection dropped, offline) makes `fetch` reject rather than answer, so
+    // without this the row stayed at its last percentage with no message. The row becomes paused:
+    // selecting the same file again resumes it from the parts S3 already has.
+    function interrupted(fileId, fileName) {
+        const entry = files.get(fileId);
+        if (entry && !entry.uploaded) {
+            entry.resumable = true;
+            renderRow(fileId, entry);
+            const candidate = resumeCandidates.find(function (c) { return c.fileId === fileId; });
+            if (candidate) {
+                candidate.matched = false;
+            } else {
+                resumeCandidates.push({
+                    fileId: fileId,
+                    name: entry.name,
+                    size: entry.size,
+                    clientLastModified: entry.clientLastModified,
+                    matched: false,
+                });
+            }
+        }
+        alert(
+            'Uploading ' + fileName + ' was interrupted by a network error. '
+            + 'Select the same file again to resume.'
+        );
     }
 
     function renderRow(fileId, entry) {
@@ -142,6 +173,15 @@ function initFileTransferUpload(options) {
     // file. Requests presigned URLs (and PUTs them) a batch at a time rather than all up front --
     // see `PART_URL_BATCH_SIZE`. Returns whether the file finished uploading successfully.
     async function uploadParts(fileId, fileName, partCount, requestParts, blobs, alreadyUploaded) {
+        try {
+            return await sendParts(fileId, fileName, partCount, requestParts, blobs, alreadyUploaded);
+        } catch (error) {
+            interrupted(fileId, fileName);
+            return false;
+        }
+    }
+
+    async function sendParts(fileId, fileName, partCount, requestParts, blobs, alreadyUploaded) {
         const finalParts = new Array(partCount);
         let completedCount = alreadyUploaded.size;
         alreadyUploaded.forEach(function (part, partNumber) {
@@ -318,10 +358,15 @@ function initFileTransferUpload(options) {
     function handleFileSelection(fileList) {
         Array.from(fileList).forEach(function (file) {
             const candidate = findResumeMatch(file);
+            // A rejection here is a network error before the parts (adding or resuming the file).
             if (candidate) {
-                resumeFile(candidate.fileId, file, candidate);
+                resumeFile(candidate.fileId, file, candidate).catch(function () {
+                    interrupted(candidate.fileId, file.name);
+                });
             } else {
-                uploadFile(file);
+                uploadFile(file).catch(function () {
+                    alert('Could not add ' + file.name + ': network error. Try again.');
+                });
             }
         });
     }
