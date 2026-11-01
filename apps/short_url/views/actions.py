@@ -18,7 +18,7 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import InsufficientCreditsError
 
 from ..services import CostChangedError, delete_link, quote_enable, set_enabled
-from .common import owned_link, parse_cost, redirect_back
+from .common import out_of_credits_message, owned_link, parse_cost, redirect_back
 
 
 def _back(request: AuthenticatedHttpRequest) -> HttpResponse:
@@ -60,7 +60,9 @@ def link_enable(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse
             else 'The cost changed. Try again.',
         )
     except InsufficientCreditsError:
-        messages.error(request, "You don't have enough credits to enable this link. Top up first.")
+        messages.error(
+            request, out_of_credits_message("You don't have enough credits to enable this link.")
+        )
     except ValidationError as exc:
         messages.error(request, ' '.join(exc.messages))
     else:

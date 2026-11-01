@@ -190,7 +190,7 @@ class TestTakeDownFromTheReportList:
         first = reports.create_report(link, reason='spam', reporter_ip='203.0.113.1')
         second = reports.create_report(link, reason='phishing', reporter_ip='203.0.113.2')
         page = act(client, REPORTS, 'take_down_action', [first, second])
-        assert page.content.decode().count('Bad001 --') == 1
+        assert page.content.decode().count('<code>Bad001</code>') == 1
         response = act(
             client,
             REPORTS,
@@ -520,3 +520,38 @@ class TestDeletingAUserWithReports:
         assert 'Cannot delete' not in client.get(url).content.decode()
         assert client.post(url, {'post': 'yes'}).status_code == 302
         assert not LinkReport.objects.exists()
+
+
+class TestConfirmationPagesAreStyled:
+    """The two-step pages use the admin theme's card, form and button classes, not bare HTML
+    (issue #224, SU-F5), and the report list opens a report from its reason, with the reported
+    link's code in the first column (SU-F6)."""
+
+    def test_take_down(self, client, superuser, link):
+        content = act(client, LINKS, 'take_down_action', [link]).content.decode()
+        assert 'class="card"' in content and 'form-control' in content
+        assert 'btn btn-danger' in content and 'form-check-input' in content
+
+    def test_block_domain(self, client, superuser, link):
+        content = act(client, LINKS, 'block_domain_action', [link]).content.decode()
+        assert 'class="card"' in content and 'form-check-input' in content
+        assert 'btn btn-danger' in content and 'name="action"' in content
+
+    def test_deactivate_owner(self, client, superuser, link):
+        content = act(client, LINKS, 'deactivate_owner_action', [link]).content.decode()
+        assert 'class="card"' in content and 'form-control' in content
+        assert 'btn btn-danger' in content and 'name="apply"' in content
+
+    def test_a_refused_take_down_shows_the_error_under_the_field(self, client, superuser, link):
+        content = act(
+            client, LINKS, 'take_down_action', [link], apply='yes', reason=''
+        ).content.decode()
+        assert 'text-danger' in content
+
+    def test_the_report_list_leads_with_the_link_code(self, client, superuser, reported):
+        content = client.get(REPORTS).content.decode()
+        row = content.partition('<tbody>')[2]
+        assert 'field-id' not in row
+        assert row.index('field-link_link') < row.index('field-reason')
+        assert '>Bad001<' in row
+        assert '<th class="field-reason"><a ' in row  # the report opens from its reason

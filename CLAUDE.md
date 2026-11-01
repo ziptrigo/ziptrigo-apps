@@ -3233,7 +3233,12 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   owner deleted, is a 404 on every page. `copyText`/`confirmModal` are the shared Alpine components in
   `core/js/components.js`. The Expires field and the link page's times use core's local-time
   helpers (see "Templates and static files"); the edit form is prefilled in UTC with `Z`
-  (`views.form._initial`) for the script to show locally.
+  (`views.form._initial`) for the script to show locally. The list's column header (the sort links)
+  is hidden on a phone, so `link_list.html` also has a `md:hidden` "Sort by" bar with the same two
+  links. The tab counts are the user's totals and **ignore the search and tag filter**, on purpose
+  (the Receipts dashboard's rule). A flash refusal for too few credits (`enable`, the analytics
+  extra) carries a "Top up your credits" link (`views.common.out_of_credits_message`). The admin's
+  two-step confirmation pages use the admin theme's card/form/button classes (`admin/short_url/_*.html`).
 - **Rate limits** (`RATELIMIT_RULES`): `SU_REDIRECT_IP` (120/min, also charged by `/unlock` GETs),
   `SU_CREATE_USER` (30/h), `SU_EDIT_USER` (60/h), `SU_QR_USER` (60/min), `SU_PASSWORD_IP` (15/10 min),
   `SU_PASSWORD_LINK` (30/10 min), `SU_PREVIEW_IP` (60/min), `SU_REPORT_IP` (5/h), `SU_REPORT_LINK`

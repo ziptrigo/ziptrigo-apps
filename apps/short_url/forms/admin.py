@@ -13,7 +13,7 @@ class TakedownForm(forms.Form):
 
     reason = forms.CharField(
         label='Reason',
-        widget=forms.Textarea(attrs={'rows': 3}),
+        widget=forms.Textarea(attrs={'rows': 3, 'class': 'form-control'}),
         help_text="Recorded on the link and always shown to its owner (on the link's page, and in "
         'the email if you notify them below). It never says who reported the link: keep it '
         'about the link, not the reporter. Use the internal note for anything staff-only.',
@@ -21,13 +21,14 @@ class TakedownForm(forms.Form):
     internal_note = forms.CharField(
         label='Internal note (staff only)',
         required=False,
-        widget=forms.Textarea(attrs={'rows': 2}),
+        widget=forms.Textarea(attrs={'rows': 2, 'class': 'form-control'}),
         help_text='Never shown to the owner, on the page or in any email.',
     )
     notify_owner = forms.BooleanField(
         label='Notify the owner by email ("one of your links was removed")',
         required=False,
         initial=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}),
     )
 
 
@@ -38,11 +39,14 @@ class BlockDomainForm(forms.Form):
         label='Also block its subdomains',
         required=False,
         initial=True,
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         help_text='On: blocks "*.host", the host and every subdomain of it. Off: blocks exactly '
         'that host. Links already pointing there stop working at once.',
     )
     reason = forms.CharField(
-        label='Reason', required=False, widget=forms.Textarea(attrs={'rows': 2})
+        label='Reason',
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 2, 'class': 'form-control'}),
     )
 
 
@@ -52,7 +56,7 @@ class DeactivateOwnerForm(forms.Form):
     reason = forms.CharField(
         label='Reason',
         required=False,
-        widget=forms.Textarea(attrs={'rows': 2}),
+        widget=forms.Textarea(attrs={'rows': 2, 'class': 'form-control'}),
         help_text="Kept on the account (and shown to the owner as the link's takedown reason if "
         'you also take their links down below).',
     )
@@ -60,6 +64,7 @@ class DeactivateOwnerForm(forms.Form):
         label="Also take down the owner's other active links",
         required=False,
         initial=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         help_text='Deactivating an account does not stop its links redirecting: off by default, '
         'so anything the owner already has live keeps working unless you opt in here. The '
         'owner is not emailed.',

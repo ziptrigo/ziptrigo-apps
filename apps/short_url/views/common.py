@@ -11,7 +11,9 @@ from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.safestring import SafeString
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core.field_errors import ErrorLines, form_lines
@@ -84,6 +86,14 @@ def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = Non
 def credits_url() -> str:
     """Where "Top up" goes: the credits page (there is no purchase page yet)."""
     return reverse('billing:credits-history')
+
+
+def out_of_credits_message(text: str) -> SafeString:
+    """A flash message that says `text` and links to the credits page, like the form refusals'
+    "Top up your credits" link. Safe HTML: `text` is escaped, the link is ours."""
+    return format_html(
+        '{} <a href="{}" class="underline">Top up your credits</a>.', text, credits_url()
+    )
 
 
 def parse_cost(value: str | None) -> int | None:

@@ -33,6 +33,27 @@
             </div>
         </li>
 
+        {% comment %} The column header above is hidden on a phone, so the same two sort links are offered here. {% endcomment %}
+        {% if links %}
+        <li class="md:hidden flex flex-wrap items-center gap-x-4 gap-y-1 bg-gray-50 dark:bg-gray-900 px-4 py-2 text-sm text-gray-500 dark:text-gray-400 sm:px-6 sm:rounded-t-md" data-sort-bar>
+            <span>Sort by</span>
+            {% with sort=sort_links.created_at %}
+            <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#link-list" hx-swap="innerHTML" hx-sync="#link-filters:replace"
+               class="group inline-flex items-center rounded-md {% if sort.active %}font-medium text-gray-900 dark:text-gray-100{% else %}hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+                Created{% if sort.active %}<span class="sr-only"> (sorted {% if sort.descending %}descending{% else %}ascending{% endif %})</span>{% endif %}
+                <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
+            </a>
+            {% endwith %}
+            {% with sort=sort_links.click_count %}
+            <a href="{{ dashboard_url }}?{{ sort.query }}" hx-get="{{ list_url }}?{{ sort.query }}" hx-target="#link-list" hx-swap="innerHTML" hx-sync="#link-filters:replace"
+               class="group inline-flex items-center rounded-md {% if sort.active %}font-medium text-gray-900 dark:text-gray-100{% else %}hover:text-gray-700 dark:hover:text-gray-200{% endif %}">
+                Clicks{% if sort.active %}<span class="sr-only"> (sorted {% if sort.descending %}descending{% else %}ascending{% endif %})</span>{% endif %}
+                <i class="fas {% if sort.active and not sort.descending %}fa-chevron-up{% else %}fa-chevron-down{% endif %} ml-1 text-xs {% if sort.active %}text-gray-500 dark:text-gray-400{% else %}text-gray-400 group-hover:text-gray-500{% endif %}" aria-hidden="true"></i>
+            </a>
+            {% endwith %}
+        </li>
+        {% endif %}
+
         {% for link in links %}
         {% include 'short_url/partials/link_row.html' %}
         {% empty %}

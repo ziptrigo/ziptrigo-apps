@@ -431,7 +431,6 @@ class LinkReportAdmin(_AbuseActionPermissionMixin, ReadOnlyModelAdmin):
     and dismiss or take down straight from here."""
 
     list_display = [
-        'id',
         'link_link',
         'reason',
         'source',
@@ -440,6 +439,8 @@ class LinkReportAdmin(_AbuseActionPermissionMixin, ReadOnlyModelAdmin):
         'reporter_ip',
         'created_at',
     ]
+    # The report itself opens from its reason; the first column is the reported link's code.
+    list_display_links = ['reason']
     list_filter = ['status', 'source', 'reason', 'created_at']
     search_fields = ['link__code_key', 'link__destination', 'reporter_email', 'reporter_ip']
     list_select_related = ['link']
