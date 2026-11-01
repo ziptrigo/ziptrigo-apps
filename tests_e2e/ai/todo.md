@@ -2,44 +2,79 @@
 
 ## Scope
 
-The To-do product's web UI (`apps/todo`, issues #178, #179, #180, #181 and #182: tasks, repeating tasks (TODO-19 and
-TODO-20), comments and task references (TODO-17 and TODO-18), reminders (TODO-21), search and saved filters (TODO-22
-and TODO-23); attachments, AI date parsing, tasks added by email and the JWT API are built too but have no case
-here; the polish of the E2E run (#224) is TODO-24 to TODO-26):
+The To-do product's web UI (`apps/todo`, issue #161 and its sub-issues): tasks (#178), repeating tasks (#179),
+comments and task references (#180), search and saved filters (#181), reminders (#182), AI date parsing (#183),
+attachments and storage billing (#184), the "Add tasks by email" settings (#186), and the polish of the E2E run
+(#224):
 
 - the sidebar (a search box, then Today with a count, Upcoming, All, Completed, Labels, Trash, Settings, then
-  a **Filters** section; a top bar of scrolling rows on phones) and the "Tasks are blocked" banner;
-- **Today** `/todo/` (the quick-add box, the Overdue section with "Reschedule overdue to today", today's
-  tasks, drag-and-drop order), **Upcoming** `/todo/upcoming/` (14 days, "Nothing due"), **All**
-  `/todo/all/` (sorts, 50 per page), **Completed**, **Trash**;
-- the task page `/todo/<number>/`: inline title edit, the Markdown description with clickable
-  checklists, Complete, Postpone, Move to trash, Restore, Delete forever, then due date, time, priority,
-  labels, repeat, reminders, subtasks (add, complete, reorder), "Referenced by", attachments and comments, in that order;
-- comments on the task page (add, edit with a visible history, delete and restore, Markdown, `#1234` links) and the
-  "Referenced by" panel;
-- **Search** `/todo/search/` (the sidebar box, glob and regular expressions, the filter bar, snippets) and **Filters**
-  `/todo/filters/` (saved filters in the sidebar, rename, reorder, delete, update);
-- **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and
-  **Settings** `/todo/settings/` (default due time, default reminder and channel, the free-tasks line) and the reminder
-  history `/todo/reminders/history/`;
-- credits: the first 10 tasks of a calendar month are free, then 10 credits each; subtasks count;
-- access control: logged-out visitors, another user's task numbers.
+  a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
+  banners;
+- **Today** `/todo/` (the quick-add box with the free-tasks line, the Overdue section with "Reschedule overdue to
+  today", today's tasks, drag-and-drop and keyboard order), **Upcoming** `/todo/upcoming/` (14 days, "Nothing due"),
+  **All** `/todo/all/` (sorts and their direction, 50 per page), **Completed**, **Trash**;
+- the task page `/todo/<number>/`: inline title edit, the Markdown description (checklists, `#1234` references,
+  links), Complete, Postpone, Move to trash, Restore, Delete forever, then the details (the "Or type a date" box, due
+  date, time, priority, labels, repeat), reminders, subtasks (add, complete, reorder), "Referenced by", then,
+  outside the panel, **Attachments** and **Comments** (with their own files);
+- repeating tasks (every rule the Repeat popover builds, fixed schedule and from completion, stop repeating, an
+  owed next occurrence that blocks creation until a top-up settles it, the open-task cap's notice);
+- comments (add, edit with a visible history, delete and restore, Markdown, files) and "Referenced by";
+- attachments on a task and on a comment (uploaded straight to the local S3, Floci; Open in the browser only for a
+  sniffed image or PDF; the size and per-task limits; trashed, completed and paused-storage states);
+- reminders (presets, custom, edit, remove, the defaults from Settings, delivery in-app and by email, the history
+  page `/todo/reminders/history/`);
+- the AI date chip (with the fake parser, see Preconditions);
+- **Search** `/todo/search/` (glob, regular expressions, the filter bar, number search, snippets) and **Filters**
+  `/todo/filters/` (saved filters in the sidebar with counts, rename, reorder, delete, update, a deleted label);
+- **Labels** `/todo/labels/` (add, edit, colour, description tooltip, reorder, delete) and **Settings**
+  `/todo/settings/` (default due time, default reminder and channel, what tasks cost, the storage line, the email
+  address with Copy and Regenerate, accepted senders, recent emails);
+- credits: the first 10 tasks of a calendar month are free, then 10 credits each; subtasks and occurrences count;
+- access control: logged-out visitors, another user's task numbers, attachments and filters.
 
-Not covered here: the JWT API and the CLI (later issue), the credit settling of an unpaid repeating
-task (covered by unit tests, and by TODO-14 for the banner), the daily purge job (unit tests).
+Not covered here: inbound email itself (SES drops mail in S3 under `todo/inbound/`; the "Recent emails" list
+therefore stays empty here, and the parser is unit-tested), the JWT API and the `inv todo` CLI (unit tests), the
+daily trash purge and the real daily storage metering (unit tests; TODO-31 freezes the storage with a shell step
+instead), a real AI model.
 
 ## Preconditions
 
-- The test server is running at `http://localhost:8765`, freshly restarted (empty database), as
-  described in [`README.md`](README.md). Rate limiting is off.
-- "Today" is the date of the machine the server runs on, in the user's time zone (a freshly seeded
-  account has none set, so UTC). Cases below say "today", "tomorrow" and "yesterday"; compute the
-  dates from the date shown on **Today**'s heading ("Today  Wednesday 28 Oct"). Date inputs are
-  `type=date`: type the date the way the browser expects (`10/28/2026` in an English browser).
-- Prices are the defaults: **10 free tasks per calendar month**, then **10 credits** per task. Subtasks
-  count as tasks. `qa.user@example.com` has 100 credits, `qa.broke@example.com` has none.
-- Cases run in order; later ones reuse tasks created earlier. Task numbers start at **1000** per user:
-  the first task created by `qa.user@example.com` is `#1000`.
+- The test server is running at `http://localhost:8765`, freshly restarted (fresh database, empty bucket), as
+  described in [`README.md`](README.md). Rate limiting is off. Tasks (emails, settling, the reminder email) run
+  inline.
+- **Time zone.** A seeded account has no time zone saved, but the site saves the **browser's** zone the first time
+  a signed-in page loads (the account page shows it under the profile). So "today" is the browser's date. Cases
+  below say "today", "tomorrow" and "yesterday"; compute the dates from the heading of **Today**'s list ("Today
+  Wednesday 28 Oct"). Date inputs are `type=date`: type the date the way the browser expects (`10/28/2026` in an
+  English browser).
+- Prices are the defaults: **10 free tasks per calendar month**, then **10 credits** per task. Subtasks and every
+  occurrence of a repeating task count. `qa.user@example.com` has 100 credits, `qa.broke@example.com` has none; an
+  account registered during the run gets 1,000 welcome credits once confirmed.
+- `qa.user@example.com` creates far more than 10 tasks in this file (TODO-22 alone adds 51). **Before TODO-02**, as
+  `qa.admin@example.com`, add **3,000** credits to `qa.user@example.com` with the credit adjustment tool, so no later
+  case runs out; the cases that check balances use fresh accounts or `qa.broke@example.com`.
+- Cases run in order; later ones reuse tasks created earlier. Task numbers start at **1000** per user: the first
+  task created by `qa.user@example.com` is `#1000`.
+- **Email** is real SMTP read back over IMAP: open `/__e2e__/mail/?to=<address>` and reload until the message
+  arrives (up to a minute). Links in it are absolute (`http://localhost:8765/...`) and clickable; the HTML body is
+  shown as source.
+- **Files** go to Floci (a local S3 at `http://localhost:4566`): an upload is a `PUT` from the browser to a
+  presigned `localhost:4566` URL, and Download / Open redirect to one. Check what the user sees (the file
+  downloads with its name and bytes, the image or PDF shows), not the URL.
+- **The AI date parser is a fake** (`tests_e2e/todo_fakes.py`). It understands exactly two titles:
+  `pay rent every month on the 1st at 9am` (the next 1st on or after today, 09:00, repeating monthly on the 1st,
+  cleaned title `pay rent`) and `call the bank tomorrow` (tomorrow, no time, cleaned title `call the bank`). Every
+  other text has no date.
+- **Shell steps.** A step marked "(shell step)" runs a command from the repo root on the machine running the
+  server, through the wrapper that uses the running server's exact environment (database, bucket, mail):
+  `python tests_e2e/ai/manage.py [--port <port>] shell -c "..."` (pass `--port` when the server is not on 8765).
+  Emails it sends show in `/__e2e__/mail/`. Without a shell, mark those steps **BLOCKED (needs-setup)**. The
+  scheduler does not run on this server, so the reminder delivery job is always a shell step.
+- **Admin tools** used here: the credit adjustment tool `/admin/billing/credittransaction/adjust/` (User email,
+  Direction Add / Spend, Amount, Description, **Apply**; success message "Adjusted credits for <email>. New
+  balance: <n>.") and To-do settings `/admin/todo/todosettings/`, both as `qa.admin@example.com`. Use another
+  browser context (or `<name>2.localhost`, see README) for the admin so the user's session stays signed in.
 
 ## Test data
 
@@ -49,9 +84,59 @@ task (covered by unit tests, and by TODO-14 for the banner), the daily purge job
 | Broke user | `qa.broke@example.com` / `QaE2e-Passw0rd!` (0 credits) |
 | Admin | `qa.admin@example.com` / `QaE2e-Passw0rd!` |
 | Visitor | a private/incognito browser context where nobody is logged in |
+| Files user (`T2`) | `qa.todo.<random>@example.com` / `TodoQa-4821!`, registered in TODO-27 (1,000 welcome credits) |
 
 Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`, `T_FUTURE`,
-`T_PARENT`, and the subtasks' numbers.
+`T_PARENT`, the subtasks' numbers, and from TODO-27 on `T2` (the files user's address), `T2_TASK` and the ids
+noted in the cases.
+
+### Files
+
+Files are built in the page with JavaScript, so nothing has to exist on disk (a browser tool that can attach real
+files to an `<input type="file">` may use files with the same names, sizes and bytes instead).
+
+| Name | What it is | Content |
+|---|---|---|
+| `photo.png` | 120x160 light-gray PNG, 280 bytes (`PNG_A`) | base64 `PNG_A` below |
+| `scan.pdf` | one-page PDF, 588 bytes (`PDF_A`) | base64 `PDF_A` below |
+| `notes.txt` | plain text, 12 bytes | `hello world\n` |
+| `fake.png` | text pretending to be a PNG, 15 bytes, type `image/png` | `this is no png\n` |
+| `empty.txt` | 0 bytes | (nothing) |
+| `big.bin` | 2 MiB of zero bytes (used once the limit is lowered to 1 MiB) | `size: 2 * 1024 * 1024` |
+
+`PNG_A` = `iVBORw0KGgoAAAANSUhEUgAAAHgAAACgCAIAAABIaz/HAAAA30lEQVR42u3QMQEAAAwCIPtXtYQttgcikHIiCkSLRrRo0YgWjWjRohEtGtGiRSNaNKJFi0a0aESLFo1o0YgWLRrRohEtWjSiRSNatGhEi0a0aNGIFo1o0aIRLRrRokUjWjSiRYtGtGhEixaNaNGIFi0a0aIRLVo0okUjWrRoRItGtGjRiBaNaNGiES0a0aJFI1o0okWLRrRoRIsWjWjRiBYtGtGiES1aNKJFI1q0aESLRrRo0YgWjWjRohEtGtGiRSNaNKJFi0a0aESLFo1o0YgWLRrRohEtWjSiRSP6zwBnGZcT9CKujQAAAABJRU5ErkJggg==`
+
+`PDF_A` = `JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMjAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA0NCA+PgpzdHJlYW0KQlQgL0YxIDEyIFRmIDIwIDEwMCBUZCAoU1RBUExFUyA0Mi4xMCkgVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMzUgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MDUKJSVFT0YK`
+
+Paste this helper into the task page's console once per page load (`window.todoPick` feeds the task's **Add
+files** input, `window.todoPickComment` the **Attach files** input of the comment form that holds the textarea
+`textareaId`: `comment-new` for the add box, `comment-text-<comment id>` for an edit form):
+
+```js
+window.PNG_A = '...'; window.PDF_A = '...';   // paste the two strings above
+window.todoFiles = (specs) => {
+  // spec: {name, type, base64} | {name, type, text} | {name, type, size} (size = that many zero bytes)
+  const dt = new DataTransfer();
+  for (const s of specs) {
+    let bytes;
+    if (s.base64 !== undefined) bytes = Uint8Array.from(atob(s.base64), (c) => c.charCodeAt(0));
+    else if (s.text !== undefined) bytes = new TextEncoder().encode(s.text);
+    else bytes = new Uint8Array(s.size);
+    dt.items.add(new File([bytes], s.name, { type: s.type || '' }));
+  }
+  return dt.files;
+};
+window.todoFeed = (input, specs) => {
+  input.files = todoFiles(specs);
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+};
+window.todoPick = (specs) => todoFeed(document.getElementById('attachment-file-input'), specs);
+window.todoPickComment = (textareaId, specs) =>
+  todoFeed(document.getElementById(textareaId).form.querySelector('[data-files-input]'), specs);
+```
+
+Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
+`todoPickComment('comment-new', [{ name: 'notes.txt', type: 'text/plain', text: 'hello world\n' }])`.
 
 ---
 
@@ -63,7 +148,7 @@ Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`,
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `http://localhost:8765/todo/`. | Redirected to `/account/login/?next=/todo/`. |
-| 2 | Go to `/todo/upcoming/`, `/todo/all/`, `/todo/completed/`, `/todo/trash/`, `/todo/labels/`, `/todo/settings/` and `/todo/1000/`. | Each redirects to the login page with its path in `next`. Nothing about any task is revealed. |
+| 2 | Go to `/todo/upcoming/`, `/todo/all/`, `/todo/completed/`, `/todo/trash/`, `/todo/labels/`, `/todo/settings/`, `/todo/search/?q=rent`, `/todo/filters/`, `/todo/reminders/history/` and `/todo/1000/`. | Each redirects to the login page with its path in `next`. Nothing about any task is revealed. |
 | 3 | Sign in as `qa.user@example.com` / `QaE2e-Passw0rd!` from the `/todo/` redirect. | Lands on `/todo/`. |
 
 ### TODO-02 Empty Today and navigation
@@ -100,7 +185,7 @@ Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click `Write report` in the list. | `/todo/1000/`: a back link "All tasks"; "#1000"; the title as a heading; then, in this order, a **Description** section with **Edit** and "No description."; the buttons **Complete**, **Postpone**, **Move to trash**; a **Details** section (Date today, Time empty, Priority 1, "Add labels", **Repeat**, **Save**); **Reminders**; a **Subtasks** section with a "New subtask" box; and, at the bottom, **Attachments** and **Comments** (a **Referenced by** section sits between Subtasks and Attachments once another task mentions this one). |
+| 1 | Click `Write report` in the list. | `/todo/1000/`: a back link "All tasks"; "#1000"; the title as a heading; then, in this order, a **Description** section with **Edit** and "No description."; the buttons **Complete**, **Postpone**, **Move to trash**; a **Details** section (an "Or type a date" box with the placeholder "Type a date... (every Monday at 9am)", then Date today, Time empty, Priority 1, "Add labels", **Repeat**, **Save**); **Reminders**; a **Subtasks** section with a "New subtask" box; and, at the bottom, **Attachments** and **Comments** (a **Referenced by** section sits between Subtasks and Attachments once another task mentions this one). |
 | 2 | Click the pencil beside the title, change it to `Write the report`, press the check button. | The heading becomes `Write the report` (the whole panel re-renders; no page reload) and the browser tab title becomes `Write the report - To-do - ZipTrigo`. Press Escape (or the X) while editing instead: it cancels, and opening the editor again shows the saved title, not what you typed. |
 | 3 | Click **Edit** on the description. | A textarea (monospace) with a hint line listing the Markdown syntax (bold, italic, code, headings, lists, checklists, quotes, links, `#1234`). **Cancel** and **Save**. Type something extra and press **Cancel** or Escape: reopening shows the saved text. |
 | 4 | Enter `Plan:` then a blank line, then `- [ ] outline`, `- [ ] draft`, a blank line, `See #1001 and https://example.com and **bold**`; click **Save**. | The description renders: "Plan:", two unchecked boxes (outline, draft), "See" with `#1001` as a link, `https://example.com` as a link, **bold** in bold. |
@@ -138,7 +223,7 @@ Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`,
 | 5 | **Postpone**, pick yesterday in the date box, **Set**. | A red message "Date: Choose today or a later date."; nothing changes. (The date box also has `min` = today.) |
 | 6 | **Postpone**, pick a date 3 weeks ahead, **Set**. | The task moves there; it is not in the 14-day Upcoming list but is in **All**, with that date. |
 | 7 | Set it back to today via the Details form. Open `/todo/`. Click **Reschedule overdue to today**. | A confirmation dialog "Reschedule overdue tasks": "Move the date of 1 overdue task to today? Their times stay." with **Cancel** and **Reschedule**. |
-| 8 | Click **Cancel**. | Dialog closes, nothing changes. Reopen it and click **Reschedule**. | The page reloads with "1 overdue task moved to today." The Overdue section is gone and `Overdue thing` is under Today. |
+| 8 | Click **Cancel**, then reopen the dialog and click **Reschedule**. | Cancel closes it and nothing changes. After Reschedule the page reloads with "1 overdue task moved to today." The Overdue section is gone and `Overdue thing` is under Today. |
 
 ### TODO-07 Subtasks
 
@@ -213,15 +298,18 @@ Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`,
 ### TODO-11 Credits: free allowance and price
 
 **Purpose:** the first 10 tasks of the month are free, then 10 credits each, and a refused task costs nothing.
-**Preconditions:** a fresh server (restart it), logged in as `qa.user@example.com`; balance 100.
+**Preconditions:** register and confirm a fresh account `qa.todo.credits.<random>@example.com` (password
+`TodoQa-4821!`): `/account/register/`, then the link of the "Confirm your ZipTrigo account email" email in
+`/__e2e__/mail/?to=<address>` and **Confirm my email**, then sign in. It has the 1,000 welcome credits and no tasks
+(the seeded `qa.user` has used part of its allowance by now, so it can't show the count from 0).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Create 10 tasks (titles `Free 1` to `Free 10`) with the quick-add box. | All succeed; the free line counts up to "10 of 10 free tasks used this month."; the balance (`/billing/credits/`) is still 100. |
-| 2 | Create `Paid 1`. | It succeeds; the balance becomes **90**; the ledger has a line of -10 described "To-do: task #<number>". |
-| 3 | Add a subtask under any task. | The balance becomes 80: subtasks count as tasks. |
-| 4 | Open **Settings**. | "**10 of 10** free tasks used this month." (never more than 10, although 12 tasks were created), the line "After that each task costs 10 credits.", and the note that subtasks and every occurrence count and credits are not refunded. A link to the account page for the time zone. |
-| 5 | Trash and delete forever `Paid 1`. | The balance is unchanged (80). Creating another task still costs 10 (the month's count never goes down). |
+| 1 | Create 10 tasks (titles `Free 1` to `Free 10`) with the quick-add box. | All succeed; the free line counts up to "10 of 10 free tasks used this month."; the balance (`/billing/credits/`) is still 1,000. |
+| 2 | Create `Paid 1`. | It succeeds; the balance becomes **990**; the ledger has a line of -10 described "To-do: task #<number>" (`#1010`). |
+| 3 | Add a subtask under any task. | The balance becomes 980: subtasks count as tasks. |
+| 4 | Open **Settings**. | "**10 of 10** free tasks used this month." (never more than 10, although 12 tasks were created), the line "After that each task costs 10 credits.", and "Subtasks and every occurrence of a repeating task count. Credits are not refunded when a task is completed or deleted." A link "account page" for the time zone. |
+| 5 | Trash and delete forever `Paid 1`. | The balance is unchanged (980). Creating another task still costs 10 (the month's count never goes down): 970. |
 | 6 | Log out and log in as `qa.broke@example.com`. Create tasks until the 11th. | The first 10 succeed. The 11th is refused with a red message "You do not have enough credits to add this task." and a **Top up your credits** link to `/billing/credits/`. No task is created and the free line is unchanged. |
 | 7 | As `qa.broke@example.com`, add a subtask beyond the allowance. | The same refusal in the Subtasks section's message slot. |
 | 8 | Log in as `qa.admin@example.com`, add 20 credits to `qa.broke@example.com` (admin credit adjustment tool), log in as the broke user again and add a task. | It succeeds and costs 10; the balance is 10. |
@@ -245,7 +333,7 @@ Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open **Settings**. | A "Default due time" section with a time field showing `09:00`, **Save**, a note that it is the time a date-only task is treated as due and such a task is still shown date-only; a "What tasks cost" section. |
+| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Default due time" section with a time field showing `09:00` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); one **Save** button for both; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
 | 2 | Change it to `07:45` and **Save**. | "Saved." in green; reload shows `07:45`. |
 | 3 | Clear the field and Save. | The browser's required prompt (or "Default due time: Enter a time."). |
 | 4 | Click the "account page" link. | Goes to the account page where the time zone can be changed. |
@@ -254,13 +342,13 @@ Record as you go: `T_REPORT` (the number of `Write report`), `T_CALL`, `T_LATE`,
 
 **Purpose:** the layout shows "Tasks are blocked" while creation is blocked. Completing a repeating task without credits
 reaches it (TODO-20 step 6); here it is set from the admin shell.
-**Preconditions:** logged in as `qa.user@example.com`; shell access to the test server database (skip this case without it).
+**Preconditions:** logged in as `qa.user@example.com`; a shell (see Preconditions: without one mark the case **BLOCKED (needs-setup)**).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | In a Django shell set `TodoAccount.objects.filter(user__email='qa.user@example.com').update(creation_blocked_at=timezone.now())`. Reload `/todo/`. | An amber banner "Tasks are blocked. A repeating task is waiting to be paid. Adding tasks resumes when you add credits." with a **Top up** link on every To-do page. |
+| 1 | (shell step) `python tests_e2e/ai/manage.py shell -c "from django.utils import timezone; from apps.todo.models import TodoAccount; print(TodoAccount.objects.filter(user__email='qa.user@example.com').update(creation_blocked_at=timezone.now()))"` (prints `1`). Reload `/todo/`. | An amber banner "Tasks are blocked. A repeating task is waiting to be paid. Adding tasks resumes when you add credits." with a **Top up** link on every To-do page. |
 | 2 | Try to add a task. | A red message "Top up your credits to add tasks: a repeating task is waiting to be paid."; nothing is created. |
-| 3 | Clear it again (`creation_blocked_at=None`). | The banner is gone; adding works. |
+| 3 | (shell step) The same command with `update(creation_blocked_at=None)`. Reload. | The banner is gone; adding works. |
 
 ### TODO-15 Admin
 
@@ -269,11 +357,11 @@ reaches it (TODO-20 step 6); here it is set from the admin shell.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/admin/` and find the **To-do** section. | Entries: Comments, To-do accounts, Labels, Tasks, To-do settings. |
+| 1 | Open `/admin/` and find the **To-do** section. | Entries (any order): Attachments, Comments, Inbound emails, Inbound messages, Labels, Recurrences, Reminder deliveries, Reminders, Saved filters, Tasks, To-do accounts, To-do settings (no "Deliverys"). |
 | 2 | Open **Tasks**. | A read-only list (user, number, title, due date, priority, charged credits, unpaid, source) with filters for priority, source, completed, trash and unpaid, and a search box (title, number, email). No "Add" button; opening a task shows no Save button; deleting is refused. |
 | 3 | Search `1000`. | The tasks numbered 1000 of every user. |
-| 4 | Open **To-do settings**. | Straight to the one form: free tasks per month (10), task price (10), trash days (30), max open tasks per user (10000), max labels per user (200). Change the price to `0`, save; as `qa.user@example.com` the next task beyond the allowance costs nothing. Put it back to 10. |
-| 5 | Open **To-do accounts**. | One row per user who visited, with next task number, "created this month", and the blocked flag. |
+| 4 | Open **To-do settings**. | Straight to the one form: free tasks per month (10), task price (10), trash days (30), max open tasks per user (10000), max labels per user (200), max attachment bytes (52428800), max attachments per task (20), max inbound rows per day (500), each with its help text. Change the price to `0`, save; as `qa.user@example.com` the next task beyond the allowance costs nothing. Put it back to 10. |
+| 5 | Open **To-do accounts**. | One row per user who visited, with next task number, "Created this month", "Task creation blocked", stored bytes and "Storage frozen"; opening one shows its email address codes inline (code, active, created, retired), read-only. Filters for blocked and frozen. |
 
 ### TODO-16 Dark mode and mobile layout
 
@@ -369,15 +457,15 @@ at step 5 is the 5th of this month, and step 7's new occurrence is due on the 1s
 | 3 | Open the new task, change Date to a day last week and **Save**, then **Complete**. | The next one is again 3 months from the day you completed it (today), not from the date you edited. |
 | 4 | Create a task `Water plants`, Repeat = **Day**, Ends **On a date** = tomorrow, mode Fixed. Complete it twice. | After the first completion a new one is due tomorrow. After completing that one, no new `Water plants` is created and the last one shows "This task no longer repeats." |
 | 5 | Add a task whose Repeat is **Year**, "On" = **A month and day**, left at day 1, month January. | The label reads "Every year on 1 January"; after adding, the date is the next 1 January on or after today. |
-| 6 | As `qa.broke@example.com` (no credits; the first 10 tasks of the month are free), create 10 tasks including one repeating task, complete the repeating one. | Completing works and its next occurrence is created (owed): the "Tasks are blocked" banner with **Top up** appears **at once**, without reloading the page, and adding a task is refused until credits are added. (Skip when this takes too long.) |
+| 6 | Nothing to do here: an occurrence the balance can't pay for (owed, the "Tasks are blocked" banner appearing at once, the refusals and the settling after a top-up) is TODO-36. | -- |
 
 ### TODO-21 Reminders
 
 **Purpose:** a task's reminders are listed, added, edited and removed, a new task with a date gets the default one, and a
 due reminder shows in the notification bell and the history.
 **Preconditions:** logged in as `qa.user@example.com` with at least 3 free tasks left this month (or enough credits).
-The delivery step needs shell access to the test server database (the scheduler does not run there): without it skip steps
-9 to 11.
+The delivery steps 9, 11 and 14 are shell steps (the scheduler does not run on this server): without a shell mark them
+**BLOCKED (needs-setup)**. Delivery by email is TODO-32.
 
 | # | Action | Expected result |
 |---|---|---|
@@ -388,13 +476,13 @@ The delivery step needs shell access to the test server database (the scheduler 
 | 5 | Choose **Custom...**, enter `2` and unit `days before`, channel Email, **Add**. | "2 days before (email)" is listed (shown as "Skipped": its time, two days before the due time, is more than a day past, so it is created already sent and never delivered; it has **no** History row, which still reads "No reminders sent yet."). |
 | 6 | Click the pen on "5 minutes before", change the amount to `15`, **Save**. | The row reads "15 minutes before (in-app)" and fires at 22:45. Press **Cancel** on another row's editor: nothing changes. |
 | 7 | Click the bin on the "2 days before" row. | It is removed. |
-| 8 | In **Details** clear the Date and press **Save**. | A browser confirmation "Clearing the date removes its 2 reminders. Continue?". Cancel: nothing changes. Accept: the Reminders block says "Set a due date to add reminders." and the bell is gone from the row. Set the date to today again and Save: the default reminder (5 minutes before) is back. |
-| 9 | In a Django shell set the reminder's `fire_at` to a minute ago (`Reminder.objects.filter(task__number=<T_BANK>).update(fire_at=timezone.now() - timedelta(minutes=1), sent_at=None)`) and run `from apps.todo.services import reminders; reminders.deliver_due()`. Reload any To-do page. | The header bell shows a new notification titled `Call the bank` with the body "Due <today's date>, 23:00", which opens the task. |
+| 8 | In **Details** clear the Date and press **Save**. | A browser confirmation "Clearing the date removes its 2 reminders. Continue?". Cancel: nothing changes. Accept: the Reminders block says "Set a due date to add reminders." and the bell is gone from the row (the time was cleared with the date). Set the date to today and the time to 23:00 again and Save: the default reminder ("5 minutes before (in-app)", fires 22:55) is back, alone. |
+| 9 | (shell step) Make the reminder due a minute ago: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.todo.models import Reminder; print(Reminder.objects.filter(task__user__email='qa.user@example.com', task__number=<T_BANK>).update(fire_at=timezone.now() - timedelta(minutes=1), sent_at=None))"` (prints `1`), then run the job: `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"`. Reload any To-do page. | The header bell shows a new notification titled `Call the bank` with the body "Due <today's date>, 23:00", which opens the task. |
 | 10 | Open `/todo/<T_BANK>/`. | **History** lists the delivery (date, time, "In-app"). Open **Settings** > **Reminder history**: the same row with `#<T_BANK> Call the bank` linking to the task. |
-| 11 | Run `deliver_due()` again. | Nothing new: the bell count and the history are unchanged (a reminder is delivered once). |
+| 11 | (shell step) Run the `send_reminders()` command of step 9 again. | Nothing new: the bell count and the history are unchanged (a reminder is delivered once). |
 | 12 | In **Settings** choose "Get no reminder", **Save**, then add a task `No reminder please` with a date. | Its page says "No reminders." and its row has no bell. Restore the setting (5 minutes) afterwards. |
 | 13 | Complete a repeating task that has a reminder (create `Pay rent`, Repeat = Week, with a 15 minute reminder, then **Complete**). Open the new occurrence. | It has the same reminder ("15 minutes before"), unsent, firing before the new date. |
-| 14 | (Only if step 9 ran.) Postpone `Call the bank` to **Tomorrow** (the Postpone action on its row or the task page) and open `/todo/<T_BANK>/`. | The reminder it already delivered is armed again: the Reminders block shows "Fires" (not "Sent") with tomorrow's date at 22:45. |
+| 14 | (Only if step 9 ran.) Postpone `Call the bank` to **Tomorrow** (the Postpone action on its row or the task page) and open `/todo/<T_BANK>/`. | The reminder it already delivered is armed again: the Reminders block shows "Fires" (not "Sent") with tomorrow's date at 22:55. (shell step) Running `send_reminders()` now delivers nothing (it is not due yet). |
 
 ### TODO-22 Search
 
@@ -489,3 +577,252 @@ task, and a parent with two open subtasks.
 | 2 | Open `/todo/settings/`. | Tab title `Settings - To-do - ZipTrigo`. |
 | 3 | In dark mode (account page > Appearance) open a task with the `Home` label and the Labels page. | The label chip text is a lighter tint of its colour so it reads on the dark card (contrast of at least 4.5:1); a rendered checklist box in the description is dark too, not a white box. |
 | 4 | With a screen reader or the accessibility tree, inspect a rendered checklist box and the sidebar's Filters label. | The box is named after its item's text; "Filters" is a link inside a paragraph (not a heading placed before the page's h1). |
+
+### TODO-27 A fresh account for the files, email and storage cases
+
+**Purpose:** set up the account TODO-28 to TODO-33 and TODO-37 use, so their files, emails and paused storage
+never touch the seeded accounts.
+**Preconditions:** signed out (or another browser context).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/account/register/` create `qa.todo.<random>@example.com` (record it as `T2`), name `Todo Files`, password `TodoQa-4821!`. | The neutral "Check your email" page. |
+| 2 | Open `/__e2e__/mail/?to=<T2>` (reload until it arrives, up to a minute) and click the link of "Confirm your ZipTrigo account email"; press **Confirm my email**. | "Email Confirmed!". |
+| 3 | Sign in as `T2` and open `/todo/`. | Today is empty, "0 of 10 free tasks used this month.". The bell has the welcome notification; `/billing/credits/` shows 1,000 credits ("A gift for your new account"). `/account/` shows a Time zone: the browser's (saved by the first page after sign-in). |
+| 4 | Add `Files task` due today. Record its number as `T2_TASK` (`1000`). Open `/todo/1000/`. | Under the panel an **Attachments** section: a dashed drop zone "Drop files here, or" with an **Add files** button and "Up to 50.0 MB each, 20 per task. Stored files are billed by size, daily."; below it "No files attached.". Then **Comments**, whose add form has an **Attach files** button and "Up to 50.0 MB each; they count toward the task's 20 files and are billed by size, daily.". |
+| 5 | Open **Settings**. | The "Files" section reads "No files stored." and "Files attached to your tasks are billed by size, once a day, at the same rate as the other products. Files on tasks in the trash are billed until the trash is emptied." |
+
+### TODO-28 Attachments: upload, open in the browser or download
+
+**Purpose:** files go straight to the bucket and are listed on the task; Open shows only a file whose bytes are an
+image or a PDF, whatever its name or declared type.
+**Preconditions:** TODO-27 done, signed in as `T2` on `/todo/<T2_TASK>/`; paste the file helper (Test data > Files).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Click **Add files**. | The browser's file chooser opens (cancel it). The button is reachable with Tab and has a visible focus ring. |
+| 2 | `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`. | A row appears in the drop zone's list with the name, the size "1 KB", a progress bar (named "Upload progress of photo.png") and a cancel x ("Cancel upload of photo.png"); the status moves through "Preparing…", "Uploading…", "Finishing…" (may be too quick to see). In the network log: `POST .../attachments/start/` (201), a `PUT` to `localhost:4566` (200), `POST .../attachments/<id>/complete/` (200). The row then goes and the list below shows `photo.png`, "280 bytes", an image icon, **Download**, **Open** and **Remove**. No console errors. |
+| 3 | `todoPick([{ name: 'scan.pdf', type: 'application/pdf', base64: PDF_A }, { name: 'notes.txt', type: 'text/plain', text: 'hello world\n' }, { name: 'fake.png', type: 'image/png', text: 'this is no png\n' }])`. | Three rows upload in parallel; the list then holds four files, oldest first (the three new ones in the order their uploads started, normally as picked): `photo.png`, `scan.pdf` (PDF icon, "588 bytes", **Open**), `notes.txt` ("12 bytes", a plain file icon, **no Open**), `fake.png` ("15 bytes", a plain file icon, **no Open**: its bytes are not a PNG, so the name and the declared type don't count). |
+| 4 | Click **Open** on `photo.png`. | A new tab shows the light-gray image itself (not a download prompt). Close it. **Open** on `scan.pdf`: the PDF shows in the browser's viewer ("STAPLES 42.10"). |
+| 5 | Click **Download** on `notes.txt`, then on `fake.png`. | Each downloads (no new page) under its own name, `notes.txt` with the 12 bytes `hello world`, `fake.png` with the 15 bytes of text. `photo.png`'s **Download** also downloads (does not open). |
+| 6 | Reload the page. | The four files are still listed, in the same order. The task's row on **Today** has no attachment marker (rows don't show one). |
+| 7 | Open **Settings**. | "Files": "**895 bytes** stored, less than 0.01 credits a day." (280 + 588 + 12 + 15). |
+| 8 | On the task page click **Remove** on `fake.png`. | The shared dialog "Remove file": "Remove fake.png from this task? This can't be undone." **Cancel** closes it. Confirm with **Remove**: the page reloads with the flash "Removed fake.png." and three files are left. Settings now says "880 bytes". |
+| 9 | Sign in as `qa.broke@example.com` (another context) and open `http://localhost:8765/todo/attachments/<id of photo.png>/download/` (the id is in its Download link) and the same with `?inline=1`. | A 404 page for both: another user's file is never served. |
+
+### TODO-29 Attachment limits and task states
+
+**Purpose:** the size and per-task limits are enforced, and only an open task takes files.
+**Preconditions:** TODO-28 done (`T2_TASK` has 3 files); signed in as `T2` on its page with the helper pasted; an
+admin context for `/admin/todo/todosettings/`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `todoPick([{ name: 'empty.txt', type: 'text/plain', size: 0 }])`. | A row "empty.txt", "0 KB", red "✕ This file is empty." with a dismiss x ("Dismiss the message about empty.txt"); no request reaches the server. Dismiss it. |
+| 2 | As admin, open **To-do settings**, set "Max attachment bytes" to `1048576` and "Max attachments per task" to `4`, save. Reload the task page. | The drop zone's hint reads "Up to 1.0 MB each, 4 per task. ...". |
+| 3 | `todoPick([{ name: 'big.bin', size: 2 * 1024 * 1024 }])`. | Row "big.bin", "2 MB", red "✕ This file is larger than 1 MB."; no request. |
+| 4 | The server checks too: in the console run `fetch(location.pathname + 'attachments/start/', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)[1]}, body: JSON.stringify({name: 'big.bin', size: 2097152, content_type: '', checksum_sha256: '47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='})}).then(async r => [r.status, await r.json()])`. | `[422, {error: "The file is too large (max 1 MB)."}]`. |
+| 5 | `todoPick([{ name: 'photo-2.png', type: 'image/png', base64: PNG_A }])`. | It uploads: 4 files. |
+| 6 | `todoPick([{ name: 'photo-3.png', type: 'image/png', base64: PNG_A }])`. | The row ends in red "✕ A task can have up to 4 files."; the list still has 4. Remove `photo-2.png` (flash "Removed photo-2.png."). |
+| 7 | As admin put the two settings back to `52428800` and `20`. | Saved. The task page's hint is "Up to 50.0 MB each, 20 per task. ..." again. |
+| 8 | **Complete** the task. | The panel shows it completed. After a reload the Attachments section has **no** drop zone or **Add files** (a completed task takes no files), but the files are listed with Download / Open / Remove, and Download still works. The comment form still has **Attach files** (TODO-30). **Uncomplete** it. |
+| 9 | **Move to trash**, then open the task from **Trash**. | No drop zone; the files are listed with **Download** (it works) and **Remove** (don't use it here). The comments are read-only. **Restore** the task: after a reload the drop zone is back. |
+| 10 | Add a task `Throwaway` (no date), attach `scan.pdf` to it, note the "Files" line in Settings, then move it to the trash. | The Settings line is unchanged by the trash ("Files on tasks in the trash are billed until the trash is emptied"). |
+| 11 | In **Trash** delete `Throwaway` forever and confirm. | "Task deleted."; Settings' "Files" drops by 588 bytes (its file was deleted with it). |
+
+### TODO-30 Files on comments
+
+**Purpose:** a comment carries files of its own, uploaded while the comment is written and saved with it.
+**Preconditions:** TODO-29 done; signed in as `T2` on `/todo/<T2_TASK>/` (open), helper pasted.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `todoPickComment('comment-new', [{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`. | An upload row under the add box, then a chip: a paperclip, `photo.png`, "1 KB" and **Remove** ("Remove photo.png"). While it uploads the **Comment** button is disabled. The task's own **Attachments** list does not change. |
+| 2 | Click **Comment** with the text empty. | Red "Comment: Write a comment." (and the same under the textarea); the chip stays. |
+| 3 | Type `See the photo` and press Ctrl+Enter (Cmd+Enter on a Mac). | The comment appears with "See the photo" and, under it, `photo.png`, "280 bytes", **Download** and **Open**. The add box is empty and has no chip. The **Attachments** section still lists only the task's own files. |
+| 4 | Click the comment's **Open**, then **Download**. | The image shows in a new tab; Download saves `photo.png`. |
+| 5 | Pick `notes.txt` into the add box, then click the chip's **Remove** before sending. Send the comment `no file here`. | The chip goes (the draft file is deleted on the server); the new comment has no file. |
+| 6 | Open the first comment's menu > **Edit**. | The edit form lists `photo.png` ("280 bytes") with a red **Remove** checkbox, and its own **Attach files** button. |
+| 7 | `todoPickComment('comment-text-<that comment's id>', [{ name: 'scan.pdf', type: 'application/pdf', base64: PDF_A }])` (the id is in the comment's `id="comment-<id>"`), wait for the chip, **Save** without changing the text. | The comment now shows `photo.png` and `scan.pdf`, and **no** "(edited)" marker (a change of files only is not an edit of the text). |
+| 8 | Edit again, tick **Remove** next to `photo.png`, **Save**. | Only `scan.pdf` is left under the comment. |
+| 9 | Delete the comment (menu > **Delete**, confirm), **Show** it, then **Restore**. | While deleted its files are not shown; after Restore `scan.pdf` is back under it. |
+| 10 | **Complete** the task and add a comment `done, receipt attached` with `notes.txt` attached. | Allowed: a completed task takes comment files (but no task attachments). **Uncomplete** the task. |
+| 11 | As admin set "Max attachments per task" to the number of files the task has now (its Attachments list plus the files under its comments, deleted comments included), then attach one more file to a new comment. | The upload row ends in red "✕ A task can have up to <n> files." (comment files count toward the task's cap). Put the setting back to `20`. |
+| 12 | Set the window to 375 px wide and dark mode (account page > Appearance). | The chips, the upload rows and the file lines under a comment wrap without horizontal scroll and have dark twins. |
+
+### TODO-31 Paused storage
+
+**Purpose:** when the storage can't be paid for, uploads and downloads stop (nothing is deleted), the owner is told by
+email and in the app, and a top-up resumes it.
+**Preconditions:** TODO-30 done (`T2` has stored files and about 1,000 credits); a shell; an admin context. The daily
+metering that freezes an account does not run here, so the freeze is a shell step.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | (shell step) `python tests_e2e/ai/manage.py shell -c "from apps.todo.models import TodoAccount; from apps.todo.services.metering import freeze_account; freeze_account(TodoAccount.objects.get(user__email='<T2>'))"`. As `T2` reload `/todo/`. | An amber banner on every To-do page: "**Storage is paused.** Your credits couldn't cover the storage for your attachments. Nothing was deleted; uploads and downloads resume when you add credits." with **Top up** to `/billing/credits/`. |
+| 2 | Open the bell. | A new notification "Your to-do file storage is paused" ("Your credit balance couldn't cover the storage for your attachments. Nothing was deleted; uploads and downloads are paused until you add credits."); clicking it opens `/todo/settings/`. |
+| 3 | Open `/__e2e__/mail/?to=<T2>` (reload until it arrives). | One email "Your to-do file storage is paused": the balance couldn't cover the storage "(<size>, about 1 credit a day)", "Your files are safe, nothing was deleted.", uploads and downloads are paused and resume when the balance covers a day of storage; links **Add credits** and **Your to-do settings**, signed "The ZipTrigo Team". **Add credits** opens `/billing/credits/`, **Your to-do settings** `/todo/settings/`. |
+| 4 | Open `/todo/<T2_TASK>/`. | The **Add files** button is disabled and the drop zone says "Uploads are paused until you add credits." with a **Top up** link; dropping a file or `todoPick(...)` does nothing. The comment form's **Attach files** is disabled with the same line. The files are still listed. |
+| 5 | Click **Download** on a file, then **Open**. | Back on the task page with the red flash "Storage is paused: top up your credits to upload or download files."; nothing downloads. |
+| 6 | Run the `fetch(... 'attachments/start/' ...)` of TODO-29 step 4 with `size: 280`. | `[422, {error: "Storage is paused: top up your credits to upload or download files.", frozen: true, top_up_url: "/billing/credits/"}]`. |
+| 7 | **Remove** a file, and add a comment without files. | Both work ("Removed <name>."): removing saves money, and comments don't need storage. |
+| 8 | Open **Settings**. | "Files" adds "Storage is paused until you add credits. **Top up**". As admin, `/admin/todo/todoaccount/` shows `T2` with "Storage frozen" ticked. |
+| 9 | As admin, add 1 credit to `T2` with the adjustment tool. As `T2` reload the task page. | The banner is gone, **Add files** and **Attach files** work again, Download downloads. The "storage paused" notification is gone from the bell and `/notifications/`. |
+
+### TODO-32 Reminders delivered by email and in the app
+
+**Purpose:** a due reminder sends an email (with working links) and an in-app notification, once; a reminder long
+past its time is skipped and says so; a completed task's reminder is not sent.
+**Preconditions:** TODO-27 done; signed in as `T2`; a shell (without one mark this case **BLOCKED (needs-setup)**).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Add `Email me <b>now</b>` due today at 23:30 (if it is later than 23:00 in your zone use tomorrow). Open it. Set the description to `Bring the **report** and #1000` and save. Record its number as `T2_MAIL`. | The default reminder "5 minutes before (in-app)" is listed. The title shows the angle brackets as text. |
+| 2 | Remove that reminder (bin), then add **At time of task** with channel **Both**. | One reminder: "At time of task (both)", "Fires <date>, 23:30". |
+| 3 | (shell step) `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.todo.models import Reminder; print(Reminder.objects.filter(task__user__email='<T2>', task__number=<T2_MAIL>).update(fire_at=timezone.now() - timedelta(minutes=1), sent_at=None))"` (prints `1`), then `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"`. | No error. |
+| 4 | As `T2` reload the page and open the bell. | A notification titled `Email me <b>now</b>` (as text, not bold) with "Due <d Mon YYYY>, 23:30"; clicking it opens `/todo/<T2_MAIL>/`. The reminder now says "Sent <date, time>"; **History** lists two rows, "In-app" and "Email", with the time sent, and "All reminder history". |
+| 5 | Open `/__e2e__/mail/?to=<T2>` (reload until it arrives). | One email "Reminder: Email me <b>now</b>". Text body: "Reminder: Email me <b>now</b>", "Due <d Mon YYYY>, 23:30 (<your zone, e.g. Europe/Lisbon>)", the description as written (`Bring the **report** and #1000`), "Open the task: http://localhost:8765/todo/<T2_MAIL>/" and the footer "You set this reminder on "Email me <b>now</b>". Change or remove it on the task page (...); your default for new tasks is in To-do settings (http://localhost:8765/todo/settings/)." In the HTML source the title is escaped (`&lt;b&gt;now&lt;/b&gt;`), **report** is `<strong>report</strong>` and `#1000` is plain text (no link). |
+| 6 | Click "Open the task", then the To-do settings link. | They open `/todo/<T2_MAIL>/` and `/todo/settings/` (signed in as `T2`). |
+| 7 | Open `/todo/reminders/history/` (Settings > **Reminder history**). | Heading "Reminder history", a back link "Settings", newest first: two rows `#<T2_MAIL> Email me <b>now</b>` (a link to the task), "In-app" and "Email", with the time. |
+| 8 | (shell step) Run the `send_reminders()` command again. | No new email, notification or history row (one delivery per firing). |
+| 9 | On `T2_MAIL` add **1 hour before** (in-app). (shell step) Make it long past: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.todo.models import Reminder; now = timezone.now(); print(Reminder.objects.filter(task__user__email='<T2>', task__number=<T2_MAIL>, minutes_before=60).update(fire_at=now - timedelta(hours=2), created_at=now - timedelta(hours=3), sent_at=None))"`, then `send_reminders()`. | The reminder shows "Skipped <date, time>" (not "Sent"); **History** adds "In-app (skipped: its time had already passed)"; no notification and no email for it. The reminder history page shows the same row. |
+| 10 | Add a task `Done already` due today at 23:45 with the default reminder, **Complete** it, make its reminder due (step 3's command with its number) and run `send_reminders()`. | Nothing is delivered: its page still lists "Fires ..." (read-only, a completed task's reminders can't be changed), no notification or email. |
+| 11 | Move `T2_MAIL` to the trash, delete it forever from **Trash**, then open the reminder history page. | Its rows stay, as `#<T2_MAIL> Email me <b>now</b>` in plain text followed by "(task deleted)". |
+
+### TODO-33 Settings: default reminder, storage line and the email address
+
+**Purpose:** every part of the Settings page saves, refuses and reloads correctly.
+**Preconditions:** TODO-27 done; signed in as `T2` on `/todo/settings/`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Choose "Get a reminder", clear the amount, **Save**. | Red "Default reminder: Enter an amount." (under the amount too); nothing saved. |
+| 2 | Set `31` "days before", **Save**. | Red "Reminder: Choose a reminder time between 0 minutes and 30 days before."; nothing saved (the due time is not saved either: both or neither). |
+| 3 | Set `1` "hours before", channel **Email**, **Save**. | Green "Saved."; reload: `1`, "hours before", "Email". Add a task `Default check` due tomorrow at 10:00: its page lists "1 hour before (email)", "Fires <tomorrow>, 09:00". |
+| 4 | Choose "Get no reminder": the amount and unit hide. **Save**. Add `No default` due tomorrow. | Its page says "No reminders.". Then put the default back to 5 "minutes before", In-app. |
+| 5 | Add `Date only` due tomorrow (no time). Open it. | "5 minutes before (in-app)", "Fires <tomorrow>, 08:55" (09:00, the default due time, minus 5 minutes). |
+| 6 | In Settings set the default due time to `10:00`, **Save**; open `Date only` again. | Its reminder now fires at 09:55 (date-only tasks follow the default due time); the task itself still shows only its date. Put the due time back to `09:00`. |
+| 7 | Look at "Add tasks by email". | An address `todo+<8 lower-case letters and digits>@<domain>` (default `ziptrigo.com`) in monospace, **Copy** and **Regenerate…** buttons; the text "Email a task to this address: the subject becomes the title, the text the description and the attachments are attached. A date in the subject ("pay rent on the 1st") is read for you. The task counts like any other: free allowance first, then 10 credits."; "Accepted senders" with **Anyone** selected and the textarea disabled; "Recent emails": "No emails yet.". Record the address. |
+| 8 | Click **Copy**. | The button reads "Copied" with a check for a moment; the clipboard holds the address. |
+| 9 | Click **Regenerate…**. | A dialog "Regenerate address": "Your old address stops working immediately. Mail already sent to it is dropped, so update any contacts or rules that use it." **Cancel** closes it with the address unchanged. Confirm with **Regenerate**: the page reloads with "Your new address is ready. The old one no longer works." and a different code. |
+| 10 | Choose **Only these** (the textarea enables), leave it empty, **Save**. | Red "Accepted senders: Enter at least one address, or choose Anyone to accept all senders." above the radios and under the textarea; nothing saved. |
+| 11 | Type `not-an-address bob@`, **Save**. | Red "Accepted senders: Use email addresses or *@domain.com. Not valid: not-an-address, bob@". |
+| 12 | Type `Me+Shop@Example.com, *@Acme.com`, **Save**. | "Saved" with a check; the textarea now reads `me@example.com, *@acme.com` (lower-cased, the `+tag` dropped). Reload: **Only these** is still selected with the same text. |
+| 13 | Choose **Anyone**, **Save**. | "Saved"; the textarea is disabled and empty after a reload. |
+| 14 | Check the "Files" section. | "<size> stored, less than 0.01 credits a day." for `T2`'s files (a rate, not the 1-credit minimum); `qa.user`'s Settings says "No files stored.". |
+| 15 | At 375 px wide and in dark mode look at the whole page. | The address breaks instead of overflowing, the buttons wrap, the radios and textarea stack; every section has a dark twin. |
+
+### TODO-34 The AI date chip
+
+**Purpose:** a date typed in the title is offered as a chip, applied only when accepted; the task page's "Or type a date"
+box sets only the date fields.
+**Preconditions:** signed in as `qa.user@example.com` on `/todo/all/`. The parser is the fake (see Preconditions): it
+reads only `pay rent every month on the 1st at 9am` and `call the bank tomorrow`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Type `buy milk` in the quick-add title and wait two seconds. | No chip (a request to `/todo/parse/` may be made; it answers no date). |
+| 2 | Type (key by key) `pay rent every month on the 1st at 9am` and stop. | About half a second after the last key a chip appears under the title (a group named "Suggested date"): a calendar icon, the label `<date>, 09:00 · Every month on the 1st` where `<date>` is the next 1st on or after today written `Today`, `Tomorrow`, `Mon 1 Dec` (within 6 days) or `1 Dec`, then **Accept** (check) and **Dismiss** (x). Hovering the chip shows "every month on the 1st at 9am". The Date, Time and Repeat controls are still empty. |
+| 3 | Click **Accept**. | The chip goes; the title becomes `pay rent`, the Date the 1st, the Time `09:00`, the **Repeat** button reads "Every month on the 1st". Click **Add task**: the task is created as shown; its page has the chip "Every month on the 1st (fixed schedule)". |
+| 4 | Type `call the bank tomorrow`. With the chip showing (label `Tomorrow`), click **Add task** without accepting. | The task is created with the title as typed and **no** date (submitting never applies the chip). |
+| 5 | Type `call the bank tomorrow` again, set the Time to `18:00` by hand. | The chip reads `Tomorrow (time kept)`. Press Tab until the chip itself has focus and press Enter: accepted; the title is `call the bank`, the Date tomorrow, the Time still `18:00`. Clear the form. |
+| 6 | Type `call the bank tomorrow`, focus the chip, press Escape. | The chip goes and the form is unchanged; the same text is not offered again (wait 2 s). Add a letter and remove it: still dismissed. Change it to `call the bank tomorrow!`: no chip (the fake doesn't read it). |
+| 7 | Open the page of an open top-level task (not a subtask). In "Or type a date" type `call the bank tomorrow`. | A chip `Tomorrow` (`(time kept)` / `(repeat kept)` / `(time and repeat kept)` appended when the Details form already has a time or a repeat). **Accept**: the Date field is tomorrow, the box is emptied, the title is unchanged; nothing is saved until **Save** (reload without saving: the old date). |
+| 8 | In the same box type `buy milk` and press Enter. | "No date found." under the box. |
+| 9 | Type `pay rent every month on the 1st at 9am` there and accept. | Date the 1st, Time 09:00, Repeat "Every month on the 1st"; **Save** saves all three. |
+| 10 | In dark mode and at 375 px look at both chips. | Readable, dark background, within the screen. |
+
+### TODO-35 Every repeat the popover builds
+
+**Purpose:** each shape of the Repeat popover gives the right sentence, first date and next date.
+**Preconditions:** signed in as `qa.user@example.com` on `/todo/all/` (enough credits, see Preconditions). Create each
+task with the quick-add box; "chip" is the repeat pill on its page.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `Every other day`: Repeat > **Day**, "Every" `2`, date today. | Label "Every 2 days"; chip "Every 2 days (fixed schedule)". **Complete** it: the next is due today + 2 days. |
+| 2 | `Fortnightly`: **Week**, "Every" `2`, tick only **Tuesday**, no date. | Label "Every 2 weeks on Tuesday"; the date is the next Tuesday on or after today. |
+| 3 | `Month end`: **Month**, On **The last day**, no date. | Label "Every month on the last day"; the date is the last day of this month (today if today is the last day). |
+| 4 | `Second Tuesday`: **Month**, On **A weekday of the month**, "second" "Tuesday". | Label "Every month on the second Tuesday"; the date is the next second Tuesday of a month on or after today. Then change it to "last" "Friday" on its page and **Save**: the chip reads "Every month on the last Friday (fixed schedule)" and the date stays as it was (a changed rule starts its series at the task's date). |
+| 5 | `Birthday`: **Year**, On **The same date**, date today. | Label "Every year"; **Complete**: the next is due on the same day and month next year. |
+| 6 | `Month 31`: **Month**, On **The same day of the month**, date 31 January of next year. **Complete** it, then complete the new one. | The next is due 28 February (29 in a leap year), then 31 March: a short month gets its last day and the series goes back to the 31st. |
+| 7 | On any repeating task's page open Repeat, Ends **On a date** a week ago, **Done**, **Save**. | Red "Repeat: This repeat rule has no upcoming date."; nothing changes. |
+| 8 | Open Repeat on a repeating task and click **Remove repeat**, then **Save**. | The button reads "Repeat"; the chip goes and "This task no longer repeats." shows. |
+| 9 | Open the popover with the keyboard (Tab to **Repeat**, Enter), move through its controls with Tab, press Escape. | Every control is reachable; Escape closes the popover and the focus returns to the **Repeat** button. |
+| 10 | Look at the rows of these tasks on **All**. | A fixed-schedule row shows the repeat icon and the sentence only; a from-completion one also says the mode (TODO-20). |
+
+### TODO-36 An occurrence the balance can't pay for
+
+**Purpose:** completing a repeating task always works; when its next occurrence can't be paid it is created owed,
+task creation is blocked at once, the owed task can't be deleted forever, and a top-up settles it.
+**Preconditions:** TODO-11 done: `qa.broke@example.com` has used this month's 10 free tasks and has **10** credits (if
+not, set it to 10 with the adjustment tool). An admin context.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | As `qa.broke`, add `Owed rent` due today with Repeat **Day**. | Created; `/billing/credits/`: balance 0, a "-10" line "To-do: task #<N>". |
+| 2 | Open its page and click **Complete**. | It completes. At once, without a reload, the amber banner "**Tasks are blocked.** A repeating task is waiting to be paid. Adding tasks resumes when you add credits." with **Top up** (to `/billing/credits/`) appears above the page. |
+| 3 | Open **All** and the new `Owed rent` (`#<N+1>`, due tomorrow). | Under its number "Waiting for credits (10)" in amber. The balance is still 0 (owed, not spent). |
+| 4 | Try to add a task, and a subtask under `Owed rent`. | Both refused with red "Top up your credits to add tasks: a repeating task is waiting to be paid."; nothing created. |
+| 5 | Trash the owed `Owed rent` from its row: in the dialog leave "Also stop repeating" unticked, confirm. In **Trash** click its delete-forever icon and confirm. | Red "This task has not been paid for yet. Top up your credits first: it can be deleted forever once it is settled." with a **Top up your credits** link; the row stays. From its own page **Delete forever** gives the same message in the panel. **Restore** it. |
+| 6 | As admin add **10** credits to `qa.broke@example.com`. | "Adjusted credits for qa.broke@example.com. New balance: 0." (the owed task was paid the moment the credits arrived). |
+| 7 | As `qa.broke` reload. | The banner is gone; `#<N+1>` has no "Waiting for credits"; the ledger shows "+10" (the adjustment) and "-10" "To-do: task #<N+1>". |
+| 8 | Add a task. | Refused with "You do not have enough credits to add this task." and **Top up your credits** (the allowance is used and the balance is 0), not the "blocked" message. |
+| 9 | On `#<N+1>` click **Stop repeating**. | "This task no longer repeats."; completing it later creates nothing. |
+
+### TODO-37 The open-task limit
+
+**Purpose:** a user can't hold more open tasks than the limit, and a repeating task whose next occurrence doesn't fit
+says so in the app.
+**Preconditions:** TODO-27 done; signed in as `T2`, who has at least one open task besides the ones below
+(`T2_TASK`); an admin context.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | As `T2` add `Cap repeat` due today, Repeat **Week**. | Created. |
+| 2 | As admin set To-do settings "Max open tasks per user" to `1`. | Saved. |
+| 3 | As `T2` add a task. | Red "Too many open tasks. Complete or delete some to add more."; nothing created. |
+| 4 | **Complete** `Cap repeat`. | It completes, but no new `Cap repeat` appears in **All**. The bell has a notification "Couldn’t create the next “Cap repeat”" saying the next occurrence was not created, usually because of the open-task limit, and how to retry; clicking it opens the completed task. |
+| 5 | As admin put the limit back to `10000`. As `T2`, **Uncomplete** then **Complete** `Cap repeat`. | The next `Cap repeat` is created (due a week after the first). The "Couldn’t create" notification is gone. |
+
+### TODO-38 Markdown rendering
+
+**Purpose:** the description and comments render exactly the supported Markdown, safely.
+**Preconditions:** signed in as `qa.user@example.com`, on an open task's page.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Set the description to the lines: `# Big heading`, `> a quote`, ``Some `code` here``, a fenced block (```` ```python ````, `print("hi")`, ```` ``` ````), `1. first`, `2. second`, `---`, `line one` and on the next line `line two`; **Save**. | A heading (no anchor link), a block quote, inline code, a monospace code block, a numbered list, a horizontal rule; "line one" and "line two" on two lines (a single newline is a line break). |
+| 2 | Set it to `www.example.com, README.md, settings.py, someone@example.com and https://example.com/a?b=1`. | `www.example.com` and the https URL are links that open in a new tab; `someone@example.com` is a `mailto:` link; `README.md` and `settings.py` stay plain text. |
+| 3 | Set it to `![logo](https://example.com/logo.png)` and `[bad](javascript:alert(1))` and `<b>raw</b>`. | No image is loaded: "logo" is a link to the image URL; "bad" is plain text with no link; `<b>raw</b>` shows literally. No alert, no console error. |
+| 4 | Set it to a three-line Markdown table (a header row `a`, `b`, a dashes row and a row `1`, `2`, each cell between pipe characters), then `~~strike~~` and `[^1]`. | Shown as literal text (tables, strikethrough and footnotes are not supported). |
+| 5 | Add a comment with the same text as step 2. | The comment renders the same way. |
+
+### TODO-39 Quick add on Upcoming and All
+
+**Purpose:** the quick-add box works on every page that has one and refreshes that page's list.
+**Preconditions:** signed in as `qa.user@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On **Upcoming** add `In three days` with the date today + 3. | It appears under that day's heading without a reload; the box is cleared. The free-tasks line is under the box. |
+| 2 | On **Upcoming** add `No date here` with no date. | Created (it shows on **All**, not on Upcoming). |
+| 3 | On **All** (heading "All tasks") add `From All`. | It appears in the list in its sorted place. **Completed** and **Trash** have no quick-add box. |
+
+---
+
+## Out of scope
+
+- **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it
+  in S3 for the poller; nothing in this environment delivers it, so the "Recent emails" list stays "No emails yet."
+  and the parser, sender authentication, attachments from mail and the `rejected_*` outcomes are unit-tested
+  (`apps/todo/tests/test_inbound.py`). `./manage.py todo_ingest_eml` can feed a local `.eml` by hand, but it is a
+  developer tool, not a user flow.
+- **A real AI model.** The date chip runs against the fake of `tests_e2e/todo_fakes.py`; how a real model reads
+  other phrasings, its time-outs and the "busy" back-off are unit-tested (`test_parsing.py`).
+- **The real daily storage metering and trash purge.** They are scheduler jobs that act on a day's worth of time;
+  TODO-31 freezes the storage directly and the purge is unit-tested. Likewise reminder delivery runs only through
+  the shell steps (the scheduler does not run on this server).
+- **A reminder email to an unconfirmed address** ("not sent: your email address is not confirmed"): reaching it
+  needs an email change through the JWT API, which is out of scope here; unit-tested.
+- **Rate limits** (switched off on this server), the JWT API `/api/todo/` and the `inv todo` CLI (unit tests).

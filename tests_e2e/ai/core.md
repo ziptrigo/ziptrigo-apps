@@ -3,15 +3,20 @@
 **Scope.** Everything every page shares (`apps/core/templates/core/base.html`) and the landing page
 (`core/home.html`): the header (logo, one link per registered product, the notification bell and
 account menu for a signed-in user or a Login link), the footer (Feedback, copyright), the "Skip to
-content" link, the product cards on `/`, the "login required" redirects of the product and
-account pages, unknown URLs, the API docs at `/api/docs`, light/dark theme, the in-app
-notification bell and page, the layout at phone width (375 px), page titles, favicon and logo,
-and console errors. Signing in itself is covered in `accounts.md`; here it is only a step.
+content" link, the flash messages, the shared confirmation dialog (`core/partials/confirm_modal.html`),
+the product cards on `/`, the "login required" redirects of the product and account pages
+(including an htmx request whose session has ended), unknown URLs, the API docs at `/api/docs`,
+light/dark theme, times shown in the visitor's zone (`{% local_time %}`), the shared field-error
+behaviour of refused forms (`core/js/field_errors.js`), the fonts, focus ring and reduced motion of
+`core/css/site.css`, the layout at phone width (375 px), page titles, favicon and logo, and console
+errors. Signing in itself is covered in `accounts.md`; here it is only a step. The notification
+bell, dropdown and page are in `notifications.md` (they used to be CORE-19).
 
 ## Preconditions
 
 - The test server is running at `http://localhost:8765` (`python tests_e2e/ai/serve.py`, fresh
-  database). All URLs below are relative to it.
+  database), `preflight.md` passed. All URLs below are relative to it.
+- Emails: open `/__e2e__/mail/?to=<address>` and reload until the email is there (up to a minute).
 - Seeded accounts (password `QaE2e-Passw0rd!` for all): `qa.user@example.com` (name "QA User",
   100 credits), `qa.admin@example.com` (superuser, "QA Admin"). Neither has any notification (the
   seeded accounts were created with the welcome credits off).
@@ -110,7 +115,7 @@ parameter, and signing in returns them to the product.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the header's right side. | A bell button (accessible name "Notifications", see CORE-19) and a person icon button (tooltip "Account"); no theme button and no **Login** link. |
+| 1 | Look at the header's right side. | A bell button (accessible name "Notifications"; the bell itself is tested in `notifications.md`) and a person icon button (tooltip "Account"); no theme button and no **Login** link. |
 | 2 | Click the person icon. | A dropdown opens under it, right-aligned and fully inside the window: first line **QA User** (bold, not a link), then **Settings** (cog icon) and **Logout** (sign-out icon). |
 | 3 | Click anywhere outside the dropdown. | It closes. |
 | 4 | Open it again and press `Escape`. | It closes and keyboard focus returns to the person icon (a focus ring is visible on it). |
@@ -125,7 +130,7 @@ parameter, and signing in returns them to the product.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/`. | Same content as CORE-01 (heading, three cards); no personal greeting is expected. |
+| 1 | Go to `/`. | Same content as CORE-01 (heading, five cards); no personal greeting is expected. |
 | 2 | Click each card in turn (use Back between them). | **QR Codes** opens `/qr/` (heading **QR codes**), **File Transfer** opens `/transfer/` (heading **Your transfers**), **Receipts** opens `/receipts/` (heading **Receipts**), **Short URLs** opens `/links/` (heading **Short URLs**), **To-do** opens `/todo/` (heading **Today**). No login page in between. |
 | 3 | On each product page, click the header links **QR Codes**, **File Transfer**, **Receipts**, **Short URLs**, **To-do** and **ZipTrigo**. | Each goes to its page directly (`/qr/`, `/transfer/`, `/receipts/`, `/links/`, `/todo/`, `/`); the header (logo, links, bell, person icon) and footer look the same on every page. The link of the product you are in is highlighted (a light sage background) and carries `aria-current="true"`; the others do not. |
 
@@ -209,6 +214,7 @@ dark mode is readable. There is no toggle in the header.
 | 2 | With the account icon focused press `Enter`. | The menu opens; its `aria-expanded` becomes `true`. |
 | 3 | Press `Tab`. | Focus moves to **Settings**, then **Logout**. |
 | 4 | Press `Escape`. | The menu closes, `aria-expanded` is `false`, focus is back on the account icon. |
+| 5 | Press `Enter` to open it again, then `Tab` past **Logout**. | The menu closes by itself as focus leaves it (focus moves on into the page). |
 
 ### CORE-14 Phone width (375 px): landing page and header, logged out
 
@@ -258,7 +264,7 @@ dark mode is readable. There is no toggle in the header.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Load `/`, `/account/login/` (logged out), `/account/`, `/billing/credits/`, `/feedback/`, `/qr/`, `/transfer/`, `/receipts/`, `/links/`, `/todo/`, and open/close the account menu and the notification dropdown on one of them. | No console **errors**. Acceptable: Tailwind's warning that `cdn.tailwindcss.com` should not be used in production. No failed requests (4xx/5xx) for scripts, styles, images or fonts: htmx (`unpkg.com/htmx.org@2.0.3`), Alpine.js, Font Awesome, the logo and the favicon all load. |
+| 1 | Load `/`, `/account/login/` (logged out), `/account/`, `/billing/credits/`, `/feedback/`, `/qr/`, `/transfer/`, `/receipts/`, `/links/`, `/todo/`, and open/close the account menu and the notification dropdown on one of them. | No console **errors**. Acceptable: Tailwind's warning that `cdn.tailwindcss.com` should not be used in production. No failed requests (4xx/5xx) for scripts, styles, images or fonts: htmx (`unpkg.com/htmx.org@2.0.3`), Alpine.js (`cdn.jsdelivr.net`), Font Awesome (`cdnjs.cloudflare.com`), `/static/core/css/site.css`, the self-hosted font `/static/core/fonts/figtree-latin.woff2`, the shared scripts under `/static/core/js/` (`components.js`, `local_time.js`, `field_errors.js`, `tabs.js`, `skeleton.js`, `date_picker.js`), the logo and the favicon all load. |
 | 2 | Check that Font Awesome icons render. | Icons in the header links, the cards and the account menu show as glyphs, not empty squares. |
 | 3 | Check images. | No broken-image icons anywhere (logo in the header and on the landing page). |
 
@@ -273,30 +279,95 @@ dark mode is readable. There is no toggle in the header.
 | 2 | Press the browser Back button, then reload. | After the reload, you are redirected to `/account/login/?next=/billing/credits/` (a cached copy may flash before the reload; after reloading no balance or history is shown). |
 | 3 | Go to `/receipts/`. | Redirected to the login page with `next=/receipts/`. |
 
-### CORE-19 Notification bell, dropdown and page
+### CORE-19 Notification bell, dropdown and page (moved)
 
-**Purpose:** the in-app notifications reach the bell, and the dropdown and list keep the keyboard
-user's place.
-**Preconditions:** register and confirm a fresh account (`qa.core.<random>@example.com`, password
-`CoreBell-4821`; confirming it gives the welcome credits and so one notification). Then add two more
-with a shell on the machine running the server (`E2E_DB_NAME` as in RCPT-44; without a shell mark
-the steps that need `Second notice` and `Third notice` **BLOCKED (needs-setup)**):
+The notification cases moved to [`notifications.md`](notifications.md) (NOTIF-02 to NOTIF-12), which
+also covers every product event that creates a notification. Nothing to run here.
 
-```bash
-ENVIRONMENT=local DJANGO_SETTINGS_MODULE=tests_e2e.receipts_e2e_settings E2E_DB_NAME=db.e2e-ai.sqlite3 \
-  python manage.py shell -c "from apps.accounts.models import User; from apps.core.services import notifications as n; u = User.objects.get(email='<address>'); n.notify(u, source='qa', title='Second notice', url='/qr/'); n.notify(u, source='qa', title='Third notice')"
-```
+### CORE-20 Setup: a fresh account for the shell cases
 
-Sign in as that account.
+**Purpose:** a confirmed account of this file's own, so the cases below can change its state.
+**Preconditions:** logged out.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | On `/`, look at the bell (left of the person icon). | A bell with a count badge: `3` (`1` if you skipped the shell step; `99+` above 99). Its accessible name is "Notifications" plus the badge's sentence (e.g. "3 new notifications"); the button has no `aria-label`. |
-| 2 | Click the bell. | A panel opens under it (spanning the header on a phone) with the heading **Notifications**, newest first: `Third notice`, `Second notice`, `Welcome! We added 1000 credits to your account` (with the body "Use them in any ZipTrigo app. Your credits history shows where they go."), and a **View all notifications** link at the bottom (no **Mark all as read**: opening the panel has already marked these read). The badge clears at once and the rows are highlighted (bold, a dot with the screen-reader text "New:"). |
-| 3 | Click the panel's heading text `Notifications` (not a link; focus drops to the page), then press `Escape`. | The panel closes and focus returns to the bell. Escape works wherever the focus is, not only while it is inside the bell's wrapper. |
-| 4 | Reopen the panel and click the "x" **Dismiss: Third notice** at the right of the first row. | The row disappears and the other two stay. Keyboard focus does **not** fall to the page body: it lands on the control now at the same place (the next row's dismiss button, or the last one). Press `Tab` once: focus moves on from there. |
-| 5 | Click `Second notice` (the whole row is a link). | You are on `/qr/`. Reopen the panel: `Second notice` is gone (opened); the welcome notification is still listed, not highlighted (read). |
-| 6 | Click **View all notifications**. | `/notifications/` (title `Notifications - ZipTrigo`): "You're all caught up." above a list with `Second notice` and the welcome notification (read ones are lighter, no dot, no "Mark as read" button). `Third notice` is absent (dismissed). |
-| 7 | With the keyboard focus the **Dismiss** button of the first row and press `Enter`. | The row is removed in place and focus stays inside the list (on the control now at that place), not on `<body>`. |
-| 8 | Dismiss the last row. | The list reads "No notifications yet."; focus goes to the list container itself (no ring is drawn for it on a mouse click). |
-| 9 | Open the bell's panel. | "No new notifications." and **View all notifications**. |
+| 1 | On `/account/register/` enter **Name** `Core Tester`, **Email** `qa.core.<random>@example.com` (record it as `CORE_USER`), **Password** `CoreBell-4821`; **Create account**. | **Check your email**. |
+| 2 | Open `/__e2e__/mail/?to=<CORE_USER>` (reload until it arrives), follow the "Confirm your ZipTrigo account email" link and press **Confirm my email**. | **Email Confirmed!**. |
+| 3 | Sign in as `CORE_USER` / `CoreBell-4821`. | You land on `/`; the bell shows `1` (the welcome credits; `notifications.md` tests it). |
+
+### CORE-21 The confirmation dialog and flash messages
+
+**Purpose:** the shared `confirmModal` dialog is keyboard friendly and a plain-POST action ends in a
+flash message that stays until dismissed.
+**Preconditions:** CORE-20, signed in as `CORE_USER`. The dialog is the one every product uses; To-do's
+"Regenerate address" is a harmless place to try it.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/todo/settings/`. Under **Add tasks by email** record the address shown. Press **Regenerate…**. | A dialog over a dimmed page (`role="dialog"`, `aria-modal="true"`, named by its title): title **Regenerate address**, the text "Your old address stops working immediately. Mail already sent to it is dropped, so update any contacts or rules that use it.", buttons **Cancel** and **Regenerate** (red). Keyboard focus is on **Cancel**. |
+| 2 | Press `Escape`. | The dialog closes; focus is back on **Regenerate…**. The address is unchanged. |
+| 3 | Open it again and click the dimmed backdrop outside the dialog. | It closes. Open it again and press **Cancel**: it closes too. |
+| 4 | Open it and press **Regenerate**. | The page reloads on `/todo/settings/` with a green message at the top of the content, "Your new address is ready. The old one no longer works.", with a check icon and an "x" button named "Dismiss"; the message has `role="status"` (an error one would be red with `role="alert"`). The address is different. |
+| 5 | Wait 10 seconds. | The message is still there (it is never dismissed automatically). |
+| 6 | Press its "x". | The message fades out. Reload: it does not come back (shown once). |
+| 7 | Resize to 375 px wide and open the dialog again. | It fits the width with a margin on both sides; both buttons are visible. **Cancel** it; reset the viewport. |
+
+### CORE-22 An htmx action after the session ended goes to a full login page
+
+**Purpose:** a form that htmx posts while the session is gone navigates to the login page (with `next`
+set to the page you were on), never renders the login page inside the form (issue #152).
+**Preconditions:** CORE-20. Signed in as `CORE_USER` in tab A on `/todo/`; tab B open on the same site.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In tab B log out. | - |
+| 2 | In tab A type `Core session check` into the quick-add box and press **Add task**. | The whole tab navigates to `/account/login/?next=/todo/` (a normal page with one header and one footer); the login page is **not** shown inside the To-do list. |
+| 3 | Sign in as `CORE_USER`. | You land on `/todo/` (Today). `Core session check` was not created (search **All**). |
+
+### CORE-23 Times are shown in the visitor's time zone
+
+**Purpose:** `{% local_time %}` renders a UTC fallback that the browser rewrites in its own zone.
+**Preconditions:** CORE-20, signed in as `CORE_USER`. Note the browser's time zone
+(`Intl.DateTimeFormat().resolvedOptions().timeZone` in the console).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/billing/credits/` and inspect the date of the welcome line ("A gift for your new account"). | A `<time datetime="<UTC ISO, ending in +00:00>" data-local-time="iso">` element whose text is `YYYY-MM-DD HH:MM` **without** "UTC": the same instant in the browser's zone (in the console, `new Date(el.dateTime)` shows the same local date and time). In a zone other than UTC the hour differs from the `datetime` attribute's. |
+| 2 | Open `/notifications/` and hover the relative time of the welcome notification (`just now` or `N minutes ago`). | Its tooltip is the exact local time in the same `YYYY-MM-DD HH:MM` form, without "UTC"; the visible text stays relative. |
+| 3 | (If the browser tool can override the time zone, e.g. the DevTools "Sensors" > Location, or CDP `Emulation.setTimezoneOverride`) set `America/Chicago` and reload `/billing/credits/`. | The date and time move to Chicago's wall clock (5 or 6 hours before UTC); the `datetime` attribute is unchanged. Remove the override. |
+| 4 | (If the tool can disable JavaScript) disable it and reload `/billing/credits/`. | The same cell reads `YYYY-MM-DD HH:MM UTC` (the server's fallback, marked UTC). Re-enable JavaScript. |
+
+### CORE-24 Field errors of a refused form
+
+**Purpose:** the shared field-error behaviour (`core/js/field_errors.js`, issue #219) on a form with
+several fields: the message box above the form, the message under each field, the focus, and what
+clears a message.
+**Preconditions:** logged out, on `/account/register/` (the browser's own checks pass for every input
+below: the name is not empty, only spaces).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | **Name** `Core Errors`, **Email** `qa.core.err.<random>@example.com`, **Password** `abcdefg` (7 letters, no digit); **Create account**. | HTTP 422, the form is replaced in place (URL unchanged). In the form's red block: `Password: Password must contain at least one digit.` Under the password field: `Password must contain at least one digit.` (red, below the field's label and hint), the field is empty again (passwords are not re-rendered), has a red border, `aria-invalid="true"` and an `aria-describedby` whose first id is that message's `<p>` (its id ends in `-error`). Keyboard focus is on **Password**, not on **Name** (which the page autofocuses: an autofocus field the swap rendered does not count as one the person is typing in). |
+| 2 | Clear **Name** and type three spaces; type `abcdefg` into **Password** again (a password is never sent back into the form); **Create account**. | The block has two lines, `Name: This field is required.` first, then the password line; both fields carry their own message under them and `aria-invalid`; focus is on **Name** (the first invalid field). |
+| 3 | Type one character into **Password**. | Only the password's message (and its red border and `aria-invalid`) goes away; the name's message stays; the red block above is unchanged until the next submission. |
+| 4 | Switch to dark mode (OS emulation; logged out the page follows the system) and repeat step 2. | The red block, the messages under the fields and the red borders are readable on the dark background. Switch back. |
+| 5 | Leave the page without creating the account. | - |
+
+### CORE-25 Fonts, focus ring and reduced motion
+
+**Purpose:** the design system's shared CSS (`core/css/site.css`, issue #214) is in effect.
+**Preconditions:** CORE-20, signed in as `CORE_USER`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/` run `getComputedStyle(document.body).fontFamily` and `document.fonts.check('16px Figtree')`. | The font list starts with `Figtree`; the check is `true` (the self-hosted font loaded). |
+| 2 | Open `/todo/settings/` and run `getComputedStyle(document.querySelector('code')).fontFamily` (the email address). | Starts with `"IBM Plex Mono"` (codes and addresses use the mono font). |
+| 3 | On `/` click the **QR Codes** header link with the mouse, go back, then reach it with `Tab`. | After the click no ring stays on the link; with `Tab` a sage ring (a 2 px gap and a sage outline, drawn as a box shadow) surrounds it. In dark mode the gap is the dark background colour. |
+| 4 | Open `/feedback/` and click into the textarea. | A soft sage halo around the field and a sage border (fields show it for the mouse too). |
+| 5 | Emulate `prefers-reduced-motion: reduce` and reload `/`. | The logo, heading and cards appear at once, without rising in (`getComputedStyle(document.querySelector('h1')).animationDuration` is a tiny value such as `1e-06s` or `0.000001s`, i.e. 0.001 ms). Open and close the account menu: no visible transition. Remove the emulation: reloading `/` shows the rise again. |
+
+## Out of scope
+
+- A branded 404 page: the project has none (CORE-10 records Django's page as an observation).
+- The 429 "rate limited" page and partial (`core/429.html`): rate limiting is off on this server.
+- The notification bell, dropdown and page: `notifications.md`.

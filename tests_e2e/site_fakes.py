@@ -13,7 +13,9 @@ store is shared by every request. Imported lazily, like `receipts_fakes`.
   `FakeTodoStorage` with a single presigned PUT / GET pointing back at `/__e2e__/todo-s3/<key>`.
 - **Mailbox.** Every email the site sends (still printed to the console as well) is kept, newest
   first, and listed at `/__e2e__/mail/` -- so a browser-driven test can open a confirmation or
-  reset link without reading the server's output. `?to=<address>` filters by recipient.
+  reset link without reading the server's output. `?to=<address>` filters by recipient. In
+  real-services mode the same page lists the emails read back over IMAP (`real_services.py`).
+- **Preflight.** `/__e2e__/preflight/` runs `real_services.run_checks` and shows the results.
 """
 
 import base64
@@ -155,16 +157,47 @@ def install_mailbox() -> None:
 
 
 def mailbox_view(request: HttpRequest) -> HttpResponse:
-    to = request.GET.get('to', '').strip().lower()
-    with _mailbox_lock:
-        emails = [m for m in _mailbox if not to or m.to.lower() == to]
+    """The emails the site sent, newest first. In real-services mode they are read back over
+    IMAP (`real_services.ImapMailbox`), so an email shows up only once it has been delivered."""
+    # An address has no spaces: a `+` written unescaped in the query string (`?to=a+b@x`) arrives
+    # as one, so read it back as the `+` it was.
+    to = request.GET.get('to', '').strip().lower().replace(' ', '+')
+    note = ''
+    if settings.E2E_SERVICES == 'real':
+        from .real_services import mailbox
+
+        box = mailbox()
+        try:
+            all_emails = box.fetch()
+        except Exception as exc:  # shown on the page: the agent must see why, not a 500
+            return HttpResponse(
+                f'<!doctype html><title>E2E mailbox</title><h1>E2E mailbox: IMAP error</h1>'
+                f'<p id="error">{escape(type(exc).__name__)}: {escape(str(exc))}</p>',
+                status=503,
+            )
+        note = (
+            '<p id="source">Sent over SMTP and read back over IMAP from '
+            f'{escape(box.config.address)} (run {escape(box.run)}). Delivery takes a few '
+            'seconds: reload if an email is missing.</p>'
+        )
+    else:
+        with _mailbox_lock:
+            all_emails = list(_mailbox)
+        note = '<p id="source">In-memory mailbox (fakes mode).</p>'
+    emails = [m for m in all_emails if not to or m.to.lower() == to]
     items = []
     for index, mail in enumerate(emails):
+        sender = getattr(mail, 'sender', '')
         items.append(
             f'<article class="email" data-index="{index}" '
             'style="border:1px solid #ccc;margin:12px 0;padding:12px">'
             f'<div><b>To:</b> <span class="to">{escape(mail.to)}</span></div>'
-            f'<div><b>Subject:</b> <span class="subject">{escape(mail.subject)}</span></div>'
+            + (
+                f'<div><b>From:</b> <span class="from">{escape(sender)}</span></div>'
+                if sender
+                else ''
+            )
+            + f'<div><b>Subject:</b> <span class="subject">{escape(mail.subject)}</span></div>'
             f'<div><b>Sent:</b> {mail.sent_at:%Y-%m-%d %H:%M:%S}</div>'
             '<pre class="text-body" style="white-space:pre-wrap">'
             f'{urlize(mail.text_body, autoescape=True)}</pre>'
@@ -180,7 +213,34 @@ def mailbox_view(request: HttpRequest) -> HttpResponse:
     body = ''.join(items) or '<p id="empty">No emails.</p>'
     html = (
         '<!doctype html><html><head><meta charset="utf-8"><title>E2E mailbox</title></head>'
-        f'<body style="font-family:sans-serif"><h1>E2E mailbox ({len(emails)})</h1>{body}'
+        f'<body style="font-family:sans-serif"><h1>E2E mailbox ({len(emails)})</h1>{note}{body}'
         '</body></html>'
     )
     return HttpResponse(html)
+
+
+def preflight_view(request: HttpRequest) -> HttpResponse:
+    """Run the preflight checks (`real_services.run_checks`) now and show them. `?mail=0` skips
+    the SMTP/IMAP round trip, which takes a few seconds."""
+    from .real_services import run_checks
+
+    real = settings.E2E_SERVICES == 'real'
+    checks = run_checks(real=real, mail=request.GET.get('mail') != '0')
+    ok = all(c.ok for c in checks)
+    rows = ''.join(
+        f'<tr class="check {"pass" if c.ok else "fail"}"><td>{escape(c.area)}</td>'
+        f'<td>{escape(c.name)}</td><td><b>{"PASS" if c.ok else "FAIL"}</b></td>'
+        f'<td>{escape(c.detail)}</td></tr>'
+        for c in checks
+    )
+    mode = 'real services (Postgres, Floci, SMTP/IMAP)' if real else 'fakes (in-memory)'
+    html = (
+        '<!doctype html><html><head><meta charset="utf-8"><title>E2E preflight</title></head>'
+        '<body style="font-family:sans-serif">'
+        f'<h1>E2E preflight: <span id="result">{"PASS" if ok else "FAIL"}</span></h1>'
+        f'<p id="mode">Mode: {escape(mode)}</p>'
+        '<table border="1" cellpadding="6" style="border-collapse:collapse">'
+        '<tr><th>Area</th><th>Check</th><th>Result</th><th>Detail</th></tr>'
+        f'{rows}</table></body></html>'
+    )
+    return HttpResponse(html, status=200 if ok else 503)

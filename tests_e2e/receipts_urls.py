@@ -9,5 +9,6 @@ urlpatterns = [
     path('__e2e__/ft-s3/<path:key>', site_fakes.ft_fake_bucket),
     path('__e2e__/todo-s3/<path:key>', site_fakes.todo_fake_bucket),
     path('__e2e__/mail/', site_fakes.mailbox_view),
+    path('__e2e__/preflight/', site_fakes.preflight_view),
     path('', include('config.urls')),
 ]

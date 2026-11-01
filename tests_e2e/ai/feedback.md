@@ -2,31 +2,36 @@
 
 **Scope.** `apps.feedback`: the login-only page at `/feedback/` reached from the footer's
 **Feedback** link, its htmx form (validation: empty, whitespace-only, over 5,000 characters; the
-live character counter), the one-shot thank-you page at `/feedback/thanks/`, the two emails each
-submission sends (a receipt to the submitter, only when their address is confirmed, and a
-notification to every active superuser), escaping of HTML in the text, and the staff side in the
-admin (`/admin/feedback/feedback/`: list, detail, status change, bulk status actions). Rate
-limiting (`FEEDBACK_USER`, 10 per hour) is switched off on this server and is not tested.
+live character counter, the message slot and the message under the field), the one-shot thank-you
+page at `/feedback/thanks/`, the two emails each submission sends (a receipt to the submitter, only
+when their address is confirmed, and a notification to every active superuser, whose admin link
+must work), escaping of HTML in the text and in the sender's name, a session that ends while the
+form is open, keyboard use, and the staff side in the admin (`/admin/feedback/feedback/`: list,
+detail, status change, bulk status actions and their History). Rate limiting (`FEEDBACK_USER`, 10
+per hour) is switched off on this server and is not tested.
 
 ## Preconditions
 
-- The test server is running at `http://localhost:8765` on a fresh database. All URLs are relative
-  to it.
+- The test server is running at `http://localhost:8765` on a fresh database, `preflight.md` passed.
+  All URLs are relative to it.
 - Seeded accounts (password `QaE2e-Passw0rd!`): `qa.user@example.com` (name "QA User", confirmed),
   `qa.admin@example.com` (name "QA Admin", superuser, confirmed; the **only** superuser, so the only
   recipient of notifications). `qa.unconfirmed@example.com` exists but cannot log in (see FB-15).
 - Log in on `/account/login/` (**Email**, **Password**, **Sign in**); log out from the account menu
   (person icon, top right) > **Logout**.
-- Emails: `/__e2e__/mail/` lists every email sent, newest first, showing **To**, **Subject**,
-  **Sent** and the plain-text body (`?to=<address>` filters). Each email's HTML body is shown as
-  source under a collapsed **HTML body (source)** section.
+- Emails are sent over real SMTP and read back over IMAP: `/__e2e__/mail/` lists this run's emails,
+  newest first, showing **To**, **Subject**, **Sent** and the plain-text body (`?to=<address>`
+  filters). Delivery takes a few seconds: **reload until the email is there, up to a minute**; a step
+  that expects **no** email waits 30 seconds first. Each email's HTML body is shown as source under a
+  collapsed **HTML body (source)** section; links in the text body are real, absolute
+  (`http://localhost:8765/...`) and clickable.
 - Timestamps in emails are UTC (`YYYY-MM-DD` and `HH:MM`).
 
 ## Reference strings (from the code)
 
 | Where | Exact text |
 |---|---|
-| Page title / heading | `Send feedback` / **Send feedback** |
+| Page title / heading | `Send feedback - ZipTrigo` / **Send feedback** |
 | Intro | "Found a bug, have an idea, or want to tell us what you think? Every message is read." |
 | Field label / placeholder | `Your feedback` / `Tell us what's on your mind…` |
 | Under the field (confirmed users only) | `A copy will be emailed to <email>.` |
@@ -36,7 +41,7 @@ limiting (`FEEDBACK_USER`, 10 per hour) is switched off on this server and is no
 | Too long error | `Keep it to 5,000 characters or fewer.` |
 | Error line in the message slot (above the form, `#feedback-msg`, `role=alert`, red) | `Your feedback: <the message>` |
 | Same message under the textarea | `<the message>` (red, linked to the textarea with `aria-describedby`; the textarea gets `aria-invalid="true"` and a red border) |
-| Thanks page title / heading | `Thanks for your feedback` / **Thanks for your feedback!** |
+| Thanks page title / heading | `Thanks for your feedback - ZipTrigo` / **Thanks for your feedback!** |
 | Thanks text, confirmed | "We've received your message and emailed a copy to **<email>**. Every message is read." |
 | Thanks text, unconfirmed | "We've received your message. Every message is read." |
 | Thanks buttons | `Send more feedback`, `Back to home` |
@@ -63,7 +68,7 @@ limiting (`FEEDBACK_USER`, 10 per hour) is switched off on this server and is no
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the page. | Tab title `Send feedback`. A card with a speech-bubble icon, heading **Send feedback**, the intro sentence, the label **Your feedback**, an empty 9-row textarea with the placeholder, and a full-width **Send feedback** button. |
+| 1 | Look at the page. | Tab title `Send feedback - ZipTrigo`. A card with a speech-bubble icon, heading **Send feedback**, the intro sentence, the label **Your feedback**, an empty 9-row textarea with the placeholder, and a full-width **Send feedback** button. |
 | 2 | Look under the textarea. | Left: "A copy will be emailed to qa.user@example.com." Right: `0 / 5,000`. |
 | 3 | Look at the footer. | The **Feedback** link carries `aria-current="page"` (check the accessibility tree). |
 | 4 | Type `Hello`. | The counter reads `5 / 5,000` after each keystroke. |
@@ -73,13 +78,12 @@ limiting (`FEEDBACK_USER`, 10 per hour) is switched off on this server and is no
 ### FB-03 Empty submission is blocked in the browser
 
 **Purpose:** the textarea is `required`, so nothing is sent for an empty form.
-**Preconditions:** logged in as `qa.user@example.com`, on `/feedback/`, field empty. Note the count
-of emails at `/__e2e__/mail/` (heading "E2E mailbox (N)").
+**Preconditions:** logged in as `qa.user@example.com`, on `/feedback/`, field empty.
 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Press **Send feedback**. | The browser's own validation bubble ("Please fill out this field." or the browser's equivalent) appears on the textarea; the page does not change; no request is sent. |
-| 2 | Check `/__e2e__/mail/`. | The email count is unchanged. |
+| 2 | Wait 30 seconds and check `/__e2e__/mail/`. | No new `Thanks for your feedback` or `New feedback submitted` email. |
 
 ### FB-04 Whitespace-only feedback is rejected by the server
 
@@ -90,7 +94,7 @@ of emails at `/__e2e__/mail/` (heading "E2E mailbox (N)").
 |---|---|---|
 | 1 | Type three spaces, press `Enter` twice, type two more spaces. | The counter shows `7 / 5,000`. |
 | 2 | Press **Send feedback**. | The button briefly shows a spinner and `Sending...`. The form is replaced in place (no page reload, URL still `/feedback/`): a red line **Your feedback: Write something before sending.** appears in the message slot above the form, the same message **Write something before sending.** appears under the textarea, the textarea has a red border and keyboard focus. The response status is 422. |
-| 3 | Check `/__e2e__/mail/`. | No new email. |
+| 3 | Wait 30 seconds and check `/__e2e__/mail/`. | No new feedback email. |
 | 4 | Type `x` in the field and look at the counter. | The counter still works after the form was swapped (it counts the whitespace kept in the field plus `x`). The message under the textarea disappears as soon as you type (the slot line above the form stays until the next submission). |
 | 5 | Clear the field. | - |
 
@@ -109,7 +113,7 @@ the counter updates:
 | 2 | Press **Send feedback**. | 422, form swapped in place: the slot line **Your feedback: Keep it to 5,000 characters or fewer.** above the form and the message **Keep it to 5,000 characters or fewer.** under the textarea; the textarea still contains the whole text (it ends with `END-MARKER!`); the counter again reads `5,001 / 5,000` in red. |
 | 3 | Delete one character (the last `!`). | Counter `5,000 / 5,000`, no longer red. |
 | 4 | Press **Send feedback**. | Accepted: the browser goes to `/feedback/thanks/` (exactly 5,000 characters is allowed); the slot line is gone from the form you get next. |
-| 5 | Check `/__e2e__/mail/`. | Two new emails (receipt to `qa.user@example.com`, notification to `qa.admin@example.com`); the receipt quotes the long text. |
+| 5 | Check `/__e2e__/mail/` (reload until they arrive). | Two new emails (receipt to `qa.user@example.com`, notification to `qa.admin@example.com`); the receipt quotes the long text. |
 
 ### FB-06 Successful submission and the thank-you page
 
@@ -127,7 +131,7 @@ Second paragraph: naïve café, 日本語 text.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Type the text and press **Send feedback**. | The button shows `Sending...` and is disabled while the request runs (a second click does nothing), then the browser navigates to `/feedback/thanks/`. |
-| 2 | Look at the page. | Tab title `Thanks for your feedback`. A round check-mark icon, heading **Thanks for your feedback!**, the text "We've received your message and emailed a copy to **qa.user@example.com**. Every message is read." and two buttons: **Send more feedback** (outlined) and **Back to home** (filled). |
+| 2 | Look at the page. | Tab title `Thanks for your feedback - ZipTrigo`. A round check-mark icon, heading **Thanks for your feedback!**, the text "We've received your message and emailed a copy to **qa.user@example.com**. Every message is read." and two buttons: **Send more feedback** (outlined) and **Back to home** (filled). |
 | 3 | Click **Send more feedback**. | `/feedback/` with an **empty** form (counter `0 / 5,000`). |
 | 4 | Press Back to return to the thanks page, or submit `FB-06 second message` and then click **Back to home**. | **Back to home** goes to `/`. |
 
@@ -141,7 +145,7 @@ resends and a direct visit shows the form.
 |---|---|---|
 | 1 | Submit `FB-07 one-shot check` on `/feedback/`. | You are on `/feedback/thanks/`. |
 | 2 | Reload the page (F5). | Redirected to `/feedback/` showing the empty form. No "resubmit form?" browser prompt. |
-| 3 | Check `/__e2e__/mail/`. | Only one pair of emails for "FB-07 one-shot check" (the reload sent nothing). |
+| 3 | Check `/__e2e__/mail/` (reload until the first pair is there, then wait 30 seconds more). | Only one pair of emails for "FB-07 one-shot check" (the reload sent nothing). |
 | 4 | Type `/feedback/thanks/` into the address bar. | Redirected to `/feedback/`. |
 | 5 | Press the browser Back button a few times. | You never see a duplicate submission; any thank-you page shown from history redirects to the form on reload. |
 
@@ -152,8 +156,9 @@ resends and a direct visit shows the form.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/__e2e__/mail/?to=qa.user@example.com` and find the email whose body contains `FB-06 Olá!`. | **To** `qa.user@example.com`, **Subject** exactly `Thanks for your feedback` (no feedback text in the subject). |
+| 1 | Open `/__e2e__/mail/?to=qa.user@example.com` (reload until it arrives) and find the email whose body contains `FB-06 Olá!`. | **To** `qa.user@example.com`, **Subject** exactly `Thanks for your feedback` (no feedback text in the subject). |
 | 2 | Read the body. | In order: `Hi QA User,`; "Thanks for taking the time to send us your feedback. Every message is read."; "Here's a copy of what you sent on <today, YYYY-MM-DD> at <HH:MM> UTC:"; the text quoted line by line with `> ` (`> FB-06 Olá! The upload page is great. 😀`, a line `> ` for the blank line, `> Second paragraph: naïve café, 日本語 text.`); then `The ZipTrigo team`. Accents, emoji and CJK characters are intact (no `?` or mojibake). The date and time match when you submitted (UTC). |
+| 3 | Look for links and expand **HTML body (source)**. | The receipt has no links. The HTML body has the same greeting and text, the feedback inside a `<blockquote>` (line breaks kept with `white-space: pre-wrap`), with `é`, `😀`, `日本語` intact. |
 
 ### FB-09 The superuser notification email
 
@@ -162,10 +167,12 @@ resends and a direct visit shows the form.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/__e2e__/mail/?to=qa.admin@example.com` and find the email containing `FB-06 Olá!`. | **Subject** exactly `New feedback submitted`. |
+| 1 | Open `/__e2e__/mail/?to=qa.admin@example.com` (reload until it arrives) and find the email containing `FB-06 Olá!`. | **Subject** exactly `New feedback submitted`. |
 | 2 | Read the body. | `From: QA User (qa.user@example.com)`; `Submitted: <YYYY-MM-DD HH:MM> UTC`; `Status: New`; the quoted text as in FB-08; then `Review it in the admin: http://localhost:8765/admin/feedback/feedback/<uuid>/change/` (a clickable link). |
 | 3 | Check who else received it: open `/__e2e__/mail/` and look at every `New feedback submitted` email. | Each is addressed to `qa.admin@example.com` only (one per submission); none to `qa.user`, `qa.broke` or `qa.unconfirmed`. |
 | 4 | Click the admin link while logged in as `qa.user@example.com`. | The admin login page with "You are authenticated as qa.user@example.com, but are not authorized to access this page. Would you like to login to a different account?"; no feedback content is shown. |
+| 5 | Expand **HTML body (source)**. | A "Review it in the admin" anchor whose `href` is the same URL as in the text body; `From`, `Submitted` and `Status` in bold labels; the text in a `<blockquote>`. |
+| 6 | In another session sign in as `qa.admin@example.com` and open the admin link. | The change page of exactly that feedback (its **Feedback** field shows the FB-06 text). Logged out, the same link goes to the admin login page and, after signing in as `qa.admin`, on to that change page. |
 
 ### FB-10 HTML in feedback is shown as text
 
@@ -226,18 +233,22 @@ FB-10 <script>alert('xss')</script> <b>bold?</b> <img src=x onerror="alert(1)"> 
 | 5 | Tick the FB-11 row, run **Mark selected as New**. | `Marked 1 feedback as New.`; it shows **New** again. |
 | 6 | Run **Mark selected as In process** on the FB-10 row. | `Marked 1 feedback as In process.` |
 | 7 | Open the actions menu. | It also offers Django's **Delete selected feedback** (deletion is not disabled for feedback). Do not run it. |
+| 8 | Tick the FB-07 row (already **Closed**) and run **Mark selected as Closed** again. | `Marked 0 feedback as Closed.` (the message counts only rows that changed); the row is unchanged. |
+| 9 | Open the FB-07 entry and press **History** (top right of the change page). | An entry by `qa.admin@example.com` with the action text `Marked as Closed.` (from step 4), and no second one from step 8. The FB-06 entry's History shows Django's own entry for the step 1 save (`Changed Status.`). |
 
 ### FB-14 A logged-out session while the form is open
 
-**Purpose:** what happens when the session ends between loading the form and sending it.
+**Purpose:** when the session ends between loading the form and sending it, the htmx post turns into
+a full-page trip to the login page (issue #152), and nothing is saved.
 **Preconditions:** logged in as `qa.user@example.com`. Open `/feedback/` in tab A and the site in tab
 B.
 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | In tab A type `FB-14 after logout`. In tab B log out. | - |
-| 2 | In tab A press **Send feedback**. | Expected: you end up on the login page as a normal full page (URL `/account/login/?next=/feedback/`), or a clear message that you were signed out. Nothing is saved: after logging in again, the admin list (as `qa.admin`) has no "FB-14" entry. **Watch for:** the login page rendered *inside* the feedback card (a second header and footer nested in the page) while the URL stays `/feedback/`; htmx follows the login redirect and swaps whatever comes back into the form. If that happens, record **FAIL** with a screenshot. |
-| 3 | Log in again as `qa.user@example.com`. | - |
+| 2 | In tab A press **Send feedback**. | Tab A navigates to `/account/login/?next=/feedback/` as a normal full page (one header, one footer). The login page is **not** rendered inside the feedback card while the URL stays `/feedback/`; if it is, record **FAIL** with a screenshot. The typed text is lost (expected). |
+| 3 | Sign in again as `qa.user@example.com`. | You land on `/feedback/` with an empty form. |
+| 4 | Wait 30 seconds and check `/__e2e__/mail/`. As `qa.admin`, check `/admin/feedback/feedback/`. | No email and no entry for "FB-14". |
 
 ### FB-15 Wording for an unconfirmed email address (needs setup)
 
@@ -280,3 +291,30 @@ un-confirms the account but keeps the browser session valid. Setup, using the Sw
 | 3 | Resize to 375 x 812 and open `/feedback/`. | No horizontal page scroll; the card fills the width with padding; the textarea and button are full width; the "A copy will be emailed to qa.user@example.com." line and the counter fit (the address may wrap; the counter stays on one line). |
 | 4 | Submit `FB-16 phone` and look at the thanks page. | The heading, text and both buttons fit; the buttons wrap onto two lines if needed rather than overflowing. |
 | 5 | Reset the viewport to desktop. | - |
+
+### FB-17 A name with markup is escaped in both emails
+
+**Purpose:** the submitter's free-text name reaches both emails as text, never as HTML.
+**Preconditions:** logged out. Register a fresh account on `/account/register/`: **Name**
+`FB <i>Eve</i> & Co`, **Email** `qa.fb.name.<random>@example.com`, **Password** `QaE2e-Passw0rd!`;
+confirm it from the email at `/__e2e__/mail/?to=<that address>` (**Confirm my email**) and sign in.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the account menu (person icon). | The first line reads `FB <i>Eve</i> & Co` literally (nothing in italics). |
+| 2 | On `/feedback/` check the line under the field, then submit `FB-17 name check`. | "A copy will be emailed to <that address>."; then the thanks page naming that address. |
+| 3 | Open `/__e2e__/mail/?to=<that address>` (reload until it arrives), the newest `Thanks for your feedback`. | The text body starts `Hi FB <i>Eve</i> & Co,` literally. In **HTML body (source)** the greeting is `Hi FB &lt;i&gt;Eve&lt;/i&gt; &amp; Co,`. |
+| 4 | Open `/__e2e__/mail/?to=qa.admin@example.com`, the newest `New feedback submitted`. | `From: FB <i>Eve</i> & Co (<that address>)` in the text; in the HTML source the name is escaped the same way. |
+| 5 | Log out. | - |
+
+### FB-18 Keyboard use and the message slot
+
+**Purpose:** the page works with the keyboard alone and announces errors.
+**Preconditions:** logged in as `qa.user@example.com`, on `/feedback/`, focus at the top of the page.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Press `Tab` once. | **Skip to content** appears; `Enter` moves focus to the main content. |
+| 2 | Keep pressing `Tab` until the textarea is focused. | The textarea gets the sage field halo; focus never lands on something invisible. |
+| 3 | Type three spaces, press `Tab` to **Send feedback** and press `Enter`. | The refusal of FB-04: the slot `#feedback-msg` (an `aria-live="polite"` region) holds a `role="alert"` line `Your feedback: Write something before sending.` and focus is back on the textarea (the first invalid field), so you can fix it at once. |
+| 4 | Type `FB-18 by keyboard`, `Tab` to the button, `Enter`. | The thanks page. `Tab` reaches **Send more feedback** then **Back to home**, both with a visible focus ring. |

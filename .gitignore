@@ -109,3 +109,6 @@ release_notes.md
 !.env.deploy.example
 .mcp.json
 admin/emails.yaml
+# AI-agent e2e tests: mailbox credentials and the running servers' recorded environments
+tests_e2e/ai/emails.yaml
+tests_e2e/ai/.run/

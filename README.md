@@ -68,7 +68,7 @@ ziptrigo-apps/
 │   ├── short_url/
 │   └── todo/
 ├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, receipts, ...), run via `inv`
-├── tests_e2e/               # Playwright end-to-end tests
+├── tests_e2e/               # Playwright end-to-end tests; ai/: test plans an AI agent runs in a browser
 ├── conftest.py              # Fixtures shared by every app's tests
 ├── Dockerfile
 └── docker-compose.yml
@@ -462,6 +462,32 @@ inv test e2e
 inv lint all                      # ruff + ty + import-linter
 inv lint all --check              # CI mode
 ```
+
+### AI-agent end-to-end test plans
+
+`tests_e2e/ai/` holds plain-language test plans, one per area, that an AI agent runs by driving a
+browser against a local test server, on demand (they take a while; they are not part of CI). The
+server uses the local services in docker plus a real mailbox, and checks them before it serves:
+
+```bash
+docker compose -f docker-compose.postgres.yml up -d
+```
+
+```bash
+docker compose -f docker-compose.floci.yml up -d
+```
+
+```bash
+cp tests_e2e/ai/emails.example.yaml tests_e2e/ai/emails.yaml
+```
+
+```bash
+python tests_e2e/ai/serve.py
+```
+
+Fill in the SMTP/IMAP credentials of a test mailbox in `emails.yaml` (gitignored) before starting.
+See `tests_e2e/ai/README.md` for how to run the plans, and its "Keeping the plans current": a
+change to anything a user or an admin can see or do updates the plan of its area in the same PR.
 
 ### Package Management
 
