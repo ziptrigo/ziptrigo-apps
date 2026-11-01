@@ -99,10 +99,37 @@ function initFileTransferUpload(options) {
                 });
             }
         }
-        alert(
-            'Uploading ' + fileName + ' was interrupted by a network error. '
-            + 'Select the same file again to resume.'
+        setRowError(
+            fileId,
+            'Upload interrupted by a network error. Select the same file again to resume.',
+            true
         );
+    }
+
+    // A problem with one file is shown on its own row (a `role="alert"` line, so it is announced
+    // without a blocking dialog, like the Receipts upload page's rows). `canResume` adds a button
+    // that opens the file picker: the browser can't reopen the file by itself, picking the same
+    // one again resumes it from the parts S3 already has.
+    function setRowError(fileId, message, canResume) {
+        const entry = files.get(fileId);
+        if (!entry) return;
+        entry.error = message;
+        entry.errorCanResume = !!canResume;
+        renderRow(fileId, entry);
+    }
+
+    // Errors with no row to show them on (the file could not even be added) go in one live
+    // region above the list, created on first use so the two pages' templates need nothing.
+    function showPageError(message) {
+        let region = document.getElementById('upload-error');
+        if (!region) {
+            region = document.createElement('p');
+            region.id = 'upload-error';
+            region.setAttribute('role', 'alert');
+            region.className = 'mt-3 text-sm text-red-600 dark:text-red-400';
+            fileListEl.parentNode.insertBefore(region, fileListEl);
+        }
+        region.textContent = message;
     }
 
     function renderRow(fileId, entry) {
@@ -110,7 +137,7 @@ function initFileTransferUpload(options) {
         if (!li) {
             li = document.createElement('li');
             li.id = 'file-row-' + fileId;
-            li.className = 'flex items-center justify-between text-sm gap-2';
+            li.className = 'flex flex-wrap items-center justify-between text-sm gap-2';
             fileListEl.appendChild(li);
         }
         // Built with DOM APIs (not `innerHTML`) so a file name is never parsed as markup -- it
@@ -138,7 +165,7 @@ function initFileTransferUpload(options) {
         if (entry.uploaded) {
             statusSpan.innerHTML = '<i class="fa-solid fa-check text-green-600" title="Done"></i>';
         } else {
-            statusSpan.textContent = entry.resumable ? 'Paused' : pct + '%';
+            statusSpan.textContent = entry.resumable ? 'Paused' : (entry.error ? 'Failed' : pct + '%');
         }
 
         const removeBtn = document.createElement('button');
@@ -150,6 +177,26 @@ function initFileTransferUpload(options) {
         removeBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
 
         li.append(nameSpan, barOuter, statusSpan, removeBtn);
+
+        if (entry.error && !entry.uploaded) {
+            const message = document.createElement('p');
+            message.setAttribute('role', 'alert');
+            message.setAttribute('data-row-error', '');
+            message.className = 'basis-full text-xs text-red-600 dark:text-red-400';
+            message.append(entry.error + ' ');
+            if (entry.errorCanResume) {
+                const pick = document.createElement('button');
+                pick.type = 'button';
+                pick.className = 'underline font-medium';
+                pick.textContent = 'Choose the file';
+                pick.addEventListener('click', function () {
+                    const input = document.getElementById('file-input');
+                    if (input) input.click();
+                });
+                message.appendChild(pick);
+            }
+            li.appendChild(message);
+        }
     }
 
     function findResumeMatch(file) {
@@ -201,7 +248,9 @@ function initFileTransferUpload(options) {
             });
             if (!urlsResp.ok) {
                 const err = await urlsResp.json().catch(function () { return {}; });
-                alert('Could not upload ' + fileName + ': ' + (err.error || urlsResp.status));
+                setRowError(
+                    fileId, 'Could not upload ' + fileName + ': ' + (err.error || urlsResp.status)
+                );
                 return false;
             }
             const urlsData = await urlsResp.json();
@@ -216,7 +265,8 @@ function initFileTransferUpload(options) {
                     body: blob,
                 });
                 if (!putResp.ok) {
-                    alert(
+                    setRowError(
+                        fileId,
                         'Uploading part ' + partNumber + ' of ' + fileName + ' failed: '
                         + putResp.status
                     );
@@ -243,13 +293,14 @@ function initFileTransferUpload(options) {
             const entry = files.get(fileId);
             entry.uploaded = true;
             entry.resumable = false;
+            entry.error = '';
             entry.progress = 100;
             renderRow(fileId, entry);
             updateSubmitState();
             return true;
         }
         const err = await completeResp.json().catch(function () { return {}; });
-        alert('Upload of ' + fileName + ' failed: ' + (err.error || completeResp.status));
+        setRowError(fileId, 'Upload of ' + fileName + ' failed: ' + (err.error || completeResp.status));
         return false;
     }
 
@@ -266,7 +317,7 @@ function initFileTransferUpload(options) {
         });
         if (!addResp.ok) {
             const err = await addResp.json().catch(function () { return {}; });
-            alert('Could not add ' + file.name + ': ' + (err.error || addResp.status));
+            showPageError('Could not add ' + file.name + ': ' + (err.error || addResp.status));
             return;
         }
         const added = await addResp.json();
@@ -313,7 +364,11 @@ function initFileTransferUpload(options) {
         });
         if (!resumeResp.ok) {
             const err = await resumeResp.json().catch(function () { return {}; });
-            alert('Could not resume ' + file.name + ': ' + (err.error || resumeResp.status));
+            setRowError(
+                fileId,
+                'Could not resume ' + file.name + ': ' + (err.error || resumeResp.status),
+                true
+            );
             if (candidate) candidate.matched = false;
             return;
         }
@@ -348,6 +403,7 @@ function initFileTransferUpload(options) {
 
         entry.uploaded = false;
         entry.resumable = false;
+        entry.error = '';
         entry.progress = Math.round((alreadyUploaded.size / partCount) * 100);
         renderRow(fileId, entry);
 
@@ -356,6 +412,8 @@ function initFileTransferUpload(options) {
     }
 
     function handleFileSelection(fileList) {
+        const pageError = document.getElementById('upload-error');
+        if (pageError) pageError.textContent = '';
         Array.from(fileList).forEach(function (file) {
             const candidate = findResumeMatch(file);
             // A rejection here is a network error before the parts (adding or resuming the file).
@@ -368,7 +426,7 @@ function initFileTransferUpload(options) {
                     // `fetch` rejects with a TypeError when the network fails; anything else (the
                     // file couldn't be read or hashed) gets a neutral message.
                     const why = error instanceof TypeError ? 'network error' : 'something went wrong';
-                    alert('Could not add ' + file.name + ' (' + why + '). Try again.');
+                    showPageError('Could not add ' + file.name + ' (' + why + '). Try again.');
                 });
             }
         });
