@@ -2077,6 +2077,9 @@ the issue (comment of 2026-10-31); the short version:
   (`billing:redeem-code`) only shows the form prefilled; without a session it redirects to the login
   page with `next` and `promo=<code>`, the login page's "Create one" link forwards `?promo=` to the
   register page, which prefills its field from it (`signup_codes.QUERY_PARAM`).
+  That sign-in page (`accounts/login.html`, only `?promo=` present) says "Sign in to redeem your
+  promo code" whatever the code is, so it can't be used to probe codes; the form's `#promo-msg` is
+  `role="alert"` so a refusal is announced.
 - **Admin** (`admin_promo.py`, icons `fa-ticket-alt` / `fa-tags`): `PromoCodeAdmin` (list: usage
   "granted (+pending) / max", credits granted, last redeemed; `StateFilter` live / scheduled /
   expired / fully redeemed / inactive; search over code, campaign, notes and emails; the add form
@@ -2118,8 +2121,9 @@ was ever used.
   above 0 (set to 0 meanwhile, the row waits) and is not staff (made staff later, e.g. by the
   admin's add form, it waits forever). Then it asks `known_emails.remember(user)`: true only
   for the **first account to have confirmed the address, or any variant of it, ever**. True: one
-  transaction with `add_credits(type=WELCOME, description='Welcome credits', source='billing')`
-  (`CreditTransactionType.WELCOME`), the row `granted` (`credits`, `transaction`) and an in-app
+  transaction with `add_credits(type=WELCOME, description='A gift for your new account', source='billing')`
+  (`CreditTransactionType.WELCOME`; the credits history hides a description equal to the type's
+  label, which older rows have), the row `granted` (`credits`, `transaction`) and an in-app
   notification (key `welcome_credits`, its own savepoint). False: the row is `refused` with reason
   `address_seen`, and **final** (moving to a fresh address afterwards does not reopen it), and the
   user is emailed once.
@@ -2156,7 +2160,10 @@ was ever used.
   released); both are idempotent, paged oldest first by keyset so rows it can never settle cannot
   starve the rest, and it does nothing while the setting is 0.
 - **Admin.** The setting is on `BillingSettings`; `WelcomeCreditAdmin` is read-only (status, reason,
-  credits, dates; filter by status and reason). `KnownEmail` has no admin on purpose (hashes).
+  credits, dates; filter by status and reason; the object is titled `<email>: <status>` and its
+  ledger line is a readable link). `BillingSettingsAdmin` saves with "Billing settings saved." (a
+  singleton's own name would double in Django's message). `KnownEmail` has no admin on purpose
+  (hashes).
 - **Tests.** `apps/billing/tests/test_welcome_credits.py` (marked `welcome_credits`: the root
   `conftest.py` has an autouse fixture that patches `welcome.configured_credits` to 0 for every other
   test, so no test creates rows or credits by accident) and `apps/accounts/tests/test_known_emails.py`.

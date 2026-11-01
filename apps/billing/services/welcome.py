@@ -51,7 +51,7 @@ from .credits import add_credits
 logger = logging.getLogger(__name__)
 
 SOURCE = 'billing'
-LEDGER_DESCRIPTION = 'Welcome credits'
+LEDGER_DESCRIPTION = 'A gift for your new account'
 REFUSED_SUBJECT = 'About your ZipTrigo welcome credits'
 
 
@@ -139,7 +139,7 @@ def _notify_granted(user: User, amount: int) -> None:
                 user,
                 source=SOURCE,
                 title=f'Welcome! We added {amount} credits to your account',
-                body='These are the welcome credits for your new account.',
+                body='Use them in any ZipTrigo app. Your credits history shows where they go.',
                 url=reverse('billing:credits-history'),
                 key='welcome_credits',
             )

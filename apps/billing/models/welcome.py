@@ -9,6 +9,8 @@ from django.db import models
 if TYPE_CHECKING:
     from django.db.models import Manager
 
+    from apps.accounts.models import User
+
 
 class WelcomeCreditStatus(models.TextChoices):
     #: Opened at account creation; waits for the email to be confirmed.
@@ -71,4 +73,4 @@ class WelcomeCredit(models.Model):
         verbose_name_plural = 'Welcome credits'
 
     def __str__(self) -> str:
-        return f'{self.user_id}: {self.status}'
+        return f'{cast("User", self.user).email}: {self.status}'

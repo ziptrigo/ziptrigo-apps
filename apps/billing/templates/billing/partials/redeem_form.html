@@ -25,5 +25,5 @@ re-render). htmx swaps the whole form on a refusal; a success is an `HX-Redirect
       <span class="hidden group-disabled:inline"><i class="fas fa-spinner fa-spin"></i></span>
     </button>
   </div>
-  <div id="promo-msg" class="mt-2 text-sm text-red-600 dark:text-red-400">{% if promo_error %}{{ promo_error }}{% endif %}</div>
+  <div id="promo-msg" role="alert" class="mt-2 text-sm text-red-600 dark:text-red-400">{% if promo_error %}{{ promo_error }}{% endif %}</div>
 </form>

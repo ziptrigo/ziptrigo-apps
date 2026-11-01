@@ -97,7 +97,7 @@ def test_a_new_account_gets_1000_credits_when_it_confirms_its_email(run):
     assert get_balance(user) == 1000
     tx = CreditTransaction.objects.get(user=user)
     assert (tx.amount, tx.type, tx.source) == (1000, CreditTransactionType.WELCOME, 'billing')
-    assert tx.description == 'Welcome credits'
+    assert tx.description == 'A gift for your new account'
     assert grant.transaction_id == tx.pk
 
 

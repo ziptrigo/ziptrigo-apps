@@ -7,6 +7,9 @@ from django.db import models
 
 from apps.core.models.singleton import load_singleton
 
+#: The most the admin can set the welcome credits to.
+WELCOME_CREDITS_MAX = 1_000_000
+
 
 class BillingSettings(models.Model):
     """Singleton admin-editable settings shared by every product that charges credits: today just
@@ -41,9 +44,9 @@ class BillingSettings(models.Model):
         models.PositiveIntegerField(
             default=1000,
             db_default=1000,
-            validators=[MaxValueValidator(1_000_000)],
-            help_text='Credits added to a genuinely new account once its email is confirmed '
-            '(issue #160). 0 turns it off: accounts created while it is off never get them.',
+            validators=[MaxValueValidator(WELCOME_CREDITS_MAX)],
+            help_text='Credits added to a genuinely new account once its email is confirmed. '
+            '0 turns it off: accounts created while it is off never get them.',
         ),
     )
 
