@@ -223,6 +223,7 @@ column (`min-h-screen flex flex-col`) with `<main class="flex-grow flex flex-col
 | List / dashboard | `max-w-4xl` | `mb-8` |
 | Form (create / edit) | `max-w-3xl` | `mb-6` |
 | Two-column detail (preview left, form right; stacked on phones) | `max-w-5xl` | `mb-6` |
+| Sidebar + content (To-do: a `w-48` menu beside the page) | `max-w-6xl` (the content column is as wide as a list page, about `max-w-4xl`) | `mb-6` |
 | Product intro page | `max-w-3xl`, `py-10` | `mb-6` |
 | Auth card (login, register) | `max-w-md`, centred with `flex-grow flex items-center justify-center p-6` | `mb-6` |
 | Modal panel | `max-w-md w-full mx-4` | `mb-2` |
