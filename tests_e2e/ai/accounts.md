@@ -633,7 +633,9 @@ name is shown as text, never as HTML, in emails and on the page.
 ### ACC-41 A reset link for an address the account has left
 
 **Purpose:** a reset link is bound to the address it was sent to; once the account's address
-changes, the old link is refused and the account signs in with the new address only.
+changes (in the admin, which handles it like an email change: the account is un-confirmed, the
+new address is sent a confirmation and the old one a notice), the old link is refused and the
+account signs in with the new address only, once that is confirmed.
 **Preconditions:** ACC-40 (UNC confirmed, password P-UNC); signed out in Context A; a fresh
 Context B. The site has no page to change one's own email (`Email cannot be changed`), so the
 address is changed in the admin.
@@ -641,11 +643,12 @@ address is changed in the admin.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Context A: on `/account/forgot-password/` submit UNC. | A new `Reset your ZipTrigo account password` arrives for UNC (RESET-UNC2). Don't open it yet. |
-| 2 | Context B: open `/admin/` and sign in with ADMIN. Go to `/admin/accounts/user/?q=qa.acc.<run>.unc`, open UNC's row, change `Email` to MOVED and Save. | Saved with a success message; the users list shows MOVED (Email confirmed still ticked: the admin doesn't un-confirm). Leave Context B signed in. |
-| 3 | Context A: open RESET-UNC2. | `Link Expired`: the link was for an address the account no longer has. |
-| 4 | Context A: sign in with UNC / P-UNC. | `Invalid credentials` (no account has that address now). |
-| 5 | Sign in with MOVED / P-UNC. | Signed in, lands on `/` (the dead link changed nothing). `/account/` shows Email MOVED and the Name unchanged. Sign out. |
-| 6 | On `/account/forgot-password/` submit MOVED. | The mailbox for MOVED gets `Reset your ZipTrigo account password`; the mailbox for UNC gets nothing new (wait 30 s). Open the new link: the `Set a new password` form. Leave it without submitting. |
+| 2 | Context B: open `/admin/` and sign in with ADMIN. Go to `/admin/accounts/user/?q=qa.acc.<run>.unc`, open UNC's row, change `Email` to MOVED (leave "Email confirmed" as it is) and Save. | Saved with a success message. Reopen the row: "Email confirmed" is now **unticked** (a changed address is not confirmed until its owner confirms it). Leave Context B signed in. |
+| 3 | Mailboxes (reload up to a minute): `?to=MOVED` and `?to=UNC`. | MOVED: `Confirm your ZipTrigo account email` with a link to `/account/confirm-email/...` (CONFIRM-MOVED; don't open it yet). UNC: `Your ZipTrigo email address was changed`, saying the address was changed from UNC to MOVED on a date and time in UTC, with no link to undo it. |
+| 4 | Context A: open RESET-UNC2. | `Link Expired`: the link was for an address the account no longer has. |
+| 5 | Context A: sign in with UNC / P-UNC, then with MOVED / P-UNC. | UNC: `Invalid credentials` (no account has that address now). MOVED: `Please confirm your email address before logging in. Check your inbox for the confirmation link.` |
+| 6 | Open CONFIRM-MOVED and press `Confirm my email`; then sign in with MOVED / P-UNC. | The email-confirmed page; then signed in, landing on `/`. `/account/` shows Email MOVED and the Name unchanged; no second welcome-credits line in the credits history. Sign out. |
+| 7 | On `/account/forgot-password/` submit MOVED. | The mailbox for MOVED gets `Reset your ZipTrigo account password`; the mailbox for UNC gets nothing new (wait 30 s). Open the new link: the `Set a new password` form. Leave it without submitting. |
 
 ### ACC-42 Time zone: "Not set", detection and a saved choice that detection never overrides
 

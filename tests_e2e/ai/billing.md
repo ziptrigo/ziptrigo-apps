@@ -493,7 +493,7 @@ from the keyboard.
 | 2 | Resize to 375 x 812. | No horizontal scroll; the field and **Redeem** button sit side by side within the card (the field shrinks), the heading and the **Credits history** link fit. Press **Redeem**: `Invalid code.` wraps inside the card. |
 | 3 | Reset to desktop. Choose **Dark** under Appearance on `/account/`, reopen the redeem page. | Card, field (dark background, light text), button, the red refusal line and the link are readable. Switch back to **System**. |
 | 4 | Reload the redeem page and press Tab from the top. | The first stop is "Skip to content"; continuing reaches the header, then the code field, then **Redeem**, then **Credits history**, each with a visible focus ring. With focus on the field, Enter submits. |
-| 5 | Log out, sign in as `qa.broke@example.com` (balance 1 after BILL-08) and open `/billing/redeem/QA-BILL-TEST/`. | Observation to record: the balance reads `1 credits` here (the history page says `1 credit`). |
+| 5 | Log out, sign in as `qa.broke@example.com` (balance 1 after BILL-08) and open `/billing/redeem/QA-BILL-TEST/`. | The balance reads `1 credit` here, as on the history page. |
 
 ---
 
