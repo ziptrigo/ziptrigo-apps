@@ -7,7 +7,7 @@
 <div class="container mx-auto px-4 py-8 max-w-3xl">
   <h1 class="text-3xl font-semibold tracking-tight mb-6 text-gray-900 dark:text-gray-100">{% if qrcode %}Edit{% else %}Create{% endif %} QR code</h1>
 
-  <div id="qrcode-msg" class="mb-4 text-sm"></div>
+  <div id="qrcode-msg" class="mb-4 text-sm" aria-live="polite"></div>
 
   <form id="qrcode-form"
         hx-post="{% if qrcode %}{% url 'qr_code:edit-submit' qrcode.id %}{% else %}{% url 'qr_code:create-submit' %}{% endif %}"

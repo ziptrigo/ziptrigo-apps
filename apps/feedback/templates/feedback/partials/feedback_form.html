@@ -1,4 +1,4 @@
-{% load field_errors %}{% if reset_message %}<div id="feedback-msg" hx-swap-oob="true" class="text-sm"></div>{% endif %}
+{% load field_errors %}{% if reset_message %}<div id="feedback-msg" hx-swap-oob="true" class="text-sm" aria-live="polite"></div>{% endif %}
 <form id="feedback-form"
       method="post"
       action="{% url 'feedback:submit' %}"

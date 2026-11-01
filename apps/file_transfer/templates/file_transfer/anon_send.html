@@ -17,7 +17,7 @@
     <div id="send-errors"></div>
 
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 mb-6 border border-gray-200 dark:border-gray-700">
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Files</label>
+        <p class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Files</p>
         <div id="drop-zone"
              class="flex flex-col items-center justify-center gap-3 text-center rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-8 transition-colors">
             <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 dark:text-gray-500"></i>
@@ -42,33 +42,33 @@
           hx-swap="innerHTML" class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 space-y-4 border border-gray-200 dark:border-gray-700">
         {% csrf_token %}
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.sender_email.label }}</label>
+            <label for="{{ form.sender_email.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.sender_email.label }}</label>
             {{ form.sender_email }}
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 We'll email you a code to confirm before anything is sent.
             </p>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.recipients.label }}</label>
+            <label for="{{ form.recipients.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.recipients.label }}</label>
             {{ form.recipients }}
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ form.recipients.help_text }}</p>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Message</label>
+            <label for="{{ form.message.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Message</label>
             {{ form.message }}
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Expiry</label>
+                <label for="{{ form.expiry_choice.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Expiry</label>
                 {{ form.expiry_choice }}
             </div>
             <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Max downloads</label>
+                <label for="{{ form.max_downloads.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Max downloads</label>
                 {{ form.max_downloads }}
             </div>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password (optional, cannot be changed later)</label>
+            <label for="{{ form.password.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password (optional, cannot be changed later)</label>
             {% include 'file_transfer/partials/password_field.html' with field=form.password %}
         </div>
 
