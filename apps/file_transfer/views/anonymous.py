@@ -25,9 +25,14 @@ from apps.core.htmx import hx_redirect
 from apps.core.json_numbers import whole_number
 from apps.core.services.client_ip import client_ip
 from apps.core.services.email_verification import (
+    EmailVerificationAlreadyConfirmed,
+    EmailVerificationBurned,
     EmailVerificationError,
+    EmailVerificationExpired,
     EmailVerificationRateLimited,
     EmailVerificationSendFailed,
+    EmailVerificationSuperseded,
+    IncorrectCode,
     ResendTooSoon,
 )
 
@@ -243,6 +248,24 @@ def resend_confirmation(request: AnonymousHttpRequest, draft_id: str) -> HttpRes
     return _finish(request, response, cookie_id)
 
 
+def code_error_message(exc: EmailVerificationError) -> str:
+    """What the sender is told when the code they typed was refused. Most of the
+    `EmailVerificationError` subclasses carry no message of their own (and `IncorrectCode`'s is
+    meant for logs), so each gets one here."""
+    if isinstance(exc, IncorrectCode):
+        left = exc.attempts_remaining
+        return f'That code is not right. {left} attempt{"" if left == 1 else "s"} left.'
+    if isinstance(exc, EmailVerificationBurned):
+        return 'Too many wrong codes. Use "Resend code" to get a new one.'
+    if isinstance(exc, EmailVerificationExpired):
+        return 'This code has expired. Use "Resend code" to get a new one.'
+    if isinstance(exc, EmailVerificationSuperseded):
+        return 'A newer code was sent. Enter the code from the latest email.'
+    if isinstance(exc, EmailVerificationAlreadyConfirmed):
+        return 'This transfer is already confirmed.'
+    return 'This code is no longer valid. Use "Resend code" to get a new one.'
+
+
 @require_POST
 def confirm_code(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
     cookie_id = _cookie_id(request)
@@ -269,7 +292,7 @@ def confirm_code(request: AnonymousHttpRequest, draft_id: str) -> HttpResponse:
                 transfer, form.cleaned_data['code'], ip, cookie_id
             )
         except EmailVerificationError as exc:
-            form.add_error('code', str(exc))
+            form.add_error('code', code_error_message(exc))
         except ValidationError as exc:
             form.add_error(None, exc.messages[0])
 

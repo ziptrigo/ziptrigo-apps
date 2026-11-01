@@ -197,7 +197,7 @@ class TestEnablingAnalytics:
     ):
         data = {} if confirm is None else {'confirm_cost': confirm}
         response = web.post(enable_url(link), data)
-        assert 'cost 1 credits' in ' '.join(flashes(response))
+        assert 'cost 1 credit.' in ' '.join(flashes(response))
         link.refresh_from_db()
         assert link.analytics_paid_at is None
         assert balance(funded_user) == 10

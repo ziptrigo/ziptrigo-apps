@@ -835,3 +835,14 @@ class TestAnalyticsCharge:
         link = make_link(funded_user, status=LinkStatus.TAKEN_DOWN)
         with pytest.raises(ValidationError):
             enable_analytics(link)
+
+
+def test_the_limit_message_is_singular_for_one_link():
+    from apps.short_url.services.errors import LimitReachedError
+
+    assert LimitReachedError(1).messages == [
+        'You can have at most 1 link. Delete one to make room.'
+    ]
+    assert LimitReachedError(2).messages == [
+        'You can have at most 2 links. Delete one to make room.'
+    ]

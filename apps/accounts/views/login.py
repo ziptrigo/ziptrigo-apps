@@ -16,7 +16,8 @@ from .redirects import redirect_target
 def login_page(request: HttpRequest) -> HttpResponse:
     """Show the login form, and log in with it (a Django session; no JWTs involved).
 
-    Goes to the `next` URL afterwards when it's on this site, otherwise to the account page.
+    Goes to the `next` URL afterwards when it's on this site, otherwise to the home page
+    (`redirects.redirect_target`, shared with "Sign in with Google/Microsoft").
     Invalid submissions re-render the form with status 422.
     """
     next_url = request.POST.get('next') or request.GET.get('next')

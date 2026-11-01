@@ -1,7 +1,8 @@
-// Times in the visitor's own time zone. The server keeps every time in UTC (TIME_ZONE = 'UTC',
-// no per-user time zone), so a time of day rendered or read on the server is UTC; the browser
-// knows its own zone and converts both ways. Loaded on every page by core/base.html, and run again
-// on whatever htmx swaps in.
+// Times in the visitor's own time zone, the browser's. The server keeps every time in UTC
+// (TIME_ZONE = 'UTC'); a signed-in user's saved zone is what the server's own `|date` follows, but
+// what this script reads and writes is always UTC, whatever zone the server had active, and the
+// browser converts both ways with its own zone. Loaded on every page by core/base.html, and run
+// again on whatever htmx swaps in.
 //
 // - `<time datetime="<ISO with offset>" data-local-time="long|short|iso">` gets its text rewritten
 //   in local time; with `data-local-time-title` it is the `title` (tooltip) that is rewritten

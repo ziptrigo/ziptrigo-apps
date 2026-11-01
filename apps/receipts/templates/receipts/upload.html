@@ -23,13 +23,16 @@
      data-start-url="{{ start_url }}"
      data-complete-url="{{ complete_url_template }}"
      data-max-bytes="{{ max_file_bytes }}"
+     data-extensions="{{ allowed_extensions|join:',' }}"
+     data-types="{{ allowed_browser_types|join:',' }}"
+     data-types-text="{{ allowed_types_text }}"
      data-frozen="{{ receipts_frozen|yesno:'true,false' }}">
     <div id="drop-zone"
          class="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-10 text-center transition-colors">
         <i class="fas fa-cloud-arrow-up text-3xl text-gray-400" aria-hidden="true"></i>
         <p class="text-sm text-gray-700 dark:text-gray-300">Drop files here, or</p>
         <input type="file" id="file-input" multiple class="hidden" tabindex="-1"
-               accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif">
+               accept="{{ allowed_extensions|join:',' }},{{ allowed_browser_types|join:',' }}">
         <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden" tabindex="-1">
         <div class="flex flex-wrap items-center justify-center gap-3">
             <button type="button" id="pick-files-btn"
@@ -44,7 +47,7 @@
             </button>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400">
-            PDF, JPG, PNG, HEIC, WebP &middot; up to {{ max_file_bytes|human_size }} &middot;
+            {{ allowed_labels|join:', ' }} &middot; up to {{ max_file_bytes|human_size }} &middot;
             {% if price_per_file %}{{ price_per_file }} credit{{ price_per_file|pluralize }} each{% else %}free{% endif %}
         </p>
         {% if receipts_frozen %}

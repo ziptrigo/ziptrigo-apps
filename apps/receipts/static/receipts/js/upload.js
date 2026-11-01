@@ -35,10 +35,11 @@
 
     const MAX_PARALLEL = 3;
     const MAX_RATE_LIMIT_RETRIES = 3;
-    const SUPPORTED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp'];
-    const SUPPORTED_TYPES = [
-        'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
-    ];
+    // What `ReceiptsSettings.allowed_types` allows, from the page (the server checks again).
+    function listOf(value) { return (value || '').split(',').filter(Boolean); }
+    const SUPPORTED_EXTENSIONS = listOf(root.dataset.extensions);
+    const SUPPORTED_TYPES = listOf(root.dataset.types);
+    const TYPES_TEXT = root.dataset.typesText;
 
     const pending = [];
     let active = 0;
@@ -269,7 +270,7 @@
             if (file.size === 0) {
                 showError(item, 'This file is empty.');
             } else if (!isSupported(file)) {
-                showError(item, 'Unsupported file type. Use PDF, JPG, PNG, HEIC or WebP.');
+                showError(item, 'Unsupported file type. Use ' + TYPES_TEXT + '.');
             } else if (file.size > maxBytes) {
                 showError(item, 'This file is larger than ' + formatSize(maxBytes) + '.');
             } else {

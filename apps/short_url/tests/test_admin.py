@@ -46,6 +46,20 @@ class TestShortLinkAdmin:
         assert response.status_code == 200
         assert 'https://app.example.test/s/Det001' in response.content.decode()
 
+    def test_now_says_blocked_for_a_blocked_destination(self, client, superuser, user):
+        from ..models import BlockedDomain
+
+        create_link(user, code='Blk001', destination='https://evil.example/page')
+        create_link(user, code='Ok0001', destination='https://example.com/page')
+        BlockedDomain.objects.create(value='evil.example')
+
+        response = client.get(reverse('admin:short_url_shortlink_changelist'))
+
+        rows = response.content.decode().split('<tr')
+        rows = {code: next(row for row in rows if code in row) for code in ('Blk001', 'Ok0001')}
+        assert '<td class="field-state">blocked</td>' in rows['Blk001']
+        assert '<td class="field-state">active</td>' in rows['Ok0001']
+
     def test_it_is_read_only(self, client, superuser, user):
         link = create_link(user)
         assert client.get(reverse('admin:short_url_shortlink_add')).status_code == 403

@@ -135,7 +135,9 @@ def start_upload(
         )
     declared = declared_content_type(filename, content_type)
     if not config.is_type_allowed(declared):
-        raise ValidationError('This file type is not supported. Use PDF, JPG, PNG, HEIC or WebP.')
+        raise ValidationError(
+            f'This file type is not supported. Use {config.allowed_types_text()}.'
+        )
     checksum_sha256 = _validate_checksum(checksum_sha256)
 
     receipt = Receipt(
@@ -228,7 +230,7 @@ def complete_upload(receipt: Receipt) -> Receipt:
         _reject(
             receipt,
             FailureReason.UNSUPPORTED_TYPE,
-            'This file is not a supported type. Use PDF, JPG, PNG, HEIC or WebP.',
+            f'This file is not a supported type. Use {config.allowed_types_text()}.',
         )
     if receipt.content_type and sniffed != receipt.content_type:
         _reject(

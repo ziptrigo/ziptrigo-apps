@@ -24,7 +24,8 @@ class LimitReachedError(ValidationError):
     """The owner already has the most links allowed (active and disabled ones count)."""
 
     def __init__(self, limit: int) -> None:
-        super().__init__(f'You can have at most {limit:,} links. Delete one to make room.')
+        noun = 'link' if limit == 1 else 'links'
+        super().__init__(f'You can have at most {limit:,} {noun}. Delete one to make room.')
 
 
 class CostChangedError(ValidationError):

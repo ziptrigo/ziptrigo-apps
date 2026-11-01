@@ -18,7 +18,13 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.billing.services import InsufficientCreditsError
 
 from ..services import CostChangedError, delete_link, quote_enable, set_enabled
-from .common import out_of_credits_message, owned_link, parse_cost, redirect_back
+from .common import (
+    credits_text,
+    out_of_credits_message,
+    owned_link,
+    parse_cost,
+    redirect_back,
+)
 
 
 def _back(request: AuthenticatedHttpRequest) -> HttpResponse:
@@ -46,7 +52,8 @@ def link_enable(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse
     if cost and parse_cost(request.POST.get('confirm_cost')) != cost.total:
         messages.error(
             request,
-            f'Enabling this link costs {cost.total} credits. Confirm it from the menu to continue.',
+            f'Enabling this link costs {credits_text(cost.total)}. '
+            'Confirm it from the menu to continue.',
         )
         return _back(request)
     try:
@@ -54,7 +61,7 @@ def link_enable(request: AuthenticatedHttpRequest, link_id: str) -> HttpResponse
     except CostChangedError as exc:
         messages.error(
             request,
-            f'Enabling this link now costs {exc.quote.total} credits. '
+            f'Enabling this link now costs {credits_text(exc.quote.total)}. '
             'Confirm it from the menu to continue.'
             if exc.quote
             else 'The cost changed. Try again.',

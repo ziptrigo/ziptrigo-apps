@@ -28,7 +28,7 @@ from ..services import (
     stats,
     unlock_free_analytics,
 )
-from .common import out_of_credits_message, owned_link, parse_cost, render_page
+from .common import credits_text, out_of_credits_message, owned_link, parse_cost, render_page
 
 
 @login_required
@@ -74,7 +74,8 @@ def link_enable_analytics(request: AuthenticatedHttpRequest, link_id: str) -> Ht
     if cost and parse_cost(request.POST.get('confirm_cost')) != cost.total:
         messages.error(
             request,
-            f'Detailed analytics cost {cost.total} credits. Confirm it from the page to continue.',
+            f'Detailed analytics cost {credits_text(cost.total)}. '
+            'Confirm it from the page to continue.',
         )
         return back
     try:
@@ -82,7 +83,8 @@ def link_enable_analytics(request: AuthenticatedHttpRequest, link_id: str) -> Ht
     except CostChangedError as exc:
         messages.error(
             request,
-            f'Detailed analytics now cost {exc.quote.total} credits. Confirm it again to continue.'
+            f'Detailed analytics now cost {credits_text(exc.quote.total)}. '
+            'Confirm it again to continue.'
             if exc.quote
             else 'The cost changed. Try again.',
         )

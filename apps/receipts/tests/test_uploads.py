@@ -109,8 +109,20 @@ class TestStartUpload:
         receipts_settings.allowed_types = 'application/pdf'
         receipts_settings.save()
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as refused:
             start(funded_user)
+        # The message names only what is allowed now.
+        assert refused.value.messages == ['This file type is not supported. Use PDF.']
+
+        receipts_settings.allowed_types = 'image/png,application/pdf,image/heic'
+        assert receipts_settings.allowed_types_text() == 'PDF, PNG or HEIC'
+        assert receipts_settings.allowed_extensions() == ['.pdf', '.png', '.heic', '.heif']
+        assert receipts_settings.allowed_browser_types() == [
+            'application/pdf',
+            'image/png',
+            'image/heic',
+            'image/heif',
+        ]
 
     def test_size_limits(self, funded_user, receipts_settings):
         receipts_settings.max_file_bytes = 1000

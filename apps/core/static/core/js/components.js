@@ -54,6 +54,31 @@ document.addEventListener('alpine:init', function () {
         };
     });
 
+    // Where focus goes back to when the confirmation modal closes: the trigger, unless it is a menu item (its
+    // menu closes when it is clicked) or is no longer shown. Then the control that opened the hidden part: the
+    // nearest focusable element before it (a row menu's button), or nothing.
+    const FOCUSABLE = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+    function shown(el) {
+        return el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null;
+    }
+    function openerBefore(el) {
+        for (let sibling = el.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
+            const control = sibling.matches(FOCUSABLE) ? sibling : sibling.querySelector(FOCUSABLE);
+            if (control && shown(control)) return control;
+        }
+        return null;
+    }
+    function returnFocusTo(trigger) {
+        if (!trigger || !trigger.isConnected) return null;
+        // Decided by the markup, not by visibility: the menu may still be fading out.
+        const menu = trigger.closest('[role="menu"]');
+        if (menu) return openerBefore(menu) || null;
+        if (shown(trigger)) return trigger;
+        let hidden = trigger;
+        while (hidden.parentElement && !shown(hidden.parentElement)) hidden = hidden.parentElement;
+        return openerBefore(hidden);
+    }
+
     // The confirmation modal of `core/partials/confirm_modal.html`. A trigger button carries
     // `data-url` (where the form posts), `data-title`, `data-body` and `data-label`, and optionally
     // `data-tone="primary"` (a non-destructive action; the default is the red "danger" button) and
@@ -85,11 +110,13 @@ document.addEventListener('alpine:init', function () {
                 this.checkboxLabel = data.checkboxLabel || '';
                 this.trigger = el;
                 this.open = true;
-                this.$nextTick(() => { if (this.$refs.cancel) this.$refs.cancel.focus(); });
+                // Not once it has closed again: a quick Escape can come before this runs.
+                this.$nextTick(() => { if (this.open && this.$refs.cancel) this.$refs.cancel.focus(); });
             },
             close() {
                 this.open = false;
-                if (this.trigger) this.trigger.focus();
+                const target = returnFocusTo(this.trigger);
+                if (target) target.focus();
             },
         };
     });

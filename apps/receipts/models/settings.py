@@ -12,6 +12,23 @@ _MB = 1024**2
 #: an attachment or an upload. HEIC and HEIF share `image/heic`.
 DEFAULT_ALLOWED_TYPES = 'application/pdf,image/jpeg,image/png,image/webp,image/heic'
 SUPPORTED_TYPES = frozenset(DEFAULT_ALLOWED_TYPES.split(','))
+#: How each supported type is named to a person, in the order the pages list them, and the
+#: extensions and browser-reported types a file of it may come with (the upload page's `accept`).
+TYPE_LABELS = {
+    'application/pdf': 'PDF',
+    'image/jpeg': 'JPG',
+    'image/png': 'PNG',
+    'image/heic': 'HEIC',
+    'image/webp': 'WebP',
+}
+TYPE_EXTENSIONS = {
+    'application/pdf': ('.pdf',),
+    'image/jpeg': ('.jpg', '.jpeg'),
+    'image/png': ('.png',),
+    'image/heic': ('.heic', '.heif'),
+    'image/webp': ('.webp',),
+}
+TYPE_BROWSER_TYPES = {'image/heic': ('image/heic', 'image/heif')}
 
 
 class ReceiptsSettings(models.Model):
@@ -145,6 +162,26 @@ class ReceiptsSettings(models.Model):
 
     def allowed_types_list(self) -> list[str]:
         return [value.strip().lower() for value in self.allowed_types.split(',') if value.strip()]
+
+    def allowed_type_labels(self) -> list[str]:
+        """The allowed types as a person reads them (`PDF`, `JPG`, ...), in the usual order."""
+        allowed = set(self.allowed_types_list())
+        return [label for content_type, label in TYPE_LABELS.items() if content_type in allowed]
+
+    def allowed_types_text(self) -> str:
+        """`PDF, JPG, PNG, HEIC or WebP`, for "Use ..." messages."""
+        labels = self.allowed_type_labels()
+        if len(labels) < 2:
+            return ''.join(labels)
+        return f'{", ".join(labels[:-1])} or {labels[-1]}'
+
+    def allowed_extensions(self) -> list[str]:
+        allowed = set(self.allowed_types_list())
+        return [ext for t, exts in TYPE_EXTENSIONS.items() if t in allowed for ext in exts]
+
+    def allowed_browser_types(self) -> list[str]:
+        allowed = set(self.allowed_types_list())
+        return [b for t in TYPE_LABELS if t in allowed for b in TYPE_BROWSER_TYPES.get(t, (t,))]
 
     def is_type_allowed(self, content_type: str) -> bool:
         return content_type.strip().lower() in self.allowed_types_list()

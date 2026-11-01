@@ -121,3 +121,28 @@ def test_the_dashboard_lists_the_link_and_a_refused_form_explains_itself(
     page.click('button:has-text("Create link")')
     expect(page.locator('#link-form-msg')).to_contain_text('Destination:')
     expect(page).to_have_url(f'{url}/links/new/')
+
+
+def test_closing_the_delete_dialog_returns_focus_to_the_row_menu(
+    page: Page, receipts_server: ReceiptsServer
+):
+    """Delete is a menu item, and the menu closes when it is clicked: closing the dialog must put
+    focus back on the menu's button, not on the hidden item (which would leave it on <body>)."""
+    url = receipts_server.url
+    receipts_server.login(page)
+
+    page.goto(f'{url}/links/new/')
+    page.fill('#id_destination', f'{DESTINATION}/focus')
+    page.fill('#id_title', 'Focus link')
+    page.click('button:has-text("Create link")')
+    expect(page.locator('body')).to_contain_text('Link created.')
+
+    page.goto(f'{url}/links/?q=Focus+link')
+    trigger = page.locator('#link-list button[aria-haspopup="menu"]').first
+    trigger.click()
+    page.locator('[role="menu"] button:has-text("Delete")').first.click()
+    expect(page.locator('#confirm-modal-title')).to_have_text('Delete this link?')
+    page.keyboard.press('Escape')
+
+    expect(page.locator('#confirm-modal-title')).to_be_hidden()
+    expect(trigger).to_be_focused()
