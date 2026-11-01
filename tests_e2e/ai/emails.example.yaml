@@ -1,0 +1,28 @@
+# The mailbox the AI-agent test server sends its emails through (copy to `emails.yaml`, which is
+# gitignored, and fill in). See README.md, "Email".
+#
+# Every email the site sends during a run goes out over the SMTP server below, addressed (in its
+# `To:` header) to whoever the site chose, e.g. `qa.user@example.com`, but *delivered* to
+# `imap.address`. The test server reads that mailbox over IMAP and lists the run's emails at
+# `/__e2e__/mail/?to=<address>`. Two headers mark them: `X-E2E-Run` and `X-E2E-Original-To`.
+#
+# Use a mailbox meant for testing: a run sends a few hundred emails. With an app password if the
+# provider requires one (Gmail, Outlook, iCloud and Fastmail do when two-factor sign-in is on).
+
+smtp:
+  host: smtp.example.com
+  port: 587
+  security: starttls        # starttls | ssl | none
+  username: you@example.com
+  password: <SMTP_PASSWORD>
+  from: you@example.com     # the From: of every email (most providers require your own address)
+
+imap:
+  host: imap.example.com
+  port: 993
+  security: ssl             # ssl | starttls | none
+  username: you@example.com
+  password: <IMAP_PASSWORD>
+  address: you@example.com  # where every email is delivered: this mailbox
+  folders:                  # searched for the run's emails; add the spam folder if test mail lands there
+    - INBOX

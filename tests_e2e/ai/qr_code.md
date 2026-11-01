@@ -10,18 +10,25 @@ The QR code product's web UI (`apps/qr_code`):
 - the editor `/qr/create/` (name, Text / URL content, type, format, "Track QR Code" with the
   server-issued short URL, live preview, validation) and `/qr/edit/<id>/` (rename only);
 - duplicate (`/qr/duplicate/<id>/`) and delete (confirmation modal);
-- the public short links `/go/<code>` and `/go/<code>/`, and their scan count;
+- the public short links `/go/<code>` and `/go/<code>/`, their scan count, and the neutral
+  "This QR code isn't available" page for an unknown or deleted code;
+- the image `/qr/image/<id>/` and its download (`?download=1`);
+- the "too long for a QR code" refusal, including the advice to turn on tracking for a long URL;
 - access control: logged-out visitors, another user's QR code ids;
-- that creating QR codes costs no credits.
+- that creating QR codes costs no credits;
+- phone width, dark mode and keyboard use of the dashboard and the editor.
 
-Not in the web UI, so out of scope here: size, border, error correction and colours (only the JWT
-API at `/api/qr/` sets them; covered by unit tests). The web UI offers the PNG through **Download**
-in each row's menu (SVG and PDF formats chosen at creation are not offered); QR-23 checks it.
+The editor offers exactly two content types, **Text** and **URL** (a URL can be tracked); both are
+covered. Not in the web UI, so out of scope here: size, border, error correction and colours (only
+the JWT API at `/api/qr/` sets them; covered by unit tests). The web UI offers the PNG through
+**Download** in each row's menu (SVG and PDF formats chosen at creation are not offered); QR-23
+checks it.
 
 ## Preconditions
 
 - The test server is running at `http://localhost:8765`, freshly restarted (empty database), as
-  described in [`README.md`](README.md). Rate limiting is off.
+  described in [`README.md`](README.md). Rate limiting is off. This file needs neither S3 nor
+  email: QR images are rendered on demand from the database, and the QR product sends no mail.
 - The server's `BASE_URL` is `http://localhost:8765`, so every short URL reads
   `http://localhost:8765/go/<code>` (8 letters/digits, case-sensitive).
 - Cases run in order; later ones reuse QR codes created earlier.
@@ -194,9 +201,9 @@ labelled "Actions for <name>") and read the `href` of **Edit**, `/qr/edit/<uuid>
 |---|---|---|
 | 1 | Open `SHORT_URL` (`http://localhost:8765/go/<CODE>`) in the browser. | Redirected (302) to `http://localhost:8765/?from=qr`: the ZipTrigo home page loads. |
 | 2 | Open `http://localhost:8765/go/<CODE>/` (trailing slash). | Same redirect to `/?from=qr`. |
-| 3 | Open `/go/<CODE>` with the case of one letter flipped (e.g. `a` ↔ `A`). | 404 page in the site layout: "This QR code isn't available" (codes are case-sensitive). |
-| 4 | Open `/go/doesnotexist`. | The same 404 page, "This QR code isn't available". |
-| 5 | Open `/go/`. | 404 (Django "Page not found", since the server runs with `DEBUG=True`); no redirect. |
+| 3 | Open `/go/<CODE>` with the case of one letter flipped (e.g. `a` ↔ `A`). | HTTP 404 with a small standalone page (no site header, navigation or footer): the ZipTrigo logo, the heading "This QR code isn't available", the line "It may have been removed by its owner." and a link **Go to ZipTrigo** (to `/`). Tab title "QR code unavailable - ZipTrigo". Codes are case-sensitive. |
+| 4 | Open `/go/doesnotexist`, then click **Go to ZipTrigo**. | The same 404 page, word for word; the link goes to the home page. |
+| 5 | Open `/go/`. | A 404 (Django's own "Page not found", not the QR page above); no redirect. |
 | 6 | Log out (account icon → **Logout**), open `SHORT_URL` again, then log back in as `qa.user`. | Logged out, the short link still redirects to `/?from=qr` (short links are public). |
 
 So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6).
@@ -266,7 +273,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 | 4 | Click the × button. | Back to `/qr/` with all four rows and an empty box. |
 | 5 | Search `zzz`. | The empty state reads **No QR codes found** with "Try another name." (a magnifier icon, no button). |
 | 6 | Search `plain`, then click the **Name** sort link. | URL is `/qr/?sort=name&q=plain`; still only `QA Plain URL`; **Name** is now the current sort. |
-| 7 | Clear the search, then click **Name**. | Alphabetical: `QA Plain URL`, `QA Text`, `QA Tracked (renamed)`, `QA Tracked copy`. |
+| 7 | Clear the search, then click **Name**. | Alphabetical: `QA Plain URL`, `QA Text`, then the two `QA Tracked…` codes. Their order between themselves follows the database's collation: on the Postgres test database (an `en_US` locale ignores punctuation and spaces at first) `QA Tracked copy` may come before `QA Tracked (renamed)`; either order is a PASS. |
 | 8 | Click **Newest**. | Back to newest first, as in step 1. |
 
 ### QR-17 Search terms with special characters survive sorting
@@ -345,7 +352,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Delete `QA Tracked copy` through the menu and the modal. | It disappears from the list. |
-| 2 | Open its short URL while logged in. | 404 page in the site layout, "This QR code isn't available"; not redirected to `/?from=qr`. |
+| 2 | Open its short URL while logged in. | The same standalone 404 page as an unknown code (QR-11 step 3: "This QR code isn't available", "It may have been removed by its owner."); not redirected to `/?from=qr`, and nothing distinguishes it from a code that never existed. |
 | 3 | Log out and open the same short URL. | The same 404 page, with no login redirect. |
 | 4 | Open `SHORT_URL` (`QA Tracked (renamed)`, not deleted). | Still redirects to `/?from=qr`. |
 | 5 | Sign back in as `qa.user`. | — |
@@ -353,14 +360,18 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 ### QR-23 What the user can download
 
 **Purpose:** document the image the UI offers (a **Download** item in each row's menu).
-**Preconditions:** logged in as `qa.user`.
+**Preconditions:** logged in as `qa.user`. (`QA Plain URL` was deleted in QR-21, so this case
+makes its own SVG code.)
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open the "⋮" menu of the `QA Plain URL` row (created as SVG) and look at it; also look in the preview modal and on the Edit page. | The menu has **Edit**, **Duplicate**, **Download** (download icon) and **Delete** (red). The preview modal and the Edit page have no download control. |
-| 1b | Click **Download** on the `QA Text` row. | The browser saves `qa-text.png` (the name slugified); the request was `/qr/image/<TEXT_ID>/?download=1` with `Content-Disposition: attachment`. For `QA Plain URL` it is a PNG too (`qa-plain-url.png`): the SVG format chosen at creation can't be obtained from the web UI (observation). |
-| 2 | Open the `QA Text` enlarged preview, right-click the image and choose "Open image in new tab" (or open `/qr/image/<TEXT_ID>/`). | A crisp PNG with a white quiet zone; the response has `Content-Type: image/png` and `Cache-Control: private, max-age=300`. |
-| 3 | Decode it with a QR reader (optional). | `Hello from QA`. |
+| 1 | Create a URL QR code named `QA SVG`, content `https://example.com/svg`, Format `SVG`, Track unticked. | Saved; it is the top row on `/qr/`. |
+| 2 | Open the "⋮" menu of the `QA SVG` row and look at it; also look in the preview modal and on the Edit page. | The menu has **Edit**, **Duplicate**, **Download** (download icon) and **Delete** (red). The preview modal and the Edit page have no download control. |
+| 3 | Click **Download** on the `QA Text` row. | The browser saves `qa-text.png` (the name slugified); the request was `/qr/image/<TEXT_ID>/?download=1` with `Content-Disposition: attachment; filename="qa-text.png"`. Open the file: a PNG QR code. |
+| 4 | Click **Download** on the `QA SVG` row. | It saves `qa-svg.png`, a PNG too: the SVG format chosen at creation can't be obtained from the web UI (observation, not a failure). |
+| 5 | Click **Download** on the `Café ☕ QR 👋` row (QR-19). | It saves `cafe-qr.png` (accents and emoji dropped from the file name). |
+| 6 | Open the `QA Text` enlarged preview, right-click the image and choose "Open image in new tab" (or open `/qr/image/<TEXT_ID>/`). | A crisp PNG with a white quiet zone; the response has `Content-Type: image/png` and `Cache-Control: private, max-age=300`, and no `Content-Disposition` (shown, not downloaded). |
+| 7 | Decode it with a QR reader (optional). | `Hello from QA`. |
 
 ### QR-24 Another user's QR codes are invisible
 
@@ -418,3 +429,70 @@ for the keyboard too: Tab and Shift+Tab never reach the page behind them.
 | 4 | Open the "⋮" menu of `QA Text`, click **Delete**. | The delete dialog opens. |
 | 5 | Press `Tab` repeatedly (4-5 times), then `Shift+Tab` repeatedly. | Focus cycles between **Cancel** and **Delete** only, in both directions, wrapping from the last to the first and back. It never lands on the search box, the sort links or a row. |
 | 6 | Press `Escape`. | The dialog closes; the row is still there; keyboard focus is not lost to `<body>` (it returns to where you opened the dialog from, or at worst the page). |
+
+### QR-28 A long URL that only fits once it is tracked
+
+**Purpose:** the "too long for a QR code" refusal of a URL suggests tracking, and tracking really
+fixes it (the code then holds the short link).
+**Preconditions:** logged in as `qa.user`, on `/qr/create/`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Name `Long URL`, Type `URL`, Track unticked. In the console run `document.querySelector('textarea[name=url]').value = 'http://localhost:8765/?q=' + '한'.repeat(900)` (925 characters, about 2,700 bytes) and click **Preview**. | Red message: `Text / URL: That is too long for a QR code. Please shorten it or turn on "Track QR Code".` The same message under the Text / URL field. The preview box keeps the logo placeholder. |
+| 2 | Click **Save**. | The same message; nothing is created. |
+| 3 | Tick **Track QR Code** (a Short URL appears, as in QR-07) and click **Preview**. | The message goes and a QR code renders: it encodes the short link, which always fits. |
+| 4 | Click **Save**. | Goes to `/qr/`; a new top row `Long URL` whose grey line is its `http://localhost:8765/go/<code>` short URL. |
+| 5 | Open that short URL. | Redirected to the home page; the address bar holds `/?q=` followed by the 900 Hangul syllables (shown decoded or percent-encoded, both are fine). |
+| 6 | Open the row's **Duplicate**. | The editor is pre-filled with the long original URL (not the short link), Track ticked, a new Short URL. Click **Cancel**: nothing is created. |
+
+### QR-29 Duplicate keeps the format; an emoji-only name downloads as `qr-code.png`
+
+**Purpose:** the duplicate form copies every option the editor has; the download name has a fallback.
+**Preconditions:** logged in as `qa.user`; `QA SVG` exists (QR-23).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the `QA SVG` menu → **Duplicate**. | Create-mode editor: Name `QA SVG`, Text / URL `https://example.com/svg`, Type `URL`, **Format `SVG`** (not reset to PNG), Track unticked and enabled, no Short URL field. |
+| 2 | Set Format `PDF`, Name `👋👋`, click **Save**. | Saved; a new top row named `👋👋` with the content `https://example.com/svg`; its thumbnail loads (always a PNG). |
+| 3 | Click **Download** on the `👋👋` row. | The file is saved as `qr-code.png` (a name with no letters or digits falls back to that). |
+| 4 | Delete the `👋👋` row through the menu and the modal. | It disappears; `QA SVG` stays. |
+
+### QR-30 Dark mode
+
+**Purpose:** the QR pages are readable with the dark theme, and the public 404 page follows the
+visitor's system setting.
+**Preconditions:** logged in as `qa.user`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/account/`, under "Appearance", choose **Dark**. | The page turns dark at once (no reload). |
+| 2 | Open `/qr/`, open a row's "⋮" menu, the enlarged preview and the delete dialog (cancel it). | Dark backgrounds with light text everywhere; the menu, the search box and the delete dialog are dark too; the QR thumbnails and the enlarged image keep their white background (a QR code must stay dark-on-light to scan). No white flash on load, no text that is dark on dark. |
+| 3 | Open `/qr/create/`, choose Type `URL`, tick Track, click **Preview** with empty fields, then fill Name and content and click **Preview** again. | Inputs, selects, the read-only Short URL field and the red error lines are all legible on the dark background. |
+| 4 | Open `/qr/edit/<TEXT_ID>/`. | The read-only Type box and textarea are a dimmer grey than the editable Name field, still legible. |
+| 5 | With the browser (or the OS) set to prefer a dark colour scheme, open `/go/doesnotexist` (no site theme applies: the page is standalone). | Dark background, light heading, readable grey line, a visible link colour. Switch the scheme back to light and reload: a white page with dark text. |
+| 6 | Back on `/account/`, choose **System** again. | The theme is back to what it was. |
+
+### QR-31 Keyboard only
+
+**Purpose:** everything on the dashboard and in the editor can be done without a mouse.
+**Preconditions:** logged in as `qa.user`, on `/qr/` with several codes; use only the keyboard.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Press `Tab` from the top of the page. | The first stop is "Skip to content"; then the header, the **New QR code** button, the search box, the **Newest**/**Name** sort links, and for each row its thumbnail button ("Preview <name>") and its "⋮" button ("Actions for <name>"). Every focused control shows a visible focus ring. |
+| 2 | Focus a row's "⋮" button and press `Enter`. | Its menu opens. `Tab` moves through **Edit**, **Duplicate**, **Download** and **Delete** in that order. |
+| 3 | Press `Escape` while the menu is open. | Record whether it closes. (The dashboard's script closes the menu on an outside click only; if `Escape` leaves it open, record it as an accessibility observation, not a failure.) |
+| 4 | Open the menu again, `Tab` to **Delete** and press `Enter`. | The delete dialog opens with focus on **Cancel** (QR-27 covers the focus trap). Press `Escape`: it closes and focus returns to that row's "⋮" button. |
+| 5 | Focus a thumbnail button and press `Enter`. | The enlarged preview opens with focus on "×"; `Enter` on "×" closes it and focus returns to the thumbnail. |
+| 6 | In the search box type `text` and press `Enter`. | The list is filtered (`/qr/?q=text`). |
+| 7 | Go to `/qr/create/` and `Tab` through the form. | Name, Text / URL, Type, Format, Track QR Code (skipped while disabled), **Preview**, **Cancel**, **Save**, in that order. With Type `URL` selected by the arrow keys, Track becomes reachable and `Space` ticks it. |
+| 8 | Fill Name and content, `Tab` to **Preview** and press `Enter`, then `Tab` to **Save** and press `Enter`. | The preview renders, then the code is saved and the browser goes to `/qr/`. Delete this code afterwards (menu → **Delete** → **Delete**). |
+
+## Out of scope
+
+- Size, border, error correction and colours: the editor has no controls for them (JWT API only,
+  unit-tested in `apps/qr_code/tests/test_render_options.py`).
+- The SVG and PDF files the format choice produces: the site only ever serves a PNG
+  (`/qr/image/<id>/`); the stored file is not reachable from the web UI.
+- The `/go/<code>` per-IP rate limit (`QR_REDIRECT_IP`): rate limiting is off on this server.
+- The JWT API `/api/qr/` and `inv qrcode`: unit-tested.

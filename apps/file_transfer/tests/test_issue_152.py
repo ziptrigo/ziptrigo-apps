@@ -123,3 +123,29 @@ class TestManagePage:
             in html
         )
         assert 'data-title="Disable this transfer?"' in html
+
+
+class TestEmailsEscapeWhatTheSenderTyped:
+    """File transfer emails are text-only, so SES gets an HTML part built from the text: what the
+    sender typed (the message, file names) must arrive as text, not as markup."""
+
+    def test_recipient_email_html_part_escapes_the_message_and_file_name(self, user, settings):
+        settings.EMAIL_BACKENDS = 'ses'
+        transfer = Transfer.objects.create(
+            owner=user,
+            status=TransferStatus.ACTIVE,
+            message='<a href="https://evil.example">Click to verify</a>',
+        )
+        _file(transfer, '<img src=x onerror=alert(1)>.pdf')
+
+        with mock.patch('apps.core.services.email.boto3.client') as client_factory:
+            emails.send_transfer_notification.call(str(transfer.id), 'to@example.com')
+
+        html = client_factory.return_value.send_email.call_args.kwargs['Message']['Body']['Html']
+        assert '<a href' not in html['Data']
+        assert '<img' not in html['Data']
+        assert (
+            '&lt;a href=&quot;https://evil.example&quot;&gt;Click to verify&lt;/a&gt;'
+            in (html['Data'])
+        )
+        assert '&lt;img src=x onerror=alert(1)&gt;.pdf' in html['Data']

@@ -2,25 +2,33 @@
 
 ## Scope
 
-The `apps/file_transfer` web UI:
+The `apps/file_transfer` web UI, against the real local S3 (Floci) and real email:
 
-- the logged-in send page `/transfer/send/` (file picker, folders, remove, progress, resumable
-  uploads, the options form and its validation, the credit minimum) and the sent page
+- the logged-in send page `/transfer/send/` (file picker, folders, remove, progress, multipart
+  uploads of several parts with per-part checksums, resuming an interrupted upload after a reload
+  with `?resume=`, the options form and its validation, the credit minimum) and the sent page
   `/transfer/sent/<id>/`;
-- the emails a send produces (recipients, sender copy, download notifications);
+- every email the app sends, and the links in them: to recipients, the sender's copy, "was
+  downloaded", "expires tomorrow", "files deleted", "suspended (out of credits)", and the anonymous
+  confirmation and sender copy;
 - the dashboard `/transfer/` (Active/Ended filters, the row, the download log, and the actions:
-  resend, add recipients, expiry / max downloads / password, disable, re-enable, delete now, the
-  "Resume it" link for an unfinished upload);
-- the public download page `/t/<slug>/` (file list, per-file download, password gate, "Download
-  all (.zip)", the neutral "no longer available" page, "Report this transfer");
+  copy link, resend and its 10-minute cooldown, add recipients, extend/shorten the expiry, max
+  downloads, password, disable, re-enable, delete now, the "Resume it" link for an unfinished
+  upload);
+- the public download page `/t/<slug>/` (file list, per-file download with the right name and
+  bytes, password gate, "Download all (.zip)" built by streaming from S3, the neutral "no longer
+  available" page, "Report this transfer");
+- the daily jobs' visible effects (metering, suspension and its in-app notification, re-enabling
+  on a top-up, the suspension grace period, the expiry reminder, natural expiry, the deferred file
+  deletion after the last allowed download), triggered with shell steps because the scheduler does
+  not run on the test server;
 - anonymous sending `/transfer/send/anon/` (off by default, switched on in the admin), its email
-  confirmation by code and by link, the anonymous sent page, the one-time manage link, and claim on
-  login;
-- access control (logged out, another user's transfer).
+  confirmation by code and by link, resending the code, the anonymous limits, the anonymous sent
+  page, the one-time manage link, and claim on login (including the zero-balance deferral);
+- access control (logged out, another user's transfer), phone width and dark mode.
 
-Out of scope: the daily metering / suspension / expiry jobs (they run on a schedule, not during a
-browser session), rate limits (off on this server), admin takedown / block list / auto-hold
-(`admin.md`), and the `/api/ft/` JWT API and `admin/filetransfer.py` CLI (unit tests).
+Out of scope here (see the end of the file): rate limits, the admin moderation tools (takedown,
+block list, auto-hold: `admin.md`), and the `/api/ft/` JWT API and `admin/filetransfer.py` CLI.
 
 ## Preconditions
 
@@ -29,24 +37,49 @@ browser session), rate limits (off on this server), admin takedown / block list 
 - Seeded accounts (password `QaE2e-Passw0rd!` for all):
   - `qa.user@example.com` -- the main sender, 100 credits;
   - `qa.broke@example.com` -- "another user", 0 credits;
-  - `qa.admin@example.com` -- superuser, only for switching anonymous sending on.
-- File transfer's S3 is an in-memory fake: the browser's part uploads go to
-  `/__e2e__/ft-s3/<key>?uploadId=...&partNumber=...` and downloads are redirects to
-  `/__e2e__/ft-s3/<key>?filename=<name>` (served as an attachment). Background tasks run inline,
-  so emails appear in the mailbox and the "download all" zip is built during the request.
-- Mailbox: `/__e2e__/mail/` lists every email the site sent, newest first; `?to=<address>`
-  filters by recipient (case-insensitive). Each entry shows **To**, **Subject**, **Sent** and the
-  text body, whose links are clickable.
+  - `qa.admin@example.com` -- superuser, for the admin settings and the credit adjustment tool
+    (`/admin/billing/credittransaction/adjust/`: User email, Direction Add/Spend, Amount, Apply).
+  - FT-42 registers a fresh account, `qa.ft.<rand>@example.com`, for the billing cases.
+- **S3 is Floci**, a real S3 emulator: the browser PUTs each part of a file straight to a presigned
+  URL on the bucket (`http://localhost:4566/...?partNumber=N&uploadId=...`, with an
+  `x-amz-checksum-sha256` header), and a download is a 302 from `/t/...` to a short-lived (15
+  minutes) presigned GET URL on the same host, which serves the file as an attachment under its
+  original name. The bucket is emptied on every server start. Background tasks run inline, so the
+  "download all" zip is built during the request that asks for it.
+- **Mailbox:** `/__e2e__/mail/` lists the emails the site sent in this run, newest first;
+  `?to=<address>` filters by the address the site sent it to (case-insensitive). Each entry shows
+  **To**, **Subject**, **Sent** and the text body, whose links are real, absolute
+  (`http://localhost:8765/...`) and clickable; an HTML body is shown as source. Email goes over real
+  SMTP, so an email takes a few seconds to arrive: **reload until it arrives, up to a minute**.
+  Where a step says no email is sent, wait a full minute and reload before concluding so.
+- **Shell steps** (marked "(shell step)") stand in for the daily jobs, which nothing in the UI or
+  the admin can trigger. Run them from the repo root with the wrapper, which uses the running
+  server's own database, bucket and mail:
+  `python tests_e2e/ai/manage.py shell -c "..."` (add `--port <port>` before `shell` when your
+  server is not on 8765). Without a shell, mark those steps (and what depends on them)
+  **BLOCKED (needs-setup)**.
+
+### Times
+
+The pages show times with the browser's own time zone (`<time>` elements rewritten in the
+browser, e.g. "Nov 30, 2026, 3:51 PM" or, in the dashboard's "sent" line and the download log,
+`2026-11-30 15:51`), without a "UTC" suffix. Emails always write UTC (`2026-11-30 15:51 UTC`).
+A "Set a date" expiry means the **end of that day in the account's time zone** (Account page >
+time zone; the browser sets it on the first visit after sign-in), so on pages it reads as 11:59 PM
+(23:59) of that day, and in an email it is that same instant converted to UTC -- exactly `23:59
+UTC` only when the account's zone is UTC. Note the zone when you start.
 
 ### Browser windows
 
 Use two independent browser contexts with separate cookies:
 
 - **Main window** -- logged in (as `qa.user` unless a case says otherwise).
-- **Visitor window** -- a private/incognito context (or a second browser profile) where nobody is
-  logged in. Used for the public download page and anonymous sending. If the tool only has one
-  context, log out of the main window before a visitor step and log back in afterwards; cookies
-  must not carry over (clear them if possible).
+- **Visitor window** -- a private/incognito context (or a second browser profile, or another host
+  alias of the same server such as `127.0.0.1:8765`) where nobody is logged in. Used for the public
+  download page and anonymous sending. If the tool only has one context, log out of the main window
+  before a visitor step and log back in afterwards; cookies must not carry over (clear them if
+  possible). Some anonymous cases need a **clean** visitor context: close it and open a new private
+  one, or clear its cookies.
 
 Log out through the account menu in the header (logout is a POST form there, not a link).
 
@@ -57,10 +90,14 @@ Write these down as you go; later cases use them:
 | Name | Where it comes from |
 |---|---|
 | `TRANSFER_A_ID`, `SLUG_A` | FT-07: the sent page URL `/transfer/sent/<TRANSFER_A_ID>/` and the link `http://localhost:8765/t/<SLUG_A>/` |
-| `SLUG_B` | FT-09 |
-| `SLUG_C` | FT-10 |
+| `SLUG_B`, `URL_B` | FT-09; `URL_B` is the presigned URL of B's one download (FT-24) |
+| `SLUG_C`, `URL_C` | FT-10; `URL_C` in FT-26 |
 | `ANON_SLUG_1`, `ANON_MANAGE_URL` | FT-33 |
 | Time A was sent | FT-07 (for the resend cooldown in FT-37) |
+| `SLUG_BIG` | FT-39 |
+| `SLUG_E` | FT-41 |
+| `FT_USER`, `SLUG_M` | FT-42 (the fresh account and its transfer M); `URL_M` in FT-45 |
+| `SLUG_M2` | FT-46 |
 
 A slug is 22 letters/digits.
 
@@ -68,7 +105,7 @@ A slug is 22 letters/digits.
 
 Test files are created in the page with JavaScript, so nothing has to exist on disk. If the
 browser tool can attach real files to an `<input type="file">`, that is fine too: use files with
-the same names and sizes.
+the same names, sizes and content.
 
 **Add files through the "Choose files" input** (`#file-input`; for the anonymous page it is the
 same id). Run in the page's console / JS tool, adjusting the list:
@@ -91,7 +128,7 @@ Files used in this plan:
 
 | Name | Content (bytes) | Used in |
 |---|---|---|
-| `qa-report.txt` | `'R'.repeat(2999) + '\n'` (3,000) | Transfer A |
+| `qa-report.txt` | `'R'.repeat(2999) + '\n'` (3,000; SHA-256 `d47d8e2f87eb95aff0cf89b622f864252a78bbc73b4e9d2f3f3c54113620d5e6`) | Transfer A |
 | `qa-notes.txt` | `'N'.repeat(1499) + '\n'` (1,500) | Transfer A |
 | `qa-remove-me.txt` | `'X'.repeat(99) + '\n'` (100) | FT-04, removed |
 | `empty.txt` | `''` (0) | FT-05, refused |
@@ -100,6 +137,33 @@ Files used in this plan:
 | `qa-broke.txt` | `'B'.repeat(99) + '\n'` (100) | FT-11 |
 | `qa-anon.txt` | `'A'.repeat(799) + '\n'` (800) | Anonymous transfer 1 |
 | `qa-anon-link.txt` | `'K'.repeat(899) + '\n'` (900) | Anonymous transfer 2 |
+| `qa-net.txt`, `qa-net2.txt` | `'W'.repeat(2999) + '\n'` (3,000), `lastModified: 1700000000002`; `'V'.repeat(799) + '\n'` (800), `lastModified: 1700000000003` | FT-38 |
+| `qa-big.bin` | 70 MiB built by the snippet below (73,400,320; two parts) | Transfer BIG |
+| `qa-dup.txt` (twice) | `'1'.repeat(9) + '\n'` (10), then `'2'.repeat(19) + '\n'` (20) | Transfer BIG |
+| `relatório café.txt` | `'Olá\n'` (5 bytes in UTF-8) | Transfer BIG |
+| `qa-expiring.txt` | `'E'.repeat(299) + '\n'` (300) | Transfer E |
+| `qa-meter.txt` | `'M'.repeat(2999) + '\n'` (3,000) | Transfer M |
+| `qa-meter-2.txt` | `'D'.repeat(399) + '\n'` (400) | Transfer M2 |
+| `qa-anon-3.txt`, `qa-anon-4.txt`, `qa-anon-5.txt` | `'3'.repeat(99) + '\n'` (100) and likewise with `4`, `5` | FT-47 to FT-49 |
+
+**The large file.** The part size is 64 MiB (`PART_SIZE_BYTES`, 67,108,864 bytes), so a 70 MiB file
+is uploaded in two parts (64 MiB + 6 MiB). Build it in the page (byte `i` is `i % 251`; it takes a
+few seconds) and add it through the file input:
+
+```js
+(() => {
+  const size = 70 * 1024 * 1024;
+  const bytes = new Uint8Array(size);
+  for (let i = 0; i < size; i++) bytes[i] = i % 251;
+  const dt = new DataTransfer();
+  dt.items.add(new File([bytes], 'qa-big.bin', { type: 'application/octet-stream', lastModified: 1700000000001 }));
+  const input = document.getElementById('file-input');
+  input.files = dt.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+})();
+```
+
+Its SHA-256 is `24f1c89f87a1ed78b333d3560219a9faa42c74da56497d5eb9275dbcb0eed34a`.
 
 **Drop a folder** on the drop zone (`#drop-zone`), simulating what the browser reports for a
 dragged folder `qa-folder/` holding `qa-folder-a.txt` and `inner/qa-folder-b.txt` (the same
@@ -119,14 +183,43 @@ technique as `tests_e2e/test_drop_zone.py`):
 })();
 ```
 
+**Break the upload of one part.** To simulate a dropped connection for the bucket's part PUTs
+(all parts, or only part 2), run in the page before adding the file, and restore with
+`window.fetch = window.__ftFetch;` (a reload restores it too):
+
+```js
+window.__ftFetch = window.__ftFetch || window.fetch;
+window.__ftBlock = /partNumber=2(&|$)/;   // only part 2; use /partNumber=/ to break every part
+window.fetch = (u, o) => (o && o.method === 'PUT' && window.__ftBlock.test(String(u)))
+  ? Promise.reject(new TypeError('Failed to fetch')) : window.__ftFetch(u, o);
+```
+
 **Downloads count.** Every request to `/t/<slug>/files/<id>/` or `/t/<slug>/zip/` counts one
-download against the transfer's max downloads. To inspect a file's content without counting
-another download, fetch the `/__e2e__/ft-s3/...` URL the download redirected to (visible in the
-network log), never the `/t/...` URL a second time.
+download against the transfer's max downloads (and emails the sender a "was downloaded" notice
+when that is on). It answers a 302 to a presigned URL on the bucket (`http://localhost:4566/...`),
+valid 15 minutes; opening or fetching **that** URL again does not count. To check what a URL
+serves, define this helper in the page (again after every navigation) and call it with a `/t/...`
+link (counts a download) or with a presigned URL from the network log (doesn't):
+
+```js
+window.ftFetch = async (url) => {
+  const r = await fetch(url);
+  const buf = await r.arrayBuffer();
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return { status: r.status, url: r.url, bytes: buf.byteLength,
+           sha256: Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join(''),
+           text: buf.byteLength <= 4096 ? new TextDecoder().decode(buf) : null };
+};
+```
+
+`r.url` is the presigned URL the download ended on (record it when a case asks for `URL_...`).
+The file's *name* comes from the `Content-Disposition` the bucket answers, which a script can't
+read: check it on a real click, where the browser saves the file under that name.
 
 **Recipients:** `qa.recipient1@example.com`, `qa.recipient2@example.com`,
 `qa.recipient3@example.com`, `qa.broke.recipient@example.com`, `qa.anon.recipient@example.com`,
-`qa.anon.recipient2@example.com`; the anonymous sender `qa.anon.sender@example.com`.
+`qa.anon.recipient2@example.com`, `qa.anon.recipient3@example.com`; the anonymous sender
+`qa.anon.sender@example.com`.
 
 ---
 
@@ -162,7 +255,7 @@ network log), never the `/t/...` URL a second time.
 
 ### FT-03 Upload files: progress and completion
 
-**Purpose:** files go straight to (fake) S3 in parts and the row reflects progress and completion.
+**Purpose:** files go straight to the bucket (Floci) in parts and the row reflects progress and completion.
 **Preconditions:** FT-02, still on `/transfer/send/`.
 
 | # | Action | Expected result |
@@ -171,7 +264,7 @@ network log), never the `/t/...` URL a second time.
 | 2 | Look at the address bar. | The URL is now `/transfer/send/?resume=<uuid>` (added without a page reload). |
 | 3 | Look at the **Send** button. | It is now enabled, and the hint "Add at least one file that has finished uploading." under it has disappeared (it reappears if every file is removed). |
 | 4 | Add `qa-notes.txt` (1,500 bytes) the same way. | A second row "qa-notes.txt (1.5 KB)" appears below the first and reaches the green check. |
-| 5 | Check the network log (or console). | For each file: one `POST .../files/` (201), one `POST .../files/<id>/parts/`, one `PUT /__e2e__/ft-s3/...` (200) and one `POST .../files/<id>/complete/` (200). No console errors. |
+| 5 | Check the network log (or console). | For each file: one `POST .../files/` (201, answering `part_size_bytes` 67108864 and `part_count` 1), one `POST .../files/<id>/parts/`, one `PUT` to the presigned part URL on the bucket (`http://localhost:4566/...?partNumber=1&uploadId=...`, with an `x-amz-checksum-sha256` request header; 200 with an `ETag`) and one `POST .../files/<id>/complete/` (200). No console errors (in particular no CORS error). |
 
 ### FT-04 Remove a file; the list survives a reload
 
@@ -209,7 +302,9 @@ network log), never the `/t/...` URL a second time.
 | 4 | Enter `qa.recipient1@example.com, not-an-email` and click **Send**. | Red box: `Recipients: "not-an-email" is not a valid email address.` |
 | 5 | Fill Recipients with 21 addresses: run `document.getElementById('id_recipients').value = Array.from({length: 21}, (_, i) => 'qa.many' + (i + 1) + '@example.com').join('\n')`, then click **Send**. | Red box: "A transfer can have at most 20 recipients." |
 | 6 | Set Recipients to `qa.recipient1@example.com`, choose Expiry "Set a date" without picking a date, click **Send**. | Red box: "Expiry date: Provide a date for a custom expiry." |
-| 7 | Check the page and the mailbox (`/__e2e__/mail/?to=qa.recipient1@example.com`). | The two file rows are still listed with green checks; the mailbox shows "No emails." -- nothing was sent. |
+| 7 | Check the page and the mailbox (`/__e2e__/mail/?to=qa.recipient1@example.com`). | The two file rows are still listed with green checks; the mailbox shows "No emails." (after waiting a minute) -- nothing was sent. |
+| 8 | Set Expiry back to "No expiration", type `0` in **Max downloads** and click **Send**. | The browser's own bubble refuses a value below 1 (the input has `min="1"`). |
+| 9 | Run `document.getElementById('send-form').noValidate = true` and click **Send** again. | Red box: "Max downloads: Ensure this value is greater than or equal to 1."; the same message under the Max downloads field. Clear Max downloads. |
 
 ### FT-07 Send transfer A
 
@@ -232,10 +327,11 @@ network log), never the `/t/...` URL a second time.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | Exactly **one** email (the duplicate `QA.RECIPIENT1@...` line was merged). Subject: `qa-report.txt and 1 more file were sent to you via ZipTrigo` (the first file and a count of the others; a single-file transfer reads `<name> was sent to you via ZipTrigo`). |
-| 2 | Read its body. | "You have received 2 files:" followed by the lines "- qa-report.txt" and "- qa-notes.txt" (every uploaded file is named, up to 20, then "- and N more"; one file reads "You have received a file: <name>."), a blank line, "Hello from QA." / "Second line.", then "Download: http://localhost:8765/t/<SLUG_A>/" and "This link expires on YYYY-MM-DD HH:MM UTC." about 30 days from now. |
+| 2 | Read its body. | "You have received 2 files:" followed by the lines "- qa-report.txt" and "- qa-notes.txt" (every uploaded file is named, up to 20, then "- and N more"; one file reads "You have received a file: <name>."), a blank line, "Hello from QA." / "Second line.", then "Download: http://localhost:8765/t/<SLUG_A>/" and "This link expires on YYYY-MM-DD HH:MM UTC." exactly 30 days from the send, in UTC. No HTML body. |
 | 3 | Open `/__e2e__/mail/?to=qa.recipient2@example.com`. | One email with the same subject, file list and download link. |
 | 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject: `Your transfer "qa-report.txt" is on its way`. Body: `Your transfer "qa-report.txt" was sent to: qa.recipient1@example.com, qa.recipient2@example.com.`, then "Download link: http://localhost:8765/t/<SLUG_A>/" and "Manage this transfer: http://localhost:8765/transfer/". |
 | 5 | Click the download link in the recipient email. | The public download page for `qa-report.txt` opens (it is fine that the main window is logged in; downloads are tested in FT-20). Don't click Download here. |
+| 6 | In the sender's copy (step 4), click the "Download link", then the "Manage this transfer" link. | The first opens the same download page; the second opens `/transfer/` (the dashboard) in the logged-in main window. Opened in the visitor window (logged out), the manage link goes to `/account/login/?next=/transfer/`. |
 
 ### FT-09 Send transfer B: password, custom date, one download
 
@@ -247,7 +343,7 @@ network log), never the `/t/...` URL a second time.
 | 1 | Go to `/transfer/send/` and add `qa-limit.txt` (500 bytes). | Row "qa-limit.txt (500 bytes)" reaches the green check. |
 | 2 | Recipients `qa.recipient1@example.com`; Expiry "Set a date"; click the date button, click **Next month**, then click day `15`. | The date button now shows the 15th of next month (in the browser's date format) and the calendar closes. |
 | 3 | Max downloads `1`; Password `Open-Sesame-42`; uncheck nothing. Click **Send**. | The sent page opens. Record the slug as `SLUG_B`. |
-| 4 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | The newest email's subject is `qa-limit.txt was sent to you via ZipTrigo`, and its body says "This link expires on <15th of next month> 23:59 UTC." There is no message paragraph (none was entered). |
+| 4 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | The newest email's subject is `qa-limit.txt was sent to you via ZipTrigo`, and its body says "This link expires on <date> <time> UTC." where that is the end of the 15th of next month in the account's zone, in UTC (see "Times": `<15th> 23:59 UTC` for a UTC account). There is no message paragraph (none was entered), and nothing in the email mentions the password. |
 
 ### FT-10 Paused upload: resume after a reload, and send transfer C
 
@@ -274,7 +370,7 @@ offers to resume the unfinished draft.
 | 1 | Go to `/transfer/send/`. | "Your balance: 0 credits. Sending needs at least 1. Buy credits." -- **Buy credits** links to `/billing/credits/`. |
 | 2 | Add `qa-broke.txt`; Recipients `qa.broke.recipient@example.com`; click **Send**. | The upload succeeds (green check). The red box shows "You need at least 1 credit to send a transfer." You stay on the send page. |
 | 3 | Open `/__e2e__/mail/?to=qa.broke.recipient@example.com`. | "No emails." |
-| 4 | Go to `/transfer/`. | "Your transfers" with "No transfers yet." and a banner above the tabs: "You have an unfinished upload." with a **Resume it** link. |
+| 4 | Go to `/transfer/`. | "Your transfers" with the empty state **No transfers yet**, "Send a file to anyone with a link that expires." and a **Send files** button (to `/transfer/send/`), and a banner above the tabs: "You have an unfinished upload." with a **Resume it** link. |
 | 5 | Click **Resume it**. | `/transfer/send/?resume=<uuid>` opens with the `qa-broke.txt` row already listed with a green check and **Send** enabled. |
 
 ### FT-12 Another user's transfer is not reachable
@@ -299,10 +395,10 @@ offers to resume the unfinished draft.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/transfer/`. | Heading **Your transfers**, a **New transfer** button, tabs **Active** (highlighted) and **Ended**. No "You have an unfinished upload." banner. Three rows, newest first: `qa-paused.txt` (C), `qa-limit.txt` (B), `qa-report.txt` (A). No draft or "Untitled transfer" rows. |
-| 2 | Read row A. | "2 files · sent YYYY-MM-DD HH:MM · ACTIVE" (status rendered uppercase), then "Expires: <~30 days ahead> UTC · Downloads: 0 / 10 (10 left) · Credits charged: 0". Buttons: **Copy link**, **Disable**, **Manage**, **Delete**. |
-| 3 | Read row B. | "1 file · sent ... · ACTIVE", "Expires: <15th of next month> 23:59 UTC · Downloads: 0 / 1 (1 left) · Credits charged: 0". |
+| 2 | Read row A. | "2 files · sent YYYY-MM-DD HH:MM · ACTIVE" (local time; status rendered uppercase), then "Expires: <30 days ahead, local time> · Downloads: 0 / 10 (10 left) · Credits charged: 0". Buttons: **Copy link**, **Disable**, **Manage**, **Delete**. Page title "File Transfer - ZipTrigo". |
+| 3 | Read row B. | "1 file · sent ... · ACTIVE", "Expires: <15th of next month>, 11:59 PM (local) · Downloads: 0 / 1 (1 left) · Credits charged: 0". |
 | 4 | Read row C. | "1 file · ... · ACTIVE", "Expires: Never · Downloads: 0 · Credits charged: 0" (no "/ max" part). |
-| 5 | Click **Ended**. | The list swaps without a full reload to "No ended transfers."; the URL becomes `/transfer/?filter=ended`; the **Ended** tab is now the highlighted one. |
+| 5 | Click **Ended**. | The list swaps without a full reload to the empty state **No ended transfers** with "Transfers that expire or are deleted appear here." (no button); the URL becomes `/transfer/?filter=ended`; the **Ended** tab is now the highlighted one (`aria-selected="true"`). |
 | 6 | Click **Active**. | The three rows come back, URL `/transfer/?filter=active`, **Active** highlighted. |
 | 7 | Open `/transfer/?filter=ended` directly, then `/transfer/?filter=active`. | Same results as steps 5 and 6, with the matching tab highlighted. |
 
@@ -357,11 +453,14 @@ offers to resume the unfinished draft.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open Manage on row A; set Expiry "15 days" and Max downloads `5`; click **Save**. | Row A re-renders: "Expires: <now + 15 days, UTC> · Downloads: 0 / 5 (5 left)". |
+| 1 | Open Manage on row A; set Expiry "15 days" and Max downloads `5`; click **Save**. | Row A re-renders: "Expires: <now + 15 days, local time> · Downloads: 0 / 5 (5 left)". |
 | 2 | Open Manage; set Expiry "Set a date", open the date button, click **Clear**, click **Save**. | Red message "Provide a date for a custom expiry."; the row's expiry is unchanged. |
 | 3 | Open Manage; set Expiry "No expiration"; Save. | "Expires: Never". |
-| 4 | Open Manage; set Expiry "Set a date" and pick the 20th of next month; Save. | "Expires: <20th of next month> 23:59 UTC". |
+| 4 | Open Manage; set Expiry "Set a date" and pick the 20th of next month; Save. | "Expires: <20th of next month>, 11:59 PM" (local). |
 | 5 | Open Manage; clear Max downloads (blank) and Save; then set it back to `5` and Save. | First "Downloads: 0" with no cap shown, then "Downloads: 0 / 5 (5 left)". |
+| 6 | Open Manage; set Expiry "1 day"; Save. | "Expires: <exactly 24 hours from now>" (shortening works the same way as extending). |
+| 7 | Open Manage; set Expiry "30 days"; Save. Then set it back to "Set a date", the 20th of next month, and Save (FT-20 expects that date). | First "Expires: <30 days from now>", then the 20th of next month, 11:59 PM again. |
+| 8 | Open Manage; type `0` in Max downloads and click **Save**; if the browser's bubble blocks it, run `document.querySelector('#transfer-row-<TRANSFER_A_ID> form[hx-post$="/settings/"]').noValidate = true` and Save again. | Row A re-renders with the red message "Ensure this value is greater than or equal to 1."; the row still reads "Downloads: 0 / 5 (5 left)" and the expiry is unchanged. |
 
 ### FT-19 Set and remove the download password
 
@@ -385,10 +484,10 @@ offers to resume the unfinished draft.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor window: `/t/<SLUG_A>/`. | Title "qa-report.txt - ZipTrigo". Heading **qa-report.txt**, the message on two lines ("Hello from QA." / "Second line."), "Available until <20th of next month> 23:59 UTC". |
+| 1 | Visitor window: `/t/<SLUG_A>/`. | Title "qa-report.txt - ZipTrigo". Heading **qa-report.txt**, the message on two lines ("Hello from QA." / "Second line."), "Available until <20th of next month>, 11:59 PM" (local time). |
 | 2 | Read the file list. | Sorted by name: `qa-notes.txt` "1.5 KB" and `qa-report.txt` "2.9 KB", each with **Download**. Below: **Download all (.zip)** and, under a divider, a small "Report this transfer" link. |
-| 3 | Click **Download** for `qa-report.txt`. | The browser downloads a file named `qa-report.txt` (3,000 bytes, 2,999 `R` characters and a newline). The request went to `/t/<SLUG_A>/files/<id>/` and was redirected to `/__e2e__/ft-s3/...?filename=qa-report.txt`. |
-| 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject `"qa-report.txt" was downloaded`, body `Someone just downloaded "qa-report.txt" from your transfer "qa-report.txt".` and "Manage this transfer: http://localhost:8765/transfer/". |
+| 3 | Click **Download** for `qa-report.txt`. | The browser saves a file named `qa-report.txt` (3,000 bytes, 2,999 `R` characters and a newline). In the network log the request went to `/t/<SLUG_A>/files/<id>/` and was redirected (302) to a presigned URL on `http://localhost:4566/` (the bucket). Run `ftFetch('<that presigned URL>')` (see Test data; it doesn't count a download): status 200, `bytes` 3000, `sha256` `d47d8e2f...20d5e6` as in Test data. |
+| 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject `"qa-report.txt" was downloaded`, body `Someone just downloaded "qa-report.txt" from your transfer "qa-report.txt".` and "Manage this transfer: http://localhost:8765/transfer/". Click that link in the main window: the dashboard opens. |
 
 ### FT-21 Download all as a zip
 
@@ -398,7 +497,7 @@ offers to resume the unfinished draft.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Visitor window: click **Download all (.zip)**. | The button is replaced by "Preparing the zip..." with a spinner, which polls every 2 s and turns into a **Download all (.zip)** link. (On this server the zip is built during the first request, so the link may appear at once.) No "Could not prepare the zip." message. |
-| 2 | Click the **Download all (.zip)** link. | A file `all.zip` downloads. If you can inspect it: it contains `qa-notes.txt` and `qa-report.txt` with their original content. |
+| 2 | Click the **Download all (.zip)** link. | A file `all.zip` downloads (from a presigned URL on the bucket). If you can inspect it (`unzip -l`, `python3 -m zipfile -l`): it contains exactly `qa-notes.txt` (1,500 bytes) and `qa-report.txt` (3,000 bytes), stored uncompressed, with their original content and today's date. Otherwise run FT-40 step 6's name-check snippet on the presigned zip URL from the network log, with the names `qa-notes.txt` and `qa-report.txt`: a little over 4,500 bytes and both names `true`. |
 | 3 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject `"all files" was downloaded`. |
 
 ### FT-22 Download log on the dashboard
@@ -419,10 +518,11 @@ file URL is gated too.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor window: `/t/<SLUG_B>/`. | Heading **qa-limit.txt**, "Available until <15th of next month> 23:59 UTC", the file `qa-limit.txt` "500 bytes" with **Locked**, the password prompt and **Unlock**. No "Download all" (single file). |
+| 1 | Visitor window: `/t/<SLUG_B>/`. | Heading **qa-limit.txt**, "Available until <15th of next month>, 11:59 PM" (local), the file `qa-limit.txt` "500 bytes" with **Locked**, the password prompt and **Unlock**. No "Download all" (single file). |
 | 2 | Enter `wrong-password` and click **Unlock**. | The page re-renders (URL `/t/<SLUG_B>/unlock/`) with "Incorrect password." under the input; files still **Locked**. |
 | 3 | Enter `Open-Sesame-42` and click **Unlock**. | Redirected to `/t/<SLUG_B>/`; the file now has a **Download** button; no password form. |
 | 4 | Copy the Download link's `href` (do **not** click it). Open that href in a third clean context (or clear the visitor window's cookies and open it there). | Redirected to `/t/<SLUG_B>/` with the file **Locked** -- the direct URL doesn't bypass the password, and nothing downloads. If you cleared the visitor window's cookies, unlock B again with `Open-Sesame-42` before FT-24. |
+| 5 | In that clean (locked) context, click **Report this transfer**. | The report form opens without asking for the password (reporting works for anyone with the link). Don't submit it. |
 
 ### FT-24 Max downloads reached: the neutral page
 
@@ -431,10 +531,11 @@ file URL is gated too.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor window: on `/t/<SLUG_B>/` (unlocked), click **Download**. | `qa-limit.txt` downloads (500 bytes). |
-| 2 | Reload `/t/<SLUG_B>/`. | Title "Transfer unavailable - ZipTrigo": heading **This transfer is no longer available** and "The link may have expired, reached its download limit, or been removed." It does not say which. |
-| 3 | Main window: `/transfer/`, then the **Ended** tab. | B is no longer under Active. Under Ended: "1 file · sent ... · EXPIRED", "Ended: <date and time>" (not "Expires:"), "Downloads: 1 / 1 (0 left)", and **no buttons at all** (no Copy link, Disable, Manage or Delete: an ended transfer has no working link). |
-| 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | An email `"qa-limit.txt" was downloaded`. |
+| 1 | Visitor window: on `/t/<SLUG_B>/` (unlocked), click **Download**. | `qa-limit.txt` downloads (500 bytes). Record the presigned URL it was redirected to (network log) as `URL_B`. |
+| 2 | Define `ftFetch` (Test data) and run `ftFetch('<URL_B>')`. | 200, 500 bytes: the files of a transfer that just reached its limit stay in the bucket for a while (deferred deletion, so this very download can finish); FT-41 checks that they go later. |
+| 3 | Reload `/t/<SLUG_B>/`. | Title "Transfer unavailable - ZipTrigo": heading **This transfer is no longer available** and "The link may have expired, reached its download limit, or been removed." It does not say which. |
+| 4 | Main window: `/transfer/`, then the **Ended** tab. | B is no longer under Active. Under Ended: "1 file · sent ... · EXPIRED", "Ended: <date and time>" (not "Expires:"), "Downloads: 1 / 1 (0 left)", and **no buttons at all** (no Copy link, Disable, Manage or Delete: an ended transfer has no working link). |
+| 5 | Open `/__e2e__/mail/?to=qa.user@example.com`. | An email `"qa-limit.txt" was downloaded`. |
 
 ### FT-25 Disable and re-enable
 
@@ -451,15 +552,17 @@ file URL is gated too.
 ### FT-26 Delete now
 
 **Purpose:** delete now asks for confirmation, ends the transfer and removes the link.
-**Preconditions:** main window on `/transfer/`; `SLUG_C` from FT-10.
+**Preconditions:** main window on `/transfer/`; visitor window logged out; `SLUG_C` from FT-10.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click **Delete** on row C (`qa-paused.txt`). | A browser confirm dialog: "Delete this transfer now? Its files will be removed immediately." Click **Cancel**: nothing changes. |
-| 2 | Click **Delete** again and confirm with **OK**. | Row C re-renders in place with status **DELETED**, "Ended: <date and time>" and no buttons. |
-| 3 | Reload `/transfer/`; open **Ended**. | C is gone from Active and listed under Ended as **DELETED** next to B (**EXPIRED**). |
-| 4 | Visitor window: open `/t/<SLUG_C>/`. | The neutral "This transfer is no longer available" page. |
-| 5 | Open `/__e2e__/mail/?to=qa.user@example.com`. | No email about C's files being deleted (`Files for "qa-paused.txt" have been deleted` must **not** appear: delete-now doesn't notify). |
+| 1 | Visitor window: open `/t/<SLUG_C>/`, define `ftFetch` and run `ftFetch(document.querySelector('a[href*="/files/"]').href)` (one download of C). | 200, 1,200 bytes, `text` is 1,199 `P`s and a newline (the resumed upload of FT-10 stored the right bytes). Record the returned `url` as `URL_C`. |
+| 2 | Main window: click **Delete** on row C (`qa-paused.txt`). | A browser confirm dialog: "Delete this transfer now? Its files will be removed immediately." Click **Cancel**: nothing changes. |
+| 3 | Click **Delete** again and confirm with **OK**. | Row C re-renders in place with status **DELETED**, "Ended: <date and time>" and no buttons. |
+| 4 | Reload `/transfer/`; open **Ended**. | C is gone from Active and listed under Ended as **DELETED** next to B (**EXPIRED**). |
+| 5 | Visitor window: open `/t/<SLUG_C>/`. | The neutral "This transfer is no longer available" page. |
+| 6 | Open `/__e2e__/mail/?to=qa.user@example.com`. | No email about C's files being deleted (`Files for "qa-paused.txt" have been deleted` must **not** appear: delete-now doesn't notify). There is a `"qa-paused.txt" was downloaded` from step 1. |
+| 7 | Open `URL_C` in a new tab (it is still within its 15 minutes). | The bucket answers an S3 error (`NoSuchKey`, HTTP 404) instead of the file: delete now really removed the object. (If more than 15 minutes passed the URL itself has expired -- `AccessDenied`/403 -- which proves nothing; note it.) |
 
 ### FT-27 Unknown slug and the neutral page
 
@@ -543,9 +646,9 @@ and an early resend are refused.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Recipients `qa.anon.recipient@example.com`, Expiry "5 days", click **Send**. | The page reloads to `/transfer/send/anon/` showing **Confirm your email**: "We've sent a code and a confirmation link to qa.anon.sender@example.com. Enter the code below, or click the link in the email -- either confirms the transfer." A box with "Enter the 6-digit code we emailed to qa.anon.sender@example.com", a code input, **Confirm** and **Resend code**. |
+| 1 | Recipients `qa.anon.recipient@example.com`, Expiry "5 days", click **Send**. | The page reloads to `/transfer/send/anon/` (title "Confirm your transfer - ZipTrigo") showing **Confirm your email**: "We've sent a code and a confirmation link to qa.anon.sender@example.com. Enter the code below, or click the link in the email -- either confirms the transfer." A box with "Enter the 6-digit code we emailed to qa.anon.sender@example.com", a code input, **Confirm** and **Resend code**. |
 | 2 | Open `/__e2e__/mail/?to=qa.anon.recipient@example.com`. | "No emails." (nothing sent before confirmation). |
-| 3 | Open `/__e2e__/mail/?to=qa.anon.sender@example.com`. | Subject "Confirm your ZipTrigo file transfer". Body: "Someone (hopefully you) is sending files through ZipTrigo.", "Enter this code on the page you were sending from: NNNNNN" (6 digits), "Or click this link to confirm instead: http://localhost:8765/transfer/send/anon/<uuid>/confirm/link/<token>/" and "This code expires in 30 minutes. ...". Note the code. |
+| 3 | Open `/__e2e__/mail/?to=qa.anon.sender@example.com`. | Subject "Confirm your ZipTrigo file transfer". Body: "Someone (hopefully you) is sending files through ZipTrigo.", "Enter this code on the page you were sending from: NNNNNN" (6 digits), "Or click this link to confirm instead: http://localhost:8765/transfer/send/anon/<uuid>/confirm/link/<token>/" and "This code expires in 30 minutes. ...". The HTML body (source) has the code in `<strong>` and the link as an `<a href>` to the same URL. Note the code. |
 | 4 | Back on the confirm page click **Resend code** right away. | A red message in the box: "Please wait Ns before requesting another code." (N up to 60). The mailbox still has only one confirmation email. |
 | 5 | Enter a wrong 6-digit code (e.g. `000000`, or `111111` if that is the real one) and click **Confirm**. | Under the input: "Incorrect code (4 attempt(s) remaining)." Still on the confirm page. |
 | 6 | Enter the real code and click **Confirm**. | Navigates to `/transfer/sent/anon/<uuid>/`: heading **Your transfer is on its way**, "We emailed the recipients and sent you a copy, with a link to manage this transfer. Here's the download link too:", the link `http://localhost:8765/t/<slug>/` with **Copy** (the label turns into **Copied** for two seconds after a click), and "Create an account and this transfer -- and any others sent from qa.anon.sender@example.com -- will show up in your dashboard next time you log in." (**Create an account** -> `/account/register/`). Record the slug as `ANON_SLUG_1`. |
@@ -562,7 +665,7 @@ and an early resend are refused.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Visitor window: open `ANON_MANAGE_URL` with the last character of the token changed. | The neutral "This transfer is no longer available" page. |
-| 2 | Open the real `ANON_MANAGE_URL`. | Title "Manage your transfer - ZipTrigo", heading **qa-anon.txt**, "Status: ACTIVE", "Downloaded 0 times." (no stray space before the full stop), "Expires: <~5 days ahead> UTC.", and a red **Disable this transfer** button. |
+| 2 | Open the real `ANON_MANAGE_URL`. | Title "Manage your transfer - ZipTrigo", heading **qa-anon.txt**, "Status: ACTIVE", "Downloaded 0 times." (no stray space before the full stop), "Expires: <5 days ahead, local time>.", and a red **Disable this transfer** button. |
 | 3 | Click **Disable this transfer**. | A confirmation dialog opens (the shared modal, not a browser dialog): title "Disable this transfer?", text "The download link stops working for everyone, and it can't be turned back on.", buttons **Cancel** and **Disable**. Press **Cancel** (or Escape): nothing changes and the status stays ACTIVE. Click **Disable this transfer** again and **Disable**. Back on the same manage URL: "Status: DISABLED", and "This transfer is disabled -- the link no longer works." instead of the button. |
 | 4 | Open `/t/<ANON_SLUG_1>/`. | The neutral "This transfer is no longer available" page. |
 | 5 | Open `/transfer/send/anon/`. | A fresh, empty anonymous send page (the disabled transfer no longer holds the session). |
@@ -596,7 +699,7 @@ from a confirmed account's address joins that account's dashboard at login.
 |---|---|---|
 | 1 | Main window: log out, then log in as `qa.user@example.com`. | Logged in. |
 | 2 | Open `/transfer/send/anon/`. | Redirected to `/transfer/send/` (anonymous sending is on, but not for a logged-in user). |
-| 3 | Open `/transfer/`. | A new row `qa-anon-link.txt`: "1 file · sent ... · ACTIVE", "Expires: <~1 day ahead> UTC · Downloads: 0 · Credits charged: 0", with Copy link / Disable / Manage / Delete. |
+| 3 | Open `/transfer/`. | A new row `qa-anon-link.txt`: "1 file · sent ... · ACTIVE", "Expires: <1 day ahead, local time> · Downloads: 0 · Credits charged: 0", with Copy link / Disable / Manage / Delete. |
 | 4 | Open Manage on that row. | Recipients: `qa.anon.recipient2@example.com` with Resend. |
 
 ### FT-37 Resend after the cooldown
@@ -615,15 +718,257 @@ from a confirmed account's address joins that account's dashboard at login.
 
 **Purpose:** a dropped connection no longer opens a blocking alert; the row says what happened and
 offers to resume.
-**Preconditions:** the main window as `qa.user`, on a fresh `/transfer/send/`. A way to make the
-browser's request to the fake bucket fail: in the page, run
-`window.__ftFetch = window.fetch; window.fetch = (u, o) => String(u).includes('/__e2e__/ft-s3/') ? Promise.reject(new TypeError('Failed to fetch')) : window.__ftFetch(u, o);`
-(mark the case BLOCKED if the tool cannot run JavaScript or block requests).
+**Preconditions:** the main window as `qa.user`, on a fresh `/transfer/send/`. Run the "Break the
+upload of one part" snippet (Test data) with `window.__ftBlock = /partNumber=/` so every part PUT
+to the bucket fails (mark the case BLOCKED if the tool cannot run JavaScript or block requests).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Add `qa-net.txt` (3,000 bytes) through the file input. | No browser dialog at any point. The row's status text becomes **Paused** (not a percentage) and under the row a red line with `role="alert"` reads "Upload interrupted by a network error. Select the same file again to resume." followed by an underlined button **Choose the file**. The row wraps so the line sits on its own line below the name and bar. |
+| 1 | Add `qa-net.txt` (3,000 bytes, with the `lastModified` from Test data) through the file input. | No browser dialog at any point. The row's status text becomes **Paused** (not a percentage) and under the row a red line with `role="alert"` reads "Upload interrupted by a network error. Select the same file again to resume." followed by an underlined button **Choose the file**. The row wraps so the line sits on its own line below the name and bar. |
 | 2 | Click **Choose the file**. | The file picker opens (the same one as **Choose files**). Cancel it. |
 | 3 | Restore the network: `window.fetch = window.__ftFetch;`. Add `qa-net.txt` again with the same size and `lastModified`. | The existing row is reused (no second row): the red line disappears, the progress runs and the row ends with the green check. |
 | 4 | Break the network again, add a different file `qa-net2.txt` (800 bytes), then restore it. | Its row shows the same interrupted line; the first row is unaffected. Re-adding `qa-net2.txt` finishes it. |
 | 5 | Remove both rows with their trash icons. | The list is empty and **Send** is disabled. |
+
+## Large files on the real bucket
+
+### FT-39 A 70 MiB file in two parts, interrupted after part 1 and resumed after a reload
+
+**Purpose:** a multipart upload of several parts goes to the real bucket with a checksum per part;
+after a reload, re-selecting the file uploads only the part that is missing, and the checksum of
+the part already there round-trips into the completion.
+**Preconditions:** main window as `qa.user`; open `/transfer/send/` without `?resume=` (an empty
+draft). The browser must be able to hold a 70 MiB file in memory (mark BLOCKED otherwise).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Run the "Break the upload of one part" snippet as it is (part 2 only), then "The large file" snippet. | A row "qa-big.bin (70.0 MB)" at 0% while the page hashes both parts (a few seconds). Network: `POST .../files/` 201 with `part_size_bytes` 67108864 and `part_count` 2; one `POST .../files/<id>/parts/` whose body lists parts 1 and 2 with a `checksum_sha256` each, answering two URLs; a `PUT` of 67,108,864 bytes to the bucket's `...partNumber=1...` URL, 200; the row reaches **50%**. Then the row turns **Paused** with the red line "Upload interrupted by a network error. Select the same file again to resume." and **Choose the file**. The URL now has `?resume=<draft id>`; **Send** is disabled. |
+| 2 | Reload the page. | The URL keeps `?resume=`. One row "qa-big.bin (70.0 MB)" with **Paused** (tooltip "Select the same file again to resume uploading it."); **Send** disabled with its hint. The reload also dropped the fetch override. |
+| 3 | Run "The large file" snippet again (same name, size, content and `lastModified`). | No second row. Network: `POST .../files/<id>/resume/` 200 with `restarted: false`, `part_count: 2` and `uploaded_parts` holding exactly part 1 (`size` 67108864, an `etag`, a non-empty `checksum_sha256`); the row starts at 50%; exactly **one** `PUT`, to `...partNumber=2...` (6,291,456 bytes), 200; then `POST .../complete/` 200 whose body lists both parts with their ETags and checksums. The row ends with the green check; **Send** is enabled. No console or CORS errors. |
+| 4 | Add three files in one run of the add snippet: `qa-dup.txt` (10 bytes), `qa-dup.txt` (20 bytes) and `relatório café.txt` (`'Olá\n'`), see Test data. | Three more rows, all reaching the green check: "qa-dup.txt (10 bytes)", "qa-dup.txt (20 bytes)" (two files of the same name are allowed) and "relatório café.txt (5 bytes)", the name shown with its accents. |
+| 5 | Recipients `qa.recipient3@example.com`; Expiry "No expiration"; **uncheck** "Email me when a file is downloaded"; **Send**. | The sent page. Record the slug as `SLUG_BIG`. |
+| 6 | Mailbox `?to=qa.recipient3@example.com`. | Newest: `qa-big.bin and 3 more files were sent to you via ZipTrigo`; body "You have received 4 files:" with "- qa-big.bin", "- qa-dup.txt", "- qa-dup.txt", "- relatório café.txt" (`qa-big.bin` first, the other three in the order the server received them; accents intact), then "Download: http://localhost:8765/t/<SLUG_BIG>/" and **no** "This link expires" line. |
+
+### FT-40 Download the large transfer: bytes, names, and a zip of several parts
+
+**Purpose:** a file assembled from two parts downloads byte for byte, a non-ASCII name survives
+the presigned URL, and "Download all" streams every file from the bucket into a zip that is
+itself written in parts.
+**Preconditions:** FT-39; visitor window logged out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor window: `/t/<SLUG_BIG>/`. | Heading **qa-big.bin**, "No expiration", the files sorted by name: `qa-big.bin` "70.0 MB", `qa-dup.txt` "10 bytes" and `qa-dup.txt` "20 bytes" (either order), `relatório café.txt` "5 bytes", each with **Download**, and **Download all (.zip)**. |
+| 2 | Define `ftFetch` and run `ftFetch(<the href of qa-big.bin's Download link>)` (counts one download). | `status` 200, `url` a presigned URL on `http://localhost:4566/`, `bytes` 73400320 and `sha256` `24f1c89f87a1ed78b333d3560219a9faa42c74da56497d5eb9275dbcb0eed34a`: the two parts were joined in order. |
+| 3 | Click **Download** for `relatório café.txt`. | The browser saves a file named exactly `relatório café.txt` (accents and space kept: not `relat_rio`, not percent-encoded), containing `Olá` and a newline (5 bytes). |
+| 4 | Open `/t/<SLUG_BIG>/zip/` directly (before asking for the zip). | Redirected back to `/t/<SLUG_BIG>/`; nothing downloads (no zip yet, so no download is counted). |
+| 5 | Click **Download all (.zip)**. | "Preparing the zip..." with a spinner (the request builds a ~70 MiB zip from the bucket: a few seconds), then a **Download all (.zip)** link. No "Could not prepare the zip." |
+| 6 | Click the link. | A file named `all.zip` downloads, a little over 73,400,355 bytes (the four files stored uncompressed, 73,400,320 + 10 + 20 + 5, plus headers; more than one 64 MiB part, so the zip was written to the bucket in two parts). If you can inspect it (`unzip -l`, `python3 -m zipfile -l`): exactly the entries `qa-big.bin` (SHA-256 as in step 2), `qa-dup.txt`, `qa-dup (1).txt` (the second file of the same name, renamed; one holds the 10-byte content and the other the 20-byte one) and `relatório café.txt`, dated today. Otherwise run `(async (url) => { const b = new Uint8Array(await (await fetch(url)).arrayBuffer()); const tail = new TextDecoder().decode(b.slice(b.length - 4096)); return { bytes: b.length, names: ['qa-big.bin', 'qa-dup.txt', 'qa-dup (1).txt', 'relatório café.txt'].map((n) => [n, tail.includes(n)]) }; })('<the presigned zip URL from the network log>')`: the size as above and all four names `true`. |
+| 7 | Main window: `/transfer/`; open **Manage** on the `qa-big.bin` row. | "4 files · sent ... · ACTIVE", "Expires: Never · Downloads: 3 · Credits charged: 0". Download log, newest first: "All files (zip)", "relatório café.txt", "qa-big.bin". |
+| 8 | Mailbox `?to=qa.user@example.com` (wait a minute). | No `"qa-big.bin" was downloaded`, `"relatório café.txt" was downloaded` or `"all files" was downloaded` email: notifications were switched off for this transfer. |
+
+## Scheduled jobs (shell steps)
+
+### FT-41 Expiry reminder, natural expiry, and deleting the files after the last download
+
+**Purpose:** the five-minute expiry job sends the "expires tomorrow" reminder once, ends an expired
+transfer with the "files deleted" email, and removes the objects of a transfer that reached its
+download limit once that download's URL has had time to expire.
+**Preconditions:** main window as `qa.user`; FT-24 (B ended by its one download, `URL_B`); a shell.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Main window: send transfer E: `qa-expiring.txt`, Recipients `qa.recipient2@example.com`, Expiry "5 days". | The sent page. Record the slug as `SLUG_E`. On `/transfer/` row E reads "Expires: <5 days from now>". |
+| 2 | (shell step) Make E due for its reminder (sent 4 days ago, expiring in 12 hours) and B's deferred deletion due (ended 16 minutes ago), then run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import expire_transfers; now = timezone.now(); print(Transfer.objects.filter(slug='<SLUG_E>').update(completed_at=now - timedelta(days=4), expires_at=now + timedelta(hours=12))); print(Transfer.objects.filter(slug='<SLUG_B>').update(ended_at=now - timedelta(minutes=16))); expire_transfers()"` | Prints `1` and `1`, no traceback. |
+| 3 | Mailbox `?to=qa.user@example.com`. | Two new emails. `Your transfer "qa-expiring.txt" expires tomorrow`, body `Your transfer "qa-expiring.txt" expires tomorrow (YYYY-MM-DD HH:MM UTC).` (about 12 hours from now, in UTC) and "Manage this transfer: http://localhost:8765/transfer/". And `Files for "qa-limit.txt" have been deleted`, body `The files for your transfer "qa-limit.txt" have been deleted and are no longer available.` (no link). |
+| 4 | Click the reminder's "Manage this transfer" link. | `/transfer/`: row E is still **ACTIVE**, "Expires: <about 12 hours from now>". |
+| 5 | Open `URL_B` in a new tab. | An S3 `NoSuchKey` error (404) instead of `qa-limit.txt`: the deferred deletion removed the object. (`AccessDenied`/403 means the URL itself expired: inconclusive, note it.) |
+| 6 | (shell step) Run the job again after moving E's expiry into the past: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import expire_transfers; print(Transfer.objects.filter(slug='<SLUG_E>').update(expires_at=timezone.now() - timedelta(minutes=1))); expire_transfers()"` | Prints `1`. |
+| 7 | Mailbox `?to=qa.user@example.com` (wait a minute). | One new email, `Files for "qa-expiring.txt" have been deleted` (same body shape as step 3). No second "expires tomorrow" for E and no second `Files for "qa-limit.txt" ...`: each is sent once. |
+| 8 | Main window: `/transfer/`, then **Ended**. | E is no longer under Active. Under Ended: `qa-expiring.txt` "**EXPIRED**", "Ended: <just now>", no buttons. |
+| 9 | Visitor window: `/t/<SLUG_E>/`. | The neutral "This transfer is no longer available" page (404). |
+
+## Credits: metering and suspension
+
+### FT-42 Set-up: a fresh account with a transfer
+
+**Purpose:** an account whose balance the billing cases can change without touching the seeded
+ones.
+**Preconditions:** main window; log out of `qa.user`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Main window: register at `/account/register/` with Name `QA FT <rand>`, Email `qa.ft.<rand>@example.com` (record as `FT_USER`), Password `FtMeter-4821`. | "Check your email". |
+| 2 | Mailbox `?to=<FT_USER>`: open the `Confirm your ZipTrigo account email` link and press **Confirm my email**. | "Email Confirmed!". |
+| 3 | Log in as `FT_USER`; open `/billing/credits/`. | "Current balance: 1000 credits" (the welcome credits, line "A gift for your new account"). |
+| 4 | Send transfer M from `/transfer/send/`: `qa-meter.txt`, Recipients `qa.recipient1@example.com`, Expiry "No expiration", notifications left on. | The sent page. Record the slug as `SLUG_M`. On `/transfer/` row M: "ACTIVE ... Expires: Never · Downloads: 0 · Credits charged: 0". |
+
+### FT-43 Daily metering charges whole credits (shell step)
+
+**Purpose:** the daily job charges a transfer's storage once per 24 hours, in whole credits, with a
+ledger line, and a second run the same day charges nothing.
+**Preconditions:** FT-42 (main window as `FT_USER`); a shell.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | (shell step) Make M's day due with one whole credit accrued (3,000 bytes at the default 0.1 credit per GB per day would take millions of days to reach one), then run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from decimal import Decimal; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import meter_transfers; print(Transfer.objects.filter(slug='<SLUG_M>').update(last_billed_at=timezone.now() - timedelta(hours=25), accrued=Decimal('1'))); meter_transfers()"` | Prints `1`, no traceback. |
+| 2 | Reload `/transfer/`. | Row M: still **ACTIVE**, "Credits charged: 1". |
+| 3 | Open `/billing/credits/`. | "Current balance: 999 credits"; the history's newest line is `Transfer "qa-meter.txt", day 1`, -1. |
+| 4 | (shell step) Run the job again without changing anything: `python tests_e2e/ai/manage.py shell -c "from apps.file_transfer.jobs import meter_transfers; meter_transfers()"`. Reload both pages. | Nothing changes: "Credits charged: 1", balance 999, no new ledger line (the next day isn't due for 24 hours). |
+
+### FT-44 Out of credits: suspension, its email and notification, and a top-up re-enables it
+
+**Purpose:** a transfer its owner can't pay for is suspended (link off, email, in-app notice), its
+manual re-enable is refused below a day's cost, and a top-up re-enables it at once and removes the
+notice.
+**Preconditions:** FT-43. Visitor window: log in there as `qa.admin@example.com` (the public page
+works the same for a signed-in visitor); a shell.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor window: `/admin/billing/credittransaction/adjust/`, User email `<FT_USER>`, Direction "Spend", Amount `999`; **Apply**. | "Adjusted credits for <FT_USER>. New balance: 0." |
+| 2 | (shell step) The same command as FT-43 step 1. | Prints `1`, no traceback. |
+| 3 | Main window: reload `/transfer/`. | Row M: status **SUSPENDED**, buttons **Copy link**, **Re-enable**, **Manage**, **Delete**; "Credits charged: 1". |
+| 4 | Visitor window: `/t/<SLUG_M>/`. | The neutral "This transfer is no longer available" page. |
+| 5 | Mailbox `?to=<FT_USER>`. | Subject `Your transfer "qa-meter.txt" was suspended (out of credits)`. Body: `Your transfer "qa-meter.txt" ran out of credits and has been suspended: the download link is no longer working.`, then `Top up your credits within 7 day(s) to automatically resume it, or its files will be deleted. You need a balance of at least 1 credit (one day of storage for this transfer); a smaller top-up will not resume it.`, then "Manage this transfer: http://localhost:8765/transfer/". Click that link: the dashboard opens with M suspended. |
+| 6 | Main window: look at the header bell, then open `/notifications/`. | The bell counts a new notification. The page lists `Transfer suspended: qa-meter.txt` with the body "It ran out of credits and its download link no longer works. Add at least 1 credit (one day of storage for this transfer; a smaller top-up will not resume it) within 7 day(s) to resume it, or its files will be deleted." Clicking it opens `/transfer/`. |
+| 7 | On `/transfer/` click **Re-enable** on row M. | The row re-renders with the red message "You need at least 1 credit to re-enable this transfer (one day of storage)."; still **SUSPENDED**. |
+| 8 | Visitor window: adjust credits for `<FT_USER>`, Direction "Add", Amount `1`; **Apply**. | "Adjusted credits for <FT_USER>. New balance: 1." |
+| 9 | Main window: reload `/transfer/`, then `/notifications/`. | Row M is **ACTIVE** with **Disable** (the top-up itself re-enabled it; no click needed). `Transfer suspended: qa-meter.txt` is no longer listed (the notice is removed when the transfer resumes). |
+| 10 | Visitor window: reload `/t/<SLUG_M>/`. | The download page with `qa-meter.txt` is back. |
+
+### FT-45 The suspension grace period deletes the files (shell step)
+
+**Purpose:** a suspended transfer not topped up within the grace period is deleted with its
+objects, and the owner is told.
+**Preconditions:** FT-44 (M active, `FT_USER` holds 1 credit); visitor window (still as
+`qa.admin`); a shell.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor window: on `/t/<SLUG_M>/` define `ftFetch` and run `ftFetch(document.querySelector('a[href*="/files/"]').href)` (one download). | 200, 3,000 bytes. Record the returned `url` as `URL_M`. |
+| 2 | (shell step) Charge two credits (more than the 1 held, so M is suspended again), then age the suspension past the 7-day grace period and run the grace-period step: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from decimal import Decimal; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import meter_transfers; from apps.file_transfer.services.metering import delete_files_past_grace_period; qs = Transfer.objects.filter(slug='<SLUG_M>'); qs.update(last_billed_at=timezone.now() - timedelta(hours=25), accrued=Decimal('2')); meter_transfers(); print(qs.get().status); qs.update(suspended_at=timezone.now() - timedelta(days=8)); print(delete_files_past_grace_period())"` | Prints `suspended`, then `1`. |
+| 3 | Mailbox `?to=<FT_USER>`. | A `"qa-meter.txt" was downloaded` (step 1), a second `Your transfer "qa-meter.txt" was suspended (out of credits)`, and `Files for "qa-meter.txt" have been deleted` with the body `The files for your transfer "qa-meter.txt" have been deleted and are no longer available.` |
+| 4 | Main window: `/transfer/`, then **Ended**; then `/billing/credits/`. | M is gone from Active; under Ended: **DELETED**, "Ended: <just now>", "Credits charged: 1", no buttons. Balance still 1 (the refused 2-credit charge spent nothing). |
+| 5 | `/notifications/`. | A new `Transfer suspended: qa-meter.txt` from step 2 is listed and stays (a deleted transfer's notice is kept as a record). |
+| 6 | Visitor window: open `URL_M` in a new tab, then `/t/<SLUG_M>/`. | `URL_M`: an S3 `NoSuchKey` error (404) -- the object is gone (403 `AccessDenied` if 15 minutes passed: inconclusive). `/t/<SLUG_M>/`: the neutral page. |
+
+### FT-46 Re-enabling a disabled transfer needs a day of credits; a top-up doesn't do it for you
+
+**Purpose:** re-enabling something the owner disabled is refused below a day's cost, and unlike a
+suspension, a top-up leaves it disabled until the owner re-enables it.
+**Preconditions:** FT-45 (`FT_USER` holds 1 credit); visitor window as `qa.admin`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Main window: send transfer M2: `qa-meter-2.txt`, Recipients `qa.recipient2@example.com`. | The sent page. Record `SLUG_M2`. |
+| 2 | On `/transfer/` click **Disable** on row M2. | **DISABLED**, with **Re-enable**. |
+| 3 | Visitor window: adjust credits for `<FT_USER>`, "Spend", `1`; **Apply**. | "... New balance: 0." |
+| 4 | Main window: click **Re-enable** on M2. | Red message in the row: "You need at least 1 credit to re-enable this transfer (one day of storage)."; still **DISABLED**. |
+| 5 | Open `/transfer/send/`. | "Your balance: 0 credits. Sending needs at least 1. Buy credits." |
+| 6 | Visitor window: adjust credits for `<FT_USER>`, "Add", `1`; **Apply**. | "... New balance: 1." |
+| 7 | Main window: reload `/transfer/`. | M2 is still **DISABLED** (a top-up re-enables only suspended transfers). Click **Re-enable**: **ACTIVE** with **Disable**, no error; `/t/<SLUG_M2>/` works again in the visitor window. |
+| 8 | Log out of both windows. Main window: log in as `qa.user@example.com`. | Logged in. |
+
+## Anonymous sending: more
+
+### FT-47 Resending the code; superseded code and link; too many wrong codes
+
+**Purpose:** "Resend code" sends a new code and link that replace the old ones, and the code box
+stops accepting guesses after five wrong ones.
+**Preconditions:** anonymous sending on (FT-31); a **clean** visitor context (the old one holds an
+active anonymous transfer and would be redirected to its sent page).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Clean visitor context: `/transfer/send/anon/`; add `qa-anon-3.txt`; Your email `qa.anon.sender@example.com`; Recipients `qa.anon.recipient3@example.com`; Expiry "15 days"; **Send**. | **Confirm your email** for `qa.anon.sender@example.com`. |
+| 2 | Mailbox `?to=qa.anon.sender@example.com`. | A new "Confirm your ZipTrigo file transfer". Note its code as `CODE1` and its link as `LINK1`. |
+| 3 | Wait until 60 seconds have passed since step 1, then click **Resend code**. | The box re-renders with no red message. (Nothing on the page says a new code was sent: note it as a UX observation.) A second confirmation email arrives with a different code (`CODE2`) and link (`LINK2`). |
+| 4 | Enter `CODE1` and click **Confirm**. | "Incorrect code (4 attempt(s) remaining)." under the input: the resend replaced it. |
+| 5 | Main window: open `LINK1` and click **Confirm this transfer**. | "This confirmation link is invalid or has expired." and no button. Mailbox `?to=qa.anon.recipient3@example.com` stays empty (wait a minute). |
+| 6 | Visitor: enter four more wrong codes (e.g. `000001` to `000004`, none of them `CODE2`), one at a time. | The first three answer "Incorrect code (3 attempt(s) remaining).", "(2 ...)", "(1 attempt(s) remaining)." The fourth (the fifth wrong code in all) must say clearly that the code can no longer be used and a new one is needed. Record **FAIL** if the field shows an empty error (a red border with no text) or nothing at all: the "too many attempts" error has no message today (`apps/file_transfer/views/anonymous.py`, `form.add_error('code', str(exc))`). |
+| 7 | Enter `CODE2`. | Refused the same way: after five wrong guesses even the right code no longer confirms. |
+| 8 | Wait 60 seconds after step 3, click **Resend code**; enter the new code (`CODE3`) from the newest email. | Navigates to the anonymous sent page. Mailbox `?to=qa.anon.recipient3@example.com`: one `qa-anon-3.txt was sent to you via ZipTrigo`, expiring about 15 days ahead. |
+
+### FT-48 The anonymous limits come from the admin
+
+**Purpose:** the anonymous page reads its file cap and expiry choices from the settings, and the
+per-connection daily cap refuses a send before any code is emailed.
+**Preconditions:** FT-47; main window: log out and log in as `qa.admin@example.com`; a **clean**
+visitor context.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Main window: `/admin/file_transfer/filetransfersettings/`; set **Anonymous max files** `2` and **Anonymous allowed expiry days** `2,7`; **Save**. | The success message; the values are kept. |
+| 2 | Clean visitor context: `/transfer/send/anon/`. | "Sending without an account is free, within limits: up to 2 files, 5.0 GB total, 10 recipients. ..." The **Expiry** select offers only "2 days" and "7 days". |
+| 3 | Add `qa-anon-4.txt`; when it has its green check, add `qa-anon-5.txt`; when that one has finished, add `qa-anon-3.txt`. | Two rows with green checks. No third row: a red line above the list, "Could not add qa-anon-3.txt: A transfer can have at most 2 files." |
+| 4 | Your email `qa.anon.sender@example.com`, Recipients `qa.anon.recipient3@example.com`, Expiry "7 days". Don't send yet. Main window: set **Anonymous max transfers per ip per day** to `1`; **Save**. | Saved. |
+| 5 | Visitor: **Send**. | Red box: "Daily limit reached for anonymous transfers from this connection. Try again tomorrow, or sign in to send without a limit." The page stays on the form (no **Confirm your email**), and no new confirmation email reaches `qa.anon.sender@example.com` (wait a minute): the confirmed anonymous transfers of FT-34 and FT-47 came from this same connection. (Counted per client IP and per browser cookie: if your visitor contexts reach the server over different loopback addresses, `::1` and `127.0.0.1`, the count may differ -- note it.) |
+| 6 | Main window: put the settings back: max transfers per ip per day `5`, max files `20`, allowed expiry days `1,5,15,30`; **Save**. | Saved. |
+| 7 | Visitor: reload; Expiry "5 days"; **Send**. | The expiry list is 1/5/15/30 days again, and the send goes through to **Confirm your email** (leave it unconfirmed). |
+
+### FT-49 Claim on login waits until the account has a credit
+
+**Purpose:** an anonymous transfer sent from a confirmed account's address is not claimed while that
+account's balance is below 1 credit (it would be suspended at once), and is claimed at the first
+login after a top-up.
+**Preconditions:** FT-48 (main window as `qa.admin`); `qa.broke@example.com` still at 0 credits; a
+**clean** visitor context.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Clean visitor context: anonymous send of `qa-anon-5.txt`, Your email `qa.broke@example.com`, Recipients `qa.anon.recipient3@example.com`, Expiry "1 day"; confirm with the code from `/__e2e__/mail/?to=qa.broke@example.com`. | The anonymous sent page. |
+| 2 | In the same visitor window log in as `qa.broke@example.com` and open `/transfer/`. | No `qa-anon-5.txt` row (only FT-11's "You have an unfinished upload." banner and the empty state). |
+| 3 | Main window: adjust credits for `qa.broke@example.com`, "Add", `1`. | "... New balance: 1." |
+| 4 | Visitor: log out, log in again as `qa.broke@example.com`, open `/transfer/`. | A `qa-anon-5.txt` row: "1 file · ... · ACTIVE", "Credits charged: 0", with Copy link / Disable / Manage / Delete; **Manage** lists `qa.anon.recipient3@example.com`. Log out. |
+
+### FT-50 "Create an account" from the anonymous sent page claims the earlier transfers
+
+**Purpose:** what the anonymous sent page promises happens: an account created with the sender's
+address picks up its anonymous transfers at login, a disabled one included, which can then be
+re-enabled from the dashboard.
+**Preconditions:** FT-34 (`ANON_SLUG_1` disabled), FT-47 (`qa-anon-3.txt` active), FT-48 (a pending,
+unconfirmed one), all from `qa.anon.sender@example.com`; visitor window logged out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor window: `/account/register/` (where the sent page's **Create an account** link goes): Name `QA Anon Sender`, Email `qa.anon.sender@example.com`, Password `AnonSender-4821`. | "Check your email". |
+| 2 | Mailbox `?to=qa.anon.sender@example.com`: open the newest `Confirm your ZipTrigo account email` link, press **Confirm my email**. | "Email Confirmed!". |
+| 3 | Log in as `qa.anon.sender@example.com`; open `/transfer/`. | Two rows: `qa-anon-3.txt` **ACTIVE** and `qa-anon.txt` **DISABLED** with **Re-enable**, **Manage** and **Delete**. The FT-48 transfer is not listed (never confirmed). |
+| 4 | Click **Re-enable** on `qa-anon.txt`. | **ACTIVE** (the account's 1,000 welcome credits cover a day). `/t/<ANON_SLUG_1>/` shows the download page again. |
+| 5 | Open `ANON_MANAGE_URL`. | The neutral "This transfer is no longer available" page: the one-time manage link only serves a transfer nobody owns. Log out. |
+
+## Layout and access
+
+### FT-51 Phone width, dark mode and keyboard
+
+**Purpose:** the File transfer pages work at phone width and in dark mode, and the dashboard can be
+driven from the keyboard.
+**Preconditions:** main window as `qa.user` (log in again if needed); visitor window logged out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Set the viewport to 375 x 812. Open `/transfer/send/` and add `qa-report.txt`. | No horizontal scrolling. The drop zone and its two buttons fit; the row (name, bar, status, trash) fits, the name truncating rather than pushing the trash icon off screen; the Expiry / Max downloads and Password / checkbox pairs fit side by side or wrap without overflow. |
+| 2 | Open `/transfer/` and click **Manage** on row A. | No horizontal scrolling; each row's buttons wrap onto new lines; the Manage panel is one column (expiry form above recipients and download log); long addresses truncate. |
+| 3 | Visitor window at 375 wide: `/t/<SLUG_A>/` and `/t/<SLUG_BIG>/`; then `/t/AAAAAAAAAAAAAAAAAAAAAA/`. | File names truncate and every **Download** button stays visible; **Report this transfer** is reachable and its form fits. The neutral page is centred and fits. |
+| 4 | Main window: on the account page's **Appearance** choose **Dark**. Open `/transfer/send/`, `/transfer/` (Manage open on row A, and the Ended tab), a sent page (`/transfer/sent/<TRANSFER_A_ID>/`). Visitor window (emulate `prefers-color-scheme: dark`): `/t/<SLUG_A>/` with the report form open, `/transfer/send/anon/` (or the anonymous sent page it redirects to). | Dark backgrounds, readable text and borders everywhere; no white card left over; the red error box, the green report confirmation and the status lines stay legible; the date picker's calendar is dark too. |
+| 5 | Main window, `/transfer/` at desktop width: press Tab from the top of the page. | The first stop is "Skip to content". Tab reaches **New transfer**, the **Active**/**Ended** tabs (Enter switches the list), then each row's **Copy link**, **Disable**, **Manage**, **Delete**, each with a visible focus ring. |
+| 6 | Focus **Manage** on row A and press Enter. | The panel opens. Tab moves through Expiry, the date button (when "Set a date"), Max downloads, Password, Remove password, **Save**, each **Resend**, the Add recipients box and **Add**. Enter on **Manage** again closes the panel. |
+| 7 | On `/transfer/send/`, Tab to **Choose files** and press Enter; Tab to the password field's eye button and press Space. | Enter opens the file picker (cancel it). Space shows the password and the button's name becomes "Hide password". |
+| 8 | Reset: Appearance back to **System**, viewport back to normal. | -- |
+
+## Out of scope
+
+- **Rate limits** (`FT_UPLOAD_USER`, `FT_DOWNLOAD_IP`, `FT_UNLOCK_*`, `FT_REPORT_*`,
+  `FT_RECIPIENT_EMAIL_USER`, the anonymous ones): switched off on this server. Unit tests cover
+  them.
+- **Admin moderation** (takedown, the block list and its "Sending isn't available" page, the
+  auto-hold and its release): `admin.md` (ADM-21 to ADM-26), which drives them from the admin.
+- **Upload expiry**: an incomplete multipart upload the bucket aborted (after a day) and the
+  `resume` endpoint restarting it (`restarted: true`), and `cleanup_drafts` deleting a draft idle
+  for 24 hours. Both need a day or the job, and the visible result is only "the upload starts
+  again from 0%"; unit tests cover them.
+- **`purge_download_ips`** (nulls a download's IP after 90 days): nothing visible in a run.
+- **Files of several GB**, the per-file and total size limits (5 GB / 20 GB): impractical in a
+  browser test; the 70 MiB file of FT-39 exercises the multipart path the same way.
+- **The JWT API `/api/ft/` and the `inv filetransfer` CLI**: unit tests.

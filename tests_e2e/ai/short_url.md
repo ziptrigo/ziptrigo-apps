@@ -4,8 +4,8 @@
 
 The Short URLs product's web UI (`apps/short_url`):
 
-- the dashboard `/links/` (empty state, list, status tabs, search, tag filter, sort, the row menu,
-  copy button);
+- the dashboard `/links/` (empty state, list, status tabs, search, tag filter, sort (column
+  header, and the "Sort by" bar at phone width), the pager, the row menu, copy button);
 - the editor `/links/new/` and `/links/<id>/edit/` (destination, custom alias, title, tags,
   expiry, click limit, password, "count bots", UTM fields, the live "your link will be" line, the
   credit-cost confirmation) and a link's own page `/links/<id>/` (copy, QR code, Edit, Stats,
@@ -14,9 +14,14 @@ The Short URLs product's web UI (`apps/short_url`):
   isn't available" page for every dead link), the preview page `/s/<code>+` with its report form,
   and the password page `/s/<code>/unlock`;
 - the per-link stats page `/links/<id>/stats/` (totals, the paid "detailed analytics", ranges);
-- credits: creating and following a link is free, extras cost credits once per link;
-- access control: logged-out visitors, another user's link ids;
-- the admin side of abuse handling: blocked domains, a taken-down link, the settings singleton.
+- credits: creating and following a link is free, extras cost credits once per link; the cost
+  confirmation panel and dialogs, and the "the cost changed" re-ask; prices of 0; the free
+  allowance and the hard cap on links;
+- access control: logged-out visitors, another user's link ids, an owner whose account staff
+  deactivated;
+- the admin side of abuse handling: blocked domains, reports and the auto-hold threshold (a link
+  "Under review"), a taken-down link and the takedown email to its owner, the settings singleton;
+- dark mode, phone width and keyboard use of the pages.
 
 Not covered here: the JWT API (`/api/s/`) and the CLI (`inv shorturl`), which are covered by unit
 tests (`apps/short_url/tests/test_api_*.py`, `admin/tests/test_shorturl.py`) and by the Playwright
@@ -27,14 +32,33 @@ the worker, see below); the background jobs (click rollup and purge).
 ## Preconditions
 
 - The test server is running at `http://localhost:8765`, freshly restarted (empty database), as
-  described in [`README.md`](README.md). Rate limiting is off.
+  described in [`README.md`](README.md): Postgres, real SMTP email, rate limiting off. Short URLs
+  store nothing in S3.
+- **Email** (only the takedown notice, SU-30, and the registration in SU-27): open
+  `/__e2e__/mail/?to=<address>` and reload until it arrives, up to a minute. Links in an email are
+  absolute (`http://localhost:8765/...`) and clickable there; the HTML body is shown as source.
+- **Registering and confirming a fresh account** (SU-27): on `/account/register/` fill **Name**,
+  **Email**, **Password**, press **Create account**; you land on **Check your email**. Open
+  `/__e2e__/mail/?to=<address>`: an email `Confirm your ZipTrigo account email` with a link to
+  `/account/confirm-email/<token>/`. Open it and press **Confirm my email** (**Email Confirmed!**),
+  then sign in on `/account/login/`. The account gets 1,000 welcome credits on confirmation.
+- **Two sessions.** Cases that need the owner and the admin at once use the main window for one
+  and a private window (separate cookies) for the other; "the visitor window" is a private window
+  where nobody is signed in. Where a case says "in another tab", it means the same session.
+- **Settings changed in the admin are always restored** at the end of the case that changed them;
+  if a case is abandoned midway, restore them by hand (`/admin/short_url/shorturlsettings/`:
+  prices 1, Free active links 25, Max links 500, Auto hold report threshold 0).
 - `BASE_URL` is `http://localhost:8765`, so a short link reads `http://localhost:8765/s/<code>`.
 - **Destinations are real internet addresses** (`https://example.com/...`): the site refuses
   `localhost` and private addresses as a destination, on purpose. Following a short link in the
   browser therefore needs the internet; without it the browser shows its own "can't reach this
   site" page for `example.com`, which is still the proof that the redirect happened (read the
   address in the error page, or the `Location` header in the network log). Where a case says
-  "follow", either is fine.
+  "follow", either is fine. **Without leaving the page**, a console call on any page of the site
+  does the same visit: `fetch('/s/<code>', {redirect: 'manual'}).then(r => [r.type, r.status])`
+  gives `['opaqueredirect', 0]` for a redirect (scripts can't read a redirect's `Location`) and
+  `['basic', 404]` for the neutral page; `{method: 'HEAD', redirect: 'manual'}` is a HEAD request.
+  A GET made this way counts as a click like a navigation does (same `User-Agent`).
 - Tasks run inline, so a link created **without a title** makes the server try to fetch the
   destination page's title during the request: it needs the internet, takes up to a few seconds,
   and a failure just leaves the title empty. Cases below give every link a title to avoid that,
@@ -150,8 +174,8 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 5 | Destination `https://example.com`, alias `ab`. | "Alias: Use 3-32 letters, digits, hyphens or underscores." |
 | 6 | Alias `admin`, then alias `help`. | Both: "Alias: That alias is not available." (reserved words). |
 | 7 | Alias `bad alias!`. | The shape error from step 5. |
-| 8 | Tags `ok, bad tag!`. | "Tags: ..." names the invalid tag and the allowed characters. |
-| 9 | Click limit `0`; then a very large one such as `99999999999`. | The browser or the server refuses: a number between 1 and 2,000,000,000. |
+| 8 | Tags `ok, bad tag!`. | `Tags: "bad tag!" is not a valid tag: use up to 32 letters, digits, hyphens or underscores.` |
+| 9 | Click limit `0`; then a very large one such as `99999999999`. | `0`: the browser blocks the submit (the field has `min="1"`). The large one reaches the server: "Click limit: Ensure this value is less than or equal to 2000000000." |
 | 10 | Set Expires to a time in the past. | "Expires: The expiry must be in the future." |
 | 11 | Count the links on `/links/`. | Still 2. None of the above created anything or charged anything. |
 
@@ -166,7 +190,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 2 | Open `http://localhost:8765/s/qa-sale`, then `/s/QA-SALE` and `/s/QA-Sale/`. | All three go to `https://example.com/alias`: codes are case-insensitive, a trailing slash is fine. |
 | 3 | If the tool can show headers (network log or `curl -I`), look at the first response for `/s/QA-Sale`. | Status **302** (never 301), `Location: https://example.com/alias`, `Cache-Control: no-store, private`. |
 | 4 | Back in the main window, open `/links/`. | `QA Sale` shows **3** clicks and the plain link **1** (plus however many times step 1 was repeated). If your browser counts as a bot (see Preconditions) the counts stay 0; the stats page's "Bot clicks" shows them instead. |
-| 5 | Open `/s/<PLAIN_CODE>` with a `HEAD` request if the tool allows it (`curl -I`). | Same 302, but the click count does not go up. |
+| 5 | Send a `HEAD` request: in the console of any page of the site run `fetch('/s/<PLAIN_CODE>', {method: 'HEAD', redirect: 'manual'}).then(r => r.type)` three times (or `curl -I`). | Each answers a redirect (`opaqueredirect`; `curl -I` shows the 302), but the plain link's click count on `/links/` does not go up. |
 
 ### SU-08 The dashboard
 
@@ -178,7 +202,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 1 | Open `/links/`. | Two rows, newest first (`QA Sale`, then the plain link). Each row: the path `/s/<code>` with a **Copy** button, the destination (truncated, full text in a tooltip), the title for the alias link, tag chips, an **Active** pill, the click count and the created date, and a "⋮" actions menu. Tabs: All 2, Active 2, the others without a count. A **Tag** dropdown now exists with `promo` and `spring`. |
 | 2 | Click **Copy** on a row. | The button reads "Copied" for a moment; pasting somewhere gives the full address `http://localhost:8765/s/<code>`. |
 | 3 | Type `sale` in the search box. | After a short pause (no page reload) only `QA Sale` remains; the address bar shows `?q=sale`. Clear it with the × button: both rows return. |
-| 4 | Search `example.com/plain`, then `spring`, then `"`. | The plain link; the alias link (matched by tag); no results ("No links found.") for `"`. |
+| 4 | Search `example.com/plain`, then `spring`, then `"`. | The plain link; the alias link (matched by tag); for `"` no rows but the empty state **No links found** with "Try other filters or a different search." and no button. The tab counts do not change with the search (they are the user's totals). |
 | 5 | Choose tag `promo`. | Only `QA Sale`; the URL has `tag=promo`. Reset the tag to "All tags". |
 | 6 | At desktop width click the **Clicks** column header, then again (at phone width use the **Sort by** bar instead, SU-21). | Sorted by clicks descending, then ascending; the arrow flips and the screen reader text says "(sorted ...)". |
 | 7 | Click each status tab. | Counts match; Disabled, Expired, Click limit reached and Taken down are empty ("No links found."). The tab you are on keeps your search. Reload the page: the same tab and filters stay (the URL carries them). |
@@ -372,3 +396,241 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 2 | Open `/links/new/`. | A single column; the expiry and click limit fields stack; the buttons are reachable. |
 | 3 | Open a link page and a stats page. | Readable; the QR code and details stack; the stats cards stack; the chart fits the width. |
 | 4 | Open `/s/<some code>+` and the unavailable page. | Centered, readable, no overflow. |
+
+### SU-22 Create a link with every option at once
+
+**Purpose:** every field of the form is stored as typed and normalized as documented, and two
+extras are quoted and charged together.
+**Preconditions:** logged in as `qa.user@example.com` in the main window; note the balance on
+`/billing/credits/` (call it `B`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/links/new/`. Destination `https://example.com/full?a=1`; alias `QA-Full`; title `  QA    Full  ` (extra spaces); tags `Spring Sale, promo, PROMO`; **Expires** tomorrow at 10:30 in your local time; click limit `50`; password `full-pass`; tick **Count bots and link previews as clicks**; expand "Campaign tracking (UTM)" and fill UTM source `news`, UTM medium `email`, UTM campaign `launch`, UTM term `shoes`, UTM content `top`. Click **Create link**. | Nothing is created yet. The amber panel: "This costs **2 credits**, one-off (custom alias 1, password 1). Your balance is `B` credits." and a button **Create the link for 2 credits**. |
+| 2 | Click **Create the link for 2 credits**. | "Link created." on `/links/<id>/` (record `FULL_ID`). Heading `QA Full` (whitespace collapsed); pill **Active**; short link `http://localhost:8765/s/QA-Full`; destination `https://example.com/full?a=1&utm_source=news&utm_medium=email&utm_campaign=launch&utm_term=shoes&utm_content=top` (the UTM parameters appended in that order, `a=1` kept); tags `spring-sale` and `promo` (lower-cased, the space turned into a hyphen, the duplicate dropped); **Expires** tomorrow 10:30 in your local time (the same as typed, no "UTC"); **Click limit** 50; **Password** Protected; **Clicks** 0. |
+| 3 | Open `/billing/credits/`. | Balance `B - 2`; two ledger lines of 1 credit each: "Short URL: custom alias for /s/QA-Full" and "Short URL: password for /s/QA-Full". |
+| 4 | Back on the link page click **Edit**. | Tab title "Edit link - ZipTrigo"; the back link reads `QA-Full`. Expires shows tomorrow 10:30 local; Click limit 50; Tags `spring-sale, promo`; **Count bots** ticked; the password field is empty with the placeholder "Leave empty to keep the current password" and a **Remove the password** checkbox below; its help says "You already paid for this extra on this link, so changing the password is free."; the UTM fields are empty and the section says "Leave a field empty to keep what the address already has; to remove a parameter, edit the destination above." Click **Cancel**: back on the link page, nothing changed. |
+| 5 | Open `/links/<FULL_ID>/stats/`. | The **Clicks** card says "Every visit, bots included: the click limit counts them." and the **Bot clicks** card "Crawlers and link previews. Also in the clicks." with a **Change** link to the edit page (a click limit counts bots whatever the checkbox says). |
+| 6 | In the visitor window open `/s/QA-Full`, enter `full-pass` on the password page and press **Continue**. | Sent on to the full destination with its UTM parameters. |
+| 7 | Main window: reload the link page. | **Clicks** 1, and a **Last click** time in your local time. |
+
+### SU-23 More destination and field refusals
+
+**Purpose:** each rule of the destination and of the other fields has its message.
+**Preconditions:** logged in as `qa.user@example.com`; note the link count and the balance. For
+each step open `/links/new/`, give the title `Bad` and submit with **Create link**.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Destination `https://paypal.com@evil.example/`. | "Destination: The address cannot contain a username or password." (also under the Destination field). |
+| 2 | Destination `https://2130706433/`, then `https://10.0.0.5/`, then `https://[::1]/`, then `https://intranet/`, then `https://printer.local/`. | Each: "Destination: That address is not allowed." (a number the browser reads as an IP, a private address, IPv6 loopback, a name without a dot, a `.local` name). |
+| 3 | Destination `https://-bad-.example/`. | "Destination: Enter a valid web address." |
+| 4 | In the console run `document.getElementById('id_destination').value = 'https://example.com/' + 'a'.repeat(2040)` and submit. | "Destination: The address is too long (at most 2,048 characters)." |
+| 5 | Destination `https://example.com/ok`; in the console run `const t = document.getElementById('id_title'); t.removeAttribute('maxlength'); t.value = 'x'.repeat(256)` and submit. | "Title: The title is too long (at most 255 characters)." |
+| 6 | Title `Bad`, tags `t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16, t17, t18, t19, t20, t21`. | "Tags: Use at most 20 tags." |
+| 7 | Tags empty, password three spaces. | "Password: Enter a password." |
+| 8 | Password empty; in the console run `const a = document.getElementById('id_alias'); a.removeAttribute('maxlength'); a.value = 'a'.repeat(33)` and submit. | "Alias: Use 3-32 letters, digits, hyphens or underscores." |
+| 9 | Alias `QA-Full` (taken in SU-22), then `qa-full`. | "Alias: That alias is not available." for both, at once, with no cost panel. |
+| 10 | Check `/links/` and `/billing/credits/`. | Same link count and balance as at the start: nothing was created or charged. |
+
+### SU-24 The link page: copy, QR code, preview
+
+**Purpose:** everything on a link's own page works.
+**Preconditions:** `FULL_ID` from SU-22; logged in as `qa.user@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/links/<FULL_ID>/`. | Tab title "QA Full - ZipTrigo" (the title, or the code for a link without one). A back link **Short URLs** to `/links/`. |
+| 2 | Click **Copy** next to the short link. | The button reads "Copied" (check icon) for a moment; the clipboard holds `http://localhost:8765/s/QA-Full`. |
+| 3 | Look at the QR code image. | It loads (alt text "QR code of http://localhost:8765/s/QA-Full"). In the console `fetch('/links/<FULL_ID>/qr.png').then(r => [r.status, r.headers.get('content-type'), r.headers.get('cache-control')])` gives `[200, 'image/png', 'private, max-age=3600']`. A QR reader (optional) decodes it to the short link, not the destination. |
+| 4 | Click **Download QR code**. | The browser saves `QA-Full.png` (the code as the file name), a PNG of the same QR code. On `/links/`, the row's "⋮" menu → **QR code** saves the same file. |
+| 5 | Click the destination. | It opens in a new tab (the link has `target="_blank"` and `rel="nofollow noopener noreferrer"`). Close that tab. |
+| 6 | Click **Preview**. | `/s/QA-Full+` opens in a new tab and, as this session has not entered the password, says the link is protected (no destination, no title). Close it. |
+| 7 | Click **Stats**, then the back link `QA-Full` at the top of the stats page. | Stats page, then back on the link page. |
+
+### SU-25 Every unavailable state answers the same, checked from the console
+
+**Purpose:** the redirect never says why a link doesn't work; HEAD is never a click; a click limit
+ends a link at the exact count.
+**Preconditions:** SU-15 (`PLAIN_CODE` deleted) and SU-20 (`QA-Sale` taken down) done; logged in
+as `qa.user@example.com` in the main window; the visitor window is open on
+`http://localhost:8765/` (any page of the site will do).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Main window: create `QA Cap1` (destination `https://example.com/cap1`, title `QA Cap1`, click limit `1`) and `QA Exp1` (`https://example.com/exp1`, title `QA Exp1`, Expires two minutes from now, local time). Record their codes `C1` and `E1`. Then disable `QA Full` (its page, **Disable**). | Both created for free; `QA Full` shows **Disabled**. |
+| 2 | Visitor window console: `const probe = async (c, m = 'GET') => { const r = await fetch('/s/' + c, {method: m, redirect: 'manual'}); return [c, m, r.type, r.status, r.headers.get('cache-control')]; }` then `await probe('<C1>', 'HEAD')`. | `['<C1>', 'HEAD', 'opaqueredirect', 0, null]`: a redirect, not counted. |
+| 3 | `await probe('<C1>')`, then `await probe('<C1>')` again. | The first is `opaqueredirect` (the one allowed click; a click limit counts every visit, even a bot's). The second is `['<C1>', 'GET', 'basic', 404, 'no-store, private']`. |
+| 4 | Main window: open `/links/`. | `QA Cap1`: pill **Click limit reached**, 1 click. |
+| 5 | Visitor window, once `QA Exp1` has expired: `await probe('<E1>')`. | `basic`, `404`, `no-store, private`. |
+| 6 | `for (const c of ['zzzzzzz', '<PLAIN_CODE>', 'QA-Sale', 'QA-Full']) console.log(await probe(c))`. | Every line is `basic`, `404`, `no-store, private`: unknown, deleted, taken down and disabled look identical. |
+| 7 | Open each of `/s/<C1>`, `/s/<E1>`, `/s/zzzzzzz`, `/s/<PLAIN_CODE>`, `/s/QA-Sale`, `/s/QA-Full` in the visitor window, then the same codes with `+` and with `/unlock`. | The same page every time: tab title "Link unavailable - ZipTrigo", an exclamation icon, "This link isn't available" and "It may have expired, been switched off, or been removed." Nothing names the reason or the owner. |
+| 8 | `fetch('/s/QA-Full/report').then(r => r.status)` (a GET of the report endpoint). | `405`. |
+| 9 | Main window: enable `QA Full` again (its page, **Enable**; free). | "Link enabled." |
+
+### SU-26 Prices: the cost changed re-ask, and free extras
+
+**Purpose:** a price changed between seeing a cost and confirming it is asked again and never
+charged unseen; a price of 0 makes an extra free and remembers it.
+**Preconditions:** logged in as `qa.admin@example.com`; two tabs of the same session: tab A for
+the site, tab B on `/admin/short_url/shorturlsettings/` (the "Prices (credits, one-off, per link)"
+tab, which says "A price of 0 makes that extra free."). Note the balance (`B`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Tab A: `/links/new/`, destination `https://example.com/cost`, title `Cost`, alias `qa-cost`, **Create link**. | The panel: "This costs **1 credit**, one-off (custom alias 1)...". Leave it showing. |
+| 2 | Tab B: set **Custom alias price (credits)** to `2`, save. | The admin's "was changed successfully" message. |
+| 3 | Tab A: click **Create the link for 1 credit**. | No link is created and nothing is charged; the panel is replaced: "This costs **2 credits**, one-off (custom alias 2). Your balance is `B` credits." with **Create the link for 2 credits**. |
+| 4 | Click **Create the link for 2 credits**. | "Link created."; on `/billing/credits/` the balance is `B - 2` with one line of 2 credits, "Short URL: custom alias for /s/qa-cost". |
+| 5 | Tab A: open the new link's **Stats** and click **Turn on for 1 credit**. | The dialog "Turn on detailed analytics?", "This costs 1 credit, once for this link. It won't be charged again.", focus on **Cancel**. Leave it open. |
+| 6 | Tab B: set **Detailed analytics price (credits)** to `3`, save. Tab A: click **Turn on for 1 credit** in the dialog. | The stats page reloads with a red message "Detailed analytics cost 3 credits. Confirm it from the page to continue."; nothing charged; the button now reads **Turn on for 3 credits**. |
+| 7 | Tab B: set Custom alias, Password and Detailed analytics prices to `0`, save. Tab A: reload the stats page. | The detailed part is shown at once, with no offer and no charge: the range selector (7 days, 30 days, 90 days, All time) and, as nobody clicked this link, "No clicks in this period yet." and "Nothing yet." in each of the four lists. Click **All time**: the heading says "0 clicks, 0 unique visitors in all time (since <today's date>)". |
+| 8 | Tab A: open `/links/new/`. | The alias help says "Aliases are free."; the password help says "Passwords are free." |
+| 9 | Create a link: `https://example.com/free`, alias `qa-free`, title `Free extras`, password `pw-free`. | No cost panel: "Link created." at once; the balance is unchanged. |
+| 10 | Tab B: set all three prices back to `1`, save. Tab A: reload the stats of `qa-cost`; open the stats of `Free extras`; open the edit page of `Free extras`. | `qa-cost` still shows its detailed analytics (opened while free, so kept). `Free extras` offers **Turn on for 1 credit** (its stats were never opened while free). Its password help says "You already paid for this extra on this link, so changing the password is free." (set while free, so recorded as paid). |
+
+### SU-27 A fresh account: the free allowance, the pager and paying to enable
+
+**Purpose:** the 25 free active links, the extra link price in ordinary use, the dashboard pager,
+and the enable dialog with its cost.
+**Preconditions:** a new account `qa.su.<random>@example.com` (password with a digit), registered
+and confirmed as described in Preconditions, signed in in the main window; call it `SU_USER`.
+Its balance is 1000.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/links/` (the empty state), then run in the console: `const t = document.cookie.match(/csrftoken=([^;]+)/)[1]; for (let i = 1; i <= 25; i++) { await fetch('/links/new/', {method: 'POST', headers: {'X-CSRFToken': t, 'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({destination: 'https://example.com/bulk/' + i, title: 'Bulk ' + i})}); }` and reload. | 25 rows, `Bulk 25` first; tabs All 25 and Active 25; no pager (25 per page). The balance is still 1000. |
+| 2 | Open `/links/new/`. | Above the buttons, in amber: "You have used your free active links, so this one costs 1 credit, once." |
+| 3 | Create `Bulk 26` (`https://example.com/bulk/26`). | The panel: "This costs **1 credit**, one-off (extra active link 1). Your balance is 1000 credits." Confirm it: "Link created."; the ledger line is "Short URL: extra active link for /s/<code>", balance 999. |
+| 4 | Open `/links/`. | Below the list "Page 1 of 2" and a **Next** link; `Bulk 1` is not on this page. |
+| 5 | Click **Next**. | Without a reload the list shows one row, `Bulk 1`; the address bar reads `/links/?page=2`; "Page 2 of 2" with **Previous** only. Reload: still page 2. Click **Previous**: back to page 1 and `/links/`. |
+| 6 | Search `Bulk 1`. | `Bulk 1` and `Bulk 10` to `Bulk 19` (11 rows), one page, no pager. Clear the search. |
+| 7 | On page 2 open `Bulk 1`'s "⋮" menu → **Disable**. | "Link disabled."; you stay on page 2 (`?page=2`); the row's pill is **Disabled** and its menu offers **Enable** with no cost (24 free links are active). |
+| 8 | Create `Bulk 27` (`https://example.com/bulk/27`). | Created at once, free, and the amber line is not shown on the form (a free slot was available). |
+| 9 | On `/links/?page=2` open `Bulk 1`'s menu → **Enable**. | A dialog "Enable this link?": "This link would go beyond your free active links, so enabling it costs 1 credit, once. It won't be charged again for this link." with **Cancel** and **Enable for 1 credit**. **Cancel** closes it; nothing changed. |
+| 10 | Open it again and click **Enable for 1 credit**. | "Link enabled."; balance 998. Disable `Bulk 1` and enable it again: no dialog and no charge (it paid its way in). |
+| 11 | Disable `Bulk 2` (free); its menu now has a plain **Enable**. Without reloading this tab, in another tab create `Bulk 28` (free). Back in the first tab click `Bulk 2`'s **Enable**. | Not enabled, nothing charged; a red message "Enabling this link costs 1 credits. Confirm it from the menu to continue." (the code says "1 credits": record the grammar as a minor issue). After the reload its menu's **Enable** opens the dialog; confirm it: "Link enabled.", balance 997. |
+
+`SU_USER` now has 28 links, `Bulk 1` to `Bulk 28`. Record the codes of `Bulk 4`, `Bulk 5`,
+`Bulk 6` and `Bulk 7` (`B4` ... `B7`) and the ids of `Bulk 4` and `Bulk 6` (`B4_ID`, `B6_ID`).
+
+### SU-28 The hard cap on links
+
+**Purpose:** the cap counts active and disabled links; only deleting makes room.
+**Preconditions:** SU-27 done (`SU_USER` has 28 links); `SU_USER` in the main window,
+`qa.admin@example.com` in a private window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Admin: on `/admin/short_url/shorturlsettings/`, **Allowances (per user)** tab, set **Free active links (per user)** to `100` and **Max links (per user)** to `29`, save. | Saved. |
+| 2 | `SU_USER`: create `Bulk 29` (`https://example.com/bulk/29`). | Created, free. |
+| 3 | Create `Bulk 30`. | Refused in the form's red box: "You can have at most 29 links. Delete one to make room." No cost panel, nothing created, nothing charged. |
+| 4 | Disable `Bulk 3`, then try `Bulk 30` again. | The same refusal: a disabled link still counts. |
+| 5 | Delete `Bulk 3` (its page → **Delete** → the dialog's **Delete**), then create `Bulk 30`. | "Link deleted."; then `Bulk 30` is created. |
+| 6 | Admin: set Free active links back to `25` and Max links back to `500`, save. | Saved. |
+
+### SU-29 Reports put a link on hold (auto-hold threshold)
+
+**Purpose:** reports from distinct addresses hold a link; a held link is unavailable and frozen
+for its owner except Disable; staff release it.
+**Preconditions:** SU-27 done; `SU_USER` in the main window, `qa.admin@example.com` in a second
+private window, the visitor window signed out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Admin: settings page, **Analytics and abuse** tab, set **Auto hold report threshold** to `2`, save. | Saved. |
+| 2 | Visitor: open `/s/<B4>+`, click **Report this link**, choose "Phishing or scam", details `QA hold 1`, **Submit report**. | "Thank you, your report has been submitted." The link still works: `fetch('/s/<B4>', {redirect: 'manual'}).then(r => r.type)` is `opaqueredirect` (one report, one address). |
+| 3 | Visitor: reload `/s/<B4>+` and send a second report from another address. The server trusts `X-Real-IP` from a loopback peer, as it does from nginx in production: `fetch('/s/<B4>/report', {method: 'POST', headers: {'X-Real-IP': '203.0.113.7', 'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({csrfmiddlewaretoken: document.querySelector('#report-box [name=csrfmiddlewaretoken]').value, reason: 'spam'})}).then(r => r.status)`. | `200`. |
+| 4 | Visitor: open `/s/<B4>`, `/s/<B4>+` and `/s/<B4>/unlock`. | The neutral "This link isn't available" page for all three. |
+| 5 | `SU_USER`: open `/links/` (All tab), then the **Active** tab. | `Bulk 4` has an amber **Under review** pill and the line "Under review: it can't be changed for now."; it is not in the Active tab. Its "⋮" menu has only **Stats**, **QR code**, **Preview** and **Disable**. |
+| 6 | Open `/links/<B4_ID>/`. | An amber notice "This link is under review, so it doesn't work for visitors and can't be changed right now. You can still disable it." Buttons: **Stats**, **Preview**, **Disable**; no **Edit**, no **Delete**. Nothing says who reported it or why. On its stats page the Bot clicks card has no **Change** link. |
+| 7 | Open `/links/<B4_ID>/edit/`. | Back on the link page with a red message "This link is under review, so it cannot be changed right now. You can disable it." |
+| 8 | Click **Disable**. | "Link disabled."; the pill reads **Disabled**; the notice stays, without "You can still disable it."; there is no **Enable** button. |
+| 9 | Admin: `/admin/short_url/linkreport/`. Select one of the two pending reports of `Bulk 4` and run **Dismiss selected report(s)**. | "Dismissed 1 report(s)." `SU_USER`'s link page (reload) still shows the review notice. |
+| 10 | Admin: `/admin/short_url/shortlink/`, search `<B4>`: the row shows a held-for-review time and **Pending reports** 1. Select it and run **Release abuse-review hold (dismisses its pending reports)**. | "Released the hold on 1 link(s)."; on the report list both reports of `Bulk 4` are now Dismissed. |
+| 11 | `SU_USER`: reload the link page. | No notice; **Edit**, **Enable** and **Delete** are back. Click **Enable**: 25 other free links are active, so the dialog asks for 1 credit; confirm. "Link enabled." and the visitor's `/s/<B4>` works again. |
+| 12 | Admin: set **Auto hold report threshold** back to `0`, save. | Saved. |
+
+### SU-30 Takedown with the owner notified by email
+
+**Purpose:** "Notify the owner by email" sends the owner a message with the reason and a working
+link; the reason is shown as text everywhere.
+**Preconditions:** SU-27 done; `qa.admin@example.com` in a private window, `SU_USER` in the main
+window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Admin: `/admin/short_url/shortlink/`, search `<B5>`, select it, run **Take down selected link(s)**. Reason `QA <b>removed</b> & co`, internal note `internal QA note`, tick **Notify the owner by email ("one of your links was removed")**, click **Take down**. | "Took down 1 link(s)." |
+| 2 | Open `/__e2e__/mail/?to=<SU_USER address>` (reload until it arrives, up to a minute). | One email, subject "One of your short links was removed". Text: "Your short link http://localhost:8765/s/<B5> was removed and no longer works.", "Reason: QA <b>removed</b> & co" and "Details: http://localhost:8765/links/<Bulk 5 id>/". The HTML source shows the reason escaped (`&lt;b&gt;removed&lt;/b&gt; &amp; co`) and a "See the link" anchor to the same page. Neither the internal note, nor any reporter, nor the reason appears in the subject. |
+| 3 | Click the Details link (signed in as `SU_USER`). | The link page, pill **Taken down**, red notice "This link was taken down: QA <b>removed</b> & co" with the tags shown literally (not bold). No **Edit** or **Delete**. In a signed-out window the same link goes to the login page and, after signing in as `SU_USER`, on to this page. |
+| 4 | Visitor: open `/s/<B5>`. | The neutral unavailable page. |
+| 5 | `SU_USER`: `/links/?status=taken_down`. | The Taken down tab counts 1 and lists `Bulk 5` with "Taken down: QA <b>removed</b> & co". |
+
+### SU-31 An owner whose account staff deactivated
+
+**Purpose:** a deactivated owner whose session is still open can't create, change or enable links,
+but can disable and delete them; their links keep working; new sign-ins are refused.
+**Preconditions:** SU-27 done; `SU_USER` signed in in the main window (keep this session open),
+`qa.admin@example.com` in a private window.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Admin: `/admin/short_url/shortlink/`, search `<B6>`, select it, run **Deactivate the selected link(s)' owner's account**. | A card "Deactivate owner's account(s)": it says the owner can't sign in again or use the API, and can't create, edit or enable links; lists `SU_USER`'s address; a required **Reason**; an unticked "Also take down the owner's other active links"; **Deactivate** and **Cancel**. |
+| 2 | Reason `QA deactivation`, click **Deactivate**. | "Deactivated 1 account(s)." |
+| 3 | `SU_USER` (same session): open `/links/new/`. | Back on `/links/` with the red message "Your account is not active, so links cannot be created, changed or enabled." |
+| 4 | Open `Bulk 6`'s edit page, change the title to `changed`, **Save changes**. | The form's red box shows the same message; reload the link page: the title is unchanged. |
+| 5 | **Disable** `Bulk 6`, then **Enable** it. | "Link disabled."; then a red message with the same "Your account is not active ..." text, and it stays disabled. |
+| 6 | Visitor: open `/s/<B7>`. | It still redirects (deactivating an account does not take its links down). |
+| 7 | `SU_USER`: log out, then try to sign in again. | Refused: "User not active". |
+| 8 | Admin: `/admin/accounts/user/`, open `SU_USER`, set **Status** to Active, save. Then sign in as `SU_USER` in the main window and open `/links/new/`. | Signed in; the form opens. Enable `Bulk 6` (confirm the 1-credit dialog if it asks): "Link enabled." |
+
+### SU-32 Reports and the password page, the remaining paths
+
+**Purpose:** reporting works on a protected link without unlocking it, a report on a link that
+stopped working meanwhile ends on the neutral page, and the password page of a link without a
+password just continues.
+**Preconditions:** `PROTECTED_CODE` (SU-12, a password set again in step 9) and `LIMITED_CODE`
+(SU-11, click limit 5) from earlier; `qa.user@example.com` in the main window; the visitor window
+has not entered the protected link's current password.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `/s/<PROTECTED_CODE>+`, click **Report this link**. | The button's `aria-expanded` turns `true` and the form opens: **Reason** (a select starting with "Choose a reason", then Phishing or scam, Malware, Spam, Illegal content, Copyright infringement, Other), **Details (optional)**, **Your email (optional)** with "In case we need to follow up. We won't share it with the owner of the link." and **Submit report**. |
+| 2 | Choose "Other", details `QA locked report`, submit. | "Thank you, your report has been submitted."; still no destination or title on the page. |
+| 3 | Click **Continue**. | The password page `/s/<PROTECTED_CODE>/unlock`: tab title "Password needed - ZipTrigo", heading "Password needed", "This link is protected. Enter the password you were given to continue.", focus already in the Password field. |
+| 4 | Visitor: open `/s/<LIMITED_CODE>+` and open the report form. Main window: disable `QA Limited`. Visitor: choose "Spam" and **Submit report**. | The visitor's page reloads by itself and shows the neutral "This link isn't available" page (no report is made). Main window: enable `QA Limited` again. |
+| 5 | Visitor: open `/s/<LIMITED_CODE>/unlock` (a link without a password). | No password page: it goes straight on to `https://example.com/limited` (and counts one click). |
+| 6 | Admin (`qa.admin@example.com`): `/admin/short_url/linkreport/`. | The report of step 2 is listed against the protected link (reason Other, status Pending, no reporter email). Select it and run **Dismiss selected report(s)**: "Dismissed 1 report(s)." |
+
+### SU-33 Dark mode, keyboard and phone width
+
+**Purpose:** the pages work in the dark theme, without a mouse and on a phone.
+**Preconditions:** logged in as `qa.user@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/account/`, under "Appearance", choose **Dark**. Open `/links/`, `/links/new/` (submit with an alias to show the cost panel, and with a bad destination to show the red box), a link page, the stats page of `QA Sale` (taken down in SU-20, but its page still shows the detailed analytics paid for in SU-14), and the row menu and the delete dialog. | Dark backgrounds, light text; the pills, tag chips, the amber cost panel, the red messages, the chart bars and the lists' bars are all legible; the QR code keeps its white background. No white boxes or dark-on-dark text. |
+| 2 | In the visitor window (dark system scheme), open `/s/<PROTECTED_CODE>/unlock`, `/s/QA-Full+` with the report form open, and `/s/zzzzzzz`. | Readable in dark too. |
+| 3 | Choose **System** again on `/account/`. | — |
+| 4 | Keyboard only, on `/links/`: `Tab` from the top. | "Skip to content" first; then the tabs, the search box, the Tag select, the sort links, and per row the short link, its **Copy** button and its "⋮" button ("Actions for <code>"), each with a visible focus ring. |
+| 5 | Focus a row's "⋮" and press `Enter`. | The menu opens (`aria-expanded="true"`); `Tab` moves through its items; `Escape` closes it and focus is back on "⋮". |
+| 6 | Open the menu again and press `Enter` on **Delete**. | The dialog "Delete this link?" opens with focus on **Cancel**; `Tab` reaches **Delete**; `Escape` closes it and nothing is deleted. Note where focus lands: the dialog gives it back to the item that opened it, which sits in the now closed menu, so if focus is lost to the page body, record it as an accessibility issue (not a failure of this plan). |
+| 7 | On `/links/new/`, `Tab` through the whole form, then fill destination `https://example.com/kbd`, title `Kbd`, alias `qa-kbd` and press `Enter` in the Destination field. | Every field, the "Campaign tracking (UTM)" summary (`Enter` opens it), the checkbox (`Space` ticks it), **Create link** and **Cancel** are reachable in that order. `Enter` submits: the cost panel appears and `Tab` reaches its **Create the link for 1 credit** button. Do not press it: `Tab` on to **Cancel** and press `Enter` (back on `/links/`, nothing created or charged). |
+| 8 | Viewport 375 px wide: open `/links/?page=2` as `SU_USER` (SU-27) or any list, a preview page with the report form open, the password page and the takedown confirmation page of the admin. | No horizontal scroll; the pager, the report form and the password field fit the width; buttons are tappable. Restore the desktop viewport. |
+
+## Out of scope
+
+- **Loops** ("That address already points at one of our short links."): this server's `BASE_URL`
+  host is `localhost` (or a `*.localhost` name), which the destination rules refuse as "not
+  allowed" before the loop check runs, so the loop message can't be reached here; unit-tested in
+  `apps/short_url/tests/test_destinations.py`.
+- Title fetching from the destination page (needs the internet; SU-04 only checks that a link
+  without a title is still created), GeoIP countries (always "Unknown") and Google Safe Browsing
+  (no API key here: every check is skipped).
+- Rate limits (`SU_REDIRECT_IP`, `SU_PASSWORD_*`, `SU_REPORT_*`, ...): off on this server, so
+  "over the limit a known link still redirects" and the 429 pages are unit-tested only.
+- A real bot `User-Agent` from the browser: a page's `fetch` can't set one (SU-14 step 8 uses
+  `curl -A` where available).
+- The background jobs (click rollup, event purge, the hourly Safe Browsing recheck): the stats
+  page reads the raw events after the last rollup, so its numbers are exact without them.
+- The JWT API (`/api/s/`) and `inv shorturl`: unit-tested.
