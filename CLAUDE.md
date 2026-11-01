@@ -1497,7 +1497,9 @@ its parts never cross an untrusted network hop, so there's nothing for a checksu
   upload, below. A "paused" (not-yet-finished) row is silently left out of the transfer at send
   time (`services.send.finalize_send`/`start_confirmation` only count `uploaded=True` files), so
   the script asks for confirmation before letting the options form's htmx submit through
-  (`htmx:confirm`) whenever one exists. The logged-in send page additionally has to solve
+  (`htmx:confirm`) whenever one exists. A problem with a file (a network error, a refused part, a failed
+  complete) is a `role="alert"` line on its own row, never an `alert()`; a network error also marks
+  the row "Paused" and offers a "Choose the file" button to resume (`tests_e2e/test_file_transfer_upload.py`). The logged-in send page additionally has to solve
   identifying the *same draft* again across a reload -- `get_or_create_draft` deliberately never
   reuses a draft that already has files, nor an empty one older than `DRAFT_REUSE_WINDOW` (1 h; the
   anonymous twin the same) -- see its own docstring: that behaviour predates hydration and stays as
