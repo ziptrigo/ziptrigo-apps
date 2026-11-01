@@ -72,7 +72,7 @@ errors in a red box above the fields, *without* the label prefix.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/account/login/`. | Tab title `Login`. A card with the logo and heading `Sign in`. Header shows a `Login` link (not the account icon). No raw `{{ }}`/`{% %}`, no console errors. |
+| 1 | Go to `/account/login/`. | Tab title `Login - ZipTrigo`. A card with the logo and heading `Sign in`. Header shows a `Login` link (not the account icon). No raw `{{ }}`/`{% %}`, no console errors. |
 | 2 | Inspect the form. | Two fields: `Email` (`type="email"`, `name="email"`) and `Password` (`type="password"`, `name="password"`), both `required`; a full-width `Sign in` button. Each visible label wraps its input, so clicking the word `Email` or `Password` focuses that field. |
 | 3 | Look below the button. | `No account? Create one` (link to `/account/register/`) and `Forgot your password?` (link to `/account/forgot-password/`). No `or` separator and no `Sign in with Google` button (Google is not configured here). |
 | 4 | Type `abc` into Password, then click the eye button inside the field (`aria-label="Toggle password visibility"`). | The password becomes readable (`type="text"`) and the icon changes to a crossed eye. Click again: hidden again, plain eye icon. |
@@ -133,7 +133,7 @@ errors in a red box above the fields, *without* the label prefix.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Name `Acc Main <run>`, Email MAIN, Password P1. Click `Create account`. | While the request runs the button may briefly show a spinner and `Creating...` and be disabled. Then the browser goes to `/account/created/`. |
-| 2 | Read the page. | Tab title and heading `Check your email`. Text exactly: `We've sent you an email with what to do next. If this is a new account, follow the link in it to confirm your address before logging in.` and `A confirmation link expires in 48 hours.` Button `Go to Login`. The wording must not say "account created" or reveal anything about the address. Save this page's full text for comparison in ACC-33. |
+| 2 | Read the page. | Tab title `Check your email - ZipTrigo`, heading `Check your email`. Text exactly: `We've sent you an email with what to do next. If this is a new account, follow the link in it to confirm your address before logging in.` and `A confirmation link expires in 48 hours.` Button `Go to Login`. The wording must not say "account created" or reveal anything about the address. Save this page's full text for comparison in ACC-33. |
 | 3 | Header. | Still shows `Login` (signup does not sign you in). |
 | 4 | Click `Go to Login`. | Goes to `/account/login/`. |
 
