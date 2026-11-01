@@ -354,3 +354,28 @@ class TestHtmx:
         assert [link.pk for link in full.context['links']] == [
             link.pk for link in partial.context['links']
         ]
+
+
+class TestSortOnAPhone:
+    """The column header that holds the sort links is hidden below the desktop breakpoint, so the
+    list also carries a sort bar that stays visible there (issue #224, SU-F1)."""
+
+    def bar(self, web, **query):
+        content = web.get(reverse('short_url:list'), query, HTTP_HX_REQUEST='true').content.decode()
+        return content.partition('data-sort-bar')[2].partition('</li>')[0]
+
+    def test_the_bar_offers_both_sorts(self, web, funded_user):
+        create_link(funded_user)
+        bar = self.bar(web)
+        assert 'sort=-created_at' in bar or 'sort=created_at' in bar
+        assert 'sort=-click_count' in bar and 'Clicks' in bar and 'Created' in bar
+
+    def test_it_marks_and_reverses_the_active_sort(self, web, funded_user):
+        create_link(funded_user)
+        bar = self.bar(web, sort='-click_count')
+        assert '(sorted descending)' in bar
+        assert 'sort=click_count"' in bar or 'sort=click_count&' in bar  # the next click reverses
+
+    def test_an_empty_list_has_no_bar(self, web):
+        content = web.get(reverse('short_url:list'), HTTP_HX_REQUEST='true').content.decode()
+        assert 'data-sort-bar' not in content

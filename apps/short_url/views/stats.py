@@ -28,7 +28,7 @@ from ..services import (
     stats,
     unlock_free_analytics,
 )
-from .common import owned_link, parse_cost, render_page
+from .common import out_of_credits_message, owned_link, parse_cost, render_page
 
 
 @login_required
@@ -88,7 +88,7 @@ def link_enable_analytics(request: AuthenticatedHttpRequest, link_id: str) -> Ht
         )
     except InsufficientCreditsError:
         messages.error(
-            request, "You don't have enough credits for detailed analytics. Top up first."
+            request, out_of_credits_message("You don't have enough credits for detailed analytics.")
         )
     except ValidationError as exc:
         messages.error(request, ' '.join(exc.messages))

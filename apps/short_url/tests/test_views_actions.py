@@ -148,7 +148,8 @@ class TestEnableCosts:
         create_link(user)
         link = create_link(user, status=LinkStatus.DISABLED)
         response = client.post(url('enable', link), {'confirm_cost': '1'})
-        assert "don't have enough credits" in flashes(response)[0]
+        assert 'have enough credits' in flashes(response)[0]
+        assert reverse('billing:credits-history') in flashes(response)[0]
         assert status_of(link) == LinkStatus.DISABLED
 
     def test_a_cost_that_appeared_after_the_quote_is_not_charged(

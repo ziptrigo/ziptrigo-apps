@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth.hashers import make_password
+from django.utils import timezone
 
 from ..models import ClickEvent, ShortLink
 from .factories import create_link
@@ -38,7 +41,12 @@ class TestPreview:
         assert 'https://shop.example.com/catalogue?id=7' in content
         assert 'Spring catalogue' in content
         assert 'Goes to <strong' in content and 'shop.example.com</strong>' in content
-        assert 'Created' in content and 'ago' in content
+        assert 'Created just now.' in content
+
+    def test_an_older_link_says_how_long_ago(self, client, link):
+        ShortLink.objects.filter(pk=link.pk).update(created_at=timezone.now() - timedelta(hours=3))
+        content = client.get('/s/Promo1+').content.decode()
+        assert 'Created 3\xa0hours ago.' in content
 
     def test_it_says_nothing_about_the_owner(self, client, link, user):
         content = client.get('/s/Promo1+').content.decode()

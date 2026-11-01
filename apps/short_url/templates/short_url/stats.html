@@ -32,7 +32,7 @@
         <dt class="text-sm text-gray-500 dark:text-gray-400">Bot clicks</dt>
         <dd class="mt-1 text-3xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">{{ totals.bot_clicks }}</dd>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Crawlers and link previews. {% if link.max_clicks or not totals.filter_bots %}Also in the clicks.{% else %}Not in the clicks.{% endif %}
-            <a href="{% url 'short_url:edit' link.pk %}" class="underline">Change</a></p>
+            {% if state != 'taken_down' and state != 'held' %}<a href="{% url 'short_url:edit' link.pk %}" class="underline">Change</a>{% endif %}</p>
     </div>
 </dl>
 

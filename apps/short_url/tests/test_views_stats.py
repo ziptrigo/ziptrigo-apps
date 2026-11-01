@@ -116,6 +116,16 @@ class TestPaywall:
         assert 'can no longer be changed' in ' '.join(flashes(response))
         assert balance(funded_user) == 10
 
+    def test_a_link_that_cannot_be_changed_has_no_change_link(self, web, funded_user):
+        editable = create_link(funded_user)
+        assert reverse('short_url:edit', args=[editable.pk]) in (
+            web.get(stats_url(editable)).content.decode()
+        )
+        for kwargs in ({'status': LinkStatus.TAKEN_DOWN}, {'held_for_review_at': timezone.now()}):
+            link = create_link(funded_user, **kwargs)
+            content = web.get(stats_url(link)).content.decode()
+            assert reverse('short_url:edit', args=[link.pk]) not in content
+
 
 class TestRanges:
     def test_the_selector_and_the_default(self, web, paid_link):
@@ -212,7 +222,8 @@ class TestEnablingAnalytics:
         client.force_login(user)
         link = create_link(user)
         response = client.post(enable_url(link), {'confirm_cost': '1'})
-        assert "don't have enough credits" in ' '.join(flashes(response))
+        assert 'have enough credits' in ' '.join(flashes(response))
+        assert reverse('billing:credits-history') in ' '.join(flashes(response))
         link.refresh_from_db()
         assert link.analytics_paid_at is None
 

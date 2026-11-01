@@ -2,54 +2,33 @@
 
 {% block content %}
 <div id="content-main">
-    <h1>{{ title }}</h1>
+    <div class="card">
+        <div class="card-header"><h3 class="card-title mb-0">{{ title }}</h3></div>
+        <div class="card-body">
+            <p>Deactivate the following account(s): the owner can't sign in again or use the API, and can't create, edit or enable links.</p>
+            <ul>
+                {% for owner in owners %}
+                <li>{{ owner.email }}{% if owner.status != 'ACTIVE' %} (already {{ owner.status|lower }}){% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% if skipped_owners %}
+            <p><strong>Will not be deactivated:</strong></p>
+            <ul>
+                {% for owner, reason in skipped_owners %}
+                <li>{{ owner.email }} ({{ reason }})</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
 
-    <div class="module">
-        <p>Deactivate the following account(s): the owner can't sign in again or use the API, and can't create, edit or enable links.</p>
-        <ul>
-            {% for owner in owners %}
-            <li>{{ owner.email }}{% if owner.status != 'ACTIVE' %} (already {{ owner.status|lower }}){% endif %}</li>
-            {% endfor %}
-        </ul>
-        {% if skipped_owners %}
-        <p><strong>Will not be deactivated:</strong></p>
-        <ul>
-            {% for owner, reason in skipped_owners %}
-            <li>{{ owner.email }} ({{ reason }})</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-
-        <form method="post" style="margin-top: 15px;">
-            {% csrf_token %}
-
-            <div>
-                {{ form.reason.errors }}
-                <label for="id_reason" style="display: block; font-weight: bold;">{{ form.reason.label }}:</label>
-                {{ form.reason }}
-                {% if form.reason.help_text %}
-                <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ form.reason.help_text }}</div>
-                {% endif %}
-            </div>
-
-            <div style="margin-top: 10px;">
-                {{ form.take_down_links.errors }}
-                <label>{{ form.take_down_links }} {{ form.take_down_links.label }}</label>
-                {% if form.take_down_links.help_text %}
-                <div style="font-size: 0.9em; color: #666;">{{ form.take_down_links.help_text }}</div>
-                {% endif %}
-            </div>
-
-            <input type="hidden" name="action" value="{{ action_name }}">
-            <input type="hidden" name="apply" value="yes">
-            {% for obj in objects %}
-            <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}">
-            {% endfor %}
-
-            <div style="margin-top: 15px;">
-                <input type="submit" value="Deactivate" class="button">
-            </div>
-        </form>
+            <form method="post" class="mt-4">
+                {% csrf_token %}
+                {% include "admin/short_url/_field.html" with field=form.reason %}
+                {% include "admin/short_url/_checkbox.html" with field=form.take_down_links %}
+                {% include "admin/short_url/_hidden.html" %}
+                <button type="submit" class="btn btn-danger">Deactivate</button>
+                <a href="{{ request.path }}" class="btn btn-link">Cancel</a>
+            </form>
+        </div>
     </div>
 </div>
 {% endblock %}
