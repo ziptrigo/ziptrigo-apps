@@ -20,6 +20,8 @@ class CreditTransactionType(models.TextChoices):
     REFUND = 'refund', 'Refund'
     # Credits granted by a promo code (issue #70); the description names the code.
     PROMO = 'promo', 'Promo code'
+    # The welcome credits of a new account (issue #160).
+    WELCOME = 'welcome', 'Welcome credits'
 
 
 class CreditTransaction(models.Model):

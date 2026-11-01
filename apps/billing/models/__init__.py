@@ -8,6 +8,7 @@ from .promo import (
     PromoRedemptionStatus,
 )
 from .settings import BillingSettings
+from .welcome import WelcomeCredit, WelcomeCreditStatus, WelcomeRefusal
 
 __all__ = [
     'BillingSettings',
@@ -19,4 +20,7 @@ __all__ = [
     'PromoRedemption',
     'PromoRedemptionSource',
     'PromoRedemptionStatus',
+    'WelcomeCredit',
+    'WelcomeCreditStatus',
+    'WelcomeRefusal',
 ]

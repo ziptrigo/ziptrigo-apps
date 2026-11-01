@@ -24,6 +24,17 @@ def _clear_ratelimit_cache():
     caches['ratelimit'].clear()
 
 
+@pytest.fixture(autouse=True)
+def _welcome_credits_off(request, monkeypatch):
+    """The welcome credits (issue #160, `apps.billing.services.welcome`) default to 1,000 on a
+    fresh `BillingSettings`, which would put a pending row, and under captured on-commit
+    callbacks a grant, behind every user any test creates. They are off unless a test is marked
+    `@pytest.mark.welcome_credits`."""
+    if request.node.get_closest_marker('welcome_credits') is not None:
+        return
+    monkeypatch.setattr('apps.billing.services.welcome.configured_credits', lambda: 0)
+
+
 class RateLimitClock:
     """The wall clock `apps.core.ratelimit.limiter` reads, frozen until a test moves it."""
 

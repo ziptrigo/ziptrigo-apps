@@ -11,8 +11,9 @@ class BillingConfig(AppConfig):
         from django.contrib.auth import get_user_model
 
         from apps.accounts import signup_codes
-        from apps.accounts.signals import email_confirmed
+        from apps.accounts.signals import account_created, email_confirmed
 
+        from .services import welcome
         from .services.promo import PromoSignupCodeHandler, grant_reservations
 
         # The register page's promo code field (issue #70): `accounts` can't import `billing`, so
@@ -30,6 +31,28 @@ class BillingConfig(AppConfig):
             weak=False,
         )
 
+        # The welcome credits of a genuinely new account (issue #160). Two receivers: one opens the
+        # row when the account is created (also settling an account created already confirmed,
+        # which gets no `email_confirmed`), one settles when the address is confirmed later.
+        def _open_welcome_credits(sender, user, **kwargs):
+            welcome.on_account_created(user)
+
+        def _settle_welcome_credits(sender, user, **kwargs):
+            welcome.on_email_confirmed(user)
+
+        account_created.connect(
+            _open_welcome_credits,
+            sender=get_user_model(),
+            dispatch_uid='billing.open_welcome_credits',
+            weak=False,
+        )
+        email_confirmed.connect(
+            _settle_welcome_credits,
+            sender=get_user_model(),
+            dispatch_uid='billing.settle_welcome_credits',
+            weak=False,
+        )
+
         self._register_jobs()
 
     def _register_jobs(self):
@@ -42,6 +65,14 @@ class BillingConfig(AppConfig):
             JobSpec(
                 name='billing.release_promo_reservations',
                 func=jobs.release_promo_reservations,
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
+        )
+        register_job(
+            JobSpec(
+                name='billing.settle_welcome_credits',
+                func=jobs.settle_welcome_credits,
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
