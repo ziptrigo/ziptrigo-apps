@@ -119,7 +119,7 @@ def test_wrong_current_password(client, user, sent_emails, django_capture_on_com
         (PASSWORD, None, 'The new password must be different from the current one.'),
         # Django's `AUTH_PASSWORD_VALIDATORS`, on top of `PasswordValidator`.
         ('password1', None, 'This password is too common.'),
-        ('testuser1', None, 'The password is too similar to the email.'),
+        ('example1', None, 'The password is too similar to the email.'),
     ],
 )
 def test_invalid_new_password(client, user, new, confirm, message):
@@ -307,3 +307,39 @@ class TestEmail:
 
         assert '<b>Mallory</b>' not in html_body
         assert '&lt;b&gt;Mallory&lt;/b&gt;' in html_body
+
+
+def test_a_password_close_to_the_name_is_refused(client, user):
+    # `User.name`, not just the email, is compared (`AUTH_PASSWORD_VALIDATORS` `user_attributes`).
+    client.force_login(user)
+
+    response = _change(client, new='Test User1')
+
+    assert response.status_code == 422
+    assert 'The password is too similar to the name.' in response.content.decode()
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
+
+
+def test_a_password_over_the_maximum_length_is_refused(client, user):
+    client.force_login(user)
+
+    response = _change(client, new='x1' * 65)
+
+    assert response.status_code == 422
+    assert 'Password must be at most 128 characters long.' in response.content.decode()
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
+
+
+def test_a_password_of_the_maximum_length_is_accepted(
+    client, user, django_capture_on_commit_callbacks
+):
+    client.force_login(user)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _change(client, new='Qz7' + 'kt' * 62 + 'p')  # 128 characters
+
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert user.check_password('Qz7' + 'kt' * 62 + 'p')

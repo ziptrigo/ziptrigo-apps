@@ -9,8 +9,11 @@ and `localtime()` render in it; the functions below are for code that has to com
 """
 
 import logging
+import os
 from datetime import UTC, date, datetime, time
-from zoneinfo import ZoneInfo
+from functools import cache
+from importlib import resources
+from zoneinfo import TZPATH, ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -36,6 +39,11 @@ _LEGACY_PREFIXES = (
     'Chile/',
     'Mexico/',
 )
+
+#: The tz database's list of the zone each country location uses, one canonical `Area/City` name
+#: per line (`Asia/Kolkata`, not its old alias `Asia/Calcutta`). `zoneinfo` cannot tell a link from
+#: a zone, but this file can.
+_ZONE_TAB = 'zone.tab'
 
 #: Zone names already warned about, so a stale value is logged once per process and not per request.
 _warned: set[str] = set()
@@ -80,15 +88,53 @@ def local_datetime(user: User, d: date, t: time | None) -> datetime:
     return local.astimezone(UTC)
 
 
+@cache
+def _canonical_names() -> frozenset[str] | None:
+    """The canonical zone names listed in the tz database's `zone.tab` (from the system tz
+    directories, else the `tzdata` package), or `None` when no copy can be read.
+
+    `zone.tab` has one line per country location with its canonical name, so it leaves out every
+    backward-compatibility link: `Asia/Calcutta`, `Europe/Kiev`, `Africa/Asmera`,
+    `America/Buenos_Aires`, `Australia/ACT`, `Pacific/Samoa` and the like. (`zone1970.tab` would
+    also drop `Europe/Amsterdam` for `Europe/Brussels`, which is not what a person looks for.)
+    """
+    paths = [os.path.join(directory, _ZONE_TAB) for directory in TZPATH]
+    try:
+        paths.append(str(resources.files('tzdata.zoneinfo').joinpath(_ZONE_TAB)))
+    except ImportError, OSError:  # the optional `tzdata` package isn't installed
+        pass
+    for path in paths:
+        try:
+            with open(path, encoding='utf-8') as handle:
+                lines = handle.read().splitlines()
+        except OSError:
+            continue
+        names = frozenset(
+            fields[2]
+            for fields in (line.split('\t') for line in lines if line and not line.startswith('#'))
+            if len(fields) >= 3
+        )
+        if names:
+            return names
+    logger.warning('No zone.tab found; the time zone list may include legacy aliases.')
+    return None
+
+
 def timezone_choices() -> list[tuple[str, str]]:
-    """`(name, label)` pairs for the account page's select: `UTC` first, then every `Area/City`
-    zone sorted, minus the legacy names (`Etc/`, `SystemV/`, `US/`, `posix/`, `right/`, the other
-    backward-compatibility links, and every bare alias such as `GMT`, `CET`, `EST` or `Japan`).
-    The label is the name with `_` shown as a space."""
+    """`(name, label)` pairs for the account page's select: `UTC` first, then every canonical
+    `Area/City` zone sorted. Left out: the legacy names (`Etc/`, `SystemV/`, `US/`, `posix/`,
+    `right/`, the other backward-compatibility prefixes), every bare alias such as `GMT`, `CET`,
+    `EST` or `Japan`, and, when the tz database's `zone.tab` can be read, every other link to a
+    zone (`Asia/Calcutta` for `Asia/Kolkata`). A user who already has one of those saved keeps it
+    selectable (`ProfileForm.timezone_options`). The label is the name with `_` shown as a
+    space."""
+    canonical = _canonical_names()
     names = sorted(
         name
         for name in known_timezone_names()
-        if '/' in name and not name.startswith(_LEGACY_PREFIXES)
+        if '/' in name
+        and not name.startswith(_LEGACY_PREFIXES)
+        and (canonical is None or name in canonical)
     )
     return [('UTC', 'UTC')] + [(name, name.replace('_', ' ')) for name in names]
 

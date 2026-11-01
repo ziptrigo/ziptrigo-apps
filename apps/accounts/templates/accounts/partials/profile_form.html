@@ -60,7 +60,7 @@
     {% comment %}A <p>, not a span with `block`: Tailwind's `block` would override the `hidden` attribute.{% endcomment %}
     <p id="timezone-detected" hidden class="text-xs text-gray-500 dark:text-gray-400 mt-1">
       Detected from your browser: <span data-timezone-detected></span>
-      <a href="#" data-timezone-use class="text-sage-600 dark:text-sage-300 underline decoration-sage-300/70 dark:decoration-sage-500 underline-offset-2 hover:decoration-sage-600 dark:hover:decoration-sage-300 transition-colors">Use it</a>
+      <button type="button" data-timezone-use class="whitespace-nowrap text-sage-600 dark:text-sage-300 underline decoration-sage-300/70 dark:decoration-sage-500 underline-offset-2 hover:decoration-sage-600 dark:hover:decoration-sage-300 transition-colors">Use it</button>
     </p>
   </div>
   {% endwith %}

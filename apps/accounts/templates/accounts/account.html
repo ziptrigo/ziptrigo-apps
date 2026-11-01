@@ -25,7 +25,7 @@
       <div class="flex items-center justify-between gap-4">
         <div>
           <div class="text-sm text-gray-600 dark:text-gray-300">Current balance</div>
-          <div class="text-2xl font-semibold">{{ credits_balance }} credit{{ credits_balance|pluralize }}</div>
+          <div class="text-2xl font-semibold">{{ credits_balance }} credit{% if credits_balance != 1 %}s{% endif %}{% comment %}`pluralize` can't read the context processor's lazy value, hence the comparison.{% endcomment %}</div>
         </div>
         <a href="{% url 'billing:credits-history' %}"
            class="btn inline-flex justify-center items-center rounded-lg bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:bg-sage-400 text-sm">
@@ -90,6 +90,7 @@
     input.type = show ? 'text' : 'password';
     icon.classList.toggle('fa-eye', !show);
     icon.classList.toggle('fa-eye-slash', show);
+    toggleBtn.setAttribute('aria-pressed', show ? 'true' : 'false');
   });
 </script>
 {% endblock %}

@@ -114,8 +114,8 @@ class TestCreateUser:
         assert not User.objects.filter(email='weak@example.com').exists()
 
     def test_the_password_rules_are_the_sign_up_ones(self):
-        assert PasswordValidator().get_help_text() in (
-            'Password must be at least 6 characters long and contain at least one digit.'
+        assert PasswordValidator().get_help_text() == (
+            'Password must be 6 to 128 characters long and contain at least one digit.'
         )
 
     def test_without_a_password_and_without_a_terminal_it_says_so(self, monkeypatch):

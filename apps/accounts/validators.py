@@ -5,9 +5,13 @@ from zoneinfo import available_timezones
 
 from django.core.exceptions import ValidationError
 
+#: The longest password the site accepts (signup, reset, change, the API and `create_user`). Far
+#: more than a person types, and well below what makes hashing a request a burden.
+MAX_PASSWORD_LENGTH = 128
+
 
 class PasswordValidator:
-    """Validate password requirements: minimum 6 chars and at least one digit."""
+    """Validate password requirements: 6 to 128 characters and at least one digit."""
 
     def validate(self, password: str, user=None):
         """Validate the password against requirements.
@@ -22,12 +26,20 @@ class PasswordValidator:
         if len(password) < 6:
             raise ValidationError('Password must be at least 6 characters long.')
 
+        if len(password) > MAX_PASSWORD_LENGTH:
+            raise ValidationError(
+                f'Password must be at most {MAX_PASSWORD_LENGTH} characters long.'
+            )
+
         if not any(char.isdigit() for char in password):
             raise ValidationError('Password must contain at least one digit.')
 
     def get_help_text(self):
         """Return help text for password requirements."""
-        return 'Password must be at least 6 characters long and contain at least one digit.'
+        return (
+            f'Password must be 6 to {MAX_PASSWORD_LENGTH} characters long and contain at least '
+            'one digit.'
+        )
 
 
 #: The message every surface (model, forms, API schema, endpoint) gives for an unknown time zone.
