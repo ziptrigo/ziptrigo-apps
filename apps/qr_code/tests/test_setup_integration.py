@@ -2,6 +2,8 @@
 Integration tests to verify setup and end-to-end functionality.
 """
 
+import re
+
 import pytest
 from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
@@ -139,3 +141,23 @@ class TestSetupIntegration:
         assert f'data-full-src="{reverse("qr_code:image", args=[qr.id])}"' in content
         # Ensure the modal container exists
         assert 'id="qr-modal-overlay"' in content
+
+    def test_dashboard_dialog_and_search_accessibility(self, client):
+        """Issue #224: labelled search, h2 dialog title, no empty-src img, focus trap script."""
+        user = User.objects.create_user(
+            email='dasha11y@example.com', password='testpass123', name='Dash A11y'
+        )
+        client.force_login(user)
+
+        content = client.get(reverse('qr_code:dashboard')).content.decode('utf-8')
+
+        # The search input has a real label, not just a placeholder.
+        assert '<label for="search-input" class="sr-only">' in content
+        # The delete dialog's title is an h2 (the page goes h1 -> h2, never h1 -> h3).
+        assert '<h2 id="delete-modal-title"' in content
+        assert '<h3' not in content
+        # The preview image has no src (an empty one is invalid) until a preview is opened.
+        assert 'src=""' not in content
+        assert re.search(r'<img id="qr-modal-image"\s+hidden', content)
+        # Both aria-modal dialogs share one Tab trap.
+        assert "ev.key !== 'Tab'" in content
