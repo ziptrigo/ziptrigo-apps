@@ -20,7 +20,7 @@
                     <label for="id_recipient" style="display: block; margin-bottom: 5px; font-weight: bold;">{{ email_form.recipient.label }}:</label>
                     {{ email_form.recipient }}
                     {% if email_form.recipient.help_text %}
-                        <div style="font-size: 0.9em; color: #666; margin-top: 5px;">{{ email_form.recipient.help_text }}</div>
+                        <div style="font-size: 0.9em; color: var(--bs-secondary-color, #666); margin-top: 5px;">{{ email_form.recipient.help_text }}</div>
                     {% endif %}
                 </div>
                 <input type="submit" name="send_test_email" value="Send test email" class="button" style="padding: 8px 16px;">
@@ -41,14 +41,16 @@
             <input type="submit" id="show-env-btn" value="Show" class="button" style="padding: 8px 16px;">
         </form>
 
-        <!-- Confirmation Modal -->
-        <div id="confirm-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center;">
-            <div style="background:#fff; padding:20px; border-radius:4px; min-width:300px; max-width:90%; box-shadow:0 2px 10px rgba(0,0,0,0.3); margin:auto;">
-                <h3>Confirm</h3>
+        {% comment %}Confirmation modal. Its colours are the admin theme's (Bootstrap's body variables), so it stays
+           readable when the light/dark toggle switches `data-bs-theme`; a fixed white box had light text on it in dark mode.{% endcomment %}
+        <div id="confirm-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+            <div role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title"
+                 style="background:var(--bs-body-bg, #fff); color:var(--bs-body-color, #212529); border:1px solid var(--bs-border-color, transparent); padding:20px; border-radius:4px; min-width:300px; max-width:90%; box-shadow:0 2px 10px rgba(0,0,0,0.3); margin:auto;">
+                <h3 id="confirm-modal-title">Confirm</h3>
                 <p>Are you sure?</p>
                 <div style="margin-top:15px; display:flex; gap:8px; justify-content:flex-end;">
-                    <button type="button" id="confirm-cancel">Cancel</button>
-                    <button type="button" id="confirm-yes" class="default">Yes, continue</button>
+                    <button type="button" id="confirm-cancel" class="btn btn-secondary">Cancel</button>
+                    <button type="button" id="confirm-yes" class="btn btn-primary">Yes, continue</button>
                 </div>
             </div>
         </div>

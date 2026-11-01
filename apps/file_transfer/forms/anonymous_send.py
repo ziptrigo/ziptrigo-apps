@@ -28,7 +28,10 @@ class AnonymousSendOptionsForm(StyledFormMixin, forms.Form):
     expiry_choice = forms.ChoiceField(choices=())
     max_downloads = forms.IntegerField(required=False, min_value=1)
     password = forms.CharField(required=False, widget=forms.PasswordInput(render_value=True))
-    notify_on_download = forms.BooleanField(required=False, initial=True)
+    # No "email me when a file is downloaded" option: an anonymous sender has no account to
+    # email, so it only matters once the transfer is claimed, and then it takes the logged-in
+    # default (on), which the owner can turn off on the dashboard. A field the page doesn't render
+    # would always read as unchecked, i.e. off.
 
     def __init__(self, *args, settings_row: FileTransferSettings | None = None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -47,5 +50,4 @@ class AnonymousSendOptionsForm(StyledFormMixin, forms.Form):
             expiry_choice=data['expiry_choice'],
             max_downloads=data.get('max_downloads'),
             password=data.get('password', ''),
-            notify_on_download=data.get('notify_on_download', True),
         )

@@ -12,7 +12,7 @@
         <div>
           <h1 class="text-2xl font-semibold">Credits History</h1>
           <p class="text-sm text-gray-600 dark:text-gray-300">
-            Current balance: <span class="font-medium">{{ credits_balance }}</span> credit{{ credits_balance|pluralize }}
+            Current balance: <span class="font-medium">{{ credits_balance }}</span> credit{% if credits_balance != 1 %}s{% endif %}{% comment %}`pluralize` can't read the context processor's lazy value, hence the comparison.{% endcomment %}
           </p>
         </div>
       </div>

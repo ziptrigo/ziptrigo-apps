@@ -40,7 +40,14 @@ from .models import (
     ShortLink,
     ShortUrlSettings,
 )
-from .services import blocklist, display_state, reports, short_url, take_down_link
+from .services import (
+    blocklist,
+    destination_host,
+    display_state,
+    reports,
+    short_url,
+    take_down_link,
+)
 
 
 class ReadOnlyModelAdmin(admin.ModelAdmin):
@@ -362,13 +369,27 @@ class ShortLinkAdmin(_AbuseActionPermissionMixin, ReadOnlyModelAdmin):
             )
         )
 
+    def get_changelist_instance(self, request: HttpRequest):
+        """Look the page's destinations up on the block list in one query (like the dashboard),
+        so "Now" can say `blocked`. Evaluating `result_list` here fills the queryset's cache, so
+        the rows the list renders are these same objects."""
+        changelist = super().get_changelist_instance(request)
+        links = list(changelist.result_list)
+        blocked = blocklist.blocked_hosts(destination_host(link.destination) for link in links)
+        for link in links:
+            link._destination_blocked = destination_host(link.destination) in blocked
+        return changelist
+
     @admin.display(description='Destination')
     def destination_preview(self, obj: ShortLink) -> str:
         return obj.destination if len(obj.destination) <= 60 else obj.destination[:57] + '...'
 
     @admin.display(description='Now')
     def state(self, obj: ShortLink) -> str:
-        return display_state(obj)
+        blocked = getattr(obj, '_destination_blocked', None)
+        if blocked is None:
+            blocked = blocklist.is_blocked(destination_host(obj.destination))
+        return display_state(obj, destination_blocked=blocked)
 
     @admin.display(description='Pending reports', ordering='_pending_reports')
     def pending_reports(self, obj: ShortLink) -> int:

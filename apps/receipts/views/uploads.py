@@ -45,6 +45,10 @@ def upload_page(request: AuthenticatedHttpRequest) -> HttpResponse:
             'price_per_file': config.price_per_file,
             'max_file_bytes': config.max_file_bytes,
             'allowed_types': config.allowed_types_list(),
+            'allowed_labels': config.allowed_type_labels(),
+            'allowed_types_text': config.allowed_types_text(),
+            'allowed_extensions': config.allowed_extensions(),
+            'allowed_browser_types': config.allowed_browser_types(),
             'start_url': reverse('receipts:upload-start'),
             'complete_url_template': reverse(
                 'receipts:upload-complete', args=['00000000-0000-0000-0000-000000000000']

@@ -59,6 +59,18 @@ class TestPage:
         assert 'up to 15 MB' in content and '1 credit each' in content
         assert f'data-start-url="{reverse("receipts:upload-start")}"' in content
 
+    def test_the_page_offers_only_the_allowed_types(self, web, receipts_settings):
+        ReceiptsSettings.objects.filter(pk=1).update(allowed_types='application/pdf,image/png')
+
+        content = web.get(reverse('receipts:upload')).content.decode()
+
+        assert 'PDF, PNG &middot;' in content
+        assert 'accept=".pdf,.png,application/pdf,image/png"' in content
+        assert 'data-extensions=".pdf,.png"' in content
+        assert 'data-types="application/pdf,image/png"' in content
+        assert 'data-types-text="PDF or PNG"' in content
+        assert 'HEIC' not in content
+
     def test_it_shows_the_balance(self, web, funded_user):
         assert 'Balance:' in web.get(reverse('receipts:upload')).content.decode()
         assert '100 credits' in web.get(reverse('receipts:upload')).content.decode()

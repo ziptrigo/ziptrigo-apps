@@ -37,6 +37,19 @@ def test_tools_view_requires_superuser_not_just_staff(client):
     assert 'You do not have permission' in response.content.decode()
 
 
+def test_the_confirmation_modal_follows_the_admin_theme(client, admin_user: User):
+    """The modal's box takes the theme's colours, so it is readable in the admin's dark mode."""
+    client.force_login(admin_user)
+
+    page = client.get(reverse('custom_admin:admin_tools')).content.decode()
+
+    modal = page[page.index('id="confirm-modal"') :]
+    modal = modal[: modal.index('id="confirm-yes"')]
+    assert 'background:var(--bs-body-bg' in modal
+    assert 'color:var(--bs-body-color' in modal
+    assert 'background:#fff' not in modal
+
+
 def test_show_environment_masks_sensitive_values(client, admin_user: User, monkeypatch):
     """Environment variables should be masked except for whitelisted keys."""
 

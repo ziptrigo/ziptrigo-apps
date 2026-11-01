@@ -9,7 +9,17 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
+from apps.core.services.email_verification import (
+    EmailVerificationAlreadyConfirmed,
+    EmailVerificationBurned,
+    EmailVerificationExpired,
+    EmailVerificationNotFound,
+    EmailVerificationSuperseded,
+    IncorrectCode,
+)
+
 from ..models import Transfer, TransferStatus
+from ..views.anonymous import code_error_message
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
@@ -235,9 +245,37 @@ def test_wrong_confirmation_code_does_not_activate(client, anon_enabled, fake_st
         data={'code': '000000'},
     )
     assert response.status_code == 422
+    assert 'That code is not right. 4 attempts left.' in response.content.decode()
 
     transfer.refresh_from_db()
     assert transfer.status == TransferStatus.PENDING_CONFIRMATION
+
+    # The fifth wrong code burns the row; it and every later one say what to do next instead of
+    # an empty message.
+    for _ in range(5):
+        response = client.post(
+            reverse('file_transfer:anon-send-confirm-code', args=[transfer.id]),
+            data={'code': '000000'},
+        )
+    assert response.status_code == 422
+    assert 'Too many wrong codes. Use &quot;Resend code&quot; to get a new one.' in (
+        response.content.decode()
+    )
+
+
+@pytest.mark.parametrize(
+    ('error', 'message'),
+    [
+        (IncorrectCode(1), 'That code is not right. 1 attempt left.'),
+        (EmailVerificationBurned(), 'Too many wrong codes.'),
+        (EmailVerificationExpired(), 'This code has expired.'),
+        (EmailVerificationSuperseded(), 'A newer code was sent.'),
+        (EmailVerificationAlreadyConfirmed(), 'This transfer is already confirmed.'),
+        (EmailVerificationNotFound(), 'This code is no longer valid.'),
+    ],
+)
+def test_every_refused_code_has_a_message(error, message):
+    assert code_error_message(error).startswith(message)
 
 
 def _pending_transfer_with_link(client, fake_storage, monkeypatch, sent) -> tuple[Transfer, str]:
@@ -377,3 +415,21 @@ def test_anonymous_part_urls_rejects_a_part_number_that_is_not_a_whole_number(
     )
 
     assert response.status_code == 422
+
+
+def test_anonymous_send_keeps_download_notifications_on(anon_enabled):
+    """The anonymous page has no "email me when a file is downloaded" checkbox, so the option
+    must not read as an unchecked one: a transfer claimed later notifies like any other."""
+    from ..forms import AnonymousSendOptionsForm
+
+    form = AnonymousSendOptionsForm(
+        data={
+            'sender_email': 'sender@example.com',
+            'recipients': 'recipient@example.com',
+            'expiry_choice': '1',
+        }
+    )
+
+    assert form.is_valid(), form.errors
+    assert 'notify_on_download' not in form.fields
+    assert form.to_anonymous_send_options().notify_on_download is True

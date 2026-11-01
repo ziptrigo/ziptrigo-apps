@@ -9,6 +9,7 @@ import unicodedata
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.template.defaultfilters import filesizeformat
 
 from ..models import FileTransferSettings, Transfer, TransferFile
 
@@ -17,6 +18,15 @@ MAX_MESSAGE_LENGTH = 2000
 
 #: A base64-encoded SHA-256 digest is always 32 raw bytes.
 _SHA256_DIGEST_SIZE = 32
+
+
+def _size_text(num_bytes: int) -> str:
+    """A limit as the pages show it (`50.0 MB`, `5.0 GB`), so a small limit isn't "0.0 GB"."""
+    return str(filesizeformat(num_bytes)).replace('\xa0', ' ')
+
+
+def _count_text(count: int, noun: str) -> str:
+    return f'{count} {noun}' if count == 1 else f'{count} {noun}s'
 
 
 def validate_message(message: str) -> None:
@@ -59,17 +69,17 @@ def _validate_new_file(
     if size <= 0:
         raise ValidationError('File is empty.')
     if size > max_file_size_bytes:
-        limit_gb = max_file_size_bytes / 1024**3
-        raise ValidationError(f'File is larger than the {limit_gb:.1f} GB limit per file.')
+        limit = _size_text(max_file_size_bytes)
+        raise ValidationError(f'File is larger than the {limit} limit per file.')
 
     existing = transfer.files.all()
     if existing.count() >= max_files:
-        raise ValidationError(f'A transfer can have at most {max_files} files.')
+        raise ValidationError(f'A transfer can have at most {_count_text(max_files, "file")}.')
 
     total = sum(f.size for f in existing) + size
     if total > max_total_size_bytes:
-        limit_gb = max_total_size_bytes / 1024**3
-        raise ValidationError(f'Transfer would exceed the {limit_gb:.1f} GB total size limit.')
+        limit = _size_text(max_total_size_bytes)
+        raise ValidationError(f'Transfer would exceed the {limit} total size limit.')
 
 
 def validate_new_file(transfer: Transfer, size: int, settings: FileTransferSettings) -> None:
@@ -115,7 +125,9 @@ def _validate_recipients(emails: list[str], *, max_recipients: int) -> list[str]
             raise ValidationError(f'"{deduped[-1][:80]}" is not a valid email address.')
 
     if len(deduped) > max_recipients:
-        raise ValidationError(f'A transfer can have at most {max_recipients} recipients.')
+        raise ValidationError(
+            f'A transfer can have at most {_count_text(max_recipients, "recipient")}.'
+        )
     return deduped
 
 

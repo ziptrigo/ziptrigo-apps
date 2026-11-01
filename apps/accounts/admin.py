@@ -8,7 +8,8 @@ from apps.core.admin_site import custom_admin_site
 from .forms.admin import UserAdminChangeForm, UserAdminCreationForm
 from .http import AuthenticatedHttpRequest
 from .models import User
-from .services.email_confirmation import send_email_confirmed
+from .services.email_change import notify_previous_address
+from .services.email_confirmation import get_email_confirmation_service, send_email_confirmed
 from .services.timezones import set_timezone
 
 # Apps whose rows hang off a user with `on_delete=CASCADE` and are meant to go with it, although
@@ -90,13 +91,37 @@ class UserAdmin(DjangoUserAdmin):
         The zone is a plain field on the change form (the form has already validated it), but a
         product listening to the signal needs to hear about it however it was changed, so it is
         written back through `set_timezone` after the rest of the row.
+
+        A changed email is handled like `PUT /api/account` handles one: confirmation links still
+        out for the address being left are retired (one could otherwise confirm whatever account
+        claims that address next), the account is un-confirmed and the new address is sent a
+        confirmation email, and a confirmed old address gets the "email changed" notice. Only when
+        staff tick "Email confirmed" in the same save is the new address taken as confirmed (and
+        no confirmation email sent): a box that was already ticked says nothing about the new
+        address.
         """
         new = obj.timezone
         if change and 'timezone' in form.changed_data:
             obj.timezone = form.initial.get('timezone', '')
+        email_changed = change and 'email' in form.changed_data
+        previous_email = form.initial.get('email', '') if email_changed else ''
+        previous_confirmed = bool(form.initial.get('email_confirmed')) if email_changed else False
+        staff_confirmed = (
+            email_changed and 'email_confirmed' in form.changed_data and obj.email_confirmed
+        )
+        if email_changed and not staff_confirmed:
+            obj.email_confirmed = False
+            obj.email_confirmed_at = None
         super().save_model(request, obj, form, change)
         if obj.timezone != new:
             set_timezone(obj, new)
+        if email_changed:
+            service = get_email_confirmation_service()
+            service.invalidate_pending_for_email(previous_email)
+            if not staff_confirmed:
+                service.send_confirmation_email(obj)
+            if previous_confirmed:
+                notify_previous_address(obj, previous_email)
         if change and 'email_confirmed' in form.changed_data and obj.email_confirmed:
             # Staff confirming an address by hand is a confirmation like any other: remember the
             # address and tell the apps that care (promo reservations, welcome credits).

@@ -83,6 +83,11 @@ def validation_lines(exc: ValidationError, names: Mapping[str, str] | None = Non
     return core_validation_lines(exc, FIELD_LABELS, names)
 
 
+def credits_text(count: int) -> str:
+    """`1 credit`, `3 credits`: an amount for a flash message."""
+    return f'{count} credit{"" if count == 1 else "s"}'
+
+
 def credits_url() -> str:
     """Where "Top up" goes: the credits page (there is no purchase page yet)."""
     return reverse('billing:credits-history')

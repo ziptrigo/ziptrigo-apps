@@ -1,9 +1,11 @@
 """`{% local_time %}`: a time shown in the visitor's own time zone.
 
-The site keeps every time in UTC and has no per-user time zone, so a time of day rendered on the
-server is UTC. This renders a `<time>` element with the UTC value marked "UTC" (what a visitor
-without JavaScript sees) that `core/js/local_time.js`, loaded on every page by `core/base.html`,
-rewrites in the browser's zone.
+The site keeps every time in UTC. A signed-in user's saved time zone (`User.timezone`, issue #177)
+is what `|date` and `localtime()` follow on the server; this tag follows the *browser's* zone
+instead, and doesn't depend on the zone that is active: it always renders a `<time>` element with
+the UTC value marked "UTC" (what a visitor without JavaScript sees) that `core/js/local_time.js`,
+loaded on every page by `core/base.html`, rewrites in the browser's zone. So it suits a visitor
+with no saved zone too (an anonymous download page, say).
 
     {% load local_time %}
     {% local_time transfer.expires_at %}            Oct 27, 2026, 8:51 AM

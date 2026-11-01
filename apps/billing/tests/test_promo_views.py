@@ -158,6 +158,29 @@ def test_redeem_link_shows_the_form_prefilled(client, user, code):
     assert get_balance(user) == 0  # a GET never redeems
 
 
+@pytest.mark.parametrize(('balance', 'text'), [(1, '1</span> credit\n'), (2, '2</span> credits\n')])
+def test_redeem_page_pluralizes_the_balance(client, user, code, balance, text):
+    from apps.billing.services import add_credits
+
+    add_credits(user, balance, source='test')
+    client.force_login(user)
+
+    html = client.get(reverse('billing:redeem-code', args=['launch2026'])).content.decode()
+
+    assert text in html
+
+
+@pytest.mark.parametrize(('balance', 'text'), [(1, '1</span> credit\n'), (2, '2</span> credits\n')])
+def test_credits_history_pluralizes_the_balance(client, user, balance, text):
+    """`|pluralize` can't read the lazy `credits_balance` and always said "credit"."""
+    from apps.billing.services import add_credits
+
+    add_credits(user, balance, source='test')
+    client.force_login(user)
+
+    assert text in client.get(HISTORY).content.decode()
+
+
 def test_redeem_link_without_session_goes_to_login_with_next_and_promo(client, code):
     url = reverse('billing:redeem-code', args=['LAUNCH2026'])
     response = client.get(url)

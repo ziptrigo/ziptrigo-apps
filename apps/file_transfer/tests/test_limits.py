@@ -45,6 +45,25 @@ def test_validate_new_file_rejects_over_max_total_size(draft_transfer, ft_settin
     limits.validate_new_file(draft_transfer, 40, ft_settings)  # exactly at the limit is fine
 
 
+def test_limit_messages_read_naturally(draft_transfer, ft_settings):
+    """A small size limit is not "0.0 GB", and a limit of one is singular."""
+    ft_settings.logged_in_max_file_size_bytes = 50 * 1024**2
+    with pytest.raises(ValidationError) as size:
+        limits.validate_new_file(draft_transfer, 50 * 1024**2 + 1, ft_settings)
+    assert size.value.messages == ['File is larger than the 50.0 MB limit per file.']
+
+    ft_settings.logged_in_max_files = 1
+    TransferFile.objects.create(transfer=draft_transfer, name='a', size=1, storage_key='k')
+    with pytest.raises(ValidationError) as count:
+        limits.validate_new_file(draft_transfer, 1, ft_settings)
+    assert count.value.messages == ['A transfer can have at most 1 file.']
+
+    ft_settings.logged_in_max_recipients = 1
+    with pytest.raises(ValidationError) as recipients:
+        limits.validate_recipients(['a@example.com', 'b@example.com'], ft_settings)
+    assert recipients.value.messages == ['A transfer can have at most 1 recipient.']
+
+
 def test_validate_recipients_dedupes_case_insensitively(ft_settings):
     result = limits.validate_recipients(
         ['A@example.com', 'a@example.com', 'b@example.com'], ft_settings

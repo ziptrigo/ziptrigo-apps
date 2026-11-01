@@ -118,7 +118,7 @@ class TestEnableCosts:
     def test_it_will_not_charge_without_a_confirmation(self, web, funded_user, costly):
         response = web.post(url('enable', costly))
         assert flashes(response) == [
-            'Enabling this link costs 1 credits. Confirm it from the menu to continue.'
+            'Enabling this link costs 1 credit. Confirm it from the menu to continue.'
         ]
         assert status_of(costly) == LinkStatus.DISABLED
         assert balance(funded_user) == 10
@@ -169,7 +169,7 @@ class TestEnableCosts:
         monkeypatch.setattr(actions_module, 'quote_enable', quote_then_use_the_last_slot)
         response = web.post(url('enable', link), {'confirm_cost': '0'})
         assert flashes(response) == [
-            'Enabling this link now costs 1 credits. Confirm it from the menu to continue.'
+            'Enabling this link now costs 1 credit. Confirm it from the menu to continue.'
         ]
         assert status_of(link) == LinkStatus.DISABLED
         assert balance(funded_user) == 10
