@@ -6,10 +6,12 @@
 //    script's `data-url` (form-encoded, with the CSRF token). The server only stores it while the
 //    account still has no zone, and this never overrides a saved one.
 // 2. Account page: next to the Time zone select, shows "Detected from your browser: <zone>" with a
-//    "Use it" link that picks it in the select, whenever it differs from the selected zone (and is
+//    "Use it" button that picks it in the select, whenever it differs from the selected zone (and is
 //    one of the select's options). Run again on whatever htmx swaps in, since saving the profile
 //    replaces the form. When detection saves the zone while the page shows "Not set", it also
 //    selects the zone there.
+// 3. Keeps <html data-user-timezone> current: the profile save (htmx) answers with a `profileSaved`
+//    event (HX-Trigger) carrying the saved zone, and detection sets it itself.
 (function () {
   const url = document.currentScript && document.currentScript.dataset.url;
 
@@ -80,8 +82,7 @@
     if (hint.dataset.bound) return;
     hint.dataset.bound = '1';
     hint.querySelector('[data-timezone-detected]').textContent = zone;
-    hint.querySelector('[data-timezone-use]').addEventListener('click', (event) => {
-      event.preventDefault();
+    hint.querySelector('[data-timezone-use]').addEventListener('click', () => {
       select.value = zone;
       hint.hidden = true;
     });
@@ -89,6 +90,11 @@
       hint.hidden = select.value === zone;
     });
   }
+
+  document.addEventListener('profileSaved', (event) => {
+    const saved = event.detail && event.detail.timezone;
+    if (typeof saved === 'string') document.documentElement.dataset.userTimezone = saved;
+  });
 
   const zone = detected();
   sendDetected(zone);

@@ -516,6 +516,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        # `accounts.User` has `name` and `email` (no username, first_name or last_name, which are
+        # Django's defaults and would compare nothing but the email).
+        'OPTIONS': {
+            'user_attributes': ('name', 'email'),
+        },
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',

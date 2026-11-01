@@ -320,7 +320,7 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   (`apps/accounts/views/login.py`, CSRF-protected, honours a same-site `next`; without one every
   sign-in -- password, Google, Microsoft -- lands on the home page, see
   `redirects.redirect_target`); logout is
-  POST-only. The browser never holds a JWT. `accounts.backends.EmailBackend` is plain
+  POST-only (a GET just redirects to the login page and ends nothing). The browser never holds a JWT. `accounts.backends.EmailBackend` is plain
   `ModelBackend` (no overrides; the class stays because sessions and `google_oauth.LOGIN_BACKEND`
   name its path): it hashes once for an unknown email, so login timing doesn't reveal accounts,
   and refuses `is_active=False` users at login and on every session load. Such a login answers
@@ -523,8 +523,11 @@ no support address.
 **Change password** is a session form view on the account page (`POST /account/password/`,
 `views/password.py`, `forms.ChangePasswordForm`; web only, no `/api/` endpoint). It needs the
 current password and refuses an unchanged one; the new one goes through `PasswordValidator` *and*
-Django's `AUTH_PASSWORD_VALIDATORS` (too common, all digits, too similar to the email or name --
-signup and reset still apply only `PasswordValidator`). `services.password_change.change_password`
+Django's `AUTH_PASSWORD_VALIDATORS` (too common, all digits, too similar to the email or the
+name: `user_attributes` is `('name', 'email')`, since `User` has no username, first or last name --
+signup and reset still apply only `PasswordValidator`, which also refuses a password over
+`MAX_PASSWORD_LENGTH` (128) characters on every surface that uses it: signup, reset, change
+password, the API's reset and `inv users create`). `services.password_change.change_password`
 saves it and, on commit, queues the `send_password_changed_email` task ("your password was
 changed", with a link to `accounts:forgot-password` in case it wasn't the owner -- sent only to a
 *confirmed* address, like the feedback receipt). The view calls `update_session_auth_hash`, so this
@@ -569,8 +572,10 @@ detection endpoint and the API schema all refuse anything else with `Unknown tim
 empty or stale name, which logs a warning once per process per value and never raises),
 `user_today(user)`, `local_datetime(user, date, time | None)` (the instant in UTC; a skipped local
 time lands forward by the gap, a repeated one is its first occurrence, `fold=0`), `timezone_choices()`
-(UTC first, then the `Area/City` names, without `Etc/`, `US/`, `posix/`, bare aliases such as `GMT`
-or `Japan` and the `Canada/`-style links) and `set_timezone(user, name, *, only_if_unset=False)`,
+(UTC first, then the canonical `Area/City` names of the tz database's `zone.tab` -- read from the
+system tz directories, else the `tzdata` package -- so without `Etc/`, `US/`, `posix/`, bare
+aliases such as `GMT` or `Japan`, the `Canada/`-style links and the old `Area/City` aliases such
+as `Asia/Calcutta`; if no `zone.tab` can be read it falls back to the prefix filter alone) and `set_timezone(user, name, *, only_if_unset=False)`,
 which compares with the row under a lock, saves with `update_fields`, returns whether it changed
 and, **on commit and only on a change**, sends `signals.timezone_changed` (`sender=User`, `user`,
 `old`, `new`; `send_robust`, a failing receiver is logged). A product connects to it from its own
@@ -604,10 +609,11 @@ is off by a few hours" report to mean the saved zone differs from where the user
   stale zone, survives saving the name. A post without `timezone`, or without `timezone_rendered`
   (an older client), still works: the former keeps the zone, the latter compares with the database.
   Under the select, `accounts/js/timezone.js` shows "Detected from your browser: ..." with a "Use
-  it" link when the browser's zone differs from the selected one and is one of the options, and,
+  it" button when the browser's zone differs from the selected one and is one of the options, and,
   when detection saves the zone while the select shows "Not set", selects it there.
 - *Detection:* the same script (loaded deferred by `core/base.html` for signed-in users only, with
-  the endpoint in its `data-url`; `<html data-user-timezone>` carries the saved zone) posts the
+  the endpoint in its `data-url`; `<html data-user-timezone>` carries the saved zone; the profile save keeps it current with a
+  `profileSaved` `HX-Trigger`) posts the
   browser's zone, form-encoded with the CSRF token, to `POST /account/timezone/` (`accounts:timezone`)
   once per browser session (`sessionStorage` `tzSent`), only while the account has no zone. The view
   writes with `set_timezone(..., only_if_unset=True)`, so a zone saved meanwhile is never overridden

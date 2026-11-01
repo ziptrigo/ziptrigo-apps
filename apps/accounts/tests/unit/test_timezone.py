@@ -1,6 +1,7 @@
 """A user's time zone (issue #177): the field, the service, the middleware, the account form, the
 browser-detection endpoint and `PUT`/`GET /api/account`."""
 
+import json
 import logging
 from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
@@ -224,6 +225,35 @@ def test_timezone_choices_start_with_utc_and_hide_legacy_names():
     for legacy in ('GMT', 'CET', 'EST', 'Japan', 'Etc/UTC', 'US/Pacific', 'Canada/Eastern'):
         assert legacy not in names
     assert not [n for n in names if n.startswith(('Etc/', 'SystemV/', 'US/', 'posix/', 'right/'))]
+
+
+def test_timezone_choices_leave_out_links_to_other_zones():
+    if timezones._canonical_names() is None:
+        pytest.skip('no zone.tab on this machine')
+    names = {name for name, _label in timezone_choices()}
+
+    # The canonical name is offered, the old alias for the same zone is not.
+    for canonical, alias in (
+        ('Asia/Kolkata', 'Asia/Calcutta'),
+        ('Europe/Kyiv', 'Europe/Kiev'),
+        ('Africa/Asmara', 'Africa/Asmera'),
+        ('America/Argentina/Buenos_Aires', 'America/Buenos_Aires'),
+        ('Pacific/Pago_Pago', 'Pacific/Samoa'),
+    ):
+        assert canonical in names
+        assert alias not in names
+    for alias in ('Australia/ACT', 'Australia/NSW', 'America/Ensenada', 'Asia/Saigon'):
+        assert alias not in names
+    # A zone that merely shares its rules with another one is still its own entry.
+    assert {'Europe/Amsterdam', 'America/Chicago', 'Pacific/Kiritimati'} <= names
+
+
+def test_timezone_choices_fall_back_to_the_prefix_filter_without_zone_tab(monkeypatch):
+    monkeypatch.setattr(timezones, '_canonical_names', lambda: None)
+    names = {name for name, _label in timezone_choices()}
+
+    assert {'Europe/Lisbon', 'Asia/Kolkata'} <= names
+    assert not {n for n in names if n.startswith(('Etc/', 'US/', 'Canada/'))}
 
 
 def test_timezone_choices_show_underscores_as_spaces():
@@ -592,6 +622,32 @@ def test_account_page_offers_a_valid_legacy_zone_that_is_saved(client, user):
     content = client.get(reverse('accounts:account')).content.decode()
 
     assert '<option value="US/Pacific" selected>US/Pacific</option>' in content
+
+
+def test_account_page_offers_a_legacy_alias_that_is_saved(client, user):
+    set_timezone(user, 'Asia/Calcutta')
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert '<option value="Asia/Calcutta" selected>Asia/Calcutta</option>' in content
+
+
+def test_saving_the_profile_over_htmx_announces_the_saved_zone(client, user):
+    client.force_login(user)
+
+    response = _post_profile(client, name='New Name', timezone='Europe/Lisbon')
+
+    assert json.loads(response['HX-Trigger']) == {'profileSaved': {'timezone': 'Europe/Lisbon'}}
+
+
+def test_use_it_is_a_button_not_a_link(client, user):
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert '<button type="button" data-timezone-use' in content
+    assert 'href="#"' not in content
 
 
 def test_form_saves_a_valid_zone_and_fires_the_signal_once(

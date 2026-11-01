@@ -2,7 +2,7 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_http_methods
 
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
@@ -80,11 +80,14 @@ def login_page(request: HttpRequest) -> HttpResponse:
     return render(request, template, context, status=status)
 
 
-@require_POST
+@require_http_methods(['GET', 'HEAD', 'POST'])
 def logout_page(request: HttpRequest) -> HttpResponse:
-    """Log out the current user and redirect to the homepage.
+    """Log out the current user (POST) and redirect to the homepage.
 
-    POST-only, so another site can't log users out with a link or an image.
+    Only a POST signs out, so another site can't log users out with a link or an image. A GET (a
+    typed or bookmarked address) changes nothing and just redirects to the sign-in page.
     """
+    if request.method != 'POST':
+        return redirect('accounts:login')
     auth_logout(request)
     return redirect('core:home')

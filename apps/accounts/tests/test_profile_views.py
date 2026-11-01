@@ -1,5 +1,7 @@
 """The account page's session-authenticated profile form."""
 
+import re
+
 import pytest
 from django.urls import reverse
 
@@ -132,3 +134,16 @@ def test_invalid_profile_post_without_htmx_still_names_the_right_provider(
     assert note in page
     assert response.status_code == 422
     assert note in response.content.decode()
+
+
+@pytest.mark.parametrize(('balance', 'text'), [(1, '1 credit'), (0, '0 credits'), (5, '5 credits')])
+def test_account_page_pluralizes_the_balance(client, user, balance, text):
+    from apps.billing.services import add_credits
+
+    if balance:
+        add_credits(user, balance, source='test')
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert re.search(rf'text-2xl font-semibold">{text}\s*<', content)

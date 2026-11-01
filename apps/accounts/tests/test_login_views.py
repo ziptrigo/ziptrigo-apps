@@ -109,11 +109,32 @@ def test_api_login_does_not_start_a_session(client, user):
     assert SESSION_KEY not in client.session
 
 
-def test_logout_requires_post(client, user):
+def test_logout_by_get_only_redirects_and_keeps_the_session(client, user):
     client.force_login(user)
 
-    assert client.get(reverse('accounts:logout')).status_code == 405
+    response = client.get(reverse('accounts:logout'))
+
+    assert response.status_code == 302
+    assert response['Location'] == reverse('accounts:login')
     assert SESSION_KEY in client.session
+
+
+def test_logout_refuses_other_methods(client, user):
+    client.force_login(user)
+
+    assert client.put(reverse('accounts:logout')).status_code == 405
+    assert client.delete(reverse('accounts:logout')).status_code == 405
+    assert SESSION_KEY in client.session
+
+
+def test_login_page_is_accessible(client):
+    content = client.get(reverse('accounts:login')).content.decode()
+
+    # The logo is decorative, and the visibility toggle is not part of the password label.
+    assert 'alt="Logo"' not in content
+    assert '<label for="password-input"' in content
+    assert 'aria-pressed="false"' in content
+    assert 'aria-label="Toggle password visibility"' not in content
 
 
 def test_logout_ends_session(client, user):
