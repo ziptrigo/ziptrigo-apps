@@ -206,7 +206,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 2 | Check the header balance after reloading the page. | "Balance: 96 credits" (3 credits spent). |
 | 3 | Click **Go to receipts**. | 6 rows in total. The three new ones are **Processed**, Staples, USD 42.10, 2026-10-09, and each second line carries an amber "⚠ possible duplicate" (just before "· added …"). R1's row has no such marker. The **Duplicates** tab shows **3**. |
 | 4 | **Record** the ids: open each new row and note `R2_ID` (staples-2.png), `R3_ID` (receipt.pdf), `R4_ID` (receipt-3.png) from the URL ("Source: uploaded · <filename>" on the page tells which is which). | — |
-| 5 | On `/billing/credits/`. | Three new "-1 (spend)" rows: "Receipt processing: staples-2.png", "…: receipt.pdf", "…: receipt-3.png". Balance 96. |
+| 5 | On `/billing/credits/`. | Three new "-1 Spend" rows: "Receipt processing: staples-2.png", "…: receipt.pdf", "…: receipt-3.png". Balance 96. |
 
 ### RCPT-09 Duplicates tab and "Not a duplicate"
 
@@ -339,7 +339,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 2 | Click **Cancel**. | Modal closes; nothing happens. |
 | 3 | Open it again and confirm. | The page reloads with "Reading the receipt again. This usually takes a few seconds." Because tasks run inline it is already **Processed** (if it shows "Reading your receipt…", wait: the panel refreshes itself every 3 s). |
 | 4 | Check the fields. | Kept as you edited them: amount 12.50, date 2025-06-30, category Travel, number INV-001, payment Visa ••1111, notes "client lunch". |
-| 5 | Go to `/billing/credits/`. | Balance **95**; a new "-1 (spend)" row "Receipt processing: staples-1.png". |
+| 5 | Go to `/billing/credits/`. | Balance **95**; a new "-1 Spend" row "Receipt processing: staples-1.png". |
 
 ### RCPT-20 Download original and the PDF preview
 
@@ -650,7 +650,7 @@ filtered receipts with the documented columns.
 | 1 | Sign in as `qa.admin@example.com`; open `/admin/billing/credittransaction/adjust/`. | "Adjust credits" form: **User email**, **Direction** (Add / Spend), **Amount**, **Description**, **Apply**. |
 | 2 | Enter `qa.broke@example.com`, Add, `5`, `QA top-up`; **Apply**. | Success message "Adjusted credits for qa.broke@example.com. New balance: 4." (5 added, and the waiting receipt was read at once for 1; if it says 5, note it and continue). |
 | 3 | Sign in as `qa.broke@example.com`; open `/receipts/<B1_ID>/`. | **Processed**, "Staples · 2026-10-09", the edit form is shown. |
-| 4 | `/billing/credits/`. | Balance 4; rows "+5 (adjustment) QA top-up" and "-1 (spend) Receipt processing: broke.png". |
+| 4 | `/billing/credits/`. | Balance 4; rows "+5 Adjustment" "QA top-up" and "-1 Spend" "Receipt processing: broke.png". |
 
 ### RCPT-44 Paused storage (frozen account) banner — needs setup
 
