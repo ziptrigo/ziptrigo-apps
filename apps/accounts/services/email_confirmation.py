@@ -186,7 +186,7 @@ def send_email_confirmed(user: User) -> None:
     and never turns the confirmation into an error page. The address is remembered as confirmed
     first (`known_emails.remember`, issue #160), in the confirming transaction, so a receiver sees
     who holds it."""
-    known_emails.remember(user)
+    known_emails.remember_quietly(user)
 
     def _send() -> None:
         for _, result in email_confirmed.send_robust(sender=User, user=user):

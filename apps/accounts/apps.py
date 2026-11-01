@@ -34,7 +34,7 @@ def _announce_new_account(sender, instance, created, raw=False, **kwargs):
     from .signals import account_created
 
     if instance.email_confirmed:
-        known_emails.remember(instance)
+        known_emails.remember_quietly(instance)
     for _, result in account_created.send_robust(sender=sender, user=instance):
         if isinstance(result, Exception):
             logger.error(

@@ -51,8 +51,14 @@ What is stored is a keyed hash of the canonical address, not the address (`accou
   remembered (the information is gone); the backfill covers confirmed accounts as they are.
 - Someone with several separate mailboxes (not aliases of one) can still get the credits once per
   mailbox. Making that harder (phone, card) is a different feature.
-- It is on by default. To ship it switched off, set the value to 0 in the admin before the first
-  user signs up (or after the deploy, before announcing it): rows are only created while it is above 0.
+- It is on by default, for the existing settings row too (the migration fills it with 1000). To
+  ship it switched off, set `welcome_credits` to 0 in the admin as soon as the deploy has run
+  (the field only exists after the migration). Accounts created in between get a waiting row; they
+  are credited if you turn it on again, and never otherwise. The daily job does nothing while it
+  is 0.
+- Free credits attract abuse: a catch-all or disposable-mail domain gives unlimited new addresses.
+  The limits are the signup rate limit (5 per hour per IP) and the Turnstile captcha, which is
+  optional (`TURNSTILE_SITE_KEY`). Turn the captcha on, and watch the amount.
 
 ## Running it by hand
 

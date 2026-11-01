@@ -2085,7 +2085,8 @@ was ever used.
   queued on commit by `on_account_created` for an account created already confirmed and by
   `on_email_confirmed` (the `email_confirmed` receiver) for the emailed link and a reset -- does
   nothing unless the row is `pending`, the user is confirmed and active and the setting is still
-  above 0 (set to 0 meanwhile, the row waits). Then it asks `known_emails.remember(user)`: true only
+  above 0 (set to 0 meanwhile, the row waits) and is not staff (made staff later, e.g. by the
+  admin's add form, it waits forever). Then it asks `known_emails.remember(user)`: true only
   for the **first account to have confirmed the address, or any variant of it, ever**. True: one
   transaction with `add_credits(type=WELCOME, description='Welcome credits', source='billing')`
   (`CreditTransactionType.WELCOME`), the row `granted` (`credits`, `transaction`) and an in-app
@@ -2104,9 +2105,11 @@ was ever used.
   anyone could register a victim's address, or a `+tag` of it, and have the owner refused. The places
   an address becomes confirmed call `remember`: `email_confirmation.send_email_confirmed` (the link,
   a reset, `inv users confirm`, all of which also use it) and the `post_save` receiver for an
-  account created already confirmed. `remember` is first-come and idempotent, the primary key
-  decides a race. `settle` calls it again itself, so a confirmation path that forgot would still be
-  covered. Two unconfirmed `a@` and `a+shop@` signups: whoever confirms first is the holder and the
+  account created already confirmed, and the user admin when staff tick `email_confirmed` (it
+  goes through `send_email_confirmed`). Both callers use `remember_quietly` (own savepoint, errors
+  logged): remembering an address must never fail a confirmation or a sign-up. `remember` is
+  first-come and idempotent, the primary key decides a race. `settle` calls it again itself, so
+  an account that has a welcome row is covered even if a path forgot; one without a row is not. Two unconfirmed `a@` and `a+shop@` signups: whoever confirms first is the holder and the
   other is refused. The migration backfills confirmed accounts, oldest first; an address an existing
   account has already moved away from cannot be recovered. **Rotating `SECRET_KEY` silently makes
   every remembered address new again** (nothing else here is keyed so persistently): don't, or
@@ -2118,8 +2121,10 @@ was ever used.
   `refusal_emailed_at`, so once per account however many times it runs. A switched-off setting sends
   nothing (there is no row to refuse).
 - **Safety net.** The daily `billing.settle_welcome_credits` job (`welcome.settle_pending`) settles
-  `pending` rows of confirmed users and sends the email of a `refused` row whose task was lost;
-  both are idempotent.
+  `pending` rows of confirmed, active, non-staff users and sends the email of a `refused` row whose
+  task was lost (or whose send failed: when every backend fails the claim on `refusal_emailed_at` is
+  released); both are idempotent, paged oldest first by keyset so rows it can never settle cannot
+  starve the rest, and it does nothing while the setting is 0.
 - **Admin.** The setting is on `BillingSettings`; `WelcomeCreditAdmin` is read-only (status, reason,
   credits, dates; filter by status and reason). `KnownEmail` has no admin on purpose (hashes).
 - **Tests.** `apps/billing/tests/test_welcome_credits.py` (marked `welcome_credits`: the root

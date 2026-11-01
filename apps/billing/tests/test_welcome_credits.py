@@ -7,12 +7,15 @@ from typing import cast
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import override_settings
+from django.urls import reverse
 
 from apps.accounts.models import KnownEmail, User
 from apps.accounts.services import google_oauth, known_emails, microsoft_oauth
 from apps.accounts.services.email_confirmation import confirm_user, send_email_confirmed
+from apps.accounts.services.password_reset import PasswordResetService
 from apps.accounts.services.signup import create_account
 from apps.accounts.tests.factories import UserFactory
+from apps.accounts.tokens import PasswordResetToken
 from apps.billing.jobs import settle_welcome_credits
 from apps.billing.models import (
     BillingSettings,
@@ -111,7 +114,7 @@ def test_the_user_is_told_in_the_app(run):
     assert notice.source == 'billing'
     assert '1000' in notice.title
     assert notice.key == 'welcome_credits'
-    assert notice.url == '/billing/credits/' or notice.url.startswith('/billing/')
+    assert notice.url == reverse('billing:credits-history')
 
 
 def test_nothing_is_granted_before_the_email_is_confirmed(run):
@@ -460,3 +463,139 @@ def test_rotating_the_secret_key_makes_known_addresses_look_new_again(run):
     with override_settings(SECRET_KEY='a-different-secret-key-for-the-test'):
         newcomer = new_confirmed(run, 'a+2@example.com')
     assert get_balance(newcomer) == 1000
+
+
+# -- review follow-ups ------------------------------------------------------------------------
+
+
+def test_a_failure_remembering_the_address_never_fails_the_confirmation(run, monkeypatch, caplog):
+    user = signup(run)
+
+    def boom(user):
+        raise RuntimeError('database exploded')
+
+    monkeypatch.setattr(known_emails, 'remember', boom)
+    with run():
+        assert confirm_user(user) is True
+
+    assert User.objects.get(pk=user.pk).email_confirmed
+    assert 'Could not remember the confirmed address' in caplog.text
+
+
+def test_a_failure_remembering_the_address_never_loses_a_new_account(monkeypatch):
+    monkeypatch.setattr(known_emails, 'remember', lambda user: 1 / 0)
+    user = User.objects.create_user(
+        email='g@example.com', password=None, name='G', email_confirmed=True
+    )
+    assert User.objects.filter(pk=user.pk).exists()
+
+
+def test_a_password_reset_that_confirms_the_address_settles_the_credits(run):
+    user = signup(run)
+    token = str(PasswordResetToken.for_user(user))
+    with run():
+        PasswordResetService.reset_password(user, 'newpass123', token=token)
+
+    assert get_balance(user) == 1000
+    assert status_of(user) == WelcomeCreditStatus.GRANTED
+
+
+def test_a_password_reset_for_a_variant_of_a_known_address_is_refused(run, sent):
+    new_confirmed(run, 'a@example.com')
+    user = signup(run, 'a+2@example.com')
+    token = str(PasswordResetToken.for_user(user))
+    with run():
+        PasswordResetService.reset_password(user, 'newpass123', token=token)
+
+    assert get_balance(user) == 0
+    assert status_of(user) == WelcomeCreditStatus.REFUSED
+    assert len(sent) == 1
+
+
+def test_staff_confirming_an_address_in_the_admin_settles_the_credits(run, client, admin_user):
+    user = signup(run)
+    client.force_login(admin_user)
+
+    with run():
+        response = client.post(
+            reverse('custom_admin:accounts_user_change', args=[user.pk]),
+            {
+                'email': user.email,
+                'name': user.name,
+                'status': User.STATUS_ACTIVE,
+                'is_active': 'on',
+                'email_confirmed': 'on',
+            },
+        )
+
+    assert response.status_code == 302
+    assert get_balance(user) == 1000
+    assert known_emails.remember(User.objects.get(pk=user.pk)) is True
+    assert KnownEmail.objects.count() == 1
+
+
+def test_a_user_made_staff_after_signing_up_is_not_offered_the_credits(run):
+    user = signup(run)
+    User.objects.filter(pk=user.pk).update(is_staff=True)
+
+    confirm(run, user)
+    settle_welcome_credits()
+
+    assert status_of(user) == WelcomeCreditStatus.PENDING
+    assert get_balance(user) == 0
+
+
+def test_a_refusal_email_that_could_not_be_sent_is_tried_again(run, monkeypatch):
+    new_confirmed(run, 'a@example.com')
+    outcomes = [(0, 1), (1, 0)]
+    messages: list[dict] = []
+
+    def flaky(**kwargs):
+        result = outcomes.pop(0)
+        if result[0]:
+            messages.append(kwargs)
+        return result
+
+    monkeypatch.setattr('apps.billing.services.welcome.send_email', flaky)
+    refused = new_confirmed(run, 'a+2@example.com')
+    grant = WelcomeCredit.objects.get(user=refused)
+    assert grant.refusal_emailed_at is None  # the first send failed and released the claim
+    assert not messages
+
+    settle_welcome_credits()  # the daily job sends it
+
+    grant.refresh_from_db()
+    assert grant.refusal_emailed_at is not None
+    assert len(messages) == 1
+
+
+def test_the_job_is_not_starved_by_rows_it_can_never_settle(run):
+    """Inactive users stay pending whatever happens; they must not hide the rows behind them."""
+    stuck = [signup(run, f'stuck{i}@example.com') for i in range(3)]
+    for user in stuck:
+        User.objects.filter(pk=user.pk).update(email_confirmed=True, status=User.STATUS_INACTIVE)
+    ok = signup(run, 'fine@example.com')
+    User.objects.filter(pk=ok.pk).update(email_confirmed=True)
+
+    assert welcome.settle_pending(batch=2) == 1
+
+    assert get_balance(ok) == 1000
+    assert all(status_of(user) == WelcomeCreditStatus.PENDING for user in stuck)
+
+
+def test_the_job_pages_through_more_rows_than_one_batch(run):
+    users = [signup(run, f'user{i}@example.com') for i in range(5)]
+    User.objects.filter(pk__in=[u.pk for u in users]).update(email_confirmed=True)
+
+    assert welcome.settle_pending(batch=2) == 5
+
+    assert all(get_balance(user) == 1000 for user in users)
+
+
+def test_the_job_does_nothing_while_the_setting_is_zero(run):
+    user = signup(run)
+    User.objects.filter(pk=user.pk).update(email_confirmed=True)
+    BillingSettings.objects.update_or_create(pk=1, defaults={'welcome_credits': 0})
+
+    assert welcome.settle_pending() == 0
+    assert status_of(user) == WelcomeCreditStatus.PENDING

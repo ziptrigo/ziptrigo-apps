@@ -26,6 +26,7 @@ address an existing account has already moved away from is gone and cannot be re
 
 import hashlib
 import hmac
+import logging
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -34,6 +35,8 @@ from ..models import KnownEmail, User
 
 #: Domains where dots in the local part are ignored, and which are the same mailbox.
 GMAIL_DOMAINS = frozenset({'gmail.com', 'googlemail.com'})
+
+logger = logging.getLogger(__name__)
 
 _PREFIX = b'known-email:'
 
@@ -72,3 +75,16 @@ def remember(user: User) -> bool:
         except IntegrityError:
             row = KnownEmail.objects.get(pk=key)
     return row.first_user_id == user.pk
+
+
+def remember_quietly(user: User) -> None:
+    """`remember` for a caller that must not fail because of it (the confirmation paths, the
+    creation of an account): in its own savepoint, since on Postgres a database error that is merely
+    caught still aborts the transaction, and logged with the user's id. `billing.welcome.settle`
+    asks again before it grants anything, so a miss here costs nothing for an account with a
+    welcome row."""
+    try:
+        with transaction.atomic():
+            remember(user)
+    except Exception:
+        logger.exception('Could not remember the confirmed address of user %s', user.pk)

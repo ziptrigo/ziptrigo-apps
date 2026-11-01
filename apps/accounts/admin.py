@@ -8,6 +8,7 @@ from apps.core.admin_site import custom_admin_site
 from .forms.admin import UserAdminChangeForm, UserAdminCreationForm
 from .http import AuthenticatedHttpRequest
 from .models import User
+from .services.email_confirmation import send_email_confirmed
 from .services.timezones import set_timezone
 
 # Apps whose rows hang off a user with `on_delete=CASCADE` and are meant to go with it, although
@@ -95,6 +96,10 @@ class UserAdmin(DjangoUserAdmin):
         super().save_model(request, obj, form, change)
         if obj.timezone != new:
             set_timezone(obj, new)
+        if change and 'email_confirmed' in form.changed_data and obj.email_confirmed:
+            # Staff confirming an address by hand is a confirmation like any other: remember the
+            # address and tell the apps that care (promo reservations, welcome credits).
+            send_email_confirmed(obj)
 
     def get_deleted_objects(self, objs, request: AuthenticatedHttpRequest):
         """Don't let a cascaded row's read-only admin block deleting its user.

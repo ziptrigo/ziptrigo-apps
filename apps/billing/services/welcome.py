@@ -99,6 +99,9 @@ def settle(user_id: str) -> str:
         user = grant.user
         if not user.email_confirmed or not user.is_active or user.status != User.STATUS_ACTIVE:
             return grant.status
+        if user.is_staff or user.is_superuser:
+            # Made staff after signing up (the admin's add form does this): not offered either.
+            return grant.status
         amount = configured_credits()
         if amount <= 0:
             return grant.status
@@ -165,7 +168,11 @@ def send_welcome_refused_email(user_id: str) -> None:
         return
     user = User.objects.get(pk=user_id)
     subject, text_body, html_body = render_welcome_refused_email(user)
-    send_email(to=user.email, subject=subject, text_body=text_body, html_body=html_body)
+    sent, _ = send_email(to=user.email, subject=subject, text_body=text_body, html_body=html_body)
+    if not sent:
+        # Every backend failed (`send_email` does not raise): release the claim so the daily job
+        # tries again.
+        WelcomeCredit.objects.filter(user_id=user_id).update(refusal_emailed_at=None)
 
 
 def render_welcome_refused_email(user: User) -> tuple[str, str, str]:
@@ -194,29 +201,55 @@ def render_welcome_refused_email(user: User) -> tuple[str, str, str]:
 
 def settle_pending(*, batch: int = 500) -> int:
     """The daily safety net (`billing.settle_welcome_credits`): settle every pending row whose
-    user is confirmed, and send the email of a refusal whose task was lost. Returns how many
-    rows it looked at. Idempotent."""
+    user is confirmed and active, and send the email of a refusal whose task was lost. Pages
+    through them oldest first by `created_at`, so rows `settle` leaves pending (a staff member, an
+    inactive user) cannot starve the ones behind them. Does nothing while the setting is 0.
+    Returns how many rows it settled or mailed. Idempotent."""
+    if configured_credits() <= 0:
+        return 0
     done = 0
-    pending = list(
-        WelcomeCredit.objects.filter(
-            status=WelcomeCreditStatus.PENDING, user__email_confirmed=True
-        ).values_list('user_id', flat=True)[:batch]
+    pending = WelcomeCredit.objects.filter(
+        status=WelcomeCreditStatus.PENDING,
+        user__email_confirmed=True,
+        user__is_active=True,
+        user__status=User.STATUS_ACTIVE,
+        user__is_staff=False,
+        user__is_superuser=False,
     )
-    for user_id in pending:
+    for user_id in _pages(pending, batch):
         try:
-            settle(str(user_id))
-            done += 1
+            if settle(str(user_id)) != WelcomeCreditStatus.PENDING:
+                done += 1
         except Exception:
             logger.exception('Could not settle welcome credits for user %s', user_id)
-    unsent = list(
-        WelcomeCredit.objects.filter(
-            status=WelcomeCreditStatus.REFUSED, refusal_emailed_at__isnull=True
-        ).values_list('user_id', flat=True)[:batch]
+    unsent = WelcomeCredit.objects.filter(
+        status=WelcomeCreditStatus.REFUSED,
+        refusal_emailed_at__isnull=True,
+        user__email_confirmed=True,
+        user__is_active=True,
     )
-    for user_id in unsent:
+    for user_id in _pages(unsent, batch):
         try:
             send_welcome_refused_email.call(str(user_id))
             done += 1
         except Exception:
             logger.exception('Could not send the welcome credits email to user %s', user_id)
     return done
+
+
+def _pages(queryset, batch: int):
+    """The `user_id` of every row of `queryset`, oldest first, `batch` at a time (keyset paging on
+    `created_at`, which the loop's own writes do not change)."""
+    last = None
+    while True:
+        rows = queryset.order_by('created_at', 'pk')
+        if last is not None:
+            rows = rows.filter(created_at__gte=last[0]).exclude(created_at=last[0], pk__lte=last[1])
+        page = list(rows.values_list('user_id', 'created_at', 'pk')[:batch])
+        if not page:
+            return
+        for user_id, _, _ in page:
+            yield user_id
+        last = (page[-1][1], page[-1][2])
+        if len(page) < batch:
+            return
