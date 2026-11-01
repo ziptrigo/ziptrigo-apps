@@ -98,6 +98,9 @@ def test_a_label_wrapped_field_keeps_its_name_and_the_message_sits_below_the_lab
 
     message = page.locator('#register-form-password-error')
     expect(message).to_be_visible()
+    # The re-rendered form has `autofocus` on Name (the first field): the first invalid control, the
+    # password, still takes the focus, since the swap put it on Name, not the person.
+    expect(password).to_be_focused()
     expect(page.locator('#register-form label:has(input[name="password"]) + p')).to_have_id(
         'register-form-password-error'
     )
@@ -266,6 +269,43 @@ def test_two_errors_for_one_control_both_stay_described_and_both_go_when_it_is_e
     expect(page.locator('#probe-form [data-field-error-message]')).to_have_count(0)
     expect(probe).not_to_have_attribute('aria-invalid', 'true')
     expect(probe).to_have_attribute('aria-describedby', 'probe-help')
+
+
+def test_an_autofocus_field_the_swap_rendered_is_not_typing_but_a_field_the_person_is_in_is(
+    page: Page, receipts_server: ReceiptsServer
+):
+    """A form swapped whole renders its `autofocus` field and the browser focuses it; that must not
+    keep the focus from the first invalid control. A person typing in another field of the form
+    still keeps theirs."""
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    fields = (
+        '<input id="first" name="first" autofocus><input id="second" name="second">'
+        '<input id="third" name="third">'
+    )
+    errors = '<ul hidden data-field-errors><li data-field-error="second">Fix.</li></ul>'
+    settle = """(id) => document.getElementById('probe-form').dispatchEvent(
+        new CustomEvent('htmx:afterSettle', {bubbles: true, detail: {}}))"""
+
+    # The person is in `third` when an answer brings an error for `second`: they stay there.
+    page.evaluate(
+        "([html]) => document.body.insertAdjacentHTML('beforeend', html)",
+        [f'<form id="probe-form">{fields}{errors}</form>'],
+    )
+    page.evaluate("() => document.getElementById('third').focus()")
+    page.evaluate(settle)
+    expect(page.locator('#second')).to_have_attribute('aria-invalid', 'true')
+    expect(page.locator('#third')).to_be_focused()
+
+    # The swap put the focus on the form's `autofocus` field (the person was not on it).
+    page.evaluate("() => document.getElementById('probe-form').remove()")
+    page.evaluate(
+        "([html]) => document.body.insertAdjacentHTML('beforeend', html)",
+        [f'<form id="probe-form">{fields}{errors}</form>'],
+    )
+    page.evaluate("() => document.getElementById('first').focus()")
+    page.evaluate(settle)
+    expect(page.locator('#second')).to_be_focused()
 
 
 def test_names_and_ids_with_quotes_and_backslashes_are_found(

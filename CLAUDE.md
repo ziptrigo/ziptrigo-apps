@@ -1643,7 +1643,9 @@ package, never to `/api/`. Conventions, with helpers in `apps/core/htmx.py`:
     inside its filter form. It puts a `<p id="…-error">` under the control (after its wrapping label, `.relative` box
     or flex/grid row; a `<form>` that is itself a flex row or grid needs its fields wrapped in a block), sets
     `aria-invalid="true"` and puts the message's id first in `aria-describedby`, moves focus to the first invalid
-    control unless the person is typing in one of the form's fields, and removes a field's message as soon as it is
+    control unless the person is typing in one of the form's fields (an `autofocus` field the swap itself
+    rendered, one the person was not on -- the register form's Name after a refused submit -- is not
+    typing: the script remembers the focused element at `htmx:beforeSwap`), and removes a field's message as soon as it is
     edited. A form's messages are cleared when the **form or one of its submit buttons** sends a request, not for a
     poll or a live check from a control inside it. Two names that resolve to one control each keep their message
     (the control's `data-field-error-id` holds every id) and editing it removes both. A widget made of buttons (the
