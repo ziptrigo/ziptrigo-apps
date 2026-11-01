@@ -34,6 +34,7 @@ from ..services import (
     delete_forever,
     get_account,
     has_manual_order,
+    open_tasks,
     order_tasks,
     postpone_task,
     recurrence,
@@ -65,6 +66,7 @@ from .lists import VIEWS, belongs, decorate, list_context, page_url, row_task
 
 PANEL_MSG = '#task-msg'
 CREDITS_LINE = 'You do not have enough credits to add this task.'
+NEIGHBOUR_ROWS = 20
 
 
 def _view_of(request: AuthenticatedHttpRequest) -> str:
@@ -166,7 +168,41 @@ def after_action(
         if belongs(fresh, view, today)
         else 'todo/partials/row_gone.html'
     )
-    return render(request, template, context)
+    response = render(request, template, context)
+    response.content += _refreshed_neighbours(request, fresh, view, today)
+    return response
+
+
+def _refreshed_neighbours(request: AuthenticatedHttpRequest, task: Task, view: str, today) -> bytes:
+    """Out-of-band updates for what an action on a row changes elsewhere on the same page, which the
+    row's own answer would leave as rendered with the page: the other open occurrences of a
+    repeating task (`Task.offers_stop_repeating` depends on how many are left) and, for a subtask,
+    the parent's Complete button (its question names the open subtasks). A target that is not on
+    the page is simply ignored by htmx."""
+    parts: list[str] = []
+    if task.recurrence_id:
+        siblings = decorate(
+            open_tasks(request.user).filter(recurrence_id=task.recurrence_id).exclude(pk=task.pk)
+        )[:NEIGHBOUR_ROWS]
+        for sibling in siblings:
+            parts.append(
+                render_to_string(
+                    'todo/partials/task_row.html',
+                    {'task': sibling, 'view': view, 'today': today, 'oob': True},
+                    request=request,
+                )
+            )
+    if view == 'subtask' and task.parent_id:
+        parent = row_task(request.user, task.parent_id)
+        open_subtasks = subtasks_of(parent).filter(completed_at__isnull=True).count()
+        parts.append(
+            render_to_string(
+                'todo/partials/complete_button.html',
+                {'task': parent, 'open_subtasks': open_subtasks, 'oob': True},
+                request=request,
+            )
+        )
+    return ''.join(parts).encode()
 
 
 def _refuse_validation(

@@ -1,0 +1,25 @@
+{% comment %} The panel's Complete (or Uncomplete) button. Needs `task` and `open_subtasks`. With `oob` it is sent out of band, so
+   completing or reopening a subtask in the list refreshes the parent's button: its question ("has N open
+   subtasks") would otherwise stay as rendered with the page. {% endcomment %}
+<span id="complete-action" class="contents"{% if oob %} hx-swap-oob="true"{% endif %}>
+{% if task.is_completed %}
+<button type="button" hx-post="{% url 'todo:uncomplete' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+        class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+    <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Uncomplete
+</button>
+{% elif open_subtasks %}
+<button type="button" @click="show($el)"
+        data-url="{% url 'todo:complete' task.number %}"
+        data-title="Complete task"
+        data-body="{{ task.title }} has {{ open_subtasks }} open subtask{{ open_subtasks|pluralize }}. Completing it completes {{ open_subtasks|pluralize:'it,them' }} too."
+        data-label="Complete" data-tone="primary"
+        class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+    <i class="fas fa-check mr-2" aria-hidden="true"></i>Complete
+</button>
+{% else %}
+<button type="button" hx-post="{% url 'todo:complete' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+        class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+    <i class="fas fa-check mr-2" aria-hidden="true"></i>Complete
+</button>
+{% endif %}
+</span>

@@ -10,7 +10,7 @@
         <div class="md:w-48 md:flex-shrink-0">
         {% if show_sidebar_search %}{% include 'todo/partials/search_box.html' %}{% endif %}
         <nav aria-label="To-do">
-            <ul class="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
+            <ul class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
                 {% for key, label, icon, url in nav_items %}
                 <li class="flex-shrink-0">
                     <a href="{{ url }}"{% if nav == key %} aria-current="page"{% endif %}

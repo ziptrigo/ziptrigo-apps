@@ -38,7 +38,11 @@ def _list_response(request: AuthenticatedHttpRequest) -> HttpResponse:
     return render(
         request,
         'todo/partials/label_list.html',
-        {'labels': list_labels(request.user), 'default_color': DEFAULT_LABEL_COLOR},
+        {
+            'labels': list_labels(request.user),
+            'default_color': DEFAULT_LABEL_COLOR,
+            'clear_msg': True,
+        },
     )
 
 

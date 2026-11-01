@@ -8,7 +8,7 @@
         <a href="{% url 'todo:filters' %}"{% if nav == 'filters' %} aria-current="page"{% endif %}
            class="rounded-md hover:underline">Filters</a>
     </h2>
-    <ul class="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
+    <ul class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
         {% for saved in sidebar_filters %}
         <li class="flex-shrink-0">
             <a href="{% url 'todo:filter' saved.pk %}"{% if current_filter_id == saved.pk %} aria-current="page"{% endif %}

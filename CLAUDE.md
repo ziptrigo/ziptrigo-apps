@@ -934,7 +934,11 @@ notifications.notify(
   The page lists everything not dismissed, 20 per page, newest first; read ones are visibly
   different (lighter weight, no dot, no "Mark as read" button), and looking at the page marks
   nothing. One consequence of the rules: a notification **without a `url`** is not a link, so it can
-  only leave the dropdown by being dismissed.
+  only leave the dropdown by being dismissed. **Keyboard focus survives the swaps** (`components.js`):
+  a container marked `data-keep-focus` (`#notification-dropdown-body`, `#notification-list`) remembers,
+  when a request starts from inside it, the place of the control used among the container's controls and
+  focuses the control now at that place after the swap (else the container), instead of dropping to
+  `<body>`; and Escape closes the dropdown from anywhere (`@keydown.escape.window`).
 - **Scoping.** Every service function takes the requesting user and filters on it; someone else's
   notification raises `Notification.DoesNotExist`, which the views turn into a **404, never a 403**.
   `mark_read(user, ids)` ignores ids that are not the user's; `mark_all_read(user)`;
@@ -3491,6 +3495,12 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   1 / 2 / 3, each with a dark twin), `{% label_chip label %}` (the colour at 20% as the background
   and as the text, the description as `title`). Times a page shows (`completed_at`, `deleted_at`) go
   through `|date`, so they follow the user's saved zone.
+- **A row action refreshes what else on the page it changes** (`views.tasks.after_action` /
+  `_refreshed_neighbours`, out of band, ignored by htmx when the target is not on the page): the other
+  open occurrences of a repeating task (`offers_stop_repeating` depends on how many are left) and, for a
+  subtask, the parent's Complete button (`partials/complete_button.html`, its question names the open
+  subtasks). A success on the Labels and Filters pages clears the earlier refusal in `#label-msg` /
+  `#filter-msg` (`clear_msg`).
 - **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
   creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
   minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`).

@@ -5,7 +5,7 @@
    `relative`); from `sm` it hangs under the bell. {% endcomment %}
 {% unread_notification_count as count %}
 <div class="sm:relative" x-data="notificationBell" @click.outside="close()"
-     @keydown.escape="if (open) { close(); $refs.trigger.focus() }">
+     @keydown.escape.window="if (open) { close(); $refs.trigger.focus() }">
     <button type="button" x-ref="trigger" @click="toggle()" id="notification-bell"
             aria-controls="notification-dropdown" :aria-expanded="open"
             class="btn relative block p-1.5 sm:p-2 rounded-full text-xl leading-none text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
@@ -23,7 +23,7 @@
          x-transition:leave-start="opacity-100 scale-100"
          x-transition:leave-end="opacity-0 scale-95"
          class="absolute inset-x-4 top-full z-50 mt-2 origin-top overflow-hidden rounded-xl border border-gray-200 bg-white text-gray-900 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:inset-x-auto sm:right-0 sm:w-96 p-1">
-        <div id="notification-dropdown-body" aria-live="polite">
+        <div id="notification-dropdown-body" aria-live="polite" data-keep-focus>
             <p class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Loading&hellip;</p>
         </div>
     </div>

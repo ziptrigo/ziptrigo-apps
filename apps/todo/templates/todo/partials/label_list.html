@@ -78,3 +78,4 @@
         </button>
     </form>
 </section>
+{% if clear_msg %}{% comment %} A success clears a refusal an earlier request left in the message slot. {% endcomment %}<div id="label-msg" hx-swap-oob="true" class="mb-4 text-sm" aria-live="polite"></div>{% endif %}

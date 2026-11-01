@@ -118,3 +118,51 @@ document.addEventListener('alpine:init', function () {
     document.addEventListener('htmx:afterSwap', check);
     document.addEventListener('htmx:oobAfterSwap', check);
 })();
+
+// Keeps keyboard focus when htmx replaces the content of a container marked `data-keep-focus` (the
+// notification dropdown and list): the focused control is swapped out (a dismissed item, a "Mark all as
+// read" that is no longer needed), which would drop focus to <body>. After the swap focus goes to the
+// control now at the same place in the container, or the last one, or the container itself.
+(function () {
+    const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const origin = new WeakMap(); // container -> the control the request came from and its place among the container's controls
+    const pending = new WeakMap(); // container -> its place in the container's controls
+    // The request is read before hx-disabled-elt disables the button (a disabled control loses focus).
+    // The control is the focused one inside the container, else the submit button of the form that sent it.
+    document.addEventListener('htmx:beforeRequest', function (event) {
+        const elt = event.detail.elt;
+        const container = elt && elt.closest && elt.closest('[data-keep-focus]');
+        if (!container) return;
+        const active = document.activeElement;
+        const from = active && container.contains(active) && active !== container
+            ? active : (elt.matches('button, a') ? elt : elt.querySelector('button, [type=submit]'));
+        if (from) origin.set(container, { from, index: Array.from(container.querySelectorAll(FOCUSABLE)).indexOf(from) });
+    });
+    document.addEventListener('htmx:beforeSwap', function (event) {
+        const target = event.detail.target;
+        if (!target || !target.hasAttribute('data-keep-focus') || !origin.has(target)) return;
+        const { from, index } = origin.get(target);
+        origin.delete(target);
+        if (!target.contains(from)) return;
+        // Only when the person was on that control (not when they have moved on while it loaded).
+        const active = document.activeElement;
+        if (active && active !== document.body && active !== from) return;
+        pending.set(target, index);
+    });
+    document.addEventListener('htmx:afterSettle', function (event) {
+        const target = event.detail.target;
+        if (!target || !pending.has(target)) return;
+        const index = pending.get(target);
+        pending.delete(target);
+        const active = document.activeElement;
+        if (active && active !== document.body) return;
+        const controls = target.querySelectorAll(FOCUSABLE);
+        const next = index >= 0 && controls.length ? controls[Math.min(index, controls.length - 1)] : null;
+        if (next) {
+            next.focus();
+        } else {
+            if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+            target.focus();
+        }
+    });
+})();
