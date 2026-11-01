@@ -193,7 +193,7 @@ about 70 characters wide. Sizes come from Tailwind's scale; don't use arbitrary 
 | Landing hero | `text-4xl font-bold tracking-tight text-sage-700 dark:text-sage-300` | "Welcome to ZipTrigo" |
 | Page title (h1) | `text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100` | "QR codes", "Create QR code" |
 | Section title (h2) | `text-xl font-semibold` (+ `pb-2 border-b border-sage-200 dark:border-sage-700` for a ruled section) | "Your transfers" |
-| Modal / card title (h3) | `text-lg font-semibold text-gray-900 dark:text-gray-100` | "Delete QR code" |
+| Modal title (a `p`, see 10.9) / card title (h3) | `text-lg font-semibold text-gray-900 dark:text-gray-100` | "Delete QR code" |
 | Nav link | `text-lg` | Header |
 | Body | default (`text-base`) | Paragraphs |
 | Field label | `text-sm font-medium` | "Name" |
@@ -508,7 +508,7 @@ sage: brand-coloured text on white is 2.5:1.
 overlay  fixed inset-0 z-50 hidden bg-black/50 dark:bg-black/70 backdrop-blur-[2px] flex items-center justify-center, fades in 220 ms, out 140 ms
 panel    bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4, rises 8 px and scales from 97% (Alpine x-transition)
 body     p-6
-title    h3  text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2
+title    p   text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2   (not a heading: the dialog is named by aria-labelledby)
 text     p   text-sm text-gray-600 dark:text-gray-400 mb-6   (item name in font-medium text-gray-900 dark:text-gray-100)
 actions  flex justify-end gap-3   [Subtle: Cancel] [Danger: Delete]
 ```

@@ -19,7 +19,8 @@
  * The message is not a live region: the slot above is what is announced, once. Focus: when the page
  * has no focus of its own on a field of the form (the swap dropped it, or it sits on the submit button), the
  * first invalid control gets it, so a person using a keyboard or a screen reader lands where the fix is,
- * and hears the label and the message. A person who is typing in a field of the form is never moved.
+ * and hears the label and the message. A person who is typing in a field of the form is never moved; an `autofocus`
+ * field that the swap itself rendered (one the person was not on) does not count as typing.
  *
  * A field's message goes away, with its attributes, the moment the person edits it; all of a form's go
  * when the form is submitted again (the form itself or one of its submit buttons sends the request; a poll or a
@@ -37,6 +38,7 @@
     var MARK = 'data-field-error-id'; // on a control: the ids of the messages under it, space separated
     var originals = new WeakMap(); // control -> its aria-describedby before ours
     var requests = new WeakMap(); // xhr -> the form its request was sent from
+    var focused = new WeakMap(); // xhr -> the element that had the focus when its answer arrived
 
     function formOf(element) {
         if (!element) return null;
@@ -192,17 +194,23 @@
         form.querySelectorAll('[data-field-error-message]').forEach(function (message) { message.remove(); });
     }
 
-    function shouldTakeFocus(form) {
+    // `before` is the element that had the focus when the answer arrived, before the swap (null for a
+    // full page). A field that has it now is "the person is typing" unless the swap itself put it there:
+    // an `autofocus` field of the new markup that is not the node the person was on (a form swapped
+    // whole after a refused submit re-renders its `autofocus` first field, which would otherwise keep
+    // the focus from the first invalid one).
+    function shouldTakeFocus(form, before) {
         var active = document.activeElement;
         if (!active || active === document.body || active === document.documentElement) return true;
         if (!form.contains(active)) return false;
-        return !isField(active);
+        if (!isField(active)) return true;
+        return active.hasAttribute('autofocus') && active !== before;
     }
 
     // Show what the unprocessed `<ul data-field-errors>` in `root` (or `root` itself) carry. `requestForm` is the
     // form of the request whose answer `root` was swapped in by, the last place to look for the form. Idempotent:
     // htmx fires its events more than once for one swap, and a list is applied once.
-    function apply(root, requestForm) {
+    function apply(root, requestForm, before) {
         if (!root || !root.querySelectorAll) return;
         var pending = 'ul[data-field-errors]:not([data-applied])';
         var lists = Array.prototype.slice.call(root.querySelectorAll(pending));
@@ -226,7 +234,7 @@
             var invalid = Array.prototype.filter.call(form.querySelectorAll('[aria-invalid="true"]'), function (c) {
                 return visible(c) && !c.disabled;
             })[0];
-            if (invalid && shouldTakeFocus(form)) invalid.focus();
+            if (invalid && shouldTakeFocus(form, before)) invalid.focus();
         });
     }
 
@@ -248,9 +256,12 @@
     // After the swap has settled (the old form is gone by then, so ids stay unique). htmx settles each element
     // a response put on the page (the target, and every out-of-band one), so only the lists *this* response
     // brought are applied, with the form that sent *this* request as the fallback.
+    document.addEventListener('htmx:beforeSwap', function (event) {
+        if (event.detail && event.detail.xhr) focused.set(event.detail.xhr, document.activeElement);
+    });
     document.addEventListener('htmx:afterSettle', function (event) {
         var xhr = event.detail && event.detail.xhr;
-        apply(event.target, (xhr && requests.get(xhr)) || null);
+        apply(event.target, (xhr && requests.get(xhr)) || null, (xhr && focused.get(xhr)) || null);
     });
     document.addEventListener('DOMContentLoaded', function () { apply(document, null); });
 

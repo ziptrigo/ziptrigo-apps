@@ -214,3 +214,13 @@ class TestFontCacheHeader:
 
     def test_it_is_wired_into_the_settings(self, settings):
         assert settings.WHITENOISE_ADD_HEADERS_FUNCTION is add_static_headers
+
+
+def test_the_confirm_modal_title_is_not_a_heading_but_names_the_dialog():
+    """The modal sits in the page before its content and its title is empty until opened: a heading
+    would show up in the outline as an empty h3 after the h1. The dialog is named by `aria-labelledby`."""
+    html = render_to_string('core/partials/confirm_modal.html')
+
+    assert '<h3' not in html
+    assert 'aria-labelledby="confirm-modal-title"' in html
+    assert '<p id="confirm-modal-title"' in html

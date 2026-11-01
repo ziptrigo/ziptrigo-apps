@@ -3,6 +3,8 @@
    @click="show($el)" and data-url / data-title / data-body / data-label (and data-tone="primary" for a
    confirmation that is not destructive: the button is the brand colour instead of red). The form is a plain POST
    (the views redirect back with a flash message). `confirm_cost` is the `data-cost` of the trigger (empty when it has none).
+   The title is a paragraph that names the dialog (`aria-labelledby`), not a heading: the modal sits in the page before its
+   content and is empty until opened, so a heading would show up in the outline as an empty h3 after the h1.
    A trigger with `data-checkbox-name` and `data-checkbox-label` also shows an unticked checkbox posted as `<name>=1`. {% endcomment %}
 <div x-show="open" style="display: none"
      @keydown.escape.window="if (open) close()" @click.self="close()"
@@ -20,7 +22,7 @@
         <form method="post" :action="url" class="p-6">
             {% csrf_token %}
             <input type="hidden" name="confirm_cost" :value="cost">
-            <h3 id="confirm-modal-title" x-text="title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2"></h3>
+            <p id="confirm-modal-title" x-text="title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2"></p>
             <p x-text="body" class="text-sm text-gray-600 dark:text-gray-400 mb-6"></p>
             <template x-if="checkboxName">
                 <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 mb-6">
