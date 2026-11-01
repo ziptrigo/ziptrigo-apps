@@ -167,10 +167,10 @@ network log), never the `/t/...` URL a second time.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Add `qa-report.txt` (3,000 bytes) through the file input (see Test data). | A row appears: "qa-report.txt (3 KB)", a progress bar, then a green check (tooltip "Done") and a red trash icon. No alert is shown. |
+| 1 | Add `qa-report.txt` (3,000 bytes) through the file input (see Test data). | A row appears: "qa-report.txt (2.9 KB)", a progress bar, then a green check (tooltip "Done") and a red trash icon. No alert is shown. |
 | 2 | Look at the address bar. | The URL is now `/transfer/send/?resume=<uuid>` (added without a page reload). |
-| 3 | Look at the **Send** button. | It is now enabled. |
-| 4 | Add `qa-notes.txt` (1,500 bytes) the same way. | A second row "qa-notes.txt (1 KB)" appears below the first and reaches the green check. |
+| 3 | Look at the **Send** button. | It is now enabled, and the hint "Add at least one file that has finished uploading." under it has disappeared (it reappears if every file is removed). |
+| 4 | Add `qa-notes.txt` (1,500 bytes) the same way. | A second row "qa-notes.txt (1.5 KB)" appears below the first and reaches the green check. |
 | 5 | Check the network log (or console). | For each file: one `POST .../files/` (201), one `POST .../files/<id>/parts/`, one `PUT /__e2e__/ft-s3/...` (200) and one `POST .../files/<id>/complete/` (200). No console errors. |
 
 ### FT-04 Remove a file; the list survives a reload
@@ -180,9 +180,9 @@ network log), never the `/t/...` URL a second time.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Add `qa-remove-me.txt` (100 bytes). | Row "qa-remove-me.txt (0 KB)" reaches the green check. (A file under 512 bytes shows "0 KB"; note it as a cosmetic issue, not a failure.) |
+| 1 | Add `qa-remove-me.txt` (100 bytes). | Row "qa-remove-me.txt (100 bytes)" reaches the green check (sizes below 1 KB are shown in bytes, from 1 KB with one decimal, like the download page). |
 | 2 | Click its trash icon (accessible name "Remove qa-remove-me.txt"). | The row disappears; the other two rows stay; **Send** stays enabled. |
-| 3 | Reload the page (the URL still has `?resume=`). | The page lists exactly `qa-report.txt (3 KB)` and `qa-notes.txt (1 KB)`, both with green checks; `qa-remove-me.txt` is gone; **Send** is enabled. |
+| 3 | Reload the page (the URL still has `?resume=`). | The page lists exactly `qa-report.txt (2.9 KB)` and `qa-notes.txt (1.5 KB)`, both with green checks; `qa-remove-me.txt` is gone; **Send** is enabled. |
 
 ### FT-05 Add a folder; an empty file is refused
 
@@ -194,7 +194,7 @@ network log), never the `/t/...` URL a second time.
 | 1 | Run the "Drop a folder" snippet. | Two rows appear, "qa-folder-a.txt" and "qa-folder-b.txt" (names only, no folder path), both reaching the green check. |
 | 2 | If the browser tool can pick a real folder, click **Add folder** and choose a folder with one small file. | A native folder picker opens; the folder's file is added as a row. (Skip this step if the tool cannot pick folders.) |
 | 3 | Remove every row added in this case with its trash icon. | Only `qa-report.txt` and `qa-notes.txt` remain. |
-| 4 | Add `empty.txt` (0 bytes) through the file input. | A browser alert says "Could not add empty.txt: File is empty." Accept it. No row is added. |
+| 4 | Add `empty.txt` (0 bytes) through the file input. | No browser alert. A red line with `role="alert"` appears above the file list: "Could not add empty.txt: File is empty." No row is added. Adding another file (or the next selection) clears the line. |
 
 ### FT-06 Options form validation
 
@@ -221,7 +221,7 @@ network log), never the `/t/...` URL a second time.
 | 1 | Set Recipients to three lines: `qa.recipient1@example.com`, `qa.recipient2@example.com`, `QA.RECIPIENT1@example.com`. | -- |
 | 2 | Message: `Hello from QA.` + new line + `Second line.`; Expiry "30 days"; Max downloads `10`; Password empty; leave "Email me when a file is downloaded" checked. Click **Send**. | The page navigates to `/transfer/sent/<uuid>/`. Record the uuid as `TRANSFER_A_ID` and the current time. |
 | 3 | Look at the sent page. | Title "Transfer sent - ZipTrigo", a check icon, heading **Your transfer is on its way**, text "We emailed the recipients and sent you a copy. Here's the link too:", a read-only input holding `http://localhost:8765/t/<slug>/`, a **Copy** button and a link **Back to your transfers**. Record the slug as `SLUG_A`. |
-| 4 | Click **Copy**. | The link is copied (if the tool can read the clipboard, it holds the same URL). |
+| 4 | Click **Copy**. | The link is copied (if the tool can read the clipboard, it holds the same URL) and the button label changes to **Copied** for about two seconds, then back to **Copy**. |
 | 5 | Go back to `/transfer/send/`. | A fresh, empty send page (no file rows, no `?resume=`); Transfer A's files are not listed. |
 
 ### FT-08 Emails for transfer A
@@ -231,9 +231,9 @@ network log), never the `/t/...` URL a second time.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | Exactly **one** email (the duplicate `QA.RECIPIENT1@...` line was merged). Subject: `qa-report.txt was sent to you via ZipTrigo`. |
-| 2 | Read its body. | "You have received files: qa-report.txt.", a blank line, "Hello from QA." / "Second line.", then "Download: http://localhost:8765/t/<SLUG_A>/" and "This link expires on YYYY-MM-DD HH:MM UTC." about 30 days from now. |
-| 3 | Open `/__e2e__/mail/?to=qa.recipient2@example.com`. | One email with the same subject and download link. |
+| 1 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | Exactly **one** email (the duplicate `QA.RECIPIENT1@...` line was merged). Subject: `qa-report.txt and 1 more file were sent to you via ZipTrigo` (the first file and a count of the others; a single-file transfer reads `<name> was sent to you via ZipTrigo`). |
+| 2 | Read its body. | "You have received 2 files:" followed by the lines "- qa-report.txt" and "- qa-notes.txt" (every uploaded file is named, up to 20, then "- and N more"; one file reads "You have received a file: <name>."), a blank line, "Hello from QA." / "Second line.", then "Download: http://localhost:8765/t/<SLUG_A>/" and "This link expires on YYYY-MM-DD HH:MM UTC." about 30 days from now. |
+| 3 | Open `/__e2e__/mail/?to=qa.recipient2@example.com`. | One email with the same subject, file list and download link. |
 | 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject: `Your transfer "qa-report.txt" is on its way`. Body: `Your transfer "qa-report.txt" was sent to: qa.recipient1@example.com, qa.recipient2@example.com.`, then "Download link: http://localhost:8765/t/<SLUG_A>/" and "Manage this transfer: http://localhost:8765/transfer/". |
 | 5 | Click the download link in the recipient email. | The public download page for `qa-report.txt` opens (it is fine that the main window is logged in; downloads are tested in FT-20). Don't click Download here. |
 
@@ -244,7 +244,7 @@ network log), never the `/t/...` URL a second time.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/transfer/send/` and add `qa-limit.txt` (500 bytes). | Row "qa-limit.txt (0 KB)" reaches the green check. |
+| 1 | Go to `/transfer/send/` and add `qa-limit.txt` (500 bytes). | Row "qa-limit.txt (500 bytes)" reaches the green check. |
 | 2 | Recipients `qa.recipient1@example.com`; Expiry "Set a date"; click the date button, click **Next month**, then click day `15`. | The date button now shows the 15th of next month (in the browser's date format) and the calendar closes. |
 | 3 | Max downloads `1`; Password `Open-Sesame-42`; uncheck nothing. Click **Send**. | The sent page opens. Record the slug as `SLUG_B`. |
 | 4 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | The newest email's subject is `qa-limit.txt was sent to you via ZipTrigo`, and its body says "This link expires on <15th of next month> 23:59 UTC." There is no message paragraph (none was entered). |
@@ -258,7 +258,7 @@ asks for confirmation, and re-selecting the same file resumes it.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/transfer/send/`. Register a file without uploading its bytes: `fetch('/transfer/send/' + document.getElementById('send-form').getAttribute('hx-post').split('/')[3] + '/files/', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')}, body: JSON.stringify({name: 'qa-paused.txt', size: 1200, client_last_modified: 1700000000000})}).then(r => r.status)` | Returns `201`. |
-| 2 | Note the draft id (the 4th path segment of the form's `hx-post`, as above) and open `/transfer/send/?resume=<draft id>`. | One row "qa-paused.txt (1 KB)" with the status text **Paused** (no check); hovering the row shows "Select the same file again to resume uploading it." **Send** is disabled. |
+| 2 | Note the draft id (the 4th path segment of the form's `hx-post`, as above) and open `/transfer/send/?resume=<draft id>`. | One row "qa-paused.txt (1.2 KB)" with the status text **Paused** (no check); hovering the row shows "Select the same file again to resume uploading it." **Send** is disabled. |
 | 3 | Add `qa-report.txt` again (3,000 bytes) so the transfer has a finished file. Then set Recipients `qa.recipient2@example.com` and click **Send**. | A browser confirm dialog: "Some files haven't finished uploading and will be left out of this transfer. Send anyway?" Click **Cancel**: nothing is sent, you stay on the page. |
 | 4 | Remove the `qa-report.txt` row. Add `qa-paused.txt` through the file input with **exactly** the content and `lastModified: 1700000000000` from Test data. | The existing Paused row is reused (no second row): it shows progress and then the green check. **Send** is enabled. |
 | 5 | Click **Send**. | No confirm dialog this time; the sent page opens. Record the slug as `SLUG_C`. |
@@ -313,7 +313,7 @@ offers to resume the unfinished draft.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click **Copy link** on row A. | The download link `http://localhost:8765/t/<SLUG_A>/` is copied to the clipboard (check with `navigator.clipboard.readText()` if allowed, or paste into the Recipients box of the send page), ideally with some visual feedback. Record exactly what happens. |
+| 1 | Click **Copy link** on row A. | The download link `http://localhost:8765/t/<SLUG_A>/` is copied to the clipboard (check with `navigator.clipboard.readText()` if allowed, or paste into the Recipients box of the send page) and the button label reads **Copied** for about two seconds before going back to **Copy link**. |
 | 2 | Check the console. | No errors. |
 
 ### FT-15 Manage panel contents
@@ -335,7 +335,7 @@ offers to resume the unfinished draft.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | In row A's Manage panel click **Resend** next to `qa.recipient1@example.com`. | Row A re-renders (the panel closes) with a red message at its top: "This recipient was emailed recently; you can resend in N minutes." with N between 1 and 10. |
-| 2 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | Still no second `qa-report.txt was sent to you via ZipTrigo` email (one for A, one for B only). |
+| 2 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | Still no second `qa-report.txt and 1 more file were sent to you via ZipTrigo` email (one for A; the other one in the mailbox is B's `qa-limit.txt was sent to you via ZipTrigo`). |
 
 ### FT-17 Add recipients
 
@@ -347,7 +347,7 @@ offers to resume the unfinished draft.
 | 1 | Open Manage on row A, leave "Add recipients" empty and click **Add**. | Row A shows the red message "This field is required." |
 | 2 | Open Manage, enter `bad@` and click **Add**. | Red message: `"bad@" is not a valid email address.` |
 | 3 | Open Manage, enter `qa.recipient2@example.com, qa.recipient3@example.com` and click **Add**. | Row A re-renders without an error. Open Manage: the recipients are qa.recipient1, qa.recipient2 and qa.recipient3 (no duplicate of recipient2). |
-| 4 | Open `/__e2e__/mail/?to=qa.recipient3@example.com` and `?to=qa.recipient2@example.com`. | recipient3 has one email `qa-report.txt was sent to you via ZipTrigo` with the A link; recipient2 still has only its original one. |
+| 4 | Open `/__e2e__/mail/?to=qa.recipient3@example.com` and `?to=qa.recipient2@example.com`. | recipient3 has one email `qa-report.txt and 1 more file were sent to you via ZipTrigo` with the A link; recipient2 still has only its original one. |
 | 5 | Open Manage, fill its "Add recipients" textarea with 18 new addresses (`document.querySelector('#transfer-row-<TRANSFER_A_ID> textarea[name=recipients]').value = Array.from({length: 18}, (_, i) => 'qa.extra' + (i + 1) + '@example.com').join('\n')`) and click **Add**. | Red message: "A transfer can have at most 20 recipients." (3 + 18 = 21). Manage still lists 3 recipients and no `qa.extra*` address got an email. |
 
 ### FT-18 Change expiry and max downloads
@@ -433,7 +433,7 @@ file URL is gated too.
 |---|---|---|
 | 1 | Visitor window: on `/t/<SLUG_B>/` (unlocked), click **Download**. | `qa-limit.txt` downloads (500 bytes). |
 | 2 | Reload `/t/<SLUG_B>/`. | Title "Transfer unavailable - ZipTrigo": heading **This transfer is no longer available** and "The link may have expired, reached its download limit, or been removed." It does not say which. |
-| 3 | Main window: `/transfer/`, then the **Ended** tab. | B is no longer under Active. Under Ended: "1 file · sent ... · EXPIRED", "Downloads: 1 / 1 (0 left)", and only the **Copy link** button (no Disable / Manage / Delete). |
+| 3 | Main window: `/transfer/`, then the **Ended** tab. | B is no longer under Active. Under Ended: "1 file · sent ... · EXPIRED", "Ended: <date and time>" (not "Expires:"), "Downloads: 1 / 1 (0 left)", and **no buttons at all** (no Copy link, Disable, Manage or Delete: an ended transfer has no working link). |
 | 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | An email `"qa-limit.txt" was downloaded`. |
 
 ### FT-25 Disable and re-enable
@@ -456,7 +456,7 @@ file URL is gated too.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Click **Delete** on row C (`qa-paused.txt`). | A browser confirm dialog: "Delete this transfer now? Its files will be removed immediately." Click **Cancel**: nothing changes. |
-| 2 | Click **Delete** again and confirm with **OK**. | Row C re-renders in place with status **DELETED** and only **Copy link**. |
+| 2 | Click **Delete** again and confirm with **OK**. | Row C re-renders in place with status **DELETED**, "Ended: <date and time>" and no buttons. |
 | 3 | Reload `/transfer/`; open **Ended**. | C is gone from Active and listed under Ended as **DELETED** next to B (**EXPIRED**). |
 | 4 | Visitor window: open `/t/<SLUG_C>/`. | The neutral "This transfer is no longer available" page. |
 | 5 | Open `/__e2e__/mail/?to=qa.user@example.com`. | No email about C's files being deleted (`Files for "qa-paused.txt" have been deleted` must **not** appear: delete-now doesn't notify). |
@@ -529,7 +529,7 @@ is sent to the normal page.
 |---|---|---|
 | 1 | Visitor window: open `/transfer/send/anon/`. | Heading **Send files**; "Sending without an account is free, within limits: up to 20 files, 5.0 GB total, 10 recipients. Log in for higher limits and a dashboard." (**Log in** -> `/account/login/?next=/transfer/send/`). The same drop zone, **Choose files** and **Add folder** buttons. |
 | 2 | Read the form. | **Your email** (help "We'll email you a code to confirm before anything is sent."), **Recipients** with the same help text, **Message**, **Expiry** with only "1 day", "5 days", "15 days", "30 days" (no "Set a date", no "No expiration"), **Max downloads**, "Password (optional, cannot be changed later)". There is **no** "Email me when a file is downloaded" checkbox. **Send** is disabled. |
-| 3 | Add `qa-anon.txt` (800 bytes). | Row "qa-anon.txt (1 KB)" reaches the green check; **Send** is enabled; the URL does **not** gain `?resume=`. |
+| 3 | Add `qa-anon.txt` (800 bytes). | Row "qa-anon.txt (800 bytes)" reaches the green check; **Send** is enabled; the URL does **not** gain `?resume=`. |
 | 4 | Reload the page. | The same draft comes back: the `qa-anon.txt` row with a green check. |
 | 5 | Your email `qa.anon.sender@example.com`; Recipients: 11 addresses (`Array.from({length: 11}, (_, i) => 'qa.anon' + (i + 1) + '@example.com').join('\n')`); **Send**. | Red box: "A transfer can have at most 10 recipients." |
 | 6 | Recipients `qa.anon.recipient@example.com, oops`; **Send**. | Red box: `Recipients: "oops" is not a valid email address.` |
@@ -548,7 +548,7 @@ and an early resend are refused.
 | 3 | Open `/__e2e__/mail/?to=qa.anon.sender@example.com`. | Subject "Confirm your ZipTrigo file transfer". Body: "Someone (hopefully you) is sending files through ZipTrigo.", "Enter this code on the page you were sending from: NNNNNN" (6 digits), "Or click this link to confirm instead: http://localhost:8765/transfer/send/anon/<uuid>/confirm/link/<token>/" and "This code expires in 30 minutes. ...". Note the code. |
 | 4 | Back on the confirm page click **Resend code** right away. | A red message in the box: "Please wait Ns before requesting another code." (N up to 60). The mailbox still has only one confirmation email. |
 | 5 | Enter a wrong 6-digit code (e.g. `000000`, or `111111` if that is the real one) and click **Confirm**. | Under the input: "Incorrect code (4 attempt(s) remaining)." Still on the confirm page. |
-| 6 | Enter the real code and click **Confirm**. | Navigates to `/transfer/sent/anon/<uuid>/`: heading **Your transfer is on its way**, "We emailed the recipients and sent you a copy, with a link to manage this transfer. Here's the download link too:", the link `http://localhost:8765/t/<slug>/` with **Copy**, and "Create an account and this transfer -- and any others sent from qa.anon.sender@example.com -- will show up in your dashboard next time you log in." (**Create an account** -> `/account/register/`). Record the slug as `ANON_SLUG_1`. |
+| 6 | Enter the real code and click **Confirm**. | Navigates to `/transfer/sent/anon/<uuid>/`: heading **Your transfer is on its way**, "We emailed the recipients and sent you a copy, with a link to manage this transfer. Here's the download link too:", the link `http://localhost:8765/t/<slug>/` with **Copy** (the label turns into **Copied** for two seconds after a click), and "Create an account and this transfer -- and any others sent from qa.anon.sender@example.com -- will show up in your dashboard next time you log in." (**Create an account** -> `/account/register/`). Record the slug as `ANON_SLUG_1`. |
 | 7 | Mailbox `?to=qa.anon.recipient@example.com`. | One email `qa-anon.txt was sent to you via ZipTrigo` with "This link expires on ..." about 5 days ahead. |
 | 8 | Mailbox `?to=qa.anon.sender@example.com`. | Newest email `Your transfer "qa-anon.txt" is on its way`: sent to `qa.anon.recipient@example.com`, the download link, and "Manage this transfer (disable it, or see how many times it was downloaded) -- keep this link, it's the only way to manage this transfer: http://localhost:8765/t/<ANON_SLUG_1>/manage/<token>/". Record that URL as `ANON_MANAGE_URL`. |
 | 9 | Visitor window: open `/transfer/send/anon/` again. | Redirected to the same `/transfer/sent/anon/<uuid>/` page (this session's transfer is active; a new anonymous send isn't offered until it is disabled or ends -- note this as a UX observation). |
@@ -562,8 +562,8 @@ and an early resend are refused.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Visitor window: open `ANON_MANAGE_URL` with the last character of the token changed. | The neutral "This transfer is no longer available" page. |
-| 2 | Open the real `ANON_MANAGE_URL`. | Title "Manage your transfer - ZipTrigo", heading **qa-anon.txt**, "Status: ACTIVE", "Downloaded 0 times.", "Expires: <~5 days ahead> UTC.", and a red **Disable this transfer** button. |
-| 3 | Click **Disable this transfer**. | Back on the same manage URL: "Status: DISABLED", and "This transfer is disabled -- the link no longer works." instead of the button. |
+| 2 | Open the real `ANON_MANAGE_URL`. | Title "Manage your transfer - ZipTrigo", heading **qa-anon.txt**, "Status: ACTIVE", "Downloaded 0 times." (no stray space before the full stop), "Expires: <~5 days ahead> UTC.", and a red **Disable this transfer** button. |
+| 3 | Click **Disable this transfer**. | A confirmation dialog opens (the shared modal, not a browser dialog): title "Disable this transfer?", text "The download link stops working for everyone, and it can't be turned back on.", buttons **Cancel** and **Disable**. Press **Cancel** (or Escape): nothing changes and the status stays ACTIVE. Click **Disable this transfer** again and **Disable**. Back on the same manage URL: "Status: DISABLED", and "This transfer is disabled -- the link no longer works." instead of the button. |
 | 4 | Open `/t/<ANON_SLUG_1>/`. | The neutral "This transfer is no longer available" page. |
 | 5 | Open `/transfer/send/anon/`. | A fresh, empty anonymous send page (the disabled transfer no longer holds the session). |
 
@@ -607,6 +607,23 @@ from a confirmed account's address joins that account's dashboard at login.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | On `/transfer/` open Manage on row A and click **Resend** next to `qa.recipient1@example.com`. | Row A re-renders without an error. |
-| 2 | Mailbox `?to=qa.recipient1@example.com`. | A new email `qa-report.txt was sent to you via ZipTrigo` on top, with the same A link. |
+| 1 | On `/transfer/` open Manage on row A and click **Resend** next to `qa.recipient1@example.com`. | Row A re-renders with a green status line at its top (`role="status"`): "Sent the email to qa.recipient1@example.com again." and no error. |
+| 2 | Mailbox `?to=qa.recipient1@example.com`. | A new email `qa-report.txt and 1 more file were sent to you via ZipTrigo` on top, with the same A link. |
 | 3 | Open Manage again and click **Resend** for `qa.recipient1@example.com` once more. | Red message: "This recipient was emailed recently; you can resend in 10 minutes." No further email. |
+
+### FT-38 A network error during an upload is shown on the file's row
+
+**Purpose:** a dropped connection no longer opens a blocking alert; the row says what happened and
+offers to resume.
+**Preconditions:** the main window as `qa.user`, on a fresh `/transfer/send/`. A way to make the
+browser's request to the fake bucket fail: in the page, run
+`window.__ftFetch = window.fetch; window.fetch = (u, o) => String(u).includes('/__e2e__/ft-s3/') ? Promise.reject(new TypeError('Failed to fetch')) : window.__ftFetch(u, o);`
+(mark the case BLOCKED if the tool cannot run JavaScript or block requests).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Add `qa-net.txt` (3,000 bytes) through the file input. | No browser dialog at any point. The row's status text becomes **Paused** (not a percentage) and under the row a red line with `role="alert"` reads "Upload interrupted by a network error. Select the same file again to resume." followed by an underlined button **Choose the file**. The row wraps so the line sits on its own line below the name and bar. |
+| 2 | Click **Choose the file**. | The file picker opens (the same one as **Choose files**). Cancel it. |
+| 3 | Restore the network: `window.fetch = window.__ftFetch;`. Add `qa-net.txt` again with the same size and `lastModified`. | The existing row is reused (no second row): the red line disappears, the progress runs and the row ends with the green check. |
+| 4 | Break the network again, add a different file `qa-net2.txt` (800 bytes), then restore it. | Its row shows the same interrupted line; the first row is unaffected. Re-adding `qa-net2.txt` finishes it. |
+| 5 | Remove both rows with their trash icons. | The list is empty and **Send** is disabled. |

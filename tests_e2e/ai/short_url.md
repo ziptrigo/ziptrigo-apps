@@ -94,8 +94,8 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/` and click **Short URLs** in the top navigation (link icon). | Lands on `/links/`. Tab title "Short URLs - ZipTrigo". |
-| 2 | Look at the page. | Heading "Short URLs"; a **New link** button; status tabs All, Active, Disabled, Expired, Click limit reached, Taken down (a tab shows its count only when it is above 0, so none has one yet); a search box "Search code, destination, title or tag"; a list header (Short link, Destination, Status, Clicks, Created); one row "No links yet. Create your first one." with a link. No tag filter yet. No broken icons, raw `{{ }}`/`{% %}`, or console errors. |
-| 3 | Click **Create your first one.** | Goes to `/links/new/`. |
+| 2 | Look at the page. | Heading "Short URLs"; a **New link** button; status tabs All, Active, Disabled, Expired, Click limit reached, Taken down (a tab shows its count only when it is above 0, so none has one yet); a search box "Search code, destination, title or tag"; a list header (Short link, Destination, Status, Clicks, Created); an empty state instead of rows: a link icon, **No links yet**, "Shorten a link, track it and share it as a QR code." and a **Create link** button. No tag filter yet. No broken icons, raw `{{ }}`/`{% %}`, or console errors. |
+| 3 | Click **Create link** in the empty state. | Goes to `/links/new/`. |
 
 ### SU-03 The new link form
 
@@ -120,7 +120,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/links/new/`, enter destination `https://example.com/plain?x=1`, leave everything else empty, click **Create link**. | The button disables while it works (it may take a few seconds if the server tries to fetch the page title). No cost panel appears. The browser lands on `/links/<id>/` with a green message "Link created." Record `PLAIN_ID`. |
-| 2 | Read the link page. | A heading showing the code (or the fetched title if the server could reach the internet); status pill **Active**; the short link `http://localhost:8765/s/<7 characters>` with a **Copy** button; the destination `https://example.com/plain?x=1`; **Clicks 0**; Created today; a QR code image and "Download QR code"; buttons **Edit**, **Stats**, **Preview**, **Disable**, **Delete**. Record `PLAIN_CODE`. |
+| 2 | Read the link page. | A heading showing the code (or the fetched title if the server could reach the internet); status pill **Active**; the short link `http://localhost:8765/s/<7 characters>` with a **Copy** button; the destination `https://example.com/plain?x=1`; **Clicks 0**; **Created** with today's date written like `Nov 1, 2026`; a QR code image and "Download QR code"; buttons **Edit**, **Stats**, **Preview**, **Disable**, **Delete**. Record `PLAIN_CODE`. |
 | 3 | Open `/billing/credits/`. | The balance is unchanged (100 credits) and there is no new ledger line. |
 
 ### SU-05 Create a link with an alias: the cost is confirmed first
@@ -180,7 +180,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 3 | Type `sale` in the search box. | After a short pause (no page reload) only `QA Sale` remains; the address bar shows `?q=sale`. Clear it with the × button: both rows return. |
 | 4 | Search `example.com/plain`, then `spring`, then `"`. | The plain link; the alias link (matched by tag); no results ("No links found.") for `"`. |
 | 5 | Choose tag `promo`. | Only `QA Sale`; the URL has `tag=promo`. Reset the tag to "All tags". |
-| 6 | Click the **Clicks** column header, then again. | Sorted by clicks descending, then ascending; the arrow flips and the screen reader text says "(sorted ...)". |
+| 6 | At desktop width click the **Clicks** column header, then again (at phone width use the **Sort by** bar instead, SU-21). | Sorted by clicks descending, then ascending; the arrow flips and the screen reader text says "(sorted ...)". |
 | 7 | Click each status tab. | Counts match; Disabled, Expired, Click limit reached and Taken down are empty ("No links found."). The tab you are on keeps your search. Reload the page: the same tab and filters stay (the URL carries them). |
 | 8 | Open the "⋮" menu on a row. | Items: Stats, Edit, QR code, Preview, Disable, Delete. Escape closes it and returns focus to the "⋮" button. |
 
@@ -250,7 +250,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | In the visitor window open `/s/QA-Sale+`. | "Where does this link go?"; the title; "Goes to **example.com**"; the full destination; "Created ... ago. Only continue if you trust where it leads."; a **Continue** button; a small "Report this link" button. The page is `noindex` (view source or headers: `X-Robots-Tag: noindex`). Nothing is counted as a click. |
+| 1 | In the visitor window open `/s/QA-Sale+`. | "Where does this link go?"; the title; "Goes to **example.com**"; the full destination; "Created <how long ago>. Only continue if you trust where it leads." (for a link made minutes ago "Created 5 minutes ago."; within the first minute "Created just now."); a **Continue** button; a small "Report this link" button. The page is `noindex` (view source or headers: `X-Robots-Tag: noindex`). Nothing is counted as a click. |
 | 2 | Click **Continue**. | Follows the short link (a click is counted). |
 | 3 | Back on the preview, click **Report this link**. | A form: Reason (choose one), Details (optional), Your email (optional). |
 | 4 | Submit without a reason. | The form re-renders with an error on Reason; it stays open. |
@@ -294,7 +294,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Log in as `qa.broke@example.com` and open `/links/`. | Empty dashboard ("No links yet."). |
+| 1 | Log in as `qa.broke@example.com` and open `/links/`. | Empty dashboard (the **No links yet** empty state with a **Create link** button). |
 | 2 | Open `/links/<SALE_ID>/`, `.../edit/`, `.../stats/` and `.../qr.png`. | Each is a plain 404 page (not "forbidden", not a redirect). |
 | 3 | POST-style actions: open `/links/<SALE_ID>/disable/` and `/links/<SALE_ID>/delete/` in the address bar. | 405 (method not allowed) or 404; either way nothing changes. |
 | 4 | Log out, log back in as `qa.user@example.com`. | `QA Sale` is still active and unchanged. |
@@ -309,7 +309,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 1 | Open `/links/new/`, destination `https://example.com/broke`, title `Broke link`, no extras. Submit. | Created for free: "Link created." Balance still 0. |
 | 2 | Create another with alias `broke-alias`, title `Broke alias`. | The cost panel says "This costs 1 credit ... Your balance is 0 credits" and offers **Top up your credits** (a link to `/billing/credits/`). Confirming shows "You don't have enough credits for this link." with a Top up link. Nothing is created (the dashboard still lists one link). |
 | 3 | On that link's edit page set a password and save. | The cost panel appears; confirming refuses for lack of credits with the Top up link; the link has no password afterwards. |
-| 4 | Open the stats page of the link. | Totals only; **Turn on for 1 credit** is offered; confirming gives an error message "You don't have enough credits for detailed analytics. Top up first." |
+| 4 | Open the stats page of the link. | Totals only; **Turn on for 1 credit** is offered; confirming gives an error message "You don't have enough credits for detailed analytics. Top up your credits." where **Top up your credits** is a link to `/billing/credits/`. (The same link ends the refusal when enabling a link: "You don't have enough credits to enable this link. Top up your credits.") |
 
 ### SU-18 More active links than the free allowance
 
@@ -351,8 +351,8 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/admin/short_url/linkreport/`. | One report: link `QA-Sale`, reason Spam, status Pending. The reporter email and IP are visible to staff only. |
-| 2 | Select it and run **Take down the reported link(s)**. | An intermediate page "take down" listing the link, with a **Reason** box, an **Internal note (staff only)** box and an unticked "Notify the owner by email" checkbox. |
+| 1 | Open `/admin/short_url/linkreport/`. | One report: its first column is the reported link (`QA-Sale`), then reason (the report opens from the reason), source, status Pending. The reporter email and IP are visible to staff only. |
+| 2 | Select it and run **Take down the reported link(s)**. | An intermediate page styled like the rest of the admin (a card with the title as its heading): a sentence about what a takedown does, the link listed as `QA-Sale -> https://example.com/...` (code in monospace, with its status), a required **Reason** field (marked `*`), an **Internal note (staff only)** field, an unticked "Notify the owner by email" checkbox, a red **Take down** button and a **Cancel** link (back to the list, nothing changed). |
 | 3 | Reason `QA: misleading content`, internal note `reported by qa.reporter`, leave notify unticked, click **Take down**. | Back on the list with a success message; the report is now Actioned. |
 | 4 | In the visitor window open `/s/QA-Sale`, `/s/QA-Sale+` and `/s/QA-Sale/unlock`. | All the neutral unavailable page (no hint of a takedown). |
 | 5 | Log in as `qa.user@example.com`; open `/links/`. | `QA Sale` has a red **Taken down** pill and the text "Taken down: QA: misleading content". Its row menu has no Edit, Enable or Delete. The Taken down tab counts 1. |
@@ -368,7 +368,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/links/`. | No horizontal scroll. Each row stacks: short link and Copy, the "⋮" menu at the right, the destination below, and a line with the status pill, clicks and date. Tabs wrap or scroll sensibly. |
+| 1 | Open `/links/`. | No horizontal scroll. The column header row is gone, replaced by a one-line **Sort by** bar with **Created** and **Clicks** links (an arrow shows the active one; the screen-reader text says "(sorted ...)"); it appears only while there are links. Tapping **Clicks** re-sorts the list by clicks without a reload. Each row stacks: short link and Copy, the "⋮" menu at the right, the destination below, and a line with the status pill, clicks and date. Tabs wrap or scroll sensibly. |
 | 2 | Open `/links/new/`. | A single column; the expiry and click limit fields stack; the buttons are reachable. |
 | 3 | Open a link page and a stats page. | Readable; the QR code and details stack; the stats cards stack; the chart fits the width. |
 | 4 | Open `/s/<some code>+` and the unavailable page. | Centered, readable, no overflow. |

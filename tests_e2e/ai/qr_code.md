@@ -5,7 +5,8 @@
 The QR code product's web UI (`apps/qr_code`):
 
 - the dashboard `/qr/` (empty state, list, thumbnails from `/qr/image/<id>/`, the enlarged preview
-  modal, search, sort by name, the per-row actions menu);
+  modal and the delete modal with their keyboard focus handling, search, sort by name, the per-row
+  actions menu);
 - the editor `/qr/create/` (name, Text / URL content, type, format, "Track QR Code" with the
   server-issued short URL, live preview, validation) and `/qr/edit/<id>/` (rename only);
 - duplicate (`/qr/duplicate/<id>/`) and delete (confirmation modal);
@@ -14,8 +15,8 @@ The QR code product's web UI (`apps/qr_code`):
 - that creating QR codes costs no credits.
 
 Not in the web UI, so out of scope here: size, border, error correction and colours (only the JWT
-API at `/api/qr/` sets them; covered by unit tests). There is no "Download" button anywhere in the
-QR UI; QR-23 checks what is offered instead.
+API at `/api/qr/` sets them; covered by unit tests). The web UI offers the PNG through **Download**
+in each row's menu (SVG and PDF formats chosen at creation are not offered); QR-23 checks it.
 
 ## Preconditions
 
@@ -24,6 +25,10 @@ QR UI; QR-23 checks what is offered instead.
 - The server's `BASE_URL` is `http://localhost:8765`, so every short URL reads
   `http://localhost:8765/go/<code>` (8 letters/digits, case-sensitive).
 - Cases run in order; later ones reuse QR codes created earlier.
+- The editor's red error box lists `Label: message` lines (e.g. `Name: This field is required.`).
+  Each message is also repeated in small red text under the field that failed, with a red border,
+  `aria-invalid="true"` and the focus moved to the first invalid field; it disappears when the
+  field is edited. A line without a field label (a general error) is only in the box.
 - `qa.user@example.com` has no QR codes at the start. Nothing in this file creates QR codes for
   any other account before QR-21.
 
@@ -48,7 +53,7 @@ Record these values as you go; later cases refer to them:
 - `TRACKED_ID`, `PLAIN_ID`: the UUIDs of `QA Tracked` and `QA Plain URL`.
 
 A QR code's UUID is in its row's Edit link: open the row's actions menu (the vertical "⋮" button,
-labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
+labelled "Actions for <name>") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 
 ---
 
@@ -71,9 +76,10 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/` and click **QR Codes** in the top navigation (qrcode icon). | Lands on `/qr/`. Browser tab title "Dashboard - ZipTrigo". |
-| 2 | Look at the page. | Heading "QR codes"; a **New QR code** button (plus icon) at the top right; a search box with placeholder "Search by name" and no clear (×) button visible; a list header "Sort by" with **Newest** (marked current) and **Name** links, and no checkboxes; one row reading "No QR codes found.". No broken images, no raw `{{ }}`/`{% %}`, no console errors. |
+| 1 | Go to `/` and click **QR Codes** in the top navigation (qrcode icon). | Lands on `/qr/`. Browser tab title "QR codes - ZipTrigo". |
+| 2 | Look at the page. | Heading "QR codes"; a **New QR code** button (plus icon) at the top right; a search box with placeholder "Search by name" and no clear (×) button visible; a list header "Sort by" with **Newest** (marked current) and **Name** links, and no checkboxes; below it an empty state: a QR icon, **No QR codes yet**, "Your first code takes a minute." and a **Create QR code** button (to `/qr/create/`). The search box has a label for screen readers ("Search QR codes by name"). No broken images, no raw `{{ }}`/`{% %}`, no console errors. |
 | 3 | Click **New QR code**. | Goes to `/qr/create/`. |
+| 4 | Go back to `/qr/` and click the empty state's **Create QR code** button. | Also goes to `/qr/create/`. |
 
 ### QR-03 Editor layout in create mode
 
@@ -87,7 +93,7 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 | 3 | Check the state of **Track QR Code**. | It is unchecked and **disabled** (Type is `Text`). No "Short URL" field is visible. |
 | 4 | Look below the options. | A **Preview** button and, next to it, a dashed box showing the ZipTrigo QR logo placeholder (`/static/qr_code/images/logo_128x128.png`), not a QR code. At the bottom right: **Cancel** and **Save**. |
 | 5 | Look for size, border, error-correction or colour controls. | There are none (not offered by the web editor). |
-| 6 | Click **Cancel**. | Back on `/qr/` with nothing created ("No QR codes found."). |
+| 6 | Click **Cancel**. | Back on `/qr/` with nothing created (the "No QR codes yet" empty state). |
 
 ### QR-04 Preview validation messages
 
@@ -96,7 +102,7 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Leave everything empty and click **Preview**. | A red message appears above the form: "Name: This field is required." and on the next line "Text / URL: Please provide the text or URL to encode.". The preview box still shows the logo placeholder. |
+| 1 | Leave everything empty and click **Preview**. | A red message appears above the form: "Name: This field is required." and on the next line "Text / URL: Please provide the text or URL to encode.". The two messages are repeated under the Name field and under the Text / URL field, and keyboard focus is on Name. The preview box still shows the logo placeholder. |
 | 2 | Type two spaces in Name and two spaces in Text / URL, click **Preview**. | The same two messages (whitespace counts as empty). |
 | 3 | Name `Check`, Type `URL`, Text / URL `example.com`, click **Preview**. | Only "Text / URL: Please enter a valid URL, e.g. https://example.com." (a URL needs a scheme). |
 | 4 | Replace the content with `javascript:alert(1)`, click **Preview**. | Same message: "Text / URL: Please enter a valid URL, e.g. https://example.com.". No alert dialog. |
@@ -114,7 +120,7 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 | 2 | Change the content to `Hello from QA, version 2` and click **Preview** again. | The image changes (a visibly different, denser pattern; the `src` value differs). |
 | 3 | Set Format to `PDF` and click **Preview**. | Still an image preview (PNG `data:` URI); no PDF viewer, no download, no error. |
 | 4 | Point your phone or a QR decoder at the preview, if available (optional). | It decodes to `Hello from QA, version 2`. |
-| 5 | Click **Cancel**. | `/qr/` still says "No QR codes found." (preview saved nothing). |
+| 5 | Click **Cancel**. | `/qr/` still shows the "No QR codes yet" empty state (preview saved nothing). |
 
 ### QR-06 Create a static Text QR code
 
@@ -125,7 +131,7 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 |---|---|---|
 | 1 | Leave Name empty, type `Hello from QA` in Text / URL, click **Save**. | The browser blocks the submit with its native "Please fill out this field." bubble on Name; no request is sent and nothing is created. |
 | 2 | Name `QA Text`, Text / URL `Hello from QA`, Type `Text`, Format `PNG`, click **Save**. | The Save button is briefly disabled, then the browser goes to `/qr/`. |
-| 3 | Look at the dashboard. | One row: a 48×48 thumbnail, the name `QA Text` and, below it in small grey text, `Hello from QA`. "No QR codes found." is gone. |
+| 3 | Look at the dashboard. | One row: a 48×48 thumbnail, the name `QA Text` and, below it in small grey text, `Hello from QA`. The "No QR codes yet" empty state is gone. |
 | 4 | Check the thumbnail image. | Its `src` is `/qr/image/<uuid>/` and it has loaded (`naturalWidth > 0`, a QR pattern is visible, not a broken-image icon). Its `alt` text is `QA Text`. Record the UUID as `TEXT_ID`. |
 | 5 | Open `/qr/image/<TEXT_ID>/` directly in a new tab. | A PNG QR code is shown (response `Content-Type: image/png`). |
 
@@ -173,9 +179,9 @@ labelled "QR code actions") and read the `href` of **Edit**, `/qr/edit/<uuid>/`.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Hover the `QA Text` thumbnail. | It scales up slightly. |
+| 1 | Hover the `QA Text` thumbnail. | It scales up slightly. The thumbnail is a button named "Preview QA Text" (the image inside has no alt text of its own). |
 | 2 | Click it. | A dark overlay opens with a large QR code image on a white background, and a "×" close button (labelled "Close QR code preview") at the top right. The image is `/qr/image/<TEXT_ID>/`. |
-| 3 | Click **×**. | The overlay closes. |
+| 3 | Click **×**. | The overlay closes, focus returns to the thumbnail you opened it from, and the hidden image has no `src` (check `document.getElementById('qr-modal-image').hasAttribute('src')` is `false`). |
 | 4 | Open it again and press **Escape**. | It closes. |
 | 5 | Open it again and click the dark area outside the image panel. | It closes. Clicking on the dark panel itself (around the image) does not close it. |
 
@@ -258,7 +264,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 | 2 | Type `tracked` in "Search by name". | A clear (×) button appears at the right of the box as you type. |
 | 3 | Press **Enter**. | URL becomes `/qr/?q=tracked`; only the two "QA Tracked…" rows are listed; the box keeps `tracked`. |
 | 4 | Click the × button. | Back to `/qr/` with all four rows and an empty box. |
-| 5 | Search `zzz`. | "No QR codes found." |
+| 5 | Search `zzz`. | The empty state reads **No QR codes found** with "Try another name." (a magnifier icon, no button). |
 | 6 | Search `plain`, then click the **Name** sort link. | URL is `/qr/?sort=name&q=plain`; still only `QA Plain URL`; **Name** is now the current sort. |
 | 7 | Clear the search, then click **Name**. | Alphabetical: `QA Plain URL`, `QA Text`, `QA Tracked (renamed)`, `QA Tracked copy`. |
 | 8 | Click **Newest**. | Back to newest first, as in step 1. |
@@ -321,7 +327,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open the `QA Plain URL` menu and click **Delete**. | The menu closes and a modal opens: title "Delete QR Code", text "Are you sure you want to delete QA Plain URL?" (name emphasised: brighter, medium weight), buttons **Cancel** and **Delete** (red). |
+| 1 | Open the `QA Plain URL` menu and click **Delete**. | The menu closes and a modal opens (a dialog named "Delete QR Code", the title is a level-2 heading), text "Are you sure you want to delete QA Plain URL?" (name emphasised: brighter, medium weight), buttons **Cancel** and **Delete** (red). |
 | 2 | Click **Cancel**. | The modal closes; the row is still there. |
 | 3 | Open the modal again and press **Escape**. | It closes; the row is still there. |
 | 4 | Open it again and click the dark backdrop. | It closes; the row is still there. |
@@ -346,12 +352,13 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 
 ### QR-23 What the user can download
 
-**Purpose:** document the image the UI offers (there is no Download button).
+**Purpose:** document the image the UI offers (a **Download** item in each row's menu).
 **Preconditions:** logged in as `qa.user`.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look for a "Download" button or link on `/qr/`, in the row menus, in the preview modal and on the Edit page. | None exists (only Edit, Duplicate, Delete). Report as an observation: the SVG/PDF format chosen at creation can't be obtained from the web UI. |
+| 1 | Open the "⋮" menu of the `QA Plain URL` row (created as SVG) and look at it; also look in the preview modal and on the Edit page. | The menu has **Edit**, **Duplicate**, **Download** (download icon) and **Delete** (red). The preview modal and the Edit page have no download control. |
+| 1b | Click **Download** on the `QA Text` row. | The browser saves `qa-text.png` (the name slugified); the request was `/qr/image/<TEXT_ID>/?download=1` with `Content-Disposition: attachment`. For `QA Plain URL` it is a PNG too (`qa-plain-url.png`): the SVG format chosen at creation can't be obtained from the web UI (observation). |
 | 2 | Open the `QA Text` enlarged preview, right-click the image and choose "Open image in new tab" (or open `/qr/image/<TEXT_ID>/`). | A crisp PNG with a white quiet zone; the response has `Content-Type: image/png` and `Cache-Control: private, max-age=300`. |
 | 3 | Decode it with a QR reader (optional). | `Hello from QA`. |
 
@@ -362,7 +369,7 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Log out; sign in as `qa.broke@example.com`. Go to `/qr/`. | "No QR codes found." (none of `qa.user`'s codes are listed). |
+| 1 | Log out; sign in as `qa.broke@example.com`. Go to `/qr/`. | The "No QR codes yet" empty state (none of `qa.user`'s codes are listed). |
 | 2 | Open `/qr/edit/<TEXT_ID>/`. | 404 page; no name or content of `QA Text` appears. |
 | 3 | Open `/qr/duplicate/<TEXT_ID>/`. | 404; the editor is not pre-filled with `qa.user`'s data. |
 | 4 | Open `/qr/image/<TEXT_ID>/`. | 404; no image. |
@@ -396,3 +403,18 @@ So far `QA Tracked` has been followed **3** times successfully (steps 1, 2 and 6
 | 3 | Open `/qr/create/`. | Fields stack vertically; Type, Format and Track are on separate lines; Preview, the preview box, Cancel and Save are all reachable without horizontal scrolling. |
 | 4 | Fill Name `Mobile`, content `mobile test`, tap **Preview**, then **Cancel**. | The preview renders in its box; nothing is created. |
 | 5 | Restore the desktop viewport. | — |
+
+### QR-27 Dialogs keep the keyboard inside
+
+**Purpose:** both dashboard dialogs (the enlarged preview and the delete confirmation) are modal
+for the keyboard too: Tab and Shift+Tab never reach the page behind them.
+**Preconditions:** logged in as `qa.user`, on `/qr/` with at least one code (e.g. `QA Text`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Click the `QA Text` thumbnail to open the preview. | Focus is on the "×" close button. |
+| 2 | Press `Tab`, then `Shift+Tab`. | Focus never leaves the dialog (it only holds the close button, so it stays on it). The page behind (search box, row menus) is not reachable. |
+| 3 | Press `Escape`. | The dialog closes and focus is back on the thumbnail. |
+| 4 | Open the "⋮" menu of `QA Text`, click **Delete**. | The delete dialog opens. |
+| 5 | Press `Tab` repeatedly (4-5 times), then `Shift+Tab` repeatedly. | Focus cycles between **Cancel** and **Delete** only, in both directions, wrapping from the last to the first and back. It never lands on the search box, the sort links or a row. |
+| 6 | Press `Escape`. | The dialog closes; the row is still there; keyboard focus is not lost to `<body>` (it returns to where you opened the dialog from, or at worst the page). |

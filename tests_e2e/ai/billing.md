@@ -19,6 +19,11 @@ covered in depth in `admin.md`).
     `e2e seed`.
   - `qa.admin@example.com`: superuser, same 100-credit seed row.
   - `qa.broke@example.com`: 0 credits, no ledger rows at all.
+
+  These three hold exactly those credits because `serve.py` switches the welcome credits off while
+  it seeds them. **An account registered during the run gets 1,000 welcome credits** the moment
+  its email is confirmed (one ledger row, see BILL-12), so a case that needs an account with 0
+  credits must use `qa.broke`.
 - Log in on `/account/login/` (**Email**, **Password**, **Sign in**); log out from the account menu
   (person icon, top right) > **Logout**. A superuser logged in on the site can open `/admin/`
   directly (same session).
@@ -54,9 +59,9 @@ Create these local files before starting (the fake AI reads any real image as a 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the page. | Tab title `Credits History - ZipTrigo`. A card with a coins icon, heading **Credits History** and "Current balance: **100** credits". At the top right of the card a **Back to Account** link with a left arrow. |
+| 1 | Look at the page. | Tab title `Credits History - ZipTrigo`. A card with a coins icon, heading **Credits History** and "Current balance: **100** credits". At the top right of the card (wrapping under the heading on a narrow window) a **Back to Account** link with a left arrow. Under the heading a "Have a promo code?" form with a `CODE` field and a **Redeem** button (see BILL-11). |
 | 2 | Look at the table header. | Three columns, in this order: **Date**, **Change**, **Description**. |
-| 3 | Look at the rows. | Exactly one row: Date = today's date and a time in UTC (`YYYY-MM-DD HH:MM`, close to when the server was started); Change = **+100** in green followed by a small grey pill `Purchase`; Description = `e2e seed`. |
+| 3 | Look at the rows. | Exactly one row (a transaction whose description only repeats its type label shows an empty Description cell, not the label twice): Date = today's date and a time in UTC (`YYYY-MM-DD HH:MM`, close to when the server was started); Change = **+100** in green followed by a small grey pill `Purchase`; Description = `e2e seed`. |
 | 4 | Look below the table. | No pagination bar ("Page 1 of 1" is **not** shown when there is only one page). |
 | 5 | Note the transaction type label. | A grey pill with the display label, `Purchase`. |
 | 6 | Click **Back to Account**. | Goes to `/account/`: section **Credits**, "Current balance" **100 credits**, and a **Usage History** button. |
@@ -110,7 +115,7 @@ everywhere.
 |---|---|---|
 | 1 | On `/receipts/upload/`, choose `broken.png`. | The upload itself succeeds ("✓ Uploaded. View receipt"). |
 | 2 | Click **View receipt**. | The receipt is **Failed** with the explanation "We couldn't read this file." and "Try a sharper photo or scan and upload it again.", not a server error. |
-| 3 | Go to `/billing/credits/`. | Balance still **99**. Two new rows on top, newest first: **+1** green `(refund)` "Receipt could not be processed: broken.png", and under it **-1** red `(spend)` "Receipt processing: broken.png". |
+| 3 | Go to `/billing/credits/`. | Balance still **99**. Two new rows on top, newest first: **+1** green `Refund` pill "Receipt could not be processed: broken.png", and under it **-1** red `Spend` pill "Receipt processing: broken.png". |
 | 4 | If instead the receipt shows **Trying again shortly** (a transient failure, not a refund). | Record it with a screenshot: the document-reading child process failed to start on this machine, which is an environment problem worth reporting separately. |
 
 ### BILL-07 Admin adjustments appear in the user's history, escaped
@@ -125,7 +130,7 @@ containing HTML is shown as text.
 | 2 | Fill User email `qa.user@example.com`, Direction **Add**, Amount `5`, Description `<b>Goodwill</b> & "thanks"`, press **Apply**. | A success message "Adjusted credits for qa.user@example.com. New balance: 104." (99 + 5, if BILL-06 left it at 99) and the form is cleared. |
 | 3 | Fill `qa.user@example.com`, **Spend**, `3`, Description empty, **Apply**. | "Adjusted credits for qa.user@example.com. New balance: 101." |
 | 4 | Fill `qa.user@example.com`, **Spend**, `1000`, **Apply**. | Error message "Insufficient credits for this spend adjustment."; the balance is unchanged. |
-| 5 | Log out, log in as `qa.user@example.com`, go to `/billing/credits/`. | Balance **101**. Newest first: **-3** red `(adjustment)` "Admin adjustment" (the default description); **+5** green `(adjustment)` with the description shown literally as `<b>Goodwill</b> & "thanks"` (the tags are visible text, nothing is bold); then the BILL-06 and BILL-05 rows. No row for the refused 1000 spend. |
+| 5 | Log out, log in as `qa.user@example.com`, go to `/billing/credits/`. | Balance **101**. Newest first: **-3** red `Adjustment` pill "Admin adjustment" (the default description); **+5** green `Adjustment` pill with the description shown literally as `<b>Goodwill</b> & "thanks"` (the tags are visible text, nothing is bold); then the BILL-06 and BILL-05 rows. No row for the refused 1000 spend. |
 
 ### BILL-08 A top-up resumes a receipt waiting for credits
 
@@ -139,7 +144,7 @@ and the ledger shows the top-up and the charge.
 | 2 | Click **View receipt**. | A panel **Waiting for credits**: "We'll read this receipt as soon as you add credits." with a **Top up** link pointing to `/billing/credits/`; no extracted fields yet. |
 | 3 | Go to `/billing/credits/`. | Still "Current balance: **0** credits" and "No credit transactions yet." (nothing was charged). |
 | 4 | Log out, log in as `qa.admin@example.com`, and on `/admin/billing/credittransaction/adjust/` add `2` credits to `qa.broke@example.com` with description `top-up test`. | "Adjusted credits for qa.broke@example.com. New balance: 2." (the message is computed right after the add; the charge may already have happened, so `1` is also acceptable here). |
-| 5 | Log out, log in as `qa.broke@example.com`, go to `/billing/credits/`. | Balance **1**. Newest first: **-1** red `(spend)` "Receipt processing: receipt-2.png", then **+2** green `(adjustment)` "top-up test". |
+| 5 | Log out, log in as `qa.broke@example.com`, go to `/billing/credits/`. | Balance **1**. Newest first: **-1** red `Spend` pill "Receipt processing: receipt-2.png", then **+2** green `Adjustment` pill "top-up test". |
 | 6 | Open `/receipts/`. | The receipt is no longer waiting: it is processed (vendor **Staples**). |
 
 ### BILL-09 Pagination at 25 rows
@@ -166,5 +171,33 @@ is repetitive: it needs 25 more rows.
 |---|---|---|
 | 1 | At desktop width, look at the table. | Columns aligned; the Date and Change columns don't wrap; long descriptions wrap inside the Description column. Green/red amounts are readable. |
 | 2 | Switch to dark mode: choose **Dark** under Appearance on `/account/`, then return to this page. | Card, table borders and text are readable on the dark background; green and red amounts remain readable. Switch back to **System** afterwards. |
-| 3 | Resize to 375 x 812. | The page itself has no horizontal scroll; if the table is wider than the card, it scrolls horizontally **inside** its box. The heading, balance and **Back to Account** link are visible (they may wrap). The pagination bar fits. |
+| 3 | Resize to 375 x 812. | The page has no horizontal scroll and the table has no scrolling box of its own: the header row is gone and each transaction is a two-line card (the change with its pill on the left and the date on the right; the full description on the second line, wrapping, never clipped). The heading, balance and **Back to Account** link are visible (they may wrap). The promo form and the pagination bar fit. |
 | 4 | Reset the viewport to desktop. | - |
+
+### BILL-11 Promo code form on the history page
+
+**Purpose:** the "Have a promo code?" form announces its refusals and the redeem link explains
+itself to a signed-out visitor. (Redeeming a valid code needs a code created in the admin; if you
+have one, redeem it here too and expect a green flash `Added N credits with promo code <CODE>.` and a
+`+N` row with the `Promo code` pill.)
+**Preconditions:** logged in as `qa.user@example.com`, on `/billing/credits/`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Press **Redeem** with the field empty. | The browser's own "required" bubble stops the submit. |
+| 2 | Type `nope-nope` (it shows upper case) and press **Redeem**. | No reload; a red line `Invalid code.` under the field (it sits in `#promo-msg`, a `role="alert"` live region); the field keeps `NOPE-NOPE`. The balance is unchanged. |
+| 3 | Log out and open `/billing/redeem/SOME-CODE/`. | Redirected to `/account/login/?next=/billing/redeem/SOME-CODE/&promo=SOME-CODE`. Above the sign-in form a ticket-icon note: "Sign in to redeem your promo code. We'll check it and take you to the redeem page once you are in." The note does **not** repeat or judge the code. |
+| 4 | Open `/account/login/` with no `promo` parameter. | No such note. |
+| 5 | Sign in as `qa.user@example.com` on that login page. | You land on `/billing/redeem/SOME-CODE/`: the form with `SOME-CODE` prefilled (nothing is redeemed by opening the page). |
+
+### BILL-12 Welcome credits of a new account
+
+**Purpose:** a genuinely new, confirmed account is given 1,000 credits once, and says so.
+**Preconditions:** none. Register a fresh account on `/account/register/` (`qa.bill.<random>@example.com`, password `BillWelcome-4821`) and confirm it from `/__e2e__/mail/?to=<address>` (open the link, press **Confirm my email**).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Sign in as the new account and open `/billing/credits/`. | "Current balance: **1000** credits". One row: **+1000** in green with a grey `Welcome credits` pill and the description **A gift for your new account** (the label is not repeated). |
+| 2 | Click the bell in the header. | A notification "Welcome! We added 1000 credits to your account" with the body "Use them in any ZipTrigo app. Your credits history shows where they go." Clicking it opens `/billing/credits/`. |
+| 3 | Open `/account/`. | The Credits section reads **1000 credits**. |
+| 4 | Register a second account with the same address written with a `+tag` (`qa.bill.<random>+two@example.com`) and confirm it. | It gets **no** welcome credits (balance 0, no ledger row), and `/__e2e__/mail/?to=<that address>` has an email `About your ZipTrigo welcome credits` saying why. |

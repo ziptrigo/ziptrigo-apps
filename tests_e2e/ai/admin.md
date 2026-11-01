@@ -39,6 +39,11 @@ create data and to check the effect of an admin action).
   the README): cookies are per host name, and the fake S3 answers CORS for any origin.
 - A small local text file to upload (any content), and a small JPEG, PNG or PDF for the Receipts
   upload in ADM-28.
+- **Switch the welcome credits off first.** Ticking "Email confirmed" on a new, non-staff account
+  (ADM-10) gives it the 1,000 welcome credits, which would break every balance in ADM-14 to ADM-16
+  and ADM-21. Before ADM-10 open `/admin/billing/billingsettings/1/change/`, set **Welcome credits**
+  to `0` and Save; ADM-18 step 5b puts it back to `1000` (do not skip that step: the other files
+  expect new accounts to get the credits).
 
 ## Test data
 
@@ -102,10 +107,10 @@ browser in this run would be locked out of sending.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Log in as `qa.admin@example.com` / `QaE2e-Passw0rd!`. | Lands on `/admin/`. Tab title "Dashboard \| ZipTrigo Admin". The navbar shows "Site" and "Admin Tools" links and a user icon menu; the left sidebar shows "ZipTrigo" and `qa.admin@example.com`. |
-| 2 | Read the main area. | Groups and models, each with links: **Accounts**: Users (Add, Change). **Billing**: Billing settings (Change), Credit accounts (View), Credit transactions (View). **Core**: Core settings (Change; also "Add" while its row doesn't exist yet, see step 4), Email verifications (View), Rate limit counters (View), Scheduled jobs (View). **Feedback**: Feedback (Change). **File transfer**: Abuse reports (View), Blocked senders (Add, Change), Download events (View), File transfer settings (Change; also "Add" while its row doesn't exist yet), Transfers (View). **QR code**: QR Codes (Add, Change). **Receipts**: Inbound emails (View), Inbound messages (View), Receipts (View), Receipts accounts (View), Receipts settings (Change), Vendors (View). |
-| 3 | Check the group headings' wording. | Each heading is readable. Record as a UX issue (not a failure) any heading that shows a raw app label such as "File_Transfer" or "Qr_Code". |
-| 4 | Check the "Core settings", "File transfer settings" and "Receipts settings" rows. | Each offers "Change". On a fresh server (the row is only created on first visit) they also offer "Add" (Billing settings doesn't: a migration creates its row); record that as a UX issue, not a failure: the pages are singletons (see ADM-17, ADM-19, ADM-20). |
-| 5 | Find the "Admin Tools" box below the models. | Heading "Admin Tools", a button "Open Admin Tools" and the help text "Access utilities such as sending test emails or viewing masked environment variables." |
+| 2 | Read the main area. | Groups and models, each with links: **Accounts**: Users (Add, Change). **Billing**: Billing settings (Change), Credit accounts (View), Credit transactions (View), Promo codes (Add, Change), Promo redemptions (View), Welcome credits (View). **Core**: Core settings (Change), Email verifications (View), Notifications (View), Rate limit counters (View), Scheduled jobs (View). **Feedback**: Feedback (Change). **File transfer**: Abuse reports (View), Blocked senders (Add, Change), Download events (View), File transfer settings (Change), Transfers (View). **QR codes**: QR Codes (Add, Change). **Receipts**: Inbound emails (View), Inbound messages (View), Receipts (View), Receipts accounts (View), Receipts settings (Change), Vendors (View). **Short URLs**: Blocked domains (Add, Change), Daily link stats (View), Link reports (View), Short links (View), Short URL settings (Change). **To-do**: Attachments, Comments, Inbound emails, Inbound messages, Labels, Recurrences, Reminder deliveries, Reminders, Saved filters, Tasks, To-do accounts (all View) and To-do settings (Change). |
+| 3 | Check the group headings' wording. | Each heading is readable ("File transfer", "QR codes", "Short URLs", "To-do"). Record as a UX issue any heading that shows a raw app label such as "File_Transfer" or "Qr_Code". |
+| 4 | Check the "Core settings", "Billing settings", "File transfer settings", "Receipts settings", "Short URL settings" and "To-do settings" rows. | Each offers only "Change", never "Add", even on a fresh server where the row does not exist yet (opening the page creates it): the pages are singletons (see ADM-17 to ADM-20). |
+| 5 | Find the "Admin Tools" box below the models. | Shown to a superuser only: heading "Admin Tools", a button "Open Admin Tools" and the help text "Access utilities such as sending test emails or viewing masked environment variables." |
 | 6 | Check the sidebar. | The same apps and models as the main area, expanded; clicking "Users" opens `/admin/accounts/user/`. Go back to `/admin/`. |
 
 ### ADM-05 Top menu, user menu and the navbar search
@@ -130,13 +135,15 @@ browser in this run would be locked out of sending.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the navbar, just left of the user icon menu. | A toggle link with a sun icon (accessible name "Toggle light/dark mode", tooltip "Light mode (click to switch to dark)"). The page is light. |
-| 2 | Click the toggle. | The admin switches to a dark theme (dark backgrounds, light text everywhere: navbar, sidebar, content, tables); the icon becomes a moon with tooltip "Dark mode (click to switch to light)". |
+| 1 | Look at the navbar, just left of the user icon menu. | A toggle link with a sun icon (accessible name "Dark mode", `aria-pressed="false"`, tooltip "Light mode (click to switch to dark)"). The page is light. |
+| 2 | Click the toggle. | The admin switches to a dark theme (dark backgrounds, light text everywhere: navbar, sidebar, content, tables; `<html data-bs-theme="dark">`); the icon becomes a moon with tooltip "Dark mode (click to switch to light)" and `aria-pressed="true"`. |
 | 3 | Reload the page, then open `/admin/accounts/user/`. | Both stay dark; text is readable (no dark-on-dark), links and buttons visible. |
 | 4 | Click the toggle again and reload. | Back to light, and it stays light after the reload. |
 
-Note: if there is no toggle at all in step 1, record FAIL (the script looks for a Bootstrap 4
-`ul.navbar-nav.ml-auto`; check whether the navbar uses `ms-auto` instead) and skip steps 2-4.
+Note: if there is no toggle at all in step 1, record FAIL (the script looks for the Bootstrap 5
+`#jazzy-navbar ul.navbar-nav.ms-auto` of jazzmin 3) and skip steps 2-4. The choice is stored in
+`localStorage['jazzmin-theme-mode']`, which jazzmin's own early script reads, so there is no flash of
+the other theme on reload.
 
 ### ADM-07 Admin Tools: send a test email
 
@@ -146,7 +153,7 @@ Note: if there is no toggle at all in step 1, record FAIL (the script looks for 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Look at the page. | Heading "Admin Tools". A section "Email Testing" ("Send a test email to any address.") with a "Recipient email:" field pre-filled with `qa.admin@example.com`, the help text "Email address to send the test email to." and a "Send test email" button. A section "Show Environment" with "Environment: local" and a "Show" button. |
-| 2 | Replace the recipient with `qa.adm.tools.<rand>@example.com` and click "Send test email". | A success message "Test email sent to qa.adm.tools.<rand>@example.com via 1 backend(s) (0 failure(s))." The message should appear **once**; record as a UX issue if it is shown twice (e.g. once at the top of the page and again under the heading). The field keeps the address. |
+| 2 | Replace the recipient with `qa.adm.tools.<rand>@example.com` and click "Send test email". | A success message "Test email sent to qa.adm.tools.<rand>@example.com via 1 backend(s) (0 failure(s))." The message appears **once** (record FAIL if it is shown twice). The field keeps the address. |
 | 3 | In a new tab open `/__e2e__/mail/?to=qa.adm.tools.<rand>@example.com`. | Exactly one email, subject "Test email from the admin panel", body "This is a test email." / "Sent from the Django admin panel." and a "Sent:" line with the current UTC time. |
 | 4 | Back on the tools page, enter `qa@nodot` and click "Send test email". | Error "Please correct the errors below." and, at the field, "Enter a valid email address." No new email in the mailbox. (If the browser's own validation blocks the submit first, that is fine; note it.) |
 | 5 | Clear the field and click "Send test email". | The browser asks to fill in the field, or the page shows "This field is required."; nothing is sent. |
@@ -188,7 +195,7 @@ duplicate address in any letter case.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click "Add user" (`/admin/accounts/user/add/`). | Fields: Email (required), Name, "Password-based authentication" (Enabled / Disabled, Enabled selected), Password with the validator hints, Password confirmation. No username field. Note as a UX issue if the intro still says "First, enter a username and password." |
+| 1 | Click "Add user" (`/admin/accounts/user/add/`). | Fields: Email (required), Name, "Password-based authentication" (Enabled / Disabled, Enabled selected), Password with the validator hints, Password confirmation. No username field. The intro reads "First, enter an email address and a password. Then you'll be able to edit more of the user's options." (record FAIL if it still says "username"). |
 | 2 | Enter Email `QA.User@EXAMPLE.COM`, Name `Dup`, password `QaE2e-Passw0rd!` twice; click "Save". | "Please correct the error below." and at Email: "A user with this email already exists." No account is created. |
 | 3 | Enter Email `qa.adm.<rand>@example.com`, Name `ADM Sender`, password `QaE2e-Passw0rd!` and confirmation `Different-Passw0rd!`; Save. | An error at the confirmation: "The two password fields didn't match." (or Django's equivalent wording). Not created. |
 | 4 | Enter the same email and name, password `12345678` twice; Save. | Refused with a validator error, e.g. "This password is entirely numeric." |
@@ -221,13 +228,13 @@ singletons stay superuser-only even with model permissions.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Session A: on USERB's change form tick "Is staff" (leave "Superuser status" unticked); Save. | Saved. |
-| 2 | Session B: go to `/admin/login/`, log in as USERB. | Logged in to the admin. The dashboard lists no models (Django's "You don’t have permission to view or edit anything." would be expected; jazzmin shows an empty dashboard instead, so record its absence as a UX issue only). The navbar has "Site" but **no** "Admin Tools" link. |
-| 3 | Session B: go to `/admin/tools/`. | HTTP 403 page rendered inside the admin with the error "You do not have permission to access this page."; no email form result or environment table can be used. |
+| 2 | Session B: go to `/admin/login/`, log in as USERB. | Logged in to the admin. The dashboard lists no models (Django's "You don’t have permission to view or edit anything." would be expected; jazzmin shows an empty dashboard instead, so record its absence as a UX issue only) and has **no** "Admin Tools" box. The navbar has "Site" but **no** "Admin Tools" link. |
+| 3 | Session B: go to `/admin/tools/`. | HTTP 403 page rendered inside the admin that says only "You do not have permission to access this page. Admin Tools are for superusers."; none of the tools (email form, environment table) is shown. |
 | 4 | Session B: go to `/admin/billing/credittransaction/adjust/`. | 403 with "You do not have permission to adjust credits."; the form is shown but cannot apply anything. |
 | 5 | Session B: go to `/admin/core/coresettings/`. | Refused (403 or a redirect to the dashboard); the settings form is not shown. |
 | 6 | Session A: on USERB's change form, in "User permissions" add "Accounts \| user \| Can add user" and "Core \| Core settings \| Can change Core settings"; Save. | Saved. |
 | 7 | Session B: reload `/admin/`. | "Users" now appears. "Core settings" still does **not** appear (singletons are superuser-only). |
-| 8 | Session B: look at the navbar, then click "Admin Tools" if it is shown. | Expected: either no "Admin Tools" link, or a link that opens a usable page. **FAIL** (UX) if the link is shown (it is gated on "Can add user") but the page answers 403 "You do not have permission to access this page." |
+| 8 | Session B: look at the navbar and the dashboard. | There is still **no** "Admin Tools" link or box (the link needs a permission that exists nowhere, so only a superuser has it; having "Can add user" does not show it). **FAIL** if either appears. |
 | 9 | Session B: go to `/admin/core/coresettings/1/change/`. | Refused (403); the form is not shown. |
 | 10 | Session B: log out (user menu → "Log out"). Session A: on USERB's form untick "Is staff", remove both permissions; Save. | USERB is an ordinary user again. |
 
@@ -243,7 +250,7 @@ singletons stay superuser-only even with model permissions.
 | 3 | Session A: set Status back to "Active" and untick "Is active"; Save. | Saved; "Is active" shows unticked in the list. |
 | 4 | Session B: log in as USERB again. | Refused with "Invalid credentials" (an inactive account is refused before the status check). |
 | 5 | Session A: filter the Users list "is active: No". | USERB is listed. |
-| 6 | Session A: tick "Is active" again; Save. Session B: log in as USERB. | Login succeeds. Log out again in Session B. **Do not open the Receipts or File transfer pages as USERB** (that would create rows that stop USERB being deleted in ADM-30). |
+| 6 | Session A: tick "Is active" again; Save. Session B: log in as USERB. | Login succeeds. Log out again in Session B. **Do not open the File transfer pages as USERB** (that would create rows that stop USERB being deleted in ADM-30; Receipts, Short URLs and To-do rows go with a deleted user). |
 
 ### ADM-14 Ledger and credit accounts are read-only
 
@@ -252,7 +259,7 @@ singletons stay superuser-only even with model permissions.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/admin/billing/credittransaction/`. | Columns ID, User, Amount, Type, Source, Description, Created at; a date drill-down above the list; filters type (Purchase, Spend, Adjustment, Refund), source, created at; a search box. The seed rows (`e2e seed`, source `e2e`, 100 each) are listed. There is **no** "Add" button, and an "Adjust credits" button (coins icon) instead. No action menu with "Delete selected". |
+| 1 | Go to `/admin/billing/credittransaction/`. | Columns ID, User, Amount, Type, Source, Description, Created at; a date drill-down above the list; filters type (Purchase, Spend, Adjustment, Refund, Promo code, Welcome credits), source, created at; a search box. The seed rows (`e2e seed`, source `e2e`, 100 each) are listed. There is **no** "Add" button, and an "Adjust credits" button (coins icon) instead. No action menu with "Delete selected". |
 | 2 | Click one seed row. | A read-only view (tab title starts "View credit transaction"): User, Amount ("Credits added (positive) or spent (negative)."), Type, Description, Source, ID, Created at. No Save and no Delete button. Note as a UX issue if the page heading is a raw string such as "<uuid> purchase 100 @ 2026-…". |
 | 3 | Go to `/admin/billing/credittransaction/add/`, then `/admin/billing/credittransaction/1/delete/`. | Both answer 403 Forbidden. |
 | 4 | Go to `/admin/billing/creditaccount/`. | Columns User, Balance, Updated at, with `qa.user@example.com` 100 (or whatever other tests left) and a search box; no "Add" button and no actions. |
@@ -310,11 +317,12 @@ the new balance.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click "Billing settings" in the sidebar. | Redirected to `/admin/billing/billingsettings/1/change/` with "Storage price (credits per GB per day)" = `0.1000` and its help text naming file transfer and receipts. No Delete button. |
+| 1 | Click "Billing settings" in the sidebar. | Redirected to `/admin/billing/billingsettings/1/change/` with "Storage price (credits per GB per day)" = `0.1000` (an input styled like the others, `min` 0) and its help text naming file transfer and receipts, and "Welcome credits" = `0` (you switched it off in the preconditions; the default is 1000) with the help text "Credits added to a genuinely new account once its email is confirmed. 0 turns it off: accounts created while it is off never get them." No Delete button. |
 | 2 | Enter `-1`; Save. | "Ensure this value is greater than or equal to 0." |
 | 3 | Enter `abc`; Save. | "Enter a number." (or the browser blocks it). |
 | 4 | Enter `0.25`; "Save and continue editing". | Saved with the success message; the field shows `0.2500`. |
-| 5 | Enter `0.1000`; Save. | Saved; reopening shows `0.1000` again. |
+| 5 | Enter `0.1000`; Save. | Saved with the message "Billing settings saved." (not "The Billing settings “Billing settings” was changed successfully.") and you stay on the settings form; reopening shows `0.1000` again. |
+| 5b | Set Welcome credits to `1000001`; Save. | "Ensure this value is less than or equal to 1000000." (the input also has `max="1000000"`). Set it back to `1000` and Save: this **restores** the setting switched off in the preconditions, and it must stay at 1000 for the other files. |
 | 6 | `/admin/billing/billingsettings/1/delete/`. | 403 Forbidden. |
 
 ### ADM-19 File transfer settings singleton
@@ -337,7 +345,7 @@ the new balance.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/admin/receipts/receiptssettings/`. | Redirected to `.../receiptssettings/1/change/` with "Price per file (credits)" (1), "Max file size (bytes)" (15728640), "Allowed types" (`application/pdf,image/jpeg,image/png,image/webp,image/heic`), "Min inline image px" (150), "Max files per user per day" (100), "Max inbound rows per day" (500), "Trash days" (30), "Max pdf pages to ai" (5), "Max ai attempts" (3), each with help text. No Delete button. |
-| 2 | Go back to `/admin/`. | "Receipts settings" now offers only "Change" (no "Add": the row exists). |
+| 2 | Go back to `/admin/`. | "Receipts settings" offers only "Change" (it never offers "Add"). |
 | 3 | Set "Max pdf pages to ai" to `21`, "Max file size (bytes)" to `0`, "Max ai attempts" to `0`; Save. | Errors "Ensure this value is less than or equal to 20.", and "Ensure this value is greater than or equal to 1." for the other two. Nothing saved. |
 | 4 | Restore 5 / 15728640 / 3, set "Trash days" to `31`; "Save and continue editing". | Saved with the success message; Trash days shows 31. |
 | 5 | Set "Trash days" back to `30`; Save. | Saved. |
@@ -395,6 +403,7 @@ transfer and tells the sender only what it should.
 | 9 | Session B: open T1's link. | "This transfer is no longer available" (the same neutral page as any unavailable transfer; no mention of a takedown or the reason). |
 | 10 | Session B: open `/transfer/`. | T1 shows status TAKEN DOWN and "This transfer was taken down: Spam content (ADM <rand>)". The internal note appears nowhere. |
 | 11 | Session A: the abuse report list. | T1's report stays "Dismissed" (it was already reviewed); no new report rows. |
+| 12 | Session A: open T1 and click **History** (top right of the change view). | One entry by `qa.admin@example.com` reading "Taken down: Spam content (ADM <rand>)": the reason the sender sees, never the internal note. (Bulk actions and two-step pages leave an entry per object like this; Django alone would log only change-form saves.) |
 
 ### ADM-24 Auto-hold and "Release abuse-review hold"
 
@@ -408,7 +417,7 @@ transfer and tells the sender only what it should.
 | 3 | Session B: reload T2's link. | "This transfer is no longer available". |
 | 4 | Session B: `/transfer/`. | T2 still shows ACTIVE with "This transfer is on hold pending review and is temporarily unavailable."; its actions except disabling are not offered. |
 | 5 | Session A: transfers list. | T2 has a "Held for review at" time; status still "Active". |
-| 6 | Tick T2, choose "Release abuse-review hold (dismisses its pending reports)", "Go". | "Released the hold on 1 transfer(s)." (no confirmation page). "Held for review at" is empty again. |
+| 6 | Tick T2, choose "Release abuse-review hold (dismisses its pending reports)", "Go". | "Released the hold on 1 transfer(s)." (no confirmation page). "Held for review at" is empty again, and T2's **History** has an entry "Released the abuse-review hold." |
 | 7 | Abuse report list. | T2's report is "Dismissed", Reviewed by `qa.admin@example.com`, Resolution note "Hold released via admin.". |
 | 8 | Session B: reload T2's link. | The download page works again. |
 | 9 | Session A: run "Release abuse-review hold" on T2 again. | "Released the hold on 0 transfer(s)." Nothing changes. |
@@ -495,14 +504,14 @@ transfer and tells the sender only what it should.
 ### ADM-30 Delete a user who has credit history
 
 **Purpose:** a superuser can delete an account even though its ledger rows are read-only.
-**Preconditions:** USERB (has a +5 adjustment, never opened Receipts or File transfer). Session A.
+**Preconditions:** USERB (has a +5 adjustment, never opened File transfer). Session A.
 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open USERB's change form and click "Delete". | A confirmation page asking whether to delete the user `qa.adm.<rand>.b@example.com`, listing the related objects that go with it (its credit account and the credit transaction). It does **not** say your account lacks permission to delete any of them. |
 | 2 | Confirm ("Yes, I’m sure"). | Back on the Users list with "The user “qa.adm.<rand>.b@example.com” was deleted successfully." USERB is no longer listed. |
 | 3 | Search the ledger for `qa.adm.<rand>.b`. | No rows (deleted with the user). The credit accounts list has no USERB row either. |
-| 4 | Open SENDER's change form, click "Delete" and read the page, then leave it through the breadcrumbs (Django shows no "No, take me back" link on this page). | The page says the user can't be deleted because your account doesn't have permission to delete related objects ("vendor", "receipt", "Receipts account"), and offers no confirm button. Nothing is deleted. Note as a UX issue that a user who has merely opened Receipts can't be deleted from the admin. |
+| 4 | Open SENDER's change form, click "Delete" and read the page, then leave it through the breadcrumbs (Django shows no "No, take me back" link on this page). | SENDER has sent transfers (ADM-21), so the page says the user can't be deleted because your account doesn't have permission to delete related objects (the transfers and their files and recipients; file transfer's admins stay read-only), and offers no confirm button. Nothing is deleted. It must **not** name "vendor", "receipt" or "Receipts account": Receipts, Short URLs and To-do rows are deleted with their user. |
 
 ### ADM-31 Recent actions and logging out
 
@@ -517,3 +526,20 @@ session.
 | 3 | Go to `/admin/`. | Redirected to `/admin/login/?next=/admin/`. |
 | 4 | Go to `/` (the site). | Logged out on the site too (the admin and the site share the session). |
 | 5 | Session B: log out of the site. | Logged out. |
+
+### ADM-32 Sections added since the first plan: notifications, promo codes, welcome credits, Short URLs, To-do
+
+**Purpose:** the newer admin sections load, are read-only where they should be and show readable names.
+**Preconditions:** Session A as `qa.admin`. A new account that confirmed its email (BILL-12 in `billing.md`) makes
+the welcome credit rows meaningful; without it some lists are empty.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/core/notification/`. | Read-only list (filters by source, read state, dismissed, date; search by the user's email or name and by title); no "Add" button; opening a row shows its fields without Save. |
+| 2 | `/admin/billing/welcomecredit/`. | Read-only list: **User** (the email, not an id), status, reason, credits, created, decided; filters status and reason. Opening a granted row shows "Ledger line" as a link reading like `+1000 Welcome credits, 2026-11-01 12:00 UTC` to the ledger row, not a raw id. |
+| 3 | `/admin/billing/promocode/`, then **Add promo code**. | A list with usage columns and a state filter (live, scheduled, expired, fully redeemed, inactive); the add form leaves **Code** blank to generate one. A **Create many** tool exists at `.../promocode/bulk/`. Do not create codes unless a case needs one. |
+| 4 | `/admin/short_url/shortlink/`, `/admin/short_url/linkreport/`, `/admin/short_url/blockeddomain/`. | Short links and link reports are read-only lists (no "Add"); the report list's first column is the reported link's code and the report opens from its **Reason**; blocked domains are plain CRUD. Their takedown / block / deactivate actions show the card-style confirmation pages described in SU-19 and SU-20. |
+| 5 | `/admin/short_url/shorturlsettings/`, `/admin/todo/todosettings/`. | Straight to the one form (no list, no Add, no Delete). Short URL settings has an **Allowances (per user)** tab. |
+| 6 | `/admin/todo/task/`. | Read-only task list (search by title, number or the user's email; filters priority, source, completed, trash, unpaid). The **Unpaid** column shows "Unpaid" only for an owed task (nothing, not a red cross, for the normal state). No Add. |
+| 7 | `/admin/todo/reminderdelivery/`. | The list and the dashboard call it "Reminder deliveries" (plural), read-only. |
+| 8 | On a billing or Short URL settings form, save without changing anything. | Billing settings says "Billing settings saved."; the others use Django's "... was changed successfully." wording. |

@@ -62,6 +62,15 @@ All share the password `QaE2e-Passw0rd!` (a local test value; see `ACCOUNTS` in 
 Tests that need a fresh account create one through the register page with a unique address such
 as `qa.<area>.<random>@example.com`.
 
+**Welcome credits.** The seeded accounts hold exactly the credits in the table (`serve.py` switches the
+welcome credits off while it seeds them). Any account **registered** during a run gets 1,000 welcome
+credits, once, as soon as its email is confirmed (a ledger line "A gift for your new account" and a bell
+notification), unless Billing settings > Welcome credits is set to 0. So a step that needs an account with
+no credits must use `qa.broke@example.com`, not a fresh registration; an address that differs from a
+confirmed one only by a `+tag` (or Gmail dots) gets nothing and an email saying why. Accounts created in
+the admin's add form get the credits when "Email confirmed" is ticked (`admin.md` switches the setting off
+for that reason).
+
 ### Several files at once
 
 Cookies are per host name, not per port, so to run files in parallel start one server per file
@@ -83,6 +92,11 @@ give each its own browser (or a headless Playwright context) instead.
    watch for anything not listed: console errors, broken images, raw template tags (`{{ }}` or
    `{% %}`), `None`/`undefined` shown to users, misaligned or overflowing layout, typos, links that
    go nowhere, missing labels.
+   Two things hold for every form unless a case says otherwise: a refused (422) submit shows its
+   `Label: message` lines in the form's red message box **and** repeats each field's message under
+   that field (red border, `aria-invalid`, keyboard focus on the first invalid field, the message
+   removed when the field is edited); and the site's pages have a "Skip to content" link as their
+   first Tab stop.
 3. Record a result per case: **PASS**, **FAIL** (with what you saw versus what was expected, the
    URL, and a screenshot or the page text), **BLOCKED** (could not run, and why) or **SKIPPED**.
 4. A failure does not stop the file: note it and continue unless later cases depend on it.

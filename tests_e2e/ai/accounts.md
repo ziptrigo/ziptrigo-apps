@@ -12,12 +12,14 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
 - **No account enumeration**: registering an address that already has an account answers exactly
   like a new one; the owner is told by email. An *unconfirmed* account is locked down instead and
   its owner gets a "Finish setting up" set-password link.
-- **Sign in / sign out** (`/account/login/`, `POST /account/logout/`): error messages, `next=`,
+- **Sign in / sign out** (`/account/login/`, `POST /account/logout/`; a GET of the logout URL only redirects to the login page): error messages, `next=`,
   mixed-case email domains, Google and Microsoft sign-in hidden when not configured.
 - **Forgot / reset password** (`/account/forgot-password/`, `/account/reset-password/<token>/`).
 - **Account page** (`/account/`): profile name, theme (Appearance), change password, the "password
   changed" email, other sessions signed out.
-- Accessibility and htmx behaviour of every form above.
+- Password rules (6 to 128 characters, at least one digit; Django's too-common / numeric /
+  too-similar-to-name-or-email checks on the account page), the time zone select on the account
+  page, and the accessibility and htmx behaviour of every form above.
 
 Out of scope: real Google and Microsoft sign-in, the Turnstile captcha (off on this server), rate limits (off on
 this server), the JWT API (`/api/auth/...`, `PUT /api/account`; covered by unit tests).
@@ -29,7 +31,11 @@ this server), the JWT API (`/api/auth/...`, `PUT /api/account`; covered by unit 
 - The mailbox is at `/__e2e__/mail/` (newest first; `?to=<address>` filters by recipient). Links in
   an email's text are clickable. Open it in a separate tab so the page under test keeps its state.
 - Seeded accounts (password `QaE2e-Passw0rd!` for all): `qa.user@example.com` (confirmed, name
-  "QA User"), `qa.unconfirmed@example.com` (not confirmed, name "QA Unconfirmed").
+  "QA User", 100 credits), `qa.unconfirmed@example.com` (not confirmed, name "QA Unconfirmed").
+- **Welcome credits:** an account registered here and then confirmed gets 1,000 credits (one
+  ledger row, a bell notification), so MAIN's balance is **1000** from ACC-10 on (the seeded
+  accounts were created with the welcome credits switched off). Reset and "finish setting up"
+  confirmations grant them too, so `qa.unconfirmed@example.com` ends ACC-35 with 1000.
 - **Never change the password of `qa.user@example.com` or `qa.admin@example.com`**: other test
   files use them. Password changes and resets in this file use fresh accounts.
   `qa.unconfirmed@example.com` is locked down and given a new password near the end (ACC-34/35);
@@ -61,7 +67,13 @@ At the start of the run pick a short random token `<run>` (6 lowercase letters/d
 Error lists on the register, login, forgot-password, resend and reset forms are one red block
 **above** the fields, one line per error, written `<Field label>: <message>` for a field error and
 just `<message>` for a form-wide one (e.g. `Invalid credentials`). The account page's two forms show
-errors in a red box above the fields, *without* the label prefix.
+errors in a red box above the fields, *without* the label prefix. **In addition, every field error
+is repeated under the field that failed** (small red text with an icon, just below the field or its
+wrapper), the field gets a red border and `aria-invalid="true"`, and the message is linked to it with
+`aria-describedby`; the first invalid field takes keyboard focus after the swap, and a field's
+message disappears as soon as you edit that field. Form-wide errors (`Invalid credentials`) appear
+only in the block. Checks below that mention "the red block" mean the block; look under the field
+too when the line has a field label.
 
 ---
 
@@ -73,9 +85,9 @@ errors in a red box above the fields, *without* the label prefix.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/account/login/`. | Tab title `Login - ZipTrigo`. A card with the logo and heading `Sign in`. Header shows a `Login` link (not the account icon). No raw `{{ }}`/`{% %}`, no console errors. |
-| 2 | Inspect the form. | Two fields: `Email` (`type="email"`, `name="email"`) and `Password` (`type="password"`, `name="password"`), both `required`; a full-width `Sign in` button. Each visible label wraps its input, so clicking the word `Email` or `Password` focuses that field. |
+| 2 | Inspect the form. | Two fields: `Email` (`type="email"`, `name="email"`) and `Password` (`type="password"`, `name="password"`), both `required`; a full-width `Sign in` button. The `Email` label wraps its input and the `Password` label is tied to its input (`for`), so clicking the word `Email` or `Password` focuses that field. The logo is decorative (empty `alt`). |
 | 3 | Look below the button. | `No account? Create one` (link to `/account/register/`) and `Forgot your password?` (link to `/account/forgot-password/`). No `or` separator and no `Sign in with Google` button (Google is not configured here). |
-| 4 | Type `abc` into Password, then click the eye button inside the field (`aria-label="Toggle password visibility"`). | The password becomes readable (`type="text"`) and the icon changes to a crossed eye. Click again: hidden again, plain eye icon. |
+| 4 | Type `abc` into Password, then click the eye button inside the field (`aria-label="Show password"`, `aria-controls="password-input"`, `aria-pressed="false"`; it sits next to the label, not inside it, so the field's accessible name is just `Password`). | The password becomes readable (`type="text"`), the icon changes to a crossed eye and `aria-pressed` becomes `true`. Click again: hidden again, plain eye icon, `aria-pressed="false"`. |
 | 5 | Note focus and autocomplete. | Record (observation, not a failure): whether any field has focus on load (`autofocus`) and whether the inputs carry `autocomplete` hints (`email`/`username`, `current-password`). |
 
 ### ACC-02 Register page layout
@@ -86,7 +98,7 @@ errors in a red box above the fields, *without* the label prefix.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | From the login page click `Create one`. | URL `/account/register/`, tab title `Register`, heading `Create account`. |
-| 2 | Inspect the form. | Fields `Name` (text, `name="name"`), `Email` (`type="email"`), `Password` (`type="password"`, `minlength="6"`), all `required`. Under Password the hint `At least 6 characters with 1 digit`. Button `Create account`. |
+| 2 | Inspect the form. | Fields `Name` (text, `name="name"`), `Email` (`type="email"`), `Password` (`type="password"`, `minlength="6"`), all `required`. Under Password the hint `At least 6 characters with 1 digit`; then an optional `Promo code` field (upper-cased as you type, hint `Its credits are added once you confirm your email.`). Button `Create account`. |
 | 3 | Look for a captcha, Google and Microsoft. | No Cloudflare Turnstile widget and no `Sign up with Google` or `Sign up with Microsoft` button. |
 | 4 | Look below the form. | `Already have an account? Sign in`, linking to `/account/login/`. |
 
@@ -98,7 +110,7 @@ errors in a red box above the fields, *without* the label prefix.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Click `Create account` with every field empty. | The browser's own "required" validation stops the submit (a tooltip on the first empty field); the URL stays `/account/register/`; no request reaches the server, nothing changes on the page. |
-| 2 | Name: three spaces `   `. Email: MAIN. Password: P1. Click `Create account`. | The page does **not** reload (htmx swap; URL unchanged). A red error block above the fields reads `Name: This field is required.` No email for MAIN in the mailbox. |
+| 2 | Name: three spaces `   `. Email: MAIN. Password: P1. Click `Create account`. | The page does **not** reload (htmx swap; URL unchanged). A red error block above the fields reads `Name: This field is required.`, the same message `This field is required.` appears under the Name field, the field has a red border and keyboard focus. No email for MAIN in the mailbox. |
 | 3 | Check the fields after the error. | Email still holds MAIN; Password is empty (passwords are never echoed back). |
 
 ### ACC-04 Register: invalid email and weak password
@@ -113,6 +125,7 @@ errors in a red box above the fields, *without* the label prefix.
 | 3 | Check the fields. | Name still `Acc Main <run>`, Email still `foo@bar`, Password empty. |
 | 4 | Email MAIN, Password `abcdefg`. Submit. | Only `Password: Password must contain at least one digit.` |
 | 5 | Open `/__e2e__/mail/?to=<MAIN>`. | `No emails.` (nothing was created). |
+| 6 | Back on the form, Email MAIN, Password `a1` repeated 65 times (130 characters; paste it). Submit. | `Password: Password must be at most 128 characters long.` (and the same text under the Password field). |
 
 ### ACC-05 Register: very long name
 
@@ -198,19 +211,19 @@ a made-up token lands on the expired page with a resend form.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/account/login/`, enter MAIN and P1, click `Sign in`. | Button shows `Signing in...` briefly; then the browser goes to `/account/` (no `next`). |
+| 1 | Open `/account/login/`, enter MAIN and P1, click `Sign in`. | Button shows `Signing in...` briefly; then the browser goes to `/` (the home page; there is no `next`). |
 | 2 | Header. | The `Login` link is replaced by an account icon button (`aria-label="Account menu"`). |
 | 3 | Click the account icon. | A menu opens showing the name `Acc Main <run>`, `Settings` (link to `/account/`) and `Logout`. Press Escape: the menu closes and focus returns to the icon. Click outside after reopening: it closes. |
 | 4 | While signed in, open `/account/login/`. | Record (observation): the sign-in form is shown again rather than redirecting a signed-in user. Not a failure. |
 
 ### ACC-13 Sign out is POST-only
 
-**Purpose:** logout works from the menu; a plain GET of the logout URL does nothing.
+**Purpose:** logout works from the menu; a plain GET of the logout URL signs nobody out.
 **Preconditions:** signed in as MAIN (ACC-12).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Navigate directly to `/account/logout/` (address bar, a GET). | HTTP 405; the page is blank (no site layout). You are **not** signed out. |
+| 1 | Navigate directly to `/account/logout/` (address bar, a GET). | Redirected to `/account/login/` (no error page). You are **not** signed out: the header shows the account icon and the login form is shown again (as in ACC-12 step 4). |
 | 2 | Go to `/account/`. | The account page loads (still signed in). |
 | 3 | Open the account menu and click `Logout`. | Redirected to `/` (the home page); header shows `Login`. |
 | 4 | Go to `/account/`. | Redirected to `/account/login/?next=/account/`. |
@@ -246,8 +259,8 @@ a made-up token lands on the expired page with a resend form.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/account/login/?next=https://evil.example.com/` and sign in with MAIN / P1. | Lands on `/account/`, never on `evil.example.com`. |
-| 2 | Sign out. Go to `/account/login/?next=//evil.example.com/x` and sign in. | Lands on `/account/`. |
+| 1 | Go to `/account/login/?next=https://evil.example.com/` and sign in with MAIN / P1. | Lands on `/` (the home page), never on `evil.example.com`. |
+| 2 | Sign out. Go to `/account/login/?next=//evil.example.com/x` and sign in. | Lands on `/`. |
 | 3 | Sign out. | Header shows `Login`. |
 
 ### ACC-17 Mixed-case email at sign-in
@@ -283,10 +296,10 @@ a made-up token lands on the expired page with a resend form.
 |---|---|---|
 | 1 | Go to `/account/`. | Tab title and heading `Account Settings`. Sections in order: `Profile Information`, `Credits`, `Appearance`, `Change Password`, then a `Back to Home` link. |
 | 2 | Profile section. | `Email` shows MAIN in a greyed, disabled field (not editable) with the hint `Email cannot be changed`; `Name` holds `Acc Main <run>`; button `Save Profile`. |
-| 3 | Credits section. | `Current balance` then `0 credits`; a `Usage History` link to `/billing/credits/`. |
+| 3 | Credits section. | `Current balance` then `1000 credits` (the welcome credits); a `Usage History` link to `/billing/credits/`; below it the "Have a promo code?" form. (A balance of exactly 1 reads `1 credit`, 0 and 2+ read `credits`; the seeded `qa.broke@example.com` shows `0 credits`.) |
 | 4 | Appearance section. | A `Theme` group with three options, `System` (selected), `Light` and `Dark`, and a hint that System follows the device's setting. No Save button (see ACC-37). |
-| 5 | Change Password section. | Fields `Current Password`, `New Password` (hint `At least 6 characters with one digit`), `Confirm New Password`, all `type="password"`, each with its own eye toggle; button `Change Password`. No `You signed in with Google` note. |
-| 6 | Click each eye toggle. | Each reveals only its own field and flips its own icon. |
+| 5 | Change Password section. | Fields `Current Password`, `New Password` (hint `6 to 128 characters with at least one digit`), `Confirm New Password`, all `type="password"`, each with its own eye toggle (outside the label; `aria-label="Show password"`, `aria-pressed="false"`); button `Change Password`. No `You signed in with Google` note. |
+| 6 | Click each eye toggle. | Each reveals only its own field, flips its own icon and sets its own `aria-pressed="true"`. |
 | 7 | Click `Back to Home`. | Goes to `/`. |
 
 ### ACC-20 Update the profile name
@@ -338,7 +351,9 @@ equal to the value given.
 | 4 | New `abcdefgh`. | `Password must contain at least one digit.` |
 | 5 | New `examplecom1`. | `The password is too similar to the email.` |
 | 6 | New `abc12` (5 characters). | The browser blocks it (`minlength="6"`). |
-| 7 | After all of these, sign-in still uses P1. | (Checked implicitly in ACC-24: the current password P1 is still accepted.) |
+| 7 | New `accmain<run>1` (the name is `Acc Main <run>`). | `The password is too similar to the name.` (the name is compared too, not only the email). |
+| 8 | New `a1` repeated 65 times (130 characters; paste it), Confirm the same. | `Password must be at most 128 characters long.` Each message above also shows under the New Password field. |
+| 9 | After all of these, sign-in still uses P1. | (Checked implicitly in ACC-24: the current password P1 is still accepted.) |
 
 ### ACC-24 Change password successfully
 
@@ -452,7 +467,7 @@ cooldown, and a new link supersedes the old one.
 | 8 | Mailbox for RESEND. | Now two emails; the newest has a different link (CONFIRM-R2). |
 | 9 | Open CONFIRM-R1 and press `Confirm my email`. | `Link Expired` page (`/account/email-confirmation-expired/`): the resend superseded it. |
 | 10 | Open CONFIRM-R2 and press `Confirm my email`. | `Email Confirmed!`. |
-| 11 | Sign in with RESEND / P-RESEND. | Lands on `/account/`. Sign out. |
+| 11 | Sign in with RESEND / P-RESEND. | Lands on `/` (the home page). Sign out. |
 | 12 | Navigate (GET) to `/account/resend-confirmation/`. | HTTP 405, blank page (the form only lives on the expired-link page). Note as observation. |
 
 ### ACC-33 No enumeration: signing up with an address that has an account
@@ -508,8 +523,8 @@ link instead.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | On `/account/register/`, use only Tab / Shift+Tab. | Focus moves Name -> Email -> Password -> `Create account` -> `Sign in` link, with a visible focus ring on each field. |
-| 2 | Submit an invalid form (Name `   `, Email `foo@bar`, Password `abcdefg`). Then press Tab from the top of the card. | The swapped-in form is fully usable: fields keep their typed Name/Email, Tab order is the same, and submitting again works (htmx still bound after the swap; a second submit produces a fresh error list, not two stacked lists). |
-| 3 | Check the error block. | It sits directly above the first field, inside the card, red text, readable in both light and dark themes. To check the other theme while signed out, emulate the other `prefers-color-scheme` (a visitor without a session follows the system), then reload, which clears the form and its errors, so submit the same invalid form again. Restore the emulation afterwards. Record (observation) whether errors are announced to assistive tech (`role="alert"`/`aria-live`) and whether inputs get `aria-invalid`; currently they do not. |
+| 2 | Submit an invalid form (Name `   `, Email `foo@bar`, Password `abcdefg`). Then press Tab from the top of the card. | The swapped-in form is fully usable: fields keep their typed Name/Email, Tab order is the same, and submitting again works (htmx still bound after the swap; a second submit produces a fresh error list, not two stacked lists, and the under-field messages are replaced, not duplicated). After the first failed submit, keyboard focus is already on the first invalid field (Name), not on the submit button or the page body. |
+| 3 | Check the error block. | It sits directly above the first field, inside the card, red text, readable in both light and dark themes. To check the other theme while signed out, emulate the other `prefers-color-scheme` (a visitor without a session follows the system), then reload, which clears the form and its errors, so submit the same invalid form again. Restore the emulation afterwards. Check that the block has `role="alert"` and that each failing input has `aria-invalid="true"` and an `aria-describedby` pointing at its under-field message (the field message itself is not a live region; the block is what is announced). Editing an invalid field removes its message and `aria-invalid`. |
 | 4 | On `/account/login/`, sign in with MAIN / `Wrong-0000` twice in a row quickly. | Each submit disables the button while pending (`hx-disabled-elt`), no duplicate error blocks, the eye toggle still works after the swap. |
 | 5 | Set the viewport to 375 px wide and visit `/account/login/`, `/account/register/`, `/account/forgot-password/`, `/account/created/`, `/account/email-confirmation-expired/`. | Each card fits the screen with side margins, no horizontal scroll, buttons fully visible. |
 | 6 | Sign in as MAIN / P3, visit `/account/` at 375 px. | All three sections fit; the eye buttons stay inside their fields. Sign out and restore the viewport. |
@@ -529,3 +544,19 @@ link instead.
 | 6 | Sign in again from a different browser profile (another "device"). | The saved theme applies there too. |
 | 7 | Visit `/account/` as the no-password account (Context with a Google-created account, if available) or note it as not applicable. | The Appearance section is shown there too. |
 | 8 | Restore `System`. | - |
+
+### ACC-38 Time zone select and the "Use it" button
+
+**Purpose:** the account page's time zone select offers canonical zones only and the browser's zone
+can be picked with one click.
+**Preconditions:** sign in as MAIN (Context A). The browser reports its own zone (record it as
+`<browser zone>`); the first page after sign-in saved it silently if the account had none.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/account/` and look at the Profile section. | A `Time zone` select between Name and the Save button, with the hint `Used for due dates, reminders and what counts as today.` It shows `<browser zone>` (or `Not set (UTC)` if detection had not run). No "Detected from your browser" line while the select equals the browser's zone. |
+| 2 | Open the select's list. | `UTC` first, then `Area/City` names with `_` shown as a space. `Asia/Kolkata`, `Europe/Kyiv` and `America/Argentina/Buenos Aires` are there; their old aliases (`Asia/Calcutta`, `Europe/Kiev`, `America/Buenos Aires`), `Etc/...`, `US/...` and bare names such as `GMT` or `Japan` are **not**. |
+| 3 | Pick a zone other than `<browser zone>` (e.g. `Asia/Tokyo`). | Under the select: `Detected from your browser: <browser zone>` followed by **Use it**, which is a real button (reachable with Tab, activated with Enter or Space, underlined; it does not wrap across lines). |
+| 4 | Activate **Use it**. | The select goes back to `<browser zone>` and the line disappears. The page did not scroll to the top or change its URL (no `#` was added). |
+| 5 | Pick `Asia/Tokyo`, press **Save Profile**. | Green `Profile updated successfully.`; the select still shows `Asia/Tokyo`; the "Detected from your browser" line is back (the form was swapped and the script re-bound). In the console, `document.documentElement.dataset.userTimezone` is now `Asia/Tokyo` **without a reload**. |
+| 6 | Reload `/account/`, then restore `<browser zone>` (use **Use it**, **Save Profile**). | The saved zone survived the reload; after the restore the attribute is `<browser zone>` again. |

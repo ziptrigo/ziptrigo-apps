@@ -32,8 +32,10 @@ limiting (`FEEDBACK_USER`, 10 per hour) is switched off on this server and is no
 | Under the field (confirmed users only) | `A copy will be emailed to <email>.` |
 | Counter | `<n> / 5,000` (red when over 5,000) |
 | Button / while sending | `Send feedback` / `Sending...` |
-| Empty or whitespace error | `Please write your feedback.` |
-| Too long error | `Please keep your feedback to 5,000 characters.` |
+| Empty or whitespace error | `Write something before sending.` |
+| Too long error | `Keep it to 5,000 characters or fewer.` |
+| Error line in the message slot (above the form, `#feedback-msg`, `role=alert`, red) | `Your feedback: <the message>` |
+| Same message under the textarea | `<the message>` (red, linked to the textarea with `aria-describedby`; the textarea gets `aria-invalid="true"` and a red border) |
 | Thanks page title / heading | `Thanks for your feedback` / **Thanks for your feedback!** |
 | Thanks text, confirmed | "We've received your message and emailed a copy to **<email>**. Every message is read." |
 | Thanks text, unconfirmed | "We've received your message. Every message is read." |
@@ -87,9 +89,9 @@ of emails at `/__e2e__/mail/` (heading "E2E mailbox (N)").
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Type three spaces, press `Enter` twice, type two more spaces. | The counter shows `7 / 5,000`. |
-| 2 | Press **Send feedback**. | The button briefly shows a spinner and `Sending...`. The form is replaced in place (no page reload, URL still `/feedback/`): a red message **Please write your feedback.** appears between the label and the textarea, and the textarea has a red border. The response status is 422. |
+| 2 | Press **Send feedback**. | The button briefly shows a spinner and `Sending...`. The form is replaced in place (no page reload, URL still `/feedback/`): a red line **Your feedback: Write something before sending.** appears in the message slot above the form, the same message **Write something before sending.** appears under the textarea, the textarea has a red border and keyboard focus. The response status is 422. |
 | 3 | Check `/__e2e__/mail/`. | No new email. |
-| 4 | Type `x` in the field and look at the counter. | The counter still works after the form was swapped (it counts the whitespace kept in the field plus `x`). |
+| 4 | Type `x` in the field and look at the counter. | The counter still works after the form was swapped (it counts the whitespace kept in the field plus `x`). The message under the textarea disappears as soon as you type (the slot line above the form stays until the next submission). |
 | 5 | Clear the field. | - |
 
 ### FB-05 Over 5,000 characters is rejected, the text is kept
@@ -104,9 +106,9 @@ the counter updates:
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Put the 5,001-character text in the field. | The counter reads `5,001 / 5,000` in red. There is no `maxlength`, so the browser accepts it. |
-| 2 | Press **Send feedback**. | 422, form swapped in place: the red message **Please keep your feedback to 5,000 characters.**; the textarea still contains the whole text (it ends with `END-MARKER!`); the counter again reads `5,001 / 5,000` in red. |
+| 2 | Press **Send feedback**. | 422, form swapped in place: the slot line **Your feedback: Keep it to 5,000 characters or fewer.** above the form and the message **Keep it to 5,000 characters or fewer.** under the textarea; the textarea still contains the whole text (it ends with `END-MARKER!`); the counter again reads `5,001 / 5,000` in red. |
 | 3 | Delete one character (the last `!`). | Counter `5,000 / 5,000`, no longer red. |
-| 4 | Press **Send feedback**. | Accepted: the browser goes to `/feedback/thanks/` (exactly 5,000 characters is allowed). |
+| 4 | Press **Send feedback**. | Accepted: the browser goes to `/feedback/thanks/` (exactly 5,000 characters is allowed); the slot line is gone from the form you get next. |
 | 5 | Check `/__e2e__/mail/`. | Two new emails (receipt to `qa.user@example.com`, notification to `qa.admin@example.com`); the receipt quotes the long text. |
 
 ### FB-06 Successful submission and the thank-you page
