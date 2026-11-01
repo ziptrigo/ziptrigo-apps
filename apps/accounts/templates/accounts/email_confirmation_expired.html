@@ -1,14 +1,14 @@
 {% extends "core/base.html" %}
 {% load static %}
 
-{% block title %}Link Expired{% endblock %}
+{% block title %}Link Expired - ZipTrigo{% endblock %}
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
   <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6 text-center">
     <div class="flex items-center justify-center gap-3 mb-6">
       <img src="{% static 'accounts/images/logo_128x128.png' %}" alt="Logo" class="h-8 w-8">
-      <h1 class="text-xl font-semibold text-red-600">Link Expired</h1>
+      <h1 class="text-xl font-semibold text-red-600 dark:text-red-400">Link Expired</h1>
     </div>
 
     <p class="mb-6">
@@ -20,11 +20,10 @@
 
     {% include 'accounts/partials/resend_confirmation_form.html' %}
 
-    <button type="button"
-            onclick="window.location='{% url 'core:home' %}';"
+    <a href="{% url 'core:home' %}"
             class="btn mt-4 inline-flex justify-center items-center rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm">
       Go to Home
-    </button>
+    </a>
   </div>
 </div>
 {% endblock %}

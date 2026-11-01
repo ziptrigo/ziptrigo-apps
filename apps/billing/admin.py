@@ -125,11 +125,15 @@ class CreditTransactionAdmin(admin.ModelAdmin):
         amount = int(data['amount'])
         description = str(data.get('description') or '').strip() or 'Admin adjustment'
 
-        try:
-            target = User.objects.get(email=user_email)
-        except User.DoesNotExist:
+        # Case-insensitive, like signup and the user admin (CLAUDE.md "Email case"); an address that
+        # matches several legacy rows only in case must be typed exactly as stored.
+        matches = list(User.objects.filter(email__iexact=user_email))
+        if len(matches) > 1:
+            matches = [u for u in matches if u.email == user_email]
+        if len(matches) != 1:
             messages.error(request, f'No user found with email: {user_email}')
             return False
+        target = matches[0]
 
         try:
             if data['direction'] == 'add':

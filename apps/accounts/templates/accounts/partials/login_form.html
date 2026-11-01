@@ -10,7 +10,7 @@
   {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
 
   {% if form.errors %}
-    <div class="mb-4 text-sm text-red-600" style="white-space: pre-line">
+    <div role="alert" class="mb-4 text-sm text-red-600 dark:text-red-400" style="white-space: pre-line">
       {% for error in form.non_field_errors %}{{ error }}
 {% endfor %}{% for field in form %}{% for error in field.errors %}{{ field.label }}: {{ error }}
 {% endfor %}{% endfor %}</div>
@@ -18,14 +18,14 @@
 
   <label class="block mb-3">
     <span class="block mb-1">Email</span>
-    <input type="email" name="email" required value="{{ form.email.value|default:'' }}"
+    <input type="email" name="email" required autocomplete="email" autofocus value="{{ form.email.value|default:'' }}"
            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
   </label>
 
   <label class="block mb-3">
     <span class="block mb-1">Password</span>
     <div class="relative">
-      <input id="password-input" type="password" name="password" required
+      <input id="password-input" type="password" name="password" required autocomplete="current-password"
              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 pr-10">
       <button type="button" id="toggle-password"
               class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"

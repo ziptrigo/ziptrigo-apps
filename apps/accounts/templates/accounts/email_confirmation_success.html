@@ -1,7 +1,7 @@
 {% extends "core/base.html" %}
 {% load static %}
 
-{% block title %}Email Confirmed{% endblock %}
+{% block title %}Email Confirmed - ZipTrigo{% endblock %}
 
 {% block content %}
 <div class="flex-grow flex items-center justify-center p-6">
@@ -15,11 +15,10 @@
       Your email address has been successfully confirmed. You can now log in to your account.
     </p>
     
-    <button type="button"
-            onclick="window.location='{% url 'accounts:login' %}';"
+    <a href="{% url 'accounts:login' %}"
             class="btn inline-flex justify-center items-center rounded-lg bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:bg-sage-400 text-sm">
       Go to Login
-    </button>
+    </a>
   </div>
 </div>
 {% endblock %}

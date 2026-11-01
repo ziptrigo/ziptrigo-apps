@@ -7,6 +7,7 @@ Product apps call these with ``source=<their app label>`` so the ledger shows wh
 
 from django.db import transaction
 from django.db.models import F
+from django.utils import timezone
 
 from apps.accounts.models import User
 
@@ -46,7 +47,10 @@ def add_credits(
 
     with transaction.atomic():
         CreditAccount.objects.get_or_create(user=user)
-        CreditAccount.objects.filter(user=user).update(balance=F('balance') + amount)
+        # `QuerySet.update` skips `auto_now`, so `updated_at` is set here.
+        CreditAccount.objects.filter(user=user).update(
+            balance=F('balance') + amount, updated_at=timezone.now()
+        )
         tx = CreditTransaction.objects.create(
             user=user,
             amount=amount,
@@ -87,7 +91,7 @@ def spend_credits(
 
     with transaction.atomic():
         updated = CreditAccount.objects.filter(user=user, balance__gte=amount).update(
-            balance=F('balance') - amount
+            balance=F('balance') - amount, updated_at=timezone.now()
         )
         if updated != 1:
             raise InsufficientCreditsError('Insufficient credits')

@@ -405,7 +405,7 @@ still finds the account.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | New P3, Confirm `AccReset-0000`. Save. | Red block: `Password confirm: Passwords do not match.` (Note: the prefix `Password confirm` differs from the visible label `Confirm password`; record it as a cosmetic issue.) Both fields empty; URL unchanged. |
+| 1 | New P3, Confirm `AccReset-0000`. Save. | Red block: `Confirm password: Passwords do not match.` Both fields empty; URL unchanged. |
 | 2 | New `abcdefgh`, Confirm `abcdefgh`. | `Password: Password must contain at least one digit.` |
 | 3 | New `abc12`. | Blocked by the browser (`minlength`). |
 | 4 | Check that the link still works. | The page is still the reset form (not `Link Expired`): failed attempts don't use up the link. |
@@ -417,7 +417,7 @@ still finds the account.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | New P3, Confirm P3, click `Save new password`. | Redirected to `/account/login/` with a green banner `Your password has been reset. You can now log in.` |
+| 1 | New P3, Confirm P3, click `Save new password`. | Redirected to `/account/login/` with a green banner `Your password is set. You can now log in.` |
 | 2 | Sign in with MAIN / P2. | `Invalid credentials`. |
 | 3 | Sign in with MAIN / P3. | Signed in, lands on `/`. Then sign out. |
 | 4 | In Context B, reload `/account/`. | Redirected to `/account/login/?next=/account/` (the reset ended that session). Close Context B. |
@@ -443,8 +443,8 @@ cooldown, and a new link supersedes the old one.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Register RESEND (name `Acc Resend <run>`, password P-RESEND). | `/account/created/`. Mailbox `?to=<RESEND>` has one `Confirm your ZipTrigo account email` (link CONFIRM-R1). |
-| 2 | Within 60 seconds of step 1, open `/account/email-confirmation-expired/`, enter RESEND, click `Resend confirmation email`. | Green message: `If the account exists and is not yet confirmed, a confirmation email will be sent.` Field emptied, no reload. |
-| 3 | Mailbox for RESEND. | Still only **one** email (a resend inside the cooldown is silently skipped). Record as a UX note: the page says an email will be sent but none arrives and no wait is suggested. |
+| 2 | Within 60 seconds of step 1, open `/account/email-confirmation-expired/`, enter RESEND, click `Resend confirmation email`. | Green message starting `If the account exists and is not yet confirmed, we'll send a confirmation email.` and saying to wait a minute after a recent request. Field emptied, no reload. |
+| 3 | Mailbox for RESEND. | Still only **one** email (a resend inside the cooldown is skipped, which the message's "wait a minute" covers). |
 | 4 | Enter `foo@bar`, submit. | `Email: Enter a valid email address.` |
 | 5 | Enter NOBODY, submit. | The same green message as step 2. Mailbox for NOBODY: `No emails.` |
 | 6 | Enter MAIN (already confirmed), submit. | The same green message. No new email for MAIN. |
@@ -495,7 +495,7 @@ link instead.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open FINISH-1. | The `Set a new password` page with `New password` / `Confirm password` and `Save new password`. Note (copy observation): the page and the success banner speak of a reset, not of finishing a setup. |
-| 2 | Enter P-FINISH in both, save. | `/account/login/` with the banner `Your password has been reset. You can now log in.` |
+| 2 | Enter P-FINISH in both, save. | `/account/login/` with the banner `Your password is set. You can now log in.` |
 | 3 | Sign in with `qa.unconfirmed@example.com` / P-FINISH. | Signed in **without** the "please confirm" message (the reset confirmed the email); lands on `/`. On `/account/`, Name shows `QA Unconfirmed` and Email `qa.unconfirmed@example.com`. |
 | 4 | Open FINISH-1 again. | `Link Expired` (single use). |
 | 5 | Sign out. | Header shows `Login`. |

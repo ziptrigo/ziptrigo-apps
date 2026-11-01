@@ -9,7 +9,7 @@
   {% field_errors form %}
 
   {% if form.errors %}
-    <div class="mb-4 text-sm text-red-600" style="white-space: pre-line">
+    <div role="alert" class="mb-4 text-sm text-red-600 dark:text-red-400" style="white-space: pre-line">
       {% for error in form.non_field_errors %}{{ error }}
 {% endfor %}{% for field in form %}{% for error in field.errors %}{{ field.label }}: {{ error }}
 {% endfor %}{% endfor %}</div>
@@ -17,19 +17,19 @@
 
   <label class="block mb-3">
     <span class="block mb-1">Name</span>
-    <input type="text" name="name" required value="{{ form.name.value|default:'' }}"
+    <input type="text" name="name" required autocomplete="name" autofocus value="{{ form.name.value|default:'' }}"
            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
   </label>
 
   <label class="block mb-3">
     <span class="block mb-1">Email</span>
-    <input type="email" name="email" required value="{{ form.email.value|default:'' }}"
+    <input type="email" name="email" required autocomplete="email"  value="{{ form.email.value|default:'' }}"
            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
   </label>
 
   <label class="block mb-4">
     <span class="block mb-1">Password</span>
-    <input type="password" name="password" required minlength="6"
+    <input type="password" name="password" required minlength="6" autocomplete="new-password"
            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
     <span class="text-xs text-gray-500 dark:text-gray-400">At least 6 characters with 1 digit</span>
   </label>

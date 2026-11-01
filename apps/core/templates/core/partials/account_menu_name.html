@@ -1,0 +1,4 @@
+{% comment %}The account menu's first line, the user's name. The profile form's success response sends it again out of band (`oob`), so the header follows a rename without a reload.{% endcomment %}
+<div id="account-menu-name"{% if oob %} hx-swap-oob="outerHTML"{% endif %}
+     class="px-3 py-2 mb-1 text-sm font-semibold truncate border-b border-gray-200 dark:border-gray-700 cursor-default select-text"
+     title="{{ user.name|default:user.email }}">{{ user.name|default:user.email }}</div>

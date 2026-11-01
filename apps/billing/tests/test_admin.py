@@ -235,3 +235,26 @@ def test_staff_needs_billing_delete_permission_to_delete_user_with_credit_histor
     assert client.post(url, {'post': 'yes'}).status_code == 302
     assert not User.objects.filter(pk=target.pk).exists()
     assert not CreditTransaction.objects.filter(user_id=target.pk).exists()
+
+
+def test_adjustment_finds_the_user_whatever_the_case_of_the_email(client, admin_user, regular_user):
+    client.force_login(admin_user)
+
+    client.post(
+        reverse(URL),
+        {'user_email': regular_user.email.upper(), 'direction': 'add', 'amount': 3},
+    )
+
+    assert get_balance(regular_user) == 3
+
+
+def test_balance_changes_move_updated_at(regular_user):
+    add_credits(regular_user, 5)
+    account = CreditAccount.objects.get(user=regular_user)
+    before = account.updated_at
+    CreditAccount.objects.filter(pk=account.pk).update(updated_at=before.replace(year=2000))
+
+    add_credits(regular_user, 1)
+
+    account.refresh_from_db()
+    assert account.updated_at.year != 2000

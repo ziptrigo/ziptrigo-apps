@@ -183,9 +183,7 @@
                              x-transition:leave-start="opacity-100 scale-100"
                              x-transition:leave-end="opacity-0 scale-95"
                              class="absolute right-0 mt-2 min-w-[10rem] max-w-[16rem] origin-top-right rounded-xl shadow-lg bg-white dark:bg-gray-800 ring-1 ring-gray-900/10 dark:ring-white/10 p-1 z-50">
-                            <div id="account-menu-name"
-                                 class="px-3 py-2 mb-1 text-sm font-semibold truncate border-b border-gray-200 dark:border-gray-700 cursor-default select-text"
-                                 title="{{ user.name|default:user.email }}">{{ user.name|default:user.email }}</div>
+                            {% include 'core/partials/account_menu_name.html' %}
                             <a href="{% url 'accounts:account' %}"
                                class="block rounded-lg px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                 <i class="fas fa-cog mr-2 w-4 text-center"></i>Settings
