@@ -38,3 +38,11 @@ def test_account_menu_falls_back_to_email_without_a_name(client, user):
     client.force_login(user)
     html = client.get(reverse('core:home')).content.decode()
     assert f'>{user.email}</div>' in html
+
+
+def test_account_menu_closes_when_focus_leaves_it(client, user):
+    client.force_login(user)
+    html = client.get(reverse('core:home')).content.decode()
+    assert '@focusout="if (!$el.contains($event.relatedTarget)) open = false"' in html
+    assert 'aria-controls="account-menu"' in html
+    assert 'id="account-menu"' in html

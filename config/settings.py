@@ -103,6 +103,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     # Activates the signed-in user's time zone for the request (issue #177); needs `request.user`.
     'apps.accounts.middleware.TimezoneMiddleware',
+    # An htmx request that lost its session navigates to the login page instead of swapping it in.
+    'apps.core.middleware.HtmxLoginRedirectMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
