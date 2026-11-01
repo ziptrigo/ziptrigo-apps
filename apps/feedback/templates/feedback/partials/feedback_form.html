@@ -1,4 +1,4 @@
-{% load field_errors %}{% if reset_message %}<div id="feedback-msg" hx-swap-oob="true" class="text-sm" aria-live="polite"></div>{% endif %}
+{% load field_errors %}{% if reset_message %}<div id="feedback-msg" hx-swap-oob="true" class="text-sm" aria-live="polite">{% include 'feedback/partials/feedback_errors.html' %}</div>{% endif %}
 <form id="feedback-form"
       method="post"
       action="{% url 'feedback:submit' %}"
@@ -9,7 +9,7 @@
       x-data="{ count: 0 }"
       x-init="count = [...$refs.text.value].length">
   {% csrf_token %}
-  {% field_errors form fallback=True %}
+  {% field_errors form %}
 
   <label class="block mb-4">
     <span class="block mb-1">{{ form.description.label }}</span>

@@ -10,7 +10,7 @@ class FeedbackForm(forms.Form):
     description = forms.CharField(
         label='Your feedback',
         strip=False,
-        error_messages={'required': 'Please write your feedback.'},
+        error_messages={'required': 'Write something before sending.'},
         widget=forms.Textarea(attrs={'rows': 9}),
     )
 

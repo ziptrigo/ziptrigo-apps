@@ -9,6 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core import ratelimit
+from apps.core.field_errors import form_lines
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import FeedbackForm
@@ -48,6 +49,8 @@ def feedback_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     partial = request.method == 'POST' and is_htmx(request)
     context = {
         'form': form,
+        # The message slot's `Label: message` lines (the page's own slot, or the out-of-band one).
+        'messages_list': form_lines(form) if form.is_bound else [],
         'max_length': MAX_DESCRIPTION_LENGTH,
         'max_length_label': f'{MAX_DESCRIPTION_LENGTH:,}',
         # Only a bare partial response carries the out-of-band `#feedback-msg` reset; the full

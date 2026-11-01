@@ -1,0 +1,2 @@
+{% comment %}The content of the message slot (#feedback-msg) after a refused submission: one `Label: message` line per error, like the other forms. The same message is also put under the textarea by core/js/field_errors.js.{% endcomment %}
+{% if messages_list %}<div class="mb-3 text-red-600 dark:text-red-400" role="alert">{% for line in messages_list %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}

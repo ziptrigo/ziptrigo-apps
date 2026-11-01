@@ -2183,8 +2183,12 @@ superusers) and `core` can't import `accounts`; it sits in the same layer as `bi
   unconfirmed user, and superusers are still notified; the form and thanks page just leave out the
   "a copy will be emailed to ..." wording in that case.
 - **Thanks page** is reachable only right after a submission: `feedback_page` sets a one-shot
-  session flag and `thanks_page` pops it, redirecting to the form without it. A 422 response also
-  clears a leftover rate-limit message with an out-of-band `#feedback-msg` swap.
+  session flag and `thanks_page` pops it, redirecting to the form without it. A refused form
+  (422) follows the slot convention (#224): the `Label: message` lines (`form_lines`) go in the
+  `#feedback-msg` slot (`role="alert"`), swapped out of band for an htmx response (which also
+  clears a leftover rate-limit message) and rendered in the page's own slot without htmx, and the
+  same message shows under the textarea. Its messages are plain: "Write something before sending."
+  and "Keep it to 5,000 characters or fewer."
 - **Admin** (`FeedbackAdmin`): filter by status and date, search, everything read-only except
   `status`, no add permission, and bulk "Mark selected as New / In process / Closed" actions that
   set `updated_at` explicitly (`QuerySet.update` skips `auto_now`); the actions require the

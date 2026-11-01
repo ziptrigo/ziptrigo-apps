@@ -19,11 +19,9 @@ def validate_description(description: str) -> str:
     """
     description = description.replace('\r\n', '\n').replace('\r', '\n').strip()
     if not description:
-        raise ValidationError('Please write your feedback.')
+        raise ValidationError('Write something before sending.')
     if len(description) > MAX_DESCRIPTION_LENGTH:
-        raise ValidationError(
-            f'Please keep your feedback to {MAX_DESCRIPTION_LENGTH:,} characters.'
-        )
+        raise ValidationError(f'Keep it to {MAX_DESCRIPTION_LENGTH:,} characters or fewer.')
     return description
 
 
