@@ -1,11 +1,16 @@
 """Admin registrations for the billing app, plus the manual credit adjustment tool. The promo code
 section (issue #70) is in `admin_promo.py`."""
 
+from typing import cast
+
 from django import forms
 from django.contrib import admin, messages
-from django.http import HttpRequest, HttpResponse
+from django.contrib.admin.widgets import AdminIntegerFieldWidget
+from django.db import models
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
-from django.urls import path
+from django.urls import path, reverse
+from django.utils.html import format_html
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.models import User
@@ -22,6 +27,7 @@ from .models import (
     PromoRedemption,
     WelcomeCredit,
 )
+from .models.settings import WELCOME_CREDITS_MAX
 from .services import InsufficientCreditsError, add_credits, get_balance, spend_credits
 
 
@@ -191,6 +197,25 @@ class BillingSettingsAdmin(SingletonSettingsAdmin):
     """Singleton settings page (issue #98): there's only ever the one row
     `BillingSettings.load()` creates."""
 
+    def formfield_for_dbfield(self, db_field: models.Field, request: HttpRequest, **kwargs):
+        # The decimal price input is otherwise rendered unstyled next to the integer one, and the
+        # integer's bounds were only enforced by the server (an input without `max`).
+        if db_field.name == 'storage_price_per_gb_per_day':
+            kwargs['widget'] = AdminIntegerFieldWidget(attrs={'min': '0'})
+        elif db_field.name == 'welcome_credits':
+            kwargs['max_value'] = WELCOME_CREDITS_MAX
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
+    def response_change(self, request: HttpRequest, obj: BillingSettings) -> HttpResponse:
+        # Django's own message would read "The Billing settings “Billing settings” was changed
+        # successfully." for a singleton, whose one row has no name of its own.
+        if '_continue' in request.POST or '_addanother' in request.POST:
+            return super().response_change(request, obj)
+        self.message_user(request, 'Billing settings saved.', messages.SUCCESS)
+        return HttpResponseRedirect(
+            reverse('custom_admin:billing_billingsettings_change', args=[obj.pk])
+        )
+
 
 custom_admin_site.register(CreditTransaction, CreditTransactionAdmin)
 custom_admin_site.register(CreditAccount, CreditAccountAdmin)
@@ -203,6 +228,7 @@ class WelcomeCreditAdmin(admin.ModelAdmin):
     """Read-only view of who got, or was refused, the welcome credits (issue #160)."""
 
     list_display = ['user', 'status', 'reason', 'credits', 'created_at', 'decided_at']
+    list_select_related = ['user']
     list_filter = ['status', 'reason', 'created_at']
     search_fields = ['user__email', 'user__name']
     readonly_fields = [
@@ -211,11 +237,26 @@ class WelcomeCreditAdmin(admin.ModelAdmin):
         'status',
         'reason',
         'credits',
-        'transaction',
+        'ledger_line',
         'refusal_emailed_at',
         'created_at',
         'decided_at',
     ]
+
+    def get_queryset(self, request: HttpRequest):
+        return super().get_queryset(request).select_related('user', 'transaction')
+
+    @admin.display(description='Ledger line')
+    def ledger_line(self, obj: WelcomeCredit):
+        """The credit it produced, readable, linking to the ledger row (rather than its raw id and
+        ISO timestamp)."""
+        tx = cast(CreditTransaction | None, obj.transaction)
+        if tx is None:
+            return '-'
+        when = tx.created_at.strftime('%Y-%m-%d %H:%M UTC') if tx.created_at else ''
+        label = f'{tx.amount:+d} {tx.get_type_display()}, {when}'
+        url = reverse('custom_admin:billing_credittransaction_change', args=[tx.pk])
+        return format_html('<a href="{}">{}</a>', url, label)
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False

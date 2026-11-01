@@ -35,7 +35,17 @@ ACCOUNTS = [
 
 SEED = f"""
 from apps.accounts.models import User
+from apps.billing.models import BillingSettings
 from apps.billing.services import add_credits
+
+# The seeded accounts hold exactly the credits listed above. They are confirmed with a plain
+# save() (no `email_confirmed` signal), so with the welcome credits on they would keep a pending
+# WelcomeCredit row that the daily job could later settle (+1000, so "qa.broke" would stop being a
+# 0-credits account). Switch the setting off while seeding (no row is opened) and put it back, so
+# accounts registered during the test still get the welcome credits.
+billing_settings = BillingSettings.load()
+welcome_credits = billing_settings.welcome_credits
+BillingSettings.objects.filter(pk=billing_settings.pk).update(welcome_credits=0)
 
 for email, name, confirmed, credits, superuser in {ACCOUNTS!r}:
     if User.objects.filter(email=email).exists():
@@ -48,6 +58,8 @@ for email, name, confirmed, credits, superuser in {ACCOUNTS!r}:
     user.save()
     if credits:
         add_credits(user, credits, description='e2e seed', source='e2e')
+
+BillingSettings.objects.filter(pk=billing_settings.pk).update(welcome_credits=welcome_credits)
 """
 
 

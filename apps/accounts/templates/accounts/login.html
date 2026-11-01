@@ -11,6 +11,14 @@
       <h1 class="text-xl font-semibold">Sign in</h1>
     </div>
 
+    {% if request.GET.promo %}
+      {# Said whatever the code is: whether it is valid is only decided after signing in. #}
+      <p class="mb-4 rounded-lg bg-sage-50 dark:bg-gray-700/50 px-3 py-2 text-sm text-gray-700 dark:text-gray-200">
+        <i class="fas fa-ticket-alt mr-1 text-sage-400"></i>
+        Sign in to redeem your promo code. We'll check it and take you to the redeem page once you are in.
+      </p>
+    {% endif %}
+
     {% include 'accounts/partials/login_form.html' %}
 
     {% if google_enabled or microsoft_enabled %}
