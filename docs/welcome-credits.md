@@ -54,6 +54,9 @@ with an optional prefix, exportable as CSV.
   (`/account/register/?promo=WELCOME1000`). Link to the register page directly with `?promo=` to
   skip the detour.
 - Afterwards: a signed-in, confirmed user can redeem it on the credits page ("Have a promo code?").
+- "Sign up with Google/Microsoft" skips the register form, so those users cannot enter the code at
+  signup (and a `?promo=` prefill is lost). They redeem it on the credits page afterwards, which
+  is why the "new accounts within days" window matters.
 
 ## Where it falls short of the issue
 
@@ -62,25 +65,37 @@ with an optional prefix, exportable as CSV.
 | Credited automatically on account creation | No. The user has to type the code or follow a link. |
 | Only for an email that never existed, even after email changes | No. The only memory is "once per user per code"; a deleted account's email, or an address a previous user moved away from, can redeem again on a new account. |
 | `email+a@g.com`, `email+b@g.com` and `email@g.com` are one person | No. Addresses are compared as typed (lower-cased); each alias is a new user. |
-| Email the user when the credits were not given | No. A refusal appears on the register or redeem page ("Invalid code", "already redeemed", "no longer available"). Nothing is emailed. |
+| Email the user when the credits were not given | No. A refusal appears on the register or redeem page ("Invalid code.", "This code has expired.", "You already redeemed this code.", "This code has been fully redeemed."). Nothing is emailed. Some refusals are silent: if the cap is reached between the register form's check and the account being created, the user sees the normal "Check your email" page, is never credited, and is told nothing. |
 
 The first is a product choice; the other three are the real risk, since a public welcome code is
 farmable with `+` aliases and throwaway addresses. Mitigations that exist today: the confirmed
-email is required before any grant, the register page has a captcha and rate limits, and
-`max_redemptions` plus an end date cap the total spend. They reduce the abuse, they do not prevent
-it.
+email is required before any grant, the register page has rate limits and, when Turnstile is
+configured (`TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`), a captcha, and `max_redemptions`
+plus an end date cap the total spend. They reduce the abuse, they do not prevent it. One
+side effect of a cap: signups that never confirm still hold a use for up to 30 days, so a public
+capped code can be used up by throwaway signups and lock real users out meanwhile.
 
 ## What would need building for the automatic version
 
 1. **A welcome grant on confirmation.** A receiver on `accounts.signals.email_confirmed` in
    `billing` (the one `grant_reservations` already uses) that redeems a configured welcome code
    without a typed code, for example a `BillingSettings` field naming the code or a flag on
-   `PromoCode`.
+   `PromoCode`. Two traps: that signal is **not sent for Google or Microsoft signups** (those
+   accounts are created already confirmed), so either send it from those two create paths or add a
+   new `account_created` signal; and it **can fire more than once per user** (a confirmed new
+   address after an email change, a reset that confirms the account). Reusing
+   `PromoCode`/`PromoRedemption` makes repeats harmless, since a partial unique constraint allows
+   one pending or granted redemption per code and user; anything built differently needs its own
+   once-per-user guard.
 2. **Remembered addresses.** A table of canonical emails that have ever had an account, written at
    signup and never deleted with the user, so deleting an account or changing an email does not free
-   the address. Fill it from existing users and from email changes.
-3. **Canonicalisation.** One function mapping `local+anything@domain` to `local@domain` (and
-   deciding about Gmail dots) used for that table. The existing email-case rules in `accounts` are
+   the address. Fill it from existing users and from email changes. Store an HMAC of the
+   canonical address keyed with `SECRET_KEY` (as the rate limiter and Short URLs visitor hash do),
+   not the address itself: that answers "has this ever existed" without keeping personal data
+   after an account is deleted.
+3. **Canonicalisation.** One function mapping `local+anything@domain` to `local@domain` used for
+   that table. Since it only refuses a grant and never merges accounts, strip `+tag` for every
+   domain and dots only for `gmail.com` / `googlemail.com`. The existing email-case rules in `accounts` are
    the model to follow.
 4. **The "not credited" email.** Sent when the check in 2 or 3 refuses, or the cap is reached, to the
    confirmed address, naming the reason and nothing sender-controlled. In-app notifications already
