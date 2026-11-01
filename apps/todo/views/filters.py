@@ -18,6 +18,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
@@ -34,6 +35,7 @@ from ..services import (
     rename_filter,
     reorder_filters,
     save_filter,
+    sidebar_filters,
     update_filter_params,
 )
 from ..services.limits import MAX_SAVED_FILTERS
@@ -60,7 +62,36 @@ def _list_response(request: AuthenticatedHttpRequest) -> HttpResponse:
     if not is_htmx(request):
         return redirect(_filters_url())
     rows = filter_rows(request.user, list(list_filters(request.user)))
-    return render(request, 'todo/partials/filter_list.html', {'rows': rows, 'clear_msg': True})
+    response = render(request, 'todo/partials/filter_list.html', {'rows': rows, 'clear_msg': True})
+    # The sidebar lists the same filters: refresh it too (its counts come with the list's own request).
+    response.content += render_to_string(
+        'todo/partials/sidebar_filters.html', _sidebar_context(request, oob=True), request=request
+    ).encode()
+    return response
+
+
+def _sidebar_context(request: AuthenticatedHttpRequest, **extra) -> dict:
+    """The sidebar's filters block as the filters page shows it."""
+    saved_filters, more_filters = sidebar_filters(request.user)
+    return {
+        'sidebar_filters': saved_filters,
+        'sidebar_more': more_filters,
+        'nav': 'filters',
+        'current_filter_id': None,
+        **extra,
+    }
+
+
+@login_required
+@require_GET
+def sidebar_view(request: AuthenticatedHttpRequest) -> HttpResponse:
+    """The sidebar's filters block alone, with its counts requested: what the filters page fetches
+    after a drag, so the sidebar shows the new order. Opened directly it goes to the page."""
+    if not is_htmx(request):
+        return redirect(_filters_url())
+    return render(
+        request, 'todo/partials/sidebar_filters.html', _sidebar_context(request, load_counts=True)
+    )
 
 
 @login_required

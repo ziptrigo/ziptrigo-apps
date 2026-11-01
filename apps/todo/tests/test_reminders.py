@@ -321,8 +321,8 @@ class TestAddUpdateDelete:
         assert reminder.sent_at == wednesday_noon() and reminder.skipped
         assert reminders.deliver_due(wednesday_noon()) == 0
         assert not Notification.objects.exists()
-        delivery = ReminderDelivery.objects.get(reminder=reminder)  # why it never fired
-        assert (delivery.note, delivery.fire_token) == ('skipped', None)
+        # Never ahead of the user: the panel says so, the history has no row for it.
+        assert not ReminderDelivery.objects.exists()
 
     def test_update_changes_the_time_and_arms_it_again(self, funded_user, wednesday):
         task = timed_task(funded_user)

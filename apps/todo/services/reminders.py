@@ -23,10 +23,13 @@ reminder twice for it.
 so one set a minute late is not lost -- but only if it is no older than `FIRE_WINDOW` (1 hour) by
 then: the job never delivers older ones, it marks them sent and `skipped` (the sweep, which also
 keeps the partial index on unsent reminders small), with a `ReminderDelivery` of note `skipped` in
-the history when the task is open and its owner active. `add_reminder` goes further and creates a
-reminder that is more than `LATE_GRACE` (24 hours) overdue already sent and skipped, so a
-long-dated edit ("1 day before" on a task due in an hour) doesn't leave an unsent row behind.
-Between the two limits the job's rule decides.
+the history when the task is open and its owner active -- unless the reminder was already due when
+it was created (`fire_at <= created_at`), which was never ahead of the user and would only bury the
+real deliveries: the task page still shows it as skipped, the history has no row. `add_reminder`
+goes further and creates a reminder that is more than `LATE_GRACE` (24 hours) overdue already sent
+and skipped (without a history row, by the same rule), so a long-dated edit ("1 day before" on a
+task due in an hour) doesn't leave an unsent row behind. Between the two limits the job's rule
+decides.
 
 A completed or trashed task keeps its reminders, but the job skips them (leaving them unsent) and so
 does it for an inactive user: restoring or uncompleting a task whose time is still ahead (or within
@@ -191,8 +194,8 @@ def _create(
         sent_at=sent_at,
         skipped=sent_at is not None,
     )
-    if sent_at is not None:
-        _record_skipped([reminder], now)
+    # No history row for a reminder created already too old to fire: it was never ahead of the user
+    # (see `_record_skipped`), and the task page shows it as skipped.
     return reminder
 
 
@@ -273,7 +276,7 @@ def update_reminder(
             current.save(update_fields=fields)
             if current.skipped and 'sent_at' in fields:
                 current.task = current_task
-                _record_skipped([current], now)
+                _record_skipped([current], now, edited=True)
     for name in ('minutes_before', 'channel', 'fire_at', 'sent_at', 'skipped'):
         setattr(reminder, name, getattr(current, name))
     return reminder
@@ -511,12 +514,16 @@ def _record(
     )
 
 
-def _record_skipped(rows: Iterable[Reminder], now: datetime) -> None:
+def _record_skipped(rows: Iterable[Reminder], now: datetime, *, edited: bool = False) -> None:
     """Write the history row of reminders that were not delivered because their time had passed
     (`note='skipped'`, in the first channel they would have used). Only for a task that is open
     and an active owner: for a completed or trashed task, or an inactive user, there was nothing to
-    miss, and a row per reminder would only bury the history. `rows` have their task and its user
-    loaded."""
+    miss, and a row per reminder would only bury the history. Nor for a reminder that was already
+    due when it was created (`fire_at <= created_at`: the default reminder of a task made for today
+    after its time, say): it was never ahead of the user, and a row for every such task buried the
+    deliveries that matter. A reminder armed again or moved ahead later has a `fire_at` after its
+    `created_at`, so it is recorded, and so is one the user moved into the past by editing its time
+    (`edited`). `rows` have their task and its user loaded."""
     deliveries = [
         ReminderDelivery(
             reminder=reminder,
@@ -534,7 +541,8 @@ def _record_skipped(rows: Iterable[Reminder], now: datetime) -> None:
             fire_at=reminder.fire_at,
         )
         for reminder in rows
-        if reminder.task.is_open
+        if (edited or reminder.fire_at > reminder.created_at)
+        and reminder.task.is_open
         and reminder.task.user.is_active
         and reminder.task.user.status == User.STATUS_ACTIVE
     ]

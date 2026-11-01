@@ -1,6 +1,7 @@
 """The To-do pages: every page renders, ownership, the 422 paths, rate limits, billing messages and
 the htmx answers (rows, panel, list partial)."""
 
+import re
 from datetime import date, time
 from html import unescape
 
@@ -97,7 +98,8 @@ class TestPages:
 
         body = text(client.get(reverse('todo:upcoming')))
 
-        assert body.count('Nothing due') == 13
+        # The empty-state <template>s (shown when a day's last row leaves) are not on the page.
+        assert re.sub(r'<template.*?</template>', '', body, flags=re.S).count('Nothing due') == 13
         assert 'Tomorrow, 29 Oct' in body and 'Tomorrow task' in body
         assert 'Later' in body
 

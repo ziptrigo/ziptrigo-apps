@@ -4,10 +4,12 @@
    request asks `todo:filter-counts` (scope=all), which answers out of band into #page-count-<id> (and the sidebar's). {% endcomment %}
 {% if rows %}<div hidden hx-get="{% url 'todo:filter-counts' %}?scope=all" hx-trigger="load" hx-swap="none"></div>{% endif %}
 <ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
-    data-sortable data-reorder-url="{% url 'todo:filter-reorder' %}" data-msg="#filter-msg">
+    data-sortable data-reorder-url="{% url 'todo:filter-reorder' %}" data-msg="#filter-msg"
+    data-after-reorder-url="{% url 'todo:filter-sidebar' %}" data-after-reorder-target="#sidebar-filters">
     {% for row in rows %}
     <li x-data="{ editing: false }" data-task-id="{{ row.filter.pk }}" class="flex items-center gap-3 px-3 py-2">
-        <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Drag to reorder" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
+        <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
+              data-name="{{ row.filter.name }}" aria-label="Reorder {{ row.filter.name }}: use the up and down arrow keys" title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
         <div class="min-w-0 flex-1">
             <div x-show="!editing">
                 <div class="flex flex-wrap items-baseline gap-x-3">
@@ -15,11 +17,12 @@
                     <span id="page-count-{{ row.filter.pk }}" class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"></span>
                 </div>
                 <p class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{{ row.summary }}</p>
+                {% if row.dropped_labels %}<p class="text-xs text-amber-700 dark:text-amber-400"><i class="fas fa-triangle-exclamation mr-1" aria-hidden="true"></i>{% if row.dropped_labels == 1 %}A label{% else %}{{ row.dropped_labels }} labels{% endif %} this filter used {% if row.dropped_labels == 1 %}was{% else %}were{% endif %} deleted and {% if row.dropped_labels == 1 %}is{% else %}are{% endif %} ignored.</p>{% endif %}
             </div>
             <form x-show="editing" style="display: none" method="post" action="{% url 'todo:filter-rename' row.filter.pk %}"
                   hx-post="{% url 'todo:filter-rename' row.filter.pk %}" hx-target="#filters" hx-swap="innerHTML"
                   hx-disabled-elt="find button[type='submit']"
-                  class="flex items-center gap-2" @keydown.escape="editing = false">
+                  class="flex items-center gap-2" @keydown.escape="editing = false; todoCancelEdit($el, '#filter-msg')">
                 {% csrf_token %}
                 <label for="filter-name-{{ row.filter.pk }}" class="sr-only">Name</label>
                 <input id="filter-name-{{ row.filter.pk }}" name="name" type="text" value="{{ row.filter.name }}" maxlength="50" required
@@ -27,7 +30,7 @@
                        class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
                 <button type="submit" aria-label="Save the name" title="Save"
                         class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
-                <button type="button" @click="editing = false" aria-label="Cancel renaming" title="Cancel"
+                <button type="button" @click="editing = false; todoCancelEdit($el.form, '#filter-msg')" aria-label="Cancel renaming" title="Cancel"
                         class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
             </form>
         </div>

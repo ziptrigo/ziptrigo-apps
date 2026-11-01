@@ -2,13 +2,14 @@
    (`SavedFilter`s), `sidebar_more` and `current_filter_id`. The counts of open tasks are not rendered: one hidden request
    fetches them after the page loads (`todo:filter-counts`, which answers out of band into #side-count-<id>); on the
    filters page the list of that page asks for them instead, for the sidebar too. {% endcomment %}
-<nav aria-label="Saved filters" class="mt-4">
-    {% if sidebar_filters and nav != 'filters' %}<div hidden hx-get="{% url 'todo:filter-counts' %}" hx-trigger="load" hx-swap="none"></div>{% endif %}
-    <h2 class="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+<nav id="sidebar-filters"{% if oob %} hx-swap-oob="true"{% endif %} aria-label="Saved filters" class="mt-4">
+    {% if sidebar_filters and nav != 'filters' or load_counts %}<div hidden hx-get="{% url 'todo:filter-counts' %}" hx-trigger="load" hx-swap="none"></div>{% endif %}
+    {% comment %} Not a heading: the nav is named by its aria-label, and this block comes before the page's <h1> in the document. {% endcomment %}
+    <p class="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
         <a href="{% url 'todo:filters' %}"{% if nav == 'filters' %} aria-current="page"{% endif %}
            class="rounded-md hover:underline">Filters</a>
-    </h2>
-    <ul class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
+    </p>
+    <ul data-scroll-hint class="relative flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
         {% for saved in sidebar_filters %}
         <li class="flex-shrink-0">
             <a href="{% url 'todo:filter' saved.pk %}"{% if current_filter_id == saved.pk %} aria-current="page"{% endif %}

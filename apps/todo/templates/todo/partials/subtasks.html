@@ -1,5 +1,6 @@
 {% comment %} The subtasks of a top-level task: the list (drag to reorder), and the add box. Rows are the ordinary task rows
    in the `subtask` view, so a completed subtask stays in the list. Adding one re-renders the whole panel. {% endcomment %}
+{% if subtasks or not task.is_trashed %}
 <section id="subtasks" aria-labelledby="subtasks-title" class="mb-8">
     <h2 id="subtasks-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Subtasks</h2>
     <div id="subtask-msg" class="mb-2 text-sm" aria-live="polite"></div>
@@ -31,3 +32,4 @@
     </form>
     {% endif %}
 </section>
+{% endif %}

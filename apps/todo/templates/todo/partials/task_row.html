@@ -10,7 +10,10 @@
     hx-vals='{"view": "{{ view }}", "ctx": "row"{% if sortable %}, "sortable": "1"{% endif %}}'
     class="task-row row-leave row-enter flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
     {% if sortable %}
-    <span class="drag-handle mt-0.5 cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" title="Drag to reorder" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
+    {% comment %}A span with role=button, not a <button>: Firefox will not start a drag from a button inside the draggable row.
+       The arrow keys move the row (tasks.js), so ordering doesn't need a mouse.{% endcomment %}
+    <span class="drag-handle mt-0.5 cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
+          data-name="{{ task.title }}" aria-label="Reorder {{ task.title }}: use the up and down arrow keys" title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
     {% endif %}
 
     {% if task.is_trashed %}

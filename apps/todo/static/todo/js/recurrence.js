@@ -125,6 +125,13 @@
         return number + suffix;
     }
 
+    // `2026-11-02` as `2 Nov 2026`, the server's `describe` format; anything else as typed.
+    function untilText(iso) {
+        var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+        var month = match ? MONTHS[parseInt(match[2], 10) - 1] : null;
+        return month ? parseInt(match[3], 10) + ' ' + month.slice(0, 3) + ' ' + match[1] : iso;
+    }
+
     // A short sentence for the button, in step with the server's `describe` for these rules.
     function summary(state) {
         if (!state.freq) return 'Repeat';
@@ -145,7 +152,7 @@
             text += ' on ' + whole(state.yearDay, 1, 31, 1) + ' ' + MONTHS[whole(state.yearMonth, 1, 12, 1) - 1];
         }
         if (state.ends === 'count') text += ', ' + whole(state.count, 1, 1000, 1) + ' times';
-        else if (state.ends === 'date' && state.until) text += ', until ' + state.until;
+        else if (state.ends === 'date' && state.until) text += ', until ' + untilText(state.until);
         return text;
     }
 

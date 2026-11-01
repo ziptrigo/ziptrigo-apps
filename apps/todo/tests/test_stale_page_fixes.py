@@ -26,7 +26,7 @@ class TestSidebarOverflow:
 
         page = text(web.get(reverse('todo:today')))
 
-        assert page.count('<ul class="relative flex gap-1 overflow-x-auto') == 2
+        assert page.count('<ul data-scroll-hint class="relative flex gap-1 overflow-x-auto') == 2
 
 
 class TestParentCompleteButton:
