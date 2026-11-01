@@ -544,3 +544,32 @@ def test_block_sender_take_down_checkbox_requires_takedown_permission(
     assert not BlockedSender.objects.filter(
         kind=BlockedSenderKind.EMAIL, value=draft_transfer.owner.email.lower()
     ).exists()
+
+
+def test_take_down_and_dismiss_leave_admin_history(
+    client, admin_user, draft_transfer, uploaded_file
+):
+    """Issue #152: moderation actions used to leave no LogEntry."""
+    from django.contrib.admin.models import LogEntry
+
+    from ..services.reports import create_report
+
+    _active(draft_transfer)
+    first = create_report(draft_transfer, reason=AbuseReportReason.OTHER)
+    client.force_login(admin_user)
+    client.post(
+        reverse('custom_admin:file_transfer_abusereport_changelist'),
+        data={'action': 'dismiss_action', '_selected_action': [str(first.id)]},
+    )
+    client.post(
+        reverse('custom_admin:file_transfer_transfer_changelist'),
+        data={
+            'action': 'take_down_action',
+            '_selected_action': [str(draft_transfer.id)],
+            'apply': 'yes',
+            'reason': 'spam',
+        },
+    )
+
+    messages = {e.object_id: e.change_message for e in LogEntry.objects.filter(user=admin_user)}
+    assert messages == {str(first.id): 'Dismissed.', str(draft_transfer.id): 'Taken down: spam'}

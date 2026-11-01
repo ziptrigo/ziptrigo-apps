@@ -4,15 +4,11 @@
 {% block content %}
 <div id="content-main">
     <h1>Admin Tools</h1>
-    
-    {% if messages %}
-        <ul class="messagelist">
-            {% for message in messages %}
-                <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
-            {% endfor %}
-        </ul>
-    {% endif %}
-    
+    {% comment %}Messages are rendered by jazzmin's base template; listing them here too showed each twice.{% endcomment %}
+
+    {% if denied %}
+    <p>You do not have permission to access this page. Admin Tools are for superusers.</p>
+    {% else %}
     <div class="module">
         <h2>Email Testing</h2>
         <p>Send a test email to any address.</p>
@@ -79,6 +75,7 @@
         </div>
         {% endif %}
     </div>
+    {% endif %}
 </div>
 {% endblock %}
 

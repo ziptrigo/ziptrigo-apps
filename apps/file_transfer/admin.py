@@ -16,6 +16,7 @@ from django.utils.html import format_html
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.models import User
+from apps.core import admin_log
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
@@ -191,16 +192,19 @@ def _takedown_confirm_response(
     if request.POST.get('apply') == 'yes':
         form = TakedownForm(request.POST)
         if form.is_valid():
-            taken_down = sum(
-                services.take_down_transfer(
+            done = [
+                transfer
+                for transfer in live_transfers
+                if services.take_down_transfer(
                     transfer,
                     by=request.user,
                     reason=form.cleaned_data['reason'],
                     internal_note=form.cleaned_data['internal_note'],
                     notify=form.cleaned_data['notify_sender'],
                 )
-                for transfer in live_transfers
-            )
+            ]
+            admin_log.log_change(request, done, _takedown_note(form.cleaned_data['reason']))
+            taken_down = len(done)
             message = f'Took down {taken_down} transfer(s).'
             if taken_down < len(live_transfers):
                 message += _skipped_note(len(live_transfers) - taken_down)
@@ -220,6 +224,11 @@ def _takedown_confirm_response(
         'action_name': action_name,
     }
     return render(request, 'admin/file_transfer/takedown_confirm.html', context)
+
+
+def _takedown_note(reason: str) -> str:
+    """The History line of a takedown: the reason the sender sees (never the internal note)."""
+    return f'Taken down: {reason}' if reason else 'Taken down.'
 
 
 def _block_sender_confirm_response(
@@ -251,13 +260,15 @@ def _block_sender_confirm_response(
         if form.is_valid():
             created = []
             for transfer in transfers:
-                created += services.blocklist.block_transfer_sender(
+                entries = services.blocklist.block_transfer_sender(
                     transfer,
                     created_by=request.user,
                     reason=form.cleaned_data['reason'],
                     block_email=form.cleaned_data['block_email'],
                     block_ip=form.cleaned_data['block_ip'],
                 )
+                admin_log.log_addition(request, entries, f'Blocked the sender of {transfer.pk}.')
+                created += entries
 
             taken_down_count = 0
             if form.cleaned_data['take_down_active_transfers']:
@@ -266,12 +277,14 @@ def _block_sender_confirm_response(
                     for other in services.blocklist.active_transfers_for_sender(transfer):
                         targets[other.pk] = other
                 for other in targets.values():
-                    taken_down_count += services.take_down_transfer(
+                    if services.take_down_transfer(
                         other,
                         by=request.user,
                         reason=form.cleaned_data['reason'] or 'Sender blocked.',
                         notify=False,
-                    )
+                    ):
+                        admin_log.log_change(request, [other], 'Taken down: sender blocked.')
+                        taken_down_count += 1
 
             deactivated_count = 0
             if form.cleaned_data['deactivate_account']:
@@ -280,6 +293,7 @@ def _block_sender_confirm_response(
                     User.objects.filter(pk=owner.pk).exclude(status=User.STATUS_INACTIVE).update(
                         status=User.STATUS_INACTIVE
                     )
+                    admin_log.log_change(request, [owner], 'Deactivated: sender blocked.')
                     deactivated_count += 1
 
             message = f'Added {len(created)} block-list entry/entries.'
@@ -379,6 +393,7 @@ class TransferAdmin(_AbuseActionPermissionMixin, admin.ModelAdmin):
         count = 0
         for transfer in queryset.filter(held_for_review_at__isnull=False):
             services.release_hold(transfer)
+            admin_log.log_change(request, [transfer], 'Released the abuse-review hold.')
             transfer.reports.filter(status=AbuseReportStatus.PENDING).update(
                 status=AbuseReportStatus.DISMISSED,
                 reviewed_by=request.user,
@@ -477,6 +492,7 @@ class AbuseReportAdmin(_AbuseActionPermissionMixin, admin.ModelAdmin):
         count = 0
         for report in queryset.filter(status=AbuseReportStatus.PENDING):
             services.dismiss_report(report, by=request.user, note='Dismissed via admin.')
+            admin_log.log_change(request, [report], 'Dismissed.')
             count += 1
         messages.success(request, f'Dismissed {count} report(s).')
 

@@ -319,3 +319,22 @@ class TestInboundMessageRetry:
 
         failed.refresh_from_db()
         assert failed.status == InboundMessageStatus.PENDING
+
+
+@pytest.mark.django_db
+def test_a_user_with_receipts_can_be_deleted_from_the_admin(admin_client, fake_storage):
+    """Issue #152: the read-only Receipts admins used to block deleting the user."""
+    from apps.accounts.models import User
+
+    owner = make_user()
+    vendor = create_vendor(owner, 'Acme')
+    receipt = create_receipt(owner, fake_storage)
+    receipt.vendor_ref = vendor
+    receipt.save(update_fields=['vendor_ref'])
+
+    response = admin_client.post(
+        reverse('custom_admin:accounts_user_delete', args=[owner.pk]), {'post': 'yes'}
+    )
+
+    assert response.status_code == 302
+    assert not User.objects.filter(pk=owner.pk).exists()

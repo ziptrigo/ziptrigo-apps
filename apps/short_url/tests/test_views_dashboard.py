@@ -19,7 +19,9 @@ class TestPage:
         assert reverse('accounts:login') in response['Location']
 
     def test_the_list_partial_needs_a_login_too(self, client):
-        assert client.get(reverse('short_url:list'), **HX).status_code == 302
+        # htmx gets the login page as a navigation, not a 302 it would swap in (issue #152).
+        response = client.get(reverse('short_url:list'), **HX)
+        assert response['HX-Redirect'].startswith(reverse('accounts:login'))
 
     def test_the_product_is_in_the_navigation(self, web):
         content = web.get(reverse('short_url:dashboard')).content.decode()

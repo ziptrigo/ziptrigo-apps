@@ -29,7 +29,9 @@ class SingletonSettingsAdmin(admin.ModelAdmin):
         return self._is_superuser(request)
 
     def has_add_permission(self, request: AuthenticatedHttpRequest) -> bool:
-        return self._is_superuser(request) and not self.model._default_manager.exists()
+        # Never "Add": the changelist creates the one row on first visit (`load_singleton`), so
+        # the dashboard and the list don't offer an Add link for a row that only has to be opened.
+        return False
 
     def has_change_permission(self, request: AuthenticatedHttpRequest, obj=None) -> bool:
         return self._is_superuser(request)

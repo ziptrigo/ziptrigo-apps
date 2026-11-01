@@ -939,7 +939,10 @@ JAZZMIN_SETTINGS = {
         {
             'name': 'Admin Tools',
             'url': 'custom_admin:admin_tools',
-            'permissions': ['accounts.add_user'],
+            # The tools page is superuser-only. jazzmin can only test permissions, and no one is
+            # granted this one (it doesn't exist), so only a superuser, who has every permission,
+            # sees the link.
+            'permissions': ['core.superuser_only'],
         },
     ],
 }
