@@ -28,7 +28,8 @@ def _log(request: HttpRequest, objects: Iterable[Model], flag: int, message: str
     if not objects:
         return
     LogEntry.objects.log_actions(
-        user_id=request.user.pk,
+        # Only admin views call this, behind the admin's own login: `request.user` is set.
+        user_id=request.user.pk,  # ty: ignore[unresolved-attribute]
         queryset=objects,
         action_flag=flag,
         change_message=message,

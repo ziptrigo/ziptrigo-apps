@@ -375,7 +375,9 @@ class TestIssue152Fixes:
         assert 'select-all' not in html
 
     def test_too_long_text_gives_advice_the_editor_can_follow(self):
-        form = QRCodeCreateForm(data={'name': 'x', 'qr_type': 'text', 'qr_format': 'png', 'url': '한' * 1000})
+        form = QRCodeCreateForm(
+            data={'name': 'x', 'qr_type': 'text', 'qr_format': 'png', 'url': '한' * 1000}
+        )
 
         assert not form.is_valid()
         assert form.errors['url'] == ['That is too long for a QR code. Please shorten it.']

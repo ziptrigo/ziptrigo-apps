@@ -40,7 +40,9 @@ def send_transfer_notification(transfer_id: str, recipient_email: str) -> None:
         body_lines.append(f'This link expires on {transfer.expires_at:%Y-%m-%d %H:%M} UTC.')
 
     others = len(names) - 1
-    subject_name = f'{name} and {others} more file{"s" if others != 1 else ""}' if others > 0 else name
+    subject_name = (
+        f'{name} and {others} more file{"s" if others != 1 else ""}' if others > 0 else name
+    )
     send_email(
         to=recipient_email,
         subject=f'{subject_name} {"were" if others > 0 else "was"} sent to you via ZipTrigo',
@@ -53,7 +55,7 @@ MAX_LISTED_FILES = 20
 
 
 def _received_line(names: list[str], fallback: str) -> str:
-    """"You have received ...", naming every file (issue #152: it used to name only the first)."""
+    """ "You have received ...", naming every file (issue #152: it used to name only the first)."""
     if not names:
         return f'You have received files: {fallback}.'
     if len(names) == 1:

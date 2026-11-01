@@ -35,7 +35,9 @@ class TestRecipientEmail:
 
         kwargs = _sent(transfer).call_args.kwargs
 
-        assert kwargs['text_body'].startswith('You have received 3 files:\n- a.txt\n- b.txt\n- c.txt\n')
+        assert kwargs['text_body'].startswith(
+            'You have received 3 files:\n- a.txt\n- b.txt\n- c.txt\n'
+        )
         assert 'paused.bin' not in kwargs['text_body']
         assert kwargs['subject'] == 'a.txt and 2 more files were sent to you via ZipTrigo'
 

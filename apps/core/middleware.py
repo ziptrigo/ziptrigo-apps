@@ -1,19 +1,20 @@
 """Middleware for the site shell."""
 
-from collections.abc import Awaitable, Callable
+import inspect
 from urllib.parse import urlsplit
 
-from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from django.conf import settings
 from django.contrib.auth.views import redirect_to_login
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import resolve_url
+from django.utils.decorators import sync_and_async_middleware
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from .htmx import is_htmx
 
 
-class HtmxLoginRedirectMiddleware:
+@sync_and_async_middleware
+def HtmxLoginRedirectMiddleware(get_response):
     """Turn the login redirect of an htmx request into a full-page navigation (issue #152).
 
     `@login_required` answers a request without a session with a 302 to the login page. htmx's XHR
@@ -24,26 +25,17 @@ class HtmxLoginRedirectMiddleware:
     would render a fragment after sign-in. Views that answer an anonymous htmx request on their own
     (the notification bell's 204) never reach this: only a redirect to `LOGIN_URL` is rewritten.
     """
+    if inspect.iscoroutinefunction(get_response):
 
-    async_capable = True
-    sync_capable = True
+        async def amiddleware(request: HttpRequest) -> HttpResponse:
+            return _rewrite(request, await get_response(request))
 
-    def __init__(
-        self, get_response: Callable[[HttpRequest], HttpResponse | Awaitable[HttpResponse]]
-    ):
-        self.get_response = get_response
-        if iscoroutinefunction(get_response):
-            markcoroutinefunction(self)
+        return amiddleware
 
-    def __call__(self, request: HttpRequest):
-        if iscoroutinefunction(self):
-            return self.__acall__(request)
-        response = self.get_response(request)
-        return _rewrite(request, response)  # ty: ignore[invalid-argument-type]
+    def middleware(request: HttpRequest) -> HttpResponse:
+        return _rewrite(request, get_response(request))
 
-    async def __acall__(self, request: HttpRequest) -> HttpResponse:
-        response = await self.get_response(request)  # ty: ignore[invalid-await]
-        return _rewrite(request, response)
+    return middleware
 
 
 def _rewrite(request: HttpRequest, response: HttpResponse) -> HttpResponse:
