@@ -2501,6 +2501,7 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
     { name = "segno" },
+    { name = "tzdata" },
     { name = "ua-parser" },
     { name = "whitenoise" },
 ]
@@ -2557,6 +2558,7 @@ requires-dist = [
     { name = "regex", specifier = ">=2025.1,<2027.0" },
     { name = "requests", specifier = ">=2.32,<3.0" },
     { name = "segno", specifier = ">=1.6,<2.0" },
+    { name = "tzdata", specifier = ">=2026.1" },
     { name = "ua-parser", specifier = ">=1.0,<2.0" },
     { name = "whitenoise", specifier = ">=6.11,<7.0" },
 ]
