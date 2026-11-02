@@ -17,6 +17,16 @@ class CoreConfig(AppConfig):
             if environment:
                 print(f'Environment: {environment}')
 
+        # Web Push (issue #239): its system check, and signing out forgets this device's
+        # subscription. Registered in every process, unlike `checks` above.
+        from django.contrib.auth.signals import user_logged_out
+
+        from . import push_checks  # noqa: F401
+
+        user_logged_out.connect(
+            _forget_push_subscription, weak=False, dispatch_uid='core.push.logout'
+        )
+
         self._register_jobs()
 
     def _register_jobs(self):
@@ -67,3 +77,17 @@ class CoreConfig(AppConfig):
                 lease=timedelta(hours=1),
             )
         )
+
+
+def _forget_push_subscription(sender, request=None, user=None, **kwargs):
+    """`user_logged_out` receiver: delete the push subscription this session saved, so a shared
+    device stops getting the signed-out user's notifications. Never raises: a sign-out must not
+    fail over it."""
+    import logging
+
+    from .services import push
+
+    try:
+        push.forget_session_subscription(getattr(request, 'session', None), user)
+    except Exception:
+        logging.getLogger(__name__).exception('Could not delete the push subscription on sign-out')

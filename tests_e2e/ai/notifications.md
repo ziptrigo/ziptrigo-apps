@@ -14,7 +14,9 @@ notification**, each in its own case: welcome credits, a promo code granted at s
 transfer suspended (and the notice removed when it is re-enabled), Receipts storage paused (and
 removed on unfreeze), a To-do reminder delivered in-app, To-do storage paused (and removed), a
 To-do repeating task whose next occurrence could not be created, and To-do "emailed tasks were not
-created". The read-only admin of notifications is in `admin.md` (ADM-32). The emails these events
+created". Also **Web Push** (issue #239): the service worker and manifest at the root, the account
+page's **Notifications on this device** section, the answer endpoint and sign-out (NOTIF-19 to
+NOTIF-22). The read-only admin of notifications is in `admin.md` (ADM-32), push in ADM-54. The emails these events
 send are checked here only for arrival, subject and links; `emails.md` has them in full.
 
 ## Preconditions
@@ -346,11 +348,79 @@ it back to `10`).
 | 6 | Open `/todo/settings/` > **Recent emails**. | Two rows, `Buy bread` and `Buy milk`, from `sender@example.com`, each "Rejected: not enough credits". |
 | 7 | As `qa.admin` set **Free tasks per month** back to `10`, **Save**. Delete `notif-task.eml`. | Saved. |
 
+### NOTIF-19 Web Push: the service worker and the manifest
+
+**Purpose:** both are served from the site root, uncached, whether or not push is configured.
+**Preconditions:** none (signed out is fine).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/sw.js`. | JavaScript source starting with `// The site's service worker (issue #239)`. Response headers (devtools, or **(shell step)** `curl -sI http://localhost:8765/sw.js`): `Content-Type: text/javascript`, `Cache-Control: no-cache`, `Service-Worker-Allowed: /`. |
+| 2 | Open `/manifest.webmanifest`. | JSON with `"name": "ZipTrigo"`, `"start_url": "/"`, `"display": "standalone"`, `"theme_color": "#8fa89e"`, three icons (192, 512, and a 512 with `"purpose": "maskable"`); each icon URL opens a PNG of the wheat logo. `Content-Type: application/manifest+json`. |
+| 3 | View the source of `/`. | The head has `<link rel="manifest" href="/manifest.webmanifest">`, an `apple-touch-icon` and `<meta name="theme-color" content="#8fa89e">`. |
+| 4 | Open `/static/core/images/push_badge_96.png`. | A white wheat-ear outline on a transparent background (the Android status-bar badge). |
+
+### NOTIF-20 Web Push: the account page section
+
+**Purpose:** the section shows what this browser can do and turns push on and off; nothing is
+shown while push is not configured.
+**Preconditions:** signed in as `<NOTIF_A>`. Push is configured only when the server was started
+with `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (generate the keys with
+**(shell step)** `python tests_e2e/ai/manage.py generate_vapid_keys`, put the two lines plus
+`VAPID_SUBJECT=mailto:qa@example.com` in `.env.local`, restart `serve.py`). Steps 2 to 6 need it;
+without it mark them **BLOCKED (push-not-configured)**. Turning push on needs the browser to reach
+its push service (Google's for Chromium) and to allow notifications for `localhost`; a headless or
+automated browser often denies the permission, which step 4 covers.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Server **without** the VAPID settings: open `/account/`. | No **Notifications on this device** section; the page source has no `core/js/push.js`. |
+| 2 | Server with them: open `/account/`. | A section **Notifications on this device** between **Credits**/**Appearance** and the password section, saying "Get ZipTrigo notifications on this device, even when the site isn't open. Your browser will ask for permission." with **Turn on notifications** (no permission prompt yet: only the click asks). |
+| 3 | Click **Turn on notifications** and allow notifications when the browser asks. | The section says "Notifications are on for this device. Signing out turns them off here." with **Turn off**; the status line reads "Notifications are on for this device." `/admin/core/pushsubscription/` (as `qa.admin`) lists a row for `<NOTIF_A>` with Push service `fcm.googleapis.com` (Chromium) and the browser's user agent. If the browser can't reach the push service the status line reads "Something went wrong. Try again." and no row is created: record it as an environment limit, not a bug. |
+| 4 | In a browser profile where notifications are blocked for the site (or the prompt is denied): reload `/account/`. | "Notifications are blocked for this site. Allow them in your browser's site settings, then reload this page." and no button. |
+| 5 | Back in the profile of step 3: reload `/account/`, then click **Turn off**. | After the reload it is still on (**Turn off** shown). After the click: "Notifications are off for this device." and **Turn on notifications** again; the admin row is gone. |
+| 6 | Phone width (375 px) and dark mode. | The section reads well: text wraps, the button fits, colours follow the theme. Keyboard: Tab reaches the button, Enter/Space presses it. |
+
+### NOTIF-21 Web Push: signing out turns push off on this device
+
+**Purpose:** a shared device stops getting the previous user's notifications, and the next sign-in
+re-saves the subscription without asking.
+**Preconditions:** NOTIF-20 step 3 done (push on for `<NOTIF_A>` in this browser); push configured.
+Otherwise **BLOCKED (push-not-configured)**.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Turn push on again on `/account/` if NOTIF-20 turned it off. As `qa.admin` (another browser or a private window) open `/admin/core/pushsubscription/`. | One row for `<NOTIF_A>`. |
+| 2 | In the first browser log out (account menu > **Logout**). Reload the admin list. | The row is gone. |
+| 3 | In the first browser sign in as `<NOTIF_B>` and open any page (`/`). Reload the admin list. | One row, now for `<NOTIF_B>` (no permission prompt appeared). `/account/` shows push on. |
+| 4 | Log out, sign in as `<NOTIF_A>` again, open `/`. | The admin list shows the row for `<NOTIF_A>` only. |
+
+### NOTIF-22 Web Push: the answer endpoint
+
+**Purpose:** the endpoint the service worker posts a button's answer to accepts only a valid token,
+keeps the first answer, and needs no session or CSRF token. Works without the VAPID settings (the
+token is made in a shell, not by a real push).
+**Preconditions:** a shell; otherwise **BLOCKED (needs-shell)**.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | **(shell step)** `python tests_e2e/ai/manage.py shell -c "import uuid; from apps.accounts.models import User; from apps.core.services import push; u = User.objects.get(email='<NOTIF_A>'); print(push.make_action_token(u.pk, uuid.uuid4(), 'qa.test', ['yes', 'no']))"` | Prints a token; record it as `TOKEN`. |
+| 2 | **(shell step)** `curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8765/push/action/ -H 'Content-Type: application/json' -d '{"token": "<TOKEN>", "action": "yes"}'` | `204` (no cookie, no CSRF token). |
+| 3 | The same with `"action": "no"`. | `204`; nothing changes. |
+| 4 | As `qa.admin` open `/admin/core/pushaction/`. | One row: `<NOTIF_A>`, kind `qa.test`, action `yes` (the first answer kept). |
+| 5 | Step 2 with `"action": "maybe"`, then with `"token": "nope"`, then with a body of `x`. | `400` each time, body `{"detail": "Invalid answer."}`; no new row. |
+| 6 | **(shell step)** `curl -s -o /dev/null -w '%{http_code}' http://localhost:8765/push/action/` | `405` (POST only). |
+| 7 | Signed out: open `/push/key/`. | Redirected to the sign-in page (`/push/subscribe/` and `/push/unsubscribe/` likewise need a session). |
+
 ## Out of scope
 
 - Real inbound email to `todo+` addresses through SES (NOTIF-18 runs the same ingest on a local
   file); the To-do "storage paused" and Receipts "storage paused" *triggers* in their real form (the
   daily metering only freezes when a day's charge reaches a whole credit, which takes gigabytes of
   storage; the shell steps call the very function it calls).
-- An email or push channel, per-user preferences and a JWT API for notifications: not built (v1).
+- An email channel, per-user preferences and a JWT API for notifications: not built (v1). Web Push
+  is not wired to the bell (`notify` doesn't push).
+- A push reaching a real phone and tapping its buttons: that needs a phone and HTTPS (staging); the
+  manual steps are in README, "Push notifications". The send itself (`send_push`) is covered by unit
+  tests with pywebpush mocked.
 - The 90-day retention job (`core.purge_old_notifications`) and the notification admin (`admin.md`).

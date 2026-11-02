@@ -498,6 +498,9 @@ def test_the_default_skip_prefixes(settings):
         '/t/',
         '/static/',
         '/api/',
+        '/sw.js',
+        '/manifest.webmanifest',
+        '/push/action/',
     )
 
 

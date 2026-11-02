@@ -112,7 +112,18 @@ MIDDLEWARE = [
 # a user query) on the hot public ones. The short links and the download page serve visitors, not
 # accounts, static files render nothing, and the API authenticates with JWTs, not sessions, so none
 # of them has a saved zone to activate; they render in `TIME_ZONE` (UTC).
-TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = ('/go/', '/s/', '/t/', '/static/', '/api/')
+# The service worker, the manifest and the push answer endpoint (issue #239) are fetched by the
+# browser on its own, with nothing to render in a zone.
+TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = (
+    '/go/',
+    '/s/',
+    '/t/',
+    '/static/',
+    '/api/',
+    '/sw.js',
+    '/manifest.webmanifest',
+    '/push/action/',
+)
 
 ROOT_URLCONF = 'config.urls'
 
@@ -343,6 +354,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # while the account has no zone, so it needs a handful at most; the rest is headroom for
     # several devices and tabs, and a bound on a script hammering the endpoint.
     'ACCOUNT_TIMEZONE_USER': (10, 60 * 60),
+    # -- core: Web Push (issue #239) --
+    # Saving this browser's push subscription (`POST /push/subscribe/`), per user and charged for
+    # every call. A browser posts once when push is turned on and once per sign-in after that, so a
+    # person needs a handful; the rest is headroom for several devices and a bound on a script.
+    'PUSH_SUBSCRIBE_USER': (30, 60 * 60),
     # -- core: shared email verification (`apps.core.services.email_verification.start`) --
     # The per-email-address-per-day cap on verification *starts* (CLAUDE.md Known gaps: a resend
     # every 60s cooldown alone still allows ~1,440 sends/day, each with fresh guess attempts).
@@ -902,6 +918,19 @@ SAFE_BROWSING_API_KEY = os.getenv('SAFE_BROWSING_API_KEY', '')
 # A person is waiting on a create or an edit, so the call is short.
 SAFE_BROWSING_TIMEOUT_SECONDS = float(os.getenv('SAFE_BROWSING_TIMEOUT_SECONDS', '3'))
 
+# Web Push (issue #239; `apps.core.services.push`). The VAPID key pair identifies this site to the
+# push services (Google's for Chrome, Mozilla's, Apple's): the public key is what browsers
+# subscribe with, the private key signs every push. `VAPID_SUBJECT` is a `mailto:` (or `https:`)
+# contact the push services can use about problems. All three come from the env file, one pair
+# per environment (`./manage.py generate_vapid_keys`); while any is unset push is off (no button,
+# `send_push` sends nothing) and `manage.py check` warns (`core.W020`). Changing the key pair
+# invalidates every existing subscription: browsers must subscribe again.
+VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
+VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
+VAPID_SUBJECT = os.getenv('VAPID_SUBJECT', '')
+# A push is a POST to the push service; a slow one must not hold a queue worker for long.
+PUSH_TIMEOUT_SECONDS = float(os.getenv('PUSH_TIMEOUT_SECONDS', '10'))
+
 
 # Jazzmin configuration
 JAZZMIN_SETTINGS = {
@@ -931,6 +960,8 @@ JAZZMIN_SETTINGS = {
         'billing.PromoRedemption': 'fas fa-tags',
         'qr_code.QRCode': 'fas fa-qrcode',
         'core.ScheduledJob': 'fas fa-clock',
+        'core.PushSubscription': 'fas fa-mobile-alt',
+        'core.PushAction': 'fas fa-reply',
         'feedback.Feedback': 'fas fa-comment-dots',
         'file_transfer.Transfer': 'fas fa-paper-plane',
         'file_transfer.DownloadEvent': 'fas fa-download',

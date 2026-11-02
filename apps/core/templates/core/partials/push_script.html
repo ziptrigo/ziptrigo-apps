@@ -1,0 +1,6 @@
+{% load static %}{% if enabled %}<script defer src="{% static 'core/js/push.js' %}"
+        data-sw-url="{% url 'core:service-worker' %}"
+        data-subscribe-url="{% url 'core:push-subscribe' %}"
+        data-unsubscribe-url="{% url 'core:push-unsubscribe' %}"
+        data-public-key="{{ public_key }}"
+        data-synced="{% if synced %}1{% else %}0{% endif %}"></script>{% endif %}

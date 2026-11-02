@@ -41,6 +41,10 @@ dependencies = [
     'pypdf>=6.20,<7.0',
     'pypdfium2>=5.0,<6.0',
     'pyjwt[crypto]>=2.10,<3.0',
+    # Web Push (issue #239): encrypts a payload for a browser's push subscription and signs the
+    # VAPID header (`apps.core.services.push`). Brings `py-vapid`, whose keys `generate_vapid_keys`
+    # prints.
+    'pywebpush>=2.0,<3.0',
     # RRULE parsing and iteration (`dateutil.rrule`) for repeating To-do tasks (issue #179).
     'python-dateutil>=2.9,<3.0',
     'python-dotenv>=1.0,<2.0',

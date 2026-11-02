@@ -14,7 +14,7 @@ One file per area, plus the preflight that runs before any of them:
 | [`core.md`](core.md) | Site shell: landing page, navigation, footer, error pages, theming, mobile layout |
 | [`accounts.md`](accounts.md) | Register, email confirmation, login/logout, forgot/reset/change password, account settings, deletion |
 | [`billing.md`](billing.md) | Credit balance, the credits history page, promo codes, welcome credits |
-| [`notifications.md`](notifications.md) | The header bell, its dropdown, the notifications page, and every event that creates one |
+| [`notifications.md`](notifications.md) | The header bell, its dropdown, the notifications page, every event that creates one, and Web Push |
 | [`emails.md`](emails.md) | Every email the site sends: delivery, subject, body, escaping and every link in it |
 | [`feedback.md`](feedback.md) | The footer's Feedback page |
 | [`qr_code.md`](qr_code.md) | QR code dashboard, editor, preview, duplicate, delete, `/go/<code>` short links |
