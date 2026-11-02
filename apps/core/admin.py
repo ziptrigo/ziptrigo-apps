@@ -197,7 +197,7 @@ class PushSubscriptionAdmin(admin.ModelAdmin):
     deleted when the push service says so. The endpoint is a capability URL (anyone holding it
     and the keys can push to that browser), so only its push service's host is shown.
 
-    "Send test notification" sends the Yes / No test to the users of the selected subscriptions
+    "Send test notification" queues the Yes / No test for the users of the selected subscriptions
     (every device of theirs), superusers only: it reaches a person's phone."""
 
     list_display = ['user', 'push_service', 'user_agent', 'created_at', 'last_success_at']
@@ -233,20 +233,15 @@ class PushSubscriptionAdmin(admin.ModelAdmin):
             )
             return
         users = {subscription.user for subscription in queryset.select_related('user')}
-        sent = removed = failed = 0
+        # Queued, not sent here: each device is a call to its push service, and a request that
+        # waits on many of them can outlast the worker timeout.
         for user in users:
-            result = push.send_test_push(user)
-            sent, removed, failed = (
-                sent + result.sent,
-                removed + result.removed,
-                failed + result.failed,
-            )
-        level = messages.SUCCESS if sent and not failed else messages.WARNING
+            push.queue_test_push(user)
         self.message_user(
             request,
-            f'Test notification sent to {len(users)} user(s): {sent} device(s) accepted it, '
-            f'{removed} gone (removed), {failed} failed.',
-            level=level,
+            f'Test notification queued for {len(users)} user(s), every device of theirs. The '
+            'push answers list shows the replies.',
+            level=messages.SUCCESS,
         )
 
 

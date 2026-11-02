@@ -946,7 +946,7 @@ push configured (NOTIF-20's preconditions).
 | # | Action | Expected result |
 |---|---|---|
 | 1 | `/admin/core/pushsubscription/`. | Read-only list (no "Add"; opening a row shows its fields without Save or Delete): **User**, **Push service** (a host such as `fcm.googleapis.com`, never the full endpoint URL), **User agent**, **Created at**, **Last success at**; search by the user's email or name. The page source contains no `fcm.googleapis.com/fcm/send/`. |
-| 2 | Select a row, action **Send test notification**, **Go**. | Without the VAPID settings: the error "Push is not configured (VAPID_* settings)." With them: "Test notification sent to 1 user(s): N device(s) accepted it, N gone (removed), N failed." (a browser that has the site open, or that is running, shows "Test notification" with **Yes** and **No**; Chrome shows them, Safari on a Mac shows none). |
+| 2 | Select a row, action **Send test notification**, **Go**. | Without the VAPID settings: the error "Push is not configured (VAPID_* settings)." With them: "Test notification queued for 1 user(s), every device of theirs. The push answers list shows the replies." Within seconds a browser where that user turned push on shows "Test notification" with **Yes** and **No** (Chrome shows them, Safari on a Mac shows none). |
 | 3 | As a staff user without superuser who may view push subscriptions (ADM-51's staff user, given `core.view_pushsubscription`): the same list. | The list opens; the action menu has no **Send test notification**. |
 | 4 | `/admin/core/pushaction/` ("Push answers"). | Read-only list: **Created at**, **User**, **Kind**, **Action**; filters kind, action, date. NOTIF-22's `qa.test` / `yes` row is there. |
 

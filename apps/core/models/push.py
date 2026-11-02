@@ -45,6 +45,9 @@ class PushSubscription(models.Model):
     p256dh = cast(str, models.CharField(max_length=P256DH_MAX_LENGTH))
     auth = cast(str, models.CharField(max_length=AUTH_MAX_LENGTH))
     user_agent = cast(str, models.CharField(max_length=USER_AGENT_MAX_LENGTH, blank=True))
+    # `push.password_fingerprint(user)` when it was saved: a password change since (which signs
+    # the user's other sessions out) stops pushes to this device.
+    password_fingerprint = cast(str, models.CharField(max_length=64, blank=True))
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
     last_success_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
 

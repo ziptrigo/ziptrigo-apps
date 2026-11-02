@@ -8,8 +8,17 @@ How it fits together:
   subscription to `POST /push/subscribe/` (`save_subscription`). The subscription's id is kept in
   the session, so signing out deletes it (`forget_session_subscription`, from the
   `user_logged_out` receiver in `CoreConfig`): a shared device stops getting the previous user's
-  pushes. After a new sign-in on a browser that still has permission, the script posts the same
-  subscription again, without asking.
+  pushes. After a new sign-in by the *same* account on a browser that still has permission, the
+  script posts the subscription again, without asking (it keeps `browser_owner_id` in
+  localStorage to tell); another account must turn push on itself.
+- A subscription is tied to the password it was made under (`password_fingerprint`, derived from
+  the session auth hash, as Django ties sessions): a password change or reset, which signs the
+  user's other sessions out, also stops pushes to their devices. `send_push` deletes a
+  subscription whose fingerprint no longer matches, and the change-password view keeps the
+  current device's (`refresh_session_subscription`). Answer tokens carry it too.
+- Only an account that may sign in gets pushes or may answer them (`is_deliverable`: `is_active`,
+  and the model's active `status` when it has one), so deactivating or deleting an account stops
+  them without deleting its subscriptions.
 - `send_push` encrypts a JSON payload for each of the user's subscriptions and POSTs it to the
   push service (`pywebpush`), signed with `VAPID_PRIVATE_KEY`. A subscription the push service
   answers 404 or 410 for is gone for good and deleted; any other failure is logged and the next
@@ -51,6 +60,7 @@ from django.tasks import task
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare, salted_hmac
 
 from ..models import PushAction, PushSubscription
 from ..models.push import (
@@ -78,6 +88,8 @@ MAX_SUBSCRIPTIONS_PER_USER = 20
 #: notification can sit in the tray for days before it is answered.
 ACTION_TOKEN_MAX_AGE = timedelta(days=7)
 ACTION_TOKEN_SALT = 'core.push.action'
+#: How much of the password fingerprint an answer token carries.
+TOKEN_FINGERPRINT_LENGTH = 20
 #: The session key holding the id of this browser's subscription, for the sign-out cleanup.
 SESSION_KEY = 'push_subscription_id'
 #: Same caps as in-app notifications (`Notification`): the text is often something a user typed.
@@ -134,6 +146,29 @@ def public_key() -> str:
     return settings.VAPID_PUBLIC_KEY if is_configured() else ''
 
 
+def is_deliverable(user: Any) -> bool:
+    """Whether `user` may get pushes and answer them: an existing, active account. `is_active`
+    alone isn't enough for `accounts.User`, whose deactivation and deletion set `status` and leave
+    `is_active` alone; `core` can't import its constants, so the model's own `STATUS_ACTIVE` is
+    compared when it has one."""
+    if user is None or not getattr(user, 'is_active', False):
+        return False
+    active_status = getattr(user, 'STATUS_ACTIVE', None)
+    return active_status is None or getattr(user, 'status', active_status) == active_status
+
+
+def password_fingerprint(user: Any) -> str:
+    """A value that changes whenever the user's password does (a change, a reset, the admin,
+    Django rehashing it), derived from the session auth hash rather than storing it."""
+    return salted_hmac('core.push.password', user.get_session_auth_hash()).hexdigest()
+
+
+def browser_owner_id(user: Any) -> str:
+    """An opaque per-user value `push.js` keeps in localStorage next to the subscription: it
+    re-saves a browser's subscription after a sign-in only for the account that turned push on."""
+    return salted_hmac('core.push.owner', str(user.pk)).hexdigest()[:24]
+
+
 def is_push_service_url(endpoint: str) -> bool:
     """Whether `endpoint` is an https URL on one of `PUSH_SERVICE_HOSTS` (or a subdomain), with no
     credentials or port of its own."""
@@ -188,6 +223,7 @@ def save_subscription(user: Model, data: Any, *, user_agent: str = '') -> PushSu
         'p256dh': p256dh,
         'auth': auth,
         'user_agent': (user_agent or '')[:USER_AGENT_MAX_LENGTH],
+        'password_fingerprint': password_fingerprint(user),
     }
     with transaction.atomic():
         # The user's row serialises their concurrent subscribes, so the cap holds.
@@ -211,18 +247,37 @@ def save_subscription(user: Model, data: Any, *, user_agent: str = '') -> PushSu
     return subscription
 
 
-def delete_subscription(user: Model, endpoint: str) -> bool:
-    """Delete `user`'s subscription with `endpoint` (turning push off on that browser). Another
-    user's is left alone. Returns whether one was deleted."""
+def delete_subscription(user: Model, endpoint: str) -> UUID | None:
+    """Delete `user`'s subscription with `endpoint` (turning push off on that browser) and return
+    its id, `None` when `user` had none (another user's is left alone)."""
     if not isinstance(endpoint, str) or not endpoint:
-        return False
-    deleted, _ = PushSubscription.objects.filter(user=user, endpoint=endpoint).delete()
-    return bool(deleted)
+        return None
+    subscription = PushSubscription.objects.filter(user=user, endpoint=endpoint).first()
+    if subscription is None:
+        return None
+    subscription_id = subscription.pk
+    subscription.delete()
+    return subscription_id
 
 
 def remember_in_session(session, subscription: PushSubscription) -> None:
     """Remember which subscription this browser has, for `forget_session_subscription`."""
     session[SESSION_KEY] = str(subscription.pk)
+
+
+def refresh_session_subscription(session, user: Model) -> None:
+    """After the user changed their password from this session, which stays signed in, tie this
+    browser's subscription to the new password; the other devices' stop working, like their
+    sessions."""
+    subscription_id = session.get(SESSION_KEY) if session is not None else None
+    if not subscription_id:
+        return
+    try:
+        PushSubscription.objects.filter(pk=subscription_id, user=user).update(
+            password_fingerprint=password_fingerprint(user)
+        )
+    except ValueError, ValidationError:
+        pass
 
 
 def forget_session_subscription(session, user: Model | None) -> None:
@@ -238,12 +293,21 @@ def forget_session_subscription(session, user: Model | None) -> None:
     session.pop(SESSION_KEY, None)
 
 
-def make_action_token(user_id: Any, push_id: UUID, kind: str, actions: Sequence[str]) -> str:
+def make_action_token(
+    user_id: Any, push_id: UUID, kind: str, actions: Sequence[str], fingerprint: str
+) -> str:
     """A signed, timestamped token that lets whoever holds it answer push `push_id` of `user_id`
-    with one of `actions`. It travels inside the encrypted payload, so only the subscribed browser
-    sees it."""
+    with one of `actions`, until the user's password changes (`fingerprint`, from
+    `password_fingerprint`). It travels inside the encrypted payload, so only the subscribed
+    browser sees it."""
     return signing.dumps(
-        {'u': str(user_id), 'p': str(push_id), 'k': kind, 'a': list(actions)},
+        {
+            'u': str(user_id),
+            'p': str(push_id),
+            'k': kind,
+            'a': list(actions),
+            'h': fingerprint[:TOKEN_FINGERPRINT_LENGTH],
+        },
         salt=ACTION_TOKEN_SALT,
         compress=True,
     )
@@ -255,7 +319,8 @@ def record_action(token: str, action: str) -> PushAction:
     The first answer to a push is kept: a repeat (the service worker retrying, or the same token
     sent twice) returns the stored row and signals nothing. The `push_action` signal is sent once,
     after commit. Raises `InvalidActionToken` for a bad, expired or foreign token, an action the
-    notification didn't offer, and a user who is gone or inactive.
+    notification didn't offer, a user who is gone or inactive, and a password changed since the
+    push was sent.
     """
     if not isinstance(token, str) or not isinstance(action, str):
         raise InvalidActionToken
@@ -267,12 +332,14 @@ def record_action(token: str, action: str) -> PushAction:
         push_id = UUID(claims['p'])
         kind = str(claims['k'])
         allowed = claims['a']
-    except signing.BadSignature, KeyError, TypeError, ValueError:
+        fingerprint = claims['h']
+        user = get_user_model().objects.filter(pk=user_id).first()
+    except signing.BadSignature, KeyError, TypeError, ValueError, ValidationError:
         raise InvalidActionToken from None
-    if action not in allowed:
+    if action not in allowed or not is_deliverable(user):
         raise InvalidActionToken
-    user = get_user_model().objects.filter(pk=user_id).first()
-    if user is None or not user.is_active:
+    current = password_fingerprint(user)[:TOKEN_FINGERPRINT_LENGTH]
+    if not isinstance(fingerprint, str) or not constant_time_compare(fingerprint, current):
         raise InvalidActionToken
     with transaction.atomic():
         answer, created = PushAction.objects.get_or_create(
@@ -336,8 +403,10 @@ def build_payload(
     tag: str | None = None,
     data: Mapping[str, Any] | None = None,
     kind: str = '',
+    fingerprint: str = '',
 ) -> dict[str, Any]:
-    """The JSON the service worker turns into a notification (`showNotification`'s options)."""
+    """The JSON the service worker turns into a notification (`showNotification`'s options).
+    `fingerprint` is the user's `password_fingerprint`, for the answer token."""
     title = _truncate(title, TITLE_MAX_LENGTH)
     if not title:
         raise ValueError('A push notification needs a title.')
@@ -349,7 +418,7 @@ def build_payload(
     if cleaned_actions:
         payload_data['action_url'] = reverse('core:push-action')
         payload_data['action_token'] = make_action_token(
-            user_id, push_id, kind, [a['action'] for a in cleaned_actions]
+            user_id, push_id, kind, [a['action'] for a in cleaned_actions], fingerprint
         )
     payload: dict[str, Any] = {
         'title': title,
@@ -412,13 +481,17 @@ def send_push(
     `data` is extra JSON for the service worker. Bad arguments are programming errors and raise
     `ValueError`.
 
-    Sends nothing while push is not configured or the user is inactive. A device the push service
-    says is gone (404, 410) has its subscription deleted; any other failure is logged and skipped,
-    so this never raises for a delivery problem. Each device is a network call, so a caller that
-    is answering a request uses `queue_push` instead.
+    Sends nothing while push is not configured or the account can't sign in (`is_deliverable`).
+    A subscription made under an earlier password, or one the push service says is gone (404,
+    410), is deleted and counted in `removed`; any other failure is logged and skipped, so this
+    never raises for a delivery problem. Each device is a network call, so a caller that is
+    answering a request uses `queue_push` instead.
     """
     push_id = uuid.uuid4()
     user_id = user.pk if isinstance(user, Model) else user
+    # Read again, not trusted from the caller: the status and password are what's current now.
+    recipient = get_user_model().objects.filter(pk=user_id).first()
+    fingerprint = password_fingerprint(recipient) if recipient is not None else ''
     payload = build_payload(
         user_id,
         push_id,
@@ -429,6 +502,7 @@ def send_push(
         tag=tag,
         data=data,
         kind=kind,
+        fingerprint=fingerprint,
     )
     encoded = json.dumps(payload, separators=(',', ':'))
     if len(encoded.encode()) > MAX_PAYLOAD_BYTES:
@@ -436,13 +510,18 @@ def send_push(
     if not is_configured():
         logger.info('Push is not configured (VAPID_* settings): nothing sent')
         return PushResult(push_id=push_id)
-    if not get_user_model().objects.filter(pk=user_id, is_active=True).exists():
+    if not is_deliverable(recipient):
         return PushResult(push_id=push_id)
 
     from pywebpush import WebPushException
 
     sent = removed = failed = 0
     for subscription in PushSubscription.objects.filter(user_id=user_id).order_by('created_at'):
+        if not constant_time_compare(subscription.password_fingerprint, fingerprint):
+            # Made under an earlier password: that device was signed out with the change.
+            subscription.delete()
+            removed += 1
+            continue
         try:
             _deliver(subscription, encoded, ttl)
         except WebPushException as exc:
@@ -473,18 +552,27 @@ TEST_ACTIONS = ({'action': 'yes', 'title': 'Yes'}, {'action': 'no', 'title': 'No
 TEST_KIND = 'core.test'
 
 
+def _test_push_arguments() -> dict[str, Any]:
+    return {
+        'title': 'Test notification',
+        'body': 'Did this reach you? Answer with a button, or tap to open your account page.',
+        'url': reverse('accounts:account'),
+        'actions': TEST_ACTIONS,
+        'tag': 'core-test',
+        'kind': TEST_KIND,
+    }
+
+
 def send_test_push(user: Model) -> PushResult:
-    """Send the test notification (`manage.py send_test_push`, the subscription admin's action):
-    a Yes / No question whose answer is stored as a `PushAction` of kind `core.test`."""
-    return send_push(
-        user,
-        'Test notification',
-        'Did this reach you? Answer with a button, or tap to open your account page.',
-        url=reverse('accounts:account'),
-        actions=TEST_ACTIONS,
-        tag='core-test',
-        kind=TEST_KIND,
-    )
+    """Send the test notification now (`manage.py send_test_push`): a Yes / No question whose
+    answer is stored as a `PushAction` of kind `core.test`."""
+    return send_push(user, **_test_push_arguments())
+
+
+def queue_test_push(user: Model) -> None:
+    """`send_test_push` from the task queue (the subscription admin's action), so a request never
+    waits on the push services."""
+    queue_push(user, **_test_push_arguments())
 
 
 @task

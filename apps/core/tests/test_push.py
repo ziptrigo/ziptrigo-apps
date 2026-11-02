@@ -322,6 +322,31 @@ def test_inactive_user_gets_nothing(configured, user, webpush):
     webpush.assert_not_called()
 
 
+@pytest.mark.parametrize('change', ['deactivate', 'mark_deleted'])
+def test_deactivated_or_deleted_account_gets_nothing(configured, user, webpush, change):
+    subscribe(user)
+    getattr(user, change)()
+
+    assert push.send_push(user, 'Hello').sent == 0
+    webpush.assert_not_called()
+    # Kept, for when the account is reactivated.
+    assert PushSubscription.objects.count() == 1
+
+
+def test_password_change_stops_pushes_to_its_devices(configured, user, webpush):
+    subscribe(user, FCM + 'before')
+    user.set_password('another-password-1')
+    user.save()
+    subscribe(user, FCM + 'after')
+
+    result = push.send_push(user, 'Hello')
+
+    assert (result.sent, result.removed) == (1, 1)
+    endpoints = [c.kwargs['subscription_info']['endpoint'] for c in webpush.call_args_list]
+    assert endpoints == [FCM + 'after']
+    assert list(PushSubscription.objects.values_list('endpoint', flat=True)) == [FCM + 'after']
+
+
 def test_actions_carry_a_token(configured, user, webpush):
     subscribe(user)
 
@@ -344,6 +369,7 @@ def test_actions_carry_a_token(configured, user, webpush):
         'p': str(result.push_id),
         'k': 'test.kind',
         'a': ['yes', 'no'],
+        'h': push.password_fingerprint(user)[: push.TOKEN_FINGERPRINT_LENGTH],
     }
 
 
@@ -407,7 +433,8 @@ def test_queue_push_queues_nothing_when_not_configured(
 
 def token_for(user, actions=('yes', 'no'), kind='test.kind'):
     push_id = push.uuid.uuid4()
-    return push_id, push.make_action_token(user.pk, push_id, kind, list(actions))
+    fingerprint = push.password_fingerprint(user)
+    return push_id, push.make_action_token(user.pk, push_id, kind, list(actions), fingerprint)
 
 
 def test_record_action_stores_and_signals_once(user, django_capture_on_commit_callbacks):
@@ -488,6 +515,30 @@ def test_inactive_user_cannot_answer(user):
     user.save()
     with pytest.raises(push.InvalidActionToken):
         push.record_action(token, 'yes')
+
+
+def test_deactivated_account_cannot_answer(user):
+    _, token = token_for(user)
+    user.deactivate()
+    with pytest.raises(push.InvalidActionToken):
+        push.record_action(token, 'yes')
+
+
+def test_answers_stop_working_after_a_password_change(user):
+    _, token = token_for(user)
+    user.set_password('another-password-1')
+    user.save()
+    with pytest.raises(push.InvalidActionToken):
+        push.record_action(token, 'yes')
+
+
+def test_deliverable():
+    assert not push.is_deliverable(None)
+    assert not push.is_deliverable(SimpleNamespace(is_active=False))
+    assert push.is_deliverable(SimpleNamespace(is_active=True))
+    active = SimpleNamespace(is_active=True, STATUS_ACTIVE='ACTIVE', status='ACTIVE')
+    assert push.is_deliverable(active)
+    assert not push.is_deliverable(SimpleNamespace(**{**vars(active), 'status': 'INACTIVE'}))
 
 
 # -- Service worker and manifest ------------------------------------------------------------------
@@ -590,6 +641,16 @@ def test_subscribe_when_off(not_configured, web):
     assert post_json(web, 'push-subscribe', subscription_json()).status_code == 404
 
 
+def test_refused_subscription_spends_no_budget(configured, web, settings):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'PUSH_SUBSCRIBE_USER': (1, 3600)}
+
+    assert (
+        post_json(web, 'push-subscribe', subscription_json('https://x.example/')).status_code == 400
+    )
+    assert post_json(web, 'push-subscribe', subscription_json()).status_code == 201
+
+
 def test_subscribe_is_rate_limited(configured, web, settings):
     settings.RATELIMIT_ENABLE = True
     settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'PUSH_SUBSCRIBE_USER': (1, 3600)}
@@ -611,11 +672,22 @@ def test_unsubscribe(configured, web, user):
     assert push.SESSION_KEY not in web.session
 
 
+def test_unsubscribing_another_device_keeps_this_sessions_subscription(configured, web, user):
+    post_json(web, 'push-subscribe', subscription_json(FCM + 'this-device'))
+    subscribe(user, FCM + 'other-device')
+
+    assert post_json(web, 'push-unsubscribe', {'endpoint': FCM + 'other-device'}).status_code == 204
+
+    assert push.SESSION_KEY in web.session
+    web.post(reverse('accounts:logout'))
+    assert not PushSubscription.objects.exists()
+
+
 def test_unsubscribe_needs_an_endpoint(configured, web):
     assert post_json(web, 'push-unsubscribe', {}).status_code == 400
 
 
-def test_action_endpoint_needs_no_session_or_csrf(user):
+def test_action_endpoint_needs_no_session_or_csrf(configured, user):
     push_id, token = token_for(user)
     client = Client(enforce_csrf_checks=True)
 
@@ -630,15 +702,22 @@ def test_action_endpoint_needs_no_session_or_csrf(user):
 
 
 @pytest.mark.parametrize('body', [None, 'x', {'token': 'nope', 'action': 'yes'}, {'action': 'yes'}])
-def test_action_endpoint_refuses_bad_answers(client, body):
+def test_action_endpoint_refuses_bad_answers(configured, client, body):
     response = post_json(client, 'push-action', body)
     assert response.status_code == 400
     assert response.json() == {'detail': 'Invalid answer.'}
     assert not PushAction.objects.exists()
 
 
-def test_action_endpoint_is_post_only(client):
+def test_action_endpoint_is_post_only(configured, client):
     assert client.get(reverse('core:push-action')).status_code == 405
+
+
+def test_action_endpoint_when_off(not_configured, client, user):
+    _, token = token_for(user)
+    response = post_json(client, 'push-action', {'token': token, 'action': 'yes'})
+    assert response.status_code == 404
+    assert not PushAction.objects.exists()
 
 
 # -- Sign-out -------------------------------------------------------------------------------------
@@ -665,10 +744,33 @@ def test_signing_out_leaves_a_subscription_moved_to_another_user(configured, web
     assert PushSubscription.objects.get().user == other
 
 
+def test_changing_the_password_keeps_this_device_only(configured, web, user, webpush):
+    post_json(web, 'push-subscribe', subscription_json(FCM + 'this-device'))
+    subscribe(user, FCM + 'other-device')
+
+    response = web.post(
+        reverse('accounts:password-change'),
+        {
+            'current_password': 'testpass123',
+            'new_password': 'Fresh-Passw0rd-42',
+            'new_password_confirm': 'Fresh-Passw0rd-42',
+        },
+    )
+    assert response.status_code == 302
+
+    user.refresh_from_db()
+    result = push.send_push(user, 'Hello')
+
+    assert (result.sent, result.removed) == (1, 1)
+    assert list(PushSubscription.objects.values_list('endpoint', flat=True)) == [
+        FCM + 'this-device'
+    ]
+
+
 # -- Pages ----------------------------------------------------------------------------------------
 
 
-def test_account_page_has_the_section(configured, web):
+def test_account_page_has_the_section(configured, web, user):
     html = web.get(reverse('accounts:account')).content.decode()
 
     assert 'data-push-settings' in html
@@ -676,6 +778,13 @@ def test_account_page_has_the_section(configured, web):
     assert 'core/js/push.js' in html
     assert f'data-public-key="{PUBLIC_KEY}"' in html
     assert 'data-synced="0"' in html
+    assert f'data-owner="{push.browser_owner_id(user)}"' in html
+
+
+def test_browser_owner_differs_between_accounts(user):
+    other = UserFactory()
+    assert push.browser_owner_id(user) != push.browser_owner_id(other)
+    assert push.browser_owner_id(user) == push.browser_owner_id(user)
 
 
 def test_script_knows_the_session_saved_a_subscription(configured, web):
@@ -704,13 +813,39 @@ def test_admin_lists_the_push_service_not_the_endpoint(configured, client, admin
     subscribe(user, FCM + 'secret-token')
     client.force_login(admin_user)
 
-    html = client.get(reverse(CHANGELIST)).content.decode()
+    response = client.get(reverse(CHANGELIST))
 
-    assert 'fcm.googleapis.com' in html
-    assert 'secret-token' not in html
+    model_admin = response.context_data['cl'].model_admin
+    rows = list(response.context_data['cl'].result_list)
+    assert [model_admin.push_service(row) for row in rows] == ['fcm.googleapis.com']
+    assert 'secret-token' not in response.content.decode()
 
 
-def test_admin_sends_the_test_notification(configured, client, admin_user, user, webpush):
+def test_admin_queues_the_test_notification(
+    configured, client, admin_user, user, webpush, django_capture_on_commit_callbacks
+):
+    subscribe(user)
+    client.force_login(admin_user)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = client.post(
+            reverse(CHANGELIST),
+            {
+                'action': 'send_test_notification',
+                '_selected_action': [PushSubscription.objects.get().pk],
+            },
+            follow=True,
+        )
+
+    assert response.status_code == 200
+    assert 'Test notification queued for 1 user(s)' in response.content.decode()
+    payload = sent_payload(webpush)
+    assert payload['title'] == 'Test notification'
+    assert [a['action'] for a in payload['actions']] == ['yes', 'no']
+    assert payload['data']['url'] == reverse('accounts:account')
+
+
+def test_admin_test_action_when_off(not_configured, client, admin_user, user):
     subscribe(user)
     client.force_login(admin_user)
 
@@ -723,12 +858,7 @@ def test_admin_sends_the_test_notification(configured, client, admin_user, user,
         follow=True,
     )
 
-    assert response.status_code == 200
-    payload = sent_payload(webpush)
-    assert payload['title'] == 'Test notification'
-    assert [a['action'] for a in payload['actions']] == ['yes', 'no']
-    assert payload['data']['url'] == reverse('accounts:account')
-    assert '1 device(s) accepted it' in response.content.decode()
+    assert 'Push is not configured' in response.content.decode()
 
 
 def _staff_with(user, *codenames):
@@ -801,7 +931,7 @@ def test_send_test_push_command(configured, user, webpush):
     assert sent_payload(webpush)['title'] == 'Test notification'
 
 
-def test_send_test_push_command_errors(configured, not_configured, user):
+def test_send_test_push_command_when_off(not_configured, user):
     with pytest.raises(CommandError, match='not configured'):
         call_command('send_test_push', user.email)
 

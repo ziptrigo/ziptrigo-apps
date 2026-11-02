@@ -493,7 +493,8 @@ network reaching `http://<your computer>:8000` is not a secure context, so use
    under *Notifications on this device*; allow notifications when Chrome asks. The section then
    says they are on.
 2. Send the test notification, either from the admin (*Push subscriptions*, select the row, action
-   **Send test notification**; superusers only) or in the container:
+   **Send test notification**; superusers only; it is queued, so it goes out within seconds) or in
+   the container (sends at once and prints what each device answered):
 
    ```bash
    python manage.py send_test_push <your email>
@@ -506,8 +507,11 @@ network reaching `http://<your computer>:8000` is not a secure context, so use
 If nothing arrives: check that Chrome may show notifications (Android settings, Apps, Chrome,
 Notifications, and the site under Chrome's site settings), that the phone isn't in Do Not Disturb,
 and the command's output (`gone (removed)` means the browser dropped the subscription: turn
-notifications on again). Signing out turns push off on that device; signing back in turns it on
-again without asking, as long as the permission is still granted.
+notifications on again). Signing out turns push off on that device; signing back in with the
+same account turns it on again without asking, as long as the permission is still granted, while
+another account must press **Turn on notifications** itself. Changing or resetting the password
+turns push off on every other device of the account (like their sessions), and a deactivated
+account gets no notifications.
 
 For developers: `apps.core.services.push.send_push(user, title, body, url=..., actions=...,
 tag=..., data=..., kind=...)` sends to every device of a user (`queue_push` does it from the task

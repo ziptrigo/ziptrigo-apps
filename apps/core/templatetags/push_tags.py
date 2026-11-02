@@ -14,14 +14,20 @@ register = template.Library()
 
 @register.inclusion_tag('core/partials/push_script.html', takes_context=True)
 def push_script(context: Context) -> dict[str, Any]:
-    """`core/js/push.js` with its URLs, the public key and whether this session already saved a
-    subscription (so the script posts it again only after a new sign-in)."""
+    """`core/js/push.js` with its URLs, the public key, whether this session already saved a
+    subscription and the account's `browser_owner_id` (so the script posts it again after a new
+    sign-in, and only for the account that turned push on in this browser)."""
     request = context.get('request')
     user = getattr(request, 'user', None)
     enabled = bool(user is not None and user.is_authenticated and push.is_configured())
     session = getattr(request, 'session', None)
     synced = bool(enabled and session is not None and session.get(push.SESSION_KEY))
-    return {'enabled': enabled, 'public_key': push.public_key(), 'synced': synced}
+    return {
+        'enabled': enabled,
+        'public_key': push.public_key(),
+        'synced': synced,
+        'owner': push.browser_owner_id(user) if enabled else '',
+    }
 
 
 @register.inclusion_tag('core/partials/push_settings.html')

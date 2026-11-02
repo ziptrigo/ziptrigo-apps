@@ -1021,7 +1021,8 @@ setup and the phone test.
   `core.checks` (runserver only). Changing the key pair strands every subscription (browsers must
   turn push on again; `push.js` replaces a subscription made with another key when it is turned on).
 - **Models.** `PushSubscription` (UUID, `user` CASCADE `related_name='push_subscriptions'`,
-  `endpoint` unique, `p256dh`, `auth`, `user_agent`, `created_at`, `last_success_at`) and
+  `endpoint` unique, `p256dh`, `auth`, `user_agent`, `password_fingerprint`, `created_at`,
+  `last_success_at`) and
   `PushAction` (UUID, `user` CASCADE `related_name='push_actions'`, `push_id` **unique**, `kind`,
   `action`, `created_at`). Both are in `accounts`' `CASCADE_WITH_USER_MODELS` and have read-only
   admins; the subscription admin shows the push service's **host only** (`__str__` too): the
@@ -1045,23 +1046,32 @@ setup and the phone test.
   iPhone shows none, so a caller must not rely on the buttons alone), ids `[a-z0-9_-]{1,50}`,
   distinct, each with a title. A payload over `MAX_PAYLOAD_BYTES` (3,500) or any bad argument is a
   `ValueError` (programming error), checked before anything is sent. Nothing is sent while push is
-  off or the user is inactive. Each subscription is one `pywebpush.webpush` call (VAPID signed with
+  off or the account can't sign in (`is_deliverable`: `is_active` **and** the model's
+  `STATUS_ACTIVE`, compared through the model since `core` can't import `accounts`; `deactivate()`
+  and `mark_deleted()` only change `status`). The user is read again by id, never trusted from the
+  caller. A subscription whose `password_fingerprint` (`salted_hmac` of the session auth hash) no
+  longer matches the user's is deleted and counted in `removed`: a password change or reset signs
+  the user's other sessions out, and stops pushes to their devices the same way; the
+  change-password view keeps the current device's (`refresh_session_subscription`). Each
+  subscription is one `pywebpush.webpush` call (VAPID signed with
   a cached `py_vapid.Vapid`, `ttl` default 1 day, `Urgency: normal`, the timeout above; a fresh
   claims dict each call, pywebpush writes into it): **404/410 deletes the subscription**, any other
   `WebPushException` logs a warning with the subscription id and status only, any other exception
   logs and continues; success stamps `last_success_at`. Never raises for a delivery problem.
   `queue_push` checks the arguments now and queues `send_push_task` (`default` queue) with
   `enqueue_after_commit`; nothing is queued while push is off. `send_test_push(user)` is the
-  Yes/No test (kind `core.test`, tag `core-test`, opening the account page).
+  Yes/No test (kind `core.test`, tag `core-test`, opening the account page); `queue_test_push`
+  queues it.
 - **Answers** (`make_action_token`, `record_action`). A notification with buttons carries a
   `django.core.signing` token (salt `core.push.action`, compressed) of the user, the push id, the
-  `kind` and the allowed actions, valid `ACTION_TOKEN_MAX_AGE` (7 days: longer than the TTL, a
+  `kind`, the allowed actions and the first `TOKEN_FINGERPRINT_LENGTH` characters of the password
+  fingerprint (so a password change ends the answers too), valid `ACTION_TOKEN_MAX_AGE` (7 days: longer than the TTL, a
   notification can sit in the tray). `POST /push/action/` (`{"token", "action"}`, JSON) is
   **CSRF-exempt and needs no session**: a service worker can't read the CSRF cookie, and the
   device's session may have expired; the token, which travels only inside the payload encrypted for
-  that browser, is the authentication. A bad, expired or forged token, an action not offered, and an
-  inactive or deleted user are all `InvalidActionToken` -> the same 400 `{"detail": "Invalid
-  answer."}`. One `PushAction` per push (`get_or_create` on `push_id`): the first answer is kept, a
+  that browser, is the authentication. A bad, expired or forged token, an action not offered, a
+  changed password and an account that can't sign in are all `InvalidActionToken` -> the same 400
+  `{"detail": "Invalid answer."}`; while push is off the endpoint answers 404. One `PushAction` per push (`get_or_create` on `push_id`): the first answer is kept, a
   repeat answers 204 and changes nothing. A new answer sends `apps.core.signals.push_action`
   (`send_robust`, on commit, a failing receiver logged) with `user_id`, `push_id`, `kind`, `action`
   and `push_action`; a product checks `kind` is its own. Nothing else happens in `core`.
@@ -1075,19 +1085,25 @@ setup and the phone test.
   `apple-touch-icon` and `theme-color` (an iPhone only delivers push to a site added to the Home
   Screen). Login required, JSON, CSRF via `X-CSRFToken`: `GET /push/key/` (`{"enabled",
   "public_key"}`), `POST /push/subscribe/` (the browser's `PushSubscription.toJSON()`; 201 `{"id"}`,
-  400 `{"detail"}`, 404 while off, JSON 429 over `PUSH_SUBSCRIBE_USER` (30/hour per user, every
-  call); bodies over 4 KB are not read) and `POST /push/unsubscribe/` (`{"endpoint"}`, 204 whether or
-  not it was the user's). The three root paths are in `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`.
+  400 `{"detail"}`, 404 while off, JSON 429 over `PUSH_SUBSCRIBE_USER` (30/hour per user), which
+  is charged only after the body passed `clean_subscription`, so a refused body spends none of it;
+  bodies over 4 KB are not read) and `POST /push/unsubscribe/` (`{"endpoint"}`, 204 whether or not
+  it was the user's; the session forgets its subscription only when that was the one deleted). The three root paths are in `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`.
 - **Sign-out.** Subscribing stores the subscription id in the session (`push.SESSION_KEY`); a
   `user_logged_out` receiver connected in `CoreConfig.ready()` (`_forget_push_subscription`, never
   raises) deletes that row if it is still the user's, so a shared device stops getting the previous
-  user's pushes. The browser keeps its subscription: after the next sign-in, `push.js` posts it
-  again (without a prompt, permission being granted) and the endpoint moves to the new user.
+  user's pushes. The browser keeps its subscription: after the next sign-in **by the same account**,
+  `push.js` posts it again without a prompt. Another account signing in there gets nothing until it
+  turns push on itself (which moves the endpoint to it).
 - **The browser** (`static/core/js/push.js`, loaded deferred by `base.html` for signed-in users
-  through `{% push_script %}`, only while configured; `data-*` carries the URLs, the public key and
-  `data-synced`, whether this session saved a subscription). On every page it re-posts the
-  browser's subscription when permission is granted and the session hasn't saved it or the endpoint
-  differs from the one in `localStorage` (`zt-push-endpoint`; a renewed subscription). The account
+  through `{% push_script %}`, only while configured; `data-*` carries the URLs, the public key,
+  `data-synced` (this session saved a subscription) and `data-owner`, `browser_owner_id(user)`, an
+  opaque per-user `salted_hmac`). **Turn on** keeps `{"endpoint", "owner"}` in `localStorage`
+  (`zt-push`). On every page the script re-posts the browser's subscription only when permission is
+  granted, the stored owner is the signed-in account's, and the session hasn't saved it or the
+  endpoint differs (a renewed subscription); without `localStorage` it never re-posts. The section
+  shows "on" only for that account (or when the session saved it): a subscription another account
+  left in the browser reads "off". The account
   page's **Notifications on this device** section (`core/partials/push_settings.html` through
   `{% push_settings %}`, included by `accounts/account.html`; core's template, not an import) shows
   one `[data-push-state]`: `checking`, `off` (**Turn on notifications**), `on` (**Turn off**),
@@ -1103,14 +1119,20 @@ setup and the phone test.
   'omit'`, up to 3 tries on a network error) without opening anything, else focuses a tab already on
   `data.url` or opens one (same origin only). No `pushsubscriptionchange` handling: the page script
   re-saves a renewed subscription on the next visit.
-- **Test send**: `./manage.py send_test_push <email>` (exact, then case-insensitive email; errors when
-  push is off, the user is unknown, has no subscription, or no device accepted it) and the
-  subscription admin's **Send test notification** action (superusers only, `has_send_test_permission`;
-  sends to the users of the selected rows).
+- **Test send**: `./manage.py send_test_push <email>` (sends now; exact, then case-insensitive
+  email; errors when push is off, the user is unknown, has no subscription, or no device accepted it)
+  and the subscription admin's **Send test notification** action (superusers only,
+  `has_send_test_permission`; **queues** it for the users of the selected rows with
+  `queue_test_push`, since a request waiting on many push services could outlast the worker
+  timeout).
 - **Not done**: no `pushsubscriptionchange` re-subscription in the worker, no per-user preferences,
   no JWT API, no push from `notify` or any product, no Declarative Web Push for Safari. Not
   verified on a real phone by the tests (pywebpush is mocked): see README for the manual test.
-- **Tests**: `apps/core/tests/test_push.py`; AI plan cases NOTIF-19 to NOTIF-22 and ADM-54.
+- **Tests**: `apps/core/tests/test_push.py`; the Playwright `tests_e2e/test_push.py` (the section's
+  states with `Notification.permission` stubbed, since headless Chromium always reads "denied";
+  `/sw.js` registering at `/`; the owner rule, with a fake registration in place of a real
+  subscription; `receipts_server` runs with a VAPID pair made per run); AI plan cases NOTIF-19 to
+  NOTIF-22 and ADM-54.
 
 ### Markdown
 

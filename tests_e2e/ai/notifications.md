@@ -392,25 +392,29 @@ Otherwise **BLOCKED (push-not-configured)**.
 |---|---|---|
 | 1 | Turn push on again on `/account/` if NOTIF-20 turned it off. As `qa.admin` (another browser or a private window) open `/admin/core/pushsubscription/`. | One row for `<NOTIF_A>`. |
 | 2 | In the first browser log out (account menu > **Logout**). Reload the admin list. | The row is gone. |
-| 3 | In the first browser sign in as `<NOTIF_B>` and open any page (`/`). Reload the admin list. | One row, now for `<NOTIF_B>` (no permission prompt appeared). `/account/` shows push on. |
-| 4 | Log out, sign in as `<NOTIF_A>` again, open `/`. | The admin list shows the row for `<NOTIF_A>` only. |
+| 3 | In the first browser sign in as `<NOTIF_B>` and open any page (`/`). Reload the admin list. | Still no row: another account never takes over this browser's notifications on its own. `/account/` shows the section *off* (**Turn on notifications**). |
+| 4 | Log out, sign in as `<NOTIF_A>` again, open `/`. Reload the admin list. | One row for `<NOTIF_A>` (no permission prompt appeared: the account that turned push on here gets it back on sign-in). |
+| 5 | As `<NOTIF_A>` on `/account/` change the password (**Change Password**), then reload the admin list in the other browser. | The row is still there (this device stays signed in and keeps push). Push on any *other* device of `<NOTIF_A>` stops: its row is deleted the next time something is sent to the account. |
 
 ### NOTIF-22 Web Push: the answer endpoint
 
 **Purpose:** the endpoint the service worker posts a button's answer to accepts only a valid token,
-keeps the first answer, and needs no session or CSRF token. Works without the VAPID settings (the
-token is made in a shell, not by a real push).
-**Preconditions:** a shell; otherwise **BLOCKED (needs-shell)**.
+keeps the first answer, and needs no session or CSRF token. The token is made in a shell, not by a
+real push.
+**Preconditions:** a shell, otherwise **BLOCKED (needs-shell)**; push configured (NOTIF-20's
+preconditions: without it the endpoint answers `404` to everything, which is step 8).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | **(shell step)** `python tests_e2e/ai/manage.py shell -c "import uuid; from apps.accounts.models import User; from apps.core.services import push; u = User.objects.get(email='<NOTIF_A>'); print(push.make_action_token(u.pk, uuid.uuid4(), 'qa.test', ['yes', 'no']))"` | Prints a token; record it as `TOKEN`. |
+| 1 | **(shell step)** `python tests_e2e/ai/manage.py shell -c "import uuid; from apps.accounts.models import User; from apps.core.services import push; u = User.objects.get(email='<NOTIF_A>'); print(push.make_action_token(u.pk, uuid.uuid4(), 'qa.test', ['yes', 'no'], push.password_fingerprint(u)))"` | Prints a token; record it as `TOKEN`. |
 | 2 | **(shell step)** `curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8765/push/action/ -H 'Content-Type: application/json' -d '{"token": "<TOKEN>", "action": "yes"}'` | `204` (no cookie, no CSRF token). |
 | 3 | The same with `"action": "no"`. | `204`; nothing changes. |
 | 4 | As `qa.admin` open `/admin/core/pushaction/`. | One row: `<NOTIF_A>`, kind `qa.test`, action `yes` (the first answer kept). |
 | 5 | Step 2 with `"action": "maybe"`, then with `"token": "nope"`, then with a body of `x`. | `400` each time, body `{"detail": "Invalid answer."}`; no new row. |
 | 6 | **(shell step)** `curl -s -o /dev/null -w '%{http_code}' http://localhost:8765/push/action/` | `405` (POST only). |
 | 7 | Signed out: open `/push/key/`. | Redirected to the sign-in page (`/push/subscribe/` and `/push/unsubscribe/` likewise need a session). |
+| 8 | On a server started **without** the VAPID settings, step 2 with a fresh token from step 1. | `404`, `{"detail": "Push notifications are not available."}`. |
+| 9 | Make a new `TOKEN` (step 1), change `<NOTIF_A>`'s password on `/account/`, then step 2 with it. | `400` `{"detail": "Invalid answer."}`: answers stop working after a password change. |
 
 ## Out of scope
 

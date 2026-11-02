@@ -1,11 +1,15 @@
 // Web Push in the browser (issue #239). Loaded, deferred, by core/base.html for signed-in users
 // while push is configured (`{% push_script %}`); its `data-*` attributes carry the URLs, the
-// VAPID public key and whether this session already saved a subscription (`data-synced`).
+// VAPID public key, whether this session already saved a subscription (`data-synced`) and an
+// opaque id of the signed-in account (`data-owner`).
 //
-// 1. Every page: when this browser already has a push subscription and permission, but the
-//    session hasn't saved it (a new sign-in: signing out deleted it on the server) or the browser
-//    renewed it since (the endpoint stored in localStorage differs), it posts the subscription
-//    again. No prompt: permission was given earlier.
+// 1. Every page: when this browser already has a push subscription and permission, *and the
+//    signed-in account is the one that turned push on here* (`data-owner` equals the owner kept in
+//    localStorage), but the session hasn't saved it (a new sign-in: signing out deleted it on the
+//    server) or the browser renewed it since (the endpoint kept in localStorage differs), it posts
+//    the subscription again. No prompt: that account already allowed it. Another account signing
+//    in on the same browser gets nothing until it turns push on itself, and without localStorage
+//    nothing is re-posted at all.
 // 2. The account page's "Notifications on this device" section ([data-push-settings]): shows
 //    whether push is on, off, blocked or unsupported, and turns it on (register the service
 //    worker, ask for permission, subscribe, save) or off (delete on the server, unsubscribe). The
@@ -14,7 +18,8 @@
   const script = document.currentScript;
   if (!script) return;
   const config = script.dataset;
-  const ENDPOINT_KEY = 'zt-push-endpoint';
+  // `{"endpoint": ..., "owner": ...}`: which subscription was saved, and for which account.
+  const STORAGE_KEY = 'zt-push';
 
   function supported() {
     return (
@@ -42,16 +47,29 @@
     return input ? input.value : '';
   }
 
-  function stored(value) {
-    // localStorage can be missing or throw (private windows, blocked site data).
+  // localStorage can be missing or throw (private windows, blocked site data): then nothing is
+  // remembered, and nothing is re-posted on its own.
+  function remembered() {
     try {
-      if (value === undefined) return window.localStorage.getItem(ENDPOINT_KEY);
-      if (value === null) window.localStorage.removeItem(ENDPOINT_KEY);
-      else window.localStorage.setItem(ENDPOINT_KEY, value);
+      const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
+      return value && typeof value === 'object' ? value : null;
     } catch (_) {
       return null;
     }
-    return null;
+  }
+
+  function remember(value) {
+    try {
+      if (value) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+      else window.localStorage.removeItem(STORAGE_KEY);
+    } catch (_) {
+      /* not remembered */
+    }
+  }
+
+  function ownedHere() {
+    const record = remembered();
+    return Boolean(record && config.owner && record.owner === config.owner);
   }
 
   function keyBytes(base64url) {
@@ -89,7 +107,7 @@
     if (!response.ok) {
       throw new Error((await errorText(response)) || 'The subscription could not be saved.');
     }
-    stored(subscription.endpoint);
+    remember({ endpoint: subscription.endpoint, owner: config.owner });
     config.synced = '1';
   }
 
@@ -102,9 +120,10 @@
   // 1. Every page.
   async function resync() {
     if (!supported() || Notification.permission !== 'granted') return;
+    if (!ownedHere()) return;
     const subscription = await currentSubscription();
     if (!subscription) return;
-    if (config.synced === '1' && stored() === subscription.endpoint) return;
+    if (config.synced === '1' && remembered().endpoint === subscription.endpoint) return;
     await saveSubscription(subscription);
   }
 
@@ -132,7 +151,11 @@
       if (!supported()) return show(isIosBrowserTab() ? 'ios' : 'unsupported');
       if (Notification.permission === 'denied') return show('blocked');
       const subscription = await currentSubscription().catch(() => null);
-      show(subscription && Notification.permission === 'granted' ? 'on' : 'off');
+      // On only for the account that turned it on here (or that this session saved): a browser
+      // subscription another account left behind is "off" for this one, which can take it over
+      // with the button.
+      const ours = config.synced === '1' || ownedHere();
+      show(subscription && ours && Notification.permission === 'granted' ? 'on' : 'off');
     }
 
     async function turnOn() {
@@ -172,7 +195,7 @@
         if (!response.ok) throw new Error((await errorText(response)) || 'Could not turn notifications off.');
         await subscription.unsubscribe();
       }
-      stored(null);
+      remember(null);
       config.synced = '0';
       show('off', 'Notifications are off for this device.');
     }
