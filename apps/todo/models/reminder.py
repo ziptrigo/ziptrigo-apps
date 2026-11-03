@@ -21,10 +21,21 @@ class ReminderChannel(models.TextChoices):
 
 
 class DeliveryChannel(models.TextChoices):
-    """The channel one delivery actually used (`both` is two deliveries)."""
+    """The channel one delivery actually used (`both` is two deliveries; an in-app reminder is
+    also pushed to the owner's devices that have push on, a third row)."""
 
     IN_APP = 'in_app', 'In-app'
     EMAIL = 'email', 'Email'
+    PUSH = 'push', 'Push'
+
+
+class SnoozeChoice(models.IntegerChoices):
+    """How long the Snooze button of a pushed reminder waits (`TodoAccount.snooze_minutes`)."""
+
+    MIN_15 = 15, '15 minutes'
+    HOUR_1 = 60, '1 hour'
+    HOURS_8 = 480, '8 hours'
+    DAY_1 = 1440, '1 day'
 
 
 class Reminder(models.Model):
@@ -38,6 +49,11 @@ class Reminder(models.Model):
     false) when its new time is ahead. `fire_token` is regenerated each time the reminder is
     claimed for delivery, so the email task can tell one firing from the next; `failures` counts
     the deliveries that raised since it was last armed (it keeps the log quiet).
+
+    `snoozed_until` is set while the reminder waits for a snooze (the Snooze button of a pushed
+    reminder): `fire_at` is then that instant, not one derived from the due time, so the passes
+    that only move the same due moment (time zone, default due time) leave it alone. Delivering it,
+    editing its time, or a new due date or time clears it.
     """
 
     objects: ClassVar['models.Manager']
@@ -66,6 +82,7 @@ class Reminder(models.Model):
     skipped = cast(bool, models.BooleanField(default=False, db_default=False))
     fire_token = cast(uuid.UUID, models.UUIDField(default=uuid.uuid4, editable=False))
     failures = cast(int, models.PositiveSmallIntegerField(default=0, db_default=0))
+    snoozed_until = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
 
     class Meta:
@@ -158,6 +175,9 @@ class ReminderDelivery(models.Model):
     #: The reminder's `fire_token` at the firing this row belongs to (null for a skipped one):
     #: what the email task dedupes on.
     fire_token = cast(uuid.UUID | None, models.UUIDField(null=True, blank=True))
+    #: The push notification's id (`core.PushAction.push_id` of its answer), for a `push` row:
+    #: how a tap on Complete or Snooze finds its reminder and task.
+    push_id = cast(uuid.UUID | None, models.UUIDField(null=True, blank=True, unique=True))
 
     class Meta:
         ordering = ['-sent_at']

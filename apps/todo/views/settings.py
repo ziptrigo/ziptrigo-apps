@@ -17,7 +17,7 @@ from apps.core.htmx import is_htmx
 
 from ..forms import SettingsForm
 from ..forms.reminder import UNITS as REMINDER_UNITS
-from ..models import ReminderChannel, TodoSettings
+from ..models import ReminderChannel, SnoozeChoice, TodoSettings
 from ..services import (
     daily_storage_rate,
     describe_daily_rate,
@@ -58,6 +58,7 @@ def _form_context(request: AuthenticatedHttpRequest, *, saved: bool = False) -> 
         'reminder_unit': unit,
         'reminder_units': REMINDER_UNITS,
         'reminder_channels': ReminderChannel.choices,
+        'snooze_choices': SnoozeChoice.choices,
     }
 
 
@@ -65,7 +66,8 @@ def _form_context(request: AuthenticatedHttpRequest, *, saved: bool = False) -> 
 @require_http_methods(['GET', 'POST'])
 @ensure_csrf_cookie
 def settings_page(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """GET: the page. POST: save the default due time and the default reminder."""
+    """GET: the page. POST: save the default due time, the default reminder and how long Snooze
+    waits."""
     if request.method == 'POST':
         return _save(request)
     context = {**_form_context(request), **inbox_context(request.user)}
@@ -87,6 +89,8 @@ def _save(request: AuthenticatedHttpRequest) -> HttpResponse:
                 reminders.set_defaults(
                     account, minutes=form.reminder_defaults[0], channel=form.reminder_defaults[1]
                 )
+            if form.cleaned_data.get('snooze_minutes') is not None:
+                reminders.set_snooze(account, form.cleaned_data['snooze_minutes'])
     except ValidationError as exc:
         return refuse(request, validation_lines(exc), retarget=SLOT, fallback=fallback)
     if not is_htmx(request):

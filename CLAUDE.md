@@ -1011,9 +1011,9 @@ notifications.notify(
 `apps.core.services.push` (issue #239; `models/push.py`, `views/push.py`, `push_checks.py`,
 `signals.py`, `static/core/js/push.js` and `sw.js`, `templatetags/push_tags.py`, migration
 `0005_push`; dependency `pywebpush`, which brings `py-vapid`) sends Web Push notifications to a
-user's devices. Standalone on purpose: `notify` (the bell) doesn't push, and no product sends a push
-yet; wiring `notify` or To-do reminders to it is a follow-up. README's "Push notifications" has the
-setup and the phone test.
+user's devices. `notify` (the bell) doesn't push; a product sends its own pushes. The one user so far
+is To-do: an in-app reminder is also pushed, with Complete and Snooze buttons (see "To-do" >
+"Reminders" > "Push"). README's "Push notifications" has the setup and the phone test.
 
 - **Configuration.** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (both base64url, raw P-256 keys, from
   `./manage.py generate_vapid_keys`, which prints them and stores nothing), `VAPID_SUBJECT`
@@ -1078,7 +1078,17 @@ setup and the phone test.
   `{"detail": "Invalid answer."}`; while push is off the endpoint answers 404. One `PushAction` per push (`get_or_create` on `push_id`): the first answer is kept, a
   repeat answers 204 and changes nothing. A new answer sends `apps.core.signals.push_action`
   (`send_robust`, on commit, a failing receiver logged) with `user_id`, `push_id`, `kind`, `action`
-  and `push_action`; a product checks `kind` is its own. Nothing else happens in `core`.
+  and `push_action`; a product checks `kind` is its own.
+  **A product that must answer the tap** registers a handler for its `kind` from its
+  `AppConfig.ready()` (`push.register_action_handler(kind, handler)`, one per kind; `core` can't
+  import products). `record_action` runs it for a new answer **in the same transaction as the
+  `PushAction`**, and leaves the plain text it returns on the row as `confirmation` (not stored;
+  cut to `CONFIRMATION_MAX_LENGTH`, 200). The view answers 200 `{"message": ...}` with it, 204 for
+  a repeat or a kind with no handler. A handler that raises rolls the row back with it and is
+  raised as `ActionFailed`, which the view answers 500 `{"detail": "That didn't work. Open the site
+  to try again."}`: nothing was recorded, so a retry runs the handler again. `queue_push` returns
+  the id the notification will get (`send_push` and `send_push_task` take `push_id=`), so a
+  product can record it before the push goes out and find its own row again from the answer.
 - **Endpoints** (`views/push.py`, `core:` names, mounted at the root). `GET /sw.js`
   (`service-worker`: the file `static/core/js/sw.js` read once per process, `text/javascript`,
   `Cache-Control: no-cache`, `Service-Worker-Allowed: /`; at the root because a service worker only
@@ -1123,7 +1133,10 @@ setup and the phone test.
   notification (an unreadable payload shows "ZipTrigo"); `notificationclick` closes it, then with
   an `event.action` posts `{token, action}` to `data.action_url` (same origin only, `credentials:
   'same-origin'` -- the token authenticates it, the cookies only get it past Cloudflare Access on
-  staging --, up to 3 tries on a network error) without opening anything, else focuses a tab already on
+  staging --, up to 3 tries on a network error) without opening anything, then shows the answer in
+  place of the notification (same tag, same title, `silent`, no buttons): the server's `message`
+  for a 200, nothing for a 204, and "That didn't work. Open the site to try again." for any other
+  status or a network failure. A tap on the notification itself focuses a tab already on
   `data.url` or opens one (same origin only). No `pushsubscriptionchange` handling: the page script
   re-saves a renewed subscription on the next visit.
 - **Test send**: `./manage.py send_test_push <email>` (sends now; exact, then case-insensitive
@@ -1133,9 +1146,11 @@ setup and the phone test.
   `queue_test_push`, since a request waiting on many push services could outlast the worker
   timeout).
 - **Not done**: no `pushsubscriptionchange` re-subscription in the worker, no per-user preferences,
-  no JWT API, no push from `notify` or any product, no Declarative Web Push for Safari. Not
+  no JWT API, no push from `notify` (To-do reminders push on their own), no Declarative Web Push
+  for Safari. Not
   verified on a real phone by the tests (pywebpush is mocked): see README for the manual test.
-- **Tests**: `apps/core/tests/test_push.py`; the Playwright `tests_e2e/test_push.py` (the section's
+- **Tests**: `apps/core/tests/test_push.py`, `test_push_answers.py` (the handler registry, the
+  confirmation, a failing handler rolled back, the known push id); the Playwright `tests_e2e/test_push.py` (the section's
   states with `Notification.permission` stubbed, since headless Chromium always reads "denied";
   `/sw.js` registering at `/`; the owner rule, with a fake registration in place of a real
   subscription; `receipts_server` runs with a VAPID pair made per run); AI plan cases NOTIF-19 to
@@ -4211,6 +4226,40 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     queued with (it has been claimed again since) or an email row with that token already exists (a
     duplicate run). A reminder armed again therefore emails again, even at the same `fire_at`.
   - `both` does both. There is no rate limit on delivery (the system's own job).
+  - **Push** (`_queue_push`): an in-app reminder (`in_app` or `both`) is also pushed to the owner's
+    devices, when push is configured and they have at least one `PushSubscription` (no new
+    channel: turning push off on the account page is the per-device switch). `push.queue_push` on
+    commit (title and body as the in-app notice, `url` the task page, tag `todo-task-<task id>` so a
+    newer reminder of the task replaces the older one on the phone, `kind`
+    `reminders.PUSH_KIND` = `todo.reminder`) with two buttons, **Complete** and **Snooze**
+    (`SNOOZE_BUTTON`: "Snooze 15 min", "Snooze 1 h", "Snooze 8 h", "Snooze 1 day"; Chrome shows two
+    at most, an iPhone none: a tap on the notification opens the task, where Postpone is). It is
+    recorded as a `ReminderDelivery` with `channel='push'` and `push_id`, the notification's id
+    (unique), which is how the answer finds its task: nothing about the task travels in the token.
+  - **The answers** (`reminders.answer_push`, registered for `todo.reminder` in `apps.py`; runs in
+    `core`'s answer transaction and returns the text the phone shows): the delivery is looked up by
+    `push_id` **and** the answering user; a task that is gone ("This task no longer exists."),
+    trashed ("This task is in the Trash.") or already completed ("Already completed.") changes
+    nothing. **Complete** is `complete_task` (open subtasks too, as the website's confirmed
+    Complete does; a repeating task creates its next occurrence and is billed as usual): "Completed."
+    or "Completed, with N open subtask(s).". **Snooze** is `reminders.snooze`: the reminder is
+    armed again `TodoAccount.snooze_minutes` from now (`fire_at` = `snoozed_until`, `sent_at` null,
+    not skipped, failures 0; the task must be open), "Snoozed until 14:30." or, on another day of
+    the user's clock, "Snoozed until Thu 29 Oct, 12:00." (`snoozed_label`). A removed reminder is
+    "This reminder was removed.". No rate limit: each push is answered at most once.
+  - **A snooze is an instant the user chose**, so `_refresh` leaves a snoozed reminder alone in the
+    passes that only move the same due moment (time zone, default due time: no `rearm`), and drops
+    the snooze when the due moment itself changes (`rearm`: a new date or time, postpone,
+    reschedule overdue). Editing the reminder's time drops it too, and so does delivering it (the
+    claim clears `snoozed_until`). The task panel says "Snoozed until ..." for one, and the API's
+    reminder has `snoozed_until`.
+  - **Snooze for** (`TodoAccount.snooze_minutes`, `SnoozeChoice`: 15, 60, 480 or 1440 minutes,
+    default 15, `db_default` too) is set on the settings page ("Reminders on your phone", the
+    settings form's `snooze_minutes`; a post without it leaves it), `GET|PATCH /api/todo/settings`
+    (`snooze_minutes`; another value is a 400 before `TODO_EDIT_USER` is spent) and `inv todo
+    settings --snooze 60`. `reminders.clean_snooze` / `set_snooze` are the one check. Migration
+    `0010_push_reminders` (`snooze_minutes`, `Reminder.snoozed_until`, `ReminderDelivery.push_id`,
+    the `push` delivery channel). Tests: `apps/todo/tests/test_push_reminders.py`.
 - **Web.** The task page's panel has a "Reminders" block (so each action answers the whole
   panel): each reminder as `5 minutes before (in-app)` (`describe_offset`: the largest of
   days, hours, minutes that divides evenly; `At time of task` for 0) with the time it fires or

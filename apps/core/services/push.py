@@ -29,6 +29,10 @@ How it fits together:
   `POST /push/action/` (`record_action`), which needs no session or CSRF token (a service worker
   has neither the CSRF cookie nor, perhaps, a live session) and stores one `PushAction` per push,
   then sends `apps.core.signals.push_action` for a product to act on.
+- A product that must *answer* the tap (To-do's "Snoozed until 14:30") registers a handler for its
+  `kind` (`register_action_handler`). It runs in the same transaction as the new `PushAction`, and
+  the plain text it returns goes back to the service worker, which replaces the notification with
+  it. A handler that raises rolls the row back too, so a retry can try again.
 
 Push is off while any of `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` is unset
 (`is_configured`): the account page shows no button and `send_push` sends nothing.
@@ -42,7 +46,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import lru_cache
@@ -122,6 +126,31 @@ _BASE64URL = re.compile(r'^[A-Za-z0-9_-]+={0,2}$')
 class InvalidActionToken(Exception):
     """The answer's token is malformed, forged, expired, not for that button, or its user is gone
     or inactive. The view answers 400 whichever it is."""
+
+
+class ActionFailed(Exception):
+    """A product's action handler raised: nothing was recorded (the `PushAction` was rolled back
+    with it), so the service worker may try again. The view answers 500."""
+
+
+#: `handler(push_action) -> str | None`: what a product does when one of its notifications is
+#: answered, returning the confirmation the device shows instead of the notification.
+ActionHandler = Callable[[PushAction], str | None]
+
+_action_handlers: dict[str, ActionHandler] = {}
+
+#: The longest confirmation the device is sent (it replaces the notification's body).
+CONFIRMATION_MAX_LENGTH = 200
+
+
+def register_action_handler(kind: str, handler: ActionHandler) -> None:
+    """Make `handler` answer the taps on notifications sent with this `kind` (from a product's
+    `AppConfig.ready()`, as `core` can't import products). One handler per kind; registering the
+    same one again is harmless."""
+    existing = _action_handlers.get(kind)
+    if existing is not None and existing is not handler:
+        raise ValueError(f'A push action handler is already registered for {kind!r}.')
+    _action_handlers[kind] = handler
 
 
 @dataclass(frozen=True)
@@ -321,6 +350,10 @@ def record_action(token: str, action: str) -> PushAction:
     after commit. Raises `InvalidActionToken` for a bad, expired or foreign token, an action the
     notification didn't offer, a user who is gone or inactive, and a password changed since the
     push was sent.
+
+    A new answer whose `kind` has a registered handler runs it in the same transaction; its text
+    is left on the returned row as `confirmation` (not stored; `None` for a repeat or a kind with
+    no handler). A handler that raises rolls the row back and is raised as `ActionFailed`.
     """
     if not isinstance(token, str) or not isinstance(action, str):
         raise InvalidActionToken
@@ -341,13 +374,24 @@ def record_action(token: str, action: str) -> PushAction:
     current = password_fingerprint(user)[:TOKEN_FINGERPRINT_LENGTH]
     if not isinstance(fingerprint, str) or not constant_time_compare(fingerprint, current):
         raise InvalidActionToken
-    with transaction.atomic():
-        answer, created = PushAction.objects.get_or_create(
-            push_id=push_id,
-            defaults={'user': user, 'kind': kind[:KIND_MAX_LENGTH], 'action': action},
-        )
-        if created:
-            transaction.on_commit(lambda: _send_push_action(answer))
+    confirmation: str | None = None
+    try:
+        with transaction.atomic():
+            answer, created = PushAction.objects.get_or_create(
+                push_id=push_id,
+                defaults={'user': user, 'kind': kind[:KIND_MAX_LENGTH], 'action': action},
+            )
+            if created:
+                handler = _action_handlers.get(answer.kind)
+                if handler is not None:
+                    confirmation = handler(answer)
+                transaction.on_commit(lambda: _send_push_action(answer))
+    except ActionFailed, IntegrityError:
+        raise
+    except Exception as exc:
+        logger.exception('Push action handler for %r failed', kind)
+        raise ActionFailed from exc
+    answer.confirmation = _truncate(confirmation, CONFIRMATION_MAX_LENGTH) if confirmation else None
     return answer
 
 
@@ -470,6 +514,7 @@ def send_push(
     *,
     kind: str = '',
     ttl: int = DEFAULT_TTL,
+    push_id: UUID | None = None,
 ) -> PushResult:
     """Send a notification to every device `user` (an instance, or its id) subscribed.
 
@@ -478,8 +523,9 @@ def send_push(
     `None`. `actions` are up to `MAX_ACTIONS` buttons, `[{'action': 'yes', 'title': 'Yes'}, ...]`
     (ids of `a-z 0-9 _ -`); an answer is stored as a `PushAction` with this `kind` and sent as the
     `push_action` signal. `tag` replaces an earlier notification with the same tag on the device.
-    `data` is extra JSON for the service worker. Bad arguments are programming errors and raise
-    `ValueError`.
+    `data` is extra JSON for the service worker. `push_id` is the notification's id (the one its
+    answer carries), new when `None`: pass one to record it before sending, as `queue_push` lets
+    a caller do. Bad arguments are programming errors and raise `ValueError`.
 
     Sends nothing while push is not configured or the account can't sign in (`is_deliverable`).
     A subscription made under an earlier password, or one the push service says is gone (404,
@@ -487,7 +533,7 @@ def send_push(
     never raises for a delivery problem. Each device is a network call, so a caller that is
     answering a request uses `queue_push` instead.
     """
-    push_id = uuid.uuid4()
+    push_id = push_id or uuid.uuid4()
     user_id = user.pk if isinstance(user, Model) else user
     # Read again, not trusted from the caller: the status and password are what's current now.
     recipient = get_user_model().objects.filter(pk=user_id).first()
@@ -586,9 +632,21 @@ def send_push_task(
     data: dict[str, Any] | None = None,
     kind: str = '',
     ttl: int = DEFAULT_TTL,
+    push_id: str | None = None,
 ) -> None:
     """`send_push` on the `default` queue (`queue_push` queues it)."""
-    send_push(user_id, title, body, url, actions, tag, data, kind=kind, ttl=ttl)
+    send_push(
+        user_id,
+        title,
+        body,
+        url,
+        actions,
+        tag,
+        data,
+        kind=kind,
+        ttl=ttl,
+        push_id=UUID(push_id) if push_id else None,
+    )
 
 
 def queue_push(
@@ -602,13 +660,16 @@ def queue_push(
     *,
     kind: str = '',
     ttl: int = DEFAULT_TTL,
-) -> None:
+) -> UUID:
     """Queue `send_push` once the surrounding transaction commits. The arguments are checked now
-    (a `ValueError` here, not in the worker); nothing is queued while push is not configured."""
+    (a `ValueError` here, not in the worker); nothing is queued while push is not configured.
+    Returns the id the notification will have, so the caller can record it (an answer carries it
+    as `PushAction.push_id`)."""
     user_id = str(user.pk if isinstance(user, Model) else user)
+    push_id = uuid.uuid4()
     build_payload(
         user_id,
-        uuid.uuid4(),
+        push_id,
         title=title,
         body=body,
         url=url,
@@ -618,7 +679,7 @@ def queue_push(
         kind=kind,
     )
     if not is_configured():
-        return
+        return push_id
     enqueue_after_commit(
         send_push_task,
         user_id,
@@ -630,4 +691,6 @@ def queue_push(
         dict(data) if data else None,
         kind,
         ttl,
+        str(push_id),
     )
+    return push_id

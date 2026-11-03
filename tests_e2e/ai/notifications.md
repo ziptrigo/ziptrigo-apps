@@ -423,7 +423,8 @@ preconditions: without it the endpoint answers `404` to everything, which is ste
   daily metering only freezes when a day's charge reaches a whole credit, which takes gigabytes of
   storage; the shell steps call the very function it calls).
 - An email channel, per-user preferences and a JWT API for notifications: not built (v1). Web Push
-  is not wired to the bell (`notify` doesn't push).
+  is not wired to the bell (`notify` doesn't push); To-do reminders push on their own, with
+  Complete and Snooze (`todo.md`, TODO-40).
 - A push reaching a real phone and tapping its buttons: that needs a phone and HTTPS (staging); the
   manual steps are in README, "Push notifications". The send itself (`send_push`) is covered by unit
   tests with pywebpush mocked.

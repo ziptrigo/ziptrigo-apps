@@ -9,7 +9,9 @@
 // - push: always shows a notification. Browsers require one for every push (`userVisibleOnly`),
 //   so even an unreadable payload shows the site's name rather than nothing.
 // - notificationclick: a tap on a button posts the answer to `data.action_url` with the signed
-//   token and does not open the site; a tap on the notification itself focuses a tab already on
+//   token and does not open the site. When the server answers with a `message` ("Snoozed until
+//   14:30") it replaces the notification, silently and without buttons; a refusal or a failure
+//   shows that it didn't work. A tap on the notification itself focuses a tab already on
 //   `data.url`, or opens one.
 'use strict';
 
@@ -53,7 +55,7 @@ self.addEventListener('notificationclick', (event) => {
   const data = notification.data || {};
   notification.close();
   if (event.action) {
-    event.waitUntil(sendAnswer(data, event.action));
+    event.waitUntil(answer(notification, data, event.action));
     return;
   }
   event.waitUntil(openUrl(data.url || '/'));
@@ -67,24 +69,55 @@ function wait(ms) {
 // connection for a moment). The server keeps the first answer to a push, so a retry of one that
 // did arrive changes nothing. The token is what authenticates it; same-site cookies still go along
 // because a site behind Cloudflare Access (staging) refuses a request without its cookie.
+// Resolves with the response, or null when every try failed on the network.
 async function sendAnswer(data, action) {
-  if (!data.action_url || !data.action_token) return;
+  if (!data.action_url || !data.action_token) return null;
   const url = new URL(data.action_url, self.location.origin);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) return null;
   const body = JSON.stringify({ token: data.action_token, action: action });
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await fetch(url.href, {
+      return await fetch(url.href, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: body,
       });
-      return;
     } catch (_) {
       await wait(2000 * (attempt + 1));
     }
   }
+  return null;
+}
+
+const FAILED_MESSAGE = "That didn't work. Open the site to try again.";
+
+// Posts the answer, then says how it went in place of the notification: the server's `message`
+// when it sent one ("Completed", "Snoozed until 14:30"), nothing for a plain 204 (the test
+// notification's Yes / No), and a short failure line otherwise.
+async function answer(notification, data, action) {
+  const response = await sendAnswer(data, action);
+  let message = null;
+  if (response === null || !response.ok) {
+    message = FAILED_MESSAGE;
+  } else if (response.status !== 204) {
+    try {
+      const reply = await response.json();
+      if (reply && typeof reply.message === 'string' && reply.message) message = reply.message;
+    } catch (_) {
+      message = null;
+    }
+  }
+  if (!message) return;
+  const options = {
+    body: message,
+    data: { url: data.url || '/' },
+    silent: true,
+  };
+  if (notification.icon) options.icon = notification.icon;
+  if (notification.badge) options.badge = notification.badge;
+  if (notification.tag) options.tag = notification.tag;
+  await self.registration.showNotification(notification.title || 'ZipTrigo', options);
 }
 
 async function openUrl(path) {

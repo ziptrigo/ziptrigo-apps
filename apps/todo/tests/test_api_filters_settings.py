@@ -233,6 +233,7 @@ class TestSettings:
             'default_due_time': '09:00:00',
             'default_reminder_minutes': 5,
             'default_reminder_channel': 'in_app',
+            'snooze_minutes': 15,
             'sender_allowlist': [],
             'tasks_created_this_month': 0,
             'free_tasks_per_month': 2,

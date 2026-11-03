@@ -188,6 +188,7 @@ def reminder_data(reminder: Reminder) -> dict[str, Any]:
         'channel': reminder.channel,
         'fire_at': reminder.fire_at,
         'sent_at': reminder.sent_at,
+        'snoozed_until': reminder.snoozed_until,
     }
 
 

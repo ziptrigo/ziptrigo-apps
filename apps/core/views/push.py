@@ -33,6 +33,7 @@ NO_CACHE = 'no-cache'
 #: A subscription is a few hundred bytes; anything much larger isn't one.
 MAX_BODY_BYTES = 4096
 NOT_AVAILABLE = 'Push notifications are not available.'
+ACTION_FAILED = "That didn't work. Open the site to try again."
 
 
 @lru_cache(maxsize=1)
@@ -159,15 +160,22 @@ def push_unsubscribe(request: AuthenticatedHttpRequest) -> HttpResponse:
 @require_POST
 def push_action(request: HttpRequest) -> HttpResponse:
     """Record the button a user tapped on a notification: `{"token": ..., "action": ...}`, posted
-    by the service worker. 204 when recorded (or already recorded), 400 for anything else, the same
-    answer for every kind of bad token, and 404 while push is not configured (off means off)."""
+    by the service worker. 200 `{"message": ...}` when the kind's handler answered (the service
+    worker shows it in place of the notification), 204 when recorded with nothing to say (or
+    already recorded), 400 for anything else, the same answer for every kind of bad token, 500
+    `{"detail": ...}` when the handler failed (nothing recorded: the worker may retry), and 404
+    while push is not configured (off means off)."""
     if not push.is_configured():
         return _error(NOT_AVAILABLE, status=404)
     data = _json_body(request)
     if not isinstance(data, dict):
         return _error('Invalid answer.')
     try:
-        push.record_action(data.get('token'), data.get('action'))
+        answer = push.record_action(data.get('token'), data.get('action'))
     except push.InvalidActionToken:
         return _error('Invalid answer.')
+    except push.ActionFailed:
+        return _error(ACTION_FAILED, status=500)
+    if answer.confirmation:
+        return JsonResponse({'message': answer.confirmation})
     return HttpResponse(status=204)
