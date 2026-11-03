@@ -618,6 +618,16 @@ def test_account_page_selects_the_saved_zone(client, user):
     assert 'Not set (UTC)' not in content
 
 
+def test_the_legacy_names_do_not_depend_on_the_host():
+    """The `tzdata` package is a dependency on every platform, so `zoneinfo` knows the legacy names
+    even on a host whose system tz database lacks them (Debian trixie and Ubuntu without
+    `tzdata-legacy`; the CI runner on Ubuntu 26.04). Checked against the package alone."""
+    from importlib import resources
+
+    bundled = set(resources.files('tzdata').joinpath('zones').read_text().split())
+    assert {'US/Pacific', 'Asia/Calcutta', 'Europe/Lisbon', 'UTC'} <= bundled
+
+
 def test_account_page_offers_a_valid_legacy_zone_that_is_saved(client, user):
     set_timezone(user, 'US/Pacific')
     client.force_login(user)

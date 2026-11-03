@@ -571,7 +571,11 @@ reminders in the user's local time (the To-do app, #161). `User.timezone` is an 
 db_default='')`: the #102 lesson again). A non-empty value must be in `zoneinfo.available_timezones()`
 (`validators.is_valid_timezone`, cached); the field's validator (`validators.validate_timezone`, so
 a `ModelForm` without the field is unaffected by a stale value), the profile and admin forms, the
-detection endpoint and the API schema all refuse anything else with `Unknown time zone.`.
+detection endpoint and the API schema all refuse anything else with `Unknown time zone.`. The
+`tzdata` package is a dependency on every platform (it used to come only on Windows), so that set,
+legacy names such as `US/Pacific` included, doesn't depend on the host: Debian since trixie (the
+`python:3.14-slim` image) and Ubuntu ship those names in a separate `tzdata-legacy` package, and
+the CI runner's move to Ubuntu 26.04 made them unknown there.
 `services.timezones` is the one place to compute with it: `user_tz(user)` (a `ZoneInfo`, UTC for an
 empty or stale name, which logs a warning once per process per value and never raises),
 `user_today(user)`, `local_datetime(user, date, time | None)` (the instant in UTC; a skipped local
