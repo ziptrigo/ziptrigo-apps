@@ -935,6 +935,21 @@ links of ADM-39 exist. Session A, and Session B logged in to the admin as STAFF.
 | 3 | Open L2's and L3's admin pages → History. | L3: "Released the abuse-review hold." and "Taken down: owner deactivated."; L2: only "Taken down: owner deactivated." (its hold was released by dismissing the report, which logs on the report, not the link). |
 | 4 | Log out of the admin (user menu). | The "Logged out" page; `/admin/` redirects to the login page. |
 
+### ADM-54 Push subscriptions and answers
+
+**Purpose:** the two push sections are read-only, never show a subscription's endpoint, and the test
+action is for superusers only.
+**Preconditions:** Session A (`qa.admin`). For rows: NOTIF-20 step 3 (a subscription) and NOTIF-22 (an
+answer); without them the lists are empty and steps 2 and 4 only check the empty lists. Step 3 needs
+push configured (NOTIF-20's preconditions).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/core/pushsubscription/`. | Read-only list (no "Add"; opening a row shows its fields without Save or Delete): **User**, **Push service** (a host such as `fcm.googleapis.com`, never the full endpoint URL), **User agent**, **Created at**, **Last success at**; search by the user's email or name. The page source contains no `fcm.googleapis.com/fcm/send/`. |
+| 2 | Select a row, action **Send test notification**, **Go**. | Without the VAPID settings: the error "Push is not configured (VAPID_* settings)." With them: "Test notification queued for 1 user(s), every device of theirs. The push answers list shows the replies." Within seconds a browser where that user turned push on shows "Test notification" with **Yes** and **No** (Chrome shows them, Safari on a Mac shows none). |
+| 3 | As a staff user without superuser who may view push subscriptions (ADM-51's staff user, given `core.view_pushsubscription`): the same list. | The list opens; the action menu has no **Send test notification**. |
+| 4 | `/admin/core/pushaction/` ("Push answers"). | Read-only list: **Created at**, **User**, **Kind**, **Action**; filters kind, action, date. NOTIF-22's `qa.test` / `yes` row is there. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

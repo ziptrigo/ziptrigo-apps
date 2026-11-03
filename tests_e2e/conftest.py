@@ -95,6 +95,24 @@ class ReceiptsServer:
         page.wait_for_url(lambda url: '/account/login' not in url)
 
 
+def _vapid_env() -> dict[str, str]:
+    from cryptography.hazmat.primitives import serialization
+    from py_vapid import Vapid
+    from py_vapid.utils import b64urlencode
+
+    vapid = Vapid()
+    vapid.generate_keys()
+    private = vapid.private_key.private_numbers().private_value.to_bytes(32, 'big')
+    public = vapid.public_key.public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+    )
+    return {
+        'VAPID_PUBLIC_KEY': b64urlencode(public),
+        'VAPID_PRIVATE_KEY': b64urlencode(private),
+        'VAPID_SUBJECT': 'mailto:e2e@example.com',
+    }
+
+
 def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
@@ -120,6 +138,8 @@ def receipts_server():
         BASE_URL=url,
         E2E_EMAIL=email,
         E2E_PASSWORD=password,
+        # Web Push on (issue #239), with a key pair made for this run: `test_push.py`.
+        **_vapid_env(),
     )
 
     database = Path(__file__).resolve().parents[1] / 'db.e2e.sqlite3'

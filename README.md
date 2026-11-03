@@ -93,6 +93,8 @@ apps/<app>/
 | Prefix | App |
 |---|---|
 | `/` | core landing page |
+| `/sw.js`, `/manifest.webmanifest` | core: the service worker of push notifications and the web app manifest — at the root because a service worker only controls the pages under its own path |
+| `/push/…` | core: push notifications (`key/`, `subscribe/`, `unsubscribe/`; `action/`, where the service worker posts the button a user tapped) |
 | `/account/…` | accounts (login, register, logout, password reset, email confirmation, settings) |
 | `/auth/google/login`, `/auth/google/callback` | accounts: "Sign in with Google" (the callback is the redirect URI registered with Google, so it never moves or gains a trailing slash) |
 | `/auth/microsoft/login`, `/auth/microsoft/callback` | accounts: "Sign in with Microsoft" (the callback is the redirect URI registered with Microsoft, same rule) |
@@ -452,6 +454,69 @@ The Lookup API receives the destination URLs themselves, so the privacy policy s
 are checked with Google. Google offers it for non-commercial use; for commercial use it points to
 [Web Risk](https://cloud.google.com/web-risk), which has the same shape and would only change
 `apps/short_url/services/safe_browsing.py`.
+
+### Push notifications (Web Push)
+
+Signed-in users can turn on notifications for a device on the account page (*Notifications on this
+device*). The site then sends them [Web Push](https://developer.mozilla.org/docs/Web/API/Push_API)
+notifications through the browser's push service, even when the site isn't open: Chrome on Android
+and desktop, Firefox, Edge; Safari on iPhone and iPad only once the site is added to the Home Screen
+(iOS 16.4+). Push is optional: until the three variables below are set the section isn't shown and
+nothing is sent.
+
+| Variable | Value |
+|---|---|
+| `VAPID_PUBLIC_KEY` | public key of the environment's VAPID key pair (base64url) |
+| `VAPID_PRIVATE_KEY` | its private key (base64url); a secret |
+| `VAPID_SUBJECT` | `mailto:<an address you read>` (or an `https:` URL): how a push service contacts you about problems |
+| `PUSH_TIMEOUT_SECONDS` | per-request timeout to the push service, default `10` |
+
+Setting it up, once per environment (local, staging, prod):
+
+1. Generate a key pair. It is printed, not stored:
+
+   ```bash
+   ENVIRONMENT=local python manage.py generate_vapid_keys
+   ```
+
+2. Put the two printed lines and a `VAPID_SUBJECT=mailto:...` line in that environment's env file
+   (`.env.local`, `.env.staging`, `.env.prod`) and, for staging and prod, copy the file to the VPS
+   (see "Configuration" above) and redeploy. Keep one pair per environment and don't change it
+   afterwards: a new pair makes every browser turn notifications on again. `manage.py check` warns
+   (`core.W020`) when only some of the three are set.
+
+Testing on an Android phone (Chrome), against staging: push needs HTTPS, and a phone on your
+network reaching `http://<your computer>:8000` is not a secure context, so use
+`https://app-staging.ziptrigo.com` (or a tunnel with HTTPS to your local server).
+
+1. On the phone, sign in, open the account page (*Settings*) and press **Turn on notifications**
+   under *Notifications on this device*; allow notifications when Chrome asks. The section then
+   says they are on.
+2. Send the test notification, either from the admin (*Push subscriptions*, select the row, action
+   **Send test notification**; superusers only; it is queued, so it goes out within seconds) or in
+   the container (sends at once and prints what each device answered):
+
+   ```bash
+   python manage.py send_test_push <your email>
+   ```
+
+3. The phone shows "Test notification" with **Yes** and **No** buttons (Chrome shows at most two).
+   Tapping a button stores the answer without opening the site (admin: *Push answers*); tapping the
+   notification itself opens the account page.
+
+If nothing arrives: check that Chrome may show notifications (Android settings, Apps, Chrome,
+Notifications, and the site under Chrome's site settings), that the phone isn't in Do Not Disturb,
+and the command's output (`gone (removed)` means the browser dropped the subscription: turn
+notifications on again). Signing out turns push off on that device; signing back in with the
+same account turns it on again without asking, as long as the permission is still granted, while
+another account must press **Turn on notifications** itself. Changing or resetting the password
+turns push off on every other device of the account (like their sessions), and a deactivated
+account gets no notifications.
+
+For developers: `apps.core.services.push.send_push(user, title, body, url=..., actions=...,
+tag=..., data=..., kind=...)` sends to every device of a user (`queue_push` does it from the task
+queue after commit); an answer to an action button is a `PushAction` row and the
+`apps.core.signals.push_action` signal. See CLAUDE.md, "Web Push".
 
 ## Development Workflow
 

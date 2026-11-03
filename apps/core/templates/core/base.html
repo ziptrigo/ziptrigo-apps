@@ -8,6 +8,10 @@
     <!-- Favicon -->
     {% load static %}
     <link rel="icon" type="image/png" href="{% static 'core/images/logo_32x32.png' %}">
+    {% comment %}Makes the site installable (issue #239): an iPhone only delivers push to a site added to the Home Screen.{% endcomment %}
+    <link rel="manifest" href="{% url 'core:manifest' %}">
+    <link rel="apple-touch-icon" href="{% static 'core/images/app_icon_192.png' %}">
+    <meta name="theme-color" content="#8fa89e">
 
     <!-- Early theme boot: the class is set before CSS to avoid FOUC. A signed-in user's saved theme
          is rendered on <html> by the server (data-theme, and the dark class for "dark"); "system"
@@ -110,6 +114,8 @@
     {% if user.is_authenticated %}
     {% comment %}Saves the browser's time zone for an account with none and offers it on the account page (issue #177). Separate from local_time.js, which only shows times in the browser's zone.{% endcomment %}
     <script defer src="{% static 'accounts/js/timezone.js' %}" data-url="{% url 'accounts:timezone' %}"></script>
+    {% comment %}Web Push (issue #239): re-saves this browser's subscription after a sign-in and drives the account page's section. Nothing while push is not configured.{% endcomment %}
+    {% load push_tags %}{% push_script %}
     {% endif %}
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 

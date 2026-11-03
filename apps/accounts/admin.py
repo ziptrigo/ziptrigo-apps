@@ -18,9 +18,10 @@ from .services.timezones import set_timezone
 # `accounts` can't import them. Receipts' files are deleted by its own `pre_delete(User)` receiver.
 CASCADE_WITH_USER_APP_LABELS = ('billing', 'receipts', 'short_url', 'todo')
 # The same, for single models (`'<app label>.<model name>'`) of an app that has other models which
-# must keep asking: `core` is a grab bag, so only its notifications (read-only in the admin) are
-# listed, and a future `core` model with a user FK is not exempted without anyone deciding so.
-CASCADE_WITH_USER_MODELS = ('core.notification',)
+# must keep asking: `core` is a grab bag, so only its notifications and push subscriptions and
+# answers (issue #239; all read-only in the admin) are listed, and a future `core` model with a
+# user FK is not exempted without anyone deciding so.
+CASCADE_WITH_USER_MODELS = ('core.notification', 'core.pushsubscription', 'core.pushaction')
 
 
 class UserAdmin(DjangoUserAdmin):

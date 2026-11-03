@@ -10,6 +10,7 @@ from django.views.decorators.http import require_POST
 
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
+from apps.core.services import push
 
 from ..forms import ChangePasswordForm
 from ..http import AuthenticatedHttpRequest
@@ -54,6 +55,8 @@ def password_change(request: AuthenticatedHttpRequest) -> HttpResponse:
     if form.is_valid():
         change_password(user, form.cleaned_data['new_password'])
         update_session_auth_hash(request, user)
+        # Push follows the sessions: this device keeps it, the user's other devices lose it.
+        push.refresh_session_subscription(request.session, user)
         if not is_htmx(request):
             messages.success(request, 'Your password has been changed.')
             return redirect('accounts:account')
