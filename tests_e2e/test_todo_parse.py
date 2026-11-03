@@ -21,6 +21,20 @@ def _wired(page: Page, field: str) -> None:
     expect(box).to_have_attribute('data-parse-ready', '1')
 
 
+def _row_ids(page: Page) -> set[str]:
+    return set(page.locator('#task-list li[id^="task-"]').evaluate_all('els => els.map(e => e.id)'))
+
+
+def _submit_and_open_new_task(page: Page, receipts_server: ReceiptsServer) -> None:
+    """Click Add task and open the task that appeared. The e2e database is shared by the tests of
+    the module, which create tasks with the same titles, so the new row is found by its number."""
+    before = _row_ids(page)
+    page.click('#quick-add-form button[type="submit"]')
+    expect(page.locator('#task-list li[id^="task-"]')).not_to_have_count(len(before))
+    (new_id,) = _row_ids(page) - before
+    page.goto(f'{receipts_server.url}/todo/{new_id.removeprefix("task-")}/')
+
+
 def _type_title(page: Page, text: str) -> None:
     # `press_sequentially` types key by key, like a person: the script's pause starts at the last.
     _wired(page, '#quick-title')
@@ -89,20 +103,37 @@ def test_dismissing_and_escape_leave_the_form_alone(page: Page, receipts_server:
     expect(page.locator('#due-date-new')).to_have_value('')
 
 
-def test_submitting_with_the_chip_showing_does_not_apply_it(
+def test_submitting_with_the_chip_showing_applies_it(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+
+    _type_title(page, DATED_TITLE)
+    expect(page.locator('#quick-parse-chip')).to_be_visible()
+    # No click on Accept: submitting accepts the chip, so the task gets the date, time and repeat
+    # and the cleaned title.
+    _submit_and_open_new_task(page, receipts_server)
+
+    expect(page.locator('h1')).to_contain_text('pay rent')
+    expect(page.locator('h1')).not_to_contain_text('every month')
+    expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value(
+        re.compile(r'^\d{4}-\d{2}-01$')
+    )
+    expect(page.locator('#task-details-form input[name="due_time"]')).to_have_value('09:00')
+    expect(page.locator('main')).to_contain_text('Every month on the 1st')
+
+
+def test_submitting_after_dismissing_the_chip_sends_the_title_as_typed(
     page: Page, receipts_server: ReceiptsServer
 ):
     receipts_server.login(page)
     page.goto(f'{receipts_server.url}/todo/all/')
 
     _type_title(page, DATED_TITLE)
-    expect(page.locator('#quick-parse-chip')).to_be_visible()
-    page.click('#quick-add-form button[type="submit"]')
+    chip = page.locator('#quick-parse-chip')
+    expect(chip).to_be_visible()
+    chip.get_by_role('button', name='Dismiss').click()
+    _submit_and_open_new_task(page, receipts_server)
 
-    # The task has the title as typed, and no date.
-    row = page.locator('#task-list').get_by_text(DATED_TITLE).first
-    expect(row).to_be_visible()
-    row.click()
     expect(page.locator('h1')).to_contain_text(DATED_TITLE)
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('')
 

@@ -4389,8 +4389,13 @@ shared in `core`.
   To keep the chip honest it **says what stays**: when the form already has a time the reply lacks,
   or a repeat the reply lacks, the label gets ` (time kept)`, ` (repeat kept)` or ` (time and repeat
   kept)` (`labelFor` in the script; it follows the form if it changes while the chip is up).
-  **Dismiss** hides it and remembers that text (not parsed again; other text is). Submitting with
-  the chip showing does not apply it. The chip is keyboard-reachable: Tab to its buttons, Enter on
+  **Dismiss** hides it and remembers that text (not parsed again; other text is). **Submitting the
+  form with the chip showing accepts it first** (a capture-phase `submit` listener on the form, so
+  it runs before htmx reads the fields; the user typed a date and expects the task to have it --
+  before, the task was created undated with the date words still in its title); a dismissed chip,
+  or text whose answer has not arrived yet (submitted within the 600 ms pause plus the model's
+  latency), is sent as typed. Accept also writes the hidden `rrule` input directly, because the
+  Alpine `:value` binding only refreshes on a later microtask. The chip is keyboard-reachable: Tab to its buttons, Enter on
   the focused chip accepts, Escape dismisses. The task page's details form has the same script
   on an "Or type a date" box (`data-mode="date"`): `clean_title` is ignored, only the date fields
   are applied, the box is emptied, Enter reads it at once and "No date found." is its answer for
@@ -4407,7 +4412,7 @@ shared in `core`.
   OpenAI call with `openai.OpenAI` mocked, the failure paths, the chip text, the endpoint, rate
   limits, the concurrency slot, `safe_title`, confidence, log content and the page wiring),
   `apps/core/tests/test_ai.py`, and the Playwright `tests_e2e/test_todo_parse.py` (accept,
-  dismiss/Escape, submit with the chip showing, the date box, the "kept" wording) on the shared e2e
+  dismiss/Escape, submit with the chip showing (applies it) or dismissed (as typed), the date box, the "kept" wording) on the shared e2e
   server, whose `receipts_e2e.E2EConfig.ready` installs a `FakeTitleParser` that understands two
   titles (`tests_e2e/todo_fakes.py`).
 

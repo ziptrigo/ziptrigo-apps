@@ -11,9 +11,10 @@
  *  - mode "date" (`data-mode="date"`, the task page's "Type a date..." box): the same, but the
  *    text is not a title, so `clean_title` is ignored and the box is emptied.
  *
- * Dismiss hides the chip and remembers the text, which is not parsed again. Nothing is applied
- * unless the user accepts: submitting the form with the chip showing sends the fields as they are,
- * and the server never re-parses.
+ * Dismiss hides the chip and remembers the text, which is not parsed again. Submitting the form
+ * while the chip is showing accepts it first (the user typed a date and expects the task to have
+ * it); a dismissed chip, or text still waiting for its answer, is sent as typed. The server never
+ * re-parses: the form posts the explicit fields.
  *
  * What Accept changes is exactly what the chip says. The date is always written; the time and the
  * repeat only when the text contains them. A time or repeat the text does not contain leaves the
@@ -166,12 +167,11 @@
             if (data.rrule) {
                 var repeat = form.querySelector('[x-data="repeatControl"]');
                 var component = repeat && window.Alpine ? window.Alpine.$data(repeat) : null;
-                if (component && component.setRule) {
-                    component.setRule(data.rrule);
-                } else {
-                    // No Alpine component: write the inputs the form submits. The mode stays.
-                    setValue(form.querySelector('input[name="rrule"]'), data.rrule);
-                }
+                if (component && component.setRule) component.setRule(data.rrule);
+                // The hidden input is bound to the component (`:value`), which Alpine refreshes
+                // on a later microtask: write the input the form submits now too, since Accept
+                // can be a submit that reads the form straight away. The mode stays.
+                setValue(form.querySelector('input[name="rrule"]'), data.rrule);
             }
             hideChip();
             if (dateMode) {
@@ -206,6 +206,13 @@
                 clearTimeout(timer);
                 ask();
             });
+        }
+        // Submitting with the chip showing accepts it: the user typed a date and expects the task to
+        // have it. Capture phase, so this runs before htmx's own submit listener reads the fields.
+        if (form) {
+            form.addEventListener('submit', function () {
+                if (result && !chip.hidden) accept();
+            }, true);
         }
         // The label says what is kept from the form: keep it true if the form changes meanwhile.
         if (form) {
