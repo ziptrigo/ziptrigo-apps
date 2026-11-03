@@ -11,7 +11,7 @@ from django.db import models
 from apps.accounts.models import User
 
 from ..limits import FIRST_TASK_NUMBER, MAX_REMINDER_MINUTES
-from .reminder import ReminderChannel
+from .reminder import ReminderChannel, SnoozeChoice
 
 
 class TodoAccount(models.Model):
@@ -77,6 +77,16 @@ class TodoAccount(models.Model):
             default=ReminderChannel.IN_APP,
             db_default=ReminderChannel.IN_APP,
             help_text='Where the default reminder is delivered.',
+        ),
+    )
+    snooze_minutes = cast(
+        int,
+        models.PositiveIntegerField(
+            choices=SnoozeChoice,
+            default=SnoozeChoice.MIN_15,
+            db_default=SnoozeChoice.MIN_15,
+            help_text='How long the Snooze button of a pushed reminder waits before reminding '
+            'again.',
         ),
     )
     sender_allowlist = cast(

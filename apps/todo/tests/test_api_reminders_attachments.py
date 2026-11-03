@@ -25,7 +25,7 @@ from .fakes import b64_sha256
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
-REMINDER_KEYS = {'id', 'minutes_before', 'channel', 'fire_at', 'sent_at'}
+REMINDER_KEYS = {'id', 'minutes_before', 'channel', 'fire_at', 'sent_at', 'snoozed_until'}
 
 
 @pytest.fixture

@@ -333,7 +333,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Default due time" section with a time field showing `09:00` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); one **Save** button for both; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
+| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Default due time" section with a time field showing `09:00` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); "Reminders on your phone" with a "Snooze for" select (TODO-40); one **Save** button for the three; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
 | 2 | Change it to `07:45` and **Save**. | "Saved." in green; reload shows `07:45`. |
 | 3 | Clear the field and Save. | The browser's required prompt (or "Default due time: Enter a time."). |
 | 4 | Click the "account page" link. | Goes to the account page where the time zone can be changed. |
@@ -469,7 +469,7 @@ The delivery steps 9, 11 and 14 are shell steps (the scheduler does not run on t
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open **Settings**. | A "Default reminder" section: a select "New tasks with a date" showing "Get a reminder", an amount `5`, a unit "minutes before", a "Default channel" select showing "In-app", the note "Email reminders go to your confirmed address only" and a **Reminder history** link. |
+| 1 | Open **Settings**. | A "Default reminder" section: a select "New tasks with a date" showing "Get a reminder", an amount `5`, a unit "minutes before", a "Default channel" select showing "In-app", the note "Email reminders go to your confirmed address only" and a **Reminder history** link. Under it a "Reminders on your phone" section (TODO-40). |
 | 2 | In the quick-add box type `Call the bank`, set Date = today and Time = 23:00 (if it is already past 22:55 in your zone the default reminder is due at once and shows "Skipped": pick a later date), **Add task**. Record the number as `T_BANK`. Open `/todo/<T_BANK>/`. | A **Reminders** block lists "5 minutes before (in-app)" with "Fires" and today's date at 22:55. Its row on Today shows a small bell icon. Under it, **History** says "No reminders sent yet." |
 | 3 | In the add row choose **1 hour before**, channel **Both**, and press **Add**. | The list now has "1 hour before (both)" (fires 22:00) above the 5 minute one. |
 | 4 | Add **1 hour before** again. | A red message "Reminder: There is already a reminder at that time." and the list is unchanged. |
@@ -809,6 +809,28 @@ says so in the app.
 | 2 | On **Upcoming** add `No date here` with no date. | Created (it shows on **All**, not on Upcoming). |
 | 3 | On **All** (heading "All tasks") add `From All`. | It appears in the list in its sorted place. **Completed** and **Trash** have no quick-add box. |
 
+### TODO-40 A reminder pushed to a phone: Complete and Snooze
+
+**Purpose:** an in-app reminder also goes to the devices where push is on, with **Complete** and **Snooze** buttons;
+a tap completes the task or reminds again after the "Snooze for" setting, and the phone is told what happened. No
+phone is needed: the shell makes the token a pushed reminder carries and `curl` posts it the way the service worker
+does (a real phone: README, "Push notifications").
+**Preconditions:** signed in as `qa.user@example.com`; a shell for steps 3-9, otherwise **BLOCKED (needs-shell)**;
+push configured on this server (NOTIF-20's preconditions: without it the endpoint answers `404`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open **Settings**. | A "Reminders on your phone" section: a "Snooze for" select showing "15 minutes" (choices 15 minutes, 1 hour, 8 hours, 1 day) and the note that in-app reminders also go to the devices where notifications are on (linking the account page), with Complete and Snooze buttons. |
+| 2 | Choose **1 hour**, **Save**, reload. | "Saved."; after the reload the select shows "1 hour". |
+| 3 | Add a task `Water the plants` due today at 23:00 (if it is past 22:55 pick tomorrow). Record its number as `T_PLANT`. **(shell step)** `python tests_e2e/ai/manage.py shell -c "import uuid; from django.utils import timezone; from apps.core.services import push; from apps.todo.models import Reminder, ReminderDelivery; r = Reminder.objects.select_related('task__user').get(task__user__email='qa.user@example.com', task__number=<T_PLANT>); t = r.task; u = t.user; p = uuid.uuid4(); ReminderDelivery.objects.create(reminder=r, task=t, user=u, task_number=t.number, task_title=t.title, channel='push', push_id=p, sent_at=timezone.now(), fire_at=r.fire_at); print(push.make_action_token(u.pk, p, 'todo.reminder', ['complete', 'snooze'], push.password_fingerprint(u)))"` | Prints a token: record it as `TOKEN_1`. (This is the row and token a real push of that reminder has.) |
+| 4 | **(shell step)** `curl -s -X POST http://localhost:8765/push/action/ -H 'Content-Type: application/json' -d '{"token": "<TOKEN_1>", "action": "snooze"}'` | `{"message": "Snoozed until HH:MM."}` with the time an hour from now on your clock (another day: "Snoozed until Thu 29 Oct, 09:15." style). |
+| 5 | Open `/todo/<T_PLANT>/`. | The reminder reads "Snoozed until" and that date and time. **History** lists a "Push" row. |
+| 6 | Step 4 again with `"action": "complete"`. | An empty answer (`204`): the first answer to a push is kept, and the task is still open. |
+| 7 | Step 3 again (a new token, `TOKEN_2`), then step 4 with `TOKEN_2` and `"action": "complete"`. | `{"message": "Completed."}`; the task page shows the task completed. |
+| 8 | Step 3 again (`TOKEN_3`; the task is completed), then step 4 with `TOKEN_3` and `"action": "snooze"`. | `{"message": "Already completed."}`; nothing changes. |
+| 9 | Move the task to the Trash, step 3 again (`TOKEN_4`) and step 4 with `"action": "complete"`. | `{"message": "This task is in the Trash."}`. |
+| 10 | Set **Snooze for** back to "15 minutes" and Save. | Saved. |
+
 ---
 
 ## Out of scope
@@ -826,3 +848,7 @@ says so in the app.
 - **A reminder email to an unconfirmed address** ("not sent: your email address is not confirmed"): reaching it
   needs an email change through the JWT API, which is out of scope here; unit-tested.
 - **Rate limits** (switched off on this server), the JWT API `/api/todo/` and the `inv todo` CLI (unit tests).
+- **A reminder reaching a real phone** and the notification the phone shows after a tap ("Snoozed until ..."): that
+  needs a phone and HTTPS; TODO-40 posts the same answer with `curl`. That a due in-app reminder is pushed, with
+  which buttons, and that a snoozed reminder is left alone by a time-zone change and replaced by a new due date, are
+  unit-tested (`test_push_reminders.py`).

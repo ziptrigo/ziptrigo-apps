@@ -70,6 +70,8 @@ POSTPONE_PRESETS = {
     'next-weekend': 'next_weekend',
 }
 CHANNELS = ('in_app', 'email', 'both')
+#: How long the Snooze button of a pushed reminder can wait, in minutes, and how it reads.
+SNOOZE_MINUTES = {15: '15 minutes', 60: '1 hour', 480: '8 hours', 1440: '1 day'}
 
 
 # -- Plumbing ------------------------------------------------------------------------------------
@@ -280,6 +282,12 @@ def _channel(value: str | None) -> str | None:
     if value is not None and value not in CHANNELS:
         raise typer.BadParameter(f'use one of: {", ".join(CHANNELS)}.')
     return value
+
+
+def _snooze_text(minutes: int | None) -> str:
+    if minutes is None:
+        return '-'
+    return SNOOZE_MINUTES.get(minutes, f'{minutes} minutes')
 
 
 def _sha256_base64_file(path: Path) -> str:
@@ -1157,6 +1165,7 @@ def _print_settings(settings: dict) -> None:
         ('Default due time', settings['default_due_time'][:5]),
         ('Default reminder', default_reminder),
         ('Default channel', settings['default_reminder_channel']),
+        ('Snooze for', _snooze_text(settings.get('snooze_minutes'))),
         (
             'Accepted senders',
             ', '.join(settings['sender_allowlist']) or 'anyone (see `settings` on the website)',
@@ -1197,6 +1206,11 @@ def todo_settings(
     default_channel: str | None = typer.Option(
         None, '--default-channel', help='in_app, email or both.'
     ),
+    snooze: int | None = typer.Option(
+        None,
+        '--snooze',
+        help='Minutes the Snooze button of a pushed reminder waits: 15, 60, 480 or 1440.',
+    ),
 ):
     """
     Show the settings and this month's usage; pass options to change the defaults.
@@ -1205,6 +1219,7 @@ def todo_settings(
         todo settings local
         todo settings local --default-due-time 08:30 --default-reminder 15 --default-channel both
         todo settings local --default-reminder none
+        todo settings local --snooze 60
     """
     select_environment(environment)
     payload: dict = {}
@@ -1225,6 +1240,10 @@ def todo_settings(
                 raise typer.BadParameter('use a number of minutes, or "none".') from None
     if _channel(default_channel):
         payload['default_reminder_channel'] = default_channel
+    if snooze is not None:
+        if snooze not in SNOOZE_MINUTES:
+            raise typer.BadParameter('use 15, 60, 480 or 1440 minutes.')
+        payload['snooze_minutes'] = snooze
 
     if payload:
         settings = _call('patch', '/settings', json=payload)

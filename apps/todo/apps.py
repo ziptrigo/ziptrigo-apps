@@ -26,6 +26,15 @@ class TodoConfig(AppConfig):
 
         self._register_jobs()
         self._connect_signals()
+        self._register_push_answers()
+
+    def _register_push_answers(self):
+        """A tap on Complete or Snooze on a pushed reminder (`services.reminders.answer_push`)."""
+        from apps.core.services import push
+
+        from .services import reminders
+
+        push.register_action_handler(reminders.PUSH_KIND, reminders.answer_push)
 
     def _register_jobs(self):
         from apps.core.scheduler import JobSpec

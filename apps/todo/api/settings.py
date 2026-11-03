@@ -25,6 +25,7 @@ def _settings(user: User) -> dict:
         'default_due_time': account.default_due_time,
         'default_reminder_minutes': account.default_reminder_minutes,
         'default_reminder_channel': account.default_reminder_channel,
+        'snooze_minutes': account.snooze_minutes,
         'sender_allowlist': list(account.sender_allowlist),
         'tasks_created_this_month': used,
         'free_tasks_per_month': free,
@@ -55,6 +56,8 @@ def _save(account: TodoAccount, user: User, changes: dict) -> None:
                 else account.default_reminder_channel
             )
             reminders.set_defaults(account, minutes=minutes, channel=channel or '')
+        if 'snooze_minutes' in changes:
+            reminders.set_snooze(account, changes['snooze_minutes'])
         if 'sender_allowlist' in changes:
             services.update_inbox_settings(user, sender_allowlist=changes['sender_allowlist'] or [])
 
@@ -67,6 +70,8 @@ def _check(changes: dict) -> None:
         reminders.clean_minutes(changes['default_reminder_minutes'])
     if 'default_reminder_channel' in changes:
         reminders.clean_channel(changes['default_reminder_channel'] or '')
+    if 'snooze_minutes' in changes:
+        reminders.clean_snooze(changes['snooze_minutes'])
 
 
 @router.get('/settings', response=SettingsSchema)
@@ -78,13 +83,14 @@ def get_settings(request):
 @router.patch('/settings', response=SettingsSchema)
 def update_settings(request, payload: SettingsUpdateSchema):
     """Change the default due time, the default reminder (`default_reminder_minutes` and
-    `default_reminder_channel`; `null` minutes: no default reminder) and/or who may add tasks by
+    `default_reminder_channel`; `null` minutes: no default reminder), how long Snooze waits on a
+    pushed reminder (`snooze_minutes`: 15, 60, 480 or 1440) and/or who may add tasks by
     email (`sender_allowlist`; `[]` or `null`: anyone). Only the fields present are applied, all or
     none. They apply to tasks created (or first given a date) afterwards; changing the default due
     time moves the reminders of date-only tasks.
 
-    A missing due time, a reminder time outside 0 to 43,200 minutes and an unknown channel are
-    refused before `TODO_EDIT_USER` is spent; a sender allowlist the service then refuses still
+    A missing due time, a reminder time outside 0 to 43,200 minutes, an unknown channel and a
+    snooze that isn't one of the four are refused before `TODO_EDIT_USER` is spent; a sender allowlist the service then refuses still
     spends one."""
     changes = payload.model_dump(exclude_unset=True)
     if changes:

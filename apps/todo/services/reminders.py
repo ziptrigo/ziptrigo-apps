@@ -1,4 +1,4 @@
-"""Reminders, in-app and by email (issue #182).
+"""Reminders, in-app, by email and by push (issues #182, #239).
 
 A `Reminder` is `minutes_before` a task's due time (a date-only task is due at the owner's default
 due time, `dates.due_at`). `Reminder.fire_at` is that instant in UTC; it is recomputed by
@@ -34,6 +34,15 @@ decides.
 A completed or trashed task keeps its reminders, but the job skips them (leaving them unsent) and so
 does it for an inactive user: restoring or uncompleting a task whose time is still ahead (or within
 the window) makes them live again; the sweep marks the older ones sent.
+
+**Push.** An in-app reminder (channel `in_app` or `both`) is also pushed to the owner's devices
+that have push on (`apps.core.services.push`, queued on commit), with two buttons: **Complete**
+and **Snooze** (Chrome shows two at most; an iPhone shows none, and a tap on the notification
+opens the task). The push is recorded as a `push` delivery holding the notification's id, which is
+how `answer_push` (registered for `PUSH_KIND` in `apps.py`) finds the task when a button is
+tapped. Snooze arms the reminder again `TodoAccount.snooze_minutes` from now (`snooze`), with
+`snoozed_until` set so the passes that only move the same due moment leave it alone; a new due
+date or time, or editing the reminder's time, replaces the snooze.
 """
 
 import logging
@@ -52,7 +61,8 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import local_datetime, user_today, user_tz
-from apps.core.services import notifications
+from apps.core.models import PushAction, PushSubscription
+from apps.core.services import notifications, push
 from apps.core.services.email import send_email
 
 from ..limits import MAX_REMINDER_MINUTES, MAX_REMINDERS_PER_TASK
@@ -61,6 +71,7 @@ from ..models import (
     Reminder,
     ReminderChannel,
     ReminderDelivery,
+    SnoozeChoice,
     Task,
     TodoAccount,
 )
@@ -89,6 +100,19 @@ TOO_MANY_MESSAGE = f'A task can have at most {MAX_REMINDERS_PER_TASK} reminders.
 NOT_OPEN_MESSAGE = 'Only an open task has reminders.'
 MINUTES_MESSAGE = 'Choose a reminder time between 0 minutes and 30 days before.'
 CHANNEL_MESSAGE = 'Choose in-app, email or both.'
+SNOOZE_MESSAGE = 'Choose 15 minutes, 1 hour, 8 hours or 1 day.'
+
+#: The `kind` of a pushed reminder (`core.PushAction.kind`), and its two buttons.
+PUSH_KIND = 'todo.reminder'
+ACTION_COMPLETE = 'complete'
+ACTION_SNOOZE = 'snooze'
+#: The Snooze button's label for each `TodoAccount.snooze_minutes`.
+SNOOZE_BUTTON = {
+    SnoozeChoice.MIN_15: 'Snooze 15 min',
+    SnoozeChoice.HOUR_1: 'Snooze 1 h',
+    SnoozeChoice.HOURS_8: 'Snooze 8 h',
+    SnoozeChoice.DAY_1: 'Snooze 1 day',
+}
 
 
 def _error(field: str, message: str) -> ValidationError:
@@ -271,7 +295,15 @@ def update_reminder(
             current.sent_at = _initial_sent_at(fire_at, now)
             current.skipped = current.sent_at is not None
             current.failures = 0
-            fields += ['minutes_before', 'fire_at', 'sent_at', 'skipped', 'failures']
+            current.snoozed_until = None
+            fields += [
+                'minutes_before',
+                'fire_at',
+                'sent_at',
+                'skipped',
+                'failures',
+                'snoozed_until',
+            ]
         if fields:
             current.save(update_fields=fields)
             if current.skipped and 'sent_at' in fields:
@@ -292,7 +324,7 @@ def delete_reminder(reminder: Reminder) -> None:
 # -- Rescheduling --------------------------------------------------------------------------------
 
 
-REFRESH_FIELDS = ['fire_at', 'sent_at', 'skipped', 'failures']
+REFRESH_FIELDS = ['fire_at', 'sent_at', 'skipped', 'failures', 'snoozed_until']
 
 
 def _refresh(
@@ -305,14 +337,19 @@ def _refresh(
     """Recompute `fire_at` of `reminders` (each with its task, and the task's user, loaded) in one
     `bulk_update`, writing what changed. With `rearm`, a *sent* reminder whose new time is ahead of
     `now` is armed again (`sent_at` null, no longer skipped, its failure count reset); without it
-    the callers pass unsent reminders only. Returns how many changed."""
+    the callers pass unsent reminders only. A snoozed reminder waits for an instant the user
+    chose, not one derived from the due time: without `rearm` (the same due moment, moved) it is
+    left alone, with `rearm` (a new due moment) the snooze is dropped. Returns how many changed."""
     now = now or timezone.now()
     changed: list[Reminder] = []
     for reminder in reminders:
+        if reminder.snoozed_until is not None and not rearm:
+            continue
         fire_at = fire_at_for(reminder.task, reminder.minutes_before, account)
         if fire_at is None:
             continue
-        dirty = fire_at != reminder.fire_at
+        dirty = fire_at != reminder.fire_at or reminder.snoozed_until is not None
+        reminder.snoozed_until = None
         reminder.fire_at = fire_at
         if rearm and reminder.sent_at is not None and fire_at > now:
             reminder.sent_at = None
@@ -461,6 +498,24 @@ def set_defaults(account: TodoAccount, *, minutes: int | None, channel: str) -> 
     return account
 
 
+def clean_snooze(value: object) -> int:
+    """`value` as one of the `SnoozeChoice` minutes."""
+    try:
+        minutes = int(value)  # ty: ignore[invalid-argument-type]
+    except TypeError, ValueError:
+        raise _error('snooze_minutes', SNOOZE_MESSAGE) from None
+    if minutes not in SnoozeChoice.values:
+        raise _error('snooze_minutes', SNOOZE_MESSAGE)
+    return minutes
+
+
+def set_snooze(account: TodoAccount, minutes: int) -> TodoAccount:
+    """Save how long the Snooze button of a pushed reminder waits."""
+    account.snooze_minutes = clean_snooze(minutes)
+    account.save(update_fields=['snooze_minutes'])
+    return account
+
+
 def task_reminders(task: Task) -> list[Reminder]:
     """The task's reminders, earliest first, each with `offset_text`, `amount` and `unit` for the
     page (the inline edit form shows the amount and unit)."""
@@ -497,6 +552,7 @@ def _record(
     note: str = '',
     notification_id=None,
     fire_token: UUID | None = None,
+    push_id: UUID | None = None,
 ) -> ReminderDelivery:
     task = reminder.task
     return ReminderDelivery.objects.create(
@@ -511,6 +567,7 @@ def _record(
         fire_at=reminder.fire_at,
         notification_id=notification_id,
         fire_token=fire_token,
+        push_id=push_id,
     )
 
 
@@ -592,8 +649,44 @@ def _deliver(reminder: Reminder, now: datetime, fire_token: UUID) -> None:
             notification_id=notification.pk,
             fire_token=fire_token,
         )
+        _queue_push(reminder, now, fire_token)
     if reminder.channel in (ReminderChannel.EMAIL, ReminderChannel.BOTH):
         _queue_email(reminder, fire_token, now)
+
+
+def _queue_push(reminder: Reminder, now: datetime, fire_token: UUID) -> None:
+    """Push an in-app reminder to the owner's devices, when push is on and they turned it on for
+    at least one device: queued on commit (`push.queue_push`, a network call per device), and
+    recorded as a `push` delivery holding the notification's id, which the answer comes back
+    with. The task's tag makes a new reminder of the same task replace the previous one."""
+    task_row = reminder.task
+    if not push.is_configured():
+        return
+    if not PushSubscription.objects.filter(user_id=task_row.user_id).exists():
+        return
+    account = get_account(task_row.user)
+    push_id = push.queue_push(
+        task_row.user,
+        title=_truncate(task_row.title, NOTICE_TITLE_MAX),
+        body=due_label(task_row),
+        url=reverse('todo:task', args=[task_row.number]),
+        actions=[
+            {'action': ACTION_COMPLETE, 'title': 'Complete'},
+            {
+                'action': ACTION_SNOOZE,
+                'title': SNOOZE_BUTTON.get(account.snooze_minutes, 'Snooze'),
+            },
+        ],
+        tag=f'todo-task-{task_row.pk}',
+        kind=PUSH_KIND,
+    )
+    _record(
+        reminder,
+        channel=DeliveryChannel.PUSH,
+        now=now,
+        fire_token=fire_token,
+        push_id=push_id,
+    )
 
 
 def sweep_stale(now: datetime) -> int:
@@ -676,7 +769,9 @@ def deliver_due(now: datetime | None = None) -> int:
                     with transaction.atomic():
                         claimed = Reminder.objects.filter(
                             pk=reminder.pk, sent_at__isnull=True
-                        ).update(sent_at=now, skipped=False, fire_token=fire_token)
+                        ).update(
+                            sent_at=now, skipped=False, fire_token=fire_token, snoozed_until=None
+                        )
                         if not claimed:
                             continue
                         _deliver(reminder, now, fire_token)
@@ -759,3 +854,80 @@ def send_reminder_email(reminder_id: str, fire_token: str) -> None:
         note='' if successes else ReminderDelivery.NOTE_FAILED,
         fire_token=token,
     )
+
+
+# -- Answers to a pushed reminder ----------------------------------------------------------------
+
+
+def snooze(reminder: Reminder, now: datetime | None = None) -> datetime:
+    """Arm `reminder` again `TodoAccount.snooze_minutes` from `now` (the Snooze button), whether
+    or not it has been sent, and return when it will fire. The task must still be open
+    (`ValidationError` otherwise). `snoozed_until` keeps the time-zone and default-due-time passes
+    from moving it; a new due moment replaces it (`_refresh`)."""
+    now = now or timezone.now()
+    task = reminder.task
+    account = get_account(task.user)
+    until = now + timedelta(minutes=account.snooze_minutes)
+    with transaction.atomic():
+        _lock_open_task(task)
+        updated = Reminder.objects.filter(pk=reminder.pk).update(
+            fire_at=until, snoozed_until=until, sent_at=None, skipped=False, failures=0
+        )
+        if not updated:
+            raise _error(NON_FIELD_ERRORS, 'This reminder no longer exists.')
+    reminder.fire_at = reminder.snoozed_until = until
+    reminder.sent_at = None
+    reminder.skipped = False
+    return until
+
+
+def snoozed_label(user: User, until: datetime, now: datetime | None = None) -> str:
+    """`14:30` when `until` is on the owner's today, else `Wed 4 Nov, 09:00` (their wall clock)."""
+    zone = user_tz(user)
+    local = until.astimezone(zone)
+    today = (now or timezone.now()).astimezone(zone).date()
+    if local.date() == today:
+        return f'{local:%H:%M}'
+    return f'{local:%a} {local.day} {local:%b}, {local:%H:%M}'
+
+
+def answer_push(answer: PushAction) -> str | None:
+    """What a tap on a pushed reminder's button does (`core`'s handler for `PUSH_KIND`, run in
+    the transaction that records the answer), and what the device shows instead of the
+    notification. Complete completes the task (and its open subtasks, as the website's Complete
+    does once confirmed; a repeating task creates its next occurrence); Snooze arms the reminder
+    again (`snooze`). A task that is gone, trashed or already completed, or a reminder removed
+    since, changes nothing and says so."""
+    delivery = (
+        ReminderDelivery.objects.select_related('task', 'task__user', 'reminder')
+        .filter(push_id=answer.push_id, user_id=answer.user_id, channel=DeliveryChannel.PUSH)
+        .first()
+    )
+    task = delivery.task if delivery is not None else None
+    if task is None:
+        return 'This task no longer exists.'
+    if task.is_trashed:
+        return 'This task is in the Trash.'
+    if task.completed_at is not None:
+        return 'Already completed.'
+    if answer.action == ACTION_COMPLETE:
+        from .tasks import complete_task  # `tasks` imports this module
+
+        subtasks = Task.objects.filter(
+            parent=task, completed_at__isnull=True, deleted_at__isnull=True
+        ).count()
+        complete_task(task)
+        if subtasks:
+            return f'Completed, with {subtasks} open subtask{"" if subtasks == 1 else "s"}.'
+        return 'Completed.'
+    if answer.action == ACTION_SNOOZE:
+        reminder = delivery.reminder if delivery is not None else None
+        if reminder is None:
+            return 'This reminder was removed.'
+        reminder.task = task
+        try:
+            until = snooze(reminder)
+        except ValidationError as exc:
+            return ' '.join(exc.messages)
+        return f'Snoozed until {snoozed_label(task.user, until)}.'
+    return None

@@ -11,7 +11,13 @@ from .inbox import (
 from .label import DEFAULT_LABEL_COLOR, Label
 from .recurrence import Recurrence, RecurrenceMode
 from .reference import TaskReference
-from .reminder import DeliveryChannel, Reminder, ReminderChannel, ReminderDelivery
+from .reminder import (
+    DeliveryChannel,
+    Reminder,
+    ReminderChannel,
+    ReminderDelivery,
+    SnoozeChoice,
+)
 from .saved_filter import SavedFilter
 from .settings import TodoSettings
 from .task import Priority, Task, TaskSource
@@ -35,6 +41,7 @@ __all__ = [
     'ReminderChannel',
     'ReminderDelivery',
     'SavedFilter',
+    'SnoozeChoice',
     'Task',
     'TaskReference',
     'TaskSource',

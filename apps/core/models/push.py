@@ -69,13 +69,16 @@ class PushAction(models.Model):
     so it is unique: the first answer is kept, a repeat of the same request changes nothing.
     `kind` is what the caller of `send_push` said the question is about (`'core.test'`), and
     `action` the button's id (`'yes'`). A product reacts to an answer through the
-    `apps.core.signals.push_action` signal; `core` itself only records it.
+    `apps.core.signals.push_action` signal, or answers it through a handler registered for its
+    `kind` (`services.push.register_action_handler`); `core` itself only records it.
     """
 
     objects: ClassVar['models.Manager']
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
 
     pk: uuid.UUID
+    # Set by `services.push.record_action` (not stored): what the kind's handler answered.
+    confirmation: str | None
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(

@@ -2,7 +2,7 @@ from django import forms
 
 from apps.core.services.mail.addresses import parse_allowlist
 
-from ..models import ReminderChannel
+from ..models import ReminderChannel, SnoozeChoice
 from .reminder import UNITS, to_minutes
 
 SENDER_MODES = (('any', 'Anyone'), ('only', 'Only these'))
@@ -39,6 +39,16 @@ class SettingsForm(forms.Form):
         required=False,
         choices=ReminderChannel.choices,
         error_messages={'invalid_choice': 'Choose in-app, email or both.'},
+    )
+
+    # How long Snooze waits on a pushed reminder. A request without it leaves it alone.
+    snooze_minutes = forms.TypedChoiceField(
+        label='Snooze for',
+        required=False,
+        coerce=int,
+        empty_value=None,
+        choices=SnoozeChoice.choices,
+        error_messages={'invalid_choice': 'Choose 15 minutes, 1 hour, 8 hours or 1 day.'},
     )
 
     #: `(minutes or None, channel)` to save, or None to leave the default reminder as it is.

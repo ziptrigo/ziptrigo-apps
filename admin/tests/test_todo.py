@@ -1287,6 +1287,7 @@ SETTINGS = {
     'default_due_time': '09:00:00',
     'default_reminder_minutes': 5,
     'default_reminder_channel': 'in_app',
+    'snooze_minutes': 15,
     'sender_allowlist': ['me@example.com'],
     'tasks_created_this_month': 4,
     'free_tasks_per_month': 10,
@@ -1362,12 +1363,23 @@ def test_settings_default_reminder_none(api):
         ['--default-due-time', 'noon'],
         ['--default-reminder', 'soon'],
         ['--default-channel', 'sms'],
+        ['--snooze', '30'],
     ],
 )
 def test_settings_refuses_bad_values_before_calling(api, args):
     result = invoke('settings', 'local', *args)
 
     assert result.exit_code == 2 and api.calls == []
+
+
+def test_settings_snooze(api):
+    api.on('patch', '/todo/settings', FakeResponse(200, {**SETTINGS, 'snooze_minutes': 60}))
+
+    result = invoke('settings', 'local', '--snooze', '60')
+
+    assert result.exit_code == 0
+    assert api.calls[0]['json'] == {'snooze_minutes': 60}
+    assert 'Snooze for' in result.output and '1 hour' in result.output
 
 
 def test_inbox(api):

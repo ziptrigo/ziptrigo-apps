@@ -513,10 +513,18 @@ another account must press **Turn on notifications** itself. Changing or resetti
 turns push off on every other device of the account (like their sessions), and a deactivated
 account gets no notifications.
 
+To-do reminders use it: a reminder sent in-app (the default) also arrives on every device where
+notifications are on, with **Complete** and **Snooze** buttons. Complete completes the task;
+Snooze reminds again after the time chosen under To-do *Settings* > *Reminders on your phone*
+(15 minutes, 1 hour, 8 hours or 1 day). After a tap the notification is replaced by what happened
+("Completed.", "Snoozed until 14:30."). To try it, give a task a reminder a few minutes ahead
+(the scheduler sends due reminders every minute).
+
 For developers: `apps.core.services.push.send_push(user, title, body, url=..., actions=...,
 tag=..., data=..., kind=...)` sends to every device of a user (`queue_push` does it from the task
-queue after commit); an answer to an action button is a `PushAction` row and the
-`apps.core.signals.push_action` signal. See CLAUDE.md, "Web Push".
+queue after commit and returns the notification's id); an answer to an action button is a
+`PushAction` row and the `apps.core.signals.push_action` signal, and a product that must answer
+the tap registers a handler for its `kind` (`register_action_handler`). See CLAUDE.md, "Web Push".
 
 ## Development Workflow
 
