@@ -52,6 +52,13 @@ dependencies = [
     # User-agent parsing (device, browser, OS, crawler detection) for short link analytics
     # (issue #162). `ua-parser` itself, not `user-agents`: that wrapper is unmaintained and only
     # adds the few boolean helpers `apps.short_url.services.useragents` writes in a few lines.
+    # The IANA time zone database for `zoneinfo` on every host (issue #177's `User.timezone`).
+    # Without it, Linux reads the system's copy, and Debian since trixie (the `python:3.14-slim`
+    # image) and Ubuntu put the legacy names (`US/Pacific`, `Asia/Calcutta`) in a separate
+    # `tzdata-legacy` package that is often missing, so the zones an account may hold depended on
+    # the host (the CI runner moving to Ubuntu 26.04 broke the tests). `available_timezones()`
+    # merges it with the system's, and `ZoneInfo` falls back to it.
+    'tzdata>=2026.1',
     'ua-parser>=1.0,<2.0',
     'whitenoise>=6.11,<7.0',
 ]
