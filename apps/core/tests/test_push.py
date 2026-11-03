@@ -554,6 +554,8 @@ def test_service_worker_served_from_the_root(client):
     body = response.content.decode()
     assert 'showNotification' in body
     assert 'notificationclick' in body
+    # Staging is behind Cloudflare Access, which refuses an answer posted without its cookie.
+    assert "credentials: 'same-origin'" in body
 
 
 def test_manifest(client):
@@ -571,7 +573,9 @@ def test_manifest(client):
 
 def test_base_template_links_the_manifest(client):
     html = client.get(reverse('core:home')).content.decode()
-    assert f'<link rel="manifest" href="{reverse("core:manifest")}">' in html
+    assert (
+        f'<link rel="manifest" href="{reverse("core:manifest")}" crossorigin="use-credentials">'
+    ) in html
 
 
 # -- Endpoints ------------------------------------------------------------------------------------
