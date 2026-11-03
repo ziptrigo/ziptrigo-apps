@@ -1085,7 +1085,9 @@ setup and the phone test.
   controls the pages under its path; also reachable under `/static/`, harmless) and `GET
   /manifest.webmanifest` (`manifest`, `application/manifest+json`, `no-cache`: name ZipTrigo,
   `start_url`/`scope` `/`, `display: standalone`, sage colours, 192/512 and a maskable 512 icon
-  generated from `ziptrigo_logo.png`), both public; `base.html` links the manifest, an
+  generated from `ziptrigo_logo.png`), both public; `base.html` links the manifest (with
+  `crossorigin="use-credentials"`: a browser fetches a manifest without cookies otherwise, and
+  staging's Cloudflare Access refuses a request without its cookie), an
   `apple-touch-icon` and `theme-color` (an iPhone only delivers push to a site added to the Home
   Screen). Login required, JSON, CSRF via `X-CSRFToken`: `GET /push/key/` (`{"enabled",
   "public_key"}`), `POST /push/subscribe/` (the browser's `PushSubscription.toJSON()`; 201 `{"id"}`,
@@ -1120,7 +1122,8 @@ setup and the phone test.
 - **The service worker** (`sw.js`, `skipWaiting` + `clients.claim`): `push` always shows a
   notification (an unreadable payload shows "ZipTrigo"); `notificationclick` closes it, then with
   an `event.action` posts `{token, action}` to `data.action_url` (same origin only, `credentials:
-  'omit'`, up to 3 tries on a network error) without opening anything, else focuses a tab already on
+  'same-origin'` -- the token authenticates it, the cookies only get it past Cloudflare Access on
+  staging --, up to 3 tries on a network error) without opening anything, else focuses a tab already on
   `data.url` or opens one (same origin only). No `pushsubscriptionchange` handling: the page script
   re-saves a renewed subscription on the next visit.
 - **Test send**: `./manage.py send_test_push <email>` (sends now; exact, then case-insensitive

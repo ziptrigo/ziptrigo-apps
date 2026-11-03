@@ -65,7 +65,8 @@ function wait(ms) {
 
 // Posts the answer, trying again twice on a network error (a phone waking up may have no
 // connection for a moment). The server keeps the first answer to a push, so a retry of one that
-// did arrive changes nothing. No cookies: the token is what authenticates it.
+// did arrive changes nothing. The token is what authenticates it; same-site cookies still go along
+// because a site behind Cloudflare Access (staging) refuses a request without its cookie.
 async function sendAnswer(data, action) {
   if (!data.action_url || !data.action_token) return;
   const url = new URL(data.action_url, self.location.origin);
@@ -76,7 +77,7 @@ async function sendAnswer(data, action) {
       await fetch(url.href, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'omit',
+        credentials: 'same-origin',
         body: body,
       });
       return;
