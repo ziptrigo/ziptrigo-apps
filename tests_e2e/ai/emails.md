@@ -22,7 +22,7 @@ every email follows:
 - **Dates and times** (issue #245). Every email that prints a date or time uses one wording for every
   recipient, signed up or not: `Mon D, YYYY, h:mm AM/PM` (`Nov 5, 2026, 9:05 PM`), and the ones that say UTC keep saying it.
   The recipient's (or sender's) own `mm/dd/yyyy` / `dd/mm/yyyy` and 12-/24-hour setting never reaches an email: before
-  running the dated emails below, set the account that triggers them to `dd/mm/yyyy` + `24-hour` (ACC-45) and check that
+  running the dated emails below, set the account that triggers them to `dd/mm/yyyy` + `24-hour` (ACC-46) and check that
   no email shows `05/11/2026`, `21:05` or `2026-11-05`; restore the defaults afterwards.
 
 ### Inventory

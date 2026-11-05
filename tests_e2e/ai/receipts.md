@@ -1149,7 +1149,7 @@ another from its row menu.
 **Purpose:** every date Receipts shows follows the account's format (issue #245), including the dashboard's
 Receipt date column and filters, the receipt page, the trash and the vendors page; the CSV stays ISO.
 **Preconditions:** RCPT-05 done (a processed receipt R1 dated 10/09/2026); the account on `mm/dd/yyyy` + `12-hour`
-(ACC-45).
+(ACC-46).
 
 | # | Action | Expected result |
 |---|---|---|

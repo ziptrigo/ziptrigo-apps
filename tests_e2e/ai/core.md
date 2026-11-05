@@ -337,7 +337,7 @@ set to the page you were on), never renders the login page inside the form (issu
 | 2 | Open `/notifications/` and hover the relative time of the welcome notification (`just now` or `N minutes ago`). | Its tooltip is the exact local time in the same `YYYY-MM-DD h:mm AM/PM` form, without "UTC"; the visible text stays relative. |
 | 3 | (If the browser tool can override the time zone, e.g. the DevTools "Sensors" > Location, or CDP `Emulation.setTimezoneOverride`) set `America/Chicago` and reload `/billing/credits/`. | The date and time move to Chicago's wall clock (5 or 6 hours before UTC); the `datetime` attribute is unchanged. Remove the override. |
 | 4 | (If the tool can disable JavaScript) disable it and reload `/billing/credits/`. | The same cell reads `YYYY-MM-DD h:mm AM/PM UTC` (the server's fallback, marked UTC, in the same date and time format). Re-enable JavaScript. |
-| 5 | With the account on `dd/mm/yyyy` and `24-hour` (ACC-45) open `/billing/credits/` and `/todo/<n>/` (a comment's tooltip) and the transfer dashboard (FT plan). | `long` times read `DD/MM/YYYY, HH:MM`, `short` ones drop the year in the current year (`DD/MM, HH:MM`); the `<time>` elements carry `data-date-format="dmy" data-time-format="24h"`. A public page (`/t/<slug>/`) reads `Nov 5, 2026, 9:05 PM` for the same signed-in account (`data-date-format="public"`). |
+| 5 | With the account on `dd/mm/yyyy` and `24-hour` (ACC-46) open `/billing/credits/` and `/todo/<n>/` (a comment's tooltip) and the transfer dashboard (FT plan). | `long` times read `DD/MM/YYYY, HH:MM`, `short` ones drop the year in the current year (`DD/MM, HH:MM`); the `<time>` elements carry `data-date-format="dmy" data-time-format="24h"`. A public page (`/t/<slug>/`) reads `Nov 5, 2026, 9:05 PM` for the same signed-in account (`data-date-format="public"`). |
 
 ### CORE-24 Field errors of a refused form
 
@@ -360,7 +360,7 @@ below: the name is not empty, only spaces).
 **Purpose:** the site's own date and time fields (`core/components/date_picker.html`, `time_field.html`) that
 replace the browser's native inputs everywhere (issue #245): typing in the account's order, the calendar, the
 suggestions, errors, and the htmx forms that react to them.
-**Preconditions:** CORE-20, signed in as `CORE_USER` with `mm/dd/yyyy` + `12-hour` (ACC-45). Use the Receipts
+**Preconditions:** CORE-20, signed in as `CORE_USER` with `mm/dd/yyyy` + `12-hour` (ACC-46). Use the Receipts
 dashboard's **Receipt date > Custom** boxes (`/receipts/`) for the date field and To-do's **Settings > Default
 due time** for the time field (TODO-41 covers the rest of To-do).
 

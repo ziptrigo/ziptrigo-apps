@@ -52,6 +52,8 @@ class UserAdmin(DjangoUserAdmin):
         'theme',
         'date_format',
         'time_format',
+        'app_order',
+        'hidden_apps',
         'email_confirmed_at',
         'created_at',
         'updated_at',
@@ -63,7 +65,17 @@ class UserAdmin(DjangoUserAdmin):
         ),
         (
             'Personal info',
-            {'fields': ('name', 'timezone', 'theme', 'date_format', 'time_format')},
+            {
+                'fields': (
+                    'name',
+                    'timezone',
+                    'theme',
+                    'date_format',
+                    'time_format',
+                    'app_order',
+                    'hidden_apps',
+                )
+            },
         ),
         (
             'Status',

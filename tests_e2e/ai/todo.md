@@ -844,7 +844,7 @@ push configured on this server (NOTIF-20's preconditions: without it the endpoin
 half-hour suggestions; words stay words (`Today`, `Tomorrow`, weekdays); messages (the reminder email, the bell) are
 always the public wording.
 **Preconditions:** signed in as `qa.user@example.com`; `/account/` Appearance set to `mm/dd/yyyy` and `12-hour`
-(ACC-45); the task `Pay rent` exists (any), and today is not the 1st or the 31st (to keep `05/11` readings
+(ACC-46); the task `Pay rent` exists (any), and today is not the 1st or the 31st (to keep `05/11` readings
 unambiguous, pick a "next November 5" in step 4 if today is near it). `<Y>` is the current year.
 
 | # | Action | Expected result |

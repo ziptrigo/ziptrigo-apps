@@ -21,8 +21,9 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
 - **Account page** (`/account/`): profile name (the header menu follows a rename at once), the
   time zone select (`Not set (UTC)`, the browser's detection, the "Use it" hint), theme
   (Appearance, applied without a reload), the date and time format (Appearance: `mm/dd/yyyy` or
-  `dd/mm/yyyy`, 12-hour or 24-hour, saved on the account and applied across the site; ACC-45), the
-  promo code form's presence, change password (every
+  `dd/mm/yyyy`, 12-hour or 24-hour, saved on the account and applied across the site; ACC-46), the
+  Apps section (switching product apps off and on, putting them in order by drag and by keyboard,
+  issue #246), the promo code form's presence, change password (every
   refusal, Django's validators), the "password changed" email and its forgot-password link, other
   sessions signed out; what persists on the account across a new session and another browser.
 - **No self-service deletion**: there is no page or control to delete one's own account; a user is
@@ -325,13 +326,14 @@ a made-up token lands on the expired page with a resend form.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/account/`. | Tab title and heading `Account Settings`. Sections in order: `Profile Information`, `Credits`, `Appearance`, `Change Password`, then a `Back to Home` link. |
+| 1 | Go to `/account/`. | Tab title and heading `Account Settings`. Sections in order: `Profile Information`, `Credits`, `Appearance`, `Apps`, `Change Password`, then a `Back to Home` link. |
 | 2 | Profile section. | `Email` shows MAIN in a greyed, disabled field (not editable) with the hint `Email cannot be changed`; `Name` holds `Acc Main <run>`; button `Save Profile`. |
 | 3 | Credits section. | `Current balance` then `1000 credits` (the welcome credits); a `Usage History` link to `/billing/credits/`; below it the "Have a promo code?" form. (A balance of exactly 1 reads `1 credit`, 0 and 2+ read `credits`; the seeded `qa.broke@example.com` shows `0 credits`.) |
-| 4 | Appearance section. | A `Theme` group with three options, `System` (selected), `Light` and `Dark`, and a hint that System follows the device's setting; below it a `Date format` group (`mm/dd/yyyy (<today as 11/05/2026>)` selected, `dd/mm/yyyy (<today as 05/11/2026>)`) and a `Time format` group (`12-hour (9:05 PM)` selected, `24-hour (21:05)`) with the line "Used for every date and time you see across the site; other pages show the new format when they next load. Public pages, such as a download link, always show dates like Nov 5, 2026." No Save button (see ACC-37 and ACC-45). |
-| 5 | Change Password section. | Fields `Current Password`, `New Password` (hint `6 to 128 characters with at least one digit`), `Confirm New Password`, all `type="password"`, each with its own eye toggle (outside the label; `aria-label="Show password"`, `aria-pressed="false"`); button `Change Password`. No `You signed in with Google` note. |
-| 6 | Click each eye toggle. | Each reveals only its own field, flips its own icon and sets its own `aria-pressed="true"`. |
-| 7 | Click `Back to Home`. | Goes to `/`. |
+| 4 | Appearance section. | A `Theme` group with three options, `System` (selected), `Light` and `Dark`, and a hint that System follows the device's setting; below it a `Date format` group (`mm/dd/yyyy (<today as 11/05/2026>)` selected, `dd/mm/yyyy (<today as 05/11/2026>)`) and a `Time format` group (`12-hour (9:05 PM)` selected, `24-hour (21:05)`) with the line "Used for every date and time you see across the site; other pages show the new format when they next load. Public pages, such as a download link, always show dates like Nov 5, 2026." No Save button (see ACC-37 and ACC-46). |
+| 5 | Apps section. | One tile per product (`QR Codes`, `File Transfer`, `Receipts`, `Short URLs`, `To-do`), each with a checked checkbox, the product's icon and its name only (no description), and a drag handle. The hint reads `Choose the apps you use. Apps you switch off leave the menu and the home page; nothing in them is deleted, and you can switch them back on any time.` No Save button (see ACC-45). |
+| 6 | Change Password section. | Fields `Current Password`, `New Password` (hint `6 to 128 characters with at least one digit`), `Confirm New Password`, all `type="password"`, each with its own eye toggle (outside the label; `aria-label="Show password"`, `aria-pressed="false"`); button `Change Password`. No `You signed in with Google` note. |
+| 7 | Click each eye toggle. | Each reveals only its own field, flips its own icon and sets its own `aria-pressed="true"`. |
+| 8 | Click `Back to Home`. | Goes to `/`. |
 
 ### ACC-20 Update the profile name
 
@@ -569,7 +571,7 @@ link instead.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/account/`. | The `Appearance` section sits between `Credits` and `Change Password`; `System` is selected; the page is light. |
+| 1 | Go to `/account/`. | The `Appearance` section sits after `Credits` and before `Apps`; `System` is selected; the page is light. |
 | 2 | Click `Dark`. | Without a Save click and without a page reload (the page does not flash or jump; scroll position stays), the page turns dark; `Dark` is selected; `<html>` has `data-theme="dark"` and class `dark`. |
 | 3 | Use only the keyboard: Tab to the group, use the arrow keys to move to `Light`. | A visible focus ring shows on the focused option and stays on the group after each arrow press; the choice is applied at once, with no reload (the page turns light) when the selection changes. |
 | 4 | Open `/`, `/feedback/` and `/billing/credits/`. | All follow the saved theme. |
@@ -698,7 +700,7 @@ register again as a new account (without a second set of welcome credits).
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Context A: register DEL (Name `Acc Del <run>`, P-DEL), confirm it from the email, sign in. | Signed in; `/account/` shows `1000 credits`. |
-| 2 | Look over `/account/` and the account menu. | No "Delete account" / "Close account" button or link anywhere: the page has only `Profile Information`, `Credits`, `Appearance`, `Change Password` and `Back to Home`; the menu only the name, `Settings` and `Logout`. |
+| 2 | Look over `/account/` and the account menu. | No "Delete account" / "Close account" button or link anywhere: the page has only `Profile Information`, `Credits`, `Appearance`, `Apps`, `Change Password` and `Back to Home`; the menu only the name, `Settings` and `Logout`. |
 | 3 | Navigate to `/account/delete/`. | 404 (this server runs with DEBUG on, so Django's "Page not found" page; the URL patterns it lists under `account/` include no delete route). |
 | 4 | Context B: sign in to `/admin/` with ADMIN, open `/admin/accounts/user/?q=qa.acc.<run>.del`, open DEL's row, click `Delete`. | A confirmation page asking whether to delete the user DEL and listing the related items that go with it (its credit account and the welcome credits' ledger line among them); it does not say a permission is missing. |
 | 5 | Context B: confirm (`Yes, I’m sure`). | `The user “qa.acc.<run>.del@example.com” was deleted successfully.`; DEL is no longer listed. Sign out of the admin. |
@@ -708,7 +710,32 @@ register again as a new account (without a second set of welcome credits).
 | 9 | Register DEL again (Name `Acc Del <run>`, P-DEL). | `/account/created/`; the mailbox for DEL gets a new `Confirm your ZipTrigo account email` (not `You already have a ZipTrigo account`: the old account is gone). Confirm it and sign in with DEL / P-DEL. |
 | 10 | Open `/account/` and the mailbox for DEL. | `0 credits` and no welcome notification in the bell: the address was used before. The mailbox has `About your ZipTrigo welcome credits`, saying the address (or a variation of it) was already used for a ZipTrigo account and welcome credits are only for new addresses, with a link `http://localhost:8765/billing/credits/`; clicking it opens the credits history page. Sign out. |
 
-### ACC-45 Date and time format
+### ACC-45 Apps: switching apps off and on, and putting them in order
+
+**Purpose:** the Apps section chooses which product apps the menu and the home page show, and in
+what order; nothing in a switched-off app is touched.
+**Preconditions:** sign in as MAIN (Context A) with a wide window (the header shows the app names).
+A fresh MAIN has every app on, in the order QR Codes, File Transfer, Receipts, Short URLs, To-do.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/account/` and look at the header. | The header menu lists the five apps in that order, left to right; the Apps section lists the same five, all checked. |
+| 2 | Uncheck `Receipts`. | Without a Save click and without a page reload (type `window.__x = 1` in the console first and check it is still set), `Receipts` leaves the header menu at once; its tile is muted (lighter background and text); the other four stay. Keyboard focus is still on the `Receipts` checkbox. |
+| 3 | Reload `/account/`. | `Receipts` is still unchecked and absent from the header. Open `/`: the home page has four cards, no `Receipts` card. |
+| 4 | Open `/receipts/` by typing the URL. | The Receipts dashboard opens normally (a direct link to a switched-off app still works); the header still does not list `Receipts`. |
+| 5 | Open `/s/` links, `/go/` links, `/t/` links created earlier, if any, in a signed-out context. | They keep working (public links are not tied to the menu). |
+| 6 | Back on `/account/`, drag the `To-do` tile's handle onto the `QR Codes` tile and drop. | The tiles reorder; the header menu becomes `To-do, QR Codes, File Transfer, Short URLs` with no reload; after a reload the order is kept, and the home page cards follow the same order. |
+| 7 | Tab to the `To-do` tile's handle (a button named `Reorder To-do: use the arrow keys to move it earlier or later`) and press the Down arrow once, then Up twice; then press Up until the tile is first and once more. | Each press moves the tile one place (the grid has two columns from `sm` up; all four arrow keys work: up/left earlier, down/right later); focus stays on the handle; a screen-reader-only live region announces `To-do moved to position N of 5.`, and `To-do is already first.` on the extra press (`already last.` at the other end); after a short pause the header menu follows (one save for the burst). |
+| 7b | In devtools, block `POST /account/apps/` (or go offline), then uncheck `Short URLs`. | A red `role="alert"` line `Couldn't save your apps. Try again.` appears in the Apps form and the tiles are re-fetched from the server (`Short URLs` is checked again); the header menu is unchanged. Unblock and uncheck again: it saves and the line is gone. |
+| 8 | Check `Receipts` again. | `Receipts` returns to the header at the place its tile has in the list (between `File Transfer` and `Short URLs` if you have not moved it), not at the end. |
+| 9 | Uncheck all five apps. | The header menu shows only the logo. Open `/`: no cards; the message `All your apps are switched off` and a `Choose your apps` button that goes to `/account/#apps`. Check one app: it comes back in the header. |
+| 10 | Sign out and open `/`. | The signed-out visitor sees all five apps in the default order, whatever MAIN chose. |
+| 11 | Sign in as the seeded `qa.user@example.com` in a fresh Context B. | That account has every app on in the default order (the choice belongs to MAIN's account). Sign out of Context B. Sign in again as MAIN in another browser profile: the same choice applies there. |
+| 12 | With JavaScript disabled (or using the browser's "disable JavaScript"), open `/account/`, uncheck `Short URLs` and press the `Save Apps` button. | A normal POST and redirect back to `/account/`; `Short URLs` is unchecked and gone from the header. The drag handles are not shown. |
+| 13 | In the admin (`admin.md` ADM), open MAIN's user page. | `Personal info` shows `App order` and `Hidden apps` as read-only values. |
+| 14 | Restore: check every app and put them back in the default order. | - |
+
+### ACC-46 Date and time format
 
 **Purpose:** the Appearance section's date and time format are saved on the account, apply to every
 page after the next load, never to public pages, emails or notifications, and are refused when forged.

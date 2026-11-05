@@ -63,7 +63,7 @@ block list, auto-hold: `admin.md`), and the `/api/ft/` JWT API and `admin/filetr
 
 The pages show times with the browser's own time zone (`<time>` elements rewritten in the
 browser) in the **account's date and time format** (issue #245; a seeded account is `mm/dd/yyyy` +
-12-hour, ACC-45): e.g. "11/30/2026, 3:51 PM" or, in the dashboard's "sent" line and the download log,
+12-hour, ACC-46): e.g. "11/30/2026, 3:51 PM" or, in the dashboard's "sent" line and the download log,
 `2026-11-30 3:51 PM`, without a "UTC" suffix (on `dd/mm/yyyy` + 24-hour: "30/11/2026, 15:51" and
 `2026-11-30 15:51`). **Public pages** (`/t/<slug>/` and the manage page) are the fixed public wording
 for everyone, a signed-in owner included: "Nov 30, 2026, 3:51 PM". Emails always write UTC in that
@@ -966,7 +966,7 @@ driven from the keyboard.
 **Purpose:** the owner's dashboard follows the account's date and time format; the public download page and every
 email are the same for everyone (issue #245).
 **Preconditions:** FT-07 to FT-09 (transfer A, with a 30-day expiry, and B with a custom date, active) as `qa.user@example.com`;
-the Appearance settings of ACC-45.
+the Appearance settings of ACC-46.
 
 | # | Action | Expected result |
 |---|---|---|

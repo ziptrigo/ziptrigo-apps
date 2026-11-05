@@ -7,8 +7,10 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from apps.core import ratelimit
+from apps.core.products import products_for
 
 from ..forms import (
+    AppsForm,
     ChangePasswordForm,
     DisplayFormatsForm,
     ProfileForm,
@@ -22,7 +24,7 @@ from ..services.email_confirmation import format_validity_minutes, get_email_con
 def account_page_context(request: AuthenticatedHttpRequest, **overrides: Any) -> dict[str, Any]:
     """The account settings page's context: one fresh form per section, `overrides` replacing any.
 
-    The profile, password and theme views all re-render the whole page (when htmx isn't used, or to
+    The profile, password, theme and apps views all re-render the whole page (when htmx isn't used, or to
     show errors), so the forms are built here once rather than each view naming the other
     sections' forms.
     """
@@ -31,6 +33,8 @@ def account_page_context(request: AuthenticatedHttpRequest, **overrides: Any) ->
         'password_form': ChangePasswordForm(request.user),
         'theme_form': ThemeForm(),
         'formats_form': DisplayFormatsForm(),
+        'apps_form': AppsForm(),
+        'app_rows': products_for(request.user),
     }
     context.update(overrides)
     return context

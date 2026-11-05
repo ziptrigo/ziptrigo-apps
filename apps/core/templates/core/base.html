@@ -158,16 +158,7 @@
                 <a href="{% url 'core:home' %}" class="btn rounded-lg text-base font-semibold whitespace-nowrap mr-1 md:mr-3">
                     <img src="{% static 'core/images/logo_32x32.png' %}" alt="" class="inline h-6 w-6 mr-1 align-text-bottom"><span class="max-[359px]:sr-only">ZipTrigo</span>
                 </a>
-                {% for product in products %}
-                {% comment %}The product the visitor is in is marked (its URL namespace is its app label).
-                It is aria-current="true", not "page": a product page already has its own "page" (To-do's sidebar
-                nav), and one page should have one.{% endcomment %}
-                <a href="{% url product.url_name %}"
-                   aria-label="{{ product.name }}" title="{{ product.name }}"{% if request.resolver_match.app_name == product.label %} aria-current="true"{% endif %}
-                   class="btn whitespace-nowrap rounded-lg px-1.5 min-[360px]:px-2 md:px-2.5 py-1.5 text-sm font-medium {% if request.resolver_match.app_name == product.label %}bg-sage-100 text-gray-900 dark:bg-sage-800 dark:text-gray-100{% else %}text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800{% endif %}">
-                    <i class="{{ product.icon }} md:mr-1.5 text-sage-600 dark:text-sage-300" aria-hidden="true"></i><span class="hidden md:inline">{{ product.name }}</span>
-                </a>
-                {% endfor %}
+                {% include 'core/partials/product_nav.html' %}
             </div>
             <div class="flex items-center sm:gap-1 shrink-0">
                 {% if user.is_authenticated %}{% include 'core/partials/notification_bell.html' %}{% endif %}

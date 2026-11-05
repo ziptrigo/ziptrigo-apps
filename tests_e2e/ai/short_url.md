@@ -144,7 +144,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/links/new/`, enter destination `https://example.com/plain?x=1`, leave everything else empty, click **Create link**. | The button disables while it works (it may take a few seconds if the server tries to fetch the page title). No cost panel appears. The browser lands on `/links/<id>/` with a green message "Link created." Record `PLAIN_ID`. |
-| 2 | Read the link page. | A heading showing the code (or the fetched title if the server could reach the internet); status pill **Active**; the short link `http://localhost:8765/s/<7 characters>` with a **Copy** button; the destination `https://example.com/plain?x=1`; **Clicks 0**; **Created** with today's date in the account's date format (`11/01/2026`, or `01/11/2026` on a `dd/mm/yyyy` account; ACC-45); a QR code image and "Download QR code"; buttons **Edit**, **Stats**, **Preview**, **Disable**, **Delete**. Record `PLAIN_CODE`. |
+| 2 | Read the link page. | A heading showing the code (or the fetched title if the server could reach the internet); status pill **Active**; the short link `http://localhost:8765/s/<7 characters>` with a **Copy** button; the destination `https://example.com/plain?x=1`; **Clicks 0**; **Created** with today's date in the account's date format (`11/01/2026`, or `01/11/2026` on a `dd/mm/yyyy` account; ACC-46); a QR code image and "Download QR code"; buttons **Edit**, **Stats**, **Preview**, **Disable**, **Delete**. Record `PLAIN_CODE`. |
 | 3 | Open `/billing/credits/`. | The balance is unchanged (100 credits) and there is no new ledger line. |
 
 ### SU-05 Create a link with an alias: the cost is confirmed first
@@ -622,7 +622,7 @@ has not entered the protected link's current password.
 
 **Purpose:** the link pages, the list and the statistics follow the account's date and time format; the Expires
 date field and time field (issue #245) take typed or picked values and store the right instant.
-**Preconditions:** SU-04 and SU-05 done (links exist, one with an expiry); ACC-45's Appearance settings. Note the
+**Preconditions:** SU-04 and SU-05 done (links exist, one with an expiry); ACC-46's Appearance settings. Note the
 browser's time zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
 
 | # | Action | Expected result |

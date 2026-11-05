@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     account_created_page,
     account_page,
+    apps_form_partial,
+    apps_update,
     confirm_email_page,
     email_confirmation_expired,
     email_confirmation_success,
@@ -25,6 +27,8 @@ urlpatterns = [
     path('', account_page, name='account'),
     path('profile/', profile_update, name='profile-update'),
     path('password/', password_change, name='password-change'),
+    path('apps/', apps_update, name='apps-update'),
+    path('apps/form/', apps_form_partial, name='apps-form'),
     path('theme/', theme_update, name='theme-update'),
     path('formats/', formats_update, name='formats'),
     path('timezone/', timezone_detect, name='timezone'),

@@ -420,7 +420,7 @@ preconditions: without it the endpoint answers `404` to everything, which is ste
 
 **Purpose:** a notification's text is the same for everyone (issue #245), while the exact time in its tooltip follows
 the account's format; pushes use the same public wording.
-**Preconditions:** NOTIF-15 done (the `Notif call` reminder notification); the Appearance settings of ACC-45.
+**Preconditions:** NOTIF-15 done (the `Notif call` reminder notification); the Appearance settings of ACC-46.
 
 | # | Action | Expected result |
 |---|---|---|

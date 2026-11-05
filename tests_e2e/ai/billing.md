@@ -578,7 +578,7 @@ repeats the label is not shown twice.
 
 **Purpose:** `/billing/credits/` shows each transaction's time in the account's clock (issue #245); descriptions
 and the admin's ledger are unchanged.
-**Preconditions:** a signed-in account with at least one transaction (`qa.user@example.com`, "e2e seed"); ACC-45's settings.
+**Preconditions:** a signed-in account with at least one transaction (`qa.user@example.com`, "e2e seed"); ACC-46's settings.
 
 | # | Action | Expected result |
 |---|---|---|
