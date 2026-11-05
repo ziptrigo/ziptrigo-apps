@@ -38,7 +38,7 @@ checkboxes with a normal POST and redirect; ordering needs JavaScript.
       Choose the apps you use. Apps you switch off leave the menu and the home page; nothing in them is deleted, and you can switch them back on any time.
       Drag the handle, or use the arrow keys on it, to move an app earlier or later in the list.
     </p>
-    <ul class="grid gap-2 sm:grid-cols-2" data-apps-grid>
+    <ul class="grid gap-2" data-apps-grid>
       {% for product, visible in app_rows %}
       <li data-app="{{ product.label }}"
           class="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 has-[input[type=checkbox]:not(:checked)]:bg-gray-50 has-[input[type=checkbox]:not(:checked)]:text-gray-500 dark:has-[input[type=checkbox]:not(:checked)]:bg-gray-900 dark:has-[input[type=checkbox]:not(:checked)]:text-gray-400">

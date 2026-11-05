@@ -28,7 +28,6 @@
       window.initSortableList(grid, {
         handle: '.drag-handle',
         item: '[data-app]',
-        horizontalKeys: true,
         label: function (handle) { return handle.dataset.name || 'App'; },
         liveRegion: function (el) {
           const form = el.closest('form');

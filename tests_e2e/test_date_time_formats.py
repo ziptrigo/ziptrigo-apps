@@ -47,6 +47,14 @@ def set_formats(server: ReceiptsServer, date_format: str, time_format: str) -> N
     )
 
 
+def choose_format(page: Page, dropdown: str, option: str) -> None:
+    """Open the themed dropdown named `dropdown` on the account page and pick `option` (one save)."""
+    form = page.locator('#formats-form')
+    form.get_by_label(dropdown).click()
+    with page.expect_response(lambda r: r.url.endswith('/account/formats/')):
+        form.get_by_role('option', name=option).click()
+
+
 def make_task(
     server: ReceiptsServer,
     title: str,
@@ -105,27 +113,24 @@ def test_the_account_page_sets_the_format_and_every_todo_date_follows(
 
     page.goto(f'{receipts_server.url}/account/')
     form = page.locator('#formats-form')
-    expect(form.locator('input[value="mdy"]')).to_be_checked()
-    expect(form.locator('input[value="12h"]')).to_be_checked()
+    expect(form.locator('input[name="date_format"]')).to_have_value('mdy')
+    expect(form.locator('input[name="time_format"]')).to_have_value('12h')
+    expect(form.get_by_label('Date format')).to_contain_text('mm/dd/yyyy')
 
-    with page.expect_response(lambda r: r.url.endswith('/account/formats/')):
-        form.locator('label', has_text='dd/mm/yyyy').click()
-    with page.expect_response(lambda r: r.url.endswith('/account/formats/')):
-        form.locator('label', has_text='24-hour').click()
+    choose_format(page, 'Date format', 'dd/mm/yyyy')
+    choose_format(page, 'Time format', '24-hour')
 
     page.reload()
-    expect(page.locator('#formats-form input[value="dmy"]')).to_be_checked()
-    expect(page.locator('#formats-form input[value="24h"]')).to_be_checked()
+    expect(page.locator('#formats-form input[name="date_format"]')).to_have_value('dmy')
+    expect(page.locator('#formats-form input[name="time_format"]')).to_have_value('24h')
 
     page.goto(f'{receipts_server.url}/todo/all/')
     expect(page.locator(f'#task-{today_task}')).to_contain_text('Today 22:00')
     expect(page.locator(f'#task-{next_year_task}')).to_contain_text(f'05/11/{NEXT_YEAR}, 22:00')
 
     page.goto(f'{receipts_server.url}/account/')
-    with page.expect_response(lambda r: r.url.endswith('/account/formats/')):
-        page.locator('#formats-form label', has_text='mm/dd/yyyy').click()
-    with page.expect_response(lambda r: r.url.endswith('/account/formats/')):
-        page.locator('#formats-form label', has_text='12-hour').click()
+    choose_format(page, 'Date format', 'mm/dd/yyyy')
+    choose_format(page, 'Time format', '12-hour')
 
     page.goto(f'{receipts_server.url}/todo/all/')
     expect(page.locator(f'#task-{today_task}')).to_contain_text('Today 10:00 PM')

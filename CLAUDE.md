@@ -568,7 +568,7 @@ theme is `system`, and the `themeChanged` listener sets `data-theme` and calls i
 read-only in the user admin ("Personal info"). A visitor without a session is rendered as `system`. The admin's own toggle (`core/js/admin_theme_toggle.js`) is separate.
 
 **Apps** (issue #246) are chosen under "Apps" on the account page (after Appearance): one tile per
-registered product (checkbox, icon and name only, plus a drag handle), stored on the account as two
+registered product (checkbox, icon and name only, plus a drag handle; one column), stored on the account as two
 `JSONField`s, `User.app_order` (every product label in the user's order, switched-off apps keep their
 place) and `User.hidden_apps` (the labels switched off), both `default=list` and `db_default=[]` (the
 #102 lesson; migration `0007`). A switched-off app leaves the header menu and the home page cards and
@@ -594,7 +594,7 @@ without htmx a redirect, an unknown label a 422 with the partial. A save that fa
 answer, which htmx doesn't swap) shows a `role="alert"` "Couldn't save your apps. Try again." and
 re-fetches the stored form (`GET /account/apps/form/`, `accounts:apps-form`, `?failed=1` keeps the line). `static/accounts/js/apps_order.js`
 wires core's shared `initSortableList` (see "Templates and static files") onto the grid: SortableJS by
-the `.drag-handle` and the arrow keys on a focused handle (up/left earlier, down/right later, via
+the `.drag-handle` and the arrow keys on a focused handle (up earlier, down later; one column, so no
 `horizontalKeys`; focus stays, the `[data-apps-live]` polite region also says "already first/last" at
 the ends, one save per burst of presses), saving by an htmx `change` on the form; the handles are `hidden`
 until it runs, and a `<noscript>` Save button covers no JS (ordering needs JS). `app_order` and
@@ -683,8 +683,8 @@ every date is numeric (`11/05/2026`, `05/11/2026`), zero-padded, and a time is `
 get `mdy` + `12h` on deploy**, a visible change from the 24-hour times the site used to show. The form
 is a session view in Theme's shape (`POST /account/formats/`, `accounts:formats`,
 `views/display_formats.py`, `forms.DisplayFormatsForm`, `services.display_formats.set_display_formats`,
-`partials/display_formats_form.html`): radios that save on `change` (`hx-sync="this:queue last"`, a
-`<noscript>` Save button), htmx success is 200 with `HX-Reswap: none` (the radios keep their focus;
+`partials/display_formats_form.html`): two themed dropdowns (`core/components/select.html`, see "Templates and static files"; options from `templatetags/display_formats.py`) that save on `change` (`hx-sync="this:queue last"`, a
+`<noscript>` Save button and a native select), htmx success is 200 with `HX-Reswap: none` (the dropdown keeps its focus;
 other pages show the new format when they next load, the form says so), without htmx a redirect to the
 account page; both fields are optional, a post with only one changes only that one, an unknown value or
 an empty post is a 422 (the partial for htmx, the whole page otherwise); no rate limit (one column
@@ -5013,7 +5013,7 @@ focused handle that move the item and keep the focus, polite announcements inclu
 one `onReorder` per burst of key presses, idempotent per container so it can be re-run from `htmx.onLoad`;
 a page includes `core/partials/sortable_script.html`, SortableJS 1.15.6 with its integrity hash plus the
 helper, before the script that calls it; used by To-do's lists and the account page's Apps form) and the
-badge/copy pops in `components.js`. Statuses, chips, counts and
+badge/copy pops in `components.js`. **Themed select** (`core/components/select.html` + `core/js/select.js`, an Alpine `themedSelect`): the site's dropdown instead of the OS's, taking `options` (`{value, label, hint}` dicts), `name`, `id` (for a `<label for>`), `value`, `describedby`, `aria_label`, `root_class`, `compact`, `disabled`; it submits one hidden input that fires bubbling `input`/`change`, so `hx-trigger="change"` works as with a native select, and shows a native `<select>` inside `<noscript>`; tests `apps/core/tests/test_select_component.py`, `tests_e2e/test_select.py`. Statuses, chips, counts and
 tags are one tinted pill from `apps/core/templatetags/core_ui.py` (`{% pill %}`, `pill_html`), which the
 products' own tags (`status_pill`, `link_status_pill`, `due_badge`, ...) wrap; an empty list is
 `core/partials/empty_state.html`. The only un-namespaced templates are core's `admin/` overrides.
