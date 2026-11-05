@@ -1,6 +1,7 @@
 /*
  * The To-do pages' scripts, loaded deferred by todo/layout.html (after SortableJS and core's
- * `initSortableList` on the pages that reorder). Everything is wired from `htmx.onLoad`, so it also covers whatever htmx swaps in:
+ * `initSortableList` on the pages that reorder). Everything is wired from `htmx.onLoad`, so it
+ * also covers whatever htmx swaps in:
  *
  *  - Checklists. The server renders the description's checkboxes disabled. On a task that can be
  *    edited (the description block has `data-checklist-url`) they are enabled here, and a change

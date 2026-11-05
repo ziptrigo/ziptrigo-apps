@@ -13,8 +13,8 @@
 //     debounceMs: 400,                // quiet time after the last key press before onReorder runs
 //   });
 //
-// Idempotent per container (call it again after htmx swaps in the list: a container that is already
-// set up is left alone). At either end an arrow key announces "<name> is already first/last.".
+// Idempotent per container: call it again after htmx swaps in the list. The options are fixed by the
+// first call for a container; later calls ignore theirs (a swapped-in list is a new container). At either end an arrow key announces "<name> is already first/last.".
 // Loaded, deferred, after SortableJS by core/partials/sortable_script.html.
 (function () {
   'use strict';
@@ -91,11 +91,10 @@
     if (!container || !config) return;
     const handle = target.closest(config.handle);
     if (!handle || !container.contains(handle)) return;
-    let item = handle.closest(config.item);
-    while (item && item.parentElement !== container) {
-      item = item.parentElement && item.parentElement.closest(config.item);
-    }
-    if (!item) return;
+    // Only a handle whose own item is a direct child of the list moves it: a handle in an item of
+    // an inner list that was never set up must not move the row around it.
+    const item = handle.closest(config.item);
+    if (!item || item.parentElement !== container) return;
     if (event.key.indexOf('Left') > -1 || event.key.indexOf('Right') > -1) {
       if (!config.horizontalKeys) return;
     }

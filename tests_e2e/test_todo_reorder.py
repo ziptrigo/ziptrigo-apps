@@ -43,21 +43,24 @@ def test_labels_reorder_with_the_arrow_keys(page: Page, receipts_server: Receipt
         page.goto(f'{receipts_server.url}/todo/labels/')
         assert _names(page) == ['Zq A', 'Zq B', 'Zq C']
 
+        # New labels go last, so the test doesn't depend on any other label of the e2e user.
+        total = page.locator('.drag-handle').count()
         handle = page.locator('.drag-handle[data-name="Zq C"]')
         handle.focus()
+        live = page.locator('[data-sortable-live]')
+
+        # At the end of the list a press only announces it.
+        page.keyboard.press('ArrowDown')
+        expect(live).to_have_text('Zq C is already last.')
+        assert _names(page) == ['Zq A', 'Zq B', 'Zq C']
+
         # Two quick presses make one save; the focus stays on the handle and the move is announced.
         with page.expect_response(lambda r: r.url.endswith('/todo/labels/reorder/')) as saved:
             page.keyboard.press('ArrowUp')
             page.keyboard.press('ArrowUp')
         assert saved.value.status < 300
         expect(handle).to_be_focused()
-        live = page.locator('[data-sortable-live]')
-        expect(live).to_have_text('Zq C moved to position 1 of 3.')
-        assert _names(page) == ['Zq C', 'Zq A', 'Zq B']
-
-        # At the top another press only announces the end of the list.
-        page.keyboard.press('ArrowUp')
-        expect(live).to_have_text('Zq C is already first.')
+        expect(live).to_have_text(f'Zq C moved to position {total - 2} of {total}.')
         assert _names(page) == ['Zq C', 'Zq A', 'Zq B']
 
         page.reload()

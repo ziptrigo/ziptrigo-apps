@@ -1,8 +1,8 @@
 // The account page's "Apps" form (issue #246): putting the apps in order.
 //
-// Loaded, deferred, by accounts/account.html after SortableJS and the shared helper. Each tile of `[data-apps-grid]` has a
-// drag handle (`.drag-handle`, hidden until this script shows it, since ordering needs JavaScript)
-// and a hidden `order` input, so moving a tile is all it takes: after a move the form is submitted
+// Loaded, deferred, by accounts/account.html after SortableJS and the shared helper. Each tile of
+// `[data-apps-grid]` has a drag handle (`.drag-handle`, hidden until this script shows it, since
+// ordering needs JavaScript) and a hidden `order` input, so moving a tile is all it takes: after a move the form is submitted
 // the way a checkbox change does (htmx `change`), and the server saves the DOM order.
 //
 // The dragging (SortableJS) and the arrow keys (up/left earlier, down/right later; announcements, one

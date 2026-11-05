@@ -72,6 +72,16 @@ class TestPages:
 
         assert client.get(reverse(name)).status_code == 200
 
+    @pytest.mark.parametrize('name', ['todo:today', 'todo:labels', 'todo:filters', 'todo:task'])
+    def test_the_reorderable_pages_load_the_shared_sortable_helper(self, web, funded_user, name):
+        # Without it `makeSortable` returns early and ordering quietly stops working on the page.
+        args = [create_task(funded_user, title='A task').number] if name == 'todo:task' else []
+
+        body = text(web.get(reverse(name, args=args)))
+
+        assert 'Sortable/1.15.6/Sortable.min.js' in body
+        assert 'core/js/sortable_list.js' in body
+
     def test_the_first_visit_creates_the_account(self, web, funded_user):
         assert not TodoAccount.objects.filter(user=funded_user).exists()
 
