@@ -655,7 +655,8 @@ write, like Theme). `set_display_formats(user, *, date_format=None, time_format=
 the columns that changed (plus `updated_at`) and returns whether anything did; a value outside the
 choices is a `ValueError`. `GET /api/account` returns both and `PUT /api/account` accepts either or both
 (an unknown value is a schema 422, no password needed); both are read-only in the user admin's "Personal
-info". The formatting itself is `core`'s (`apps.core.datetime_format`, see "Templates and static files" >
+info". The JWT API's dates stay ISO values and **its text fields are always the public wording**
+(`Nov 5, 2026`), whatever these settings say. The formatting itself is `core`'s (`apps.core.datetime_format`, see "Templates and static files" >
 "Date and time wording"). Tests: `apps/accounts/tests/unit/test_display_formats.py` and the Playwright
 `tests_e2e/test_date_time_formats.py`.
 
@@ -3774,7 +3775,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
     (`Every 2 weeks on Monday, Wednesday`, `Every month on the last day`, `Every year on March 3,
     5 times`, `..., until 12/31/2026`; any other combination `Custom repeat (<rule>)`). The rule keeps
     words ordered by the date format (`March 3`, or `3 March` for `dmy`); the end date is a real date
-    in the active wording (`describe(rrule, formats=None)`; the API runs with the public one).
+    in the active wording (`describe(rrule, formats=None)`; the API passes `PUBLIC` explicitly).
     `next_date(rrule, after, day=None)` is `rrulestr(..., dtstart=after).after(dtstart, inc=False)`:
     **an explicit `BYMONTHDAY` beyond the month's length is skipped by dateutil, not clamped** (`31`
     has no February) and `-1` is the last day. **A monthly/yearly rule with no day of its own** (no
@@ -4374,8 +4375,13 @@ shared in `core`.
   user's `DisplayFormats`, filled by the web endpoint, `POST /api/todo/parse`, `parse_title` on `POST
   /api/todo/tasks` and email intake) puts one line in `_SYSTEM_PROMPT` (`DATE_ORDER_RULES`: "month
   first: 5/11 is May 11" or "day first: 5/11 is 5 November"), and the chip, the endpoint's `label` and
-  `rrule_text` are written in those formats explicitly (the API is not activated by the middleware).
-  Receipts' extraction prompt is untouched.
+  `rrule_text` are written in those formats explicitly on the web (`POST /todo/parse/`). **That hint is
+  about *reading* the title; what is *written back* is separate** (`ParseRequest.wording`, `None` = in
+  `formats`): the JWT API (`POST /api/todo/parse`, `parsed.label` of `POST /api/todo/tasks`) sets
+  `wording=PUBLIC`, so every API text field -- chip `label`, `rrule_text`, a task's
+  `recurrence.rrule_text`, a saved filter's `summary` -- is the same public wording (`Sun Nov 1, 6:30
+  PM`, `Every year on March 3`) for every client, whatever the account's formats. Receipts' extraction
+  prompt is untouched.
   - **Concurrency.** `parsing._slot` is a module-level `threading.BoundedSemaphore(1)`, taken
     **without waiting** around the model call. A request that finds it taken gets `ParseBusy` (a
     `ParseUnavailable`) without the model being called and without spending any rate limit; the
@@ -4840,6 +4846,11 @@ CLI does with them.
   `--due YYYY-MM-DDTHH:MM` sets one; `--clear-time` removes it, alone or with a date); `label-delete` and `regenerate` ask first (`--yes` skips). Everything
   that prints a title or a label name escapes Rich markup, so a title like `[bold]` shows as typed.
   Tests: `admin/tests/test_todo.py` (HTTP mocked, no Django).
+- **Text is public wording** (issue #245). Every human-readable date in a response -- `recurrence.rrule_text`,
+  `POST /parse`'s `label` and `rrule_text`, `parsed.label` of `POST /tasks`, a saved filter's `summary` --
+  is written in `PUBLIC` explicitly (`Sun Nov 1, 6:30 PM`, `Every year on March 3, until Dec 31, 2028`),
+  the same for every client; the user's own date order only goes to the model, as a hint for reading the
+  title (`ParseRequest.formats`, not `wording`). Tests: `apps/todo/tests/test_date_time_formats.py`.
 - **Not in v1**: an `expected_cost` / quote for task creation (the price is the setting's and the
   answer reports `charged_credits`), search snippets in the API.
 - **Judgement calls** where the issue left room: `GET /tasks/{number}` also returns the task's
@@ -5002,8 +5013,13 @@ on a page looks like; keep them apart:
   `data-*` attributes stay ISO (`Y-m-d`, `H:i`): **`apps/core/tests/test_date_format_guard.py` fails on any
   template that formats a date with Django's `|date` / `|time`** other than those machine values (a
   line with `value="`, `min="`, `max="`, `data-` or an include of the date or time field), so a new
-  template cannot bring a fixed format back. The API (ISO values), the CSV export, the admin and the CLI
-  tables are unchanged. `<html>` carries `data-date-format="mdy|dmy|public"` and `data-time-format=
+  template cannot bring a fixed format back; a second test in that file does the same for non-test Python
+  (`strftime` / f-string formats with month or weekday names, `%I %p`, locale directives, `%H:%M`, `%d/%m`;
+  machine values, the admin and `__str__` are in a per-entry, reasoned allow-list, and a stale entry fails).
+  **The API writes the public wording in every text field** (its dates are ISO values), the CSV export, the
+  admin and the CLI tables are unchanged. The `|fdate` / `|ftime` / `|fdatetime` filters return `''` for a
+  value that isn't a date or time (and log a warning once per process and filter, never the value), as
+  Django's `|date` does, while the Python functions stay strict. `<html>` carries `data-date-format="mdy|dmy|public"` and `data-time-format=
   "12h|24h"` (`{% format_data_attrs %}`) for the browser scripts.
 - **The visitor's own zone in the browser.** `core/js/local_time.js`, loaded on every page by
   `core/base.html` and re-run on whatever htmx swaps in (`htmx:load`), shows times in **the browser's
@@ -5048,7 +5064,18 @@ The browser-side pieces:
   Alpine scope binds one with `x_model='until'` (`x-modelable`; the repeat control's last date). A
   disabled field is `disabled` or an Alpine `disabled_expr` (To-do search's custom range). Arguments:
   `name` (empty for a field that only feeds a script), `id` (on the text box), `value`, `min`, `max`,
-  `aria_label`, `describedby`, `root_class`, `compact`, `amber`, `disabled`.
+  `aria_label`, `describedby`, `root_class`, `compact`, `amber`, `required`, `disabled`.
+  **A typed value that was refused is never silently dropped on save**: every field's root carries
+  `data-commit-field`, and `datetime_format.js` listens for `submit` (capture, on the document, so before
+  htmx's own listener) and, for a non-GET htmx request carrying a form's values without a submit,
+  `htmx:confirm`; it asks each *visible, enabled* field of the form to `commit()` and, if one refuses,
+  cancels the request, keeps the message under the box and focuses it. `required` refuses an empty box
+  (`Enter a date.` / `Enter a time.`) and hides the date calendar's Clear (To-do's Postpone date is required).
+  **The calendar is built only while open** (`built` flag, dropped 300 ms after closing so the fade-out
+  finishes): a closed picker, one per To-do row, is just the text box and the button. `place()` keeps the
+  open calendar inside the viewport (shifts it left of the field when it would overflow). Escape closes
+  only the calendar while it is open (propagation stopped), so a Postpone menu around it stays. The error
+  line is an always-present `aria-live="polite"` paragraph.
 - **Entering an instant** (`data-utc-pair`): Short URLs' Expires is a date field and a time field
   (no `name`) wrapped in `data-pair-date` / `data-pair-time` inside `<div data-utc-pair
   data-utc-target="<id>">`, next to a hidden input `<id>` that carries the field's `name` and is

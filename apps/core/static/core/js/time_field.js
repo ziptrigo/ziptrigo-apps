@@ -99,16 +99,17 @@ document.addEventListener('alpine:init', () => {
     // Reads the text box (on blur and on Enter). Returns whether the field is in a good state.
     commit() {
       const typed = this.text.trim();
-      if (typed === this.format(this.value)) {
-        this.setError('');
-        return true;
-      }
       if (typed === '') {
         if (this.required) {
           this.setError('Enter a time.');
           return false;
         }
-        this.commitValue('');
+        if (this.value) this.commitValue('');
+        else this.setError('');
+        return true;
+      }
+      if (typed === this.format(this.value)) {
+        this.setError('');
         return true;
       }
       const iso = Z.parseTime(typed);

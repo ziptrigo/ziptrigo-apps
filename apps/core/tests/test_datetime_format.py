@@ -278,6 +278,29 @@ def test_filters_on_none_are_empty():
     )
 
 
+@pytest.mark.parametrize('bad', ['not a date', 12, object(), ['2026-11-05']])
+def test_filters_return_empty_for_a_value_that_is_not_a_date_or_time(bad):
+    # Like Django's |date: a page with a wrong value in a variable renders, it doesn't 500.
+    assert render('[{{ v|fdate }}][{{ v|ftime }}][{{ v|fdatetime }}]', v=bad) == '[][][]'
+    assert render("[{{ v|fdate:'compact' }}]", v=bad) == '[]'
+
+
+def test_a_filter_logs_a_bad_value_once_without_the_value(caplog):
+    from apps.core.templatetags import datetime_format as tags
+
+    tags._warned.clear()
+    with caplog.at_level('WARNING', logger=tags.logger.name):
+        render('{{ v|fdate }}{{ v|fdate }}{{ v|ftime }}', v='secret text')
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == 2  # one per filter, not per call
+    assert not any('secret text' in m for m in messages)
+
+
+def test_the_python_api_stays_strict():
+    with pytest.raises(AttributeError):
+        df.format_date('not a date')  # ty: ignore[invalid-argument-type]
+
+
 def test_an_unknown_style_is_a_template_error():
     with pytest.raises(TemplateSyntaxError):
         render("{{ d|fdate:'nope' }}", d=DAY)

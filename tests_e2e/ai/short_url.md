@@ -632,7 +632,7 @@ browser's time zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
 | 3 | Edit the link with an expiry. | The Expires date box reads `DD/MM/YYYY` and the time box `HH:MM` (the stored instant split in the browser's zone). |
 | 4 | Type `31/12/2030` in the date box and `18:30` in the time box, **Save changes**. | Saved; the link page reads `31/12/2030, 18:30` in the browser's zone. The stored instant is the same everywhere: a browser in Tokyo (UTC+9) saving it stores 09:30 UTC, which a browser in Chicago (UTC-6 in December) reads as `31/12/2030, 03:30`. |
 | 5 | Type only the date (leave the time empty), save. | Valid: the link expires at the end of that day (`23:59`) in the browser's zone. |
-| 6 | Clear both boxes, save. | The link no longer expires ("Expires" absent). A bad date (`32/13/2030`) shows "Enter a date as dd/mm/yyyy, for example ..." under the date box and keeps the saved value; a bad time `99` shows "Enter a time like 21:00.". |
+| 6 | Clear both boxes, save. | The link no longer expires ("Expires" absent). A bad date (`32/13/2030`) shows "Enter a date as dd/mm/yyyy, for example ..." under the date box and keeps the saved value (pressing Save while it stands sends nothing and focuses the box); a bad time `99` shows "Enter a time like 21:00.". |
 | 7 | In a private window open `/s/<code>+` (the preview): "Created ...". | The wording is public (`Created <how long ago>`); there is no date in another format. |
 | 8 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 

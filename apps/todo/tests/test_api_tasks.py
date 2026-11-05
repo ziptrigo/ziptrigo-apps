@@ -298,7 +298,7 @@ class TestParseTitle:
         assert body['recurrence']['rrule'] == 'FREQ=MONTHLY;BYMONTHDAY=1'
         assert body['parsed']['applied'] is True
         assert body['parsed']['matched_text'] == 'every month on the 1st'
-        assert body['parsed']['label'].startswith('Sun 11/01')
+        assert body['parsed']['label'].startswith('Sun Nov 1')
 
     def test_it_is_not_read_unless_asked(self, client, auth, fake_title_parser):
         self.reading(fake_title_parser)

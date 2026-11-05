@@ -297,24 +297,76 @@ def test_the_web_endpoint_reads_the_chip_in_the_users_format_and_tells_the_model
     assert fake_title_parser.requests[0].date_order == date_format
 
 
-def test_the_api_endpoint_uses_the_users_formats_too(
-    client, auth, funded_user, fake_title_parser, wednesday
+@pytest.mark.parametrize('date_format', ['mdy', 'dmy'])
+def test_the_api_writes_the_public_wording_and_reads_in_the_users_order(
+    client, auth, funded_user, fake_title_parser, wednesday, date_format
 ):
-    set_display_formats(funded_user, date_format='dmy', time_format='24h')
+    """The model is told how this user writes `1/11`; what the API writes back is the same text
+    for every client, whatever the account's formats."""
+    set_display_formats(funded_user, date_format=date_format, time_format='24h')
     fake_title_parser.replies['pay rent 1/11'] = ParsedTitle(
         has_date=True,
         clean_title='pay rent',
         due_date=date(2026, 11, 1),
         due_time=time(18, 30),
+        rrule='FREQ=YEARLY;BYMONTHDAY=3;BYMONTH=3;UNTIL=20281231',
         matched_text='1/11',
         confidence=0.9,
     )
 
     body = api_post(client, '/parse', auth, {'title': 'pay rent 1/11'}).json()
 
-    assert body['label'] == 'Sun 01/11, 18:30'
+    assert body['label'].startswith('Sun Nov 1, 6:30 PM')
+    assert body['rrule_text'] == 'Every year on March 3, until Dec 31, 2028'
     assert body['due_date'] == '2026-11-01' and body['due_time'] == '18:30'
-    assert fake_title_parser.requests[0].date_order == 'dmy'
+    assert fake_title_parser.requests[0].date_order == date_format
+
+
+@pytest.mark.parametrize('date_format', ['mdy', 'dmy'])
+def test_creating_through_the_api_writes_the_public_label(
+    client, auth, funded_user, fake_title_parser, wednesday, date_format
+):
+    set_display_formats(funded_user, date_format=date_format, time_format='24h')
+    fake_title_parser.replies['pay rent 1/11'] = ParsedTitle(
+        has_date=True,
+        clean_title='pay rent',
+        due_date=date(2026, 11, 1),
+        matched_text='1/11',
+        confidence=0.9,
+    )
+
+    body = api_post(client, '/tasks', auth, {'title': 'pay rent 1/11', 'parse_title': True}).json()
+
+    assert body['parsed']['label'] == 'Sun Nov 1'
+    assert fake_title_parser.requests[0].date_order == date_format
+
+
+@pytest.mark.parametrize('date_format', ['mdy', 'dmy'])
+def test_other_api_text_is_public_too(client, auth, funded_user, wednesday, date_format):
+    """A task's repeat sentence and a saved filter's summary don't follow the account."""
+    set_display_formats(funded_user, date_format=date_format, time_format='24h')
+    task = api_post(
+        client,
+        '/tasks',
+        auth,
+        {
+            'title': 'pay rent',
+            'due_date': '2026-11-01',
+            'rrule': 'FREQ=YEARLY;BYMONTHDAY=3;BYMONTH=3;UNTIL=20281231',
+        },
+    ).json()
+    saved = api_post(
+        client,
+        '/filters',
+        auth,
+        {
+            'name': 'november',
+            'params': {'date_range': 'custom', 'date_from': '2026-11-01', 'date_to': '2026-11-30'},
+        },
+    ).json()
+
+    assert task['recurrence']['rrule_text'] == 'Every year on March 3, until Dec 31, 2028'
+    assert saved['summary'] == 'Nov 1, 2026 to Nov 30, 2026'
 
 
 def test_creating_through_the_api_tells_the_model_the_order(

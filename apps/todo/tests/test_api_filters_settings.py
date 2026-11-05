@@ -395,7 +395,7 @@ class TestParse:
             'rrule': 'FREQ=MONTHLY;BYMONTHDAY=1',
             'rrule_text': 'Every month on the 1st',
             'matched_text': 'every month on the 1st',
-            'label': 'Sun 11/01, 9:00 AM · Every month on the 1st',
+            'label': 'Sun Nov 1, 9:00 AM · Every month on the 1st',
         }
         assert fake_title_parser.requests[0].title == 'pay rent every month on the 1st'
         assert fake_title_parser.requests[0].today == date(2026, 10, 28)
@@ -413,6 +413,10 @@ class TestParse:
             '/todo/parse/', json.dumps({'title': title}), content_type='application/json'
         ).json()
 
+        # The same answer, except that the web writes the chip in the user's wording (the default
+        # account is month first, `Sun 11/01`) and the API always in the public one (`Sun Nov 1`).
+        assert page.pop('label') == 'Sun 11/01 · Every month on the 1st'
+        assert api.pop('label') == 'Sun Nov 1 · Every month on the 1st'
         assert api == page
 
     def test_a_title_without_a_date(self, client, auth, fake_title_parser):

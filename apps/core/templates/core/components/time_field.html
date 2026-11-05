@@ -10,13 +10,15 @@ Submits a single hidden input `name` with an HH:MM value ('' when nothing is cho
 no name. The hidden input fires bubbling `input` and `change` events when the time changes.
 The text box's own `change` event is stopped (`@change.stop`): a form that refreshes on `change` hears only the hidden
 input, after the typed text has been read, never a half-typed date.
+A form that is submitted asks each visible field to read its text box first (`data-commit-field`, core/js/datetime_format.js):
+a typed time that is refused stops the request and its message stays under the box.
 Behaviour: static/core/js/time_field.js (Alpine). Also used by core.forms.TimeFieldWidget.
 `data-field-wrap` on the wrapper tells core/js/field_errors.js that a click inside it edits the field.
 `x-modelable` lets a parent Alpine scope bind the value with x-model; `x_model` is the expression to bind (e.g. "until").
 {% endcomment %}
 {% load datetime_format %}
 <div x-data="timeField" x-modelable="value"{% if x_model %} x-model="{{ x_model }}"{% endif %} data-value="{{ value }}" data-required="{% if required %}true{% else %}false{% endif %}"
-     class="relative {{ root_class }}" data-field-wrap @click.outside="open = false">
+     class="relative {{ root_class }}" data-field-wrap data-commit-field @click.outside="open = false">
   <input type="hidden" {% if hidden_id %}id="{{ hidden_id }}" {% endif %}{% if name %}name="{{ name }}" {% endif %}value="{{ value }}" x-ref="hidden" @field-set="setExternal($event.detail.value)"
          {% if disabled %}disabled{% endif %}{% if disabled_expr %} :disabled="{{ disabled_expr }}"{% endif %}>
   <input type="text" {% if id %}id="{{ id }}"{% endif %} x-ref="text" x-model="text" autocomplete="off" spellcheck="false"
@@ -29,8 +31,8 @@ Behaviour: static/core/js/time_field.js (Alpine). Also used by core.forms.TimeFi
          @keydown.enter="onEnter($event)" @keydown.escape="onEscape($event)"
          {% if disabled %}disabled{% endif %}{% if disabled_expr %} :disabled="{{ disabled_expr }}"{% endif %}
          class="w-full rounded-lg border {% if amber %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 {% if compact %}text-sm{% endif %} disabled:opacity-50">
-  <p x-show="error" x-text="error" :id="messageId" style="display: none"
-     class="mt-1.5 text-xs text-red-600 dark:text-red-400"></p>
+  <p x-text="error" :id="messageId" aria-live="polite" :class="error ? 'mt-1.5' : ''"
+     class="text-xs text-red-600 dark:text-red-400"></p>
   <ul x-show="open" :id="listId" role="listbox" aria-label="Suggested times" style="display: none"
       class="absolute z-20 mt-1 max-h-56 w-full min-w-[9rem] overflow-y-auto rounded-xl border border-sage-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1 text-sm">
     <template x-for="(option, i) in options" :key="option.value">

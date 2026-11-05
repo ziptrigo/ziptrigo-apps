@@ -18,6 +18,8 @@ document.addEventListener('alpine:init', () => {
 
   Alpine.data('datePicker', () => ({
     open: false,
+    built: false, // the calendar's markup exists only while it is open (and while it fades out)
+    required: false,
     value: '',
     text: '',
     error: '',
@@ -38,10 +40,24 @@ document.addEventListener('alpine:init', () => {
       this.value = this.$refs.hidden.value || d.value || '';
       this.min = d.min || '';
       this.max = d.max || '';
+      this.required = d.required === 'true';
       this.messageId = `date-field-msg-${++uid}`;
       this.baseDescribedBy = this.$refs.text.getAttribute('aria-describedby') || '';
       this.text = this.format(this.value);
       this.showMonthOf(this.value || todayIso());
+      let unbuild = null;
+      this.$watch('open', (isOpen) => {
+        clearTimeout(unbuild);
+        if (isOpen) {
+          this.built = true;
+          this.$nextTick(() => this.place());
+        } else {
+          // Let the leave transition finish before the calendar's cells go.
+          unbuild = setTimeout(() => {
+            if (!this.open) this.built = false;
+          }, 300);
+        }
+      });
       this.$watch('value', (v) => {
         this.$refs.hidden.value = v;
         this.text = this.format(v);
@@ -102,12 +118,17 @@ document.addEventListener('alpine:init', () => {
     // Reads the text box (on blur and on Enter). Returns whether the field is in a good state.
     commit() {
       const typed = this.text.trim();
-      if (typed === this.format(this.value)) {
-        this.setError('');
+      if (typed === '') {
+        if (this.required) {
+          this.setError('Enter a date.');
+          return false;
+        }
+        if (this.value) this.commitValue('');
+        else this.setError('');
         return true;
       }
-      if (typed === '') {
-        this.commitValue('');
+      if (typed === this.format(this.value)) {
+        this.setError('');
         return true;
       }
       const iso = Z.parseDate(typed, this.fmt.order);
@@ -131,6 +152,23 @@ document.addEventListener('alpine:init', () => {
     // Enter reads the text; a good date lets the form submit as usual, a bad one stays put.
     onEnter(event) {
       if (!this.commit()) event.preventDefault();
+    },
+
+    // Keep the open calendar inside the viewport: a field near the right edge (a row's Postpone
+    // menu on a phone) would otherwise push the 18rem calendar off the screen. Measured without
+    // the transition's scale, from the field's own position and the calendar's layout width.
+    place() {
+      const calendar = this.$refs.calendar;
+      if (!calendar) return;
+      calendar.style.left = '0px';
+      const margin = 8;
+      const left = this.$el.getBoundingClientRect().left;
+      const width = calendar.offsetWidth;
+      const viewport = document.documentElement.clientWidth;
+      let shift = 0;
+      if (left + width > viewport - margin) shift = viewport - margin - (left + width);
+      if (left + shift < margin) shift = margin - left;
+      calendar.style.left = `${shift}px`;
     },
 
     showMonthOf(isoDate) {

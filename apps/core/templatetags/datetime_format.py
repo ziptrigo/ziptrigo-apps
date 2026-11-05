@@ -11,6 +11,8 @@ and a public page in the fixed public wording. `{% format_data_attrs %}` writes 
 `data-date-format` / `data-time-format` attributes the browser scripts read.
 """
 
+import logging
+from collections.abc import Callable
 from datetime import date, datetime, time
 
 from django import template
@@ -20,7 +22,26 @@ from django.utils.safestring import SafeString
 
 from apps.core import datetime_format
 
+logger = logging.getLogger(__name__)
+
 register = template.Library()
+
+_warned: set[str] = set()
+
+
+def _lenient(filter_name: str, render: Callable[[], str], value: object) -> str:
+    """Run `render`; a value that is not a date or time gives `''`, as Django's `|date` does for
+    one it can't format, instead of an error page. The Python API in `apps.core.datetime_format`
+    stays strict. Logged once per process and filter, with the type only (never the value)."""
+    try:
+        return render()
+    except AttributeError, TypeError, ValueError:
+        if filter_name not in _warned:
+            _warned.add(filter_name)
+            logger.warning(
+                '|%s got a value it cannot format (%s)', filter_name, type(value).__name__
+            )
+        return ''
 
 
 def _check_style(style: str) -> str:
@@ -33,17 +54,19 @@ def _check_style(style: str) -> str:
 
 @register.filter
 def fdate(value: date | datetime | None, style: str = 'full') -> str:
-    return datetime_format.format_date(value, _check_style(style))
+    style = _check_style(style)
+    return _lenient('fdate', lambda: datetime_format.format_date(value, style), value)
 
 
 @register.filter
 def ftime(value: time | datetime | None) -> str:
-    return datetime_format.format_time(value)
+    return _lenient('ftime', lambda: datetime_format.format_time(value), value)
 
 
 @register.filter
 def fdatetime(value: datetime | None, style: str = 'full') -> str:
-    return datetime_format.format_datetime(value, _check_style(style))
+    style = _check_style(style)
+    return _lenient('fdatetime', lambda: datetime_format.format_datetime(value, style), value)
 
 
 @register.simple_tag

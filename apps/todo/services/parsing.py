@@ -145,6 +145,10 @@ class ParseRequest:
     #: `5/11` in their order, and the chip is written in their format. `PUBLIC` (month first, for
     #: the model) where there is no account to ask.
     formats: DisplayFormats = PUBLIC
+    #: How the chip label and `rrule_text` are *written*. `None`: in `formats`, the user's own
+    #: wording (the web). The JWT API sets `PUBLIC`: it writes the same text for every client,
+    #: while `formats` still tells the model how to read the title.
+    wording: DisplayFormats | None = None
 
     @property
     def date_order(self) -> str:
@@ -523,15 +527,14 @@ def parse_title(request: ParseRequest, *, charge: Callable[[], bool] | None = No
     if not parsed.has_date or parsed.due_date is None or parsed.confidence < MIN_CONFIDENCE:
         return TitleParse(has_date=False, clean_title=title)
     matched = parsed.matched_text if parsed.matched_text.lower() in title.lower() else ''
+    wording = request.wording or request.formats
     return TitleParse(
         has_date=True,
         clean_title=safe_title(title, parsed.clean_title),
         due_date=parsed.due_date,
         due_time=parsed.due_time,
         rrule=parsed.rrule,
-        rrule_text=describe(parsed.rrule, request.formats) if parsed.rrule else None,
+        rrule_text=describe(parsed.rrule, wording) if parsed.rrule else None,
         matched_text=matched,
-        label=chip_text(
-            parsed.due_date, request.today, parsed.due_time, parsed.rrule, request.formats
-        ),
+        label=chip_text(parsed.due_date, request.today, parsed.due_time, parsed.rrule, wording),
     )

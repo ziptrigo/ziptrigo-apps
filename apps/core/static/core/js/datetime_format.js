@@ -143,6 +143,51 @@
         return `${pad(hour)}:${pad(minute)}`;
     }
 
+    // -- Submitting with a typed date or time that was never accepted ------------------------------
+    // The date and time fields (date_picker.js, time_field.js) read their text box on blur and on
+    // Enter, but a click on a Save button submits whatever the hidden input holds -- the previous
+    // value -- and the form re-renders, so a typo would silently turn back into the old date. So a
+    // form that is about to be sent first asks each visible field of it to read its text box, and a
+    // field that refuses (its message stays under the box) stops the request.
+    // A plain or htmx form is stopped on `submit` (capture, on the document, so it runs before
+    // htmx's own listener on the form); a non-GET htmx request that carries a form's values without
+    // a submit (a button inside the form with hx-post) is stopped on `htmx:confirm`, which htmx fires
+    // before it reads the values. A field that is disabled or not shown is left out: its value is
+    // not the user's to fix (a hidden "last date", the custom range of a preset).
+    function refusingField(form) {
+      let first = null;
+      for (const root of form.querySelectorAll('[data-commit-field]')) {
+        const text = root.querySelector('input[type="text"]');
+        if (!text || text.disabled || text.getClientRects().length === 0) continue;
+        const data = window.Alpine && window.Alpine.$data(root);
+        if (data && typeof data.commit === 'function' && !data.commit() && !first) first = text;
+      }
+      return first;
+    }
+    document.addEventListener(
+      'submit',
+      (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        const bad = refusingField(form);
+        if (!bad) return;
+        event.preventDefault();
+        event.stopPropagation();
+        bad.focus();
+      },
+      true,
+    );
+    document.addEventListener('htmx:confirm', (event) => {
+      const { elt, verb } = event.detail || {};
+      if (!elt || String(verb).toLowerCase() === 'get') return;
+      const form = elt.closest && elt.closest('form');
+      if (!form) return;
+      const bad = refusingField(form);
+      if (!bad) return;
+      event.preventDefault(); // without issueRequest(): the request is not sent
+      bad.focus();
+    });
+
     window.ZTDateTime = {
         MONTH_NAMES,
         formatsFor,

@@ -176,8 +176,24 @@ def test_a_typed_date_is_read_in_the_users_order_and_a_bad_one_changes_nothing(
         )
     ).to_be_visible()
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
-    save_details(page, number)
+
+    # Pressing Save while the typo stands sends nothing: the message stays under the box, the box
+    # takes focus and the saved date is not "restored" by a re-rendered panel.
+    sent: list[str] = []
+    page.on('request', lambda r: sent.append(r.url) if f'/todo/{number}/edit/' in r.url else None)
+    page.click('#task-details-form button[type="submit"]')
+    page.wait_for_timeout(600)
+    assert sent == []
+    expect(box).to_have_attribute('aria-invalid', 'true')
+    expect(box).to_be_focused()
+    expect(page.locator('#task-details-form p:visible', has_text='Enter a date as')).to_be_visible()
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
+
+    # Fixing it lets the save through.
+    box.fill('2026-11-07')
+    box.press('Tab')
+    save_details(page, number)
+    expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-07')
 
 
 # -- 3. The calendar -----------------------------------------------------------------------------
@@ -212,6 +228,116 @@ def test_the_calendar_picks_a_day_and_postpone_greys_out_the_past(
     menu_field.get_by_role('button', name='Choose a date').click()
     menu_field.get_by_role('button', name='Previous month').click()
     expect(menu_field.locator('button[data-date]:not([disabled])')).to_have_count(0)
+
+
+def test_postpone_needs_a_valid_date_and_escape_closes_only_the_calendar(
+    page: Page, receipts_server: ReceiptsServer
+):
+    number = make_task(receipts_server, 'postpone refusals', days=1, at=None)
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    row = page.locator(f'#task-{number}')
+    # A closed picker builds no calendar: nothing to render per row.
+    expect(row.locator('button[aria-label="Choose a date"]')).to_have_count(1)
+    expect(row.locator('button[data-date]')).to_have_count(0)
+
+    row.get_by_role('button', name=re.compile('^Postpone')).click()
+    field = row.locator('[data-field-wrap]').first
+    box = field.locator('input[type="text"]')
+    field.get_by_role('button', name='Choose a date').click()
+    expect(field.get_by_role('dialog')).to_be_visible()
+    expect(field.locator('button[data-date]').first).to_be_visible()
+    # Escape closes the calendar only; the menu stays; a second Escape closes the menu.
+    box.focus()
+    page.keyboard.press('Escape')
+    expect(field.get_by_role('dialog')).to_be_hidden()
+    expect(box).to_be_visible()
+    page.keyboard.press('Escape')
+    expect(box).to_be_hidden()
+
+    # An empty box and a typo are both refused without a request.
+    sent: list[str] = []
+    page.on('request', lambda r: sent.append(r.url) if '/postpone/' in r.url else None)
+    row.get_by_role('button', name=re.compile('^Postpone')).click()
+    box.fill('')
+    row.get_by_role('button', name='Set').click()
+    page.wait_for_timeout(500)
+    assert sent == []
+    expect(field.get_by_text('Enter a date.')).to_be_visible()
+    expect(box).to_be_focused()
+    box.fill('99/99/2030')
+    row.get_by_role('button', name='Set').click()
+    page.wait_for_timeout(500)
+    assert sent == []
+    expect(field.get_by_text('Enter a date as')).to_be_visible()
+    # The calendar has no Clear for a required field.
+    field.get_by_role('button', name='Choose a date').click()
+    expect(field.get_by_role('button', name='Today')).to_be_visible()
+    expect(field.get_by_role('button', name='Clear')).to_be_hidden()
+
+
+def test_the_calendar_stays_on_screen_in_a_phone_sized_row_menu(
+    page: Page, receipts_server: ReceiptsServer
+):
+    number = make_task(receipts_server, 'phone postpone', days=1, at=None)
+    page.set_viewport_size({'width': 375, 'height': 812})
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    row = page.locator(f'#task-{number}')
+    row.get_by_role('button', name=re.compile('^Postpone')).click()
+    field = row.locator('[data-field-wrap]').first
+    field.get_by_role('button', name='Choose a date').click()
+    calendar = field.get_by_role('dialog')
+    expect(calendar).to_be_visible()
+    page.wait_for_timeout(500)  # the open transition scales it for a moment
+    box = calendar.bounding_box()
+    assert box is not None
+    assert box['x'] >= 0, box
+    assert box['x'] + box['width'] <= 375, box
+    # It is usable there: a day can be picked.
+    calendar.locator('button[data-date$="-28"]:not([disabled])').first.click()
+    expect(field.locator('input[type="text"]')).not_to_have_value('')
+
+
+@pytest.mark.parametrize('date_format', ['mdy', 'dmy'])
+def test_the_repeat_last_date_is_typed_or_picked_and_ends_the_rule(
+    page: Page, receipts_server: ReceiptsServer, date_format
+):
+    set_formats(receipts_server, date_format, '12h')
+    number = make_task(receipts_server, f'repeat until {date_format}', days=2, at=None)
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/{number}/')
+    form = page.locator('#task-details-form')
+    rrule = form.locator('input[name="rrule"]')
+    year = YEAR + 2
+
+    form.get_by_role('button', name=re.compile('^Repeat')).click()
+    form.get_by_label('Frequency').select_option('week')
+    form.get_by_label('Ends').select_option('date')
+    until = form.locator('input[aria-label="Last date"]')
+    expect(until).to_be_visible()
+
+    typed = f'12/31/{year}' if date_format == 'mdy' else f'31/12/{year}'
+    until.fill(typed)
+    until.press('Tab')
+    expect(rrule).to_have_value(re.compile(rf'UNTIL={year}1231$'))
+    repeat_button = form.get_by_role('button', name=re.compile(r'^Every week'))
+    expect(repeat_button).to_contain_text(f'until {typed}')
+
+    # Pick another day from the calendar (the month shown is the one of the typed date).
+    field = until.locator('xpath=ancestor::div[@data-field-wrap][1]')
+    field.get_by_role('button', name='Choose a date').click()
+    field.locator(f'button[data-date="{year}-12-15"]').click()
+    expect(rrule).to_have_value(re.compile(rf'UNTIL={year}1215$'))
+    picked = f'12/15/{year}' if date_format == 'mdy' else f'15/12/{year}'
+    expect(until).to_have_value(picked)
+    expect(repeat_button).to_contain_text(f'until {picked}')
+
+    # A refused typo leaves the rule where it was.
+    until.fill('31/31/2030')
+    until.press('Tab')
+    expect(until).to_have_attribute('aria-invalid', 'true')
+    expect(rrule).to_have_value(re.compile(rf'UNTIL={year}1215$'))
 
 
 # -- 4. The time field -----------------------------------------------------------------------------
