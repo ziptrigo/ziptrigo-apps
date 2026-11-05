@@ -43,7 +43,7 @@ send are checked here only for arrival, subject and links; `emails.md` has them 
   `Receipts`, `Short URLs`, `To-do`, with its icon) or, for anything else, the source label made
   readable (`billing` -> `Billing`, `qa` -> `Qa`, with a generic bell icon), then ` · ` and a
   relative time (`just now`, `2 minutes ago`, one unit) whose tooltip is the exact local time
-  (`2026-11-01 15:21` style).
+  (`2026-11-01 3:21 PM` style: ISO date, then the time on the account's clock; `15:21` on a 24-hour account).
 
 ## Reference strings (from the code)
 
@@ -284,10 +284,10 @@ step makes the reminders due and runs the job (`apps.todo.jobs.send_reminders`).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | On `/todo/` add `Notif call` with **Date** tomorrow and **Time** `09:00` (quick add). Open its page and record its number as `T_CALL`. | **Reminders** lists "5 minutes before (in-app)" (the default). |
+| 1 | On `/todo/` add `Notif call` with **Date** tomorrow and **Time** `9am` (quick add; the box shows `9:00 AM`). Open its page and record its number as `T_CALL`. | **Reminders** lists "5 minutes before (in-app)" (the default). |
 | 2 | In the Reminders add row choose **1 hour before**, channel **Email**, **Add**. | "1 hour before (email)" is listed too. |
 | 3 | **(shell step)** `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.todo.models import Reminder; print(Reminder.objects.filter(task__user__email='<NOTIF_B>', task__number=<T_CALL>).update(fire_at=timezone.now() - timedelta(minutes=1), sent_at=None)); from apps.todo.jobs import send_reminders; send_reminders()"` | Prints `2`. |
-| 4 | Reload any page and open the bell. | **One** new notification: `Notif call`, source `To-do`, body `Due <tomorrow as "2 Nov 2026">, 09:00`. Not two: the email-only reminder made no notification. |
+| 4 | Reload any page and open the bell. | **One** new notification: `Notif call`, source `To-do`, body `Due <tomorrow as "Nov 2, 2026">, 9:00 AM` (always the public wording, whatever the account's date and time format, issue #245). Not two: the email-only reminder made no notification. |
 | 5 | Click it. | `/todo/<T_CALL>/`; its **History** lists the in-app delivery. |
 | 6 | Open `/__e2e__/mail/?to=<NOTIF_B>`. | One email `Reminder: Notif call` (from the email-only reminder; `todo.md` / `emails.md` check its content). |
 | 7 | Run step 3's `send_reminders()` part again: **(shell step)** `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"`. | Nothing new in the bell (a reminder is delivered once). |
@@ -415,6 +415,19 @@ preconditions: without it the endpoint answers `404` to everything, which is ste
 | 7 | Signed out: open `/push/key/`. | Redirected to the sign-in page (`/push/subscribe/` and `/push/unsubscribe/` likewise need a session). |
 | 8 | On a server started **without** the VAPID settings, step 2 with a fresh token from step 1. | `404`, `{"detail": "Push notifications are not available."}`. |
 | 9 | Make a new `TOKEN` (step 1), change `<NOTIF_A>`'s password on `/account/`, then step 2 with it. | `400` `{"detail": "Invalid answer."}`: answers stop working after a password change. |
+
+### NOTIF-23 Notification times and texts follow one wording
+
+**Purpose:** a notification's text is the same for everyone (issue #245), while the exact time in its tooltip follows
+the account's format; pushes use the same public wording.
+**Preconditions:** NOTIF-15 done (the `Notif call` reminder notification); the Appearance settings of ACC-46.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | With `dd/mm/yyyy` + `24-hour` saved, open the bell and `/notifications/`. | The reminder's body still reads `Due Nov 2, 2026, 9:00 AM` (public wording, 12-hour), not `02/11/2026`/`09:00`. |
+| 2 | Hover the relative time (`2 minutes ago`) of any notification. | The tooltip reads `YYYY-MM-DD HH:MM` (24-hour, the account's clock, browser zone) without "UTC"; with `12-hour` it reads `YYYY-MM-DD h:mm AM/PM`. |
+| 3 | (Push, NOTIF-22's shell steps) read a pushed reminder's payload body and a snooze answer. | `Due Nov 2, 2026, 9:00 AM`; `Snoozed until 9:15 AM.` / `Snoozed until Thu Oct 29, 9:15 AM.` in the public wording whatever the account's format. |
+| 4 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
 ## Out of scope
 

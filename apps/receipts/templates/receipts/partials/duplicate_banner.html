@@ -1,3 +1,4 @@
+{% load datetime_format %}
 {% comment %} The "possible duplicate" banner. `#duplicate-banner` is always present, so "Not a duplicate"
    (and the in-progress poll) can swap it. {% endcomment %}
 <div id="duplicate-banner">
@@ -6,7 +7,7 @@
         <i class="fas fa-triangle-exclamation text-amber-600 dark:text-amber-400" aria-hidden="true"></i>
         <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">
             <span class="font-medium text-gray-900 dark:text-gray-100">Possible duplicate</span> of
-            {% firstof duplicate_of.vendor duplicate_of.original_filename 'another receipt' %}{% if duplicate_of.receipt_date %}, {{ duplicate_of.receipt_date|date:'Y-m-d' }}{% endif %}{% if duplicate_of.amount is not None %}, {{ duplicate_of.currency }} {{ duplicate_of.amount|floatformat:'2g' }}{% endif %}
+            {% firstof duplicate_of.vendor duplicate_of.original_filename 'another receipt' %}{% if duplicate_of.receipt_date %}, {{ duplicate_of.receipt_date|fdate }}{% endif %}{% if duplicate_of.amount is not None %}, {{ duplicate_of.currency }} {{ duplicate_of.amount|floatformat:'2g' }}{% endif %}
         </p>
         <div class="flex items-center gap-3">
             <a href="{% url 'receipts:detail' duplicate_of.pk %}"

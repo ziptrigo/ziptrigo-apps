@@ -125,11 +125,26 @@
         return number + suffix;
     }
 
-    // `2026-11-02` as `2 Nov 2026`, the server's `describe` format; anything else as typed.
+    // The site's date wording, core/js/datetime_format.js (not loaded under Node).
+    function wording() {
+        return typeof window !== 'undefined' ? window.ZTDateTime : null;
+    }
+
+    // `2026-11-02` as the user's date (`11/02/2026`, `02/11/2026`), the server's `describe` format;
+    // anything else as typed.
     function untilText(iso) {
         var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
         var month = match ? MONTHS[parseInt(match[2], 10) - 1] : null;
-        return month ? parseInt(match[3], 10) + ' ' + month.slice(0, 3) + ' ' + match[1] : iso;
+        if (!month) return iso;
+        var z = wording();
+        if (z) return z.formatIsoDate(iso, 'full');
+        return parseInt(match[3], 10) + ' ' + month.slice(0, 3) + ' ' + match[1];
+    }
+
+    // A month and day in words in the user's order: `March 3` or `3 March`.
+    function monthDayText(month, day) {
+        var z = wording();
+        return z ? z.monthDayWords(month, day) : day + ' ' + MONTHS[month - 1];
     }
 
     // A short sentence for the button, in step with the server's `describe` for these rules.
@@ -149,7 +164,7 @@
             } else if (state.monthKind === 'day') text += ' on the ' + ordinalDay(whole(state.monthDay, 1, 31, 1));
         }
         if (state.freq === 'year' && state.yearKind === 'date') {
-            text += ' on ' + whole(state.yearDay, 1, 31, 1) + ' ' + MONTHS[whole(state.yearMonth, 1, 12, 1) - 1];
+            text += ' on ' + monthDayText(whole(state.yearMonth, 1, 12, 1), whole(state.yearDay, 1, 31, 1));
         }
         if (state.ends === 'count') text += ', ' + whole(state.count, 1, 1000, 1) + ' times';
         else if (state.ends === 'date' && state.until) text += ', until ' + untilText(state.until);

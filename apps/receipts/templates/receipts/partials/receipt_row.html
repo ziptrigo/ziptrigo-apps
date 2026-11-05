@@ -1,9 +1,10 @@
+{% load datetime_format %}
 {% load receipts_ui %}
 <li id="receipt-{{ receipt.pk }}">
     <a href="{% url 'receipts:detail' receipt.pk %}"
        class="block px-4 py-4 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
         <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 md:grid-cols-[6.5rem_minmax(0,1fr)_9.5rem_7rem_8.5rem] md:items-center">
-            <span class="hidden md:block text-sm text-gray-700 dark:text-gray-300 tabular-nums">{{ receipt.receipt_date|date:'Y-m-d'|default:'—' }}</span>
+            <span class="hidden md:block text-sm text-gray-700 dark:text-gray-300 tabular-nums">{{ receipt.receipt_date|fdate|default:'—' }}</span>
             <span class="min-w-0 truncate text-sm font-medium text-sage-600 dark:text-sage-300">
                 {% if receipt.vendor %}{{ receipt.vendor }}{% elif receipt.original_filename %}{{ receipt.original_filename }}{% elif receipt.source == 'email' %}Email body{% else %}Receipt{% endif %}
             </span>
@@ -14,7 +15,7 @@
             <span class="justify-self-end md:justify-self-start">{% status_pill receipt.status %}</span>
 
             <span class="col-span-2 md:hidden min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">
-                {{ receipt.receipt_date|date:'Y-m-d'|default:'No date' }}
+                {{ receipt.receipt_date|fdate|default:'No date' }}
                 {% if receipt.category %}&middot; {{ receipt.category.name }}{% endif %}
                 {% if receipt.amount is not None %}&middot; {{ receipt.currency }} {{ receipt.amount|floatformat:'2g' }}{% endif %}
             </span>
@@ -40,7 +41,7 @@
                 {% if receipt.possible_duplicate_of_id and not receipt.duplicate_dismissed %}
                 &middot; <span class="text-amber-700 dark:text-amber-400"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> possible duplicate</span>
                 {% endif %}
-                &middot; added {{ receipt.created_at|date:'M j' }}
+                &middot; added {{ receipt.created_at|fdate:'compact' }}
             </p>
         </div>
     </a>

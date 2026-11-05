@@ -1193,7 +1193,7 @@ class TestDescribeParams:
         )
 
         assert describe_params(params) == (
-            'priority none, 2 · no label · 1 Nov 2026 to 30 Nov 2026 · /a.b/ · '
+            'priority none, 2 · no label · Nov 1, 2026 to Nov 30, 2026 · /a.b/ · '
             'including completed · by title'
         )
 
@@ -1201,11 +1201,11 @@ class TestDescribeParams:
         assert describe_params(FilterParams(q='a+', mode='regex')) == '/a+/'
         assert (
             describe_params(FilterParams(date_range='custom', date_from=date(2026, 1, 5)))
-            == 'from 5 Jan 2026'
+            == 'from Jan 5, 2026'
         )
         assert (
             describe_params(FilterParams(date_range='custom', date_to=date(2026, 1, 5)))
-            == 'until 5 Jan 2026'
+            == 'until Jan 5, 2026'
         )
 
     def test_a_label_that_is_gone_is_left_out(self):

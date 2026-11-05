@@ -26,7 +26,10 @@ def _checked_themes(content: str) -> list[str]:
     """The values of the theme radios that are checked, in page order."""
     inputs = re.findall(r'<input type="radio"[^>]*>', content, flags=re.DOTALL)
     return [
-        value for tag in inputs if 'checked' in tag for value in re.findall(r'value="(.*?)"', tag)
+        value
+        for tag in inputs
+        if 'name="theme"' in tag and 'checked' in tag
+        for value in re.findall(r'value="(.*?)"', tag)
     ]
 
 

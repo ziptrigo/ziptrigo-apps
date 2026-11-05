@@ -10,7 +10,6 @@ render as HTML in the recipient's inbox. No feedback text goes into a subject li
 """
 
 import logging
-from datetime import UTC
 
 from django.conf import settings
 from django.tasks import task
@@ -18,6 +17,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 
 from apps.accounts.models import User
+from apps.core.datetime_format import utc_date_time
 from apps.core.services.email import send_email
 
 from ..models import Feedback
@@ -33,8 +33,7 @@ def _quote(text: str) -> str:
 
 
 def _submitted_at(feedback: Feedback) -> tuple[str, str]:
-    created_at = feedback.created_at.astimezone(UTC)
-    return f'{created_at:%Y-%m-%d}', f'{created_at:%H:%M}'
+    return utc_date_time(feedback.created_at)
 
 
 def active_superusers():
@@ -110,7 +109,7 @@ def notify_superusers_of_feedback(feedback_id: str) -> None:
     )
     context = {
         'sender': sender,
-        'submitted': f'{date} {time} UTC',
+        'submitted': f'{date}, {time} UTC',
         'status': feedback.get_status_display(),
         'description': feedback.description,
         'admin_url': admin_url,

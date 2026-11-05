@@ -12,6 +12,7 @@ from django.urls import reverse
 
 from apps.accounts.tests.factories import UserFactory
 from apps.billing.signals import credits_added
+from apps.core.datetime_format import DisplayFormats, override
 from apps.core.products import get_products
 from apps.core.scheduler import get_jobs
 
@@ -63,24 +64,47 @@ class TestTags:
             (1, 'Tomorrow'),
             (2, 'Friday'),
             (6, 'Tuesday'),
-            (7, '4 Nov'),
-            (-3, '25 Oct'),
+            (7, 'Nov 4'),
+            (-3, 'Oct 25'),
         ],
     )
     def test_due_text(self, days, expected):
+        """Words stay words; a date is the public wording where no account's formats are active."""
         today = date(2026, 10, 28)  # a Wednesday
 
         assert due_text(today + timedelta(days=days), today) == expected
 
+    @pytest.mark.parametrize(
+        ('formats', 'expected'),
+        [
+            (DisplayFormats('mdy', '12h'), ['Today', 'Tomorrow', 'Friday', '11/04', '10/25']),
+            (DisplayFormats('dmy', '24h'), ['Today', 'Tomorrow', 'Friday', '04/11', '25/10']),
+        ],
+    )
+    def test_due_text_follows_the_users_date_order(self, formats, expected):
+        today = date(2026, 10, 28)
+
+        with override(formats):
+            texts = [due_text(today + timedelta(days=days), today) for days in (0, 1, 2, 7, -3)]
+
+        assert texts == expected
+
     def test_another_year_shows_the_year(self):
-        assert due_text(date(2027, 1, 5), date(2026, 12, 20)) == '5 Jan 2027'
-        assert due_text(date(2025, 12, 30), date(2026, 1, 2)) == '30 Dec 2025'
+        assert due_text(date(2027, 1, 5), date(2026, 12, 20)) == 'Jan 5, 2027'
+        assert due_text(date(2025, 12, 30), date(2026, 1, 2)) == 'Dec 30, 2025'
+        with override(DisplayFormats('mdy', '12h')):
+            assert due_text(date(2027, 1, 5), date(2026, 12, 20)) == '01/05/2027'
+        with override(DisplayFormats('dmy', '12h')):
+            assert due_text(date(2027, 1, 5), date(2026, 12, 20)) == '05/01/2027'
 
     def test_day_heading(self):
         today = date(2026, 10, 28)
 
-        assert day_heading(date(2026, 10, 29), today) == 'Tomorrow, 29 Oct'
-        assert day_heading(date(2026, 11, 3), today) == 'Tuesday 3 Nov'
+        assert day_heading(date(2026, 10, 29), today) == 'Tomorrow, Oct 29'
+        assert day_heading(date(2026, 11, 3), today) == 'Tuesday, Nov 3'
+        with override(DisplayFormats('dmy', '24h')):
+            assert day_heading(date(2026, 10, 29), today) == 'Tomorrow, 29/10'
+            assert day_heading(date(2026, 11, 3), today) == 'Tuesday, 03/11'
 
     def render(self, source: str, **context) -> str:
         request = RequestFactory().get('/')
@@ -95,13 +119,39 @@ class TestTags:
         later = make_task(user, due_date=date(2026, 12, 1))
         undated = make_task(user)
 
-        for task, text, red in ((overdue, '20 Oct', True), (today, 'Today 09:05', False)):
+        for task, text, red in ((overdue, 'Oct 20', True), (today, 'Today 9:05 AM', False)):
             html = self.render('{% due_badge task %}', task=task, user=user)
             assert text in html
             assert ('bg-red-50' in html) is red
-        assert '1 Dec' in self.render('{% due_badge task %}', task=later, user=user)
+        assert 'Dec 1' in self.render('{% due_badge task %}', task=later, user=user)
         assert self.render('{% due_badge task %}', task=undated, user=user) == ''
         assert 'overdue' in self.render('{% due_badge task %}', task=overdue, user=user)
+
+    @pytest.mark.parametrize(
+        ('formats', 'today_text', 'timed_later', 'title'),
+        [
+            (
+                DisplayFormats('mdy', '12h'),
+                'Today 9:05 PM',
+                '12/01, 9:05 PM',
+                'Due 12/01/2026, 9:05 PM',
+            ),
+            (DisplayFormats('dmy', '24h'), 'Today 21:05', '01/12, 21:05', 'Due 01/12/2026, 21:05'),
+        ],
+    )
+    def test_due_badge_follows_the_users_formats(
+        self, user, wednesday, formats, today_text, timed_later, title
+    ):
+        today = make_task(user, due_date=wednesday, due_time=time(21, 5))
+        later = make_task(user, due_date=date(2026, 12, 1), due_time=time(21, 5))
+
+        with override(formats):
+            today_html = self.render('{% due_badge task %}', task=today, user=user)
+            later_html = self.render('{% due_badge task %}', task=later, user=user)
+
+        assert today_text in today_html
+        assert timed_later in later_html
+        assert f'title="{title}"' in later_html
 
     def test_priority_flag(self, user):
         for priority, tone in ((1, 'red'), (2, 'amber'), (3, 'sky')):

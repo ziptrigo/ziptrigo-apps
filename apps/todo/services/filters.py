@@ -19,6 +19,7 @@ from django.db.models import Exists, OuterRef, Q, QuerySet
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
+from apps.core.datetime_format import DisplayFormats, format_date
 
 from ..models import Label, Task
 from .dates import SORT_DEFAULT, SORTS
@@ -352,13 +353,18 @@ def filter_page(
 # -- Describing ----------------------------------------------------------------------------------
 
 
-def _day(value: date) -> str:
-    return f'{value.day} {value:%b} {value.year}'
-
-
-def describe_params(params: FilterParams, names: Mapping[str, str] | None = None) -> str:
+def describe_params(
+    params: FilterParams,
+    names: Mapping[str, str] | None = None,
+    formats: DisplayFormats | None = None,
+) -> str:
     """A short summary: `priority 1 · @home · next 7 days · "rent*"`. `names` maps label ids
-    to names (`label_names(user)`); a label it doesn't know is left out."""
+    to names (`label_names(user)`); a label it doesn't know is left out. Dates are written in
+    `formats` (default: the formats active for the request; the API passes `PUBLIC`)."""
+
+    def _day(value: date) -> str:
+        return format_date(value, 'full', formats)
+
     parts: list[str] = []
     if params.priorities:
         levels = ['none' if priority == 0 else str(priority) for priority in params.priorities]

@@ -16,6 +16,8 @@ from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
 from apps.accounts.services.timezones import user_today
+from apps.core import datetime_format
+from apps.core.datetime_format import DisplayFormats, format_date, format_time
 from apps.core.markdown import render
 from apps.core.templatetags.core_ui import pill_html
 
@@ -44,18 +46,22 @@ def render_description(context, task: Task) -> SafeString:
         return format_html('<p>{}</p>', linebreaksbr(task.description, autoescape=True))
 
 
-def due_text(due: date, today: date) -> str:
-    """`Today`, `Tomorrow`, the weekday for the next 6 days, else `5 Nov` (the year added when it
-    isn't this year's)."""
+def due_text(due: date, today: date, formats: DisplayFormats | None = None) -> str:
+    """`Today`, `Tomorrow`, the weekday for the next 6 days, else the date in the viewer's format
+    (`11/05`, the year added when it isn't this year's; `Nov 5` on a public page)."""
     delta = (due - today).days  # negative: overdue, shown as a date
     if delta == 0:
         return 'Today'
     if delta == 1:
         return 'Tomorrow'
     if 2 <= delta <= 6:
-        return due.strftime('%A')
-    text = f'{due.day} {due.strftime("%b")}'
-    return text if due.year == today.year else f'{text} {due.year}'
+        return datetime_format.WEEKDAY_NAMES[due.weekday()]
+    return format_date(due, 'compact', formats, today=today)
+
+
+def is_word_label(due: date, today: date) -> bool:
+    """Whether `due_text` wrote a word (Today, Tomorrow, a weekday) rather than a date."""
+    return 0 <= (due - today).days <= 6
 
 
 @register.simple_tag(takes_context=True)
@@ -67,12 +73,17 @@ def due_badge(context, task: Task) -> SafeString:
     overdue = task.is_overdue(today)
     text = due_text(task.due_date, today)
     tone = 'red' if overdue else 'green' if text == 'Today' else 'gray'
-    time = f' {task.due_time:%H:%M}' if task.due_time is not None else ''
+    due_time = format_time(task.due_time) if task.due_time is not None else ''
+    # A word and a time read as one phrase ("Today 9:05 PM"); a date is set off with a comma.
+    joiner = ' ' if is_word_label(task.due_date, today) else ', '
+    title = format_date(task.due_date)
+    if due_time:
+        title = f'{title}, {due_time}'
     return pill_html(
         tone,
-        f'{text}{time}',
+        f'{text}{joiner}{due_time}' if due_time else text,
         icon='far fa-calendar',
-        title=f'Due {task.due_date.isoformat()}{time}',
+        title=f'Due {title}',
         sr_only=' (overdue)' if overdue else '',
     )
 
@@ -180,7 +191,7 @@ def repeat_chip(task: Task, detail: bool = False) -> SafeString:
 
 @register.simple_tag
 def day_heading(day: date, today: date) -> str:
-    """`Tomorrow`, `Wednesday 4 Nov`, ... for the Upcoming page's day headings."""
+    """`Tomorrow, 11/05`, `Wednesday, 11/04`, ... for the Upcoming page's day headings."""
     if day == today + timedelta(days=1):
-        return f'Tomorrow, {day.day} {day.strftime("%b")}'
-    return f'{day.strftime("%A")} {day.day} {day.strftime("%b")}'
+        return f'Tomorrow, {format_date(day, "compact", today=today)}'
+    return format_date(day, 'heading', today=today)

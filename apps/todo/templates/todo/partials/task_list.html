@@ -1,3 +1,4 @@
+{% load datetime_format %}
 {% load todo_ui %}
 {% comment %} The list of the current view, what every page's tabs, sort links and pager swap into #task-list (and
    what the quick-add form re-renders, with `oob_form`/`oob_nav` refreshing the form and the sidebar count out
@@ -32,7 +33,7 @@
     </section>
     {% endif %}
     <section aria-labelledby="today-title">
-        <h2 id="today-title" class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">Today <span class="text-sm font-normal text-gray-500 dark:text-gray-400">{{ today|date:'l j M' }}</span></h2>
+        <h2 id="today-title" class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">Today <span class="text-sm font-normal text-gray-500 dark:text-gray-400">{{ today|fdate:'heading' }}</span></h2>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
             <ul class="divide-y divide-gray-200 dark:divide-gray-700"
                 data-sortable data-empty-list data-reorder-url="{% url 'todo:reorder' %}" data-scope="today">
@@ -50,7 +51,7 @@
 
 {% elif view == 'upcoming' %}
     {% for day, day_tasks in days %}
-    <section class="mb-6" aria-label="{{ day|date:'l j M' }}">
+    <section class="mb-6" aria-label="{{ day|fdate:'heading' }}">
         <h2 class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">{% day_heading day today %}</h2>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
             <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>

@@ -108,9 +108,8 @@ def test_a_request_that_ends_without_its_events_leaves_nothing_behind_for_the_ne
     held = []
     page.route('**/todo/new/', lambda route: held.append(route))
     page.locator('#quick-title').fill('stale entry')
-    page.locator('#quick-add-form input[name="due_time"]').fill(
-        '09:00'
-    )  # refused: a time needs a date
+    page.locator('#due-time-new').fill('9am')  # refused: a time needs a date
+    page.locator('#due-time-new').press('Tab')
     page.click(submit)
     _wait_for(page, held, 1)
 

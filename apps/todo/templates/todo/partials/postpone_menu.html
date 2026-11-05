@@ -19,15 +19,17 @@
                 @click="open = false"
                 class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">Next weekend</button>
         <form method="post" action="{% url 'todo:postpone' task.number %}" hx-post="{% url 'todo:postpone' task.number %}"
+              @htmx:after-request="if ($event.detail.successful) open = false"
               class="flex items-end gap-2 border-t border-gray-200 dark:border-gray-700 px-4 py-2">
             {% csrf_token %}
             <input type="hidden" name="preset" value="date">
             <div class="min-w-0 flex-1">
                 <label for="postpone-date-{{ task.number }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Pick a date</label>
-                <input id="postpone-date-{{ task.number }}" type="date" name="date" required min="{{ today|date:'Y-m-d' }}"
-                       class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                {% with number_s=task.number|stringformat:'s' %}{% with postpone_id='postpone-date-'|add:number_s %}
+                {% include 'core/components/date_picker.html' with name='date' id=postpone_id min=today|date:'Y-m-d' compact=True required=True %}
+                {% endwith %}{% endwith %}
             </div>
-            <button type="submit" @click="open = false"
+            <button type="submit"
                     class="btn px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Set</button>
         </form>
     </div>

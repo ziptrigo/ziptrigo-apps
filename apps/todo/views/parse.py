@@ -30,6 +30,7 @@ from django.views.decorators.http import require_POST
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today, user_tz
 from apps.core import ratelimit
+from apps.core.datetime_format import formats_for
 from apps.core.ratelimit import RateLimitResult
 
 from ..services import TITLE_MAX, get_account
@@ -85,6 +86,7 @@ def parse_view(request: AuthenticatedHttpRequest) -> HttpResponse:
         timezone=tz.key,
         default_time=get_account(user).default_due_time,
         now_local=time(now.hour, now.minute),
+        formats=formats_for(user),
     )
 
     # Over a limit already: stop here. Nothing is counted yet -- the limits are spent in `charge`,

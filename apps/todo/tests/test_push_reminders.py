@@ -84,7 +84,7 @@ class TestPushedWithTheReminder:
 
         payload = sent_payload(webpush)
         assert payload['title'] == 'Pay rent'
-        assert payload['body'] == 'Due 28 Oct 2026, 14:30'
+        assert payload['body'] == 'Due Oct 28, 2026, 2:30 PM'
         assert payload['tag'] == f'todo-task-{task.pk}'
         assert payload['data']['url'] == reverse('todo:task', args=[task.number])
         assert payload['actions'] == [
@@ -211,7 +211,7 @@ class TestAnswers:
         response = tap(client, payload, 'snooze')
 
         # `wednesday` freezes now at 12:00 UTC, the user has no zone (UTC): 15 minutes later.
-        assert response.json() == {'message': 'Snoozed until 12:15.'}
+        assert response.json() == {'message': 'Snoozed until 12:15 PM.'}
         reminder = Reminder.objects.get(task=self.task)
         assert reminder.fire_at == utc(2026, 10, 28, 12, 15)
         assert reminder.snoozed_until == reminder.fire_at
@@ -221,13 +221,13 @@ class TestAnswers:
         reminders.set_snooze(get_account(funded_user), 1440)
 
         assert tap(client, payload, 'snooze').json() == {
-            'message': 'Snoozed until Thu 29 Oct, 12:00.'
+            'message': 'Snoozed until Thu Oct 29, 12:00 PM.'
         }
 
     def test_the_snooze_time_is_on_the_users_clock(self, client, payload, funded_user):
         set_timezone(funded_user, 'America/Chicago')  # UTC-5 until 1 November
 
-        assert tap(client, payload, 'snooze').json() == {'message': 'Snoozed until 07:15.'}
+        assert tap(client, payload, 'snooze').json() == {'message': 'Snoozed until 7:15 AM.'}
 
     def test_a_removed_reminder_cannot_be_snoozed(self, client, payload):
         Reminder.objects.filter(task=self.task).delete()
@@ -309,7 +309,7 @@ class TestSnoozedReminder:
 
         html = web.get(reverse('todo:task', args=[reminder.task.number])).content.decode()
 
-        assert 'Snoozed until Wed 28 Oct 2026, 12:15' in html
+        assert 'Snoozed until Wed 10/28/2026, 12:15 PM' in html
 
     def test_a_completed_task_cannot_be_snoozed(self, funded_user, wednesday):
         task = due_task(funded_user)

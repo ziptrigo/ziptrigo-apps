@@ -10,6 +10,8 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
 
+from apps.core.datetime_format import PUBLIC
+
 from .. import services
 from ..models import SavedFilter
 from ..schemas import (
@@ -49,7 +51,7 @@ def _data(saved: SavedFilter, user, names: dict[str, str]) -> dict:
         'name': saved.name,
         'position': saved.position,
         'params': params.to_dict(),
-        'summary': services.describe_params(params, names),
+        'summary': services.describe_params(params, names, PUBLIC),
         'created_at': saved.created_at,
     }
 

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from ..validators import UNKNOWN_TIMEZONE_MESSAGE, is_valid_timezone
@@ -14,6 +16,9 @@ class AccountSchema(BaseModel):
     email: str
     # An IANA name, or `""` while none is set (treated as UTC).
     timezone: str
+    # How the site writes this user's dates and times (issue #245).
+    date_format: Literal['mdy', 'dmy']
+    time_format: Literal['12h', '24h']
 
 
 class AccountUpdateRequest(BaseModel):
@@ -28,6 +33,10 @@ class AccountUpdateRequest(BaseModel):
     # An IANA zone name (`Europe/Lisbon`), or `""` to clear it. Not security-relevant, so it needs
     # no password. An unknown name is a 422.
     timezone: str | None = None
+    # The date order (`mdy` or `dmy`) and clock (`12h` or `24h`) the site writes dates and times
+    # in (issue #245). Not security-relevant, so no password; an unknown value is a 422.
+    date_format: Literal['mdy', 'dmy'] | None = None
+    time_format: Literal['12h', '24h'] | None = None
 
     @field_validator('timezone')
     @classmethod

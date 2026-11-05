@@ -334,7 +334,7 @@ def test_email_changed_notice_escapes_the_name(user):
         changed_at=datetime(2026, 10, 12, 14, 5, tzinfo=UTC),
     )
 
-    assert '2026-10-12 at 14:05 UTC' in text_body
+    assert 'Oct 12, 2026 at 2:05 PM UTC' in text_body
     assert '&lt;b&gt;Mallory&lt;/b&gt;' in html_body
     assert '<b>Mallory</b>' not in html_body
     assert 'old@example.com' in html_body

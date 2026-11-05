@@ -7,6 +7,7 @@ from apps.core import ratelimit
 from ..auth import JWTAuth
 from ..models import User
 from ..schemas import AccountSchema, AccountUpdateRequest, AccountUpdateResponse
+from ..services.display_formats import set_display_formats
 from ..services.email_change import notify_previous_address
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.timezones import set_timezone
@@ -20,7 +21,14 @@ def get_account(request):
     """The current user's account: id, name, email and time zone (`""` while none is set,
     which is treated as UTC)."""
     user: User = request.auth
-    return AccountSchema(id=str(user.id), name=user.name, email=user.email, timezone=user.timezone)
+    return AccountSchema(
+        id=str(user.id),
+        name=user.name,
+        email=user.email,
+        timezone=user.timezone,
+        date_format=user.date_format,  # ty: ignore[invalid-argument-type]
+        time_format=user.time_format,  # ty: ignore[invalid-argument-type]
+    )
 
 
 @router.put('/account', response=AccountUpdateResponse, auth=jwt_auth)
@@ -89,6 +97,9 @@ def update_account(request, payload: AccountUpdateRequest):
     if payload.timezone is not None:
         set_timezone(user, payload.timezone)
 
+    # Through the service too (issue #245): it writes only the columns that changed.
+    set_display_formats(user, date_format=payload.date_format, time_format=payload.time_format)
+
     if email_changed:
         service = get_email_confirmation_service()
         # Invalidate any still-pending confirmation for the address being left behind first
@@ -116,5 +127,7 @@ def update_account(request, payload: AccountUpdateRequest):
             'name': user.name,
             'email': user.email,
             'timezone': user.timezone,
+            'date_format': user.date_format,
+            'time_format': user.time_format,
         },
     )

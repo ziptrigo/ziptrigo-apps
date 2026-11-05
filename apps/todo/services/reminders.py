@@ -61,6 +61,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import local_datetime, user_today, user_tz
+from apps.core.datetime_format import PUBLIC, WEEKDAY_NAMES, format_date, format_time
 from apps.core.models import PushAction, PushSubscription
 from apps.core.services import notifications, push
 from apps.core.services.email import send_email
@@ -183,16 +184,18 @@ UNIT_MINUTES = {'minutes': 1, 'hours': 60, 'days': MINUTES_PER_DAY}
 
 def due_label(task: Task, today=None) -> str:
     """What a notification and an email say is due: `Due today` for a date-only task due on the
-    owner's today, else `Due 5 Nov 2026` or, with a time, `Due 5 Nov 2026, 14:30` (the owner's
-    wall clock, the very values stored)."""
+    owner's today, else `Due Nov 5, 2026` or, with a time, `Due Nov 5, 2026, 9:05 PM` (the owner's
+    wall clock, the very values stored). Always the public wording, whatever the owner's date and
+    time format: a message is written by a job, with no request to take the formats from, and goes
+    to a notification, a push and an email alike (issue #245)."""
     if task.due_date is None:
         return ''
     due = task.due_date
     if task.due_time is None:
         if due == (today or user_today(task.user)):
             return 'Due today'
-        return f'Due {due.day} {due:%b} {due.year}'
-    return f'Due {due.day} {due:%b} {due.year}, {task.due_time:%H:%M}'
+        return f'Due {format_date(due, "full", PUBLIC)}'
+    return f'Due {format_date(due, "full", PUBLIC)}, {format_time(task.due_time, PUBLIC)}'
 
 
 # -- Creating and changing -----------------------------------------------------------------------
@@ -882,13 +885,16 @@ def snooze(reminder: Reminder, now: datetime | None = None) -> datetime:
 
 
 def snoozed_label(user: User, until: datetime, now: datetime | None = None) -> str:
-    """`14:30` when `until` is on the owner's today, else `Wed 4 Nov, 09:00` (their wall clock)."""
+    """`9:05 PM` when `until` is on the owner's today, else `Wed Nov 4, 9:00 AM` (their wall clock),
+    in the public wording whatever their format (the answer is shown by the phone's notification)."""
     zone = user_tz(user)
     local = until.astimezone(zone)
     today = (now or timezone.now()).astimezone(zone).date()
+    clock = format_time(local.time(), PUBLIC)
     if local.date() == today:
-        return f'{local:%H:%M}'
-    return f'{local:%a} {local.day} {local:%b}, {local:%H:%M}'
+        return clock
+    day = format_date(local.date(), 'compact', PUBLIC, today=today)
+    return f'{WEEKDAY_NAMES[local.weekday()][:3]} {day}, {clock}'
 
 
 def answer_push(answer: PushAction) -> str | None:

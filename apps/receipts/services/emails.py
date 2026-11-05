@@ -25,6 +25,7 @@ from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 
 from apps.accounts.models import User
+from apps.core.datetime_format import format_utc
 from apps.core.services.email import send_email
 from apps.core.services.queue import enqueue_after_commit
 
@@ -131,7 +132,7 @@ def send_attention_email(email_id: str) -> None:
     subject = (
         '1 receipt needs your attention' if count == 1 else f'{count} receipts need your attention'
     )
-    received = (email.received_at or email.created_at or timezone.now()).strftime('%b %d, %H:%M')
+    received = format_utc(email.received_at or email.created_at or timezone.now())
     heading = f'From the email "{email.subject or "(no subject)"}" (received {received} UTC):'
 
     text_lines = [heading]

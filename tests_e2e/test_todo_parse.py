@@ -5,7 +5,8 @@ swapped for a fake that understands one title (`todo_fakes.DATED_TITLE`), so no 
 """
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, expect
 
@@ -53,7 +54,7 @@ def test_accepting_the_chip_fills_the_fields_and_strips_the_title(
 
     chip = page.locator('#quick-parse-chip')
     expect(chip).to_be_visible()
-    expect(chip).to_contain_text('09:00')
+    expect(chip).to_contain_text('9:00 AM')
     expect(chip).to_contain_text('Every month on the 1st')
     expect(chip).to_have_attribute('title', 'every month on the 1st at 9am')
     # Nothing is applied until it is accepted.
@@ -63,8 +64,13 @@ def test_accepting_the_chip_fills_the_fields_and_strips_the_title(
 
     expect(chip).to_be_hidden()
     expect(page.locator('#quick-title')).to_have_value('pay rent')
-    expect(page.locator('#due-date-new')).to_have_value(re.compile(r'^\d{4}-\d{2}-01$'))
-    expect(page.locator('#due-time-new')).to_have_value('09:00')
+    # The fields submit ISO and show the user's wording (a new account is month first, 12-hour).
+    expect(page.locator('#quick-add-form input[name="due_date"]')).to_have_value(
+        re.compile(r'^\d{4}-\d{2}-01$')
+    )
+    expect(page.locator('#due-date-new')).to_have_value(re.compile(r'^\d{2}/01/\d{4}$'))
+    expect(page.locator('#quick-add-form input[name="due_time"]')).to_have_value('09:00')
+    expect(page.locator('#due-time-new')).to_have_value('9:00 AM')
     expect(page.locator('#quick-add-form input[name="rrule"]')).to_have_value(RULE)
     expect(page.locator('#quick-add-form')).to_contain_text('Every month on the 1st')
 
@@ -194,5 +200,7 @@ def test_the_chip_says_what_stays_when_the_text_has_no_time_or_repeat(
     # The date moved; the time and the repeat are what the chip said they were.
     expect(form.locator('input[name="due_time"]')).to_have_value('09:00')
     expect(form.locator('input[name="rrule"]')).to_have_value(RULE)
-    tomorrow = datetime.now(UTC).date() + timedelta(days=1)  # the user's zone is UTC
+    # "Tomorrow" in the account's zone (the browser's, saved on the first sign-in; UTC if none yet).
+    zone = ZoneInfo(page.locator('html').get_attribute('data-user-timezone') or 'UTC')
+    tomorrow = datetime.now(zone).date() + timedelta(days=1)
     expect(form.locator('input[name="due_date"]')).to_have_value(tomorrow.isoformat())

@@ -23,6 +23,8 @@ from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone as dj_timezone
 
+from apps.core.datetime_format import MONTH_ABBR, format_date
+
 from ..models import ClickEvent, DailyLinkDimension, DailyLinkStat, DimensionKind, ShortLink
 from .rollup import DIMENSION_FIELDS, day_start, rolled_up_through, stat_aggregates
 
@@ -212,8 +214,10 @@ def _next_bucket(start: date, bucket_days: int) -> date:
 
 def _bucket_label(start: date, bucket_days: int) -> str:
     if bucket_days == 0:
-        return start.strftime('%b %Y')
-    return f'{start:%b} {start.day}'
+        # Month and year only: no day/month order to get wrong, so it stays words (issue #245).
+        return f'{MONTH_ABBR[start.month - 1]} {start.year}'
+    # A day or a week's first day, in the active wording (the viewer's, or the public one).
+    return format_date(start, 'compact')
 
 
 def build_buckets(days: list[Day], start: date, end: date, filter_bots: bool) -> list[Bucket]:

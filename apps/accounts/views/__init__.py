@@ -1,4 +1,5 @@
 from .apps import apps_form_partial, apps_update
+from .display_formats import formats_update
 from .forgot_password import forgot_password_page
 from .google import google_callback, google_login
 from .login import login_page, logout_page
@@ -21,6 +22,7 @@ from .timezone import timezone_detect
 __all__ = [
     'apps_form_partial',
     'apps_update',
+    'formats_update',
     'account_created_page',
     'account_page',
     'confirm_email_page',

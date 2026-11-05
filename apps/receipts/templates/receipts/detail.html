@@ -1,4 +1,5 @@
 {% extends 'receipts/layout.html' %}
+{% load datetime_format %}
 {% load local_time %}
 {% load static %}
 {% load receipts_ui %}
@@ -14,7 +15,7 @@
        class="text-sm text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Receipts</a>
     <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <h1 class="min-w-0 break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-            {% firstof receipt.vendor receipt.original_filename 'Receipt' %}{% if receipt.receipt_date %}<span class="font-normal text-gray-500 dark:text-gray-400"> &middot; {{ receipt.receipt_date|date:'Y-m-d' }}</span>{% endif %}
+            {% firstof receipt.vendor receipt.original_filename 'Receipt' %}{% if receipt.receipt_date %}<span class="font-normal text-gray-500 dark:text-gray-400"> &middot; {{ receipt.receipt_date|fdate }}</span>{% endif %}
         </h1>
         {% status_pill receipt.status %}
     </div>
@@ -69,7 +70,7 @@
                 {% endif %}
             </p>
             <p id="receipt-added">
-                Added {% local_time receipt.created_at 'short' %}{% if receipt.receipt_date %} (receipt dated {{ receipt.receipt_date|date:'M j' }}){% endif %}
+                Added {% local_time receipt.created_at 'short' %}{% if receipt.receipt_date %} (receipt dated {{ receipt.receipt_date|fdate:'compact' }}){% endif %}
             </p>
         </div>
     </div>

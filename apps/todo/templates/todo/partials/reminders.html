@@ -1,3 +1,4 @@
+{% load datetime_format %}
 {% comment %} The task page's "Reminders" block, inside `#task-panel` (every action answers the whole panel, since the times shown follow the date).
    Needs `task`, `reminders` (each with offset_text, amount, unit), `reminder_history`, `reminder_presets`, `reminder_units`,
    `reminder_channels` and `default_reminder_channel`. Only an open task can be changed; a completed or trashed one lists them. {% endcomment %}
@@ -13,7 +14,7 @@
                 <i class="far fa-bell text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
                 <span class="font-medium text-gray-900 dark:text-gray-100">{{ reminder.offset_text }} <span class="font-normal text-gray-500 dark:text-gray-400">({{ reminder.get_channel_display|lower }})</span></span>
                 <span class="text-xs text-gray-500 dark:text-gray-400">
-                    {% if reminder.skipped %}Skipped{% elif reminder.sent_at %}Sent{% elif reminder.snoozed_until %}Snoozed until{% else %}Fires{% endif %} {{ reminder.fire_at|date:'D j M Y, H:i' }}
+                    {% if reminder.skipped %}Skipped{% elif reminder.sent_at %}Sent{% elif reminder.snoozed_until %}Snoozed until{% else %}Fires{% endif %} {{ reminder.fire_at|fdatetime:'weekday' }}
                 </span>
                 {% if task.is_open %}
                 <span class="ml-auto flex items-center gap-1">
@@ -111,7 +112,7 @@
     <ul id="reminder-history" class="space-y-1 text-sm text-gray-700 dark:text-gray-300">
         {% for delivery in reminder_history %}
         <li>
-            {{ delivery.sent_at|date:'j M Y, H:i' }} &middot; {{ delivery.get_channel_display }}
+            {{ delivery.sent_at|fdatetime }} &middot; {{ delivery.get_channel_display }}
             {% if delivery.note == 'unconfirmed' %}<span class="text-xs text-amber-700 dark:text-amber-400">(not sent: your email address is not confirmed)</span>
             {% elif delivery.note == 'failed' %}<span class="text-xs text-red-600 dark:text-red-400">(could not be sent)</span>
             {% elif delivery.note == 'skipped' %}<span class="text-xs text-gray-500 dark:text-gray-400">(skipped: its time had already passed)</span>{% endif %}

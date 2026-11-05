@@ -104,7 +104,7 @@ class TestPage:
             in (content)
         )
         assert f'{url("dashboard")}?vendor={acme.pk}' in content
-        assert '2026-10-09' in content
+        assert '10/09/2026' in content
 
     def test_the_tabs_count_all_to_vet_and_vetted(self, web, acme, funded_user):
         create_vendor(funded_user, 'Blue Bottle')

@@ -29,10 +29,10 @@
  * and every non-field error, stay only in the slot. Nothing here needs the answer to come from htmx: the
  * same markup in a full page (a plain POST re-rendered) is applied on DOMContentLoaded.
  *
- * A hidden input (a date picker's value, a UTC mirror of a `datetime-local`) is not what the person sees:
+ * A hidden input (a date or time field's value, the UTC mirror of a date and time pair) is not what the person sees:
  * the first visible control in the same box takes its place. `data-error-for="<name>"` on any element picks
  * the control or widget by hand. A widget made of buttons (the date picker) marks its wrapper
- * `data-field-wrap`: a click inside it counts as editing.
+ * `data-field-wrap`: a click inside it (but not in its text box) counts as editing.
  */
 (function () {
     var MARK = 'data-field-error-id'; // on a control: the ids of the messages under it, space separated
@@ -68,6 +68,10 @@
                 return;
             }
             var partner = element.id && form.querySelector('[data-utc-target="' + CSS.escape(element.id) + '"]');
+            // A date and time pair (`data-utc-pair`) stands for its first visible box.
+            if (partner && !isField(partner)) {
+                partner = partner.querySelector('input:not([type=hidden])') || partner;
+            }
             if (!partner && element.parentElement) {
                 partner = element.parentElement.querySelector('input:not([type=hidden]), select, textarea, button');
             }
@@ -274,13 +278,14 @@
     }
     document.addEventListener('input', edited);
     document.addEventListener('change', edited);
-    // A widget made of buttons (the date picker) changes its value without an input event.
+    // A widget made of buttons (the date picker's calendar, the time field's suggestions) changes its
+    // value without an input event on the box the person sees.
     document.addEventListener('click', function (event) {
         var target = event.target;
         if (!(target instanceof Element)) return;
         var box = target.closest('[data-field-wrap]');
         if (!box) return;
-        var control = box.querySelector('button[' + MARK + ']');
-        if (control && control !== target.closest('button')) clearControl(control);
+        var control = box.querySelector('[' + MARK + ']');
+        if (control && control !== target.closest('input, button')) clearControl(control);
     });
 })();

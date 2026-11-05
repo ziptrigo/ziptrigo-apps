@@ -20,8 +20,10 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
   before it; a link for an address the account has since left is refused.
 - **Account page** (`/account/`): profile name (the header menu follows a rename at once), the
   time zone select (`Not set (UTC)`, the browser's detection, the "Use it" hint), theme
-  (Appearance, applied without a reload), the Apps section (switching product apps off and on,
-  putting them in order by drag and by keyboard, issue #246), the promo code form's presence, change password (every
+  (Appearance, applied without a reload), the date and time format (Appearance: `mm/dd/yyyy` or
+  `dd/mm/yyyy`, 12-hour or 24-hour, saved on the account and applied across the site; ACC-46), the
+  Apps section (switching product apps off and on, putting them in order by drag and by keyboard,
+  issue #246), the promo code form's presence, change password (every
   refusal, Django's validators), the "password changed" email and its forgot-password link, other
   sessions signed out; what persists on the account across a new session and another browser.
 - **No self-service deletion**: there is no page or control to delete one's own account; a user is
@@ -327,7 +329,7 @@ a made-up token lands on the expired page with a resend form.
 | 1 | Go to `/account/`. | Tab title and heading `Account Settings`. Sections in order: `Profile Information`, `Credits`, `Appearance`, `Apps`, `Change Password`, then a `Back to Home` link. |
 | 2 | Profile section. | `Email` shows MAIN in a greyed, disabled field (not editable) with the hint `Email cannot be changed`; `Name` holds `Acc Main <run>`; button `Save Profile`. |
 | 3 | Credits section. | `Current balance` then `1000 credits` (the welcome credits); a `Usage History` link to `/billing/credits/`; below it the "Have a promo code?" form. (A balance of exactly 1 reads `1 credit`, 0 and 2+ read `credits`; the seeded `qa.broke@example.com` shows `0 credits`.) |
-| 4 | Appearance section. | A `Theme` group with three options, `System` (selected), `Light` and `Dark`, and a hint that System follows the device's setting. No Save button (see ACC-37). |
+| 4 | Appearance section. | A `Theme` group with three options, `System` (selected), `Light` and `Dark`, and a hint that System follows the device's setting; below it a `Date format` group (`mm/dd/yyyy (<today as 11/05/2026>)` selected, `dd/mm/yyyy (<today as 05/11/2026>)`) and a `Time format` group (`12-hour (9:05 PM)` selected, `24-hour (21:05)`) with the line "Used for every date and time you see across the site; other pages show the new format when they next load. Public pages, such as a download link, always show dates like Nov 5, 2026." No Save button (see ACC-37 and ACC-46). |
 | 5 | Apps section. | One tile per product (`QR Codes`, `File Transfer`, `Receipts`, `Short URLs`, `To-do`), each with a checked checkbox, the product's icon and its name only (no description), and a drag handle. The hint reads `Choose the apps you use. Apps you switch off leave the menu and the home page; nothing in them is deleted, and you can switch them back on any time.` No Save button (see ACC-45). |
 | 6 | Change Password section. | Fields `Current Password`, `New Password` (hint `6 to 128 characters with at least one digit`), `Confirm New Password`, all `type="password"`, each with its own eye toggle (outside the label; `aria-label="Show password"`, `aria-pressed="false"`); button `Change Password`. No `You signed in with Google` note. |
 | 7 | Click each eye toggle. | Each reveals only its own field, flips its own icon and sets its own `aria-pressed="true"`. |
@@ -732,6 +734,27 @@ A fresh MAIN has every app on, in the order QR Codes, File Transfer, Receipts, S
 | 12 | With JavaScript disabled (or using the browser's "disable JavaScript"), open `/account/`, uncheck `Short URLs` and press the `Save Apps` button. | A normal POST and redirect back to `/account/`; `Short URLs` is unchecked and gone from the header. The drag handles are not shown. |
 | 13 | In the admin (`admin.md` ADM), open MAIN's user page. | `Personal info` shows `App order` and `Hidden apps` as read-only values. |
 | 14 | Restore: check every app and put them back in the default order. | - |
+
+### ACC-46 Date and time format
+
+**Purpose:** the Appearance section's date and time format are saved on the account, apply to every
+page after the next load, never to public pages, emails or notifications, and are refused when forged.
+**Preconditions:** sign in as MAIN / P3 (Context A). A second isolated browser profile for step 9.
+`<today>` below is today's date; `<m>`, `<d>`, `<y>` are its month, day and year.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | A brand-new account (register ACC-NEW as in ACC-10 and confirm it): open `/account/`. | `Date format` has `mm/dd/yyyy` selected and `Time format` has `12-hour` selected (the defaults for every account, including ones that existed before the setting). |
+| 2 | Click `dd/mm/yyyy`, then `24-hour`. | Each click saves at once with no Save button, no reload and no focus jump (the clicked option keeps its focus ring); the options stay selected. Reload: both are still selected. |
+| 3 | Open `/todo/`, add `Fmt task` for today at `22:00` (Date and Time boxes of quick add, TODO-41 for the boxes). | The row's badge reads `Today 22:00`; the Date box reads `<d>/<m>/<y>` and the Time box `22:00` after a reload. |
+| 4 | Back on `/account/` pick `mm/dd/yyyy` and `12-hour`, then open `/todo/` again. | The badge reads `Today 10:00 PM`; the Date box reads `<m>/<d>/<y>`. |
+| 5 | Open `/billing/credits/` and `/receipts/` in both formats. | Dates and times follow the choice (`<m>/<d>/<y>, 10:05 PM` or `<d>/<m>/<y>, 22:05`); month-only labels stay words (`Nov 2026`). |
+| 6 | With `dd/mm/yyyy` + `24-hour` saved, open a public page of a transfer or short link you own (`/t/<slug>/`, `/s/<code>+`) while signed in. | Dates read `Nov 5, 2026` and times `9:05 PM`: the same as for a visitor in a private window. `<html>` has `data-date-format="public"`. |
+| 7 | (Devtools) In the console run `fetch('/account/formats/', {method: 'POST', headers: {'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)[1], 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded'}, body: 'date_format=ymd'}).then(r => r.status)`. | `422`; reload: the saved choices are unchanged. A post with neither field answers `422` with "Please choose a date or a time format.". |
+| 8 | Post only `time_format=12h` the same way (a valid one). | `200`; only the time format changed (`date_format` is untouched). |
+| 9 | Second browser profile: sign in as MAIN. | The saved choices apply there too (they live on the account, not in the browser). |
+| 10 | Disable JavaScript for the page (or inspect the markup): the form. | It is a normal `<form method="post" action="/account/formats/">` with a `Save Formats` button inside `<noscript>`; submitting it redirects back to `/account/`. |
+| 11 | API: `curl -s -H "Authorization: Bearer <token>" http://localhost:8765/api/account` and then `PUT` `{"date_format": "dmy", "time_format": "24h"}`; then `{"date_format": "ymd"}`. | `GET` returns `date_format` and `time_format`; the `PUT` answers 200 with both in `user` and they are saved; the bad value is a 422. Restore `mm/dd/yyyy` and `12-hour`. |
 
 ## Out of scope
 

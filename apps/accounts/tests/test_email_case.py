@@ -283,6 +283,8 @@ def test_admin_change_form_leaves_one_of_two_legacy_rows_editable(legacy_pair):
             'name': 'Renamed',
             'status': User.STATUS_ACTIVE,
             'theme': User.THEME_SYSTEM,
+            'date_format': User.DATE_FORMAT_MDY,
+            'time_format': User.TIME_FORMAT_12H,
             'is_active': 'on',
         },
         instance=newer,

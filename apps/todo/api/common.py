@@ -42,6 +42,7 @@ from ninja.errors import HttpError
 from apps.accounts.models import User
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
+from apps.core.datetime_format import PUBLIC
 from apps.core.markdown import ReferenceResolver
 
 from ..models import Attachment, Reminder, Task, TodoAccount
@@ -224,7 +225,7 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
         if active is None
         else {
             'rrule': active.rrule,
-            'rrule_text': recurrence.describe(active.rrule),
+            'rrule_text': recurrence.describe(active.rrule, PUBLIC),
             'mode': active.mode,
             'anchor_date': active.anchor_date,
             'ended_at': active.ended_at,

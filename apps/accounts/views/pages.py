@@ -9,7 +9,14 @@ from django.views.decorators.http import require_http_methods
 from apps.core import ratelimit
 from apps.core.products import products_for
 
-from ..forms import AppsForm, ChangePasswordForm, ProfileForm, ResendConfirmationForm, ThemeForm
+from ..forms import (
+    AppsForm,
+    ChangePasswordForm,
+    DisplayFormatsForm,
+    ProfileForm,
+    ResendConfirmationForm,
+    ThemeForm,
+)
 from ..http import AuthenticatedHttpRequest
 from ..services.email_confirmation import format_validity_minutes, get_email_confirmation_service
 
@@ -25,6 +32,7 @@ def account_page_context(request: AuthenticatedHttpRequest, **overrides: Any) ->
         'form': ProfileForm(instance=request.user),
         'password_form': ChangePasswordForm(request.user),
         'theme_form': ThemeForm(),
+        'formats_form': DisplayFormatsForm(),
         'apps_form': AppsForm(),
         'app_rows': products_for(request.user),
     }

@@ -128,7 +128,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/links/new/`. | Heading "New link". Fields: Destination (required, `url` input), Custom alias (optional), Title, Tags, Expires (date and time), Click limit, Password, a checkbox "Count bots and link previews as clicks" (unchecked), a collapsed "Campaign tracking (UTM)" section, **Create link** and Cancel. |
+| 1 | Open `/links/new/`. | Heading "New link". Fields: Destination (required, `url` input), Custom alias (optional), Title, Tags, Expires (a date field and a time field side by side, in the browser's time zone), Click limit, Password, a checkbox "Count bots and link previews as clicks" (unchecked), a collapsed "Campaign tracking (UTM)" section, **Create link** and Cancel. |
 | 2 | Read the alias help text. | Says 3-32 letters, digits, hyphens or underscores, that capitals don't matter, and **"An alias costs 1 credit, once."** |
 | 3 | Read the password help text. | Says visitors must enter it, and **"A password costs 1 credit, once per link."** |
 | 4 | Look at the line "Your link will be ...". | Reads `http://localhost:8765/s/xxxxxxx`. Typing `Spring-Sale` in the alias field updates it live to `http://localhost:8765/s/Spring-Sale`; clearing the field restores `xxxxxxx`. |
@@ -144,7 +144,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/links/new/`, enter destination `https://example.com/plain?x=1`, leave everything else empty, click **Create link**. | The button disables while it works (it may take a few seconds if the server tries to fetch the page title). No cost panel appears. The browser lands on `/links/<id>/` with a green message "Link created." Record `PLAIN_ID`. |
-| 2 | Read the link page. | A heading showing the code (or the fetched title if the server could reach the internet); status pill **Active**; the short link `http://localhost:8765/s/<7 characters>` with a **Copy** button; the destination `https://example.com/plain?x=1`; **Clicks 0**; **Created** with today's date written like `Nov 1, 2026`; a QR code image and "Download QR code"; buttons **Edit**, **Stats**, **Preview**, **Disable**, **Delete**. Record `PLAIN_CODE`. |
+| 2 | Read the link page. | A heading showing the code (or the fetched title if the server could reach the internet); status pill **Active**; the short link `http://localhost:8765/s/<7 characters>` with a **Copy** button; the destination `https://example.com/plain?x=1`; **Clicks 0**; **Created** with today's date in the account's date format (`11/01/2026`, or `01/11/2026` on a `dd/mm/yyyy` account; ACC-46); a QR code image and "Download QR code"; buttons **Edit**, **Stats**, **Preview**, **Disable**, **Delete**. Record `PLAIN_CODE`. |
 | 3 | Open `/billing/credits/`. | The balance is unchanged (100 credits) and there is no new ledger line. |
 
 ### SU-05 Create a link with an alias: the cost is confirmed first
@@ -176,7 +176,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 7 | Alias `bad alias!`. | The shape error from step 5. |
 | 8 | Tags `ok, bad tag!`. | `Tags: "bad tag!" is not a valid tag: use up to 32 letters, digits, hyphens or underscores.` |
 | 9 | Click limit `0`; then a very large one such as `99999999999`. | `0`: the browser blocks the submit (the field has `min="1"`). The large one reaches the server: "Click limit: Ensure this value is less than or equal to 2000000000." |
-| 10 | Set Expires to a time in the past. | "Expires: The expiry must be in the future." |
+| 10 | Set Expires to a time in the past (date box and time box). | "Expires: The expiry must be in the future." |
 | 11 | Count the links on `/links/`. | Still 2. None of the above created anything or charged anything. |
 
 ### SU-07 Following a link
@@ -199,7 +199,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/links/`. | Two rows, newest first (`QA Sale`, then the plain link). Each row: the path `/s/<code>` with a **Copy** button, the destination (truncated, full text in a tooltip), the title for the alias link, tag chips, an **Active** pill, the click count and the created date, and a "⋮" actions menu. Tabs: All 2, Active 2, the others without a count. A **Tag** dropdown now exists with `promo` and `spring`. |
+| 1 | Open `/links/`. | Two rows, newest first (`QA Sale`, then the plain link). Each row: the path `/s/<code>` with a **Copy** button, the destination (truncated, full text in a tooltip), the title for the alias link, tag chips, an **Active** pill, the click count and the created date (`MM/DD/YYYY`), and a "⋮" actions menu. Tabs: All 2, Active 2, the others without a count. A **Tag** dropdown now exists with `promo` and `spring`. |
 | 2 | Click **Copy** on a row. | The button reads "Copied" for a moment; pasting somewhere gives the full address `http://localhost:8765/s/<code>`. |
 | 3 | Type `sale` in the search box. | After a short pause (no page reload) only `QA Sale` remains; the address bar shows `?q=sale`. Clear it with the × button: both rows return. |
 | 4 | Search `example.com/plain`, then `spring`, then `"`. | The plain link; the alias link (matched by tag); for `"` no rows but the empty state **No links found** with "Try other filters or a different search." and no button. The tab counts do not change with the search (they are the user's totals). |
@@ -247,7 +247,7 @@ A link's id is in its page URL `/links/<id>/`; its code is the last part of the 
 | 3 | Follow it a third time. | The neutral "This link isn't available" page (404). |
 | 4 | On `/links/`, look at the row and the tabs. | A **Click limit reached** pill; the tab "Click limit reached" counts 1 and lists it; the click count reads 2. |
 | 5 | Open the link page and click **Edit**; raise the click limit to `5`, save, and follow the link again. | It redirects again (3 of 5). |
-| 6 | Create the expiring link: destination `https://example.com/expiring`, title `QA Expiring`, **Expires** a minute or two ahead **in your own local time** (the field is in the browser's time zone; the link page then shows the same local time). Follow it at once, then again after it has expired. | The first follow redirects; the second shows the neutral page. The dashboard shows an **Expired** pill and the Expired tab counts it. |
+| 6 | Create the expiring link: destination `https://example.com/expiring`, title `QA Expiring`, **Expires** today's date and a time a minute or two ahead **in your own local time** (the boxes are in the browser's time zone; the link page then shows the same local time). Follow it at once, then again after it has expired. | The first follow redirects; the second shows the neutral page. The dashboard shows an **Expired** pill and the Expired tab counts it. |
 | 7 | Edit the expiring link and clear the expiry (empty field), save. | It works again and the pill is **Active**. (An unchanged, already-passed expiry would also have saved.) |
 
 ### SU-12 A password-protected link
@@ -406,10 +406,10 @@ extras are quoted and charged together.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/links/new/`. Destination `https://example.com/full?a=1`; alias `QA-Full`; title `  QA    Full  ` (extra spaces); tags `Spring Sale, promo, PROMO`; **Expires** tomorrow at 10:30 in your local time; click limit `50`; password `full-pass`; tick **Count bots and link previews as clicks**; expand "Campaign tracking (UTM)" and fill UTM source `news`, UTM medium `email`, UTM campaign `launch`, UTM term `shoes`, UTM content `top`. Click **Create link**. | Nothing is created yet. The amber panel: "This costs **2 credits**, one-off (custom alias 1, password 1). Your balance is `B` credits." and a button **Create the link for 2 credits**. |
-| 2 | Click **Create the link for 2 credits**. | "Link created." on `/links/<id>/` (record `FULL_ID`). Heading `QA Full` (whitespace collapsed); pill **Active**; short link `http://localhost:8765/s/QA-Full`; destination `https://example.com/full?a=1&utm_source=news&utm_medium=email&utm_campaign=launch&utm_term=shoes&utm_content=top` (the UTM parameters appended in that order, `a=1` kept); tags `spring-sale` and `promo` (lower-cased, the space turned into a hyphen, the duplicate dropped); **Expires** tomorrow 10:30 in your local time (the same as typed, no "UTC"); **Click limit** 50; **Password** Protected; **Clicks** 0. |
+| 1 | Open `/links/new/`. Destination `https://example.com/full?a=1`; alias `QA-Full`; title `  QA    Full  ` (extra spaces); tags `Spring Sale, promo, PROMO`; **Expires**: the date tomorrow (type it as `MM/DD/YYYY`) and the time `10:30am`; click limit `50`; password `full-pass`; tick **Count bots and link previews as clicks**; expand "Campaign tracking (UTM)" and fill UTM source `news`, UTM medium `email`, UTM campaign `launch`, UTM term `shoes`, UTM content `top`. Click **Create link**. | Nothing is created yet. The amber panel: "This costs **2 credits**, one-off (custom alias 1, password 1). Your balance is `B` credits." and a button **Create the link for 2 credits**. |
+| 2 | Click **Create the link for 2 credits**. | "Link created." on `/links/<id>/` (record `FULL_ID`). Heading `QA Full` (whitespace collapsed); pill **Active**; short link `http://localhost:8765/s/QA-Full`; destination `https://example.com/full?a=1&utm_source=news&utm_medium=email&utm_campaign=launch&utm_term=shoes&utm_content=top` (the UTM parameters appended in that order, `a=1` kept); tags `spring-sale` and `promo` (lower-cased, the space turned into a hyphen, the duplicate dropped); **Expires** tomorrow `MM/DD/YYYY, 10:30 AM` in your local time (the same as typed, no "UTC", the account's format); **Click limit** 50; **Password** Protected; **Clicks** 0. |
 | 3 | Open `/billing/credits/`. | Balance `B - 2`; two ledger lines of 1 credit each: "Short URL: custom alias for /s/QA-Full" and "Short URL: password for /s/QA-Full". |
-| 4 | Back on the link page click **Edit**. | Tab title "Edit link - ZipTrigo"; the back link reads `QA-Full`. Expires shows tomorrow 10:30 local; Click limit 50; Tags `spring-sale, promo`; **Count bots** ticked; the password field is empty with the placeholder "Leave empty to keep the current password" and a **Remove the password** checkbox below; its help says "You already paid for this extra on this link, so changing the password is free."; the UTM fields are empty and the section says "Leave a field empty to keep what the address already has; to remove a parameter, edit the destination above." Click **Cancel**: back on the link page, nothing changed. |
+| 4 | Back on the link page click **Edit**. | Tab title "Edit link - ZipTrigo"; the back link reads `QA-Full`. The Expires date box shows tomorrow's date and the time box `10:30 AM` (local); Click limit 50; Tags `spring-sale, promo`; **Count bots** ticked; the password field is empty with the placeholder "Leave empty to keep the current password" and a **Remove the password** checkbox below; its help says "You already paid for this extra on this link, so changing the password is free."; the UTM fields are empty and the section says "Leave a field empty to keep what the address already has; to remove a parameter, edit the destination above." Click **Cancel**: back on the link page, nothing changed. |
 | 5 | Open `/links/<FULL_ID>/stats/`. | The **Clicks** card says "Every visit, bots included: the click limit counts them." and the **Bot clicks** card "Crawlers and link previews. Also in the clicks." with a **Change** link to the edit page (a click limit counts bots whatever the checkbox says). |
 | 6 | In the visitor window open `/s/QA-Full`, enter `full-pass` on the password page and press **Continue**. | Sent on to the full destination with its UTM parameters. |
 | 7 | Main window: reload the link page. | **Clicks** 1, and a **Last click** time in your local time. |
@@ -617,6 +617,24 @@ has not entered the protected link's current password.
 | 6 | Open the menu again and press `Enter` on **Delete**. | The dialog "Delete this link?" opens with focus on **Cancel**; `Tab` reaches **Delete**; `Escape` closes it and nothing is deleted. Focus goes back to the row's "⋮" menu button (the menu is closed), never to the page body. |
 | 7 | On `/links/new/`, `Tab` through the whole form, then fill destination `https://example.com/kbd`, title `Kbd`, alias `qa-kbd` and press `Enter` in the Destination field. | Every field, the "Campaign tracking (UTM)" summary (`Enter` opens it), the checkbox (`Space` ticks it), **Create link** and **Cancel** are reachable in that order. `Enter` submits: the cost panel appears and `Tab` reaches its **Create the link for 1 credit** button. Do not press it: `Tab` on to **Cancel** and press `Enter` (back on `/links/`, nothing created or charged). |
 | 8 | Viewport 375 px wide: open `/links/?page=2` as `SU_USER` (SU-27) or any list, a preview page with the report form open, the password page and the takedown confirmation page of the admin. | No horizontal scroll; the pager, the report form and the password field fit the width; buttons are tappable. Restore the desktop viewport. |
+
+### SU-34 Dates and the Expires fields in both formats
+
+**Purpose:** the link pages, the list and the statistics follow the account's date and time format; the Expires
+date field and time field (issue #245) take typed or picked values and store the right instant.
+**Preconditions:** SU-04 and SU-05 done (links exist, one with an expiry); ACC-46's Appearance settings. Note the
+browser's time zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | With `mm/dd/yyyy` + `12-hour`: the list, a link page and the stats page. | The list's created column and the link page's **Created** read `MM/DD/YYYY`; **Expires** and **Last clicked** read `MM/DD/YYYY, h:mm AM/PM` (browser zone); the stats page's "since" reads `MM/DD/YYYY` and the chart's bars are labelled `MM/DD` (or `Nov 2026` when the range is monthly: a month and year stay words). |
+| 2 | Set `dd/mm/yyyy` + `24-hour`; reload the same pages. | `DD/MM/YYYY`, `DD/MM/YYYY, HH:MM`, bars labelled `DD/MM`; month buckets still `Nov 2026`. |
+| 3 | Edit the link with an expiry. | The Expires date box reads `DD/MM/YYYY` and the time box `HH:MM` (the stored instant split in the browser's zone). |
+| 4 | Type `31/12/2030` in the date box and `18:30` in the time box, **Save changes**. | Saved; the link page reads `31/12/2030, 18:30` in the browser's zone. The stored instant is the same everywhere: a browser in Tokyo (UTC+9) saving it stores 09:30 UTC, which a browser in Chicago (UTC-6 in December) reads as `31/12/2030, 03:30`. |
+| 5 | Type only the date (leave the time empty), save. | Valid: the link expires at the end of that day (`23:59`) in the browser's zone. |
+| 6 | Clear both boxes, save. | The link no longer expires ("Expires" absent). A bad date (`32/13/2030`) shows "Enter a date as dd/mm/yyyy, for example ..." under the date box and keeps the saved value (pressing Save while it stands sends nothing and focuses the box); a bad time `99` shows "Enter a time like 21:00.". |
+| 7 | In a private window open `/s/<code>+` (the preview): "Created ...". | The wording is public (`Created <how long ago>`); there is no date in another format. |
+| 8 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
 ## Out of scope
 

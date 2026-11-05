@@ -155,6 +155,8 @@ def dashboard(request: AuthenticatedHttpRequest) -> HttpResponse:
             'inbox_address': inbox_address_for(request.user),
             'categories': ReceiptCategory.objects.filter(user=request.user),
             'date_ranges': DATE_RANGES,
+            # The custom range's two fields are disabled (not sent) until "Custom" is picked.
+            'dates_disabled': parsed.date_range != 'custom',
             'form_values': parsed.params,
         }
     )

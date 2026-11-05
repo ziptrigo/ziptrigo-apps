@@ -1,3 +1,4 @@
+{% load datetime_format %}
 {% load todo_ui %}
 {% comment %} One task in a list. Needs `task` (loaded like a list loads its rows: subtask counts, parent and
    labels), `view` (the list it is in: today, upcoming, all, completed, trash, or subtask on the task page),
@@ -63,7 +64,7 @@
             <span class="text-xs text-gray-500 dark:text-gray-400">in <a href="{% url 'todo:task' task.parent.number %}" class="hover:underline">{{ task.parent.title }}</a></span>
             {% endif %}
             {% if view == 'completed' and task.completed_at %}
-            <span class="text-xs text-gray-500 dark:text-gray-400">Completed {{ task.completed_at|date:'j M Y' }}</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">Completed {{ task.completed_at|fdate }}</span>
             {% endif %}
             {% if view == 'trash' %}
             <span class="text-xs text-gray-500 dark:text-gray-400">{% if task.days_left %}deleted in {{ task.days_left }} day{{ task.days_left|pluralize }}{% else %}deleted soon{% endif %}</span>

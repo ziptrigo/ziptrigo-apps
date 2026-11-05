@@ -10,12 +10,13 @@ Like `password_change`, a `django.tasks` task with an autoescaped `html_body` (t
 the user's free-text name), queued with `enqueue_after_commit`.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from django.tasks import task
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from apps.core.datetime_format import utc_date_time
 from apps.core.services.email import send_email
 from apps.core.services.queue import enqueue_after_commit
 
@@ -58,7 +59,8 @@ def render_email_changed_notice(
     *, user: User, previous_email: str, new_email: str, changed_at: datetime
 ) -> tuple[str, str, str]:
     """Render the subject, text and HTML bodies of the "email changed" notice."""
-    when = f'{changed_at.astimezone(UTC):%Y-%m-%d} at {changed_at.astimezone(UTC):%H:%M} UTC'
+    changed_date, changed_time = utc_date_time(changed_at)
+    when = f'{changed_date} at {changed_time} UTC'
     greeting = f'Hi {user.name},' if user.name else 'Hi there,'
 
     text_body = (

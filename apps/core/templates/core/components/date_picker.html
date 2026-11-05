@@ -1,22 +1,50 @@
 {% comment %}
-Reusable date picker (date only). Include it with:
+Reusable date field (date only): a text box you can type into, in your own date order
+(11/05/2026 or 05/11/2026; ISO 2026-11-05 is accepted too), and a calendar button that opens a picker.
+Include it with:
   {% include 'core/components/date_picker.html' with name='due' value='2026-12-31' min='2026-01-01' %}
-`value`, `min`, `max` are optional YYYY-MM-DD strings; `id` goes on the button (for a <label for>).
-Submits a single hidden input `name` with a YYYY-MM-DD value ('' when nothing is chosen).
+`value`, `min`, `max` are optional YYYY-MM-DD strings; `id` goes on the text box (`hidden_id` on the hidden input: an htmx `from:#...` trigger listens there) (for a <label for>);
+`describedby` is the id of help text; `root_class` adds classes to the wrapper (a width); `compact` makes the text small;
+`amber` draws the amber "please fill this in" border; `required` (a flag) refuses an empty box and hides the calendar's Clear; `aria_label` names it when there is no label; `disabled` (a flag) or `disabled_expr` (an Alpine
+expression in the surrounding scope, e.g. "range !== 'custom'") disables both the box and the value.
+Submits a single hidden input `name` (none when `name` is empty, for a field that only feeds a script) with a YYYY-MM-DD value ('' when nothing is chosen); the visible
+box has no name. The hidden input fires bubbling `input` and `change` events when the date changes.
+The text box's own `change` event is stopped (`@change.stop`): a form that refreshes on `change` hears only the hidden
+input, after the typed text has been read, never a half-typed date.
+The calendar is built only while it is open (a page can hold dozens of closed pickers, one per list row), and it is
+kept inside the viewport (date_picker.js `place()`), whatever side of the page the field is on.
+A form that is submitted asks each visible field to read its text box first (`data-commit-field`, core/js/datetime_format.js):
+a typed date that is refused stops the request and its message stays under the box.
 Behaviour: static/core/js/date_picker.js (Alpine). Also used by core.forms.DatePickerWidget.
 `data-field-wrap` on the wrapper tells core/js/field_errors.js that a click inside it edits the field.
+`x-modelable` lets a parent Alpine scope bind the value with x-model; `x_model` is the expression to bind (e.g. "until").
 {% endcomment %}
-<div x-data="datePicker" data-value="{{ value }}" data-min="{{ min }}" data-max="{{ max }}"
-     class="relative" data-field-wrap @keydown.escape="open = false" @click.outside="open = false">
-  <input type="hidden" name="{{ name }}" :value="value">
-  <button type="button" {% if id %}id="{{ id }}"{% endif %} @click="toggle()"
-          :aria-expanded="open" aria-haspopup="dialog"
-          class="btn w-full flex items-center justify-between rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-left">
-    <span x-text="display" :class="value ? '' : 'text-gray-500 dark:text-gray-400'"></span>
-    <i class="far fa-calendar text-sage-400" aria-hidden="true"></i>
-  </button>
-  <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none" role="dialog" aria-label="Choose a date"
-       class="absolute z-20 mt-1 w-72 rounded-xl border border-sage-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3 origin-top">
+{% load datetime_format %}
+<div x-data="datePicker" x-modelable="value"{% if x_model %} x-model="{{ x_model }}"{% endif %} data-value="{{ value }}" data-min="{{ min }}" data-max="{{ max }}" data-required="{% if required %}true{% else %}false{% endif %}"
+     class="relative {{ root_class }}" data-field-wrap data-commit-field
+     @keydown.escape="if (open) { open = false; $event.stopPropagation() }" @click.outside="open = false">
+  <input type="hidden" {% if hidden_id %}id="{{ hidden_id }}" {% endif %}{% if name %}name="{{ name }}" {% endif %}value="{{ value }}" x-ref="hidden" @field-set="setExternal($event.detail.value)"
+         {% if disabled %}disabled{% endif %}{% if disabled_expr %} :disabled="{{ disabled_expr }}"{% endif %}>
+  <div class="relative">
+    <input type="text" {% if id %}id="{{ id }}"{% endif %} x-ref="text" x-model="text" inputmode="numeric" autocomplete="off"
+           value="{% field_date_text value %}" placeholder="{% field_date_placeholder %}" :placeholder="placeholder"
+           {% if aria_label %}aria-label="{{ aria_label }}"{% endif %}{% if describedby %} aria-describedby="{{ describedby }}"{% endif %}
+           @blur="commit()" @keydown.enter="onEnter($event)" @change.stop
+           {% if disabled %}disabled{% endif %}{% if disabled_expr %} :disabled="{{ disabled_expr }}"{% endif %}
+           class="w-full rounded-lg border {% if amber %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 py-2 pl-3 pr-10 {% if compact %}text-sm{% endif %} disabled:opacity-50">
+    <button type="button" @click="toggle()" aria-label="Choose a date"
+            :aria-expanded="open" aria-haspopup="dialog"
+            {% if disabled %}disabled{% endif %}{% if disabled_expr %} :disabled="{{ disabled_expr }}"{% endif %}
+            class="btn absolute inset-y-0 right-0 flex items-center rounded-r-lg px-3 text-sage-400 disabled:opacity-50">
+      <i class="far fa-calendar" aria-hidden="true"></i>
+    </button>
+  </div>
+  <p x-text="error" :id="messageId" aria-live="polite" :class="error ? 'mt-1.5' : ''"
+     class="text-xs text-red-600 dark:text-red-400"></p>
+  <div x-ref="calendar" x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none" role="dialog" aria-label="Choose a date"
+       class="absolute left-0 z-20 mt-1 w-72 max-w-[calc(100vw-1rem)] rounded-xl border border-sage-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3 origin-top">
+    <template x-if="built">
+    <div>
     <div class="flex items-center justify-between mb-2">
       <button type="button" @click="shiftMonth(-1)" aria-label="Previous month"
               class="p-1.5 rounded-lg text-sage-700 dark:text-sage-100 hover:bg-sage-100 dark:hover:bg-gray-700">
@@ -36,6 +64,7 @@ Behaviour: static/core/js/date_picker.js (Alpine). Also used by core.forms.DateP
         <span>
           <button type="button" x-show="cell" x-text="cell && cell.day"
                   :disabled="cell && cell.disabled" @click="pick(cell)"
+                  :data-date="cell && cell.value"
                   :class="{
                     'bg-sage-300 text-gray-900 font-semibold': cell && cell.selected,
                     'ring-1 ring-sage-400': cell && cell.today && !cell.selected,
@@ -47,8 +76,10 @@ Behaviour: static/core/js/date_picker.js (Alpine). Also used by core.forms.DateP
       </template>
     </div>
     <div class="flex justify-between mt-2 pt-2 border-t border-sage-100 dark:border-gray-700 text-xs">
-      <button type="button" @click="clear()" class="text-sage-600 dark:text-sage-300 hover:underline">Clear</button>
-      <button type="button" @click="goToday()" class="text-sage-600 dark:text-sage-300 hover:underline">Today</button>
+      <button type="button" x-show="!required" @click="clear()" class="text-sage-600 dark:text-sage-300 hover:underline">Clear</button>
+      <button type="button" @click="goToday()" class="ml-auto text-sage-600 dark:text-sage-300 hover:underline">Today</button>
     </div>
+    </div>
+    </template>
   </div>
 </div>

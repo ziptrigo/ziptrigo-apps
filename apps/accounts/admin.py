@@ -50,6 +50,8 @@ class UserAdmin(DjangoUserAdmin):
         'google_sub',
         'microsoft_id',
         'theme',
+        'date_format',
+        'time_format',
         'app_order',
         'hidden_apps',
         'email_confirmed_at',
@@ -63,7 +65,17 @@ class UserAdmin(DjangoUserAdmin):
         ),
         (
             'Personal info',
-            {'fields': ('name', 'timezone', 'theme', 'app_order', 'hidden_apps')},
+            {
+                'fields': (
+                    'name',
+                    'timezone',
+                    'theme',
+                    'date_format',
+                    'time_format',
+                    'app_order',
+                    'hidden_apps',
+                )
+            },
         ),
         (
             'Status',

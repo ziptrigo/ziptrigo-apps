@@ -1,4 +1,5 @@
 {% extends 'receipts/layout.html' %}
+{% load datetime_format %}
 
 {% block title %}Trash - ZipTrigo{% endblock %}
 
@@ -20,7 +21,7 @@
                     <a href="{% url 'receipts:detail' receipt.pk %}"
                        class="block truncate text-sm font-medium text-sage-600 dark:text-sage-300 hover:underline">{{ row.label|capfirst }}</a>
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        {{ receipt.receipt_date|date:'Y-m-d'|default:'No date' }}
+                        {{ receipt.receipt_date|fdate|default:'No date' }}
                         {% if receipt.amount is not None %}&middot; {{ receipt.currency }} {{ receipt.amount|floatformat:'2g' }}{% endif %}
                         &middot; {% if row.days_left %}deleted in {{ row.days_left }} day{{ row.days_left|pluralize }}{% else %}deleted soon{% endif %}
                     </p>

@@ -6,7 +6,8 @@ account menu for a signed-in user or a Login link), the footer (Feedback, copyri
 content" link, the flash messages, the shared confirmation dialog (`core/partials/confirm_modal.html`),
 the product cards on `/`, the "login required" redirects of the product and account pages
 (including an htmx request whose session has ended), unknown URLs, the API docs at `/api/docs`,
-light/dark theme, times shown in the visitor's zone (`{% local_time %}`), the shared field-error
+light/dark theme, times shown in the visitor's zone (`{% local_time %}`) and in the account's date and time
+format, the site's date field and time field (`core/components/date_picker.html`, `time_field.html`), the shared field-error
 behaviour of refused forms (`core/js/field_errors.js`), the fonts, focus ring and reduced motion of
 `core/css/site.css`, the layout at phone width (375 px), page titles, favicon and logo, and console
 errors. Signing in itself is covered in `accounts.md`; here it is only a step. The notification
@@ -326,16 +327,17 @@ set to the page you were on), never renders the login page inside the form (issu
 
 ### CORE-23 Times are shown in the visitor's time zone
 
-**Purpose:** `{% local_time %}` renders a UTC fallback that the browser rewrites in its own zone.
+**Purpose:** `{% local_time %}` renders a UTC fallback that the browser rewrites in its own zone, in the account's date and time format (never the browser's locale, issue #245).
 **Preconditions:** CORE-20, signed in as `CORE_USER`. Note the browser's time zone
 (`Intl.DateTimeFormat().resolvedOptions().timeZone` in the console).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/billing/credits/` and inspect the date of the welcome line ("A gift for your new account"). | A `<time datetime="<UTC ISO, ending in +00:00>" data-local-time="iso">` element whose text is `YYYY-MM-DD HH:MM` **without** "UTC": the same instant in the browser's zone (in the console, `new Date(el.dateTime)` shows the same local date and time). In a zone other than UTC the hour differs from the `datetime` attribute's. |
-| 2 | Open `/notifications/` and hover the relative time of the welcome notification (`just now` or `N minutes ago`). | Its tooltip is the exact local time in the same `YYYY-MM-DD HH:MM` form, without "UTC"; the visible text stays relative. |
+| 1 | Open `/billing/credits/` and inspect the date of the welcome line ("A gift for your new account"). | A `<time datetime="<UTC ISO, ending in +00:00>" data-local-time="iso" data-date-format="mdy" data-time-format="12h">` element whose text is `YYYY-MM-DD h:mm AM/PM` (a 24-hour account: `YYYY-MM-DD HH:MM`) **without** "UTC": the same instant in the browser's zone (in the console, `new Date(el.dateTime)` shows the same local date and time). In a zone other than UTC the hour differs from the `datetime` attribute's. |
+| 2 | Open `/notifications/` and hover the relative time of the welcome notification (`just now` or `N minutes ago`). | Its tooltip is the exact local time in the same `YYYY-MM-DD h:mm AM/PM` form, without "UTC"; the visible text stays relative. |
 | 3 | (If the browser tool can override the time zone, e.g. the DevTools "Sensors" > Location, or CDP `Emulation.setTimezoneOverride`) set `America/Chicago` and reload `/billing/credits/`. | The date and time move to Chicago's wall clock (5 or 6 hours before UTC); the `datetime` attribute is unchanged. Remove the override. |
-| 4 | (If the tool can disable JavaScript) disable it and reload `/billing/credits/`. | The same cell reads `YYYY-MM-DD HH:MM UTC` (the server's fallback, marked UTC). Re-enable JavaScript. |
+| 4 | (If the tool can disable JavaScript) disable it and reload `/billing/credits/`. | The same cell reads `YYYY-MM-DD h:mm AM/PM UTC` (the server's fallback, marked UTC, in the same date and time format). Re-enable JavaScript. |
+| 5 | With the account on `dd/mm/yyyy` and `24-hour` (ACC-46) open `/billing/credits/` and `/todo/<n>/` (a comment's tooltip) and the transfer dashboard (FT plan). | `long` times read `DD/MM/YYYY, HH:MM`, `short` ones drop the year in the current year (`DD/MM, HH:MM`); the `<time>` elements carry `data-date-format="dmy" data-time-format="24h"`. A public page (`/t/<slug>/`) reads `Nov 5, 2026, 9:05 PM` for the same signed-in account (`data-date-format="public"`). |
 
 ### CORE-24 Field errors of a refused form
 
@@ -352,6 +354,31 @@ below: the name is not empty, only spaces).
 | 3 | Type one character into **Password**. | Only the password's message (and its red border and `aria-invalid`) goes away; the name's message stays; the red block above is unchanged until the next submission. |
 | 4 | Switch to dark mode (OS emulation; logged out the page follows the system) and repeat step 2. | The red block, the messages under the fields and the red borders are readable on the dark background. Switch back. |
 | 5 | Leave the page without creating the account. | - |
+
+### CORE-26 The date field and the time field
+
+**Purpose:** the site's own date and time fields (`core/components/date_picker.html`, `time_field.html`) that
+replace the browser's native inputs everywhere (issue #245): typing in the account's order, the calendar, the
+suggestions, errors, and the htmx forms that react to them.
+**Preconditions:** CORE-20, signed in as `CORE_USER` with `mm/dd/yyyy` + `12-hour` (ACC-46). Use the Receipts
+dashboard's **Receipt date > Custom** boxes (`/receipts/`) for the date field and To-do's **Settings > Default
+due time** for the time field (TODO-41 covers the rest of To-do).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/receipts/` choose **Receipt date > Custom**. | Two boxes with the placeholder `mm/dd/yyyy` and a calendar button each (no browser date picker anywhere). |
+| 2 | Type `06/01/2025` in the first box and press Tab. | The box keeps `06/01/2025`; the list refreshes once and the URL has `date_from=2025-06-01` (always ISO). |
+| 3 | Type `2025-07-31` (ISO) in the second box and press Enter. | It shows `07/31/2025`; the list refreshes with `date_to=2025-07-31`. |
+| 4 | Type `13/45/2025` in the first box and Tab. | A red message under the box "Enter a date as mm/dd/yyyy, for example <today as MM/DD/YYYY>."; the box has a red border and `aria-invalid="true"`; the list is **not** refreshed and the URL still has `date_from=2025-06-01`. Fix it to `06/02/2025`: the message goes. |
+| 5 | Empty the first box and Tab. | The date is cleared (`date_from` leaves the URL) and the list refreshes. |
+| 6 | Click the calendar button; use the arrows to move a month; pick a day. | A popover with the month and year (`June 2025`), Monday first; picking a day fills the box (`MM/DD/YYYY`), refreshes the list and closes the popover. **Today** and **Clear** work; Escape and a click outside close it. |
+| 7 | Choose **Any date** in the range select. | Both boxes and their hidden values are disabled and hidden; no stale date is sent. |
+| 8 | Open `/todo/settings/`. In **Default due time** type `7:45`, Tab. | The box shows `7:45 AM`; typing `1930` shows `7:30 PM`; `19.30`, `7:30pm`, `730p` all show `7:30 PM`. |
+| 9 | Click the box. | A list of half-hour times from `12:00 AM` to `11:30 PM` opens under it, the nearest to the current value highlighted; ArrowDown / ArrowUp move (the list scrolls), Enter picks, Escape closes without changing; a click on an option picks it and the box keeps the focus. |
+| 10 | Empty the box and Tab, then **Save**. | "Enter a time." under the box (this field is required); nothing is saved. Type `9am`, **Save**: "Saved.". |
+| 11 | Account page: `dd/mm/yyyy` + `24-hour`; repeat steps 2 and 8. | The date box takes `01/06/2025` as 1 June (the URL has `date_from=2025-06-01`), the placeholder reads `dd/mm/yyyy`; the time box shows `07:45`/`19:30`, its list is `00:00` ... `23:30`, and its message reads "Enter a time like 21:00.". |
+| 12 | Use only the keyboard: Tab into the date box, type, Tab to the calendar button, Space. | A visible focus ring on each; the popover opens; the day buttons are reachable by Tab; Escape closes it. |
+| 13 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
 ### CORE-25 Fonts, focus ring and reduced motion
 

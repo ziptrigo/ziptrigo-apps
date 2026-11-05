@@ -1,0 +1,62 @@
+{% comment %}
+The account page's date and time format form (issue #245), in the Appearance section. `formats_form`
+(a `DisplayFormatsForm`) is only passed back with errors. The saved choices are read from
+`request.user`. A choice submits straight away (htmx, `change`), like the theme: on success the
+server answers `HX-Reswap: none` so the radios stay in place and keep the keyboard focus; only an
+error (422) is swapped in, over the form (`hx-target="this"`). Other pages show the new format
+when they next load. `hx-sync` runs one request at a time and keeps only the last click queued.
+Without JavaScript the Save button, shown only then, does the same with a normal POST and redirect.
+{% endcomment %}
+{% load datetime_format %}
+<form id="formats-form"
+      method="post"
+      action="{% url 'accounts:formats' %}"
+      hx-post="{% url 'accounts:formats' %}"
+      hx-trigger="change"
+      hx-target="this"
+      hx-swap="outerHTML"
+      hx-sync="this:queue last"
+      hx-on::before-request="this.querySelector('[data-formats-error]')?.remove()"
+      class="mt-6">
+  {% csrf_token %}
+
+  {% if formats_form.errors %}
+    <div data-formats-error role="alert" class="mb-4 text-sm p-3 rounded-xl bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700">
+      {% for error in formats_form.non_field_errors %}{{ error }}<br>{% endfor %}
+      {% for field in formats_form %}{% for error in field.errors %}{{ error }}<br>{% endfor %}{% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="grid gap-6 sm:grid-cols-2">
+    <fieldset>
+      <legend class="mb-2 text-sm font-medium">Date format</legend>
+      <div class="flex flex-wrap gap-2">
+        {% sample_date 'mdy' as mdy_example %}
+        {% sample_date 'dmy' as dmy_example %}
+        {% include 'accounts/partials/format_option.html' with name='date_format' value='mdy' label='mm/dd/yyyy' example=mdy_example current=request.user.date_format %}
+        {% include 'accounts/partials/format_option.html' with name='date_format' value='dmy' label='dd/mm/yyyy' example=dmy_example current=request.user.date_format %}
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend class="mb-2 text-sm font-medium">Time format</legend>
+      <div class="flex flex-wrap gap-2">
+        {% sample_time '12h' as twelve_example %}
+        {% sample_time '24h' as twentyfour_example %}
+        {% include 'accounts/partials/format_option.html' with name='time_format' value='12h' label='12-hour' example=twelve_example current=request.user.time_format %}
+        {% include 'accounts/partials/format_option.html' with name='time_format' value='24h' label='24-hour' example=twentyfour_example current=request.user.time_format %}
+      </div>
+    </fieldset>
+  </div>
+  <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+    Used for every date and time you see across the site; other pages show the new format when they next load.
+    Public pages, such as a download link, always show dates like Nov 5, 2026.
+  </p>
+
+  <noscript>
+    <button type="submit"
+            class="btn mt-4 inline-flex justify-center items-center rounded-lg bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:bg-sage-400 text-sm">
+      Save Formats
+    </button>
+  </noscript>
+</form>

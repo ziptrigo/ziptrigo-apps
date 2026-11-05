@@ -296,7 +296,7 @@ class TestEmail:
         for body in (text_body, html_body):
             assert 'Hi Test User,' in body
             assert user.email in body
-            assert '2026-10-12 at 14:05 UTC' in body
+            assert 'Oct 12, 2026 at 2:05 PM UTC' in body
             assert url in body
         assert f'href="{url}"' in html_body
 

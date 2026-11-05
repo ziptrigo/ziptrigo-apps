@@ -1,4 +1,5 @@
 {% extends 'todo/layout.html' %}
+{% load datetime_format %}
 
 {% block title %}Settings - To-do - ZipTrigo{% endblock %}
 
@@ -42,7 +43,7 @@
     <ul class="divide-y divide-gray-200 dark:divide-gray-700">
         {% for email in recent_emails %}
         <li class="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:gap-4">
-            <span class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap sm:w-16">{{ email.received_at|default:email.created_at|date:'M j' }}</span>
+            <span class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap sm:w-24">{{ email.received_at|default:email.created_at|fdate:'compact' }}</span>
             <span class="min-w-0 flex-1 text-sm">
                 <span class="block truncate text-gray-900 dark:text-gray-100">{{ email.from_address|default:'(unknown sender)' }}</span>
                 {% if email.subject %}<span class="block truncate text-xs text-gray-500 dark:text-gray-400">&ldquo;{{ email.subject }}&rdquo;</span>{% endif %}

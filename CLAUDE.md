@@ -672,6 +672,30 @@ is off by a few hours" report to mean the saved zone differs from where the user
 Tests: `apps/accounts/tests/unit/test_timezone.py` and the Playwright `tests_e2e/test_timezone.py`
 (detection on the page after sign-in, the "Use it" hint, a saved zone surviving a new session).
 
+**Date and time format** (issue #245) is the other half of "when": how the site *writes* a date and a
+time. `User.date_format` (`mdy` = `mm/dd/yyyy`, the default, or `dmy` = `dd/mm/yyyy`) and
+`User.time_format` (`12h`, the default, or `24h`) are `CharField(max_length=8, choices, default,
+db_default)` (the #102 lesson; migration `accounts.0008_user_date_time_format`). They are chosen under
+**Appearance** on the account page, next to the theme, and apply to the whole site for a signed-in user:
+every date is numeric (`11/05/2026`, `05/11/2026`), zero-padded, and a time is `9:05 PM` or `21:05`
+(midnight `12:00 AM`, noon `12:00 PM`); a date with a time is `11/05/2026, 9:05 PM`. **Existing users
+get `mdy` + `12h` on deploy**, a visible change from the 24-hour times the site used to show. The form
+is a session view in Theme's shape (`POST /account/formats/`, `accounts:formats`,
+`views/display_formats.py`, `forms.DisplayFormatsForm`, `services.display_formats.set_display_formats`,
+`partials/display_formats_form.html`): radios that save on `change` (`hx-sync="this:queue last"`, a
+`<noscript>` Save button), htmx success is 200 with `HX-Reswap: none` (the radios keep their focus;
+other pages show the new format when they next load, the form says so), without htmx a redirect to the
+account page; both fields are optional, a post with only one changes only that one, an unknown value or
+an empty post is a 422 (the partial for htmx, the whole page otherwise); no rate limit (one column
+write, like Theme). `set_display_formats(user, *, date_format=None, time_format=None)` writes only
+the columns that changed (plus `updated_at`) and returns whether anything did; a value outside the
+choices is a `ValueError`. `GET /api/account` returns both and `PUT /api/account` accepts either or both
+(an unknown value is a schema 422, no password needed); both are read-only in the user admin's "Personal
+info". The JWT API's dates stay ISO values and **its text fields are always the public wording**
+(`Nov 5, 2026`), whatever these settings say. The formatting itself is `core`'s (`apps.core.datetime_format`, see "Templates and static files" >
+"Date and time wording"). Tests: `apps/accounts/tests/unit/test_display_formats.py` and the Playwright
+`tests_e2e/test_date_time_formats.py`.
+
 Tasks queued from inside a transaction go through `apps.core.services.queue.enqueue_after_commit`
 (on commit; a failure to enqueue is logged and swallowed, since the domain write is already
 committed and raising would only turn it into an error page). `accounts`, `feedback` and
@@ -3445,7 +3469,7 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
   page (`/links/<id>/stats/?range=7|30|90|all`: totals always; a server-rendered SVG chart with a table
   fallback and the four top lists behind the paid analytics extra). Another user's link, or one the
   owner deleted, is a 404 on every page. `copyText`/`confirmModal` are the shared Alpine components in
-  `core/js/components.js`. The Expires field and the link page's times use core's local-time
+  `core/js/components.js`. The Expires field (a date field and a time field, issue #245) and the link page's times use core's local-time
   helpers (see "Templates and static files"); the edit form is prefilled in UTC with `Z`
   (`views.form._initial`) for the script to show locally. The list's column header (the sort links)
   is hidden on a phone, so `link_list.html` also has a `md:hidden` "Sort by" bar with the same two
@@ -3745,7 +3769,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   call `todoCancelEdit(form, slot)` (`tasks.js`), which resets the form to the saved text and clears the
   refusal an earlier save left in the slot, as the comment editor already did. The Repeat control is not
   rendered on a subtask or a completed task (it could only answer "A subtask cannot repeat."); its button
-  label writes an `until` date as `2 Nov 2026` like the chip (`recurrence.js`, `untilText`). An inline rename
+  label writes an `until` date in the user's format (`11/02/2026`) like the chip (`recurrence.js`, `untilText`). An inline rename
   updates the tab title (`#task-panel[data-document-title]`); the settings page is "Settings - To-do - ZipTrigo".
   Accessibility: a rendered checklist box is named from its item's text (`tasks.js`), looks dark in dark mode
   (`color-scheme`), and the sidebar's "Filters" label is a plain paragraph inside the labelled nav, not an
@@ -3784,8 +3808,10 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
     **user's** today, not UTC's: `parse_rule(value, today)` and `clean_rule(value, today)` take
     `user_today(user)` (the form, `create_task` and `update_task` pass it), so `UNTIL` of the user's
     own today is accepted at 23:30 in Chicago. `describe(rrule)` is the sentence for the UI
-    (`Every 2 weeks on Monday, Wednesday`, `Every month on the last day`, `Every year on 3 March,
-    5 times`, `..., until 31 Dec 2026`; any other combination `Custom repeat (<rule>)`).
+    (`Every 2 weeks on Monday, Wednesday`, `Every month on the last day`, `Every year on March 3,
+    5 times`, `..., until 12/31/2026`; any other combination `Custom repeat (<rule>)`). The rule keeps
+    words ordered by the date format (`March 3`, or `3 March` for `dmy`); the end date is a real date
+    in the active wording (`describe(rrule, formats=None)`; the API passes `PUBLIC` explicitly).
     `next_date(rrule, after, day=None)` is `rrulestr(..., dtstart=after).after(dtstart, inc=False)`:
     **an explicit `BYMONTHDAY` beyond the month's length is skipped by dateutil, not clamped** (`31`
     has no February) and `-1` is the last day. **A monthly/yearly rule with no day of its own** (no
@@ -4241,10 +4267,11 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
   every minute. **Because the job's window (1 h) is much shorter than `LATE_GRACE` (24 h), a reminder
   added between 1 and 24 hours late is created unsent but swept at the next run without a
   delivery; `LATE_GRACE` only decides whether such a row is created already sent.**
-  - *In-app*: `notifications.notify(source='todo', title=task.title cut to 120, body='Due 28 Oct
-    2026, 14:30', url=reverse('todo:task', ...))` (`Due today` for a date-only task due on the
-    owner's today, `Due 30 Oct 2026` for a date-only one on another day, with a reminder set days
-    ahead) and a `ReminderDelivery` with the notification's id. No `key`: nothing deletes the
+  - *In-app*: `notifications.notify(source='todo', title=task.title cut to 120, body='Due Oct 28,
+    2026, 2:30 PM', url=reverse('todo:task', ...))` (`Due today` for a date-only task due on the
+    owner's today, `Due Oct 30, 2026` for a date-only one on another day, with a reminder set days
+    ahead; always the public wording, whatever the owner's date and time format: a message is written
+    by a job, issue #245) and a `ReminderDelivery` with the notification's id. No `key`: nothing deletes the
     notice later.
   - *Email*: `send_reminder_email(reminder_id, fire_token)` (`default` queue, queued on commit by
     `_queue_email`; if queuing raises, it is logged and a `ReminderDelivery` with `note='failed'` is
@@ -4280,8 +4307,8 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     Complete does; a repeating task creates its next occurrence and is billed as usual): "Completed."
     or "Completed, with N open subtask(s).". **Snooze** is `reminders.snooze`: the reminder is
     armed again `TodoAccount.snooze_minutes` from now (`fire_at` = `snoozed_until`, `sent_at` null,
-    not skipped, failures 0; the task must be open), "Snoozed until 14:30." or, on another day of
-    the user's clock, "Snoozed until Thu 29 Oct, 12:00." (`snoozed_label`). A removed reminder is
+    not skipped, failures 0; the task must be open), "Snoozed until 2:30 PM." or, on another day of
+    the user's clock, "Snoozed until Thu Oct 29, 12:00 PM." (`snoozed_label`, the public wording). A removed reminder is
     "This reminder was removed.". No rate limit: each push is answered at most once.
   - **A snooze is an instant the user chose**, so `_refresh` leaves a snoozed reminder alone in the
     passes that only move the same due moment (time zone, default due time: no `rearm`), and drops
@@ -4378,8 +4405,19 @@ shared in `core`.
   applies, in order: the **concurrency limit**, the **rate limits** (`charge`), the call, the
   **confidence** (under `MIN_CONFIDENCE`, 0.5, the answer is "no date" and there is no chip, as
   Receipts sends a doubtful reading to review) and **`safe_title`**. `chip_text` builds the
-  label: `Today`, `Tomorrow`, `Mon 3 Nov` within the next 6 days, else `3 Nov` (`3 Nov 2027` for
-  another year), `, 09:00` when timed and ` · <describe(rrule)>` when repeating.
+  label in the user's formats: `Today`, `Tomorrow`, `Mon 11/03` within the next 6 days, else `11/03`
+  (`11/03/2027` for another year), `, 9:00 AM` when timed and ` · <describe(rrule)>` when repeating.
+  **The model is told how the user writes numeric dates** (issue #245): `ParseRequest.formats` (the
+  user's `DisplayFormats`, filled by the web endpoint, `POST /api/todo/parse`, `parse_title` on `POST
+  /api/todo/tasks` and email intake) puts one line in `_SYSTEM_PROMPT` (`DATE_ORDER_RULES`: "month
+  first: 5/11 is May 11" or "day first: 5/11 is 5 November"), and the chip, the endpoint's `label` and
+  `rrule_text` are written in those formats explicitly on the web (`POST /todo/parse/`). **That hint is
+  about *reading* the title; what is *written back* is separate** (`ParseRequest.wording`, `None` = in
+  `formats`): the JWT API (`POST /api/todo/parse`, `parsed.label` of `POST /api/todo/tasks`) sets
+  `wording=PUBLIC`, so every API text field -- chip `label`, `rrule_text`, a task's
+  `recurrence.rrule_text`, a saved filter's `summary` -- is the same public wording (`Sun Nov 1, 6:30
+  PM`, `Every year on March 3`) for every client, whatever the account's formats. Receipts' extraction
+  prompt is untouched.
   - **Concurrency.** `parsing._slot` is a module-level `threading.BoundedSemaphore(1)`, taken
     **without waiting** around the model call. A request that finds it taken gets `ParseBusy` (a
     `ParseUnavailable`) without the model being called and without spending any rate limit; the
@@ -4844,6 +4882,11 @@ CLI does with them.
   `--due YYYY-MM-DDTHH:MM` sets one; `--clear-time` removes it, alone or with a date); `label-delete` and `regenerate` ask first (`--yes` skips). Everything
   that prints a title or a label name escapes Rich markup, so a title like `[bold]` shows as typed.
   Tests: `admin/tests/test_todo.py` (HTTP mocked, no Django).
+- **Text is public wording** (issue #245). Every human-readable date in a response -- `recurrence.rrule_text`,
+  `POST /parse`'s `label` and `rrule_text`, `parsed.label` of `POST /tasks`, a saved filter's `summary` --
+  is written in `PUBLIC` explicitly (`Sun Nov 1, 6:30 PM`, `Every year on March 3, until Dec 31, 2028`),
+  the same for every client; the user's own date order only goes to the model, as a hint for reading the
+  title (`ParseRequest.formats`, not `wording`). Tests: `apps/todo/tests/test_date_time_formats.py`.
 - **Not in v1**: an `expected_cost` / quote for task creation (the price is the setting's and the
   answer reports `charged_credits`), search snippets in the API.
 - **Judgement calls** where the issue left room: `GET /tasks/{number}` also returns the task's
@@ -4966,47 +5009,116 @@ tags are one tinted pill from `apps/core/templatetags/core_ui.py` (`{% pill %}`,
 products' own tags (`status_pill`, `link_status_pill`, `due_badge`, ...) wrap; an empty list is
 `core/partials/empty_state.html`. The only un-namespaced templates are core's `admin/` overrides.
 
-**Times of day have two zones, on purpose.** `TIME_ZONE` is UTC and the database holds UTC. A
-signed-in user may also have a saved time zone (`User.timezone`, issue #177, see "Auth" > "Time
-zone"), which `TimezoneMiddleware` activates for the request. The two mechanisms below don't depend
-on each other:
+**Date and time wording, and zones** (issue #245). Three independent things decide what a date or time
+on a page looks like; keep them apart:
 
-- **Server side, the user's saved zone.** With the middleware active, `{{ value|date }}`,
-  `{% now %}`, `localtime()`, `localdate()` and `make_aware()` use the user's zone, so a `|date:"H:i"`
-  on any page (receipts, file transfer dates, `timezone.localdate()` in Receipts' date-range presets,
-  file transfer's end-of-day expiry, core's date picker) is local time for a user who has set a zone,
-  and UTC for one who hasn't, for an anonymous visitor and for the JWT API (no session, so no zone;
-  its values are explicit ISO 8601 anyway). Code that has to compute with the zone calls
-  `apps.accounts.services.timezones` (`user_tz`, `user_today`, `local_datetime`) instead of relying
-  on what is active.
-- **Browser side, the visitor's own zone.** Before there was a saved zone, a time rendered with
-  `|date:"H:i"` was UTC and a bare `datetime-local` value was read as UTC (found by the browser run
-  of the Short URLs AI plan: from Chicago, an expiry "2 minutes from now" was refused as past).
-  `core/js/local_time.js`, loaded on every page by `core/base.html` and re-run on whatever htmx swaps
-  in (`htmx:load`), converts both ways **using the browser's zone, not the saved one** (the two are
-  normally the same place; when they aren't, a `{% local_time %}` shows where the visitor is, while
-  `|date` shows where the account says they live). It is independent of the middleware: the tag
-  always renders the UTC value and the UTC fallback whatever zone is active
-  (`apps/accounts/tests/unit/test_timezone.py` renders it under another active zone), and the
-  inputs always submit UTC.
+- **The zone** (`TIME_ZONE` is UTC and the database holds UTC; a signed-in user may also have a saved
+  time zone, `User.timezone`, issue #177, see "Auth" > "Time zone", which `TimezoneMiddleware`
+  activates for the request). With it active, `localtime()`, `localdate()`, `make_aware()` and
+  `{% now %}` use the user's zone, and so does the formatting below (an aware datetime is converted
+  with `timezone.localtime` first). Code that has to compute with the zone calls
+  `apps.accounts.services.timezones` (`user_tz`, `user_today`, `local_datetime`).
+- **The wording** (`apps.core.datetime_format`, `User.date_format` / `time_format`, see "Auth" >
+  "Date and time format"). **A page never formats a date itself**: it uses `{% load datetime_format
+  %}` with `|fdate`, `|ftime`, `|fdatetime` (each takes a style), or `{% local_time %}`.
+  `DisplayFormats(date_order, clock)` is a frozen dataclass; `date_order` is `mdy`, `dmy` or `public`.
+  **`PUBLIC`** is the fixed wording of everything public: `Nov 5, 2026` (month as three letters,
+  English, written by hand so the process locale never changes it) and `Nov 5, 2026, 9:05 PM`. A context
+  variable holds the formats active for the request (`activate`, `deactivate`, `get_active`, default
+  `PUBLIC`, and the `override(formats)` context manager). `TimezoneMiddleware` activates the signed-in
+  user's (`formats_for(user)`, duck-typed on `date_format` / `time_format`) and deactivates after the
+  response; it skips `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`, `/t/`, `/static/`, `/api/`), so
+  **public pages and the API render `PUBLIC` for everyone**, a signed-in owner included. Any other
+  page an anonymous visitor reaches renders `PUBLIC` too. **Messages are always public**: an email, a
+  notification or a push is written by a job or for someone who may have no account, so it passes
+  `PUBLIC` explicitly (`format_date(..., PUBLIC)`) or uses `format_utc(value)` /
+  `utc_date_time(value)` (UTC, public wording; the email says "UTC" next to it): the file transfer
+  emails (`This link expires on Nov 5, 2026, 9:05 PM UTC.`), Receipts' attention email, the feedback,
+  email-changed and password-changed emails, and To-do's reminders (`due_label`: `Due Nov 5, 2026,
+  9:05 PM`, `Due today`; `snoozed_label`: `9:05 PM`, `Thu Nov 5, 9:05 AM`). Never rely on whatever was
+  last active in a thread.
+  Styles (`format_date(value, style, formats=None, today=None)`): `full` (`11/05/2026`), `compact`
+  (`11/05`, the year added when it is not the current one in the active zone: `11/05/2027`; `Nov 5`),
+  `weekday` (`Thu 11/05/2026`) and `heading` (`Thursday, 11/05`); `format_time` (`9:05 PM`, `21:05`) and
+  `format_datetime` (`date, time`); `month_day_words(month, day)` (`March 3`, `3 March` for `dmy`) for
+  the repeat sentences, which keep words. **Where words stay words:** To-do's `Today`, `Tomorrow` and the
+  weekday for the next 6 days (`Today 10:00 PM`, `Thursday 9:05 PM`, then `11/05` or `11/05/2027, 9:05
+  PM`), the calendar header (`November 2026`) and Short URL stats' month buckets (`Nov 2026`); the
+  Short URL day and week buckets follow the setting (`compact`). Where the year was already left out
+  (row badges, "added ...", due chips) `compact` drops it; everywhere else it is `full`. Inputs and
+  `data-*` attributes stay ISO (`Y-m-d`, `H:i`): **`apps/core/tests/test_date_format_guard.py` fails on any
+  template that formats a date with Django's `|date` / `|time`** other than those machine values (a
+  line with `value="`, `min="`, `max="`, `data-` or an include of the date or time field), so a new
+  template cannot bring a fixed format back; a second test in that file does the same for non-test Python
+  (`strftime` / f-string formats with month or weekday names, `%I %p`, locale directives, `%H:%M`, `%d/%m`;
+  machine values, the admin and `__str__` are in a per-entry, reasoned allow-list, and a stale entry fails).
+  **The API writes the public wording in every text field** (its dates are ISO values), the CSV export, the
+  admin and the CLI tables are unchanged. The `|fdate` / `|ftime` / `|fdatetime` filters return `''` for a
+  value that isn't a date or time (and log a warning once per process and filter, never the value), as
+  Django's `|date` does, while the Python functions stay strict. `<html>` carries `data-date-format="mdy|dmy|public"` and `data-time-format=
+  "12h|24h"` (`{% format_data_attrs %}`) for the browser scripts.
+- **The visitor's own zone in the browser.** `core/js/local_time.js`, loaded on every page by
+  `core/base.html` and re-run on whatever htmx swaps in (`htmx:load`), shows times in **the browser's
+  zone, not the saved one** (normally the same place; when they aren't, a `{% local_time %}` shows
+  where the visitor is, while `|fdatetime` shows where the account says they live). The *wording* is
+  the site's, not the browser's locale: `core/js/datetime_format.js` (`window.ZTDateTime`, the twin of
+  the Python module: `formatDate`, `formatTime`, `parseDate`, `parseTime`, `monthDayWords`) reads
+  `<html data-date-format data-time-format>` (or the element's own). The script is independent of the
+  middleware: the tag always renders the UTC value and the UTC fallback in the active wording
+  (`11/05/2026, 9:05 PM UTC`), and the inputs always submit UTC.
 
 The browser-side pieces:
 
 - **Showing**: `{% load local_time %}{% local_time value %}` (`core/templatetags/local_time.py`)
-  renders `<time datetime="<UTC ISO>" data-local-time="long">Oct 27, 2026 13:51 UTC</time>`, the UTC
-  fallback marked "UTC" for a visitor without JavaScript, which the script rewrites locally. Styles:
-  `long` (default), `short` (no year), `iso` (`2026-10-27 08:51`, for tables); `title=True` renders
-  only the attributes for an element of your own and localizes its tooltip instead of its text (the
-  notification list's relative "3 hours ago"). Used by file transfer (dashboard row, download and
-  manage pages), billing history, the receipt page, notifications and Short URLs. A bare date
-  (`|date:"M j"`) needs none of this. **Emails stay in UTC** (no browser to convert them), and should
-  say so.
-- **Entering**: `<input type="datetime-local" data-utc-target="<id>">` with no `name`, next to a
-  hidden input `<id>` that carries the field's `name` and is prefilled in UTC with an offset
-  (`2026-10-27T13:51Z`); the script shows it locally and writes the UTC value
-  (`2026-10-27T13:51:00.000Z`) back on every change, which Django's `DateTimeField` parses as aware.
-  Without JavaScript the field is not sent. Only Short URLs' Expires uses it so far (file transfer's
-  expiry is a date picker).
+  renders `<time datetime="<UTC ISO>" data-local-time="long" data-date-format="mdy" data-time-format=
+  "12h">10/27/2026, 1:51 PM UTC</time>`, the UTC fallback marked "UTC" for a visitor without JavaScript,
+  which the script rewrites locally. Styles: `long` (default, the `full` date and the time), `short` (the
+  `compact` date: no year this year), `iso` (`2026-10-27 1:51 PM`, for tables; the date stays ISO, the
+  time follows the clock); `title=True` renders only the attributes for an element of your own and
+  localizes its tooltip instead of its text (the notification list's relative "3 hours ago"). Used by
+  file transfer (dashboard row, download and manage pages), billing history, the receipt page,
+  notifications, Short URLs and To-do's comment times.
+- **Date and time fields.** **No native `<input type="date|time|datetime-local">` anywhere** (their look
+  and order follow the browser's locale, not the account's). `core/components/date_picker.html` +
+  `core/js/date_picker.js` (`DatePickerWidget`, a `forms.DateField` widget, or an `{% include %}`) is a
+  text box showing the date in the user's order (`11/05/2026`; placeholder `mm/dd/yyyy` or `dd/mm/yyyy`;
+  a field on a public page is typed month first), a calendar button and a hidden input carrying the
+  ISO value that is submitted. Typing accepts the user's order with `/`, `-` or `.`, 1- or 2-digit day
+  and month, a 2- or 4-digit year and ISO (`2026-11-05`), parsed on blur and on Enter; a bad or
+  out-of-range (`min` / `max`) date shows a message under the box, sets `aria-invalid` and leaves the
+  hidden value at its previous date (a typo never clears a saved one). `core/components/time_field.html`
+  + `core/js/time_field.js` (`TimeFieldWidget`) is the same for a time: a text box showing `10:00 PM` or
+  `22:00` that accepts `22:00`, `2200`, `10pm`, `10:30 p`, `10.30pm`, `9`, and an ARIA combobox listbox of
+  half-hour suggestions (arrows, Enter, Escape); `required` refuses an empty box. **The hidden input
+  fires bubbling `input` and `change` events when the value changes**, and the text box's own `change` is
+  stopped (`@change.stop`), so an htmx form refreshing on `change` hears only the finished value
+  (Receipts' filters listen with `from:#date_from_value`, the id the `hidden_id` argument puts on the
+  hidden input; To-do search's `hx-trigger="submit, change"` needs nothing), and `field_errors.js` shows
+  server messages under the visible box (a hidden input stands for the first visible control next to it;
+  a click inside `data-field-wrap`, but not in its text box, counts as editing). Other scripts write a
+  value with a `field-set` event on the hidden input (`detail.value`; To-do's AI chip does) and a parent
+  Alpine scope binds one with `x_model='until'` (`x-modelable`; the repeat control's last date). A
+  disabled field is `disabled` or an Alpine `disabled_expr` (To-do search's custom range). Arguments:
+  `name` (empty for a field that only feeds a script), `id` (on the text box), `value`, `min`, `max`,
+  `aria_label`, `describedby`, `root_class`, `compact`, `amber`, `required`, `disabled`.
+  **A typed value that was refused is never silently dropped on save**: every field's root carries
+  `data-commit-field`, and `datetime_format.js` listens for `submit` (capture, on the document, so before
+  htmx's own listener) and, for a non-GET htmx request carrying a form's values without a submit,
+  `htmx:confirm`; it asks each *visible, enabled* field of the form to `commit()` and, if one refuses,
+  cancels the request, keeps the message under the box and focuses it. `required` refuses an empty box
+  (`Enter a date.` / `Enter a time.`) and hides the date calendar's Clear (To-do's Postpone date is required).
+  **The calendar is built only while open** (`built` flag, dropped 300 ms after closing so the fade-out
+  finishes): a closed picker, one per To-do row, is just the text box and the button. `place()` keeps the
+  open calendar inside the viewport (shifts it left of the field when it would overflow). Escape closes
+  only the calendar while it is open (propagation stopped), so a Postpone menu around it stays. The error
+  line is an always-present `aria-live="polite"` paragraph.
+- **Entering an instant** (`data-utc-pair`): Short URLs' Expires is a date field and a time field
+  (no `name`) wrapped in `data-pair-date` / `data-pair-time` inside `<div data-utc-pair
+  data-utc-target="<id>">`, next to a hidden input `<id>` that carries the field's `name` and is
+  prefilled in UTC with an offset (`2026-10-27T13:51Z`); `local_time.js` splits it into the browser's
+  local date and time on load and writes the UTC value (`2026-10-27T13:51:00.000Z`) back whenever
+  either changes (a date alone means the end of that day, `23:59`), which Django's `DateTimeField`
+  parses as aware. Without JavaScript the field is not sent. File transfer's expiry is a date field.
 
 ### Docker
 
