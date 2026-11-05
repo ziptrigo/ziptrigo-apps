@@ -106,9 +106,7 @@
 {% endblock %}
 
 {% block extra_js %}
-{% comment %}Dragging the apps into order (issue #246): the same SortableJS version and integrity hash as To-do's pages.{% endcomment %}
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"
-        integrity="sha512-csIng5zcB+XpulRUa+ev1zKo7zRNGpEaVfNB9On1no9KYTEY/rLGAEEpvgdw6nim1WdTuihZY1eqZ31K7/fZjw=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% comment %}Dragging the apps into order (issue #246): SortableJS and the shared reordering helper, then this page's wiring.{% endcomment %}
+{% include 'core/partials/sortable_script.html' %}
 <script defer src="{% static 'accounts/js/apps_order.js' %}"></script>
 {% endblock %}

@@ -3,7 +3,7 @@
 
 {% comment %} Shared by every To-do page: the sidebar (a top bar on phones), the "Tasks are blocked" banner, the
    page-level message slot and the one confirmation modal the whole page shares. Pages that reorder
-   load SortableJS in `todo_js_libs`. {% endcomment %}
+   load SortableJS and the shared helper (core/partials/sortable_script.html) in `todo_js_libs`. {% endcomment %}
 {% block content %}
 {% comment %} `data-scroll-hint` (tasks.js sets `data-more-right` while there is more to scroll to): on a phone the menus are
    horizontal scrollers with no scrollbar, so the last visible item fades out as the hint. The checkbox rule gives the
