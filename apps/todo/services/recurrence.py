@@ -43,6 +43,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
+from apps.core.datetime_format import DisplayFormats, format_date, month_day_words
 from apps.core.services import notifications
 
 from ..models import Recurrence, RecurrenceMode, Task, TaskSource
@@ -291,9 +292,13 @@ def _every(interval: int, unit: str) -> str:
     return f'Every {unit}' if interval == 1 else f'Every {interval} {unit}s'
 
 
-def describe(rrule: str) -> str:
+def describe(rrule: str, formats: DisplayFormats | None = None) -> str:
     """A sentence for the UI: `Every 2 weeks on Monday, Wednesday`, `Every month on the last day`,
-    `Every year on 3 March, 5 times`. A combination without a sentence is `Custom repeat (<rule>)`.
+    `Every year on March 3, 5 times`. A combination without a sentence is `Custom repeat (<rule>)`.
+
+    The rule keeps words, ordered by the date format (`March 3`, or `3 March` for day first); an
+    end date is a real date in that format (`until 12/31/2026`). `formats` defaults to the active
+    ones, the public wording where there are none.
     """
     custom = f'Custom repeat ({rrule})'
     try:
@@ -335,7 +340,7 @@ def describe(rrule: str) -> str:
         if bymonth or bymonthday:
             if len(bymonth) != 1 or len(bymonthday) != 1 or int(bymonthday[0]) < 1:
                 return custom
-            text += f' on {int(bymonthday[0])} {MONTH_NAMES[int(bymonth[0]) - 1]}'
+            text += ' on ' + month_day_words(int(bymonth[0]), int(bymonthday[0]), formats)
     else:
         return custom
 
@@ -347,7 +352,7 @@ def describe(rrule: str) -> str:
             until = datetime.strptime(parts['UNTIL'], '%Y%m%d')
         except ValueError:
             return custom
-        text += f', until {until.day} {until.strftime("%b")} {until.year}'
+        text += f', until {format_date(until, "full", formats)}'
     return text
 
 

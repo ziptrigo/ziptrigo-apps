@@ -53,7 +53,7 @@ def test_accepting_the_chip_fills_the_fields_and_strips_the_title(
 
     chip = page.locator('#quick-parse-chip')
     expect(chip).to_be_visible()
-    expect(chip).to_contain_text('09:00')
+    expect(chip).to_contain_text('9:00 AM')
     expect(chip).to_contain_text('Every month on the 1st')
     expect(chip).to_have_attribute('title', 'every month on the 1st at 9am')
     # Nothing is applied until it is accepted.
@@ -63,8 +63,13 @@ def test_accepting_the_chip_fills_the_fields_and_strips_the_title(
 
     expect(chip).to_be_hidden()
     expect(page.locator('#quick-title')).to_have_value('pay rent')
-    expect(page.locator('#due-date-new')).to_have_value(re.compile(r'^\d{4}-\d{2}-01$'))
-    expect(page.locator('#due-time-new')).to_have_value('09:00')
+    # The fields submit ISO and show the user's wording (a new account is month first, 12-hour).
+    expect(page.locator('#quick-add-form input[name="due_date"]')).to_have_value(
+        re.compile(r'^\d{4}-\d{2}-01$')
+    )
+    expect(page.locator('#due-date-new')).to_have_value(re.compile(r'^\d{2}/01/\d{4}$'))
+    expect(page.locator('#quick-add-form input[name="due_time"]')).to_have_value('09:00')
+    expect(page.locator('#due-time-new')).to_have_value('9:00 AM')
     expect(page.locator('#quick-add-form input[name="rrule"]')).to_have_value(RULE)
     expect(page.locator('#quick-add-form')).to_contain_text('Every month on the 1st')
 

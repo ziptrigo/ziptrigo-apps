@@ -126,13 +126,15 @@ def test_a_refused_quick_add_marks_the_time_and_leaves_the_task_list_alone(
     receipts_server.login(page)
     page.goto(f'{receipts_server.url}/todo/all/')
     page.locator('#quick-title').fill('call the bank')
-    page.locator('#quick-add-form input[name="due_time"]').fill('09:00')
+    # The time field: a text box the person types into (the hidden input carries 09:00 once read).
+    page.locator('#due-time-new').fill('9am')
+    page.locator('#due-time-new').press('Tab')
     page.click('#quick-add-form button[type="submit"]')
 
-    time_input = page.locator('#quick-add-form input[name="due_time"]')
+    time_input = page.locator('#due-time-new')
     expect(page.locator('#quick-add-msg')).to_contain_text('Time: A time needs a date.')
     expect(time_input).to_have_attribute('aria-invalid', 'true')
-    expect(time_input.locator('xpath=following-sibling::p[1]')).to_have_text('A time needs a date.')
+    expect(page.locator('[data-field-error-message]')).to_have_text('A time needs a date.')
     # The first refused field takes the focus (the submit button had it).
     expect(time_input).to_be_focused()
 
@@ -143,7 +145,7 @@ def test_a_refused_quick_add_marks_the_time_and_leaves_the_task_list_alone(
     expect(page.locator('#task-list')).not_to_have_attribute('aria-busy', 'true')
 
     # Editing the field the message is about takes it away (another field's edit leaves it).
-    page.locator('#quick-add-form input[name="due_date"]').fill('2030-01-15')
+    page.locator('#due-date-new').fill('2030-01-15')
     expect(time_input).to_have_attribute('aria-invalid', 'true')
     time_input.fill('10:30')
     expect(time_input).not_to_have_attribute('aria-invalid', 'true')

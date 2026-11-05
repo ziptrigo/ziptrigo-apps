@@ -62,13 +62,16 @@
 
     <div class="mb-4 grid gap-4 sm:grid-cols-2">
         <div>
-            <label for="id_expires_at" class="block mb-1 text-sm font-medium">Expires <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
-            {% comment %} The visible input is in the browser's time zone; local_time.js keeps the hidden
-               one, which is what is submitted, in UTC. {% endcomment %}
-            <input id="id_expires_at" type="datetime-local" data-utc-target="id_expires_at_utc" aria-describedby="expires-help"
-                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+            <label for="id_expires_date" class="block mb-1 text-sm font-medium">Expires <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>
+            {% comment %} The date and time boxes are in the browser's time zone (no name, so they are not
+               sent); local_time.js keeps the hidden one, which is what is submitted, in UTC. A date
+               without a time means the end of that day. {% endcomment %}
+            <div data-utc-pair data-utc-target="id_expires_at_utc" class="grid grid-cols-2 gap-2">
+                <div data-pair-date>{% include 'core/components/date_picker.html' with name='' id='id_expires_date' aria_label='Expiry date' %}</div>
+                <div data-pair-time>{% include 'core/components/time_field.html' with name='' id='id_expires_time' aria_label='Expiry time' %}</div>
+            </div>
             <input id="id_expires_at_utc" name="expires_at" type="hidden" value="{{ values.expires_at }}">
-            <p id="expires-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">In your own time zone. After this the link stops working.</p>
+            <p id="expires-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">In your own time zone; a date alone means the end of that day. After this the link stops working.</p>
         </div>
         <div>
             <label for="id_max_clicks" class="block mb-1 text-sm font-medium">Click limit <span class="font-normal text-gray-500 dark:text-gray-400">(optional)</span></label>

@@ -407,6 +407,34 @@ Rules:
 - Use `maxlength` / `required` for native validation, and mirror the limit in help text
   ("Up to 1000 characters.").
 
+#### Dates and times
+
+Every date and time a person reads goes through the site's own wording (`apps.core.datetime_format`,
+issue #245), never a hard-coded format and never the browser's locale. A signed-in user chooses, on the
+account page, a numeric date order and a clock; public pages, emails and notifications use one fixed
+wording.
+
+| Where | `mm/dd/yyyy` · 12-hour | `dd/mm/yyyy` · 24-hour | Public |
+|---|---|---|---|
+| Date | `11/05/2026` | `05/11/2026` | `Nov 5, 2026` |
+| Date, year left out (row badges, "added ...") | `11/05` (`11/05/2027` another year) | `05/11` | `Nov 5` |
+| Time | `9:05 PM` (midnight `12:00 AM`, noon `12:00 PM`) | `21:05` | `9:05 PM` |
+| Date and time | `11/05/2026, 9:05 PM` | `05/11/2026, 21:05` | `Nov 5, 2026, 9:05 PM` |
+
+- Templates use `{% load datetime_format %}` with `|fdate`, `|fdate:'compact'`, `|ftime`, `|fdatetime`, or
+  `{% local_time %}` for an instant shown in the visitor's own time zone. Django's `|date` / `|time` are
+  for machine values only (`value="..."`, `data-*`, ISO `Y-m-d` / `H:i`); a test fails on any other use.
+- Words stay words where there is no day/month order to get wrong or a word reads better: `Today`,
+  `Tomorrow` and weekdays in To-do, the calendar header (`November 2026`), month buckets (`Nov 2026`),
+  and a repeat sentence (`Every year on March 3`, `3 March` day first).
+- **Date field** (`core/components/date_picker.html`, `DatePickerWidget`): a text box you can type into in
+  your order (`/`, `-` or `.` between the parts, a 2- or 4-digit year, ISO accepted too) with a calendar
+  button; the hidden input submits ISO. A bad date shows a message under the box and keeps the previous
+  value. **Time field** (`core/components/time_field.html`, `TimeFieldWidget`): a text box that accepts
+  `10pm`, `22:00`, `2200`, `9` and shows the user's clock, with half-hour suggestions. Both fire
+  `input` / `change` on the hidden input and wear `data-field-wrap`. **Never use a native
+  `<input type="date|time|datetime-local">`**: its look and order come from the browser, not the account.
+
 ### 10.3 Form actions
 
 Last block in the form: `mt-6 flex items-center justify-end gap-3` with Secondary Cancel (a link back
@@ -787,6 +815,7 @@ The refresh (#214) brought every product page onto this document. What is left:
 - [ ] Motion uses the tokens and classes of [9. Motion](#9-motion) (`btn`, `animate-*`, `row-enter`); nothing moves on its own; checked with reduced motion on.
 - [ ] Forms: labels tied to controls, one message slot, 422 error partial, `hx-disabled-elt`.
 - [ ] The 422 partial carries each field's error (`{% field_errors %}`, [10.4](#104-messages-and-validation-errors)), so it shows under the field with `aria-invalid` and `aria-describedby`; the message says how to fix it.
+- [ ] Dates and times use `|fdate` / `|ftime` / `|fdatetime` / `{% local_time %}`, never `|date`; date and time inputs are the site's date and time fields, never native ones ([10.2](#102-form-fields)).
 - [ ] Destructive actions go through a confirmation modal.
 - [ ] Icon-only controls have `aria-label`; focus rings intact.
 - [ ] Sentence-case copy; empty state written.

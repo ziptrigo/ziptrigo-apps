@@ -12,9 +12,11 @@
 
         <div class="mb-4">
             <label for="id_receipt_date" class="block mb-1 text-sm font-medium">Receipt date <span class="text-amber-700 dark:text-amber-400" aria-hidden="true">*</span></label>
-            <input id="id_receipt_date" name="receipt_date" type="date" value="{{ receipt.receipt_date|date:'Y-m-d' }}"
-                   {% if 'receipt_date' in missing %}aria-describedby="date-hint"{% endif %}
-                   class="w-full rounded-lg border {% if 'receipt_date' in missing %}border-amber-600 dark:border-amber-400{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2">
+            {% if 'receipt_date' in missing %}
+            {% include 'core/components/date_picker.html' with name='receipt_date' id='id_receipt_date' value=receipt.receipt_date|date:'Y-m-d' describedby='date-hint' amber=True %}
+            {% else %}
+            {% include 'core/components/date_picker.html' with name='receipt_date' id='id_receipt_date' value=receipt.receipt_date|date:'Y-m-d' %}
+            {% endif %}
             {% if 'receipt_date' in missing %}<p id="date-hint" class="mt-1 text-xs text-amber-700 dark:text-amber-400"><i class="fas fa-turn-up fa-rotate-90 mr-1" aria-hidden="true"></i>We couldn't read the date. Check the receipt and fill it in.</p>{% endif %}
         </div>
 

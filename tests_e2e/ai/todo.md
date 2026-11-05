@@ -46,8 +46,12 @@ instead), a real AI model.
 - **Time zone.** A seeded account has no time zone saved, but the site saves the **browser's** zone the first time
   a signed-in page loads (the account page shows it under the profile). So "today" is the browser's date. Cases
   below say "today", "tomorrow" and "yesterday"; compute the dates from the heading of **Today**'s list ("Today
-  Wednesday 28 Oct"). Date inputs are `type=date`: type the date the way the browser expects (`10/28/2026` in an
-  English browser).
+  Wednesday, 10/28"). **Dates and times follow the account's format** (issue #245): a seeded account is
+  `mm/dd/yyyy` + 12-hour, so everything below is written that way (`09:00` reads `9:00 AM`, `22:55` reads
+  `10:55 PM`, the 5th of November reads `11/05/2026`); TODO-41 repeats the key checks with `dd/mm/yyyy` and 24-hour.
+  The Date and Time controls are the site's own **text boxes** with a calendar button and half-hour suggestions
+  (no native date or time inputs): type `10/28/2026` (or `2026-10-28`) and `10pm` (or `22:00`), then Tab, or pick
+  from the calendar and the list.
 - Prices are the defaults: **10 free tasks per calendar month**, then **10 credits** per task. Subtasks and every
   occurrence of a repeating task count. `qa.user@example.com` has 100 credits, `qa.broke@example.com` has none; an
   account registered during the run gets 1,000 welcome credits once confirmed.
@@ -62,10 +66,11 @@ instead), a real AI model.
 - **Files** go to Floci (a local S3 at `http://localhost:4566`): an upload is a `PUT` from the browser to a
   presigned `localhost:4566` URL, and Download / Open redirect to one. Check what the user sees (the file
   downloads with its name and bytes, the image or PDF shows), not the URL.
-- **The AI date parser is a fake** (`tests_e2e/todo_fakes.py`). It understands exactly two titles:
+- **The AI date parser is a fake** (`tests_e2e/todo_fakes.py`). It understands exactly three titles:
   `pay rent every month on the 1st at 9am` (the next 1st on or after today, 09:00, repeating monthly on the 1st,
-  cleaned title `pay rent`) and `call the bank tomorrow` (tomorrow, no time, cleaned title `call the bank`). Every
-  other text has no date.
+  cleaned title `pay rent`), `call the bank tomorrow` (tomorrow, no time, cleaned title `call the bank`) and
+  `pay rent 5/11` (a numeric date in the account's order: May 11 for `mm/dd/yyyy`, 5 November for `dd/mm/yyyy`,
+  in the year after this one; TODO-41). Every other text has no date.
 - **Shell steps.** A step marked "(shell step)" runs a command from the repo root on the machine running the
   server, through the wrapper that uses the running server's exact environment (database, bucket, mail):
   `python tests_e2e/ai/manage.py [--port <port>] shell -c "..."` (pass `--port` when the server is not on 8765).
@@ -171,10 +176,10 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 |---|---|---|
 | 1 | Click **Add task** with the title empty. | The browser's own "fill out this field" prompt (the field is required); nothing is sent. |
 | 2 | Type `Write report`, set the date to today and Priority to **Priority 1**, click **Add task**. | The button shows a spinner and "Adding..." briefly. The task appears under "Today" with a red flag (Priority 1), a green "Today" date and `#1000` next to the title. The box is cleared (title empty, date empty, Priority None). The sidebar count beside Today becomes **1**; the free line reads "1 of 10 free tasks used this month." Record `T_REPORT`=1000. |
-| 3 | Add `Call dentist` with today's date and the time `10:30`. | Appears under Today with "Today 10:30". Count 2. `#1001`. |
-| 4 | Add `Overdue thing` with yesterday's date. | An **Overdue** section appears above Today with the task, its date in red ("<d Mon>", and "(overdue)" for screen readers), and a **Reschedule overdue to today** button. Count 3. `#1002`. |
+| 3 | Add `Call dentist` with today's date and the time `10:30`. | Appears under Today with "Today 10:30 AM" (the Time box takes `10:30`, `10:30am` or `1030`). Count 2. `#1001`. |
+| 4 | Add `Overdue thing` with yesterday's date. | An **Overdue** section appears above Today with the task, its date in red ("<MM/DD>", and "(overdue)" for screen readers), and a **Reschedule overdue to today** button. Count 3. `#1002`. |
 | 5 | Add `Future thing` with the date 5 days from today. | It is not on Today. Count unchanged. `#1003`. |
-| 6 | Type only a time (`09:00`) with no date and a title `Time only`, click **Add task**. | A red message above the fields: "Time: A time needs a date." Nothing is added; what you typed stays. |
+| 6 | Type only a time (`9am`, then Tab: the box shows `9:00 AM`) with no date and a title `Time only`, click **Add task**. | A red message above the fields: "Time: A time needs a date." Nothing is added; what you typed stays. |
 | 7 | Type a title of 501 characters (paste), click **Add task**. | The browser stops it (`maxlength` 500) or a red "Title: ..." line appears; nothing is added. |
 | 8 | Reload the page. | The same tasks, in the same order: Overdue; then Today: `Write report`, `Call dentist` (undated-time ordering: date-only before timed, so Write report first). |
 
@@ -192,7 +197,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 | 5 | Click the `draft` checkbox. | It becomes checked without reloading the page. Click **Edit**: the text now reads `- [x] draft`. Cancel. Reload: still checked. |
 | 6 | Click the `#1001` link. | Opens `/todo/1001/` (`Call dentist`). Go back. |
 | 7 | Hover `https://example.com`; click it. | It opens in a new tab (`target=_blank`); close it. |
-| 8 | In Details, set the time to `14:00`, Priority to **Priority 3**, click **Save**. | The panel re-renders with those values. The list (open `/todo/`) shows a blue flag and "Today 14:00" for the task. |
+| 8 | In Details, set the time to `14:00`, Priority to **Priority 3**, click **Save**. | The panel re-renders with those values. The list (open `/todo/`) shows a blue flag and "Today 2:00 PM" for the task. |
 | 9 | Clear the Date field (leave the time), click **Save**. | Date and time are both empty afterwards (clearing the date clears the time). The task leaves Today. Set the date back to today and Save. |
 | 10 | Edit the description to `<script>alert(1)</script> **x**` and save. | The text appears as plain text (escaped); no alert; **x** is bold. |
 | 11 | Edit the description to 20,001 characters (paste a long text). | Either the textarea stops it (`maxlength`) or a red "Description: ..." message appears; nothing is saved. |
@@ -217,8 +222,8 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 | # | Action | Expected result |
 |---|---|---|
 | 1 | On Today click the calendar-plus icon on `Write report`. | A menu: Tomorrow, Next week, Next weekend, and a "Pick a date" box with **Set**. |
-| 2 | Click **Tomorrow**. | The row leaves Today (count drops). In **Upcoming** it is under "Tomorrow, <d Mon>" with "Tomorrow" as its badge and its time unchanged. |
-| 3 | From its page (`/todo/1000/`) use **Postpone > Next week**. | The date becomes the **next Monday after today** (a Monday today moves it 7 days). The panel shows it; the badge reads the weekday or "<d Mon>". |
+| 2 | Click **Tomorrow**. | The row leaves Today (count drops). In **Upcoming** it is under "Tomorrow, <MM/DD>" with "Tomorrow" as its badge and its time unchanged. |
+| 3 | From its page (`/todo/1000/`) use **Postpone > Next week**. | The date becomes the **next Monday after today** (a Monday today moves it 7 days). The panel shows it; the badge reads the weekday or "<MM/DD>". |
 | 4 | **Postpone > Next weekend**. | The date becomes the **next Saturday after today** (a Saturday today moves it 7 days). |
 | 5 | **Postpone**, pick yesterday in the date box, **Set**. | A red message "Date: Choose today or a later date."; nothing changes. (The date box also has `min` = today.) |
 | 6 | **Postpone**, pick a date 3 weeks ahead, **Set**. | The task moves there; it is not in the 14-day Upcoming list but is in **All**, with that date. |
@@ -333,8 +338,8 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Default due time" section with a time field showing `09:00` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); "Reminders on your phone" with a "Snooze for" select (TODO-40); one **Save** button for the three; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
-| 2 | Change it to `07:45` and **Save**. | "Saved." in green; reload shows `07:45`. |
+| 1 | Open **Settings**. | Heading "Settings" and, in order: a "Default due time" section with a time field showing `9:00 AM` and the note that it is the time a date-only task is treated as due and such a task is still shown date-only; "Default reminder" (TODO-21); "Reminders on your phone" with a "Snooze for" select (TODO-40); one **Save** button for the three; "What tasks cost"; "Files" ("No files stored." for this user); "Add tasks by email" (TODO-33). |
+| 2 | Change it to `7:45am` (Tab) and **Save**. | "Saved." in green; reload shows `7:45 AM`. A nonsense value (`banana`) shows "Enter a time like 9:00 PM." under the box and saves nothing. |
 | 3 | Clear the field and Save. | The browser's required prompt (or "Default due time: Enter a time."). |
 | 4 | Click the "account page" link. | Goes to the account page where the time zone can be changed. |
 
@@ -442,7 +447,7 @@ at step 5 is the 5th of this month, and step 7's new occurrence is due on the 1s
 | 10 | Create `Weekly review` with Repeat = Week, ticking Monday and Wednesday, Ends "After a number of times" `2`. | The button reads "Every week on Monday, Wednesday, 2 times". After adding, its date is the next Monday or Wednesday on or after today. |
 | 11 | Open `Weekly review`, click **Stop repeating**. | The chip and the link disappear and "This task no longer repeats." shows; the task stays open. Click **Repeat** > **Week** > **Done** > **Save**: the chip returns ("Every week"). |
 | 12 | In the Repeat popover enter Month with "On" = **Day of the month** `31` and Save on a task. Open its page. | The chip reads "Every month on the 31st". (Completing it later skips months without a 31st: not checked here.) |
-| 13 | In the Repeat popover choose **Ends** > **On a date** and pick a date. | The button label ends with `until 2 Nov 2026`-style text (day, short month, year), the same way the chip writes it. |
+| 13 | In the Repeat popover choose **Ends** > **On a date** and pick a date. | The button label ends with `until 11/02/2026`-style text (the account's date format), the same way the chip writes it. The last-date box is the site's date field: typing `11/02/2026` works as well as the calendar. |
 | 14 | Open the page of a **subtask**, then of a **completed** task. | Neither has a **Repeat** control in Details (a subtask never repeats and only an open task can). The quick-add box and an open top-level task do. |
 
 ### TODO-20 Repeating task, from completion
@@ -456,7 +461,7 @@ at step 5 is the 5th of this month, and step 7's new occurrence is due on the 1s
 | 2 | Complete it from Today. | It leaves Today. Open **All**: a new `Rotate tires` due exactly 3 months from **today** (the completion day). Its subtasks (if any were open) are copied; the completed original is in **Completed**. |
 | 3 | Open the new task, change Date to a day last week and **Save**, then **Complete**. | The next one is again 3 months from the day you completed it (today), not from the date you edited. |
 | 4 | Create a task `Water plants`, Repeat = **Day**, Ends **On a date** = tomorrow, mode Fixed. Complete it twice. | After the first completion a new one is due tomorrow. After completing that one, no new `Water plants` is created and the last one shows "This task no longer repeats." |
-| 5 | Add a task whose Repeat is **Year**, "On" = **A month and day**, left at day 1, month January. | The label reads "Every year on 1 January"; after adding, the date is the next 1 January on or after today. |
+| 5 | Add a task whose Repeat is **Year**, "On" = **A month and day**, left at day 1, month January. | The label reads "Every year on January 1" (month first; "1 January" for `dd/mm/yyyy`); after adding, the date is the next 1 January on or after today. |
 | 6 | Nothing to do here: an occurrence the balance can't pay for (owed, the "Tasks are blocked" banner appearing at once, the refusals and the settling after a top-up) is TODO-36. | -- |
 
 ### TODO-21 Reminders
@@ -470,19 +475,19 @@ The delivery steps 9, 11 and 14 are shell steps (the scheduler does not run on t
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open **Settings**. | A "Default reminder" section: a select "New tasks with a date" showing "Get a reminder", an amount `5`, a unit "minutes before", a "Default channel" select showing "In-app", the note "Email reminders go to your confirmed address only" and a **Reminder history** link. Under it a "Reminders on your phone" section (TODO-40). |
-| 2 | In the quick-add box type `Call the bank`, set Date = today and Time = 23:00 (if it is already past 22:55 in your zone the default reminder is due at once and shows "Skipped": pick a later date), **Add task**. Record the number as `T_BANK`. Open `/todo/<T_BANK>/`. | A **Reminders** block lists "5 minutes before (in-app)" with "Fires" and today's date at 22:55. Its row on Today shows a small bell icon. Under it, **History** says "No reminders sent yet." |
-| 3 | In the add row choose **1 hour before**, channel **Both**, and press **Add**. | The list now has "1 hour before (both)" (fires 22:00) above the 5 minute one. |
+| 2 | In the quick-add box type `Call the bank`, set Date = today and Time = 23:00 (if it is already past 22:55 in your zone the default reminder is due at once and shows "Skipped": pick a later date), **Add task**. Record the number as `T_BANK`. Open `/todo/<T_BANK>/`. | A **Reminders** block lists "5 minutes before (in-app)" with "Fires" and today's date at 10:55 PM. Its row on Today shows a small bell icon. Under it, **History** says "No reminders sent yet." |
+| 3 | In the add row choose **1 hour before**, channel **Both**, and press **Add**. | The list now has "1 hour before (both)" (fires 10:00 PM) above the 5 minute one. |
 | 4 | Add **1 hour before** again. | A red message "Reminder: There is already a reminder at that time." and the list is unchanged. |
 | 5 | Choose **Custom...**, enter `2` and unit `days before`, channel Email, **Add**. | "2 days before (email)" is listed (shown as "Skipped": its time, two days before the due time, is more than a day past, so it is created already sent and never delivered; it has **no** History row, which still reads "No reminders sent yet."). |
-| 6 | Click the pen on "5 minutes before", change the amount to `15`, **Save**. | The row reads "15 minutes before (in-app)" and fires at 22:45. Press **Cancel** on another row's editor: nothing changes. |
+| 6 | Click the pen on "5 minutes before", change the amount to `15`, **Save**. | The row reads "15 minutes before (in-app)" and fires at 10:45 PM. Press **Cancel** on another row's editor: nothing changes. |
 | 7 | Click the bin on the "2 days before" row. | It is removed. |
-| 8 | In **Details** clear the Date and press **Save**. | A browser confirmation "Clearing the date removes its 2 reminders. Continue?". Cancel: nothing changes. Accept: the Reminders block says "Set a due date to add reminders." and the bell is gone from the row (the time was cleared with the date). Set the date to today and the time to 23:00 again and Save: the default reminder ("5 minutes before (in-app)", fires 22:55) is back, alone. |
+| 8 | In **Details** clear the Date and press **Save**. | A browser confirmation "Clearing the date removes its 2 reminders. Continue?". Cancel: nothing changes. Accept: the Reminders block says "Set a due date to add reminders." and the bell is gone from the row (the time was cleared with the date). Set the date to today and the time to 23:00 again and Save: the default reminder ("5 minutes before (in-app)", fires 10:55 PM) is back, alone. |
 | 9 | (shell step) Make the reminder due a minute ago: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.todo.models import Reminder; print(Reminder.objects.filter(task__user__email='qa.user@example.com', task__number=<T_BANK>).update(fire_at=timezone.now() - timedelta(minutes=1), sent_at=None))"` (prints `1`), then run the job: `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"`. Reload any To-do page. | The header bell shows a new notification titled `Call the bank` with the body "Due <today's date>, 23:00", which opens the task. |
 | 10 | Open `/todo/<T_BANK>/`. | **History** lists the delivery (date, time, "In-app"). Open **Settings** > **Reminder history**: the same row with `#<T_BANK> Call the bank` linking to the task. |
 | 11 | (shell step) Run the `send_reminders()` command of step 9 again. | Nothing new: the bell count and the history are unchanged (a reminder is delivered once). |
 | 12 | In **Settings** choose "Get no reminder", **Save**, then add a task `No reminder please` with a date. | Its page says "No reminders." and its row has no bell. Restore the setting (5 minutes) afterwards. |
 | 13 | Complete a repeating task that has a reminder (create `Pay rent`, Repeat = Week, with a 15 minute reminder, then **Complete**). Open the new occurrence. | It has the same reminder ("15 minutes before"), unsent, firing before the new date. |
-| 14 | (Only if step 9 ran.) Postpone `Call the bank` to **Tomorrow** (the Postpone action on its row or the task page) and open `/todo/<T_BANK>/`. | The reminder it already delivered is armed again: the Reminders block shows "Fires" (not "Sent") with tomorrow's date at 22:55. (shell step) Running `send_reminders()` now delivers nothing (it is not due yet). |
+| 14 | (Only if step 9 ran.) Postpone `Call the bank` to **Tomorrow** (the Postpone action on its row or the task page) and open `/todo/<T_BANK>/`. | The reminder it already delivered is armed again: the Reminders block shows "Fires" (not "Sent") with tomorrow's date at 10:55 PM. (shell step) Running `send_reminders()` now delivers nothing (it is not due yet). |
 
 ### TODO-22 Search
 
@@ -506,7 +511,7 @@ matter): `Pay the rent` (priority 1, label `Home`, due in 2 days), `Walk the Cã
 | 10 | Type 201 characters. | The browser stops at 200 characters in the box. |
 | 11 | Open the `?` help. | A popover lists `*`, `?`, `/.../` or the Regex box (with the note that a regular expression is matched against the normalised, lower-case text and that its letters are lower-cased for you), the shared syntax, "case, accents, punctuation and formatting are ignored" and "deleted comments and earlier edits are not searched". Escape closes it. |
 | 12 | Delete the plumber comment (on the task page), then search `plumber`. | `Walk the Cão` is no longer found. Restore the comment: found again. Edit the comment to `The electrician called`: `plumber` finds nothing (the earlier text is not searched), `electrician` does. |
-| 13 | Open the filter bar: tick **Priority 1**, with the text box empty. | Only priority 1 tasks (`Pay the rent`); no text is needed when a filter is chosen. With **Labels > @Home**: the same. With **Due date > Next 7 days**: `Pay the rent`. With **No date**: the undated ones. With **Custom** two date inputs appear. |
+| 13 | Open the filter bar: tick **Priority 1**, with the text box empty. | Only priority 1 tasks (`Pay the rent`); no text is needed when a filter is chosen. With **Labels > @Home**: the same. With **Due date > Next 7 days**: `Pay the rent`. With **No date**: the undated ones. With **Custom** two date fields (text boxes with calendar buttons, disabled until Custom is chosen) appear; typing a date in each searches when the box is left. |
 | 14 | Combine `rent` with Priority 2. | Nothing matches. Change the **Sort by** to Title: the order follows. |
 | 15 | Search for something with more than 50 results (create 51 tasks named `bulk N` if needed) and open page 2 from the pager. | Page 2 loads in place with the rest, and the address bar shows `&page=2`; a reload shows the same page. |
 | 16 | In the results, complete a task with its circle. | The row stays in the list, shown as completed (a search keeps completed tasks it lists). |
@@ -678,10 +683,10 @@ past its time is skipped and says so; a completed task's reminder is not sent.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Add `Email me <b>now</b>` due today at 23:30 (if it is later than 23:00 in your zone use tomorrow). Open it. Set the description to `Bring the **report** and #1000` and save. Record its number as `T2_MAIL`. | The default reminder "5 minutes before (in-app)" is listed. The title shows the angle brackets as text. |
-| 2 | Remove that reminder (bin), then add **At time of task** with channel **Both**. | One reminder: "At time of task (both)", "Fires <date>, 23:30". |
+| 2 | Remove that reminder (bin), then add **At time of task** with channel **Both**. | One reminder: "At time of task (both)", "Fires <date>, 11:30 PM". |
 | 3 | (shell step) `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.todo.models import Reminder; print(Reminder.objects.filter(task__user__email='<T2>', task__number=<T2_MAIL>).update(fire_at=timezone.now() - timedelta(minutes=1), sent_at=None))"` (prints `1`), then `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"`. | No error. |
-| 4 | As `T2` reload the page and open the bell. | A notification titled `Email me <b>now</b>` (as text, not bold) with "Due <d Mon YYYY>, 23:30"; clicking it opens `/todo/<T2_MAIL>/`. The reminder now says "Sent <date, time>"; **History** lists two rows, "In-app" and "Email", with the time sent, and "All reminder history". |
-| 5 | Open `/__e2e__/mail/?to=<T2>` (reload until it arrives). | One email "Reminder: Email me <b>now</b>". Text body: "Reminder: Email me <b>now</b>", "Due <d Mon YYYY>, 23:30 (<your zone, e.g. Europe/Lisbon>)", the description as written (`Bring the **report** and #1000`), "Open the task: http://localhost:8765/todo/<T2_MAIL>/" and the footer "You set this reminder on "Email me <b>now</b>". Change or remove it on the task page (...); your default for new tasks is in To-do settings (http://localhost:8765/todo/settings/)." In the HTML source the title is escaped (`&lt;b&gt;now&lt;/b&gt;`), **report** is `<strong>report</strong>` and `#1000` is plain text (no link). |
+| 4 | As `T2` reload the page and open the bell. | A notification titled `Email me <b>now</b>` (as text, not bold) with "Due <Mon D, YYYY>, 11:30 PM" (the public wording: a notification is the same for everyone); clicking it opens `/todo/<T2_MAIL>/`. The reminder now says "Sent <date, time>"; **History** lists two rows, "In-app" and "Email", with the time sent, and "All reminder history". |
+| 5 | Open `/__e2e__/mail/?to=<T2>` (reload until it arrives). | One email "Reminder: Email me <b>now</b>". Text body: "Reminder: Email me <b>now</b>", "Due <Mon D, YYYY>, 11:30 PM (<your zone, e.g. Europe/Lisbon>)" (always this public wording, whatever the account's format), the description as written (`Bring the **report** and #1000`), "Open the task: http://localhost:8765/todo/<T2_MAIL>/" and the footer "You set this reminder on "Email me <b>now</b>". Change or remove it on the task page (...); your default for new tasks is in To-do settings (http://localhost:8765/todo/settings/)." In the HTML source the title is escaped (`&lt;b&gt;now&lt;/b&gt;`), **report** is `<strong>report</strong>` and `#1000` is plain text (no link). |
 | 6 | Click "Open the task", then the To-do settings link. | They open `/todo/<T2_MAIL>/` and `/todo/settings/` (signed in as `T2`). |
 | 7 | Open `/todo/reminders/history/` (Settings > **Reminder history**). | Heading "Reminder history", a back link "Settings", newest first: two rows `#<T2_MAIL> Email me <b>now</b>` (a link to the task), "In-app" and "Email", with the time. |
 | 8 | (shell step) Run the `send_reminders()` command again. | No new email, notification or history row (one delivery per firing). |
@@ -698,10 +703,10 @@ past its time is skipped and says so; a completed task's reminder is not sent.
 |---|---|---|
 | 1 | Choose "Get a reminder", clear the amount, **Save**. | Red "Default reminder: Enter an amount." (under the amount too); nothing saved. |
 | 2 | Set `31` "days before", **Save**. | Red "Reminder: Choose a reminder time between 0 minutes and 30 days before."; nothing saved (the due time is not saved either: both or neither). |
-| 3 | Set `1` "hours before", channel **Email**, **Save**. | Green "Saved."; reload: `1`, "hours before", "Email". Add a task `Default check` due tomorrow at 10:00: its page lists "1 hour before (email)", "Fires <tomorrow>, 09:00". |
+| 3 | Set `1` "hours before", channel **Email**, **Save**. | Green "Saved."; reload: `1`, "hours before", "Email". Add a task `Default check` due tomorrow at 10:00: its page lists "1 hour before (email)", "Fires <tomorrow>, 9:00 AM". |
 | 4 | Choose "Get no reminder": the amount and unit hide. **Save**. Add `No default` due tomorrow. | Its page says "No reminders.". Then put the default back to 5 "minutes before", In-app. |
-| 5 | Add `Date only` due tomorrow (no time). Open it. | "5 minutes before (in-app)", "Fires <tomorrow>, 08:55" (09:00, the default due time, minus 5 minutes). |
-| 6 | In Settings set the default due time to `10:00`, **Save**; open `Date only` again. | Its reminder now fires at 09:55 (date-only tasks follow the default due time); the task itself still shows only its date. Put the due time back to `09:00`. |
+| 5 | Add `Date only` due tomorrow (no time). Open it. | "5 minutes before (in-app)", "Fires <tomorrow>, 8:55 AM" (9:00 AM, the default due time, minus 5 minutes). |
+| 6 | In Settings set the default due time to `10:00`, **Save**; open `Date only` again. | Its reminder now fires at 9:55 AM (date-only tasks follow the default due time); the task itself still shows only its date. Put the due time back to `09:00`. |
 | 7 | Look at "Add tasks by email". | An address `todo+<8 lower-case letters and digits>@<domain>` (default `ziptrigo.com`) in monospace, **Copy** and **Regenerate…** buttons; the text "Email a task to this address: the subject becomes the title, the text the description and the attachments are attached. A date in the subject ("pay rent on the 1st") is read for you. The task counts like any other: free allowance first, then 10 credits."; "Accepted senders" with **Anyone** selected and the textarea disabled; "Recent emails": "No emails yet.". Record the address. |
 | 8 | Click **Copy**. | The button reads "Copied" with a check for a moment; the clipboard holds the address. |
 | 9 | Click **Regenerate…**. | A dialog "Regenerate address": "Your old address stops working immediately. Mail already sent to it is dropped, so update any contacts or rules that use it." **Cancel** closes it with the address unchanged. Confirm with **Regenerate**: the page reloads with "Your new address is ready. The old one no longer works." and a different code. |
@@ -722,14 +727,14 @@ reads only `pay rent every month on the 1st at 9am` and `call the bank tomorrow`
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Type `buy milk` in the quick-add title and wait two seconds. | No chip (a request to `/todo/parse/` may be made; it answers no date). |
-| 2 | Type (key by key) `pay rent every month on the 1st at 9am` and stop. | About half a second after the last key a chip appears under the title (a group named "Suggested date"): a calendar icon, the label `<date>, 09:00 · Every month on the 1st` where `<date>` is the next 1st on or after today written `Today`, `Tomorrow`, `Mon 1 Dec` (within 6 days) or `1 Dec`, then **Accept** (check) and **Dismiss** (x). Hovering the chip shows "every month on the 1st at 9am". The Date, Time and Repeat controls are still empty. |
-| 3 | Click **Accept**. | The chip goes; the title becomes `pay rent`, the Date the 1st, the Time `09:00`, the **Repeat** button reads "Every month on the 1st". Click **Add task**: the task is created as shown; its page has the chip "Every month on the 1st (fixed schedule)". |
+| 2 | Type (key by key) `pay rent every month on the 1st at 9am` and stop. | About half a second after the last key a chip appears under the title (a group named "Suggested date"): a calendar icon, the label `<date>, 9:00 AM · Every month on the 1st` where `<date>` is the next 1st on or after today written `Today`, `Tomorrow`, `Tue 12/01` (within 6 days) or `12/01` (`12/01/2027` in another year), then **Accept** (check) and **Dismiss** (x). Hovering the chip shows "every month on the 1st at 9am". The Date, Time and Repeat controls are still empty. |
+| 3 | Click **Accept**. | The chip goes; the title becomes `pay rent`, the Date the 1st (`MM/01/YYYY` in the Date box), the Time `9:00 AM`, the **Repeat** button reads "Every month on the 1st". Click **Add task**: the task is created as shown; its page has the chip "Every month on the 1st (fixed schedule)". |
 | 4 | Type `call the bank tomorrow`. With the chip showing (label `Tomorrow`), click **Add task** without accepting. | Submitting accepts the chip: the task is created titled `call the bank` with tomorrow's date. Repeat with the chip **dismissed** first: the task is created with the title as typed and **no** date. Click **Add task** within a fraction of a second of the last key, before any chip has appeared: title as typed, no date (nothing had been read yet). |
-| 5 | Type `call the bank tomorrow` again, set the Time to `18:00` by hand. | The chip reads `Tomorrow (time kept)`. Press Tab until the chip itself has focus and press Enter: accepted; the title is `call the bank`, the Date tomorrow, the Time still `18:00`. Clear the form. |
+| 5 | Type `call the bank tomorrow` again, set the Time to `18:00` by hand. | The chip reads `Tomorrow (time kept)` (the Time box: `6pm`, Tab, shows `6:00 PM`). Press Tab until the chip itself has focus and press Enter: accepted; the title is `call the bank`, the Date tomorrow, the Time still `6:00 PM`. Clear the form. |
 | 6 | Type `call the bank tomorrow`, focus the chip, press Escape. | The chip goes and the form is unchanged; the same text is not offered again (wait 2 s). Add a letter and remove it: still dismissed. Change it to `call the bank tomorrow!`: no chip (the fake doesn't read it). |
 | 7 | Open the page of an open top-level task (not a subtask). In "Or type a date" type `call the bank tomorrow`. | A chip `Tomorrow` (`(time kept)` / `(repeat kept)` / `(time and repeat kept)` appended when the Details form already has a time or a repeat). **Accept**: the Date field is tomorrow, the box is emptied, the title is unchanged; nothing is saved until **Save** (reload without saving: the old date). |
 | 8 | In the same box type `buy milk` and press Enter. | "No date found." under the box. |
-| 9 | Type `pay rent every month on the 1st at 9am` there and accept. | Date the 1st, Time 09:00, Repeat "Every month on the 1st"; **Save** saves all three. |
+| 9 | Type `pay rent every month on the 1st at 9am` there and accept. | Date the 1st, Time 9:00 AM, Repeat "Every month on the 1st"; **Save** saves all three. |
 | 10 | In dark mode and at 375 px look at both chips. | Readable, dark background, within the screen. |
 
 ### TODO-35 Every repeat the popover builds
@@ -823,13 +828,40 @@ push configured on this server (NOTIF-20's preconditions: without it the endpoin
 | 1 | Open **Settings**. | A "Reminders on your phone" section: a "Snooze for" select showing "15 minutes" (choices 15 minutes, 1 hour, 8 hours, 1 day) and the note that in-app reminders also go to the devices where notifications are on (linking the account page), with Complete and Snooze buttons. |
 | 2 | Choose **1 hour**, **Save**, reload. | "Saved."; after the reload the select shows "1 hour". |
 | 3 | Add a task `Water the plants` due today at 23:00 (if it is past 22:55 pick tomorrow). Record its number as `T_PLANT`. **(shell step)** `python tests_e2e/ai/manage.py shell -c "import uuid; from django.utils import timezone; from apps.core.services import push; from apps.todo.models import Reminder, ReminderDelivery; r = Reminder.objects.select_related('task__user').get(task__user__email='qa.user@example.com', task__number=<T_PLANT>); t = r.task; u = t.user; p = uuid.uuid4(); ReminderDelivery.objects.create(reminder=r, task=t, user=u, task_number=t.number, task_title=t.title, channel='push', push_id=p, sent_at=timezone.now(), fire_at=r.fire_at); print(push.make_action_token(u.pk, p, 'todo.reminder', ['complete', 'snooze'], push.password_fingerprint(u)))"` | Prints a token: record it as `TOKEN_1`. (This is the row and token a real push of that reminder has.) |
-| 4 | **(shell step)** `curl -s -X POST http://localhost:8765/push/action/ -H 'Content-Type: application/json' -d '{"token": "<TOKEN_1>", "action": "snooze"}'` | `{"message": "Snoozed until HH:MM."}` with the time an hour from now on your clock (another day: "Snoozed until Thu 29 Oct, 09:15." style). |
+| 4 | **(shell step)** `curl -s -X POST http://localhost:8765/push/action/ -H 'Content-Type: application/json' -d '{"token": "<TOKEN_1>", "action": "snooze"}'` | `{"message": "Snoozed until H:MM AM/PM."}` with the time an hour from now on your clock (another day: "Snoozed until Thu Oct 29, 9:15 AM." style; always the public wording, whatever the account's format). |
 | 5 | Open `/todo/<T_PLANT>/`. | The reminder reads "Snoozed until" and that date and time. **History** lists a "Push" row. |
 | 6 | Step 4 again with `"action": "complete"`. | An empty answer (`204`): the first answer to a push is kept, and the task is still open. |
 | 7 | Step 3 again (a new token, `TOKEN_2`), then step 4 with `TOKEN_2` and `"action": "complete"`. | `{"message": "Completed."}`; the task page shows the task completed. |
 | 8 | Step 3 again (`TOKEN_3`; the task is completed), then step 4 with `TOKEN_3` and `"action": "snooze"`. | `{"message": "Already completed."}`; nothing changes. |
 | 9 | Move the task to the Trash, step 3 again (`TOKEN_4`) and step 4 with `"action": "complete"`. | `{"message": "This task is in the Trash."}`. |
 | 10 | Set **Snooze for** back to "15 minutes" and Save. | Saved. |
+
+### TODO-41 Date and time format: pages, typed and picked dates, the time field and the AI chip
+
+**Purpose:** every date and time in To-do follows the account's format (`mm/dd/yyyy` or `dd/mm/yyyy`, 12-hour or
+24-hour); the Date and Time boxes accept what a person types in that format (ISO too) and offer a calendar and
+half-hour suggestions; words stay words (`Today`, `Tomorrow`, weekdays); messages (the reminder email, the bell) are
+always the public wording.
+**Preconditions:** signed in as `qa.user@example.com`; `/account/` Appearance set to `mm/dd/yyyy` and `12-hour`
+(ACC-45); the task `Pay rent` exists (any), and today is not the 1st or the 31st (to keep `05/11` readings
+unambiguous, pick a "next November 5" in step 4 if today is near it). `<Y>` is the current year.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Add `Fmt A` due today at `10:05 PM`, `Fmt B` due on `11/05/<Y+1>` at `9:05 PM` and `Fmt C` due tomorrow (no time). Open **All**. | Badges: `Today 10:05 PM`, `11/05/<Y+1>, 9:05 PM` (a date with a time is set off with a comma, the year shows because it isn't this year's), `Tomorrow`. |
+| 2 | Account page: choose `dd/mm/yyyy` and `24-hour`; open **All** and **Upcoming**. | Badges: `Today 22:05`, `05/11/<Y+1>, 21:05`, `Tomorrow`; day headings `Tomorrow, <DD/MM>` and `<Weekday>, <DD/MM>`; **Today**'s heading `Today <Weekday>, <DD/MM>`. |
+| 3 | Open `Fmt B`. | The Date box reads `05/11/<Y+1>`, the Time box `21:05`; hovering the badge on **All** shows `Due 05/11/<Y+1>, 21:05`. Reminders: `Fires Thu 05/11/<Y+1>, 21:00` style (weekday, date, 24-hour time). |
+| 4 | In the Date box type `07.11.<Y+1>` (day first, dots), Tab; then `2030-01-02` (ISO), Tab; then `31/02/<Y+1>`, Tab. | The box shows `07/11/<Y+1>`, then `02/01/2030`; the third is refused under the box: "Enter a date as dd/mm/yyyy, for example <today as DD/MM/YYYY>." with a red border, `aria-invalid="true"`, and the saved date does not change: press **Save** and reload, the Date is still `02/01/2030`. Typing a month first date with a month over 12 (`05/13/<Y+1>`) is refused the same way. |
+| 5 | Click the calendar button next to the Date box. | A calendar for the month of the date opens (`November 2030`-style header, Monday first); the chosen day is highlighted; pick another day: the box shows it as `DD/MM/YYYY` and the popover closes. **Clear** empties the box; **Today** picks today. Escape closes it. |
+| 6 | In the Time box type `10pm`, Tab; `2200`, Tab; `9.30 p`, Tab; `banana`, Tab. | `22:00`, `22:00`, `21:30` (24-hour clock shows 24-hour), then "Enter a time like 21:00." under the box and the previous time kept. Click the box: a list of half-hour times opens (`00:00` ... `23:30`) with the current one highlighted; ArrowDown/ArrowUp move, Enter picks, Escape closes without changing. **Save**: reload shows the saved time. |
+| 7 | Account page: `mm/dd/yyyy` + `12-hour`. Open `Fmt B`. | The Date box shows the date saved in steps 4 and 5 written month first (`MM/DD/YYYY`), the Time box `9:30 PM`. |
+| 8 | Postpone menu (a row's calendar-plus icon): open the date box's calendar. | Days before today are greyed out and cannot be picked; typing yesterday's date shows "Choose <today as MM/DD/YYYY> or later." |
+| 9 | **Search** (`/todo/search/`): choose **Due date > Custom**. | Both date boxes become enabled (they are disabled and greyed before); type `01/01/<Y>` in the first box and Tab: the results refresh once and the URL has `date_from=<Y>-01-01` (ISO whatever the display order). |
+| 10 | Quick add: type `pay rent 5/11` (key by key, with `mm/dd/yyyy` saved) and wait for the chip. | The chip reads `05/11/<Y+1>` (May 11): Accept fills the Date box with `05/11/<Y+1>`. Now set `dd/mm/yyyy` on the account page, reload and repeat: the chip also reads `05/11/<Y+1>` but it is 5 November (check the Date box's calendar header: `November <Y+1>`). |
+| 11 | Add `Repeat yearly` with Repeat > Year > a month and day (March 3) and Ends > On a date `12/31/<Y+1>` (typed in the account's order). | The button label reads `Every year on March 3, until 12/31/<Y+1>` for month first and `Every year on 3 March, until 31/12/<Y+1>` for day first. |
+| 12 | Open a comment's time (add one on any task; hover its relative time). | The tooltip reads `<MM/DD/YYYY>, <h:mm AM/PM>` (or `DD/MM/YYYY, HH:MM` with the other format) in the browser's time zone. |
+| 13 | **Settings > Default due time**: the box shows `9:00 AM` (`09:00` on a 24-hour account). Reminder history (`/todo/reminders/history/`). | Times written in the account's format. The reminder email of TODO-32 and the bell notification are the public wording in both formats. |
+| 14 | Restore `mm/dd/yyyy` and `12-hour`. | - |
 
 ---
 

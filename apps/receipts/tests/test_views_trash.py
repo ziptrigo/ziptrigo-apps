@@ -39,7 +39,7 @@ def test_lists_the_trash_with_how_long_is_left(web, trashed, make_receipt):
 
     assert response.status_code == 200
     assert 'Staples' in content and 'Live one' not in content
-    assert '2026-10-01' in content and 'USD 12.00' in content
+    assert '10/01/2026' in content and 'USD 12.00' in content
     assert 'deleted in 27 days' in content
     assert 'deleted forever 30 days after being trashed' in content
     assert reverse('receipts:restore', args=[trashed.pk]) in content

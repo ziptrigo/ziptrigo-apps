@@ -74,12 +74,10 @@
                 </select>
                 <span x-show="range === 'custom'" {% if params.date_range != 'custom' %}style="display: none"{% endif %} class="inline-flex flex-wrap items-center gap-2">
                     <label class="sr-only" for="search-date-from">From</label>
-                    <input id="search-date-from" type="date" name="date_from" value="{{ params.date_from|date:'Y-m-d' }}" :disabled="range !== 'custom'"
-                           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                    {% include 'core/components/date_picker.html' with name='date_from' id='search-date-from' value=params.date_from|date:'Y-m-d' disabled_expr="range !== 'custom'" root_class='w-36' compact=True %}
                     <span aria-hidden="true">to</span>
                     <label class="sr-only" for="search-date-to">To</label>
-                    <input id="search-date-to" type="date" name="date_to" value="{{ params.date_to|date:'Y-m-d' }}" :disabled="range !== 'custom'"
-                           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                    {% include 'core/components/date_picker.html' with name='date_to' id='search-date-to' value=params.date_to|date:'Y-m-d' disabled_expr="range !== 'custom'" root_class='w-36' compact=True %}
                 </span>
             </div>
         </div>

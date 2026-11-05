@@ -10,7 +10,7 @@ It passes an explicit `html_body` rendered from an autoescaped template: without
 own (free-text) name.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from django.conf import settings
 from django.tasks import task
@@ -18,6 +18,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.core.datetime_format import utc_date_time
 from apps.core.services.email import send_email
 from apps.core.services.queue import enqueue_after_commit
 
@@ -61,7 +62,8 @@ def send_password_changed_email(user_id: str, changed_at: str) -> None:
 
 def render_password_changed_email(*, user: User, changed_at: datetime) -> tuple[str, str, str]:
     """Render the subject, text and HTML bodies of the "password changed" email."""
-    when = f'{changed_at.astimezone(UTC):%Y-%m-%d} at {changed_at.astimezone(UTC):%H:%M} UTC'
+    changed_date, changed_time = utc_date_time(changed_at)
+    when = f'{changed_date} at {changed_time} UTC'
     forgot_password_url = settings.BASE_URL.rstrip('/') + reverse('accounts:forgot-password')
     greeting = f'Hi {user.name},' if user.name else 'Hi there,'
 

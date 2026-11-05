@@ -1,3 +1,3 @@
-from .widgets import DatePickerWidget
+from .widgets import DatePickerWidget, TimeFieldWidget
 
-__all__ = ['DatePickerWidget']
+__all__ = ['DatePickerWidget', 'TimeFieldWidget']

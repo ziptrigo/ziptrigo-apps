@@ -24,8 +24,9 @@
             <input type="hidden" name="preset" value="date">
             <div class="min-w-0 flex-1">
                 <label for="postpone-date-{{ task.number }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Pick a date</label>
-                <input id="postpone-date-{{ task.number }}" type="date" name="date" required min="{{ today|date:'Y-m-d' }}"
-                       class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                {% with number_s=task.number|stringformat:'s' %}{% with postpone_id='postpone-date-'|add:number_s %}
+                {% include 'core/components/date_picker.html' with name='date' id=postpone_id min=today|date:'Y-m-d' compact=True %}
+                {% endwith %}{% endwith %}
             </div>
             <button type="submit" @click="open = false"
                     class="btn px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Set</button>

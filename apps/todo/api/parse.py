@@ -17,6 +17,7 @@ from ninja.errors import HttpError
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today, user_tz
 from apps.core import ratelimit
+from apps.core.datetime_format import formats_for
 from apps.core.ratelimit import RateLimitResult
 
 from ..schemas import ParseAnswerSchema, ParseSchema
@@ -51,6 +52,7 @@ def parse_request(user: User, title: str) -> ParseRequest:
         timezone=tz.key,
         default_time=get_account(user).default_due_time,
         now_local=time(now.hour, now.minute),
+        formats=formats_for(user),
     )
 
 

@@ -12,6 +12,7 @@ from django.conf import settings
 from django.tasks import task
 from django.urls import reverse
 
+from apps.core.datetime_format import format_utc
 from apps.core.services.email import send_email
 
 from ..models import FileTransferSettings, Transfer, TransferFile, TransferStatus
@@ -37,7 +38,7 @@ def send_transfer_notification(transfer_id: str, recipient_email: str) -> None:
         body_lines += [transfer.message, '']
     body_lines.append(f'Download: {transfer.absolute_download_url}')
     if transfer.expires_at:
-        body_lines.append(f'This link expires on {transfer.expires_at:%Y-%m-%d %H:%M} UTC.')
+        body_lines.append(f'This link expires on {format_utc(transfer.expires_at)} UTC.')
 
     # The same list as the body: `name` is the first file of any state, which may be one still
     # uploading and so not part of the transfer.
@@ -142,7 +143,7 @@ def send_expires_soon_notification(transfer_id: str) -> None:
         subject=f'Your transfer "{name}" expires tomorrow',
         text_body=(
             f'Your transfer "{name}" expires tomorrow'
-            f'{f" ({transfer.expires_at:%Y-%m-%d %H:%M} UTC)" if transfer.expires_at else ""}.\n\n'
+            f'{f" ({format_utc(transfer.expires_at)} UTC)" if transfer.expires_at else ""}.\n\n'
             f'Manage this transfer: {dashboard_url()}'
         ),
     )

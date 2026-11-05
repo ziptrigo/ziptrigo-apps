@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.urls import reverse
 
 from apps.billing.services import add_credits
+from apps.core.datetime_format import PUBLIC, DisplayFormats, override
 from apps.core.models import Notification
 
 from ..models import Recurrence, RecurrenceMode, Task, TodoAccount, TodoSettings
@@ -171,18 +172,33 @@ class TestDescribe:
             ('FREQ=MONTHLY;BYDAY=1MO', 'Every month on the first Monday'),
             ('FREQ=MONTHLY;BYDAY=-1FR', 'Every month on the last Friday'),
             ('FREQ=MONTHLY;INTERVAL=3', 'Every 3 months'),
-            ('FREQ=YEARLY;BYMONTHDAY=3;BYMONTH=3', 'Every year on 3 March'),
+            ('FREQ=YEARLY;BYMONTHDAY=3;BYMONTH=3', 'Every year on March 3'),
             ('FREQ=YEARLY', 'Every year'),
             ('FREQ=DAILY;COUNT=5', 'Every day, 5 times'),
             ('FREQ=DAILY;COUNT=1', 'Every day, 1 time'),
             (
                 'FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261231',
-                'Every month on the 1st, until 31 Dec 2026',
+                'Every month on the 1st, until Dec 31, 2026',
             ),
         ],
     )
     def test_sentences(self, rule, text):
+        """With no formats active, the public wording."""
         assert describe(rule) == text
+
+    @pytest.mark.parametrize(
+        ('formats', 'yearly', 'until'),
+        [
+            (DisplayFormats('mdy', '12h'), 'Every year on March 3', 'until 12/31/2026'),
+            (DisplayFormats('dmy', '24h'), 'Every year on 3 March', 'until 31/12/2026'),
+            (PUBLIC, 'Every year on March 3', 'until Dec 31, 2026'),
+        ],
+    )
+    def test_dates_in_a_sentence_follow_the_formats(self, formats, yearly, until):
+        assert describe('FREQ=YEARLY;BYMONTHDAY=3;BYMONTH=3', formats) == yearly
+        assert describe('FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261231', formats).endswith(until)
+        with override(formats):
+            assert describe('FREQ=YEARLY;BYMONTHDAY=3;BYMONTH=3') == yearly
 
     @pytest.mark.parametrize(
         'rule',

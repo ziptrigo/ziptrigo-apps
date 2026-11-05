@@ -14,6 +14,8 @@ import pytest
 from django.core.checks import Warning as CheckWarning
 from django.urls import reverse
 
+from apps.core.datetime_format import DisplayFormats
+
 from ..checks import check_ai_configuration
 from ..services import parsing
 from ..services.parsing import (
@@ -454,17 +456,45 @@ class TestChipText:
         [
             (date(2026, 10, 28), None, None, 'Today'),
             (date(2026, 10, 29), None, None, 'Tomorrow'),
-            (date(2026, 11, 2), None, None, 'Mon 2 Nov'),
-            (date(2026, 11, 3), None, None, 'Tue 3 Nov'),
-            (date(2026, 11, 4), None, None, '4 Nov'),
-            (date(2026, 11, 20), time(18, 30), None, '20 Nov, 18:30'),
-            (date(2027, 11, 3), None, None, '3 Nov 2027'),
-            (date(2026, 11, 1), time(9, 0), MONTHLY, 'Sun 1 Nov, 09:00 · Every month on the 1st'),
-            (date(2026, 11, 2), None, 'FREQ=WEEKLY;BYDAY=MO', 'Mon 2 Nov · Every week on Monday'),
+            (date(2026, 11, 2), None, None, 'Mon Nov 2'),
+            (date(2026, 11, 3), None, None, 'Tue Nov 3'),
+            (date(2026, 11, 4), None, None, 'Nov 4'),
+            (date(2026, 11, 20), time(18, 30), None, 'Nov 20, 6:30 PM'),
+            (date(2027, 11, 3), None, None, 'Nov 3, 2027'),
+            (date(2026, 11, 1), time(9, 0), MONTHLY, 'Sun Nov 1, 9:00 AM · Every month on the 1st'),
+            (date(2026, 11, 2), None, 'FREQ=WEEKLY;BYDAY=MO', 'Mon Nov 2 · Every week on Monday'),
         ],
     )
     def test_labels(self, due, at, rule, expected):
+        """With no formats given, the public wording."""
         assert chip_text(due, TODAY, at, rule) == expected
+
+    @pytest.mark.parametrize(
+        ('formats', 'expected'),
+        [
+            (DisplayFormats('mdy', '12h'), ['Today', 'Mon 11/02', '11/20, 6:30 PM', '11/03/2027']),
+            (DisplayFormats('dmy', '24h'), ['Today', 'Mon 02/11', '20/11, 18:30', '03/11/2027']),
+        ],
+    )
+    def test_labels_follow_the_users_formats(self, formats, expected):
+        cases = [
+            (date(2026, 10, 28), None),
+            (date(2026, 11, 2), None),
+            (date(2026, 11, 20), time(18, 30)),
+            (date(2027, 11, 3), None),
+        ]
+
+        assert [chip_text(due, TODAY, at, None, formats) for due, at in cases] == expected
+
+    def test_a_repeat_sentence_follows_the_order_too(self):
+        rule = 'FREQ=YEARLY;BYMONTHDAY=3;BYMONTH=3'
+
+        assert chip_text(date(2026, 11, 20), TODAY, None, rule, DisplayFormats('mdy', '12h')) == (
+            '11/20 · Every year on March 3'
+        )
+        assert chip_text(date(2026, 11, 20), TODAY, None, rule, DisplayFormats('dmy', '12h')) == (
+            '20/11 · Every year on 3 March'
+        )
 
 
 class TestParseTitle:
@@ -485,7 +515,7 @@ class TestParseTitle:
         assert result.due_time == time(9, 0)
         assert result.rrule == MONTHLY
         assert result.rrule_text == 'Every month on the 1st'
-        assert result.label == 'Sun 1 Nov, 09:00 · Every month on the 1st'
+        assert result.label == 'Sun Nov 1, 9:00 AM · Every month on the 1st'
         assert fake_title_parser.calls == 1
 
     def test_nothing_date_like_skips_the_ai(self, fake_title_parser):
@@ -750,7 +780,7 @@ class TestEndpoint:
             'rrule': MONTHLY,
             'rrule_text': 'Every month on the 1st',
             'matched_text': 'every month on the 1st at 9am',
-            'label': 'Sun 1 Nov, 09:00 · Every month on the 1st',
+            'label': 'Sun 11/01, 9:00 AM · Every month on the 1st',
         }
 
     def test_the_request_the_model_sees(self, web, fake_title_parser, funded_user):
@@ -776,9 +806,9 @@ class TestEndpoint:
         [
             (date(2026, 10, 28), 'Today'),
             (date(2026, 10, 29), 'Tomorrow'),
-            (date(2026, 11, 2), 'Mon 2 Nov'),
-            (date(2026, 12, 25), '25 Dec'),
-            (date(2027, 11, 3), '3 Nov 2027'),
+            (date(2026, 11, 2), 'Mon 11/02'),
+            (date(2026, 12, 25), '12/25'),
+            (date(2027, 11, 3), '11/03/2027'),
         ],
     )
     def test_labels(self, web, fake_title_parser, due, expected):

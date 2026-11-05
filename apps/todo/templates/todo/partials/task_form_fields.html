@@ -1,16 +1,14 @@
 {% load todo_ui %}
 {% comment %} The date, time, priority and labels controls both modes of task_form.html share. Initial values come from
    `task` when there is one (details mode). {% endcomment %}
-{% with uid=task.number|default:'new' %}
+{% with uid=task.number|default:'new' %}{% with uid_s=uid|stringformat:'s' %}{% with date_id="due-date-"|add:uid_s time_id="due-time-"|add:uid_s until_id="repeat-until-"|add:uid_s %}
 <div>
     <label for="due-date-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Date</label>
-    <input id="due-date-{{ uid }}" type="date" name="due_date" value="{{ task.due_date|date:'Y-m-d' }}"
-           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
+    {% include 'core/components/date_picker.html' with name='due_date' id=date_id value=task.due_date|date:'Y-m-d' root_class='w-36' compact=True %}
 </div>
 <div>
     <label for="due-time-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Time</label>
-    <input id="due-time-{{ uid }}" type="time" name="due_time" value="{{ task.due_time|time:'H:i' }}"
-           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
+    {% include 'core/components/time_field.html' with name='due_time' id=time_id value=task.due_time|time:'H:i' root_class='w-32' compact=True %}
 </div>
 <div>
     <label for="priority-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Priority</label>
@@ -156,8 +154,9 @@
                 </div>
                 <div x-show="ends === 'date'">
                     <label for="repeat-until-{{ uid }}" class="sr-only">Last date</label>
-                    <input id="repeat-until-{{ uid }}" type="date" x-model="until" @input="touch()"
-                           class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                    <div @input="touch()">
+                        {% include 'core/components/date_picker.html' with name='' id=until_id x_model='until' root_class='w-36' compact=True aria_label='Last date' %}
+                    </div>
                 </div>
             </div>
             <fieldset class="space-y-2">
@@ -185,3 +184,4 @@
 {% endwith %}
 {% endif %}
 {% endwith %}
+{% endwith %}{% endwith %}

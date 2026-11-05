@@ -124,7 +124,7 @@ class TestPage:
         assert 'name="document_type" value="receipt" checked' in content
         assert 'value="R-55102"' in content and 'value="Visa ••4242"' in content
         assert 'Notes (yours)' in content and '>toner</textarea>' in content
-        assert 'Added ' in content and '(receipt dated Oct 9)' in content
+        assert 'Added ' in content and '(receipt dated 10/09)' in content
         assert 'Source: uploaded' in content and 'staples.jpg' in content
         assert 'Download original' in content and url('download', processed) in content
         assert 'Re-run extraction (1 credit)' in content
@@ -374,7 +374,7 @@ class TestStates:
 
         content = web.get(url('detail', dup)).content.decode()
 
-        assert 'Possible duplicate' in content and 'Staples, 2026-10-09, USD 42.10' in content
+        assert 'Possible duplicate' in content and 'Staples, 10/09/2026, USD 42.10' in content
         assert f'href="{url("detail", processed)}"' in content
         assert 'Not a duplicate' in content and url('dismiss-duplicate', dup) in content
 

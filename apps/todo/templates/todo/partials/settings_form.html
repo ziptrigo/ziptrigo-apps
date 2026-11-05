@@ -10,8 +10,7 @@
         <h2 id="due-time-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Default due time</h2>
         <div>
             <label for="default-due-time" class="block mb-1 text-sm font-medium">Time</label>
-            <input id="default-due-time" type="time" name="default_due_time" value="{{ account.default_due_time|time:'H:i' }}" required
-                   class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+            {% include 'core/components/time_field.html' with name='default_due_time' id='default-due-time' value=account.default_due_time|time:'H:i' required=True root_class='w-40' %}
         </div>
         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">The time a task with a date and no time is treated as due, for reminders and ordering. Such a task is still shown as date-only.</p>
         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Dates and times follow your time zone, which you can change on your <a href="{% url 'accounts:account' %}" class="underline">account page</a>.</p>

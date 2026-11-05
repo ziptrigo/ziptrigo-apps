@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ user.theme|default:'system' }}"{% if user.is_authenticated %} data-user-timezone="{{ user.timezone }}"{% endif %}{% if user.theme == 'dark' %} class="dark"{% endif %}>
+{% load datetime_format %}<html lang="en" {% format_data_attrs %} data-theme="{{ user.theme|default:'system' }}"{% if user.is_authenticated %} data-user-timezone="{{ user.timezone }}"{% endif %}{% if user.theme == 'dark' %} class="dark"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -105,7 +105,9 @@
     <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 
     <!-- Alpine.js (components registered on alpine:init must load first) -->
+    <script defer src="{% static 'core/js/datetime_format.js' %}"></script>
     <script defer src="{% static 'core/js/date_picker.js' %}"></script>
+    <script defer src="{% static 'core/js/time_field.js' %}"></script>
     <script defer src="{% static 'core/js/components.js' %}"></script>
     <script defer src="{% static 'core/js/local_time.js' %}"></script>
     <script defer src="{% static 'core/js/tabs.js' %}"></script>

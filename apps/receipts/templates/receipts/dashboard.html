@@ -34,7 +34,7 @@
 <form id="receipt-filters" method="get" action="{% url 'receipts:dashboard' %}"
       hx-get="{% url 'receipts:list' %}" hx-target="#receipt-list" hx-swap="innerHTML"
       hx-sync="this:replace"
-      hx-trigger="input changed delay:300ms from:#q, change from:#category, change from:#date_range, change from:#date_from, change from:#date_to, submit">
+      hx-trigger="input changed delay:300ms from:#q, change from:#category, change from:#date_range, change from:#date_from_value, change from:#date_to_value, submit">
     <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end">
         <div class="relative flex-1" data-has-value="{{ parsed.params.q|yesno:'true,false' }}"
              x-data="{ hasValue: $el.dataset.hasValue === 'true' }">
@@ -67,7 +67,8 @@
             </select>
         </div>
         {% comment %} A preset, or "Custom" to show the two dates. Hidden, the dates are disabled so they
-           aren't sent (the server ignores them for a preset anyway). {% endcomment %}
+           aren't sent (the server ignores them for a preset anyway): `disabled` until Alpine starts,
+           then `disabled_expr`. {% endcomment %}
         <fieldset data-range="{{ parsed.date_range }}" x-data="{ range: $el.dataset.range }">
             <legend class="mb-1 text-sm font-medium">Receipt date</legend>
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -80,13 +81,17 @@
                 </select>
                 <div x-show="range === 'custom'" {% if parsed.date_range != 'custom' %}style="display: none"{% endif %}
                      class="flex items-center gap-2">
-                    <input type="date" name="date_from" id="date_from" value="{{ parsed.params.date_from }}" aria-label="Receipt date from"
-                           :disabled="range !== 'custom'" {% if parsed.date_range != 'custom' %}disabled{% endif %}
-                           class="w-full sm:w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+                    {% if parsed.date_range == 'custom' %}
+                    {% include 'core/components/date_picker.html' with name='date_from' id='date_from' hidden_id='date_from_value' value=parsed.params.date_from aria_label='Receipt date from' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True %}
+                    {% else %}
+                    {% include 'core/components/date_picker.html' with name='date_from' id='date_from' hidden_id='date_from_value' value=parsed.params.date_from aria_label='Receipt date from' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=True %}
+                    {% endif %}
                     <span class="text-gray-500 dark:text-gray-400" aria-hidden="true">&ndash;</span>
-                    <input type="date" name="date_to" id="date_to" value="{{ parsed.params.date_to }}" aria-label="Receipt date to"
-                           :disabled="range !== 'custom'" {% if parsed.date_range != 'custom' %}disabled{% endif %}
-                           class="w-full sm:w-40 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+                    {% if parsed.date_range == 'custom' %}
+                    {% include 'core/components/date_picker.html' with name='date_to' id='date_to' hidden_id='date_to_value' value=parsed.params.date_to aria_label='Receipt date to' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True %}
+                    {% else %}
+                    {% include 'core/components/date_picker.html' with name='date_to' id='date_to' hidden_id='date_to_value' value=parsed.params.date_to aria_label='Receipt date to' disabled_expr="range !== 'custom'" root_class='w-full sm:w-40' compact=True disabled=True %}
+                    {% endif %}
                 </div>
             </div>
         </fieldset>

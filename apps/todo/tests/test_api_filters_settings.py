@@ -395,7 +395,7 @@ class TestParse:
             'rrule': 'FREQ=MONTHLY;BYMONTHDAY=1',
             'rrule_text': 'Every month on the 1st',
             'matched_text': 'every month on the 1st',
-            'label': 'Sun 1 Nov, 09:00 · Every month on the 1st',
+            'label': 'Sun 11/01, 9:00 AM · Every month on the 1st',
         }
         assert fake_title_parser.requests[0].title == 'pay rent every month on the 1st'
         assert fake_title_parser.requests[0].today == date(2026, 10, 28)

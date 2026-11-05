@@ -62,8 +62,12 @@ block list, auto-hold: `admin.md`), and the `/api/ft/` JWT API and `admin/filetr
 ### Times
 
 The pages show times with the browser's own time zone (`<time>` elements rewritten in the
-browser, e.g. "Nov 30, 2026, 3:51 PM" or, in the dashboard's "sent" line and the download log,
-`2026-11-30 15:51`), without a "UTC" suffix. Emails always write UTC (`2026-11-30 15:51 UTC`).
+browser) in the **account's date and time format** (issue #245; a seeded account is `mm/dd/yyyy` +
+12-hour, ACC-45): e.g. "11/30/2026, 3:51 PM" or, in the dashboard's "sent" line and the download log,
+`2026-11-30 3:51 PM`, without a "UTC" suffix (on `dd/mm/yyyy` + 24-hour: "30/11/2026, 15:51" and
+`2026-11-30 15:51`). **Public pages** (`/t/<slug>/` and the manage page) are the fixed public wording
+for everyone, a signed-in owner included: "Nov 30, 2026, 3:51 PM". Emails always write UTC in that
+public wording (`Nov 30, 2026, 3:51 PM UTC`), whatever the recipient's or sender's format.
 A "Set a date" expiry means the **end of that day in the account's time zone** (Account page >
 time zone; the browser sets it on the first visit after sign-in), so on pages it reads as 11:59 PM
 (23:59) of that day, and in an email it is that same instant converted to UTC -- exactly `23:59
@@ -327,7 +331,7 @@ read: check it on a real click, where the browser saves the file under that name
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | Exactly **one** email (the duplicate `QA.RECIPIENT1@...` line was merged). Subject: `qa-report.txt and 1 more file were sent to you via ZipTrigo` (the first file and a count of the others; a single-file transfer reads `<name> was sent to you via ZipTrigo`). |
-| 2 | Read its body. | "You have received 2 files:" followed by the lines "- qa-report.txt" and "- qa-notes.txt" (every uploaded file is named, up to 20, then "- and N more"; one file reads "You have received a file: <name>."), a blank line, "Hello from QA." / "Second line.", then "Download: http://localhost:8765/t/<SLUG_A>/" and "This link expires on YYYY-MM-DD HH:MM UTC." exactly 30 days from the send, in UTC. No HTML body. |
+| 2 | Read its body. | "You have received 2 files:" followed by the lines "- qa-report.txt" and "- qa-notes.txt" (every uploaded file is named, up to 20, then "- and N more"; one file reads "You have received a file: <name>."), a blank line, "Hello from QA." / "Second line.", then "Download: http://localhost:8765/t/<SLUG_A>/" and "This link expires on Mon D, YYYY, h:mm AM/PM UTC." exactly 30 days from the send, in UTC. No HTML body. |
 | 3 | Open `/__e2e__/mail/?to=qa.recipient2@example.com`. | One email with the same subject, file list and download link. |
 | 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject: `Your transfer "qa-report.txt" is on its way`. Body: `Your transfer "qa-report.txt" was sent to: qa.recipient1@example.com, qa.recipient2@example.com.`, then "Download link: http://localhost:8765/t/<SLUG_A>/" and "Manage this transfer: http://localhost:8765/transfer/". |
 | 5 | Click the download link in the recipient email. | The public download page for `qa-report.txt` opens (it is fine that the main window is logged in; downloads are tested in FT-20). Don't click Download here. |
@@ -343,7 +347,7 @@ read: check it on a real click, where the browser saves the file under that name
 | 1 | Go to `/transfer/send/` and add `qa-limit.txt` (500 bytes). | Row "qa-limit.txt (500 bytes)" reaches the green check. |
 | 2 | Recipients `qa.recipient1@example.com`; Expiry "Set a date"; click the date button, click **Next month**, then click day `15`. | The date button now shows the 15th of next month (in the browser's date format) and the calendar closes. |
 | 3 | Max downloads `1`; Password `Open-Sesame-42`; uncheck nothing. Click **Send**. | The sent page opens. Record the slug as `SLUG_B`. |
-| 4 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | The newest email's subject is `qa-limit.txt was sent to you via ZipTrigo`, and its body says "This link expires on <date> <time> UTC." where that is the end of the 15th of next month in the account's zone, in UTC (see "Times": `<15th> 23:59 UTC` for a UTC account). There is no message paragraph (none was entered), and nothing in the email mentions the password. |
+| 4 | Open `/__e2e__/mail/?to=qa.recipient1@example.com`. | The newest email's subject is `qa-limit.txt was sent to you via ZipTrigo`, and its body says "This link expires on <date> <time> UTC." where that is the end of the 15th of next month in the account's zone, in UTC (see "Times": `<Mon 15>, <year>, 11:59 PM UTC` for a UTC account). There is no message paragraph (none was entered), and nothing in the email mentions the password. |
 
 ### FT-10 Paused upload: resume after a reload, and send transfer C
 
@@ -395,8 +399,8 @@ offers to resume the unfinished draft.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/transfer/`. | Heading **Your transfers**, a **New transfer** button, tabs **Active** (highlighted) and **Ended**. No "You have an unfinished upload." banner. Three rows, newest first: `qa-paused.txt` (C), `qa-limit.txt` (B), `qa-report.txt` (A). No draft or "Untitled transfer" rows. |
-| 2 | Read row A. | "2 files · sent YYYY-MM-DD HH:MM · ACTIVE" (local time; status rendered uppercase), then "Expires: <30 days ahead, local time> · Downloads: 0 / 10 (10 left) · Credits charged: 0". Buttons: **Copy link**, **Disable**, **Manage**, **Delete**. Page title "File Transfer - ZipTrigo". |
-| 3 | Read row B. | "1 file · sent ... · ACTIVE", "Expires: <15th of next month>, 11:59 PM (local) · Downloads: 0 / 1 (1 left) · Credits charged: 0". |
+| 2 | Read row A. | "2 files · sent YYYY-MM-DD h:mm AM/PM · ACTIVE" (local time; status rendered uppercase), then "Expires: <30 days ahead, local time> · Downloads: 0 / 10 (10 left) · Credits charged: 0". Buttons: **Copy link**, **Disable**, **Manage**, **Delete**. Page title "File Transfer - ZipTrigo". |
+| 3 | Read row B. | "1 file · sent ... · ACTIVE", "Expires: <MM/15/YYYY>, 11:59 PM (local, the account's format) · Downloads: 0 / 1 (1 left) · Credits charged: 0". |
 | 4 | Read row C. | "1 file · ... · ACTIVE", "Expires: Never · Downloads: 0 · Credits charged: 0" (no "/ max" part). |
 | 5 | Click **Ended**. | The list swaps without a full reload to the empty state **No ended transfers** with "Transfers that expire or are deleted appear here." (no button); the URL becomes `/transfer/?filter=ended`; the **Ended** tab is now the highlighted one (`aria-selected="true"`). |
 | 6 | Click **Active**. | The three rows come back, URL `/transfer/?filter=active`, **Active** highlighted. |
@@ -456,7 +460,7 @@ offers to resume the unfinished draft.
 | 1 | Open Manage on row A; set Expiry "15 days" and Max downloads `5`; click **Save**. | Row A re-renders: "Expires: <now + 15 days, local time> · Downloads: 0 / 5 (5 left)". |
 | 2 | Open Manage; set Expiry "Set a date", open the date button, click **Clear**, click **Save**. | Red message "Provide a date for a custom expiry."; the row's expiry is unchanged. |
 | 3 | Open Manage; set Expiry "No expiration"; Save. | "Expires: Never". |
-| 4 | Open Manage; set Expiry "Set a date" and pick the 20th of next month; Save. | "Expires: <20th of next month>, 11:59 PM" (local). |
+| 4 | Open Manage; set Expiry "Set a date" and pick the 20th of next month; Save. | "Expires: <MM/20/YYYY>, 11:59 PM" (local). |
 | 5 | Open Manage; clear Max downloads (blank) and Save; then set it back to `5` and Save. | First "Downloads: 0" with no cap shown, then "Downloads: 0 / 5 (5 left)". |
 | 6 | Open Manage; set Expiry "1 day"; Save. | "Expires: <exactly 24 hours from now>" (shortening works the same way as extending). |
 | 7 | Open Manage; set Expiry "30 days"; Save. Then set it back to "Set a date", the 20th of next month, and Save (FT-20 expects that date). | First "Expires: <30 days from now>", then the 20th of next month, 11:59 PM again. |
@@ -484,7 +488,7 @@ offers to resume the unfinished draft.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor window: `/t/<SLUG_A>/`. | Title "qa-report.txt - ZipTrigo". Heading **qa-report.txt**, the message on two lines ("Hello from QA." / "Second line."), "Available until <20th of next month>, 11:59 PM" (local time). |
+| 1 | Visitor window: `/t/<SLUG_A>/`. | Title "qa-report.txt - ZipTrigo". Heading **qa-report.txt**, the message on two lines ("Hello from QA." / "Second line."), "Available until <Mon 20, YYYY>, 11:59 PM" (the public wording, local time). |
 | 2 | Read the file list. | Sorted by name: `qa-notes.txt` "1.5 KB" and `qa-report.txt` "2.9 KB", each with **Download**. Below: **Download all (.zip)** and, under a divider, a small "Report this transfer" link. |
 | 3 | Click **Download** for `qa-report.txt`. | The browser saves a file named `qa-report.txt` (3,000 bytes, 2,999 `R` characters and a newline). In the network log the request went to `/t/<SLUG_A>/files/<id>/` and was redirected (302) to a presigned URL on `http://localhost:4566/` (the bucket). Run `ftFetch('<that presigned URL>')` (see Test data; it doesn't count a download): status 200, `bytes` 3000, `sha256` `d47d8e2f...20d5e6` as in Test data. |
 | 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject `"qa-report.txt" was downloaded`, body `Someone just downloaded "qa-report.txt" from your transfer "qa-report.txt".` and "Manage this transfer: http://localhost:8765/transfer/". Click that link in the main window: the dashboard opens. |
@@ -508,7 +512,7 @@ offers to resume the unfinished draft.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Main window: reload `/transfer/`. | Row A: "Downloads: 2 / 5 (3 left)". |
-| 2 | Open Manage on row A. | A **Download log** section lists two entries, newest first: "All files (zip)" then "qa-report.txt", each with a `YYYY-MM-DD HH:MM` time and the IP (`127.0.0.1` or `::1`). |
+| 2 | Open Manage on row A. | A **Download log** section lists two entries, newest first: "All files (zip)" then "qa-report.txt", each with a `YYYY-MM-DD h:mm AM/PM` time and the IP (`127.0.0.1` or `::1`). |
 
 ### FT-23 Password gate
 
@@ -518,7 +522,7 @@ file URL is gated too.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor window: `/t/<SLUG_B>/`. | Heading **qa-limit.txt**, "Available until <15th of next month>, 11:59 PM" (local), the file `qa-limit.txt` "500 bytes" with **Locked**, the password prompt and **Unlock**. No "Download all" (single file). |
+| 1 | Visitor window: `/t/<SLUG_B>/`. | Heading **qa-limit.txt**, "Available until <Mon 15, YYYY>, 11:59 PM" (public wording, local), the file `qa-limit.txt` "500 bytes" with **Locked**, the password prompt and **Unlock**. No "Download all" (single file). |
 | 2 | Enter `wrong-password` and click **Unlock**. | The page re-renders (URL `/t/<SLUG_B>/unlock/`) with "Incorrect password." under the input; files still **Locked**. |
 | 3 | Enter `Open-Sesame-42` and click **Unlock**. | Redirected to `/t/<SLUG_B>/`; the file now has a **Download** button; no password form. |
 | 4 | Copy the Download link's `href` (do **not** click it). Open that href in a third clean context (or clear the visitor window's cookies and open it there). | Redirected to `/t/<SLUG_B>/` with the file **Locked** -- the direct URL doesn't bypass the password, and nothing downloads. If you cleared the visitor window's cookies, unlock B again with `Open-Sesame-42` before FT-24. |
@@ -780,7 +784,7 @@ download limit once that download's URL has had time to expire.
 |---|---|---|
 | 1 | Main window: send transfer E: `qa-expiring.txt`, Recipients `qa.recipient2@example.com`, Expiry "5 days". | The sent page. Record the slug as `SLUG_E`. On `/transfer/` row E reads "Expires: <5 days from now>". |
 | 2 | (shell step) Make E due for its reminder (sent 4 days ago, expiring in 12 hours) and B's deferred deletion due (ended 16 minutes ago), then run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import expire_transfers; now = timezone.now(); print(Transfer.objects.filter(slug='<SLUG_E>').update(completed_at=now - timedelta(days=4), expires_at=now + timedelta(hours=12))); print(Transfer.objects.filter(slug='<SLUG_B>').update(ended_at=now - timedelta(minutes=16))); expire_transfers()"` | Prints `1` and `1`, no traceback. |
-| 3 | Mailbox `?to=qa.user@example.com`. | Two new emails. `Your transfer "qa-expiring.txt" expires tomorrow`, body `Your transfer "qa-expiring.txt" expires tomorrow (YYYY-MM-DD HH:MM UTC).` (about 12 hours from now, in UTC) and "Manage this transfer: http://localhost:8765/transfer/". And `Files for "qa-limit.txt" have been deleted`, body `The files for your transfer "qa-limit.txt" have been deleted and are no longer available.` (no link). |
+| 3 | Mailbox `?to=qa.user@example.com`. | Two new emails. `Your transfer "qa-expiring.txt" expires tomorrow`, body `Your transfer "qa-expiring.txt" expires tomorrow (Mon D, YYYY, h:mm AM/PM UTC).` (about 12 hours from now, in UTC) and "Manage this transfer: http://localhost:8765/transfer/". And `Files for "qa-limit.txt" have been deleted`, body `The files for your transfer "qa-limit.txt" have been deleted and are no longer available.` (no link). |
 | 4 | Click the reminder's "Manage this transfer" link. | `/transfer/`: row E is still **ACTIVE**, "Expires: <about 12 hours from now>". |
 | 5 | Open `URL_B` in a new tab. | An S3 `NoSuchKey` error (404) instead of `qa-limit.txt`: the deferred deletion removed the object. (`AccessDenied`/403 means the URL itself expired: inconclusive, note it.) |
 | 6 | (shell step) Run the job again after moving E's expiry into the past: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import expire_transfers; print(Transfer.objects.filter(slug='<SLUG_E>').update(expires_at=timezone.now() - timedelta(minutes=1))); expire_transfers()"` | Prints `1`. |
@@ -956,6 +960,22 @@ driven from the keyboard.
 | 6 | Focus **Manage** on row A and press Enter. | The panel opens. Tab moves through Expiry, the date button (when "Set a date"), Max downloads, Password, Remove password, **Save**, each **Resend**, the Add recipients box and **Add**. Enter on **Manage** again closes the panel. |
 | 7 | On `/transfer/send/`, Tab to **Choose files** and press Enter; Tab to the password field's eye button and press Space. | Enter opens the file picker (cancel it). Space shows the password and the button's name becomes "Hide password". |
 | 8 | Reset: Appearance back to **System**, viewport back to normal. | -- |
+
+### FT-52 Dates in both formats and the public pages
+
+**Purpose:** the owner's dashboard follows the account's date and time format; the public download page and every
+email are the same for everyone (issue #245).
+**Preconditions:** FT-07 to FT-09 (transfer A, with a 30-day expiry, and B with a custom date, active) as `qa.user@example.com`;
+the Appearance settings of ACC-45.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Signed in as the owner with `mm/dd/yyyy` + `12-hour`: `/transfer/` and the Manage panel of A. | The row reads "Expires: MM/DD/YYYY, h:mm AM/PM", the date picker of the expiry form shows `MM/DD/YYYY` in a text box with a calendar button (you can type it or pick it; the saved value is the same). |
+| 2 | Set `dd/mm/yyyy` + `24-hour`; reload. | "Expires: DD/MM/YYYY, HH:MM"; the expiry box reads `DD/MM/YYYY` and its placeholder is `dd/mm/yyyy`; the download log times read `YYYY-MM-DD HH:MM`. |
+| 3 | With that setting still saved, open A's public page `/t/<SLUG_A>/` in the same window, then in a private window. | Both read "Available until Mon D, YYYY, h:mm AM/PM" (the public wording, 12-hour, in each browser's own zone); `<html>` has `data-date-format="public"`. |
+| 4 | Open the one-time manage link of an anonymous transfer (FT-34), if you have one. | Its expiry and download count use the same public wording. |
+| 5 | Read the recipient email of A (FT-08) and the "expires tomorrow" email (FT-41). | "This link expires on Mon D, YYYY, h:mm AM/PM UTC." and "(Mon D, YYYY, h:mm AM/PM UTC)": never in the owner's format. |
+| 6 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
 ## Out of scope
 

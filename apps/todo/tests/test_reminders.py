@@ -569,7 +569,7 @@ class TestDeliverDue:
         notification = Notification.objects.get(user=funded_user)
         assert notification.source == 'todo'
         assert notification.title == 'Pay rent'
-        assert notification.body == 'Due 28 Oct 2026, 14:30'
+        assert notification.body == 'Due Oct 28, 2026, 2:30 PM'
         assert notification.url == reverse('todo:task', args=[task.number])
         reminder.refresh_from_db()
         assert reminder.sent_at == utc(2026, 10, 28, 14, 26)
@@ -596,7 +596,7 @@ class TestDeliverDue:
 
         reminders.deliver_due(utc(2026, 10, 29, 9, 0))
 
-        assert Notification.objects.get().body == 'Due 30 Oct 2026'
+        assert Notification.objects.get().body == 'Due Oct 30, 2026'
 
     def test_a_long_title_is_cut_for_the_notification(self, funded_user, wednesday):
         create_task(funded_user, title='x' * 300, due_date=TODAY)
@@ -749,7 +749,7 @@ class TestChannelsAndEmail:
         [mail] = sent
         assert mail['to'] == funded_user.email
         assert mail['subject'] == 'Reminder: Pay rent'
-        assert 'Due 28 Oct 2026, 14:30 (UTC)' in mail['text_body']
+        assert 'Due Oct 28, 2026, 2:30 PM (UTC)' in mail['text_body']
         assert 'Pay **now**' in mail['text_body']
         assert '<strong>now</strong>' in mail['html_body']
         assert f'http://localhost:8000{reverse("todo:task", args=[5000])}' not in mail['text_body']
@@ -969,7 +969,7 @@ class TestTaskPage:
         assert 'Reminders' in body
         assert '5 minutes before' in body and '(in-app)' in body
         assert '1 day before' in body and '(email)' in body
-        assert 'Wed 28 Oct 2026, 14:25' in body and 'Tue 27 Oct 2026, 14:30' in body
+        assert 'Wed 10/28/2026, 2:25 PM' in body and 'Tue 10/27/2026, 2:30 PM' in body
 
     def test_the_times_follow_the_users_zone(self, web, funded_user, wednesday):
         funded_user.timezone = 'America/Chicago'
@@ -978,7 +978,7 @@ class TestTaskPage:
 
         body = text(web.get(reverse('todo:task', args=[task.number])))
 
-        assert 'Wed 28 Oct 2026, 14:25' in body  # 14:30 Chicago, 5 minutes before: not 19:25 UTC
+        assert 'Wed 10/28/2026, 2:25 PM' in body  # 14:30 Chicago, 5 minutes before: not 19:25 UTC
 
     def test_a_task_without_a_date_says_so(self, web, funded_user):
         task = create_task(funded_user, title='x')
@@ -1012,7 +1012,7 @@ class TestTaskPage:
         reminders.deliver_due(utc(2026, 10, 28, 14, 26))
         body = text(web.get(reverse('todo:task', args=[task.number])))
 
-        assert '28 Oct 2026, 14:26' in body and 'In-app' in body
+        assert '10/28/2026, 2:26 PM' in body and 'In-app' in body
 
     def test_a_row_with_reminders_shows_a_bell(self, web, funded_user, wednesday):
         create_task(funded_user, title='With', due_date=TODAY)
@@ -1663,8 +1663,8 @@ class TestSkipped:
 
         body = text(web.get(reverse('todo:task', args=[task.number])))
 
-        assert 'Skipped Wed 28 Oct 2026, 14:25' in body
-        assert 'Sent Wed 28 Oct' not in body
+        assert 'Skipped Wed 10/28/2026, 2:25 PM' in body
+        assert 'Sent Wed 10/28' not in body
         assert 'skipped: its time had already passed' in body  # in the task's history too
 
     def test_a_delivered_one_still_says_sent(self, web, funded_user, wednesday):
@@ -1673,7 +1673,7 @@ class TestSkipped:
 
         body = text(web.get(reverse('todo:task', args=[task.number])))
 
-        assert 'Sent Wed 28 Oct 2026, 14:25' in body and 'Skipped' not in body
+        assert 'Sent Wed 10/28/2026, 2:25 PM' in body and 'Skipped' not in body
 
     def test_the_history_page_says_skipped(self, web, funded_user, wednesday):
         timed_task(funded_user)
@@ -1689,7 +1689,7 @@ class TestSkipped:
 
         body = text(web.get(reverse('todo:task', args=[task.number])))
 
-        assert 'Skipped Mon 26 Oct 2026, 14:30' in body
+        assert 'Skipped Mon 10/26/2026, 2:30 PM' in body
 
     def test_an_inactive_owners_reminder_is_swept_without_a_history_row(
         self, funded_user, wednesday

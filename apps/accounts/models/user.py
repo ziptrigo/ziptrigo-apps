@@ -62,6 +62,20 @@ class User(AbstractBaseUser, PermissionsMixin):
         (THEME_DARK, 'Dark'),
     ]
 
+    DATE_FORMAT_MDY = 'mdy'
+    DATE_FORMAT_DMY = 'dmy'
+    DATE_FORMAT_CHOICES = [
+        (DATE_FORMAT_MDY, 'mm/dd/yyyy'),
+        (DATE_FORMAT_DMY, 'dd/mm/yyyy'),
+    ]
+
+    TIME_FORMAT_12H = '12h'
+    TIME_FORMAT_24H = '24h'
+    TIME_FORMAT_CHOICES = [
+        (TIME_FORMAT_12H, '12-hour'),
+        (TIME_FORMAT_24H, '24-hour'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # These fields are re-typed with `cast(...)` to their actual Python value type rather than
     # left as the declared `models.Field` subclass: Django model fields are descriptors handled by
@@ -118,6 +132,28 @@ class User(AbstractBaseUser, PermissionsMixin):
             choices=THEME_CHOICES,
             default=THEME_SYSTEM,
             db_default=THEME_SYSTEM,
+        ),
+    )
+    # How the site writes dates and times for this user (issue #245): a numeric date order and a
+    # 12- or 24-hour clock, set on the account page and applied by `apps.core.datetime_format`.
+    # `db_default` as well as `default`, as for `theme`: the previous release's container keeps
+    # inserting users while the migration runs and doesn't know the columns.
+    date_format = cast(
+        str,
+        models.CharField(
+            max_length=8,
+            choices=DATE_FORMAT_CHOICES,
+            default=DATE_FORMAT_MDY,
+            db_default=DATE_FORMAT_MDY,
+        ),
+    )
+    time_format = cast(
+        str,
+        models.CharField(
+            max_length=8,
+            choices=TIME_FORMAT_CHOICES,
+            default=TIME_FORMAT_12H,
+            db_default=TIME_FORMAT_12H,
         ),
     )
     # The user's IANA time zone (issue #177), for "today", due dates with times and reminders in

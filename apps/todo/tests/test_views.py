@@ -100,7 +100,7 @@ class TestPages:
 
         # The empty-state <template>s (shown when a day's last row leaves) are not on the page.
         assert re.sub(r'<template.*?</template>', '', body, flags=re.S).count('Nothing due') == 13
-        assert 'Tomorrow, 29 Oct' in body and 'Tomorrow task' in body
+        assert 'Tomorrow, 10/29' in body and 'Tomorrow task' in body
         assert 'Later' in body
 
     def test_all_lists_the_open_tasks_and_sorts(self, seeded):
@@ -490,7 +490,7 @@ class TestTaskPage:
 
         body = text(client.get(reverse('todo:task', args=[done.number])))
 
-        assert 'Completed 28 Oct 2026' in body and 'Uncomplete' in body
+        assert 'Completed 10/28/2026, ' in body and 'Uncomplete' in body
 
     def test_a_trashed_task_is_read_only_with_restore(self, seeded):
         client = Client()

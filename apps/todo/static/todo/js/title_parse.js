@@ -49,9 +49,13 @@
         return match ? decodeURIComponent(match[1]) : '';
     }
 
+    // Writes a form control. A date or time field (core/js/date_picker.js, time_field.js) keeps
+    // the ISO value in a hidden input and shows it in its own text box: `field-set` asks it to
+    // show what was written (other controls ignore it).
     function setValue(input, value) {
         if (!input) return;
         input.value = value;
+        input.dispatchEvent(new CustomEvent('field-set', { detail: { value: value } }));
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
     }

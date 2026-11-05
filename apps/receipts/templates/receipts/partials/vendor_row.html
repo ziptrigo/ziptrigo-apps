@@ -1,3 +1,4 @@
+{% load datetime_format %}
 {% load receipts_ui %}
 {% comment %} One row of the Vendors page: a checkbox for the bulk bar (owned by #vendor-bulk through `form`), the
    name with its chip and the other names it is read as, how many receipts (linking to the dashboard
@@ -16,13 +17,13 @@
         <p class="truncate text-xs text-gray-500 dark:text-gray-400">Also read as {% for name in vendor.also_shown %}&ldquo;{{ name }}&rdquo;{% if not forloop.last %}, {% endif %}{% endfor %}{% if vendor.also_more %} and {{ vendor.also_more }} more{% endif %}</p>
         {% endif %}
         <p class="text-xs text-gray-500 dark:text-gray-400 md:hidden">
-            {{ vendor.receipt_count }} receipt{{ vendor.receipt_count|pluralize }}{% if vendor.last_receipt_date %} &middot; last {{ vendor.last_receipt_date|date:'Y-m-d' }}{% endif %}
+            {{ vendor.receipt_count }} receipt{{ vendor.receipt_count|pluralize }}{% if vendor.last_receipt_date %} &middot; last {{ vendor.last_receipt_date|fdate }}{% endif %}
         </p>
     </div>
     <a href="{% url 'receipts:dashboard' %}?vendor={{ vendor.pk }}"
        class="hidden md:block text-right text-sm tabular-nums text-sage-600 dark:text-sage-300 underline underline-offset-2 rounded-md"
        aria-label="{{ vendor.receipt_count }} receipt{{ vendor.receipt_count|pluralize }} from {{ vendor.name }}">{{ vendor.receipt_count }}{% if vendor.trashed_count %}<span class="block text-xs font-normal no-underline text-gray-500 dark:text-gray-400">+{{ vendor.trashed_count }} in Trash</span>{% endif %}</a>
-    <span class="hidden md:block text-sm tabular-nums text-gray-700 dark:text-gray-300">{% if vendor.last_receipt_date %}{{ vendor.last_receipt_date|date:'Y-m-d' }}{% else %}&mdash;{% endif %}</span>
+    <span class="hidden md:block text-sm tabular-nums text-gray-700 dark:text-gray-300">{% if vendor.last_receipt_date %}{{ vendor.last_receipt_date|fdate }}{% else %}&mdash;{% endif %}</span>
 
     <div class="relative justify-self-end" x-data="{ menu: false }" @keydown.escape.window="menu = false" @click.outside="menu = false">
         <button type="button" @click="menu = !menu" aria-haspopup="menu" :aria-expanded="menu ? 'true' : 'false'"

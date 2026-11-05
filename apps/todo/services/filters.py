@@ -19,6 +19,7 @@ from django.db.models import Exists, OuterRef, Q, QuerySet
 
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
+from apps.core.datetime_format import format_date
 
 from ..models import Label, Task
 from .dates import SORT_DEFAULT, SORTS
@@ -353,7 +354,7 @@ def filter_page(
 
 
 def _day(value: date) -> str:
-    return f'{value.day} {value:%b} {value.year}'
+    return format_date(value, 'full')
 
 
 def describe_params(params: FilterParams, names: Mapping[str, str] | None = None) -> str:

@@ -172,7 +172,7 @@ Example: `rcptPick([{ name: 'staples-1.png', type: 'image/png', base64: PNG_A }]
 | 1 | Go to `/receipts/`. | Page title "Receipts - ZipTrigo", heading **Receipts**, buttons **Export CSV** and **Upload** top right. |
 | 2 | Read the address strip under the heading. | "Email receipts to" followed by an address of the form `receipts+xxxxxxxx@ziptrigo.com` (8 lowercase letters/digits, none of `i l o 0 1`), a **Copy** button and a **Settings ->** link. **Record** it as `ADDR1`. |
 | 3 | Look at the tabs row. | Tabs **All** (underlined, current), **Needs review**, **Processing**, **Failed**, **Duplicates**, none with a count badge. On the right **Vendors** (no "to vet" badge) and **Trash** (no number). |
-| 4 | Look at the filters. | Search box with placeholder "Search vendor, notes or amount"; **Category** select with "All categories", "Uncategorized", then the 12 defaults in this order: Advertising & marketing, Bank & payment fees, Equipment, Meals & entertainment, Office supplies, Professional services, Rent & utilities, Software & subscriptions, Phone & internet, Travel, Vehicle & fuel, Other; **Receipt date** select with Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom. No date inputs are visible. |
+| 4 | Look at the filters. | Search box with placeholder "Search vendor, notes or amount"; **Category** select with "All categories", "Uncategorized", then the 12 defaults in this order: Advertising & marketing, Bank & payment fees, Equipment, Meals & entertainment, Office supplies, Professional services, Rent & utilities, Software & subscriptions, Phone & internet, Travel, Vehicle & fuel, Other; **Receipt date** select with Any date, Last 15 days, Last 30 days, This month, This quarter, This year, Custom. No date fields are visible. |
 | 5 | Look at the list. | Header row: **Receipt date** (sortable), Vendor, **Added** (sortable), Category, Amount, Status. One empty-state row: "No receipts yet. Upload one, or email it to your address above." |
 | 6 | Inspect the **Export CSV** link. | `href` is `/receipts/export.csv` (no query). |
 | 7 | Reload the page. | Same address `ADDR1` (the account is not recreated). |
@@ -212,9 +212,9 @@ Example: `rcptPick([{ name: 'staples-1.png', type: 'image/png', base64: PNG_A }]
 |---|---|---|
 | 1 | Supply one file: `rcptPick([{ name: 'staples-1.png', type: 'image/png', base64: PNG_A }])`. | A row appears with the name "staples-1.png", the size "1 KB", a progress bar (role progressbar, aria-label "Upload progress of staples-1.png") and a cancel (x) button labelled "Cancel upload of staples-1.png". The status line moves through "Preparing…" / "Uploading…" / "Finishing…" (may be too fast to see). |
 | 2 | Wait for it to finish. | Status turns green: "✓ Uploaded. View receipt"; the bar is full (`aria-valuenow="100"`); the cancel button is gone. |
-| 3 | Click **View receipt**. | The receipt's page `/receipts/<uuid>/` opens with heading "Staples · 2026-10-09" and a green **Processed** pill. **Record** the id as `R1_ID`. |
+| 3 | Click **View receipt**. | The receipt's page `/receipts/<uuid>/` opens with heading "Staples · 10/09/2026" and a green **Processed** pill. **Record** the id as `R1_ID`. |
 | 4 | Go to `/billing/credits/`. | "Current balance: 99 credits". The newest row: change "-1" (red) "Spend" pill, description "Receipt processing: staples-1.png". The seed row "+100 Purchase" "e2e seed" is below it. |
-| 5 | Go to `/receipts/`. | One row: date 2026-10-09, vendor **Staples**, category Office supplies, amount "USD 42.10", pill **Processed**; second line "upload · receipt #R-55102 · Visa ••4242 · added <Mon D>". The **Vendors** link now shows an amber "1 to vet" badge. |
+| 5 | Go to `/receipts/`. | One row: date 10/09/2026, vendor **Staples**, category Office supplies, amount "USD 42.10", pill **Processed**; second line "upload · receipt #R-55102 · Visa ••4242 · added <Mon D>". The **Vendors** link now shows an amber "1 to vet" badge. |
 
 ### RCPT-06 Files refused in the browser: wrong type, empty, too large
 
@@ -253,7 +253,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 |---|---|---|
 | 1 | `rcptPick([{ name: 'staples-2.png', type: 'image/png', base64: PNG_A }, { name: 'receipt.pdf', type: 'application/pdf', base64: PDF_A }, { name: 'receipt-3.png', type: 'image/png', base64: PNG_B }])`. | Three rows appear at once, each with its own progress bar; all three end with "✓ Uploaded. View receipt". |
 | 2 | Check the header balance after reloading the page. | "Balance: 96 credits" (3 credits spent). |
-| 3 | Click **Go to receipts**. | 6 rows in total. The three new ones are **Processed**, Staples, USD 42.10, 2026-10-09, and each second line carries an amber "⚠ possible duplicate" (just before "· added …"). R1's row has no such marker. The **Duplicates** tab shows **3**. |
+| 3 | Click **Go to receipts**. | 6 rows in total. The three new ones are **Processed**, Staples, USD 42.10, 10/09/2026, and each second line carries an amber "⚠ possible duplicate" (just before "· added …"). R1's row has no such marker. The **Duplicates** tab shows **3**. |
 | 4 | **Record** the ids: open each new row and note `R2_ID` (staples-2.png), `R3_ID` (receipt.pdf), `R4_ID` (receipt-3.png) from the URL ("Source: uploaded · <filename>" on the page tells which is which). | — |
 | 5 | On `/billing/credits/`. | Three new "-1 Spend" rows: "Receipt processing: staples-2.png", "…: receipt.pdf", "…: receipt-3.png". Balance 96. |
 
@@ -265,7 +265,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | On `/receipts/` click the **Duplicates** tab. | The list (swapped in place, no full reload) shows exactly R2, R3, R4. URL becomes `/receipts/?status=duplicates`; the tab is underlined. |
-| 2 | Open R3 (`receipt.pdf`). | An amber banner under the heading: "**Possible duplicate** of Staples, 2026-10-09, USD 42.10" with buttons **View** and **Not a duplicate**. |
+| 2 | Open R3 (`receipt.pdf`). | An amber banner under the heading: "**Possible duplicate** of Staples, 10/09/2026, USD 42.10" with buttons **View** and **Not a duplicate**. |
 | 3 | Click **View**. | Opens R1's page (`/receipts/<R1_ID>/`). Go back. |
 | 4 | Click **Not a duplicate**. | The banner disappears in place (no reload). Reloading the page: still no banner. |
 | 5 | Back on `/receipts/`. | **Duplicates** badge is **2**; R3's row no longer shows "possible duplicate". |
@@ -277,8 +277,8 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the top. | "<- Receipts" link, heading "Staples · 2026-10-09", green **Processed** pill. Page title "Staples - ZipTrigo". No duplicate banner. |
-| 2 | Look at the preview (left on desktop, above the form on a phone-width window). | A light-gray image with alt "Preview of Staples", actually loaded (`naturalWidth` 120). Below it **Download original** and an **Open full size** link. "Source: uploaded · staples-1.png" and "Added <Mon D, HH:MM> (receipt dated Oct 9)". |
+| 1 | Look at the top. | "<- Receipts" link, heading "Staples · 10/09/2026", green **Processed** pill. Page title "Staples - ZipTrigo". No duplicate banner. |
+| 2 | Look at the preview (left on desktop, above the form on a phone-width window). | A light-gray image with alt "Preview of Staples", actually loaded (`naturalWidth` 120). Below it **Download original** and an **Open full size** link. "Source: uploaded · staples-1.png" and "Added <MM/DD, h:mm AM/PM> (receipt dated 10/09)" (the account's date and time format; `10/09/2026`-style with the year when the receipt is dated in another year than this one). |
 | 3 | Look at the form. | **Vendor** \* = "Staples" with a gray "New vendor" chip inside the field and a "Rename vendor…" link above it right; below: "N receipts from this vendor so far. Fix the name if you like, then mark it vetted so future receipts are matched to it first." (N = 4) and a **Mark as vetted** button. **Receipt date** \* = 2026-10-09; **Amount** \* = 42.10 with currency select USD; **Type**: Receipt checked; **Number** R-55102; **Payment method** "Visa ••4242" with help "Only the last 4 digits are kept; longer numbers are masked."; **Category** "Office supplies"; **Notes (yours)** empty, help "Up to 5,000 characters. Only you write here; we never touch it, not even when you run the extraction again." The three required labels carry an amber `*`; no field has an amber border. |
 | 4 | Look at the buttons. | **Re-run extraction (1 credit)**, red **Move to trash**, and **Save**. |
 | 5 | Click **Open full size**. | Opens the image in a new tab from a presigned URL on the S3 host (not a `/receipts/` URL; its query carries an expiring signature); the image displays in the tab (it is not downloaded). Close the tab. |
@@ -293,8 +293,8 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 1 | Set **Amount** to `1.234,56`; click **Save**. | Red text above the form: "Amount: Enter the amount as a number." The typed value stays in the field; no "Saved." message; status pill unchanged. |
 | 2 | Set **Amount** to `-5`; **Save**. | "Amount: The amount cannot be negative." |
 | 3 | Set **Amount** to `0,500`; **Save**. | "Amount: Enter the amount as a number." (an ambiguous comma is refused). |
-| 4 | (Devtools) Run `document.getElementById('id_receipt_date').type = 'text'`, type `09/10/2026` into **Receipt date**, set **Amount** to `forty`, **Save**. | Both problems in one go: "Receipt date: Enter a valid date." and "Amount: Enter the amount as a number." (dates are ISO only; a date input normally prevents this). |
-| 5 | Reload the page. | Amount 42.10, date 2026-10-09: nothing was saved. |
+| 4 | Type `13/45/2026` into **Receipt date** (the site's date field, `mm/dd/yyyy`), press Tab: "Enter a date as mm/dd/yyyy, for example <today as MM/DD/YYYY>." under the box, red border, and the saved date is kept. Set **Amount** to `forty` and **Save**. | The form posts the previous valid date (the box never sends the typo), so only "Amount: Enter the amount as a number." is refused and nothing is saved. (Server side: (Devtools) set the hidden `receipt_date` input's value to `09/10/2026` and Save: "Receipt date: Enter a valid date." under the box; the dates the server takes are ISO only.) |
+| 5 | Reload the page. | Amount 42.10, date 10/09/2026: nothing was saved. |
 
 ### RCPT-12 Valid edits are saved
 
@@ -314,10 +314,10 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Clear **Receipt date** (empty the date input); **Save**. | "Saved." The pill is now amber **Needs review**; the heading is just "Staples" (no date). The date field has an amber border and the hint "We couldn't read the date. Check the receipt and fill it in." |
+| 1 | Clear **Receipt date** (empty the box, or use the calendar's **Clear**); **Save**. | "Saved." The pill is now amber **Needs review**; the heading is just "Staples" (no date). The date field has an amber border and the hint "We couldn't read the date. Check the receipt and fill it in." |
 | 2 | Go to `/receipts/`. | **Needs review** tab has an amber badge **1**. R1's row shows date "—", the amber pill, and "· date missing" in the second line. Click **Needs review**: only R1 is listed. |
-| 3 | Back on R1, set **Receipt date** to `2025-06-30`; **Save**. | "Saved."; pill **Processed**; heading "Staples · 2025-06-30"; no amber border or hint. |
-| 4 | On `/receipts/`. | Needs review has no badge. R1 now sorts **below** the 2026-10-09 receipts (newest receipt date first). |
+| 3 | Back on R1, set **Receipt date** to `2025-06-30`; **Save**. | "Saved."; pill **Processed**; heading "Staples · 06/30/2025"; no amber border or hint. |
+| 4 | On `/receipts/`. | Needs review has no badge. R1 now sorts **below** the 10/09/2026 receipts (newest receipt date first). |
 
 ### RCPT-14 Vendor combobox: suggestions, keyboard, teaching hint
 
@@ -351,7 +351,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Set **Vendor** to `Staples Inc.`; **Save**. | Two flashes: "Saved." and "Filed under your vendor Staples. To change a vendor's name for all of its receipts, use Rename vendor." |
-| 2 | Check the field. | Vendor still "Staples" with the **Vetted** chip; heading "Staples · 2026-10-09". |
+| 2 | Check the field. | Vendor still "Staples" with the **Vetted** chip; heading "Staples · 10/09/2026". |
 
 ### RCPT-17 Typing a new name moves the receipt to a new vendor
 
@@ -360,7 +360,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Set **Vendor** to `Office Depot`; **Save**. | "Saved." Heading "Office Depot · 2026-10-09"; chip **Vetted**. |
+| 1 | Set **Vendor** to `Office Depot`; **Save**. | "Saved." Heading "Office Depot · 10/09/2026"; chip **Vetted**. |
 | 2 | Read under the field. | "Read on the receipt as “Staples”. Filed under your vendor Office Depot (1 receipt)." No "Mark as vetted" box. |
 | 3 | Go to `/receipts/`. | R4 shows vendor "Office Depot". Its "possible duplicate" marker is gone (different vendor now); the **Duplicates** badge is **1** (only R2). Other Staples rows still say Staples. |
 
@@ -375,7 +375,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 2 | Press Escape. | The dialog closes; focus returns to the "Rename vendor…" button. |
 | 3 | Reopen it, set **Name** to `STAPLES INC`, click **Rename**. | The dialog stays open and changes: the name field (read-only, red border) shows "STAPLES INC" and an amber box says "You already have a vendor called **Staples** (3 receipts)." and "Merge **Office Depot** into it? Its 1 receipt will show “Staples”." with a "Use a different name" link; buttons **Cancel** and **Merge into Staples**. |
 | 4 | Click **Use a different name**. | Back to the plain rename form. |
-| 5 | Set **Name** to `ODP` (keep **Vetted** checked), **Rename**. | The page reloads with "Renamed to ODP."; heading "ODP · 2026-10-09"; field "ODP" with **Vetted** chip; "Read on the receipt as “Staples”. Filed under your vendor ODP (1 receipt)." |
+| 5 | Set **Name** to `ODP` (keep **Vetted** checked), **Rename**. | The page reloads with "Renamed to ODP."; heading "ODP · 10/09/2026"; field "ODP" with **Vetted** chip; "Read on the receipt as “Staples”. Filed under your vendor ODP (1 receipt)." |
 
 ### RCPT-19 Re-run extraction costs a credit and keeps your edits
 
@@ -387,7 +387,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 | 1 | Click **Re-run extraction (1 credit)**. | A modal: title "Run the extraction again?", body "This costs 1 credit. The receipt is read again from the original file; anything you edited and your notes are kept.", buttons **Cancel** (focused) and **Re-run extraction (1 credit)** (brand colour, not red). |
 | 2 | Click **Cancel**. | Modal closes; nothing happens. |
 | 3 | Open it again and confirm. | The page reloads with "Reading the receipt again. This usually takes a few seconds." Because tasks run inline it is already **Processed** (if it shows "Reading your receipt…", wait: the panel refreshes itself every 3 s). |
-| 4 | Check the fields. | Kept as you edited them: amount 12.50, date 2025-06-30, category Travel, number INV-001, payment Visa ••1111, notes "client lunch". |
+| 4 | Check the fields. | Kept as you edited them: amount 12.50, date 06/30/2025, category Travel, number INV-001, payment Visa ••1111, notes "client lunch". |
 | 5 | Go to `/billing/credits/`. | Balance **95**; a new "-1 Spend" row "Receipt processing: staples-1.png". |
 
 ### RCPT-20 Download original and the PDF preview
@@ -419,7 +419,7 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click **Trash (2)**. | `/receipts/trash/`, heading **Trash**, "Items are deleted forever 30 days after being trashed. Until then they still count toward your storage." Two rows, most recently trashed first: "Notes.pdf" (first letter capitalised) with "No date · deleted in 30 days", and "Staples" with "2026-10-09 · USD 42.10 · deleted in 30 days". Each has **Restore** and a red trash icon. |
+| 1 | Click **Trash (2)**. | `/receipts/trash/`, heading **Trash**, "Items are deleted forever 30 days after being trashed. Until then they still count toward your storage." Two rows, most recently trashed first: "Notes.pdf" (first letter capitalised) with "No date · deleted in 30 days", and "Staples" with "10/09/2026 · USD 42.10 · deleted in 30 days". Each has **Restore** and a red trash icon. |
 | 2 | Click the trash icon of notes.pdf (aria-label "Delete notes.pdf forever"). | Modal "Delete forever": "Are you sure you want to delete notes.pdf forever? This can't be undone." with **Cancel** and red **Delete forever**. Press **Cancel**: nothing happens. |
 | 3 | Open it again and click **Delete forever**. | "Deleted notes.pdf forever." The row is gone. |
 | 4 | Click **Restore** on Staples. | "Restored Staples."; the page now says "The trash is empty." |
@@ -473,10 +473,10 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Choose **Last 30 days**. | URL `?date_range=last_30_days`. R1 and fake.pdf are hidden (no date never matches a range). R2-R4 are shown if 2026-10-09 is within the last 30 days of today (otherwise "No receipts found."; note today's date in the report). |
+| 1 | Choose **Last 30 days**. | URL `?date_range=last_30_days`. R1 and fake.pdf are hidden (no date never matches a range). R2-R4 are shown if 10/09/2026 is within the last 30 days of today (otherwise "No receipts found."; note today's date in the report). |
 | 2 | Choose **This year**. | R1 hidden (if today is in 2026 or later), R2-R4 shown if today is in 2026. |
-| 3 | Choose **Custom**. | Two date inputs (aria-labels "Receipt date from" / "Receipt date to") appear, enabled. |
-| 4 | Set from `2025-06-01` and to `2025-07-31`. | Only R1. URL has `date_from=2025-06-01&date_to=2025-07-31` and **no** `date_range`. |
+| 3 | Choose **Custom**. | Two date fields (text boxes with calendar buttons, aria-labels "Receipt date from" / "Receipt date to", placeholder `mm/dd/yyyy`) appear, enabled. |
+| 4 | Type `06/01/2025` in from and `07/31/2025` in to (Tab after each; ISO `2025-06-01` works too). | Only R1. The boxes read `06/01/2025` and `07/31/2025`. URL has `date_from=2025-06-01&date_to=2025-07-31` and **no** `date_range`. |
 | 5 | Reload. | **Custom** is selected, both dates kept, only R1. |
 | 6 | Choose **Any date**. | Date inputs hidden; all 5 rows; URL `/receipts/`. |
 
@@ -487,8 +487,8 @@ but is refused by `complete` and kept as a failed receipt, uncharged.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the default order. | Newest receipt date first, **undated first**: fake.pdf, then the three 2026-10-09 receipts (newest added first), then R1 (2025-06-30). **Receipt date** header is dark (active) with a down chevron. |
-| 2 | Click **Receipt date**. | Ascending: R1 first, the 2026-10-09 ones, fake.pdf **last**. URL `?sort=receipt_date`; chevron up; the header's hidden text says "(sorted ascending)". |
+| 1 | Look at the default order. | Newest receipt date first, **undated first**: fake.pdf, then the three 10/09/2026 receipts (newest added first), then R1 (06/30/2025). **Receipt date** header is dark (active) with a down chevron. |
+| 2 | Click **Receipt date**. | Ascending: R1 first, the 10/09/2026 ones, fake.pdf **last**. URL `?sort=receipt_date`; chevron up; the header's hidden text says "(sorted ascending)". |
 | 3 | Click **Receipt date** again. | Back to the default order; `sort` disappears from the URL. |
 | 4 | Click **Added**. | Newest added first: R2/R3/R4 (uploaded together in RCPT-08), then fake.pdf, then R1 last (restoring R2 did not change when it was added). URL `?sort=-created_at`; **Added** is now the dark, active header. Click **Added** again: oldest first (R1, fake.pdf, then R2-R4), URL `?sort=created_at`. |
 | 5 | With `?sort=created_at` active, search `staples`. | The sort is kept (URL has both `q=staples` and `sort=created_at`). |
@@ -529,7 +529,7 @@ filtered receipts with the documented columns.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | From `/receipts/` click **Vendors**. | `/receipts/vendors/`, heading **Vendors**, intro text beginning "Who your receipts are from." Tabs **All** (badge 2), **To vet** (no badge), **Vetted** (badge 2). Search box placeholder "Search vendors, including the names they were read as". |
-| 2 | Read the list (desktop width). | Column headers Vendor / Receipts / Last receipt. Rows sorted by name: **ODP** with a green "Vetted" chip, "Also read as “Office Depot”", receipts **1**, last receipt 2026-10-09; **Staples** with "Vetted", receipts **25**, last receipt 2026-10-09. |
+| 2 | Read the list (desktop width). | Column headers Vendor / Receipts / Last receipt. Rows sorted by name: **ODP** with a green "Vetted" chip, "Also read as “Office Depot”", receipts **1**, last receipt 10/09/2026; **Staples** with "Vetted", receipts **25**, last receipt 10/09/2026. |
 | 3 | Inspect ODP's receipt-count link. | aria-label "1 receipt from ODP", `href` `/receipts/?vendor=<id>`. **Record** ODP's id as `ODP_ID` and Staples' as `STAPLES_ID`. |
 | 4 | Open ODP's row menu (aria-label "Actions for ODP"). | Items: View receipts, Rename…, Mark as not vetted, Merge into…, and a grayed **Delete** that cannot be clicked, with tooltip "Only a vendor with no receipts can be deleted. Merge it into another vendor instead." Escape closes the menu. |
 
@@ -575,7 +575,7 @@ filtered receipts with the documented columns.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/receipts/<R3_ID>/`, set **Vendor** to `Corner Cafe`, **Save**. | "Saved."; heading "Corner Cafe · 2026-10-09", chip Vetted. |
+| 1 | Open `/receipts/<R3_ID>/`, set **Vendor** to `Corner Cafe`, **Save**. | "Saved."; heading "Corner Cafe · 10/09/2026", chip Vetted. |
 | 2 | On `/receipts/vendors/`, tick "Select Corner Cafe" and "Select ODP", click **Merge…**. | Dialog "Merge 2 vendors", "Which name should the 2 receipts show?", two radio cards: "Corner Cafe ✓ vetted · 1 receipt" (selected by default: equal counts, alphabetical) and "ODP ✓ vetted · 1 receipt". Note "This changes the vendor shown on receipts you already have. It can't be undone…". Buttons **Cancel** and **Merge into Corner Cafe**. |
 | 3 | Select **ODP**. | The button text changes to **Merge into ODP**. |
 | 4 | Press Escape. | Dialog closes; nothing merged. |
@@ -698,7 +698,7 @@ filtered receipts with the documented columns.
 |---|---|---|
 | 1 | Sign in as `qa.admin@example.com`; open `/admin/billing/credittransaction/adjust/`. | "Adjust credits" form: **User email**, **Direction** (Add / Spend), **Amount**, **Description**, **Apply**. |
 | 2 | Enter `qa.broke@example.com`, Add, `5`, `QA top-up`; **Apply**. | Success message "Adjusted credits for qa.broke@example.com. New balance: 4." (5 added, and the waiting receipt was read at once for 1; if it says 5, note it and continue). |
-| 3 | Sign in as `qa.broke@example.com`; open `/receipts/<B1_ID>/`. | **Processed**, "Staples · 2026-10-09", the edit form is shown. |
+| 3 | Sign in as `qa.broke@example.com`; open `/receipts/<B1_ID>/`. | **Processed**, "Staples · 10/09/2026", the edit form is shown. |
 | 4 | `/billing/credits/`. | Balance 4; rows "+5 Adjustment" "QA top-up" and "-1 Spend" "Receipt processing: broke.png". |
 
 ### RCPT-44 Paused storage (frozen account): banner, email, notification -- shell step
@@ -769,11 +769,11 @@ through its JPEG rendering but downloads as the original; the camera input feeds
 |---|---|---|
 | 1 | Click **Take photo**. | A file chooser opens (on a desktop browser it does not start a camera). Cancel it. |
 | 2 | Feed the camera input: `rcptPick([{ name: 'photo.jpg', type: 'image/jpeg', base64: JPEG_A }], 'camera-input')` (or the browser tool's file upload on `#camera-input` with the decoded file). | A row "photo.jpg", "1 KB", ending "✓ Uploaded. View receipt". |
-| 3 | Click **View receipt** (**record** the id as `J1`). | **Processed**, "Staples · 2026-10-09", "Source: uploaded · photo.jpg". The preview is a blue image, loaded (`naturalWidth` 80), from a presigned URL on the S3 host. Vendor chip **New vendor** with "First receipt from this vendor. Fix the name if you like, then mark it vetted so future receipts are matched to it first." |
+| 3 | Click **View receipt** (**record** the id as `J1`). | **Processed**, "Staples · 10/09/2026", "Source: uploaded · photo.jpg". The preview is a blue image, loaded (`naturalWidth` 80), from a presigned URL on the S3 host. Vendor chip **New vendor** with "First receipt from this vendor. Fix the name if you like, then mark it vetted so future receipts are matched to it first." |
 | 4 | Click **Mark as vetted**. | Chip **Vetted** (later cases rely on Staples being vetted for `F`). |
 | 5 | **Download original**. | `photo.jpg`, 708 bytes. |
 | 6 | Back on the upload page (helper pasted again): `rcptPick([{ name: 'scan.webp', type: 'image/webp', base64: WEBP_A }, { name: 'phone.heic', type: '', base64: HEIC_A }])`. (The empty type is what Chrome sends for a `.heic` file; the extension decides.) | Both rows end "✓ Uploaded. View receipt"; neither is refused as unsupported. |
-| 7 | Open the WebP receipt (**record** `W1`). | **Processed**; a green image preview (`naturalWidth` 80); **Open full size** shows it inline in a new tab. A "Possible duplicate of Staples, 2026-10-09, USD 42.10" banner (of `J1`). |
+| 7 | Open the WebP receipt (**record** `W1`). | **Processed**; a green image preview (`naturalWidth` 80); **Open full size** shows it inline in a new tab. A "Possible duplicate of Staples, 10/09/2026, USD 42.10" banner (of `J1`). |
 | 8 | Open the HEIC receipt (**record** `H1`). | **Processed**, "Source: uploaded · phone.heic". The preview is an orange image (`naturalWidth` 64): the server's JPEG rendering of the photo, which the browser can show. **Open full size** opens that JPEG inline. |
 | 9 | Click **Download original** on `H1`. | The browser downloads `phone.heic`, 445 bytes, byte-identical to `HEIC_A` (the original, not the rendering). |
 | 10 | Reload the upload page; open `/billing/credits/`. | "Balance: 997 credits". Three "-1 Spend" rows: "Receipt processing: photo.jpg", "…: scan.webp", "…: phone.heic". |
@@ -846,13 +846,13 @@ Restore button on a trashed receipt's page brings it back to that page, editable
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `H1`, set **Vendor** to `Heic Shop`. | No blue "On save, future receipts read as …" hint (Staples is vetted, so nothing would be taught). |
-| 2 | **Save**. | "Saved."; heading "Heic Shop · 2026-10-09", chip **Vetted**, "Read on the receipt as “Staples”. Filed under your vendor Heic Shop (1 receipt)." |
+| 2 | **Save**. | "Saved."; heading "Heic Shop · 10/09/2026", chip **Vetted**, "Read on the receipt as “Staples”. Filed under your vendor Heic Shop (1 receipt)." |
 | 3 | Click **Move to trash**. | `/receipts/` with "Moved to the trash. You can restore it from there for 30 days."; link **Trash (1)**. |
 | 4 | Open `/receipts/vendors/`. | **Heic Shop** shows receipts **0** with "+1 in Trash" under the number, last receipt "—". Its menu's **Delete** is grayed out (`aria-disabled="true"`) with the tooltip "Only a vendor with no receipts can be deleted. Merge it into another vendor instead." |
 | 5 | (Devtools) Forge the delete as in RCPT-35 step 6, with Heic Shop's id. | The reloaded page shows the red flash "Heic Shop still has receipts. Merge it into another vendor instead of deleting it." and Heic Shop is still listed. |
 | 6 | Open `/receipts/<H1>/`. | The gray "This receipt is in the Trash. Restore it to edit it." banner with **Restore**; the form is disabled. |
 | 7 | Click **Restore**. | You stay on `H1`'s page (not the Trash), with "Restored Heic Shop."; no banner; the form is editable again with **Save**. The Trash link has no number. |
-| 8 | On `/receipts/vendors/`. | Heic Shop: receipts **1**, no "+ in Trash", last receipt 2026-10-09. |
+| 8 | On `/receipts/vendors/`. | Heic Shop: receipts **1**, no "+ in Trash", last receipt 10/09/2026. |
 
 ### RCPT-52 Receipt-date presets against today
 
@@ -873,7 +873,7 @@ up at sign-in) and `T20` the date 20 days before it.
 | 8 | Choose **Custom**, set only the **from** date to `T20` (leave **to** empty). | `J1` and `W1`; the URL has `date_from` and no `date_to` or `date_range`. |
 | 9 | Clear **from**, set only **to** = January 1 of this year. | Only `A1`. |
 | 10 | Open `/receipts/?q=rangecheck&date_from=<TODAY>`. | **Custom** selected with that date: only `J1` (dates without a `date_range` mean Custom). |
-| 11 | Open `/receipts/?q=rangecheck&date_range=any&date_from=<TODAY>`. | **Any date** selected, the date inputs hidden, all three listed ("Any date" wins over the left-over date). |
+| 11 | Open `/receipts/?q=rangecheck&date_range=any&date_from=<TODAY>`. | **Any date** selected, the date fields hidden, all three listed ("Any date" wins over the left-over date). |
 
 ### RCPT-53 The CSV export guards against spreadsheet formulas
 
@@ -935,7 +935,7 @@ https://mail-settings.google.com/mail/vf-fake
 |---|---|---|
 | 1 | (Shell step) `python tests_e2e/ai/manage.py receipts_ingest_eml <folder>/rcpt-body.eml --to <ADDR_F>`. | It prints a line for the address ending `: accepted, 1 receipt(s)`, then `Done (receipts/inbound/local-<uuid>).` |
 | 2 | Reload `/receipts/`. | A new row **Staples**, **Processed**, whose second line starts with an envelope icon and "email" (not "upload"). |
-| 3 | Open it (**record** `E1`). | "Staples · 2026-10-09". "Source: email from orders@shop.example" and, on the next line, “Your order receipt”. **Download original** is there; **Open full size** is not. |
+| 3 | Open it (**record** `E1`). | "Staples · 10/09/2026". "Source: email from orders@shop.example" and, on the next line, “Your order receipt”. **Download original** is there; **Open full size** is not. |
 | 4 | Look at the preview. | An iframe titled "Email body" with a bare `sandbox` attribute (no `allow-…` tokens) and `referrerpolicy="no-referrer"`, white even in dark mode. It shows the heading "Thanks for your order" in blue (the email's own inline style applies), "Staples order total: 42.10 USD, paid 2026-10-09.", and **"Scripts did not run."** (never "SCRIPT RAN"). The tracking pixel is not loaded (a broken image or its alt text) and the network log has **no** request to `tracker.example`; a CSP violation in the console for it is expected, not a failure. |
 | 5 | Type in the frame's "Card number" box and click **Send**. | Nothing is submitted: no request to `evil.example`, the frame does not navigate. |
 | 6 | In the network log, check the receipt page's own response headers. | `Content-Security-Policy: frame-src 'self'` (only on the page of an email-body receipt; `J1`'s page has no such header). |
@@ -944,7 +944,7 @@ https://mail-settings.google.com/mail/vf-fake
 | 9 | Click **Download original**. | A file `email.html` downloads, containing the original HTML (the `<script>` included: it is the stored body, served as a download, never run). |
 | 10 | (Shell step) `python tests_e2e/ai/manage.py receipts_ingest_eml <folder>/rcpt-text.eml --to <ADDR_F>`. | `: accepted, 1 receipt(s)`. |
 | 11 | Open the new row (**record** `E2`). | **Processed**; "Source: email from forwarding-noreply@google.com". The frame shows the text in a monospace block, with `<b>not bold</b>` **literally** (escaped, not bold). **Download original** gives `email.txt`. |
-| 12 | Open `/receipts/settings/`. | **No** "Gmail forwarding confirmation" box: without SES's authentication the email is not trusted as Google's, so it was read as an ordinary email. **Recent emails**: two rows, newest first, each with the date (e.g. "Nov 1"), the sender and the subject in quotes: forwarding-noreply@google.com “(#999999999) Gmail Forwarding Confirmation” and orders@shop.example “Your order receipt”, both with a green check and "1 receipt". |
+| 12 | Open `/receipts/settings/`. | **No** "Gmail forwarding confirmation" box: without SES's authentication the email is not trusted as Google's, so it was read as an ordinary email. **Recent emails**: two rows, newest first, each with the date (e.g. "11/01", the account's format without the year), the sender and the subject in quotes: forwarding-noreply@google.com “(#999999999) Gmail Forwarding Confirmation” and orders@shop.example “Your order receipt”, both with a green check and "1 receipt". |
 | 13 | `/billing/credits/`. | Balance **991**: two "-1 Spend" rows "Receipt processing: email". |
 | 14 | As `qa.user` (another browser context), open `/receipts/<E1>/body/` and `/receipts/<E1>/`; as `F`, open `/receipts/<J1>/body/`. | 404 for all three (another user's receipt; a receipt that is not an email body). |
 
@@ -1046,7 +1046,7 @@ https://mail-settings.google.com/mail/vf-%5BQA%5D-123
 | # | Action | Expected result |
 |---|---|---|
 | 1 | (Shell step) `python tests_e2e/ai/manage.py receipts_ingest_eml <folder>/rcpt-scan.eml --to <ADDR_F>`. | `: accepted, 1 receipt(s)`. |
-| 2 | Open `/__e2e__/mail/?to=<F>` (reload until it arrives, up to a minute). | One email, subject "1 receipt needs your attention". Text: `From the email "Scanned receipt" (received <Mon DD, HH:MM> UTC):`, then `  - scan.png couldn't be read`, then `Manage receipts: http://localhost:8765/receipts/`. The HTML source has the same, with a **Review** link to `http://localhost:8765/receipts/<id>/` on the scan.png line and a **Manage receipts** link (the apostrophe may appear as `&#x27;` in the source: escaping). Nothing in the subject comes from the email. |
+| 2 | Open `/__e2e__/mail/?to=<F>` (reload until it arrives, up to a minute). | One email, subject "1 receipt needs your attention". Text: `From the email "Scanned receipt" (received <Mon D, YYYY, h:mm AM/PM> UTC): (always the public wording, e.g. `Nov 1, 2026, 3:21 PM`, whatever the account's format)`, then `  - scan.png couldn't be read`, then `Manage receipts: http://localhost:8765/receipts/`. The HTML source has the same, with a **Review** link to `http://localhost:8765/receipts/<id>/` on the scan.png line and a **Manage receipts** link (the apostrophe may appear as `&#x27;` in the source: escaping). Nothing in the subject comes from the email. |
 | 3 | Open the **Review** link (copy its `href` from the HTML source) and then **Manage receipts**. | Review: the receipt (**record** `S1`) is **Failed** with "We couldn't read this file." / "Try a sharper photo or scan and upload it again." / "Your credits for this attempt were returned.", "Source: email from scanner@office.example", “Scanned receipt”. Manage receipts: `/receipts/`. |
 | 4 | `/billing/credits/`. | "-1 Spend" "Receipt processing: scan.png" and "+1 Refund" "Receipt could not be processed: scan.png"; balance 991. |
 | 5 | On `S1` click **Re-run extraction (1 credit)** and confirm; wait a minute and reload the mailbox. | It fails again and is refunded again; **no** second "needs your attention" email (one per email received). |
@@ -1055,7 +1055,7 @@ https://mail-settings.google.com/mail/vf-%5BQA%5D-123
 | 8 | (Shell step) Ingest `rcpt-note.eml`. | `: no_receipt, 0 receipt(s)` (the sender passed; the short text and the `.txt` file can't be receipts). |
 | 9 | (Shell step) Ingest `rcpt-spam.eml`; then edit it so the first two lines read `X-SES-Spam-Verdict: PASS` and `X-SES-Virus-Verdict: FAIL` and ingest it again. | `: rejected_spam, 0 receipt(s)`, then `: rejected_virus, 0 receipt(s)`. |
 | 10 | (Shell step) Ingest `rcpt-forward.eml`. | `: forwarding_confirmation, 0 receipt(s)`, although the accepted-senders list doesn't include Google (a confirmation must get through to finish setting up forwarding). |
-| 11 | Reload `/receipts/settings/`. | Under the address, a blue box: "Gmail forwarding confirmation received <Mon D> — code **123456789**" with an **Open** button whose `href` is `https://mail-settings.google.com/mail/vf-%5BQA%5D-123` and opens in a new tab (don't follow it: it is an external site). **Recent emails**, newest first: forwarding-noreply@google.com "forwarding confirmation" (gray info icon); win@prizes.example "flagged as a virus" and "flagged as spam" (red); someone@else.example “Just a note” "no receipt found"; orders@shop.example “Your order receipt” and someone@else.example “Pretending to be listed” "sender not allowed"; scanner@office.example “Scanned receipt” "1 receipt" (green); then the two of RCPT-54. |
+| 11 | Reload `/receipts/settings/`. | Under the address, a blue box: "Gmail forwarding confirmation received <MM/DD> — code **123456789**" with an **Open** button whose `href` is `https://mail-settings.google.com/mail/vf-%5BQA%5D-123` and opens in a new tab (don't follow it: it is an external site). **Recent emails**, newest first: forwarding-noreply@google.com "forwarding confirmation" (gray info icon); win@prizes.example "flagged as a virus" and "flagged as spam" (red); someone@else.example “Just a note” "no receipt found"; orders@shop.example “Your order receipt” and someone@else.example “Pretending to be listed” "sender not allowed"; scanner@office.example “Scanned receipt” "1 receipt" (green); then the two of RCPT-54. |
 | 12 | `/receipts/` and `/billing/credits/`. | No new receipts besides `S1`; balance still 991; no further "needs your attention" email. |
 | 13 | Choose **Anyone**, **Save**. Then **Regenerate…** the address and confirm; **record** the new one as `ADDR_F2`. | "Your new address is ready. The old one no longer works." |
 | 14 | (Shell step) Ingest `rcpt-body.eml` with `--to <ADDR_F>` (the old address). | `No recipient matched an active inbox code.` then `Done (…)`; nothing new on the dashboard or in Recent emails. |
@@ -1143,6 +1143,22 @@ another from its row menu.
 | 4 | On `/receipts/vendors/`, open Heic Shop's menu > **Merge into…**. | A dialog "Merge Heic Shop into another vendor": "Its 2 receipts will show the name of the vendor you choose, and its name becomes a name that vendor is also known by." A **Merge into** select (focused) with "Choose a vendor…" and "Staples (vetted) · N receipts"; the note "This changes the vendor shown on receipts you already have…"; **Cancel** and **Merge**. |
 | 5 | Click **Merge** with "Choose a vendor…" still selected. | The browser's required-field check stops it; nothing is merged. |
 | 6 | Choose Staples, click **Merge**. | The page reloads with "Merged 1 vendor into Staples. <N+2> receipts now show Staples."; Heic Shop is gone and Staples' row says "Also read as “Heic Shop”". `H1` and `A1` now show Staples. |
+
+### RCPT-61 Dates and times in both formats
+
+**Purpose:** every date Receipts shows follows the account's format (issue #245), including the dashboard's
+Receipt date column and filters, the receipt page, the trash and the vendors page; the CSV stays ISO.
+**Preconditions:** RCPT-05 done (a processed receipt R1 dated 10/09/2026); the account on `mm/dd/yyyy` + `12-hour`
+(ACC-45).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/receipts/`. | R1's date column reads `10/09/2026`; the second line ends "added <MM/DD>" (e.g. `added 11/05`; with the year, `11/05/2025`, when it was added in another year). |
+| 2 | Open R1. | Heading "Staples · 10/09/2026"; "Added <MM/DD/YYYY or MM/DD, h:mm AM/PM> (receipt dated 10/09)"; the **Receipt date** field is a text box with a calendar button showing `10/09/2026` (not a browser date input). Type `10/10/2026` and **Save**: the heading follows. |
+| 3 | Type `25/10/2026`... no: with `mm/dd/yyyy` type the ISO `2026-10-25` into the Receipt date box, Tab, **Save**; then on the account page choose `dd/mm/yyyy` + `24-hour` and reload R1, `/receipts/`, `/receipts/trash/` (move R1 to the Trash, look, then restore it) and `/receipts/vendors/`. | The heading, the list, the trash row and the vendor's last receipt all read `25/10/2026` (day first; 25 cannot be a month, so the order is unmistakable); "Added" times read 24-hour (`21:05`); the Receipt date box reads `25/10/2026` with the placeholder `dd/mm/yyyy`. |
+| 4 | Export CSV from the dashboard. | The `receipt_date` column is `2026-10-25` and `added` an ISO timestamp: exports do not follow the display format. |
+| 5 | Check the Receipts attention email (RCPT-55) with the account on `dd/mm/yyyy` + `24-hour`. | The email's "received ..." line is `Nov 5, 2026, 9:05 PM UTC` style (public wording and UTC). |
+| 6 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
 ## Out of scope
 

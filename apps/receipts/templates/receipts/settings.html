@@ -1,4 +1,5 @@
 {% extends 'receipts/layout.html' %}
+{% load datetime_format %}
 
 {% block title %}Receipts settings - ZipTrigo{% endblock %}
 {% block page_width %}max-w-3xl{% endblock %}
@@ -34,7 +35,7 @@
         <div class="mt-4 flex flex-col gap-2 rounded-xl border border-blue-600/40 dark:border-blue-400/40 bg-blue-50 dark:bg-gray-800 px-4 py-3 sm:flex-row sm:items-center" role="status">
             <i class="fas fa-circle-info text-blue-600 dark:text-blue-400" aria-hidden="true"></i>
             <p class="flex-1 text-sm text-gray-700 dark:text-gray-300">
-                Gmail forwarding confirmation received {{ confirmation.received_at|date:'M j' }}
+                Gmail forwarding confirmation received {{ confirmation.received_at|fdate:'compact' }}
                 {% if confirmation.code %}&mdash; code <code class="font-medium text-gray-900 dark:text-gray-100">{{ confirmation.code }}</code>{% endif %}
             </p>
             {% if confirmation.url %}
@@ -66,7 +67,7 @@
         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
             {% for email in recent_emails %}
             <li class="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:gap-4">
-                <span class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap sm:w-16">{{ email.received_at|default:email.created_at|date:'M j' }}</span>
+                <span class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap sm:w-24">{{ email.received_at|default:email.created_at|fdate:'compact' }}</span>
                 <span class="min-w-0 flex-1 text-sm">
                     <span class="block truncate text-gray-900 dark:text-gray-100">{{ email.from_address|default:'(unknown sender)' }}</span>
                     {% if email.subject %}<span class="block truncate text-xs text-gray-500 dark:text-gray-400">&ldquo;{{ email.subject }}&rdquo;</span>{% endif %}

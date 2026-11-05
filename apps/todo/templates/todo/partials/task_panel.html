@@ -1,3 +1,4 @@
+{% load datetime_format %}
 {% load todo_ui %}
 {% comment %} The task page's content: what every action taken from the page re-renders (`ctx=page`, target #task-panel).
    Needs `task` (with subtask counts), `subtasks`, `labels`, `selected_label_ids`, `today` and `referenced_by`.
@@ -10,9 +11,9 @@
         <span>#{{ task.number }}</span>
         {% if task.parent %}<span>Subtask of <a href="{% url 'todo:task' task.parent.number %}" class="text-sage-600 dark:text-sage-300 hover:underline">{{ task.parent.title }}</a></span>{% endif %}
         {% if task.is_trashed %}
-        <span class="text-red-600 dark:text-red-400"><i class="fas fa-trash mr-1" aria-hidden="true"></i>In the trash since {{ task.deleted_at|date:'j M Y' }}</span>
+        <span class="text-red-600 dark:text-red-400"><i class="fas fa-trash mr-1" aria-hidden="true"></i>In the trash since {{ task.deleted_at|fdate }}</span>
         {% elif task.is_completed %}
-        <span class="text-green-700 dark:text-green-400"><i class="fas fa-check mr-1" aria-hidden="true"></i>Completed {{ task.completed_at|date:'j M Y, H:i' }}</span>
+        <span class="text-green-700 dark:text-green-400"><i class="fas fa-check mr-1" aria-hidden="true"></i>Completed {{ task.completed_at|fdatetime }}</span>
         {% endif %}
         {% if task.is_from_email %}<span><i class="fas fa-envelope mr-1" aria-hidden="true"></i>{% if task.email_from_authenticated %}Created from an email from {{ task.email_from }}{% elif task.email_from %}Created from an email claiming to be from {{ task.email_from }}{% else %}Created from an email{% endif %}</span>{% endif %}
         {% if task.is_unpaid %}<span class="text-amber-700 dark:text-amber-400"><i class="fas fa-coins mr-1" aria-hidden="true"></i>Waiting for credits ({{ task.charged_credits }})</span>{% endif %}
@@ -99,7 +100,7 @@
         <h2 id="details-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Details</h2>
         {% if task.is_trashed %}
         <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <div><dt class="text-xs text-gray-500 dark:text-gray-400">Date</dt><dd>{% if task.due_date %}{{ task.due_date|date:'D j M Y' }}{% if task.due_time %} {{ task.due_time|time:'H:i' }}{% endif %}{% else %}No date{% endif %}</dd></div>
+            <div><dt class="text-xs text-gray-500 dark:text-gray-400">Date</dt><dd>{% if task.due_date %}{{ task.due_date|fdate:'weekday' }}{% if task.due_time %} {{ task.due_time|ftime }}{% endif %}{% else %}No date{% endif %}</dd></div>
             <div><dt class="text-xs text-gray-500 dark:text-gray-400">Priority</dt><dd>{% if task.priority %}Priority {{ task.priority }}{% else %}None{% endif %}</dd></div>
             <div class="sm:col-span-2"><dt class="mb-1 text-xs text-gray-500 dark:text-gray-400">Labels</dt><dd class="flex flex-wrap gap-2">{% for label in task.labels.all %}{% label_chip label %}{% empty %}None{% endfor %}</dd></div>
         </dl>

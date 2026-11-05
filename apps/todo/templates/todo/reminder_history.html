@@ -1,4 +1,5 @@
 {% extends 'todo/layout.html' %}
+{% load datetime_format %}
 
 {% block title %}Reminder history - To-do - ZipTrigo{% endblock %}
 
@@ -10,7 +11,7 @@
 <ul id="reminder-history" class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
     {% for delivery in deliveries %}
     <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-3 text-sm">
-        <span class="text-xs text-gray-500 dark:text-gray-400">{{ delivery.sent_at|date:'j M Y, H:i' }}</span>
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ delivery.sent_at|fdatetime }}</span>
         <span class="min-w-0 flex-1">
             <span class="text-gray-500 dark:text-gray-400">#{{ delivery.task_number }}</span>
             {% if delivery.task_id %}

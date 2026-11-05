@@ -93,6 +93,7 @@ from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today, user_tz
 from apps.billing.services import InsufficientCreditsError
 from apps.core import ratelimit
+from apps.core.datetime_format import formats_for
 from apps.core.services import notifications
 from apps.core.services.mail import mime
 from apps.core.services.mail.addresses import matches_allowlist
@@ -698,6 +699,7 @@ def _parse_request(user: User, account: TodoAccount, title: str) -> parsing.Pars
         timezone=tz.key,
         default_time=account.default_due_time,
         now_local=time(now.hour, now.minute),
+        formats=formats_for(user),
     )
 
 

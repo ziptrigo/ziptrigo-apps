@@ -573,8 +573,8 @@ def test_local_time_tag_keeps_rendering_utc_when_a_zone_is_active():
     html = template.render(Context({'value': value}))
 
     assert 'datetime="2026-10-27T13:51:00+00:00"' in html
-    assert 'Oct 27, 2026 13:51 UTC' in html
-    assert '2026-10-27 13:51 UTC' in html
+    assert 'Oct 27, 2026, 1:51 PM UTC' in html
+    assert '2026-10-27 1:51 PM UTC' in html
 
 
 def test_local_time_tag_converts_an_aware_value_in_another_zone_to_utc():
@@ -585,7 +585,7 @@ def test_local_time_tag_converts_an_aware_value_in_another_zone_to_utc():
     html = template.render(Context({'value': value}))
 
     assert 'datetime="2026-10-27T13:51:00+00:00"' in html
-    assert '13:51 UTC' in html
+    assert '1:51 PM UTC' in html
 
 
 # --- the account page's form ---
@@ -1104,6 +1104,8 @@ def test_get_account_returns_the_zone(client, user):
         'name': 'Test User',
         'email': 'testuser@example.com',
         'timezone': 'Asia/Tokyo',
+        'date_format': 'mdy',
+        'time_format': '12h',
     }
 
 

@@ -10,6 +10,8 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.core.datetime_format import DisplayFormats, format_date
+
 from ..forms.filters import resolve_date_range
 from ..models import Receipt, ReceiptCategory, ReceiptsAccount, ReceiptStatus
 from ..services.accounts import get_account
@@ -19,6 +21,7 @@ from .factories import create_receipt
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 HX = {'HTTP_HX_REQUEST': 'true'}
+MDY = DisplayFormats('mdy', '12h')
 
 
 @pytest.fixture
@@ -90,11 +93,11 @@ class TestList:
         content = web.get(reverse('receipts:dashboard')).content.decode()
 
         assert 'Staples' in content
-        assert '2026-10-09' in content
+        assert '10/09/2026' in content
         assert 'USD 1,042.10' in content
         assert 'Processed' in content
         assert 'email' in content and 'receipt' in content and 'Visa ••4242' in content
-        assert f'added {staples.created_at:%b} {staples.created_at.day}' in content
+        assert f'added {format_date(staples.created_at, "compact", MDY)}' in content
 
     def test_rows_without_data_show_what_is_wrong(self, web, make):
         make(status=ReceiptStatus.NEEDS_REVIEW, original_filename='IMG_2041.HEIC')

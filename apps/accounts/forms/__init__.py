@@ -1,5 +1,6 @@
 from .admin import UserAdminChangeForm, UserAdminCreationForm
 from .change_password import ChangePasswordForm
+from .display_formats import DisplayFormatsForm
 from .forgot_password import ForgotPasswordForm
 from .login import LoginForm
 from .profile import ProfileForm
@@ -9,6 +10,7 @@ from .reset_password import ResetPasswordForm
 from .theme import ThemeForm
 
 __all__ = [
+    'DisplayFormatsForm',
     'ChangePasswordForm',
     'ForgotPasswordForm',
     'LoginForm',

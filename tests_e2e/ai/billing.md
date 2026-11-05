@@ -36,7 +36,7 @@ pages themselves (list columns, filters, bulk tool, CSV, read-only rules) are te
 - Log in on `/account/login/` (**Email**, **Password**, **Sign in**); log out from the account menu
   (person icon, top right) > **Logout**. A superuser logged in on the site can open `/admin/`
   directly (same session).
-- Times on the history page are shown in the **browser's** time zone, formatted `YYYY-MM-DD HH:MM`
+- Times on the history page are shown in the **browser's** time zone, formatted `YYYY-MM-DD h:mm AM/PM` (`YYYY-MM-DD HH:MM` on a 24-hour account, issue #245)
   (`{% local_time ... 'iso' %}`; the `<time datetime="...">` attribute holds the UTC value).
 - Background tasks run inline, so a receipt is charged during its upload's final request, and a
   welcome grant or a promo reservation is settled during the confirming request.
@@ -96,7 +96,7 @@ Create these local files before starting (the fake AI reads any real image as a 
 |---|---|---|
 | 1 | Look at the page. | Tab title `Credits History - ZipTrigo`. A card with a coins icon, heading **Credits History** and "Current balance: **100** credits". At the top right of the card (wrapping under the heading on a narrow window) a **Back to Account** link with a left arrow. Under the heading a "Have a promo code?" form with a `CODE` field and a **Redeem** button (see BILL-11). |
 | 2 | Look at the table header. | Three columns, in this order: **Date**, **Change**, **Description**. |
-| 3 | Look at the rows. | Exactly one row (a transaction whose description only repeats its type label shows an empty Description cell, not the label twice): Date = today's date and a time in the browser's time zone (`YYYY-MM-DD HH:MM`, close to when the server was started; hover/inspect: the `<time>` element's `datetime` attribute is the UTC instant); Change = **+100** in green followed by a small grey pill `Purchase`; Description = `e2e seed`. |
+| 3 | Look at the rows. | Exactly one row (a transaction whose description only repeats its type label shows an empty Description cell, not the label twice): Date = today's date and a time in the browser's time zone (`YYYY-MM-DD h:mm AM/PM`, close to when the server was started; hover/inspect: the `<time>` element's `datetime` attribute is the UTC instant); Change = **+100** in green followed by a small grey pill `Purchase`; Description = `e2e seed`. |
 | 4 | Look below the table. | No pagination bar ("Page 1 of 1" is **not** shown when there is only one page). |
 | 5 | Note the transaction type label. | A grey pill with the display label, `Purchase`. |
 | 6 | Click **Back to Account**. | Goes to `/account/`: section **Credits**, "Current balance" **100 credits**, and a **Usage History** button. |
@@ -573,6 +573,19 @@ repeats the label is not shown twice.
 | 1 | As `qa.admin` on `/admin/billing/credittransaction/adjust/`, add `1` credit to `qa.user@example.com` with Description `Adjustment`. | "Adjusted credits for qa.user@example.com. New balance: ...". Log out. |
 | 2 | Sign in as `qa.user`, open `/billing/credits/`. | The new top row: `+1` with the `Adjustment` pill and an **empty** Description cell (the label isn't repeated). Further down the pills `Promo code` (BILL-20), `Adjustment`, `Refund`, `Spend` and `Purchase`, each next to its amount (green `+` for credits added, red `-` for spent). |
 | 3 | Sign in as P, open `/billing/credits/`. | The `Welcome credits` pill on the `+1000` row (description `A gift for your new account`) and `Promo code` pills. Together with step 2 all six labels appear: Purchase, Spend, Adjustment, Refund, Promo code, Welcome credits; never a raw value such as `promo` or `welcome`. Log out. |
+
+### BILL-33 The history page follows the date and time format; the ledger text does not
+
+**Purpose:** `/billing/credits/` shows each transaction's time in the account's clock (issue #245); descriptions
+and the admin's ledger are unchanged.
+**Preconditions:** a signed-in account with at least one transaction (`qa.user@example.com`, "e2e seed"); ACC-45's settings.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | With `mm/dd/yyyy` + `12-hour` open `/billing/credits/`. | Each Date cell reads `YYYY-MM-DD h:mm AM/PM` (e.g. `2026-11-05 9:05 PM`): the date part stays ISO (this is the `iso` style, for tables), the time follows the clock. |
+| 2 | Set `24-hour` and reload. | `2026-11-05 21:05`. |
+| 3 | In a private window, nothing of this page is public. | `/billing/credits/` redirects to the login page. |
+| 4 | Restore `12-hour`. | - |
 
 ## Out of scope
 
