@@ -135,6 +135,21 @@ class User(AbstractBaseUser, PermissionsMixin):
             validators=[validate_timezone],
         ),
     )
+    # Which product apps the user sees and in what order (issue #246), set in the "Apps" section of
+    # the account page. Lists of product labels (`apps.core.products`). `app_order` is the user's
+    # order, hidden apps included, so switching one back on puts it where it was; `hidden_apps` are
+    # the ones switched off. Both are read leniently by `apps.core.products.products_for`: unknown
+    # labels are ignored, a product missing from `app_order` goes last and is shown. `db_default`
+    # as well as `default`, as for `theme`: the previous release's container keeps inserting users
+    # while the migration runs.
+    app_order = cast(
+        list[str],
+        models.JSONField(default=list, db_default=[], blank=True),
+    )
+    hidden_apps = cast(
+        list[str],
+        models.JSONField(default=list, db_default=[], blank=True),
+    )
     inactive_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     inactive_reason = cast(str, models.TextField(blank=True))
     deleted_at = models.DateTimeField(null=True, blank=True)

@@ -17,6 +17,16 @@
         A set of small tools under one account.
     </p>
 
+    {% if user.is_authenticated and not products %}
+    {% comment %}Every app is switched off in the account's Apps section (issue #246).{% endcomment %}
+    <div id="no-apps" class="w-full max-w-md rounded-xl border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-800">
+        {% url 'accounts:account' as account_url %}
+        {% with action_url=account_url|add:'#apps' %}
+        {% include 'core/partials/empty_state.html' with icon='fas fa-toggle-off' title='All your apps are switched off' text='Switch the ones you use back on in your account settings.' action_label='Choose your apps' %}
+        {% endwith %}
+    </div>
+    {% endif %}
+
     <div class="grid gap-6 w-full max-w-4xl sm:grid-cols-2">
         {% for product in products %}
         <a href="{% url product.url_name %}" style="animation-delay: {{ forloop.counter0|add:3 }}00ms"
