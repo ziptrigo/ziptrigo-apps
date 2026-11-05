@@ -39,7 +39,7 @@ def test_upload_review_edit_trash_and_restore(
     row = page.locator('#receipt-list li', has_text='Staples')
     expect(row).to_contain_text('Processed')
     expect(row).to_contain_text('USD 42.10')
-    expect(row).to_contain_text('2026-10-09')
+    expect(row).to_contain_text('10/09/2026')  # the account's format: month first
 
     # The detail page previews the uploaded image from the bucket.
     row.click()

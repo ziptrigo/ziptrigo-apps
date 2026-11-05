@@ -86,3 +86,35 @@ def test_the_day_and_week_bucket_labels_follow_the_format_and_months_stay_words(
     for formats in (DisplayFormats('mdy', '12h'), DisplayFormats('dmy', '24h')):
         with override(formats):
             assert stats._bucket_label(date(2026, 10, 1), 0) == 'Oct 2026'
+
+
+@pytest.mark.parametrize(
+    ('date_format', 'time_format', 'since'),
+    [
+        ('mdy', '12h', r'\(since \d{2}/\d{2}/\d{4}\)'),
+        ('dmy', '24h', r'\(since \d{2}/\d{2}/\d{4}\)'),
+    ],
+)
+def test_the_stats_page_says_since_in_the_users_format(
+    web, funded_user, date_format, time_format, since
+):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from .events import add_event, at_day
+
+    set_display_formats(funded_user, date_format=date_format, time_format=time_format)
+    paid = create_link(funded_user, code='Fmt2', analytics_paid_at=timezone.now())
+    first = timezone.now().astimezone(UTC).date() - timedelta(days=40)
+    add_event(paid, at_day(first), visitor='a')
+
+    body = flat(web.get(reverse('short_url:stats', args=[paid.pk]) + '?range=all'))
+
+    expected = (
+        f'{first.month:02d}/{first.day:02d}/{first.year}'
+        if date_format == 'mdy'
+        else f'{first.day:02d}/{first.month:02d}/{first.year}'
+    )
+    assert re.search(since, body)
+    assert f'(since {expected})' in body

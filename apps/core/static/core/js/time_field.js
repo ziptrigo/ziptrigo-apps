@@ -62,6 +62,9 @@ document.addEventListener('alpine:init', () => {
     },
 
     setError(message) {
+      // Nothing of ours to clear: leave what core/js/field_errors.js set on the box (a refused
+      // form's message) alone when focus merely passes through.
+      if (!message && !this.error) return;
       this.error = message;
       const text = this.$refs.text;
       if (message) {

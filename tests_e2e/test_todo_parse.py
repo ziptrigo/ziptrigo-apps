@@ -5,7 +5,8 @@ swapped for a fake that understands one title (`todo_fakes.DATED_TITLE`), so no 
 """
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, expect
 
@@ -199,5 +200,7 @@ def test_the_chip_says_what_stays_when_the_text_has_no_time_or_repeat(
     # The date moved; the time and the repeat are what the chip said they were.
     expect(form.locator('input[name="due_time"]')).to_have_value('09:00')
     expect(form.locator('input[name="rrule"]')).to_have_value(RULE)
-    tomorrow = datetime.now(UTC).date() + timedelta(days=1)  # the user's zone is UTC
+    # "Tomorrow" in the account's zone (the browser's, saved on the first sign-in; UTC if none yet).
+    zone = ZoneInfo(page.locator('html').get_attribute('data-user-timezone') or 'UTC')
+    tomorrow = datetime.now(zone).date() + timedelta(days=1)
     expect(form.locator('input[name="due_date"]')).to_have_value(tomorrow.isoformat())

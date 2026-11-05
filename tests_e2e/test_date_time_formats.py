@@ -35,7 +35,8 @@ def run(server: ReceiptsServer, code: str) -> str:
         capture_output=True,
         text=True,
     )
-    return result.stdout.strip()
+    # Django's shell announces the objects it imported before anything the code prints.
+    return result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ''
 
 
 def set_formats(server: ReceiptsServer, date_format: str, time_format: str) -> None:
@@ -76,9 +77,20 @@ def _free_tasks_and_default_formats(receipts_server: ReceiptsServer):
         'settings.task_price = 0\n'
         'settings.save()\n',
     )
+    # Pin the account's time zone: otherwise the first sign-in saves the browser's, and "today"
+    # moves under the tasks these tests create from the shell.
+    run(receipts_server, "User.objects.filter(pk=user.pk).update(timezone='UTC')\n")
     set_formats(receipts_server, 'mdy', '12h')
     yield
     set_formats(receipts_server, 'mdy', '12h')
+    run(receipts_server, "User.objects.filter(pk=user.pk).update(timezone='')\n")
+
+
+def save_details(page: Page, number: str) -> None:
+    """Press Save on the task page's details form and wait until the panel was swapped."""
+    with page.expect_response(lambda r: f'/todo/{number}/edit/' in r.url):
+        page.click('#task-details-form button[type="submit"]')
+    page.wait_for_timeout(300)  # htmx settles the swapped-in panel
 
 
 # -- 1. Setting a format -----------------------------------------------------------------------
@@ -140,16 +152,16 @@ def test_a_typed_date_is_read_in_the_users_order_and_a_bad_one_changes_nothing(
     box.fill(typed)
     box.press('Tab')
     expect(hidden).to_have_value('2026-11-05')
-    page.click('#task-details-form button[type="submit"]')
+    save_details(page, number)
     expect(page.locator(f'#due-date-{number}')).to_have_value(shown)
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-05')
 
     # ISO is accepted whatever the order.
     box = page.locator(f'#due-date-{number}')
     box.fill('2026-11-06')
-    box.press('Enter')
+    box.press('Tab')
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
-    page.click('#task-details-form button[type="submit"]')
+    save_details(page, number)
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
 
     # A date that doesn't exist is refused under the box and leaves the saved date alone.
@@ -164,7 +176,7 @@ def test_a_typed_date_is_read_in_the_users_order_and_a_bad_one_changes_nothing(
         )
     ).to_be_visible()
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
-    page.click('#task-details-form button[type="submit"]')
+    save_details(page, number)
     expect(page.locator('#task-details-form input[name="due_date"]')).to_have_value('2026-11-06')
 
 
@@ -219,7 +231,7 @@ def test_a_typed_time_shows_on_the_users_clock_and_saves_as_hh_mm(
     box.press('Tab')
     expect(box).to_have_value(shown)
     expect(page.locator('#task-details-form input[name="due_time"]')).to_have_value('22:00')
-    page.click('#task-details-form button[type="submit"]')
+    save_details(page, number)
     expect(page.locator(f'#due-time-{number}')).to_have_value(shown)
     expect(page.locator('#task-details-form input[name="due_time"]')).to_have_value('22:00')
 
@@ -331,7 +343,8 @@ def test_a_short_link_expiry_is_a_date_and_a_time_in_the_browsers_zone(
         page.goto(page.url.rstrip('/') + '/edit/')
         expect(page.locator('#id_expires_date')).to_have_value('31/12/2030')
         expect(page.locator('#id_expires_time')).to_have_value('18:30')
-        expect(page.locator('#id_expires_at_utc')).to_have_value('2030-12-31T09:30:00.000Z')
+        # The submitted UTC value is the server's, until a box changes.
+        expect(page.locator('#id_expires_at_utc')).to_have_value('2030-12-31T09:30Z')
     finally:
         context.close()
 
@@ -435,7 +448,8 @@ def test_a_comment_time_is_in_the_users_format_and_the_browsers_zone(
         page.click('#task-comments form[hx-post$="/comments/"] button[type="submit"]')
         stamp = page.locator('#task-comments time[data-local-time]').first
         expect(stamp).to_be_visible()
-
+        # The script rewrites the tooltip once htmx has put the comment on the page.
+        expect(stamp).to_have_attribute('title', re.compile(r'^\d{2}/\d{2}/\d{4}, [^U]*$'))
         title = stamp.get_attribute('title') or ''
         # What the browser's own zone says the moment is, written by hand in the expected wording.
         parts = stamp.evaluate(
