@@ -1,0 +1,58 @@
+{% comment %}
+Reusable themed select: the site's own dropdown in place of the operating system's. Include it with:
+  {% include 'core/components/select.html' with name='date_format' id='date-format' options=options value='mdy' %}
+`options` is a list of dicts with `value` and `label` and an optional `hint` (a muted second part of the
+text, e.g. an example); `value` is the selected one (the first option when it matches none: the script picks it as it starts). `id` goes on the
+button, so a `<label for="...">` names it; `describedby` is the id of help text; `aria_label` names it when
+there is no label; `root_class` adds classes to the wrapper (a width); `disabled` (a flag) disables it;
+`compact` makes the text small.
+Submits a single hidden input `name`; the button has none. The hidden input fires bubbling `input` and
+`change` events when a choice is made, so a form that refreshes on `change` (hx-trigger="change") works as with
+a native select. Without JavaScript a native `<select>` of the same name is shown instead (`<noscript>`).
+Behaviour: static/core/js/select.js (Alpine, `themedSelect`). An ARIA select-only combobox: Enter, Space or
+Arrow Down opens the list, the arrow keys, Home and End move, typing a letter jumps, Enter chooses, Escape
+closes. Other scripts set the value with a `field-set` event on the hidden input ({ detail: { value } }).
+{% endcomment %}
+{% with selected=value %}
+<div x-data="themedSelect" data-value="{{ value }}" class="relative {{ root_class }}" data-field-wrap
+     @click.outside="close()">
+  <input type="hidden" name="{{ name }}" value="{{ value }}" x-ref="hidden" @field-set="setExternal($event.detail.value)"
+         {% if disabled %}disabled{% endif %}>
+  <button type="button" {% if id %}id="{{ id }}"{% endif %} x-ref="button" role="combobox"
+          aria-haspopup="listbox" :aria-expanded="open" :aria-controls="listId"
+          :aria-activedescendant="open && active !== -1 ? listId + '-' + active : null"
+          {% if aria_label %}aria-label="{{ aria_label }}"{% endif %}{% if describedby %} aria-describedby="{{ describedby }}"{% endif %}
+          {% if disabled %}disabled{% endif %}
+          @click="toggle()" @keydown="onKey($event)" @blur="onBlur($event)"
+          class="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-left {% if compact %}text-sm{% endif %} hover:border-sage-300 dark:hover:border-sage-400 disabled:opacity-50 disabled:cursor-not-allowed"
+          :class="open ? 'border-sage-300 dark:border-sage-400' : ''">
+    <span class="min-w-0 truncate">
+      {% for option in options %}{% if option.value == selected %}<span x-text="label">{{ option.label }}</span>{% if option.hint %} <span class="font-normal text-gray-500 dark:text-gray-400" x-show="hint" x-text="'(' + hint + ')'">({{ option.hint }})</span>{% endif %}{% endif %}{% endfor %}
+    </span>
+    <i class="fas fa-chevron-down text-xs text-gray-500 dark:text-gray-400 transition-transform" :class="open ? 'rotate-180' : ''" aria-hidden="true"></i>
+  </button>
+  <ul x-show="open" x-ref="list" :id="listId" role="listbox" tabindex="-1" style="display: none"
+      {% if aria_label %}aria-label="{{ aria_label }}"{% endif %}
+      class="absolute z-20 mt-1 max-h-64 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-sage-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1 text-sm">
+    {% for option in options %}
+    <li role="option" :id="listId + '-{{ forloop.counter0 }}'" data-value="{{ option.value }}" data-label="{{ option.label }}"{% if option.hint %} data-hint="{{ option.hint }}"{% endif %}
+        :aria-selected="value === $el.dataset.value ? 'true' : 'false'"
+        @mousedown.prevent="choose({{ forloop.counter0 }})" @mousemove="active = {{ forloop.counter0 }}"
+        :class="{
+          'bg-sage-100 dark:bg-gray-700': active === {{ forloop.counter0 }},
+          'font-semibold': value === $el.dataset.value
+        }"
+        class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sage-800 dark:text-sage-100">
+      <span class="min-w-0 truncate">{{ option.label }}{% if option.hint %} <span class="font-normal text-gray-500 dark:text-gray-400">({{ option.hint }})</span>{% endif %}</span>
+      <i class="fas fa-check text-xs text-sage-600 dark:text-sage-300" x-show="value === $el.parentElement.dataset.value" aria-hidden="true"></i>
+    </li>
+    {% endfor %}
+  </ul>
+  <noscript>
+    <select name="{{ name }}" {% if aria_label %}aria-label="{{ aria_label }}"{% endif %}
+            class="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+      {% for option in options %}<option value="{{ option.value }}"{% if option.value == selected %} selected{% endif %}>{{ option.label }}{% if option.hint %} ({{ option.hint }}){% endif %}</option>{% endfor %}
+    </select>
+  </noscript>
+</div>
+{% endwith %}

@@ -434,6 +434,16 @@ wording.
   `10pm`, `22:00`, `2200`, `9` and shows the user's clock, with half-hour suggestions. Both fire
   `input` / `change` on the hidden input and wear `data-field-wrap`. **Never use a native
   `<input type="date|time|datetime-local">`**: its look and order come from the browser, not the account.
+- **Themed select** (`core/components/select.html`, `static/core/js/select.js`): the site's own dropdown, for
+  a short list the user picks one of where the operating system's popup would break the look (the account
+  page's date and time format). A `rounded-lg` button in the control classes with a chevron, and a
+  `rounded-xl` listbox in the time field's suggestion style (sage border, `shadow-lg`, the highlighted
+  option `bg-sage-100 dark:bg-gray-700`, a check on the selected one). Options are `{value, label, hint}`
+  dicts (the hint is a muted example); it submits one hidden input and fires bubbling `input` / `change`
+  on it, so `hx-trigger="change"` works as with a native `<select>`. An ARIA select-only combobox
+  (arrows, Home/End, typing, Enter, Escape; Tab leaves without choosing). Name it with a `<label for>`
+  pointing at its `id`. Without JavaScript a native `<select>` of the same name shows in a `<noscript>`.
+  Long or searchable lists, and selects inside a small tool bar, may still use a native `<select>`.
 
 ### 10.3 Form actions
 

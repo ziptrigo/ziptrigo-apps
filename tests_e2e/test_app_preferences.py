@@ -154,3 +154,16 @@ def test_arrow_keys_announce_the_ends_of_the_list(page: Page, receipts_server: R
         expect(page.locator('[data-apps-live]')).to_have_text('To-do is already last.')
     finally:
         receipts_server.shell(RESET)
+
+
+def test_the_apps_are_one_column(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.shell(RESET)
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/account/')
+
+    boxes = page.locator('[data-app]').evaluate_all(
+        'tiles => tiles.map(tile => { const r = tile.getBoundingClientRect(); return [r.left, r.top]; })'
+    )
+    assert len(boxes) == 5
+    assert len({left for left, _ in boxes}) == 1  # all the same left edge
+    assert [top for _, top in boxes] == sorted(top for _, top in boxes)

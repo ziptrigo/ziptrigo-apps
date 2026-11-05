@@ -2,12 +2,12 @@
 The account page's date and time format form (issue #245), in the Appearance section. `formats_form`
 (a `DisplayFormatsForm`) is only passed back with errors. The saved choices are read from
 `request.user`. A choice submits straight away (htmx, `change`), like the theme: on success the
-server answers `HX-Reswap: none` so the radios stay in place and keep the keyboard focus; only an
+server answers `HX-Reswap: none` so the dropdowns stay in place and keep the keyboard focus; only an
 error (422) is swapped in, over the form (`hx-target="this"`). Other pages show the new format
 when they next load. `hx-sync` runs one request at a time and keeps only the last click queued.
 Without JavaScript the Save button, shown only then, does the same with a normal POST and redirect.
 {% endcomment %}
-{% load datetime_format %}
+{% load display_formats %}
 <form id="formats-form"
       method="post"
       action="{% url 'accounts:formats' %}"
@@ -28,25 +28,17 @@ Without JavaScript the Save button, shown only then, does the same with a normal
   {% endif %}
 
   <div class="grid gap-6 sm:grid-cols-2">
-    <fieldset>
-      <legend class="mb-2 text-sm font-medium">Date format</legend>
-      <div class="flex flex-wrap gap-2">
-        {% sample_date 'mdy' as mdy_example %}
-        {% sample_date 'dmy' as dmy_example %}
-        {% include 'accounts/partials/format_option.html' with name='date_format' value='mdy' label='mm/dd/yyyy' example=mdy_example current=request.user.date_format %}
-        {% include 'accounts/partials/format_option.html' with name='date_format' value='dmy' label='dd/mm/yyyy' example=dmy_example current=request.user.date_format %}
-      </div>
-    </fieldset>
+    <div>
+      <label id="date-format-label" for="date-format" class="mb-2 block text-sm font-medium">Date format</label>
+      {% date_format_options as date_options %}
+      {% include 'core/components/select.html' with name='date_format' id='date-format' options=date_options value=request.user.date_format %}
+    </div>
 
-    <fieldset>
-      <legend class="mb-2 text-sm font-medium">Time format</legend>
-      <div class="flex flex-wrap gap-2">
-        {% sample_time '12h' as twelve_example %}
-        {% sample_time '24h' as twentyfour_example %}
-        {% include 'accounts/partials/format_option.html' with name='time_format' value='12h' label='12-hour' example=twelve_example current=request.user.time_format %}
-        {% include 'accounts/partials/format_option.html' with name='time_format' value='24h' label='24-hour' example=twentyfour_example current=request.user.time_format %}
-      </div>
-    </fieldset>
+    <div>
+      <label id="time-format-label" for="time-format" class="mb-2 block text-sm font-medium">Time format</label>
+      {% time_format_options as time_options %}
+      {% include 'core/components/select.html' with name='time_format' id='time-format' options=time_options value=request.user.time_format %}
+    </div>
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
     Used for every date and time you see across the site; other pages show the new format when they next load.

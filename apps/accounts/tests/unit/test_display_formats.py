@@ -22,12 +22,12 @@ HTMX = {'HTTP_HX_REQUEST': 'true'}
 
 
 def _checked(content: str, name: str) -> list[str]:
-    """The values of the checked radios called `name`, in page order."""
-    tags = re.findall(r'<input type="radio"[^>]*>', content, flags=re.DOTALL)
+    """The values of the hidden inputs called `name` (what the themed dropdown submits), in page order."""
+    tags = re.findall(r'<input type="hidden"[^>]*>', content, flags=re.DOTALL)
     return [
         value
         for tag in tags
-        if f'name="{name}"' in tag and 'checked' in tag
+        if f'name="{name}"' in tag
         for value in re.findall(r'value="(.*?)"', tag)
     ]
 
@@ -194,7 +194,7 @@ def test_get_is_not_allowed(client, user):
 # --- the account page ---
 
 
-def test_account_page_renders_both_groups_with_the_defaults_checked(client, user):
+def test_account_page_renders_both_dropdowns_with_the_defaults_selected(client, user):
     client.force_login(user)
 
     content = client.get(reverse('accounts:account')).content.decode()
@@ -205,9 +205,13 @@ def test_account_page_renders_both_groups_with_the_defaults_checked(client, user
     assert 'mm/dd/yyyy' in flat and 'dd/mm/yyyy' in flat
     assert '12-hour' in flat and '24-hour' in flat
     assert '(9:05 PM)' in flat and '(21:05)' in flat
+    # Dropdowns, not radios: the site's own listbox, with a native select only for no JavaScript.
+    assert 'type="radio"' not in flat.split('formats-form', 1)[1].split('</form>', 1)[0]
+    assert flat.count('role="listbox"') >= 2
+    assert '<noscript> <select name="date_format"' in flat
 
 
-def test_account_page_checks_the_saved_choices(client, user):
+def test_account_page_selects_the_saved_choices(client, user):
     set_display_formats(user, date_format='dmy', time_format='24h')
     client.force_login(user)
 
