@@ -1,0 +1,18 @@
+{% comment %}
+The product links of the header: the apps the visitor has not switched off, in their order (issue #246).
+`products` is the context processor's list. `display: contents` (`contents`) keeps the wrapper out of the
+header's flex layout. With `oob` set the partial is a swap target the account page's Apps form answers with,
+so the menu follows a change without a reload.
+{% endcomment %}
+<div id="product-nav" class="contents"{% if oob %} hx-swap-oob="true"{% endif %}>
+{% for product in products %}
+{% comment %}The product the visitor is in is marked (its URL namespace is its app label).
+It is aria-current="true", not "page": a product page already has its own "page" (To-do's sidebar
+nav), and one page should have one.{% endcomment %}
+<a href="{% url product.url_name %}"
+   aria-label="{{ product.name }}" title="{{ product.name }}"{% if request.resolver_match.app_name == product.label %} aria-current="true"{% endif %}
+   class="btn whitespace-nowrap rounded-lg px-1.5 min-[360px]:px-2 md:px-2.5 py-1.5 text-sm font-medium {% if request.resolver_match.app_name == product.label %}bg-sage-100 text-gray-900 dark:bg-sage-800 dark:text-gray-100{% else %}text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800{% endif %}">
+    <i class="{{ product.icon }} md:mr-1.5 text-sage-600 dark:text-sage-300" aria-hidden="true"></i><span class="hidden md:inline">{{ product.name }}</span>
+</a>
+{% endfor %}
+</div>

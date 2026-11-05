@@ -194,7 +194,9 @@ Each app may import only from layers below it. Enforced by the import-linter con
 
 - `core` can't import `accounts`, so the admin site's request type is `PermissionsMixin`, and the
   nav/landing page learn about products from the `apps.core.products` registry, which each
-  product fills in its `AppConfig.ready()`.
+  product fills in its `AppConfig.ready()`. The registry also orders and filters them per user (`products_for`,
+  `visible_products`: a user's `app_order` / `hidden_apps` read as plain attributes, see "Auth" >
+  "Apps"), which is why the `products` context processor only returns the visible ones.
 - `accounts.User` has no `credits`; the balance lives in `billing.CreditAccount`. Change it only
   through `apps.billing.services` (`add_credits`, `spend_credits`, `apply_credits`,
   `get_balance`), passing `source='<app label>'` from a product. Templates get the balance as
@@ -564,6 +566,36 @@ one `apply` that reads `data-theme` each time (`dark` for "dark", none for "ligh
 `prefers-color-scheme` for "system"), so its live follow of the OS setting only matters while the
 theme is `system`, and the `themeChanged` listener sets `data-theme` and calls it. `User.theme` is
 read-only in the user admin ("Personal info"). A visitor without a session is rendered as `system`. The admin's own toggle (`core/js/admin_theme_toggle.js`) is separate.
+
+**Apps** (issue #246) are chosen under "Apps" on the account page (after Appearance): one tile per
+registered product (checkbox, icon and name only, plus a drag handle), stored on the account as two
+`JSONField`s, `User.app_order` (every product label in the user's order, switched-off apps keep their
+place) and `User.hidden_apps` (the labels switched off), both `default=list` and `db_default=[]` (the
+#102 lesson; migration `0007`). A switched-off app leaves the header menu and the home page cards and
+nothing else: its pages, emails, notifications, public links (`/go/`, `/s/`, `/t/`) and jobs keep
+working and a direct link opens it. `core` can't import `accounts`, so
+`apps.core.products.products_for(user)` reads the two attributes off the user with `getattr` (the way
+`base.html` reads `user.theme`): every registered product as `(product, visible)` in the user's order,
+unknown or repeated labels skipped, a product missing from `app_order` (added after the user saved)
+appended in registry order and visible; an anonymous visitor, or an object without the attributes,
+gets everything in registry order. `visible_products(user)` is the shown ones, and the `products`
+context processor returns only those, so `base.html` and `home.html` need no other logic. The header's
+links are `core/partials/product_nav.html` (`id="product-nav"`, `display: contents`), which the save
+swaps out of band; the home page shows an empty state linking to `/account/#apps` when a signed-in
+user has every app off. It is a session form view like the theme (`POST /account/apps/`,
+`views/apps.py`, `forms.AppsForm`, `services.apps.set_app_preferences`; web only, no `/api/`
+endpoint, no rate limit: one row write): the form posts `order` (a hidden input per tile, in DOM
+order) and `enabled` (the ticked checkboxes), both checked against the registry; an unlisted
+registered product is not hidden by being missing (a page rendered before an app was added); the
+stored order always lists every product. Every change submits (htmx `change`, `hx-sync="this:queue
+last"`); success is 200 with `HX-Reswap: none` (keeps the keyboard focus) and the nav out of band,
+without htmx a redirect, an unknown label a 422 with the partial. `static/accounts/js/apps_order.js`
+adds SortableJS (the To-do pages' version) by the `.drag-handle` and the arrow keys on a focused
+handle (focus stays, polite live region, one save per burst of presses); the handles are `hidden`
+until it runs, and a `<noscript>` Save button covers no JS (ordering needs JS). `app_order` and
+`hidden_apps` are read-only in the user admin ("Personal info"). Tests:
+`apps/accounts/tests/unit/test_app_preferences.py`, the products tests in
+`apps/core/tests/test_products.py`, Playwright `tests_e2e/test_app_preferences.py`, AI case ACC-45.
 
 **Time zone** (issue #177) is a property of the account, for "today", due dates with a time and
 reminders in the user's local time (the To-do app, #161). `User.timezone` is an IANA name or `''` for

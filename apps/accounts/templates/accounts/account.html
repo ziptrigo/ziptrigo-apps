@@ -46,6 +46,13 @@
       {% include 'accounts/partials/theme_form.html' %}
     </section>
 
+    <!-- Apps Section (issue #246) -->
+    <section class="mb-8" id="apps">
+      <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Apps</h2>
+
+      {% include 'accounts/partials/apps_form.html' %}
+    </section>
+
     {% comment %} Push notifications (issue #239) are core's: a template include, not an import. {% endcomment %}
     {% load push_tags %}{% push_settings %}
 
@@ -96,4 +103,12 @@
     toggleBtn.setAttribute('aria-pressed', show ? 'true' : 'false');
   });
 </script>
+{% endblock %}
+
+{% block extra_js %}
+{% comment %}Dragging the apps into order (issue #246): the same SortableJS version and integrity hash as To-do's pages.{% endcomment %}
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"
+        integrity="sha512-csIng5zcB+XpulRUa+ev1zKo7zRNGpEaVfNB9On1no9KYTEY/rLGAEEpvgdw6nim1WdTuihZY1eqZ31K7/fZjw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script defer src="{% static 'accounts/js/apps_order.js' %}"></script>
 {% endblock %}
