@@ -553,7 +553,7 @@ subtasks, three labels and two saved filters (TODO-07, TODO-08, TODO-23).
 |---|---|---|
 | 1 | On **Today** Tab to the grip handle of the second task. | The handle takes focus with a visible ring; it is a `role="button"` named "Reorder <title>: use the up and down arrow keys" (its tooltip says "Drag to reorder, or use the up and down arrow keys"). |
 | 2 | Press the up arrow once, then wait a moment. | The row moves above the first one at once and keeps the focus on its handle; a screen-reader announcement "<title> moved to position 1 of N." is made (a polite live region); one request is sent for the burst. Reload: the order is kept. |
-| 3 | Press the down arrow twice quickly. | The row moves two places down; still only one save after the burst. At the top or bottom of the list another press in that direction does nothing. |
+| 3 | Press the down arrow twice quickly. | The row moves two places down; still only one save after the burst. At the top or bottom of the list another press in that direction moves nothing and announces "<title> is already first." / "... is already last." |
 | 4 | Repeat on a parent's **Subtasks**, on **Labels** and on **Filters** (`/todo/filters/`). | Each list reorders the same way and keeps the order after a reload. After a move on Filters the sidebar's Filters list shows the new order without reloading. |
 | 5 | Press the arrow keys with the focus on a checkbox or the title link of a row. | Nothing is reordered (only a handle reacts). |
 

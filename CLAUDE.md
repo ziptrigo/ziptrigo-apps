@@ -593,9 +593,10 @@ last"`); success is 200 with `HX-Reswap: none` (keeps the keyboard focus) and th
 without htmx a redirect, an unknown label a 422 with the partial. A save that fails (a 5xx or no
 answer, which htmx doesn't swap) shows a `role="alert"` "Couldn't save your apps. Try again." and
 re-fetches the stored form (`GET /account/apps/form/`, `accounts:apps-form`, `?failed=1` keeps the line). `static/accounts/js/apps_order.js`
-adds SortableJS (the To-do pages' version) by the `.drag-handle` and the arrow keys on a focused
-handle (up/left earlier, down/right later; focus stays, polite live region that also says "already
-first/last" at the ends, one save per burst of presses); the handles are `hidden`
+wires core's shared `initSortableList` (see "Templates and static files") onto the grid: SortableJS by
+the `.drag-handle` and the arrow keys on a focused handle (up/left earlier, down/right later, via
+`horizontalKeys`; focus stays, the `[data-apps-live]` polite region also says "already first/last" at
+the ends, one save per burst of presses), saving by an htmx `change` on the form; the handles are `hidden`
 until it runs, and a `<noscript>` Save button covers no JS (ordering needs JS). `app_order` and
 `hidden_apps` are read-only in the user admin ("Personal info"). Tests:
 `apps/accounts/tests/unit/test_app_preferences.py`, the products tests in
@@ -3701,11 +3702,13 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   place in one day's order means nothing on another. Subtasks: `dates.subtasks_of(parent)`;
   `next_position` takes the max over that parent's subtasks, so a drag in one parent's list never
   orders another's. A top-level task's `position` stays 0. SortableJS (`sortablejs@1.15.6` from
-  cdnjs, loaded only on Today, the task page, Labels and Filters) posts the order to `POST /todo/reorder/`
+  cdnjs, loaded with core's `initSortableList` through `core/partials/sortable_script.html`, only on Today, the
+  task page, Labels and Filters) posts the order to `POST /todo/reorder/`
   (`scope`, `ids[]`, `parent`: the parent's number), answered 204. The handle (`.drag-handle`) is a
   focusable `role="button"` span (not a `<button>`: Firefox won't start a drag from one inside the
   draggable row) named "Reorder <name>"; the **up and down arrow keys move the row** and post the order
-  (one request per burst, announced in a polite live region), so ordering needs no mouse (`tasks.js`).
+  (one request per burst, announced in a polite live region, which also says "already first/last" at the
+  ends), so ordering needs no mouse (`initSortableList`, wired by `tasks.js`'s `makeSortable`).
   The filters list also fetches `todo:filter-sidebar` into `#sidebar-filters` after a save
   (`data-after-reorder-url`), so the sidebar shows the new order.
 - **Views and URLs** (`views/`; every one `@login_required`; another user's task, and a *trashed*
@@ -5002,9 +5005,15 @@ self-hosted Figtree and IBM Plex Mono `@font-face`s under `core/static/core/font
 and keyframes, the opt-in htmx hooks `row-enter` / `row-leave`, the `btn` press
 and the `:focus-visible` ring, and the `prefers-reduced-motion` switch-off). Templates carry no
 `focus:ring-*` classes: `site.css` draws the keyboard ring for buttons and links and a sage halo for
-fields. Three small shared scripts sit next to the Alpine components: `core/js/tabs.js` (the sliding
+fields. Four small shared scripts sit next to the Alpine components: `core/js/tabs.js` (the sliding
 underline of `<nav data-tabs>`), `core/js/skeleton.js` (skeleton rows after 250 ms for a `data-list`
-container that htmx refreshes) and the badge/copy pops in `components.js`. Statuses, chips, counts and
+container that htmx refreshes), `core/js/sortable_list.js` (`initSortableList(container, {handle, item,
+onReorder, label, liveRegion, horizontalKeys, debounceMs})`: SortableJS by a handle, arrow keys on a
+focused handle that move the item and keep the focus, polite announcements including "already first/last",
+one `onReorder` per burst of key presses, idempotent per container so it can be re-run from `htmx.onLoad`;
+a page includes `core/partials/sortable_script.html`, SortableJS 1.15.6 with its integrity hash plus the
+helper, before the script that calls it; used by To-do's lists and the account page's Apps form) and the
+badge/copy pops in `components.js`. Statuses, chips, counts and
 tags are one tinted pill from `apps/core/templatetags/core_ui.py` (`{% pill %}`, `pill_html`), which the
 products' own tags (`status_pill`, `link_status_pill`, `due_badge`, ...) wrap; an empty list is
 `core/partials/empty_state.html`. The only un-namespaced templates are core's `admin/` overrides.

@@ -1,16 +1,18 @@
 /*
- * The To-do pages' scripts, loaded deferred by todo/layout.html (after SortableJS on the pages that
- * reorder). Everything is wired from `htmx.onLoad`, so it also covers whatever htmx swaps in:
+ * The To-do pages' scripts, loaded deferred by todo/layout.html (after SortableJS and core's
+ * `initSortableList` on the pages that reorder). Everything is wired from `htmx.onLoad`, so it
+ * also covers whatever htmx swaps in:
  *
  *  - Checklists. The server renders the description's checkboxes disabled. On a task that can be
  *    edited (the description block has `data-checklist-url`) they are enabled here, and a change
  *    posts `index` and `checked` to that URL; the answer is the description block again.
  *  - Clearing a task's date asks first when it has reminders (they are removed with the date).
- *  - Drag and drop. A list with `data-sortable` is sorted with SortableJS by its `.drag-handle`;
+ *  - Drag and drop. A list with `data-sortable` is made sortable with core's `initSortableList`
+ *    (core/js/sortable_list.js: SortableJS by its `.drag-handle`, arrow keys, announcements);
  *    the new order of the rows' `data-task-id`s is posted to `data-reorder-url` as `ids[]`, with
  *    `scope` and `parent` when the list has them (`data-scope`, `data-parent`). The handle is
- *    focusable too: the up and down arrow keys move its row and post the order the same way (an
- *    announcement goes to a polite live region), so ordering does not need a mouse. A list with
+ *    focusable too: the up and down arrow keys move its row and post the order the same way, so
+ *    ordering does not need a mouse. A list with
  *    `data-after-reorder-url` fetches that URL into `data-after-reorder-target` once the order is
  *    saved (the filters page refreshes the sidebar's copy of the list).
  *  - Empty lists. A row action removes the row without re-rendering its list, so a list marked
@@ -106,53 +108,18 @@
     }
 
     function makeSortable(list) {
-        if (typeof Sortable === 'undefined' || Sortable.get(list)) return;
-        Sortable.create(list, {
+        if (typeof window.initSortableList !== 'function') return;
+        window.initSortableList(list, {
             handle: '.drag-handle',
-            draggable: '[data-task-id]',
-            animation: 150,
-            onEnd: function (event) {
-                if (event.oldIndex !== event.newIndex) postOrder(list);
-            },
+            item: '[data-task-id]',
+            label: function (handle) { return handle.dataset.name || 'Item'; },
+            onReorder: postOrder,
         });
     }
 
-    // Keyboard ordering: the up and down arrow keys on a row's handle move the row and save the order
-    // (one request for a burst of key presses). The move is announced in a polite live region.
-    let live = null;
-    function announce(text) {
-        if (!live) {
-            live = document.createElement('div');
-            live.className = 'sr-only';
-            live.setAttribute('aria-live', 'polite');
-            document.body.appendChild(live);
-        }
-        live.textContent = '';
-        window.setTimeout(function () { live.textContent = text; }, 30);
-    }
-    const saveTimers = new WeakMap();
     function rowsOf(list) {
         return Array.from(list.children).filter(function (child) { return child.hasAttribute('data-task-id'); });
     }
-    document.addEventListener('keydown', function (event) {
-        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-        const handle = event.target instanceof Element ? event.target.closest('.drag-handle') : null;
-        const row = handle && handle.closest('[data-task-id]');
-        const list = row && row.parentElement;
-        if (!list || !list.hasAttribute('data-sortable')) return;
-        event.preventDefault();
-        const rows = rowsOf(list);
-        const from = rows.indexOf(row);
-        const to = from + (event.key === 'ArrowUp' ? -1 : 1);
-        if (to < 0 || to >= rows.length) return;
-        if (event.key === 'ArrowUp') list.insertBefore(row, rows[to]);
-        else list.insertBefore(row, rows[to].nextElementSibling);
-        handle.focus();
-        const name = handle.dataset.name || 'Item';
-        announce(name + ' moved to position ' + (to + 1) + ' of ' + rows.length + '.');
-        window.clearTimeout(saveTimers.get(list));
-        saveTimers.set(list, window.setTimeout(function () { postOrder(list); }, 400));
-    });
 
     // Lists whose last row has left (an action answered with an empty body) or got one back.
     function refreshEmpty() {

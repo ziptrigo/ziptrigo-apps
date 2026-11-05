@@ -158,6 +158,7 @@ def test_account_page_loads_the_ordering_script(client, user):
 
     assert 'accounts/js/apps_order.js' in content
     assert 'Sortable.min.js' in content
+    assert 'core/js/sortable_list.js' in content
 
 
 # --- saving ---
