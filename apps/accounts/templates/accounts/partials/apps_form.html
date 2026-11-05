@@ -1,6 +1,7 @@
 {% comment %}
 The account page's "Apps" form (issue #246). `app_rows` is a list of (product, switched on) in the
-user's order; `apps_form` (an `AppsForm`) is only passed back with errors.
+user's order; `apps_form` (an `AppsForm`) is only passed back with errors, and `save_failed` is set
+when the page re-fetched the form after a save failed (`apps_order.js`).
 
 Each tile is a checkbox (`enabled`), the app's icon and name, and a drag handle; a hidden `order`
 input per tile sends the order the tiles are in, so reordering is just moving a tile. Every change
@@ -19,10 +20,13 @@ checkboxes with a normal POST and redirect; ordering needs JavaScript.
       hx-target="this"
       hx-swap="outerHTML"
       hx-sync="this:queue last"
+      data-form-url="{% url 'accounts:apps-form' %}"
       hx-on::before-request="this.querySelector('[data-apps-error]')?.remove()">
   {% csrf_token %}
 
-  {% if apps_form.errors %}
+  {% if save_failed %}
+    <div data-apps-error role="alert" class="mb-4 text-sm p-3 rounded-xl bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700">Couldn't save your apps. Try again.</div>
+  {% elif apps_form.errors %}
     <div data-apps-error role="alert" class="mb-4 text-sm p-3 rounded-xl bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700">
       {% for field in apps_form %}{% for error in field.errors %}{{ error }}<br>{% endfor %}{% endfor %}
     </div>
@@ -32,15 +36,15 @@ checkboxes with a normal POST and redirect; ordering needs JavaScript.
     <legend class="mb-1 text-sm font-medium">Show these apps</legend>
     <p id="apps-hint" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
       Choose the apps you use. Apps you switch off leave the menu and the home page; nothing in them is deleted, and you can switch them back on any time.
-      Drag the handle, or use the up and down arrow keys on it, to put them in the order you like.
+      Drag the handle, or use the arrow keys on it, to move an app earlier or later in the list.
     </p>
     <ul class="grid gap-2 sm:grid-cols-2" data-apps-grid>
       {% for product, visible in app_rows %}
       <li data-app="{{ product.label }}"
           class="flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 has-[input[type=checkbox]:not(:checked)]:bg-gray-50 has-[input[type=checkbox]:not(:checked)]:text-gray-500 dark:has-[input[type=checkbox]:not(:checked)]:bg-gray-900 dark:has-[input[type=checkbox]:not(:checked)]:text-gray-400">
         <span class="drag-handle hidden cursor-grab rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
-              data-name="{{ product.name }}" aria-label="Reorder {{ product.name }}: use the up and down arrow keys"
-              title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+              data-name="{{ product.name }}" aria-label="Reorder {{ product.name }}: use the arrow keys to move it earlier or later"
+              title="Drag to reorder, or use the arrow keys to move it earlier or later"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
         <label class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-sm font-medium">
           <input type="checkbox" name="enabled" value="{{ product.label }}" class="h-4 w-4 rounded border-gray-300 accent-sage-500" {% if visible %}checked{% endif %}>
           <i class="{{ product.icon }} w-5 text-center text-sage-600 dark:text-sage-300" aria-hidden="true"></i>

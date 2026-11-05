@@ -15,6 +15,11 @@ HTMX = {'HTTP_HX_REQUEST': 'true'}
 LABELS = ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo']
 
 
+def _except(*hidden: str) -> list[str]:
+    """Every label but `hidden`: the `enabled` that switches those off."""
+    return [label for label in LABELS if label not in hidden]
+
+
 def _post(client, order, enabled, **extra):
     return client.post(
         reverse('accounts:apps-update'), {'order': order, 'enabled': enabled}, **extra
@@ -52,7 +57,7 @@ def test_columns_have_database_defaults():
 
 
 def test_set_app_preferences_saves_order_and_hidden_in_order(user):
-    set_app_preferences(user, ['todo', 'receipts', 'qr_code'], ['qr_code', 'todo'])
+    set_app_preferences(user, ['todo', 'receipts', 'qr_code'], _except('qr_code', 'todo'))
 
     user.refresh_from_db()
     # The stored order always lists every product; hidden apps keep their place.
@@ -61,7 +66,7 @@ def test_set_app_preferences_saves_order_and_hidden_in_order(user):
 
 
 def test_set_app_preferences_drops_repeats(user):
-    set_app_preferences(user, ['todo', 'todo', 'qr_code'], [])
+    set_app_preferences(user, ['todo', 'todo', 'qr_code'], LABELS)
 
     user.refresh_from_db()
     assert user.app_order[:2] == ['todo', 'qr_code']
@@ -71,17 +76,18 @@ def test_set_app_preferences_drops_repeats(user):
 def test_set_app_preferences_bumps_updated_at(user):
     before = User.objects.get(pk=user.pk).updated_at
 
-    set_app_preferences(user, LABELS, [])
+    set_app_preferences(user, LABELS, LABELS)
 
     assert User.objects.get(pk=user.pk).updated_at > before
 
 
 @pytest.mark.parametrize(
-    ('order', 'hidden'), [(['nope'], []), (LABELS, ['nope']), (['todo', '<script>'], [])]
+    ('order', 'enabled'),
+    [(['nope'], LABELS), (LABELS, ['nope']), (['todo', '<script>'], LABELS)],
 )
-def test_set_app_preferences_rejects_an_unknown_label(user, order, hidden):
+def test_set_app_preferences_rejects_an_unknown_label(user, order, enabled):
     with pytest.raises(ValueError):
-        set_app_preferences(user, order, hidden)
+        set_app_preferences(user, order, enabled)
 
     user.refresh_from_db()
     assert user.app_order == []
@@ -106,7 +112,7 @@ def test_account_page_shows_the_apps_section_with_every_app_on(client, user):
 
 
 def test_account_page_follows_the_saved_order_and_unchecks_hidden_apps(client, user):
-    set_app_preferences(user, ['todo', 'qr_code'], ['qr_code'])
+    set_app_preferences(user, ['todo', 'qr_code'], _except('qr_code'))
     client.force_login(user)
 
     content = client.get(reverse('accounts:account')).content.decode()
@@ -228,7 +234,7 @@ def test_a_product_the_form_did_not_list_is_not_switched_off(client, user):
 
 @pytest.mark.parametrize('field', ['order', 'enabled'])
 def test_unknown_label_is_a_422_and_saves_nothing(client, user, field):
-    set_app_preferences(user, ['todo'], ['qr_code'])
+    set_app_preferences(user, ['todo', 'qr_code'], _except('qr_code'))
     client.force_login(user)
     data = {'order': LABELS, 'enabled': LABELS}
     data[field] = LABELS + ['<script>alert(1)</script>']
@@ -287,7 +293,7 @@ def test_anonymous_htmx_post_redirects_to_login(client):
 
 
 def test_saved_choice_shapes_the_header_on_another_page(client, user):
-    set_app_preferences(user, ['todo', 'qr_code'], ['qr_code', 'receipts'])
+    set_app_preferences(user, ['todo', 'qr_code', 'receipts'], _except('qr_code', 'receipts'))
     client.force_login(user)
 
     content = client.get(reverse('accounts:account')).content.decode()
@@ -300,7 +306,7 @@ def test_saved_choice_shapes_the_header_on_another_page(client, user):
 
 
 def test_another_users_choice_does_not_apply(client, user, regular_user):
-    set_app_preferences(regular_user, LABELS, LABELS)
+    set_app_preferences(regular_user, LABELS, [])
     client.force_login(user)
 
     content = client.get(reverse('core:home')).content.decode()
@@ -313,7 +319,7 @@ def test_another_users_choice_does_not_apply(client, user, regular_user):
 
 
 def test_admin_shows_the_preferences_read_only(client, admin_user, regular_user):
-    set_app_preferences(regular_user, ['todo'], ['qr_code'])
+    set_app_preferences(regular_user, ['todo', 'qr_code'], _except('qr_code'))
     client.force_login(admin_user)
 
     url = reverse('custom_admin:accounts_user_change', args=[regular_user.pk])
@@ -326,3 +332,63 @@ def test_admin_shows_the_preferences_read_only(client, admin_user, regular_user)
     assert 'App order' in content
     assert 'Hidden apps' in content
     assert 'qr_code' in content
+
+
+# --- the service derives what is hidden ---
+
+
+def test_set_app_preferences_never_hides_a_product_the_order_does_not_list(user):
+    # A page rendered before a product was added lists four of the five; the fifth is not
+    # switched off by being missing from `enabled`.
+    set_app_preferences(user, ['todo', 'qr_code'], ['todo'])
+
+    user.refresh_from_db()
+    assert user.hidden_apps == ['qr_code']
+
+
+def test_set_app_preferences_with_no_order_hides_everything_not_enabled(user):
+    set_app_preferences(user, [], ['todo'])
+
+    user.refresh_from_db()
+    assert user.hidden_apps == [label for label in user.app_order if label != 'todo']
+
+
+# --- the stored form, fetched again after a failed save ---
+
+
+def test_apps_form_partial_shows_the_stored_state(client, user):
+    set_app_preferences(user, ['todo', 'qr_code'], _except('qr_code'))
+    client.force_login(user)
+
+    response = client.get(reverse('accounts:apps-form'))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert '<html' not in content
+    assert _tiles(content)[:2] == [('todo', True), ('qr_code', False)]
+    assert "Couldn't save your apps" not in content
+
+
+def test_apps_form_partial_can_carry_the_failed_save_line(client, user):
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:apps-form'), {'failed': '1'}).content.decode()
+
+    assert "Couldn't save your apps. Try again." in content
+    assert 'role="alert"' in content
+
+
+def test_apps_form_partial_needs_a_login_and_get(client, user):
+    url = reverse('accounts:apps-form')
+    assert client.get(url).status_code == 302
+    client.force_login(user)
+    assert client.post(url).status_code == 405
+
+
+def test_the_form_names_the_url_the_page_refetches_after_a_failed_save(client, user):
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert f'data-form-url="{reverse("accounts:apps-form")}"' in content
+    assert 'use the arrow keys to move it earlier or later' in content

@@ -1,4 +1,4 @@
-from .apps import apps_update
+from .apps import apps_form_partial, apps_update
 from .forgot_password import forgot_password_page
 from .google import google_callback, google_login
 from .login import login_page, logout_page
@@ -19,6 +19,7 @@ from .theme import theme_update
 from .timezone import timezone_detect
 
 __all__ = [
+    'apps_form_partial',
     'apps_update',
     'account_created_page',
     'account_page',

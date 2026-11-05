@@ -577,7 +577,7 @@ working and a direct link opens it. `core` can't import `accounts`, so
 `apps.core.products.products_for(user)` reads the two attributes off the user with `getattr` (the way
 `base.html` reads `user.theme`): every registered product as `(product, visible)` in the user's order,
 unknown or repeated labels skipped, a product missing from `app_order` (added after the user saved)
-appended in registry order and visible; an anonymous visitor, or an object without the attributes,
+appended in registry order and visible (visible unless it is in `hidden_apps`); an anonymous visitor, or an object without the attributes,
 gets everything in registry order. `visible_products(user)` is the shown ones, and the `products`
 context processor returns only those, so `base.html` and `home.html` need no other logic. The header's
 links are `core/partials/product_nav.html` (`id="product-nav"`, `display: contents`), which the save
@@ -586,12 +586,16 @@ user has every app off. It is a session form view like the theme (`POST /account
 `views/apps.py`, `forms.AppsForm`, `services.apps.set_app_preferences`; web only, no `/api/`
 endpoint, no rate limit: one row write): the form posts `order` (a hidden input per tile, in DOM
 order) and `enabled` (the ticked checkboxes), both checked against the registry; an unlisted
-registered product is not hidden by being missing (a page rendered before an app was added); the
-stored order always lists every product. Every change submits (htmx `change`, `hx-sync="this:queue
+registered product is not hidden by being missing (a page rendered before an app was added): that
+rule lives in `set_app_preferences(user, order, enabled)`, which derives `hidden` itself, so any later
+caller shares it; the stored order always lists every product. Every change submits (htmx `change`, `hx-sync="this:queue
 last"`); success is 200 with `HX-Reswap: none` (keeps the keyboard focus) and the nav out of band,
-without htmx a redirect, an unknown label a 422 with the partial. `static/accounts/js/apps_order.js`
+without htmx a redirect, an unknown label a 422 with the partial. A save that fails (a 5xx or no
+answer, which htmx doesn't swap) shows a `role="alert"` "Couldn't save your apps. Try again." and
+re-fetches the stored form (`GET /account/apps/form/`, `accounts:apps-form`, `?failed=1` keeps the line). `static/accounts/js/apps_order.js`
 adds SortableJS (the To-do pages' version) by the `.drag-handle` and the arrow keys on a focused
-handle (focus stays, polite live region, one save per burst of presses); the handles are `hidden`
+handle (up/left earlier, down/right later; focus stays, polite live region that also says "already
+first/last" at the ends, one save per burst of presses); the handles are `hidden`
 until it runs, and a `<noscript>` Save button covers no JS (ordering needs JS). `app_order` and
 `hidden_apps` are read-only in the user admin ("Personal info"). Tests:
 `apps/accounts/tests/unit/test_app_preferences.py`, the products tests in

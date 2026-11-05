@@ -111,3 +111,46 @@ def test_drag_a_tile_to_reorder(page: Page, receipts_server: ReceiptsServer):
         assert _nav_names(page)[0] == 'To-do'
     finally:
         receipts_server.shell(RESET)
+
+
+def test_a_failed_save_says_so_and_shows_what_is_stored(
+    page: Page, receipts_server: ReceiptsServer
+):
+    receipts_server.shell(RESET)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/account/')
+        # The save never reaches the server (a network error).
+        page.route('**/account/apps/', lambda route: route.abort())
+        page.get_by_role('checkbox', name='Short URLs').uncheck()
+        alert = page.locator('#apps-form [role="alert"]')
+        expect(alert).to_have_text("Couldn't save your apps. Try again.")
+        # The tiles match the server again, and the header never changed.
+        expect(page.get_by_role('checkbox', name='Short URLs')).to_be_checked()
+        assert 'Short URLs' in _nav_names(page)
+
+        # Once the network is back the next change saves and the line goes away.
+        page.unroute('**/account/apps/')
+        with page.expect_response(lambda r: r.url.endswith('/account/apps/')) as saved:
+            page.get_by_role('checkbox', name='Short URLs').uncheck()
+        assert saved.value.status == 200
+        expect(page.locator('#apps-form [role="alert"]')).to_have_count(0)
+        assert 'Short URLs' not in _nav_names(page)
+    finally:
+        receipts_server.shell(RESET)
+
+
+def test_arrow_keys_announce_the_ends_of_the_list(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.shell(RESET)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/account/')
+        handle = page.get_by_role('button', name='Reorder QR Codes')
+        handle.focus()
+        page.keyboard.press('ArrowUp')
+        expect(page.locator('[data-apps-live]')).to_have_text('QR Codes is already first.')
+        page.get_by_role('button', name='Reorder To-do').focus()
+        page.keyboard.press('ArrowDown')
+        expect(page.locator('[data-apps-live]')).to_have_text('To-do is already last.')
+    finally:
+        receipts_server.shell(RESET)

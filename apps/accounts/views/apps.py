@@ -5,10 +5,10 @@ from typing import Any
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from apps.core.htmx import is_htmx
-from apps.core.products import get_products, products_for
+from apps.core.products import products_for
 
 from ..forms import AppsForm
 from ..http import AuthenticatedHttpRequest
@@ -29,14 +29,7 @@ def apps_update(request: AuthenticatedHttpRequest) -> HttpResponse:
     """
     form = AppsForm(request.POST)
     if form.is_valid():
-        enabled = set(form.cleaned_data['enabled'])
-        order = form.cleaned_data['order']
-        hidden = {product.label for product in get_products()} - enabled
-        # A product the form didn't list (added since the page was rendered) is not switched off
-        # by being missing from it: only labels the form carried can be hidden.
-        if order:
-            hidden &= set(order)
-        set_app_preferences(request.user, order, hidden)
+        set_app_preferences(request.user, form.cleaned_data['order'], form.cleaned_data['enabled'])
         if not is_htmx(request):
             return redirect('accounts:account')
         response = render(request, 'core/partials/product_nav.html', {'oob': True})
@@ -48,3 +41,18 @@ def apps_update(request: AuthenticatedHttpRequest) -> HttpResponse:
         return render(request, 'accounts/partials/apps_form.html', context, status=422)
     context = account_page_context(request, apps_form=form)
     return render(request, 'accounts/account.html', context, status=422)
+
+
+@login_required
+@require_GET
+def apps_form_partial(request: AuthenticatedHttpRequest) -> HttpResponse:
+    """The Apps form as stored, as a partial.
+
+    The page fetches it after a save failed (`apps_order.js`), so the tiles show what the server
+    has again; `?failed=1` makes it carry the "Couldn't save" line.
+    """
+    context: dict[str, Any] = {
+        'app_rows': products_for(request.user),
+        'save_failed': request.GET.get('failed') == '1',
+    }
+    return render(request, 'accounts/partials/apps_form.html', context)

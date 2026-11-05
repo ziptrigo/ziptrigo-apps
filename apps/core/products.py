@@ -56,7 +56,8 @@ def products_for(user: object) -> list[tuple[ProductApp, bool]]:
     ``user.theme``: `core` can't import ``accounts``. An anonymous visitor, or any object without
     the attributes, gets every product in registry order. Read leniently: a label that is no
     longer registered is skipped, a duplicate counts once, and a registered product missing from
-    ``app_order`` (one added after the user saved) goes last, in registry order, and is visible.
+    ``app_order`` (one added after the user saved) goes last, in registry order, and is visible (a product is visible unless it is in
+    ``hidden_apps``).
     """
     registry = {product.label: product for product in get_products()}
     authenticated = bool(getattr(user, 'is_authenticated', False))
