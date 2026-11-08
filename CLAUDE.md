@@ -344,6 +344,43 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   `User.password`, e.g. Django rehashing it on login after a hasher upgrade: it kills outstanding
   JWTs and password reset links alike. A token without the claim is rejected, so
   tokens issued before this shipped stopped working and CLI users had to log in again once.
+  **Refresh tokens rotate** (issue #252, `services/refresh_tokens.py`, model `accounts.RefreshToken`,
+  migration `0009`): a client in regular use never signs in again, an unused refresh token still dies
+  after 30 days. `POST /api/auth/refresh` (`{"refresh_token"}`) answers the same `TokenResponse`
+  (`access_token`, `refresh_token`, `token_type`, `expires_in`) but `refresh_token` is now a **new**
+  token (`CustomRefreshToken.for_user`, so the `pwd` claim is re-stamped and the 30 days restart); the
+  client must store it. The status, `is_active` and `pwd` checks run first (403 / 401, as before).
+  Login and refresh write one row per issued token (by `jti`; never the token) in a **family** (all
+  descended from one login). The first use of a token marks it rotated; **within
+  `JWT_REFRESH_GRACE_SECONDS` (60) of that** it may be used again and gets another successor (an app
+  and its widget racing on one token; the siblings are all valid) -- but at most `MAX_SUCCESSORS`
+  (3, `successor_count` on the row) per token, a fourth use being a replay too; **after the window it
+  is a replay**: the whole family is revoked (`revoked_at`) and the request is a 401
+  `Invalid or expired refresh token` (the same body as every other invalid token), the real client
+  signs in again. **Trade-off, accepted:** replay detection only works after the window; inside it a
+  stolen copy of a token just gets a sibling of its own (bounded by `MAX_SUCCESSORS`) and the family
+  lives on until someone reuses an old token later. The checks run in order signature, user, status,
+  `pwd`, then **`REFRESH_USER`** (60/hour per user, `ratelimit.hit_user` + `enforce`: a JSON 429 with
+  `Retry-After`; charged only after those checks, so garbage tokens never spend a user's budget),
+  then `rotate`. A token with no row (a **legacy** one, issued before this shipped) is accepted once
+  and migrated: a row is made for it in a family of its own, so nobody is logged out by the deploy.
+  The decision runs under `select_for_update` in one transaction (the unique `jti` settles two
+  concurrent first uses of a legacy token; `now` is read after the lock) and, as in email
+  verification, is decided inside `atomic()` and raised after it, so a revocation is committed
+  before the 401. **Deploy note:** a client must persist the `refresh_token` that refresh returns
+  (the Android app does, `TokenAuthenticator` stores `body.refreshToken`; the CLIs never refresh);
+  one that keeps reusing its first token has its second refresh after the window treated as a replay. The daily
+  `accounts.purge_refresh_tokens` job (`accounts/jobs.py`, registered from `AccountsConfig.ready()`)
+  deletes rows past `expires_at`. Read-only `RefreshTokenAdmin` (filters: revoked, rotated; `accounts.refreshtoken` is in
+  `CASCADE_WITH_USER_MODELS`). `accounts.W005` warns when `JWT_REFRESH_GRACE_SECONDS` is outside 0 to
+  3600. **Access tokens are not tracked**: revoking a family stops refreshing,
+  not an access token already issued. **Decided, not done:** the access token keeps its 14 days
+  (`JWT_EXP_DELTA_SECONDS`) because the CLIs (`admin/utils.py`) store only an access token and have no
+  refresh; shortening it (to an hour, say) needs them to refresh first, a follow-up. No absolute cap
+  on a family's age either (a client in daily use is signed in until it stops); adding one is a column
+  (`family_started_at`) and a check in `rotate`. **Follow-ups, not done:** closing the legacy path
+  (a row-less token accepted once) after 30 days, and a logout / revoke-family endpoint. ninja_jwt's own `ROTATE_REFRESH_TOKENS` /
+  `token_blacklist` are not used. Tests: `apps/accounts/tests/api/test_refresh_rotation.py`.
 
 `POST /api/auth/login` only issues JWTs; it never starts a session. Register, forgot-password,
 reset-password and resend-confirmation (issue #52) are session form views too, the same as login
@@ -1434,7 +1471,7 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address limits on the email an
   existing address gets, `SIGNUP_EXISTING_EMAIL` and `SIGNUP_EXISTING_EMAIL_DAY`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
   `PUT /api/account`, per user), `ACCOUNT_TIMEZONE_USER` (the browser's time zone detection, 10/hour per
-  user, see "Auth" > "Time zone"), forgot-password (as above,
+  user, see "Auth" > "Time zone"), `REFRESH_USER` (`POST /api/auth/refresh`, 60/hour per user, see "Auth"), forgot-password (as above,
   and its response shape never changes so existence still isn't leaked), resend-confirmation, `CONFIRM_EMAIL_IP` (the confirming POST of the emailed link, per IP, generous), QR preview/create (per user, shared between
   the web editor and `/api/qr/`), the `/go/<code>` redirect (per IP,
   generous, charged *before* the code lookup so made-up codes spend the budget too -- over the limit

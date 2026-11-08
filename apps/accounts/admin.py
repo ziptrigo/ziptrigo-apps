@@ -1,13 +1,14 @@
 """Admin registrations for the accounts app."""
 
 from django.apps import apps as django_apps
+from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from apps.core.admin_site import custom_admin_site
 
 from .forms.admin import UserAdminChangeForm, UserAdminCreationForm
 from .http import AuthenticatedHttpRequest
-from .models import User
+from .models import RefreshToken, User
 from .services.email_change import notify_previous_address
 from .services.email_confirmation import get_email_confirmation_service, send_email_confirmed
 from .services.timezones import set_timezone
@@ -21,7 +22,12 @@ CASCADE_WITH_USER_APP_LABELS = ('billing', 'receipts', 'short_url', 'todo')
 # must keep asking: `core` is a grab bag, so only its notifications and push subscriptions and
 # answers (issue #239; all read-only in the admin) are listed, and a future `core` model with a
 # user FK is not exempted without anyone deciding so.
-CASCADE_WITH_USER_MODELS = ('core.notification', 'core.pushsubscription', 'core.pushaction')
+CASCADE_WITH_USER_MODELS = (
+    'core.notification',
+    'core.pushsubscription',
+    'core.pushaction',
+    'accounts.refreshtoken',
+)
 
 
 class UserAdmin(DjangoUserAdmin):
@@ -168,3 +174,70 @@ class UserAdmin(DjangoUserAdmin):
 
 
 custom_admin_site.register(User, UserAdmin)
+
+
+class _NullFieldFilter(admin.SimpleListFilter):
+    """Yes/no filter on whether a nullable timestamp is set."""
+
+    field = ''
+
+    def lookups(self, request, model_admin):
+        return [('yes', 'Yes'), ('no', 'No')]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'yes':
+            return queryset.filter(**{f'{self.field}__isnull': False})
+        if self.value() == 'no':
+            return queryset.filter(**{f'{self.field}__isnull': True})
+        return queryset
+
+
+class RevokedFilter(_NullFieldFilter):
+    title = 'revoked'
+    parameter_name = 'revoked'
+    field = 'revoked_at'
+
+
+class RotatedFilter(_NullFieldFilter):
+    title = 'rotated'
+    parameter_name = 'rotated'
+    field = 'rotated_at'
+
+
+class RefreshTokenAdmin(admin.ModelAdmin):
+    """Read-only (issue #252): rows are written by login and refresh and purged by the daily job.
+    Support can see a user's token families -- when each token was issued, replaced and revoked --
+    to tell a replay (a revoked family) from an idle client. The tokens themselves are never
+    stored. Deleting a user removes theirs (the cascade; `UserAdmin` accounts for that)."""
+
+    list_display = ['created_at', 'user', 'family_short', 'expires_at', 'rotated_at', 'revoked_at']
+    list_filter = [RevokedFilter, RotatedFilter, 'created_at']
+    search_fields = ['user__email', 'user__name', 'family']
+    list_select_related = ['user']
+    ordering = ['-created_at']
+    readonly_fields = [
+        'jti',
+        'user',
+        'family',
+        'created_at',
+        'expires_at',
+        'rotated_at',
+        'revoked_at',
+        'successor_count',
+    ]
+
+    @admin.display(description='Family')
+    def family_short(self, obj: RefreshToken) -> str:
+        return str(obj.family)[:8]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+
+custom_admin_site.register(RefreshToken, RefreshTokenAdmin)

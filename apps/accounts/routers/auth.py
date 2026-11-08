@@ -16,7 +16,7 @@ from ..schemas import (
     ResendConfirmationRequest,
     TokenResponse,
 )
-from ..services import login_throttle
+from ..services import login_throttle, refresh_tokens
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.password_reset import InvalidResetTokenError, get_password_reset_service
 from ..tokens import CustomAccessToken, CustomRefreshToken, matches_password
@@ -127,7 +127,7 @@ def login(request: HttpRequest, payload: LoginRequest) -> TokenResponse:
         )
 
     # Generate tokens
-    refresh = CustomRefreshToken.for_user(user)
+    refresh = refresh_tokens.issue(user)
     access = CustomAccessToken.for_user(user)
 
     return TokenResponse(
@@ -140,7 +140,13 @@ def login(request: HttpRequest, payload: LoginRequest) -> TokenResponse:
 
 @router.post('/refresh', response=TokenResponse, auth=None)
 def refresh_token(request: HttpRequest, payload: RefreshRequest) -> TokenResponse:
-    """Token refresh endpoint - returns a new access token using refresh token."""
+    """Token refresh endpoint - returns a new access token and a new refresh token.
+
+    The refresh token in the request is replaced (issue #252, `services.refresh_tokens`): the
+    client must keep the one in the response. The old one may be used again for a minute (two
+    requests racing, at most `MAX_SUCCESSORS` times), after that it is a replay and revokes the whole
+    family of tokens. Over `REFRESH_USER` it is a 429.
+    """
     try:
         refresh = CustomRefreshToken(payload.refresh_token)
     except Exception:
@@ -162,12 +168,18 @@ def refresh_token(request: HttpRequest, payload: RefreshRequest) -> TokenRespons
     if not matches_password(refresh, user):
         raise HttpError(401, 'Invalid or expired refresh token')
 
-    # Generate a new access token
+    ratelimit.enforce(ratelimit.hit_user(user, 'REFRESH_USER'))
+
+    try:
+        new_refresh = refresh_tokens.rotate(refresh, user)
+    except refresh_tokens.InvalidRefreshToken:
+        raise HttpError(401, 'Invalid or expired refresh token') from None
+
     access = CustomAccessToken.for_user(user)
 
     return TokenResponse(
         access_token=str(access),
-        refresh_token=str(refresh),
+        refresh_token=str(new_refresh),
         token_type='Bearer',
         expires_in=int(settings.NINJA_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds()),
     )
