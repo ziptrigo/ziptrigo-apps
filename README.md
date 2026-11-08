@@ -301,6 +301,12 @@ server.
 | `GOOGLE_ANDROID_AUDIENCES` | optional, comma-separated extra audiences (`aud`) a Google ID token from the Android app may carry on `POST /api/auth/google`, added to `GOOGLE_CLIENT_ID` (the web client, which the app passes as Credential Manager's `serverClientId`), never replacing it. The endpoint is on while at least one audience resolves and needs neither the secret nor the redirect URI |
 | `GOOGLE_ANDROID_CLIENT_IDS` | optional but recommended in production, comma-separated Android OAuth client ids: when set, the token's `azp` must be one of them, so only the app (not, say, the website) can present a token. Empty means `azp` is not checked |
 
+The Google Cloud console is <https://console.cloud.google.com>. The client IDs and secrets live
+only in the env files (`.env.local`, `.env.staging`, `.env.prod`), never in the repo, so read the
+current values there (`GOOGLE_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_IDS`). The number before the first
+`-` of a client ID is the number of the Google Cloud project it belongs to, and
+`https://console.cloud.google.com/apis/credentials?project=<that number>` opens its OAuth clients.
+
 To get them, in the [Google Cloud console](https://console.cloud.google.com/) under *APIs &
 Services*:
 
@@ -311,7 +317,7 @@ Services*:
 3. Under *Authorized redirect URIs* add `GOOGLE_REDIRECT_URI` **exactly** as it is in the env file
    (scheme, host, port and path; no trailing slash). A mismatch fails with `redirect_uri_mismatch`.
    Use one OAuth client (or at least one redirect URI) per environment.
-4. Copy the client ID and secret into the environment's env file (`.env.dev`, `.env.staging`,
+4. Copy the client ID and secret into the environment's env file (`.env.local`, `.env.staging`,
    `.env.prod`), never into the repo.
 
 A Google sign-in uses the same session as the password login (no JWT is issued) and requires a
