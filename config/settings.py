@@ -613,12 +613,17 @@ GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '').strip()
 # Native sign-in (issue #251): the Android app gets a Google ID token on the device and trades it at
-# `POST /api/auth/google`. The token must be issued for one of these OAuth client ids (its `aud`).
-# Comma-separated; empty means just `GOOGLE_CLIENT_ID`, the web client, which is what the app's
-# Credential Manager `serverClientId` is. The endpoint is on while at least one id resolves (it
-# needs neither the secret nor the redirect URI).
+# `POST /api/auth/google`. Its `aud` must be `GOOGLE_CLIENT_ID` (the web client, which is the app's
+# Credential Manager `serverClientId`) or one of `GOOGLE_ANDROID_AUDIENCES` (extra audiences,
+# comma-separated, added to the web client id, never replacing it). `GOOGLE_ANDROID_CLIENT_IDS`
+# (comma-separated) pins the token's `azp`, the Android client that obtained it; empty means `azp` is
+# not checked. The endpoint is on while at least one audience resolves (it needs neither the secret
+# nor the redirect URI).
 GOOGLE_ANDROID_AUDIENCES = [
     a.strip() for a in os.getenv('GOOGLE_ANDROID_AUDIENCES', '').split(',') if a.strip()
+]
+GOOGLE_ANDROID_CLIENT_IDS = [
+    a.strip() for a in os.getenv('GOOGLE_ANDROID_CLIENT_IDS', '').split(',') if a.strip()
 ]
 
 # "Sign in with Microsoft" (issue #156), a server-side OpenID Connect authorization code flow

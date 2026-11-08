@@ -78,6 +78,10 @@ class GoogleSignInError(Exception):
             self.user_message = user_message
 
 
+class SignInRaceLost(GoogleSignInError):
+    """A concurrent sign-in won a unique constraint; the same request will likely succeed again."""
+
+
 class GoogleNotConfigured(GoogleSignInError):
     user_message = 'Google sign-in is not available right now.'
 
@@ -187,8 +191,8 @@ def _is_true(value: object) -> bool:
 
 
 def identity_from_claims(claims: Mapping[str, Any]) -> GoogleIdentity:
-    """Read the claims of a validated ID token (Authlib has already checked its signature,
-    issuer, audience, expiry and nonce).
+    """Read the claims of an ID token the caller has already verified (signature, issuer,
+    audience, expiry): Authlib for the web flow, `joserfc` in `google_id_token` for the API.
 
     Raises:
         InvalidClaims: `sub` or `email` is missing.
@@ -262,9 +266,10 @@ def resolve_user(identity: GoogleIdentity, *, create: bool = True) -> User:
     before anything is written.
 
     Raises:
-        UnverifiedEmail, InactiveAccount, AccountConflict (and its subclasses), NoAccount: see
-            above. All are
-            `GoogleSignInError`s with a `user_message`.
+        UnverifiedEmail, InactiveAccount, AccountConflict (and its subclasses) and NoAccount: see
+            above.
+        SignInRaceLost: a concurrent sign-in won a unique constraint (retry).
+        All are `GoogleSignInError`s with a `user_message`.
     """
     if not identity.email_verified:
         raise UnverifiedEmail()
@@ -281,7 +286,7 @@ def resolve_user(identity: GoogleIdentity, *, create: bool = True) -> User:
         # A concurrent sign-in for the same address/`sub` won the race for a unique constraint.
         # Rare, and a retry (which then finds the winner's row) is the right answer.
         logger.warning('Google sign-in lost a race creating or linking an account')
-        raise GoogleSignInError() from None
+        raise SignInRaceLost() from None
 
 
 def _link_or_create(identity: GoogleIdentity, *, create: bool = True) -> User:

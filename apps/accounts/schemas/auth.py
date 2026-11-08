@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from ..validators import PasswordValidator
 
@@ -48,7 +48,8 @@ class PasswordResetConfirm(BaseModel):
 
 
 class GoogleTokenRequest(BaseModel):
-    id_token: str
+    # Same bound as `google_id_token.MAX_TOKEN_CHARS` (the service checks it again).
+    id_token: str = Field(max_length=8192)
 
 
 class RefreshRequest(BaseModel):

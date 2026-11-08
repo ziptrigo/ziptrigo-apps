@@ -4,7 +4,10 @@ The Android app gets an ID token on the device (Credential Manager) and trades i
 /api/auth/google` for our JWTs. There is no redirect, `state` or `nonce` here: what proves the
 token is ours to accept is Google's signature, the issuer, the expiry and the **audience** -- the
 token must have been issued for one of our OAuth client ids (`allowed_audiences`), or any app's
-token for any Google user could be replayed against us.
+token for any Google user could be replayed against us. A Credential Manager token has `aud` = the
+web client id (the app's `serverClientId`) and `azp` (authorized party) = the Android client id;
+when `GOOGLE_ANDROID_CLIENT_IDS` is set, `azp` must be one of them, which pins which client may
+present the token (an ID token issued to the website itself is refused).
 
 Verification is `joserfc` (Authlib's own JOSE library, a dependency already) against Google's
 published key set. The key set is cached in memory for `KEYS_TTL` (Google rotates keys rarely and
@@ -57,18 +60,24 @@ class InvalidIdToken(GoogleSignInError):
 
 
 class KeysUnavailable(GoogleSignInError):
-    """Google's signing keys could not be fetched (and none are cached)."""
+    """Google's signing keys could not be fetched (and none are cached). Retry after
+    `KEYS_REFRESH_MIN_INTERVAL` seconds."""
 
     user_message = UNAVAILABLE_MESSAGE
 
 
 def allowed_audiences() -> list[str]:
-    """The client ids an ID token may be issued for: `GOOGLE_ANDROID_AUDIENCES`, else the web
-    client id (what Credential Manager's `serverClientId` is set to)."""
-    configured = [a for a in getattr(settings, 'GOOGLE_ANDROID_AUDIENCES', []) if a]
-    if configured:
-        return configured
-    return [settings.GOOGLE_CLIENT_ID] if settings.GOOGLE_CLIENT_ID else []
+    """The `aud` values an ID token may carry: `GOOGLE_CLIENT_ID` (the web client, which is what
+    Credential Manager's `serverClientId` is set to) plus any `GOOGLE_ANDROID_AUDIENCES`. The extras
+    are added to the web client id, never a replacement for it."""
+    found = [settings.GOOGLE_CLIENT_ID, *getattr(settings, 'GOOGLE_ANDROID_AUDIENCES', [])]
+    return list(dict.fromkeys(a for a in found if a))
+
+
+def allowed_authorized_parties() -> list[str]:
+    """`GOOGLE_ANDROID_CLIENT_IDS`: the clients whose `azp` may be on the token. Empty means `azp`
+    is not checked."""
+    return [a for a in getattr(settings, 'GOOGLE_ANDROID_CLIENT_IDS', []) if a]
 
 
 def is_configured() -> bool:
@@ -100,7 +109,9 @@ def reset_cache() -> None:
 def _load_keys(*, force: bool = False) -> KeySet:
     """The cached key set, fetched when missing, older than `KEYS_TTL`, or `force` (a `kid` we
     don't know). Attempts, failed ones included, are spaced `KEYS_REFRESH_MIN_INTERVAL` apart, so a
-    Google outage or forged `kid`s cost one request a minute, not one per call."""
+    Google outage or forged `kid`s cost one request a minute, not one per call. The attempt slot is
+    claimed under the lock, the fetch itself runs without it (other callers keep using the cached
+    set meanwhile) and the result is swapped in under it."""
     global _keys, _expires_at, _next_attempt_at
     with _lock:
         now = time.monotonic()
@@ -111,14 +122,18 @@ def _load_keys(*, force: bool = False) -> KeySet:
                 raise KeysUnavailable()
             return _keys
         _next_attempt_at = now + KEYS_REFRESH_MIN_INTERVAL
-        try:
-            _keys = KeySet.import_key_set(fetch_keys())  # ty: ignore[invalid-argument-type]
-            _expires_at = now + KEYS_TTL
-        except Exception as exc:
-            logger.warning('Could not fetch Google signing keys: %s', type(exc).__name__)
+    try:
+        fetched = KeySet.import_key_set(fetch_keys())  # ty: ignore[invalid-argument-type]
+    except Exception as exc:
+        logger.warning('Could not fetch Google signing keys: %s', type(exc).__name__)
+        with _lock:
             if _keys is None:
                 raise KeysUnavailable() from None
-        return _keys
+            return _keys
+    with _lock:
+        _keys = fetched
+        _expires_at = now + KEYS_TTL
+    return fetched
 
 
 def _decode(token: str, keys: KeySet) -> jwt.Token:
@@ -151,12 +166,17 @@ def verify(id_token: str) -> dict[str, Any]:
             iss={'essential': True, 'values': list(ISSUERS)},
             sub={'essential': True},
             exp={'essential': True},
+            iat={'essential': False},
+            nbf={'essential': False},
         )
         registry.validate(decoded.claims)
         # `aud` is a string or a list; joserfc's `values` option only handles the string case.
         aud = decoded.claims.get('aud')
         token_audiences = [aud] if isinstance(aud, str) else aud
         if not isinstance(token_audiences, list) or not set(token_audiences) & set(audiences):
+            raise InvalidIdToken()
+        parties = allowed_authorized_parties()
+        if parties and decoded.claims.get('azp') not in parties:
             raise InvalidIdToken()
     except GoogleSignInError:
         raise

@@ -28,8 +28,8 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
   sessions signed out; what persists on the account across a new session and another browser.
 - **API refresh tokens** (`POST /api/auth/refresh`): each refresh returns a new refresh token, the old
   one works for a minute more, a replay after that revokes the login's tokens (ACC-47).
-- **Native Google sign-in** (`POST /api/auth/google`, issue #251): only that it is off (404) while Google is not
-  configured (ACC-48).
+- **Native Google sign-in** (`POST /api/auth/google`, issue #251): only that it is off (404) while Google is
+  not configured, and the 422 for a missing or oversized token (ACC-48).
 - **No self-service deletion**: there is no page or control to delete one's own account; a user is
   deleted only from the admin (`admin.md` owns the admin side), after which they cannot sign in.
 - Password rules (6 to 128 characters, at least one digit; Django's too-common / numeric /
@@ -783,13 +783,13 @@ write `$BASE` for `http://localhost:8765`. Each login below is its own family.
 **Purpose:** `POST /api/auth/google` is off while no Google client id is configured and never creates an
 account (issue #251). Real Google ID tokens cannot be produced on this server, so only the refusals that
 need no token are checked; the token paths are unit-tested.
-**Preconditions:** the server runs without `GOOGLE_CLIENT_ID` / `GOOGLE_ANDROID_AUDIENCES` (Google is not
-configured here, see ACC-18). `curl`; `$BASE` is `http://localhost:8765`.
+**Preconditions:** the server runs without `GOOGLE_CLIENT_ID`, `GOOGLE_ANDROID_AUDIENCES` and
+`GOOGLE_ANDROID_CLIENT_IDS` (Google is not configured here, see ACC-18). `curl`; `$BASE` is `http://localhost:8765`.
 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | `curl -s -i -X POST $BASE/api/auth/google -H 'Content-Type: application/json' -d '{"id_token":"abc"}'`. | `404` with `{"detail": "Google sign-in is not available."}`. |
-| 2 | Same without a body: `-d '{}'`. | `422` (the `id_token` field is required). |
+| 2 | Same without a token: `-d '{}'`; then with a 9,000-character `id_token`. | `422` both times (the field is required, at most 8,192 characters), before the off state is considered. |
 | 3 | `curl -s -i $BASE/api/docs` and open the `auth` group. | `POST /api/auth/google` is listed with no lock (no bearer token needed) and answers `TokenResponse` like `/api/auth/login`. |
 
 ## Out of scope
@@ -800,10 +800,11 @@ configured here, see ACC-18). `curl`; `$BASE` is `http://localhost:8765`.
   they are not configured; ACC-18 checks they fail gracefully.
 - The Turnstile captcha and every rate limit (`REFRESH_USER` (a 429 from refresh), `LOGIN_*`, `CHANGE_PASSWORD_USER`,
   `SIGNUP_EXISTING_EMAIL*`, `ACCOUNT_TIMEZONE_USER`, ...): switched off on this server, unit-tested.
-- The JWT API (`/api/auth/...`, `PUT /api/account`) apart from ACC-47 and ACC-48 (the native Google endpoint's off state) (refresh token rotation, by
-  `curl`) and the `PUT /api/account` steps of ACC-46, so also the user-facing email change and its
-  "Your ZipTrigo email address was changed" notice, which only that endpoint triggers. A password
-  change revoking rotated refresh tokens is unit-tested.
+- The JWT API (`/api/auth/...`, `PUT /api/account`) apart from ACC-47 (refresh token rotation, by
+  `curl`), ACC-48 (the native Google endpoint's off state) and the `PUT /api/account` steps of
+  ACC-46, so also the user-facing email change and its "Your ZipTrigo email address was changed"
+  notice, which only that endpoint triggers. A password change revoking rotated refresh tokens is
+  unit-tested.
 - Link expiry by time (48 hours for a confirmation link, 4 hours for a reset link): too long to
   wait for; unit-tested.
 - The no-JavaScript fallbacks (the `<noscript>` `Save Theme` button, plain-POST redirects): not

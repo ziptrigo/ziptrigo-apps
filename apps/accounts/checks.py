@@ -135,3 +135,27 @@ def check_refresh_grace(*args, **kwargs):
             id='accounts.W005',
         )
     ]
+
+
+@register()
+def check_google_native(*args, **kwargs):
+    """Warn when `GOOGLE_ANDROID_CLIENT_IDS` is set but `POST /api/auth/google` is off (issue #251).
+
+    The endpoint is on while `GOOGLE_CLIENT_ID` or `GOOGLE_ANDROID_AUDIENCES` gives it an audience;
+    pinning the Android clients without one is a forgotten variable. A warning, never an error:
+    `migrate` runs the checks.
+    """
+    from .services import google_id_token
+
+    if not google_id_token.allowed_authorized_parties() or google_id_token.is_configured():
+        return []
+    return [
+        Warning(
+            'GOOGLE_ANDROID_CLIENT_IDS is set but no Google audience is configured.',
+            hint=(
+                'Set GOOGLE_CLIENT_ID (the web client id) or GOOGLE_ANDROID_AUDIENCES, or the '
+                'native endpoint POST /api/auth/google stays off (404).'
+            ),
+            id='accounts.W006',
+        )
+    ]

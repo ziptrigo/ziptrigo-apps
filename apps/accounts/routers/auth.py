@@ -2,7 +2,7 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.http import HttpRequest
+from django.http import HttpRequest, JsonResponse
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -146,8 +146,24 @@ def _issue_tokens(user: User) -> TokenResponse:
     )
 
 
-@router.post('/google', response=TokenResponse, auth=None)
-def google_sign_in(request: HttpRequest, payload: GoogleTokenRequest) -> TokenResponse:
+def _google_status(exc: google_oauth.GoogleSignInError) -> int:
+    """The HTTP status of a refused Google token sign-in: a bad token is a 400, a lost race a 409
+    (retry), anything else (a refusal about the account) a 403."""
+    if isinstance(exc, google_id_token.InvalidIdToken | google_oauth.InvalidClaims):
+        return 400
+    if isinstance(exc, google_oauth.SignInRaceLost):
+        return 409
+    return 403
+
+
+def _google_detail(exc: google_oauth.GoogleSignInError) -> str:
+    if isinstance(exc, google_oauth.InvalidClaims):
+        return google_id_token.INVALID_TOKEN_MESSAGE
+    return exc.user_message
+
+
+@router.post('/google', response={200: TokenResponse, 503: dict}, auth=None)
+def google_sign_in(request: HttpRequest, payload: GoogleTokenRequest):
     """Trade a Google ID token (from Credential Manager on Android) for our JWTs (issue #251).
 
     The account is found or linked by the web flow's rules (`google_oauth.resolve_user`) but never
@@ -164,16 +180,14 @@ def google_sign_in(request: HttpRequest, payload: GoogleTokenRequest) -> TokenRe
         identity = google_oauth.identity_from_claims(claims)
         user = google_oauth.resolve_user(identity, create=False)
     except google_id_token.KeysUnavailable as exc:
-        raise HttpError(503, exc.user_message) from None
-    except google_oauth.InvalidClaims:
-        raise HttpError(400, google_id_token.INVALID_TOKEN_MESSAGE) from None
-    except google_id_token.InvalidIdToken as exc:
-        raise HttpError(400, exc.user_message) from None
+        return JsonResponse(
+            {'detail': exc.user_message},
+            status=503,
+            headers={'Retry-After': str(google_id_token.KEYS_REFRESH_MIN_INTERVAL)},
+        )
     except google_oauth.GoogleSignInError as exc:
         logger.warning('Google token sign-in refused: %s', type(exc).__name__)
-        raise HttpError(
-            400 if type(exc) is google_oauth.GoogleSignInError else 403, exc.user_message
-        ) from None
+        raise HttpError(_google_status(exc), _google_detail(exc)) from None
 
     return _issue_tokens(user)
 

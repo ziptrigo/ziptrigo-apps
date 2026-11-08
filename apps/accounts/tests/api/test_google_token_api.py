@@ -34,6 +34,7 @@ def key():
 def configured(settings, key):
     settings.GOOGLE_CLIENT_ID = CLIENT_ID
     settings.GOOGLE_ANDROID_AUDIENCES = []
+    settings.GOOGLE_ANDROID_CLIENT_IDS = []
     google_id_token.reset_cache()
     with mock.patch.object(
         google_id_token, 'fetch_keys', return_value={'keys': [key.as_dict(private=False)]}
@@ -125,13 +126,39 @@ def test_the_audience_may_be_a_list(client, key):
     assert _post(client, _token(key, aud=['other', CLIENT_ID])).status_code == 200
 
 
-def test_a_separate_android_audience(client, key, settings):
+def test_extra_audiences_are_added_to_the_web_client_id(client, key, settings):
     settings.GOOGLE_ANDROID_AUDIENCES = ['android-client']
     _account(google_sub=SUB)
 
     assert _post(client, _token(key, aud='android-client')).status_code == 200
-    response = _post(client, _token(key))  # the web client id is no longer accepted
+    assert _post(client, _token(key)).status_code == 200  # the web client id still works
+
+
+def test_an_aud_list_without_ours_is_refused(client, key):
+    _account(google_sub=SUB)
+
+    response = _post(client, _token(key, aud=['one', 'two']))
+
     assert response.status_code == 400
+    assert response.json() == {'detail': INVALID}
+
+
+def test_azp_is_ignored_when_no_android_client_is_configured(client, key):
+    _account(google_sub=SUB)
+
+    assert _post(client, _token(key, azp='anything')).status_code == 200
+    assert _post(client, _token(key)).status_code == 200
+
+
+def test_azp_must_be_a_configured_android_client(client, key, settings):
+    settings.GOOGLE_ANDROID_CLIENT_IDS = ['android-1', 'android-2']
+    _account(google_sub=SUB)
+
+    assert _post(client, _token(key, azp='android-2')).status_code == 200
+    for azp in ('web-client', CLIENT_ID, None):  # the website's own token has azp = the web client
+        response = _post(client, _token(key, azp=azp))
+        assert response.status_code == 400
+        assert response.json() == {'detail': INVALID}
 
 
 @pytest.mark.parametrize('issuer', ['accounts.google.com', 'https://accounts.google.com'])
@@ -162,6 +189,40 @@ def test_a_bad_token_is_a_400(client, key, overrides):
     assert response.json() == {'detail': INVALID}
 
 
+@pytest.mark.parametrize(
+    'overrides',
+    [{'iat': int(time.time()) + 3600}, {'nbf': int(time.time()) + 3600}],
+    ids=['future-iat', 'future-nbf'],
+)
+def test_a_token_from_the_future_is_a_400(client, key, overrides):
+    _account(google_sub=SUB)
+
+    assert _post(client, _token(key, **overrides)).status_code == 400
+
+
+def test_a_token_without_a_kid_is_a_400_and_cannot_force_refetches(client, key, configured):
+    """(With one key in the set joserfc would just use it; Google publishes several.)"""
+    other = RSAKey.generate_key(2048, parameters={'kid': 'k2', 'use': 'sig'})
+    configured.return_value = {'keys': [key.as_dict(private=False), other.as_dict(private=False)]}
+    _account(google_sub=SUB)
+    token = jwt.encode(
+        {'alg': 'RS256'},
+        {
+            'iss': 'https://accounts.google.com',
+            'aud': CLIENT_ID,
+            'sub': SUB,
+            'email': 'alice@gmail.com',
+            'exp': int(time.time()) + 600,
+        },
+        key,
+    )
+
+    for _ in range(3):
+        assert _post(client, token).status_code == 400
+
+    assert configured.call_count == 1
+
+
 def test_a_token_signed_by_another_key_is_a_400(client):
     other = RSAKey.generate_key(2048, parameters={'kid': 'k1', 'use': 'sig'})
     _account(google_sub=SUB)
@@ -170,10 +231,15 @@ def test_a_token_signed_by_another_key_is_a_400(client):
 
 
 def test_garbage_is_a_400(client):
-    for token in ('', 'not-a-jwt', 'a.b.c', 'x' * 20000):
+    for token in ('', 'not-a-jwt', 'a.b.c'):
         response = _post(client, token)
         assert response.status_code == 400
         assert response.json() == {'detail': INVALID}
+
+
+def test_an_oversized_token_is_a_422(client):
+    assert _post(client, 'x' * 20000).status_code == 422
+    assert client.post(URL, {}, content_type='application/json').status_code == 422
 
 
 def test_an_hs256_token_signed_with_a_public_key_is_refused(client, key):
@@ -302,6 +368,15 @@ def test_off_while_not_configured(client, key, settings):
     assert response.status_code == 404
 
 
+def test_the_off_state_does_not_charge_the_rate_limit(client, key, settings):
+    settings.RATELIMIT_ENABLE = True
+    settings.GOOGLE_CLIENT_ID = ''
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'GOOGLE_TOKEN_IP': (1, 300)}
+
+    for _ in range(3):
+        assert _post(client, _token(key)).status_code == 404
+
+
 def test_needs_no_secret_or_redirect_uri(client, key, settings):
     settings.GOOGLE_CLIENT_SECRET = ''
     settings.GOOGLE_REDIRECT_URI = ''
@@ -323,6 +398,18 @@ def test_the_endpoint_is_rate_limited_per_ip(client, key, settings):
 
 
 # -- Google's keys -------------------------------------------------------------------------
+
+
+def test_losing_the_signup_race_is_a_409(client, key):
+    from django.db import IntegrityError
+
+    _account()  # linked by email, which is where the save can collide
+
+    with mock.patch.object(User, 'save', side_effect=IntegrityError('dup')):
+        response = _post(client, _token(key))
+
+    assert response.status_code == 409
+    assert response.json() == {'detail': "We couldn't sign you in with Google. Please try again."}
 
 
 def test_the_key_set_is_cached(client, key, configured):
@@ -360,9 +447,30 @@ def test_keys_that_cannot_be_fetched_are_a_503(client, key, configured, caplog):
 
     assert response.status_code == 503
     assert response.json() == {'detail': 'Google sign-in is not available right now.'}
+    assert response['Retry-After'] == '60'
     # And the next call within the minute doesn't hit Google again.
     assert _post(client, _token(key)).status_code == 503
     assert configured.call_count == 1
+
+
+def test_a_malformed_key_set_is_a_503_and_is_not_cached(client, key, configured):
+    configured.return_value = {'nokeys': []}
+
+    assert _post(client, _token(key)).status_code == 503
+    assert google_id_token._keys is None
+
+
+def test_the_android_clients_check(settings):
+    from apps.accounts.checks import check_google_native
+
+    assert check_google_native() == []  # nothing pinned
+    settings.GOOGLE_ANDROID_CLIENT_IDS = ['android-1']
+    assert check_google_native() == []  # a web audience exists
+    settings.GOOGLE_CLIENT_ID = ''
+    (warning,) = check_google_native()
+    assert warning.id == 'accounts.W006' and warning.level == 30
+    settings.GOOGLE_ANDROID_AUDIENCES = ['extra']
+    assert check_google_native() == []
 
 
 def test_stale_keys_are_used_when_a_refresh_fails(client, key, configured, monkeypatch):
