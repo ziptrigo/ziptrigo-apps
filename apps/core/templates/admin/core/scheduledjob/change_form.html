@@ -1,0 +1,21 @@
+{% extends "admin/change_form.html" %}
+{% comment %}
+  A scheduled job's page: what the job does (`JobSpec.description`, set where the job is
+  registered in its app's `AppConfig.ready()`) above the status fields.
+{% endcomment %}
+
+{% block form_top %}
+    <div class="col-12 col-lg-9 px-0">
+        <div class="card mb-3" data-job-description>
+            <div class="card-body">
+                {% if not job_registered %}
+                    <p class="mb-0 text-muted">This job is no longer registered, so it doesn't run. The row is what's left of its last runs.</p>
+                {% elif job_description %}
+                    <p class="mb-0">{{ job_description }}</p>
+                {% else %}
+                    <p class="mb-0 text-muted">No description.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock %}

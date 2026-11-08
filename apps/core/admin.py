@@ -38,7 +38,11 @@ _EMAIL_VERIFICATION_FIELDS = [
 
 
 class ScheduledJobAdmin(admin.ModelAdmin):
-    """Read-only: job status is written by the scheduler runner, never edited by hand."""
+    """Read-only: job status is written by the scheduler runner, never edited by hand. The change
+    page shows the job's `JobSpec.description` above the fields
+    (`admin/core/scheduledjob/change_form.html`)."""
+
+    change_form_template = 'admin/core/scheduledjob/change_form.html'
 
     list_display = [
         'name',
@@ -59,6 +63,18 @@ class ScheduledJobAdmin(admin.ModelAdmin):
         'last_error',
         'run_count',
     ]
+
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        from .scheduler import get_job
+
+        obj = self.get_object(request, object_id)
+        job = get_job(obj.name) if obj is not None else None
+        extra_context = {
+            **(extra_context or {}),
+            'job_registered': job is not None,
+            'job_description': job.description if job is not None else '',
+        }
+        return super().change_view(request, object_id, form_url, extra_context)
 
     def has_add_permission(self, request) -> bool:
         return False

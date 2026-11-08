@@ -8,7 +8,7 @@ from their own `AppConfig.ready()` instead of `core` discovering them. See `apps
 for `JobSpec` / `register`, and `apps/core/scheduler/runner.py` for the claim-and-run loop.
 """
 
-from .registry import JobSpec, clear_registry, get_jobs, register
+from .registry import JobSpec, clear_registry, get_job, get_jobs, register
 from .runner import SchedulerRunner, run_due_jobs, try_claim
 from .thread import start_scheduler_thread
 
@@ -16,6 +16,7 @@ __all__ = [
     'JobSpec',
     'SchedulerRunner',
     'clear_registry',
+    'get_job',
     'get_jobs',
     'register',
     'run_due_jobs',

@@ -41,6 +41,7 @@ class CoreConfig(AppConfig):
             JobSpec(
                 name='core.purge_old_email_verifications',
                 func=jobs.purge_old_email_verifications,
+                description='Deletes email verification codes and links older than 30 days.',
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -49,6 +50,10 @@ class CoreConfig(AppConfig):
             JobSpec(
                 name='core.purge_expired_rate_limit_counters',
                 func=jobs.purge_expired_rate_limit_counters,
+                description=(
+                    'Deletes rate-limit counters whose time window has ended (only '
+                    'needed when the counters are stored in the database, not Redis).'
+                ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),
             )
@@ -57,6 +62,10 @@ class CoreConfig(AppConfig):
             JobSpec(
                 name='core.purge_old_task_results',
                 func=jobs.purge_old_task_results,
+                description=(
+                    'Deletes the results of finished background tasks older than 14 '
+                    'days. Tasks that are waiting or running are never touched.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -65,6 +74,10 @@ class CoreConfig(AppConfig):
             JobSpec(
                 name='core.purge_old_notifications',
                 func=jobs.purge_old_notifications,
+                description=(
+                    'Deletes in-app notifications (the header bell) older than 90 '
+                    'days, read or not.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -73,6 +86,10 @@ class CoreConfig(AppConfig):
             JobSpec(
                 name='core.clear_expired_sessions',
                 func=jobs.clear_expired_sessions,
+                description=(
+                    "Deletes expired login sessions from the database (what Django's "
+                    'clearsessions command does).'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )

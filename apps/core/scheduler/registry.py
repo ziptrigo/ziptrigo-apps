@@ -24,12 +24,15 @@ class JobSpec:
         lease: How long a claim is held before another runner is allowed to consider the job
             unclaimed again (protects against a crashed run holding the lease forever). Should be
             comfortably longer than the job is ever expected to take.
+        description: What the job does, in plain words for staff. Shown at the top of the job's
+            page in the admin (`ScheduledJob` change view).
     """
 
     name: str
     func: Callable[[], None]
     interval: timedelta
     lease: timedelta = timedelta(minutes=10)
+    description: str = ''
 
 
 _registry: dict[str, JobSpec] = {}
@@ -38,6 +41,12 @@ _registry: dict[str, JobSpec] = {}
 def register(job: JobSpec) -> None:
     """Register a job. Registering the same name again replaces the previous entry."""
     _registry[job.name] = job
+
+
+def get_job(name: str) -> JobSpec | None:
+    """Return the registered job called `name`, or `None` (e.g. a `ScheduledJob` row left over
+    from a job that was removed)."""
+    return _registry.get(name)
 
 
 def get_jobs() -> list[JobSpec]:

@@ -65,6 +65,11 @@ class BillingConfig(AppConfig):
             JobSpec(
                 name='billing.release_promo_reservations',
                 func=jobs.release_promo_reservations,
+                description=(
+                    'Gives back the uses of promo codes reserved at sign-up by '
+                    "accounts that still haven't confirmed their email after 30 "
+                    'days, so those uses can be redeemed by someone else.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -73,6 +78,11 @@ class BillingConfig(AppConfig):
             JobSpec(
                 name='billing.settle_welcome_credits',
                 func=jobs.settle_welcome_credits,
+                description=(
+                    'Safety net for welcome credits: grants the credits of new, '
+                    'confirmed accounts that are still pending, and sends the "no '
+                    'welcome credits" email if its task was lost.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )

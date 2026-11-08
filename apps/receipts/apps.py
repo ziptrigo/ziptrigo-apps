@@ -36,6 +36,11 @@ class ReceiptsConfig(AppConfig):
             JobSpec(
                 name='receipts.meter_storage',
                 func=jobs.meter_storage,
+                description=(
+                    'Charges each Receipts account one day of storage for its files, '
+                    "pauses accounts that can't pay, and resumes paused accounts "
+                    'whose owner has topped up.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -44,6 +49,10 @@ class ReceiptsConfig(AppConfig):
             JobSpec(
                 name='receipts.purge_trash',
                 func=jobs.purge_trash,
+                description=(
+                    'Permanently deletes receipts (rows and files) that have been in '
+                    'the Trash longer than the Trash period in the Receipts settings.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -52,6 +61,11 @@ class ReceiptsConfig(AppConfig):
             JobSpec(
                 name='receipts.retry_due',
                 func=jobs.retry_due,
+                description=(
+                    'Queues receipts whose AI reading is due for a retry, recovers '
+                    'receipts stuck in processing for over 30 minutes, and queues '
+                    'ones nobody picked up.'
+                ),
                 interval=timedelta(minutes=5),
                 lease=timedelta(minutes=10),
             )
@@ -60,6 +74,10 @@ class ReceiptsConfig(AppConfig):
             JobSpec(
                 name='receipts.poll_inbound',
                 func=jobs.poll_inbound,
+                description=(
+                    'Checks the S3 inbox for receipts emailed in and queues each new '
+                    'message to be read.'
+                ),
                 interval=timedelta(minutes=1),
                 lease=timedelta(minutes=2),
             )
@@ -68,6 +86,11 @@ class ReceiptsConfig(AppConfig):
             JobSpec(
                 name='receipts.purge_inbound_messages',
                 func=jobs.purge_inbound_messages,
+                description=(
+                    'Deletes the records (and leftover files) of processed inbound '
+                    'emails older than 30 days that matched no inbox address, such as '
+                    'junk mail.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -76,6 +99,10 @@ class ReceiptsConfig(AppConfig):
             JobSpec(
                 name='receipts.link_vendors',
                 func=jobs.link_vendors,
+                description=(
+                    'Links receipts that have a vendor name but no vendor record to '
+                    "the user's vendor of that name, creating one when needed."
+                ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),
             )
@@ -84,6 +111,9 @@ class ReceiptsConfig(AppConfig):
             JobSpec(
                 name='receipts.cleanup_uploads',
                 func=jobs.cleanup_uploads,
+                description=(
+                    'Removes receipt uploads that were started but not completed within 24 hours.'
+                ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),
             )

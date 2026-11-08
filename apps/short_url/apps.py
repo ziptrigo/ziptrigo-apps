@@ -53,6 +53,10 @@ class ShortUrlConfig(AppConfig):
             JobSpec(
                 name='short_url.rollup_clicks',
                 func=jobs.rollup_clicks,
+                description=(
+                    "Adds up each complete day's clicks into the daily statistics "
+                    'shown on the link stats pages.'
+                ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),
             )
@@ -61,6 +65,10 @@ class ShortUrlConfig(AppConfig):
             JobSpec(
                 name='short_url.purge_click_events',
                 func=jobs.purge_click_events,
+                description=(
+                    'Deletes individual click records older than the retention in the '
+                    'Short URL settings. The daily totals are kept.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -69,6 +77,11 @@ class ShortUrlConfig(AppConfig):
             JobSpec(
                 name='short_url.recheck_destinations',
                 func=jobs.recheck_destinations,
+                description=(
+                    'Checks the destinations of active links against Google Safe '
+                    'Browsing again (each about once a day) and puts flagged links on '
+                    'hold for review. Does nothing without a Safe Browsing API key.'
+                ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=10),
             )

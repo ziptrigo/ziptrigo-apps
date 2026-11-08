@@ -46,6 +46,10 @@ class TodoConfig(AppConfig):
             JobSpec(
                 name='todo.purge_trash',
                 func=jobs.purge_trash,
+                description=(
+                    'Permanently deletes tasks that have been in the Trash longer '
+                    'than the Trash period in the To-do settings.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -54,6 +58,11 @@ class TodoConfig(AppConfig):
             JobSpec(
                 name='todo.meter_storage',
                 func=jobs.meter_storage,
+                description=(
+                    'Charges each To-do account one day of storage for its '
+                    "attachments, pauses accounts that can't pay, and resumes paused "
+                    'accounts whose owner has topped up.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -62,6 +71,11 @@ class TodoConfig(AppConfig):
             JobSpec(
                 name='todo.cleanup_uploads',
                 func=jobs.cleanup_uploads,
+                description=(
+                    'Removes attachment uploads that were started but not completed '
+                    'within 24 hours, and comment files that were never saved with a '
+                    'comment.'
+                ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),
             )
@@ -70,6 +84,10 @@ class TodoConfig(AppConfig):
             JobSpec(
                 name='todo.send_reminders',
                 func=jobs.send_reminders,
+                description=(
+                    'Sends the task reminders that are due (in-app, push, email) and '
+                    'marks ones more than an hour late as skipped.'
+                ),
                 interval=timedelta(minutes=1),
                 lease=timedelta(minutes=5),
             )
@@ -79,6 +97,10 @@ class TodoConfig(AppConfig):
             JobSpec(
                 name='todo.poll_inbound',
                 func=jobs.poll_inbound,
+                description=(
+                    'Checks the S3 inbox for tasks emailed in and queues each new '
+                    'message to be turned into a task.'
+                ),
                 interval=timedelta(minutes=1),
                 lease=timedelta(minutes=2),
             )
@@ -87,6 +109,11 @@ class TodoConfig(AppConfig):
             JobSpec(
                 name='todo.purge_inbound_messages',
                 func=jobs.purge_inbound_messages,
+                description=(
+                    'Deletes the records (and leftover files) of processed inbound '
+                    'emails older than 30 days that matched no inbox address, such as '
+                    'junk mail.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
