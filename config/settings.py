@@ -326,6 +326,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # headroom for a shared NAT/office IP signing in at the same time, not a per-user quota. The
     # callback does an outbound token exchange with Google per call, which is what this protects.
     'GOOGLE_LOGIN_IP': (30, 5 * 60),
+    # `POST /api/auth/google` (issue #251): a Google ID token for our JWTs. Charged before the token
+    # is verified, every call. A real app signs in once in a long while (refresh tokens last
+    # weeks), so this is headroom for a shared NAT/office IP, not a per-user quota; verification is
+    # local (Google's keys are cached), the limit bounds forged-token and account-probing noise.
+    'GOOGLE_TOKEN_IP': (30, 5 * 60),
     # "Sign in with Microsoft" callback (issue #156): the same reasoning and numbers as
     # `GOOGLE_LOGIN_IP` (an outbound token exchange per call, headroom for a shared NAT/office IP).
     'MICROSOFT_LOGIN_IP': (30, 5 * 60),
@@ -607,6 +612,19 @@ LOGIN_URL = 'accounts:login'
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '').strip()
+# Native sign-in (issue #251): the Android app gets a Google ID token on the device and trades it at
+# `POST /api/auth/google`. Its `aud` must be `GOOGLE_CLIENT_ID` (the web client, which is the app's
+# Credential Manager `serverClientId`) or one of `GOOGLE_ANDROID_AUDIENCES` (extra audiences,
+# comma-separated, added to the web client id, never replacing it). `GOOGLE_ANDROID_CLIENT_IDS`
+# (comma-separated) pins the token's `azp`, the Android client that obtained it; empty means `azp` is
+# not checked. The endpoint is on while at least one audience resolves (it needs neither the secret
+# nor the redirect URI).
+GOOGLE_ANDROID_AUDIENCES = [
+    a.strip() for a in os.getenv('GOOGLE_ANDROID_AUDIENCES', '').split(',') if a.strip()
+]
+GOOGLE_ANDROID_CLIENT_IDS = [
+    a.strip() for a in os.getenv('GOOGLE_ANDROID_CLIENT_IDS', '').split(',') if a.strip()
+]
 
 # "Sign in with Microsoft" (issue #156), a server-side OpenID Connect authorization code flow
 # against the Microsoft identity platform (`apps.accounts.services.microsoft_oauth`). Same shape as

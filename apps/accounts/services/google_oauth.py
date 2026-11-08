@@ -53,6 +53,9 @@ UNCONFIRMED_ACCOUNT_MESSAGE = (
 EXISTING_ACCOUNT_MESSAGE = (
     'An account with this email already exists. Sign in with your email and password instead.'
 )
+NO_ACCOUNT_MESSAGE = (
+    'No ZipTrigo account uses this Google account. Create one at app.ziptrigo.com first.'
+)
 #: Domains Google itself hosts: for these, and only these, `email_verified` is authoritative.
 GOOGLE_MAIL_DOMAINS = frozenset({'gmail.com', 'googlemail.com'})
 UNVERIFIED_MESSAGE = (
@@ -73,6 +76,10 @@ class GoogleSignInError(Exception):
         super().__init__(user_message or self.user_message)
         if user_message:
             self.user_message = user_message
+
+
+class SignInRaceLost(GoogleSignInError):
+    """A concurrent sign-in won a unique constraint; the same request will likely succeed again."""
 
 
 class GoogleNotConfigured(GoogleSignInError):
@@ -98,6 +105,12 @@ class InactiveAccount(GoogleSignInError):
     """
 
     user_message = INACTIVE_MESSAGE
+
+
+class NoAccount(GoogleSignInError):
+    """No account uses this Google identity and the caller may not create one (`create=False`)."""
+
+    user_message = NO_ACCOUNT_MESSAGE
 
 
 class AccountConflict(GoogleSignInError):
@@ -178,8 +191,8 @@ def _is_true(value: object) -> bool:
 
 
 def identity_from_claims(claims: Mapping[str, Any]) -> GoogleIdentity:
-    """Read the claims of a validated ID token (Authlib has already checked its signature,
-    issuer, audience, expiry and nonce).
+    """Read the claims of an ID token the caller has already verified (signature, issuer,
+    audience, expiry): Authlib for the web flow, `joserfc` in `google_id_token` for the API.
 
     Raises:
         InvalidClaims: `sub` or `email` is missing.
@@ -217,7 +230,7 @@ def _google_is_authoritative_for(identity: GoogleIdentity) -> bool:
     return identity.email.rpartition('@')[2].lower() in GOOGLE_MAIL_DOMAINS
 
 
-def resolve_user(identity: GoogleIdentity) -> User:
+def resolve_user(identity: GoogleIdentity, *, create: bool = True) -> User:
     """The user this Google identity signs in as: found, linked, or created.
 
     1. Refuse unless Google verified the email address -- otherwise anyone could claim someone
@@ -245,13 +258,18 @@ def resolve_user(identity: GoogleIdentity) -> User:
        "forgot password" can still set one). No confirmation email: Google already did that job.
        Any verified address may create an account, whatever its domain.
 
+    With `create=False` (the native app's `POST /api/auth/google`: accounts are created only in the
+    browser, issue #117) step 4 is a refusal instead: `NoAccount`, nothing written.
+
     An account already linked to a *different* `sub`, or two accounts differing only by email
     case, are refused (`AccountConflict`) rather than guessed at. Inactive accounts are refused
     before anything is written.
 
     Raises:
-        UnverifiedEmail, InactiveAccount, AccountConflict (and its subclasses): see above. All are
-            `GoogleSignInError`s with a `user_message`.
+        UnverifiedEmail, InactiveAccount, AccountConflict (and its subclasses) and NoAccount: see
+            above.
+        SignInRaceLost: a concurrent sign-in won a unique constraint (retry).
+        All are `GoogleSignInError`s with a `user_message`.
     """
     if not identity.email_verified:
         raise UnverifiedEmail()
@@ -260,7 +278,7 @@ def resolve_user(identity: GoogleIdentity) -> User:
         with transaction.atomic():
             user = User.objects.select_for_update().filter(google_sub=identity.sub).first()
             if user is None:
-                user = _link_or_create(identity)
+                user = _link_or_create(identity, create=create)
             elif user.status != User.STATUS_ACTIVE or not user.is_active:
                 raise InactiveAccount()
             return user
@@ -268,16 +286,18 @@ def resolve_user(identity: GoogleIdentity) -> User:
         # A concurrent sign-in for the same address/`sub` won the race for a unique constraint.
         # Rare, and a retry (which then finds the winner's row) is the right answer.
         logger.warning('Google sign-in lost a race creating or linking an account')
-        raise GoogleSignInError() from None
+        raise SignInRaceLost() from None
 
 
-def _link_or_create(identity: GoogleIdentity) -> User:
+def _link_or_create(identity: GoogleIdentity, *, create: bool = True) -> User:
     matches = list(User.objects.select_for_update().filter(email__iexact=identity.email)[:2])
     if len(matches) > 1:
         logger.warning('Google sign-in matched more than one account by email')
         raise AccountConflict()
     if matches:
         return _link(matches[0], identity)
+    if not create:
+        raise NoAccount()
 
     now = datetime.now(UTC)
     # `create_user` with no password stores an unusable one.

@@ -773,11 +773,60 @@ with a `messages` banner. The feature is on only when `GOOGLE_CLIENT_ID`, `GOOGL
 `GOOGLE_REDIRECT_URI` are all set (`google_oauth.is_configured()`, passed to the login/register
 templates as `google_enabled`); unset, the button is hidden and both routes redirect with a message,
 and `apps.accounts.checks` warns (`accounts.W001`) about a *partial* configuration. The callback is
-rate limited per IP (`GOOGLE_LOGIN_IP`).
+rate limited per IP (`GOOGLE_LOGIN_IP`). `resolve_user(identity, *, create=True)` is shared with the native endpoint below.
 The linking refusals ("an account with this email already exists ...") do say that an address has
 an account, which the no-enumeration rule above (issue #125) otherwise forbids; that was left on
 purpose: they appear only after Google has verified the caller controls that very address, so
 nobody learns anything about an address they don't hold.
+
+**Native Google sign-in for the Android app** (issue #251) is `POST /api/auth/google` (`auth=None`, body
+`{"id_token": "..."}`; `routers/auth.py`), which trades a **Google ID token** the app got on the device
+(Credential Manager, with `serverClientId` = the web client id) for the same `TokenResponse` as `POST
+/api/auth/login` (`_issue_tokens`: `refresh_tokens.issue(user)` + `CustomAccessToken.for_user(user)`, so
+the refresh token starts a rotation family). It is not the web flow (no redirect, state or nonce) and it
+**does not fire `user_logged_in`**, so claim-on-login stays a web thing. `services.google_id_token`
+verifies the token with `joserfc` (Authlib's JOSE library, now an explicit dependency): RS256 only,
+signature against Google's key set, `exp` (60 s leeway; a future `iat`/`nbf` is refused too), `iss` in
+`accounts.google.com` / `https://accounts.google.com`, `sub` present and `aud` (string or list)
+containing one of `allowed_audiences()`: `GOOGLE_CLIENT_ID` **plus** `GOOGLE_ANDROID_AUDIENCES`
+(extra audiences, comma-separated, default empty; added to the web client id, never replacing it).
+A Credential Manager token has `aud` = the web client id (`serverClientId`) and `azp` = the Android
+client id, so the new optional `GOOGLE_ANDROID_CLIENT_IDS` (comma-separated, default empty) pins
+`azp`: when set, the token's `azp` must be one of them (none, or another, is the 400 invalid-token
+answer), so only the app, not an ID token issued to the website itself, can present a token.
+**Set it in production.** Without it any ID token for the web client is accepted for its ~1 h life:
+safe today because the web flow keeps its ID tokens server-side, but adding Google One Tap or the GIS
+button to the site would expose them to page scripts (XSS, an extension) that could turn one into a
+30-day refresh-token family, so set `GOOGLE_ANDROID_CLIENT_IDS` before that. No `nonce` binding: a
+possible follow-up. **On while at least one audience resolves** (the web flow's `is_configured()`
+needs all three web settings; this needs neither the secret nor the redirect URI); otherwise 404;
+`manage.py check` warns `accounts.W006` when `GOOGLE_ANDROID_CLIENT_IDS` is set but no audience
+resolves. The key set
+(`https://www.googleapis.com/oauth2/v3/certs`) is cached in the process for an hour, fetched with a 5 s
+timeout by the patchable `fetch_keys` (outside the lock: the attempt slot is claimed under it, the
+result swapped in under it); an unknown `kid` (or none) triggers a refetch, and every fetch attempt
+(failed ones too) is spaced 60 s apart, so forged `kid`s or a Google outage cost one request a minute.
+If the keys cannot be fetched and none are cached: 503; an expired cached set is still used as a
+fallback. The user is resolved by `google_oauth.resolve_user(identity, create=False)`: all the web's
+rules (`email_verified`, `google_sub` first, linking only a confirmed account with Google
+authoritative for the address, the same refusals), but **an identity matching no account is
+`NoAccount`, never a new account** (accounts are created in the browser, #117). The token and its
+claims are never logged. Rate limit `GOOGLE_TOKEN_IP` (30 per 5 min per IP), charged before the token
+is verified (not while the endpoint is off). Status codes: **400** `{"detail": "Invalid or expired Google token."}` for any token that
+is malformed, badly signed, expired, for another audience/issuer, or lacks `sub`/`email`; **403** with
+`detail` the web's wording for `email_verified` false (`Google hasn't verified the email address of
+this Google account, ...`), an unconfirmed account (`An account with this email already exists but
+hasn't been confirmed yet. ...`), a non-authoritative domain (`An account with this email already
+exists. Sign in with your email and password instead.`), a different linked identity (`We couldn't sign
+you in with this Google account because ...`), `User not active`, and no account (`No ZipTrigo account
+uses this Google account. Create one at app.ziptrigo.com first.`); **409** `We couldn't sign you in
+with Google. Please try again.` (a concurrent sign-in won a unique-constraint race, `SignInRaceLost`:
+retry); **404** `Google sign-in is not available.` while off; **422** ninja's own, for a missing
+`id_token` or one over 8,192 characters; **429** over the limit; **503** `Google sign-in is not
+available right now.` with `Retry-After: 60`. The status map is explicit (`_google_status` in the
+router). Tests:
+`apps/accounts/tests/api/test_google_token_api.py` (real signed JWTs, only `fetch_keys` patched), AI
+case ACC-48.
 
 **Sign in with Microsoft** (issue #156) is a fourth way in to the *web UI* and mirrors Google's in
 structure: a session login ending in `django.contrib.auth.login()` (so `user_logged_in` fires), an
@@ -1468,7 +1517,8 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   authenticate-style outcome there to gate a failed-only counter on, so it's a flat cap instead,
   but still needs many different IPs to exhaust rather than a handful of requests from one).
 - **The rules** (`settings.RATELIMIT_RULES`, one dict, each entry commented with its reasoning):
-  login (as above), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address limits on the email an
+  login (as above), `GOOGLE_TOKEN_IP` (`POST /api/auth/google`, issue #251, per IP, charged before the
+  token is verified), signup (plus `SIGNUP_CAPTCHA_IP` and the per-address limits on the email an
   existing address gets, `SIGNUP_EXISTING_EMAIL` and `SIGNUP_EXISTING_EMAIL_DAY`, see "Auth"), `ACCOUNT_EMAIL_CHANGE_USER` (email changes through
   `PUT /api/account`, per user), `ACCOUNT_TIMEZONE_USER` (the browser's time zone detection, 10/hour per
   user, see "Auth" > "Time zone"), `REFRESH_USER` (`POST /api/auth/refresh`, 60/hour per user, see "Auth"), forgot-password (as above,
