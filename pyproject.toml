@@ -19,6 +19,8 @@ dependencies = [
     # Country of a click from a MaxMind GeoLite2-Country database (`GEOIP_PATH`; issue #162).
     'geoip2>=5.0,<6.0',
     'gunicorn>=26.2,<27.0',
+    # JOSE library (Authlib's own); verifies Google ID tokens for `POST /api/auth/google`.
+    'joserfc>=1.0,<2.0',
     # Bare-URL detection for markdown-it's `linkify` option (`apps.core.markdown`, issue #176).
     'linkify-it-py>=2.0,<3.0',
     # CommonMark parser behind `apps.core.markdown`: the Markdown subset of descriptions and

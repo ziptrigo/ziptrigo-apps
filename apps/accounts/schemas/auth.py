@@ -47,6 +47,10 @@ class PasswordResetConfirm(BaseModel):
         return self.password == self.password_confirm
 
 
+class GoogleTokenRequest(BaseModel):
+    id_token: str
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 

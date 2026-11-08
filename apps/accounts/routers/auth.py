@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.http import HttpRequest
@@ -9,6 +11,7 @@ from apps.core import ratelimit
 from ..models import User
 from ..schemas import (
     EmailConfirmRequest,
+    GoogleTokenRequest,
     LoginRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
@@ -16,7 +19,7 @@ from ..schemas import (
     ResendConfirmationRequest,
     TokenResponse,
 )
-from ..services import login_throttle, refresh_tokens
+from ..services import google_id_token, google_oauth, login_throttle, refresh_tokens
 from ..services.email_confirmation import get_email_confirmation_service
 from ..services.password_reset import InvalidResetTokenError, get_password_reset_service
 from ..tokens import CustomAccessToken, CustomRefreshToken, matches_password
@@ -25,6 +28,7 @@ from ..tokens import CustomAccessToken, CustomRefreshToken, matches_password
 # register page, behind its captcha (`apps.accounts.views.register`). An API client works on behalf
 # of an account a person created there.
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 @router.post('/confirm-email', response={200: dict}, auth=None)
@@ -126,7 +130,11 @@ def login(request: HttpRequest, payload: LoginRequest) -> TokenResponse:
             'Check your inbox for the confirmation link.',
         )
 
-    # Generate tokens
+    return _issue_tokens(user)
+
+
+def _issue_tokens(user: User) -> TokenResponse:
+    """A new session for `user`: an access token and a refresh token starting a new family."""
     refresh = refresh_tokens.issue(user)
     access = CustomAccessToken.for_user(user)
 
@@ -136,6 +144,38 @@ def login(request: HttpRequest, payload: LoginRequest) -> TokenResponse:
         token_type='Bearer',
         expires_in=int(settings.NINJA_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds()),
     )
+
+
+@router.post('/google', response=TokenResponse, auth=None)
+def google_sign_in(request: HttpRequest, payload: GoogleTokenRequest) -> TokenResponse:
+    """Trade a Google ID token (from Credential Manager on Android) for our JWTs (issue #251).
+
+    The account is found or linked by the web flow's rules (`google_oauth.resolve_user`) but never
+    created here: accounts are made in the browser. Does not fire `user_logged_in`, so claiming an
+    anonymous file transfer stays a web-login thing. The token is never logged.
+    """
+    if not google_id_token.is_configured():
+        raise HttpError(404, 'Google sign-in is not available.')
+
+    ratelimit.enforce(ratelimit.hit_ip(request, 'GOOGLE_TOKEN_IP'))
+
+    try:
+        claims = google_id_token.verify(payload.id_token)
+        identity = google_oauth.identity_from_claims(claims)
+        user = google_oauth.resolve_user(identity, create=False)
+    except google_id_token.KeysUnavailable as exc:
+        raise HttpError(503, exc.user_message) from None
+    except google_oauth.InvalidClaims:
+        raise HttpError(400, google_id_token.INVALID_TOKEN_MESSAGE) from None
+    except google_id_token.InvalidIdToken as exc:
+        raise HttpError(400, exc.user_message) from None
+    except google_oauth.GoogleSignInError as exc:
+        logger.warning('Google token sign-in refused: %s', type(exc).__name__)
+        raise HttpError(
+            400 if type(exc) is google_oauth.GoogleSignInError else 403, exc.user_message
+        ) from None
+
+    return _issue_tokens(user)
 
 
 @router.post('/refresh', response=TokenResponse, auth=None)

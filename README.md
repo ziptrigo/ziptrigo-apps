@@ -298,6 +298,7 @@ server.
 | `GOOGLE_CLIENT_ID` | the OAuth client's ID, `….apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET` | the OAuth client's secret |
 | `GOOGLE_REDIRECT_URI` | this site's `/auth/google/callback`, e.g. `https://app-staging.ziptrigo.com/auth/google/callback` (local: `http://localhost:8000/auth/google/callback`) |
+| `GOOGLE_ANDROID_AUDIENCES` | optional, comma-separated client ids a Google ID token from the Android app may be issued for (`POST /api/auth/google`); empty means just `GOOGLE_CLIENT_ID`, the web client, which the app passes as Credential Manager's `serverClientId`. The endpoint is on while at least one id resolves and needs neither the secret nor the redirect URI |
 
 To get them, in the [Google Cloud console](https://console.cloud.google.com/) under *APIs &
 Services*:

@@ -1,6 +1,7 @@
 from .account import AccountSchema, AccountUpdateRequest, AccountUpdateResponse
 from .auth import (
     EmailConfirmRequest,
+    GoogleTokenRequest,
     LoginRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
@@ -14,6 +15,7 @@ __all__ = [
     'AccountUpdateRequest',
     'AccountUpdateResponse',
     'EmailConfirmRequest',
+    'GoogleTokenRequest',
     'LoginRequest',
     'PasswordResetConfirm',
     'PasswordResetRequest',
