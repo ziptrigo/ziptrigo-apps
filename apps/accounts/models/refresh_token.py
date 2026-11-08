@@ -32,6 +32,8 @@ class RefreshToken(models.Model):
     expires_at = cast(datetime, models.DateTimeField(db_index=True))
     rotated_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     revoked_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    # Successors issued from this token (capped by `refresh_tokens.MAX_SUCCESSORS`).
+    successor_count = cast(int, models.PositiveSmallIntegerField(default=0, db_default=0))
 
     class Meta:
         verbose_name = 'Refresh token'

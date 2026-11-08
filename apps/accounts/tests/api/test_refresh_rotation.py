@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import pytest
 from django.contrib.auth.models import Permission
+from django.db.models import QuerySet
 from django.urls import reverse
 from django.utils import timezone
 
@@ -174,6 +175,92 @@ def test_two_first_uses_of_a_legacy_token_share_one_row(user):
     assert _row(str(a)).family == _row(str(b)).family == _row(str(legacy)).family
 
 
+def test_two_first_uses_race_to_create_the_legacy_row(user, monkeypatch):
+    """The other caller inserts the row between our lookup and our insert: `get_or_create` hits
+    the unique `jti` (IntegrityError) and re-reads the winner's row, so both callers end up on one
+    row and one family. SQLite can't interleave two real transactions, so the race is staged: the
+    first lookup misses although the row already exists."""
+    legacy = CustomRefreshToken.for_user(user)
+    winner = RefreshToken.objects.create(
+        jti=str(legacy['jti']),
+        user=user,
+        family=uuid.uuid4(),
+        expires_at=timezone.now() + timedelta(days=30),
+    )
+    real_get = QuerySet.get
+    misses = []
+
+    def get_missing_once(self, *args, **kwargs):
+        if self.model is RefreshToken and not misses:
+            misses.append(True)
+            raise RefreshToken.DoesNotExist
+        return real_get(self, *args, **kwargs)
+
+    monkeypatch.setattr(QuerySet, 'get', get_missing_once)
+
+    a = refresh_tokens.rotate(legacy, user)
+    b = refresh_tokens.rotate(legacy, user)
+
+    assert misses == [True]
+    assert RefreshToken.objects.filter(jti=legacy['jti']).count() == 1
+    assert _row(str(a)).family == _row(str(b)).family == winner.family
+
+
+def test_a_token_has_at_most_max_successors_within_the_window(client, user):
+    first = _login(client, user)
+    siblings = [
+        _refresh(client, first['refresh_token']) for _ in range(refresh_tokens.MAX_SUCCESSORS)
+    ]
+    assert [r.status_code for r in siblings] == [200] * refresh_tokens.MAX_SUCCESSORS
+    assert _row(first['refresh_token']).successor_count == refresh_tokens.MAX_SUCCESSORS
+
+    over = _refresh(client, first['refresh_token'])
+
+    # Inside the window, but past the cap: a replay, so the whole family dies.
+    assert over.status_code == 401
+    assert over.json() == {'detail': 'Invalid or expired refresh token'}
+    for response in siblings:
+        assert _refresh(client, response.json()['refresh_token']).status_code == 401
+
+
+def test_refresh_is_rate_limited_per_user(client, user, settings):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'REFRESH_USER': (2, 3600)}
+    token = _login(client, user)['refresh_token']
+    for _ in range(2):
+        token = _refresh(client, token).json()['refresh_token']
+
+    response = _refresh(client, token)
+
+    assert response.status_code == 429
+    assert 'Retry-After' in response.headers
+    # The refused request rotated nothing.
+    assert _row(token).rotated_at is None
+
+
+def test_garbage_does_not_spend_the_refresh_budget(client, user, settings):
+    settings.RATELIMIT_ENABLE = True
+    settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'REFRESH_USER': (1, 3600)}
+    token = _login(client, user)['refresh_token']
+
+    assert _refresh(client, 'not-a-token').status_code == 401
+    assert _refresh(client, 'x.y.z').status_code == 401
+
+    assert _refresh(client, token).status_code == 200
+
+
+def test_the_grace_setting_check(settings):
+    from apps.accounts.checks import check_refresh_grace
+
+    for good in (0, 60, 3600):
+        settings.JWT_REFRESH_GRACE_SECONDS = good
+        assert check_refresh_grace() == []
+    for bad in (-1, 3601):
+        settings.JWT_REFRESH_GRACE_SECONDS = bad
+        (warning,) = check_refresh_grace()
+        assert warning.id == 'accounts.W005' and warning.level == 30
+
+
 def test_password_change_revokes_the_rotated_token(client, user):
     first = _login(client, user)
     second = _refresh(client, first['refresh_token']).json()
@@ -263,6 +350,24 @@ def test_the_purge_job_is_registered():
 def admin_client(client, admin_user):
     client.force_login(admin_user)
     return client
+
+
+def test_admin_filters_by_revoked_and_rotated(admin_client, user):
+    live = refresh_tokens.issue(user)
+    rotated = refresh_tokens.issue(user)
+    refresh_tokens.rotate(rotated, user)
+    RefreshToken.objects.filter(jti=live['jti']).update(revoked_at=timezone.now())
+    url = reverse('custom_admin:accounts_refreshtoken_changelist')
+
+    def ids(**params):
+        response = admin_client.get(url, params)
+        assert response.status_code == 200
+        return {row.jti for row in response.context['cl'].result_list}
+
+    assert ids(revoked='yes') == {live['jti']}
+    assert live['jti'] not in ids(revoked='no')
+    assert ids(rotated='yes') == {rotated['jti']}
+    assert rotated['jti'] not in ids(rotated='no')
 
 
 def test_admin_lists_tokens_read_only(admin_client, user):

@@ -112,3 +112,26 @@ def check_turnstile_test_secret(*args, **kwargs):
             id='accounts.W003',
         )
     ]
+
+
+@register()
+def check_refresh_grace(*args, **kwargs):
+    """Warn about a `JWT_REFRESH_GRACE_SECONDS` that makes rotation pointless or unsafe (#252).
+
+    Negative would make every reuse a replay from the first instant; over an hour leaves a stolen
+    token's siblings usable for that long before a replay is noticed. A warning, never an error:
+    `migrate` runs the checks.
+    """
+    value = settings.JWT_REFRESH_GRACE_SECONDS
+    if 0 <= value <= 3600:
+        return []
+    return [
+        Warning(
+            f'JWT_REFRESH_GRACE_SECONDS is {value}, outside 0 to 3600.',
+            hint=(
+                'It is the window (in seconds) in which a rotated refresh token may be used '
+                'again. Use a value from 0 to 3600; the default is 60.'
+            ),
+            id='accounts.W005',
+        )
+    ]

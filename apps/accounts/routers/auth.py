@@ -144,7 +144,8 @@ def refresh_token(request: HttpRequest, payload: RefreshRequest) -> TokenRespons
 
     The refresh token in the request is replaced (issue #252, `services.refresh_tokens`): the
     client must keep the one in the response. The old one may be used again for a minute (two
-    requests racing), after that it is a replay and revokes the whole family of tokens.
+    requests racing, at most `MAX_SUCCESSORS` times), after that it is a replay and revokes the whole
+    family of tokens. Over `REFRESH_USER` it is a 429.
     """
     try:
         refresh = CustomRefreshToken(payload.refresh_token)
@@ -166,6 +167,8 @@ def refresh_token(request: HttpRequest, payload: RefreshRequest) -> TokenRespons
     # `apps.accounts.tokens.password_fingerprint`).
     if not matches_password(refresh, user):
         raise HttpError(401, 'Invalid or expired refresh token')
+
+    ratelimit.enforce(ratelimit.hit_user(user, 'REFRESH_USER'))
 
     try:
         new_refresh = refresh_tokens.rotate(refresh, user)

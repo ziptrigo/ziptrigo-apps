@@ -176,6 +176,34 @@ class UserAdmin(DjangoUserAdmin):
 custom_admin_site.register(User, UserAdmin)
 
 
+class _NullFieldFilter(admin.SimpleListFilter):
+    """Yes/no filter on whether a nullable timestamp is set."""
+
+    field = ''
+
+    def lookups(self, request, model_admin):
+        return [('yes', 'Yes'), ('no', 'No')]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'yes':
+            return queryset.filter(**{f'{self.field}__isnull': False})
+        if self.value() == 'no':
+            return queryset.filter(**{f'{self.field}__isnull': True})
+        return queryset
+
+
+class RevokedFilter(_NullFieldFilter):
+    title = 'revoked'
+    parameter_name = 'revoked'
+    field = 'revoked_at'
+
+
+class RotatedFilter(_NullFieldFilter):
+    title = 'rotated'
+    parameter_name = 'rotated'
+    field = 'rotated_at'
+
+
 class RefreshTokenAdmin(admin.ModelAdmin):
     """Read-only (issue #252): rows are written by login and refresh and purged by the daily job.
     Support can see a user's token families -- when each token was issued, replaced and revoked --
@@ -183,7 +211,7 @@ class RefreshTokenAdmin(admin.ModelAdmin):
     stored. Deleting a user removes theirs (the cascade; `UserAdmin` accounts for that)."""
 
     list_display = ['created_at', 'user', 'family_short', 'expires_at', 'rotated_at', 'revoked_at']
-    list_filter = ['created_at']
+    list_filter = [RevokedFilter, RotatedFilter, 'created_at']
     search_fields = ['user__email', 'user__name', 'family']
     list_select_related = ['user']
     ordering = ['-created_at']
@@ -195,6 +223,7 @@ class RefreshTokenAdmin(admin.ModelAdmin):
         'expires_at',
         'rotated_at',
         'revoked_at',
+        'successor_count',
     ]
 
     @admin.display(description='Family')

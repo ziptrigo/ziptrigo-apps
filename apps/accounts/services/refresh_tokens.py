@@ -9,10 +9,13 @@ one login):
 - `rotate(token, user)` -- a refresh. The first use of a token marks it rotated and issues its
   successor in the same family. **Within `settings.JWT_REFRESH_GRACE_SECONDS` (60) of that first
   rotation** the same token may be used again and gets another successor (an app and its widget
-  racing on one token must not sign the user out); the siblings are all valid. **After the window,
+  racing on one token must not sign the user out); the siblings are all valid, but at most
+  `MAX_SUCCESSORS` (3) per token: a fourth use is a replay too. **After the window,
   a rotated token is a replay**: either the client lost its newer token, or a copy was stolen, and
   we can't tell which, so the whole family is revoked (the real client signs in again, the thief
   can't use whichever copy of the family he holds) and `InvalidRefreshToken` is raised.
+  Trade-off: replay detection only works after the window; inside it a stolen copy gets a
+  sibling of its own, bounded by `MAX_SUCCESSORS`.
 - A token that has no row is a **legacy** one, issued by a login before this existed: it is
   accepted once (a row is made for it, in a family of its own, as if just issued) and rotated like
   any other, so deploying this signs nobody out. The row's unique `jti` makes two concurrent first
@@ -40,6 +43,11 @@ from ..tokens import CustomRefreshToken
 logger = logging.getLogger(__name__)
 
 
+# How many successors one rotated token may have. Within the grace window an app and its widget
+# racing on one token each get one; past this the reuse is treated as a replay.
+MAX_SUCCESSORS = 3
+
+
 class InvalidRefreshToken(Exception):
     """The refresh token may not be used any more: its family is revoked, or it was replayed."""
 
@@ -63,34 +71,43 @@ def issue(user: User) -> CustomRefreshToken:
 
 def rotate(old: CustomRefreshToken, user: User) -> CustomRefreshToken:
     """The successor of `old` (a verified refresh token of `user`), or `InvalidRefreshToken`."""
-    now = timezone.now()
     grace = timedelta(seconds=settings.JWT_REFRESH_GRACE_SECONDS)
     replayed_family: uuid.UUID | None = None
+    refused = False
     new: CustomRefreshToken | None = None
 
+    # Every outcome is decided as plain local variables and acted on after the block, so a refusal
+    # never raises through `atomic()` (which would roll a revocation back).
     with transaction.atomic():
         record, _ = RefreshToken.objects.select_for_update().get_or_create(
             jti=str(old['jti']),
             defaults={'user': user, 'family': uuid.uuid4(), 'expires_at': _expires_at(old)},
         )
-        if record.user_id != user.pk:  # Can't happen with a signed token; refuse, don't guess.
-            raise InvalidRefreshToken
-        if record.revoked_at is not None:
-            raise InvalidRefreshToken
-        if record.rotated_at is not None and now - record.rotated_at > grace:
+        # Read after the lock is held, so the grace decision and the stamps use the moment the
+        # row was examined, not the moment the request began waiting for it.
+        now = timezone.now()
+        if record.user_id != user.pk or record.revoked_at is not None:
+            # A foreign row can't happen with a signed token; refuse, don't guess.
+            refused = True
+        elif record.rotated_at is not None and (
+            now - record.rotated_at > grace or record.successor_count >= MAX_SUCCESSORS
+        ):
             replayed_family = record.family
             RefreshToken.objects.filter(family=record.family, revoked_at__isnull=True).update(
                 revoked_at=now
             )
         else:
-            if record.rotated_at is None:
-                RefreshToken.objects.filter(pk=record.pk).update(rotated_at=now)
+            RefreshToken.objects.filter(pk=record.pk).update(
+                rotated_at=record.rotated_at or now,
+                successor_count=record.successor_count + 1,
+            )
             new = CustomRefreshToken.for_user(user)
             _record(user, new, record.family)
 
-    if new is None:
+    if replayed_family is not None:
         logger.warning(
             'Replayed refresh token: revoked family %s of user %s', replayed_family, user.pk
         )
+    if new is None or refused:
         raise InvalidRefreshToken
     return new

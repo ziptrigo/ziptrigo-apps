@@ -354,6 +354,12 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # while the account has no zone, so it needs a handful at most; the rest is headroom for
     # several devices and tabs, and a bound on a script hammering the endpoint.
     'ACCOUNT_TIMEZONE_USER': (10, 60 * 60),
+    # `POST /api/auth/refresh` (issue #252), per user and charged only for a request whose token
+    # passed the signature, user, status and `pwd` checks (garbage never touches a budget). A client
+    # refreshes when its access token (14 days) runs out, so a handful a day at most; 60/hour is
+    # headroom for several devices and widgets racing, and a bound on a stolen token being farmed
+    # for siblings inside the grace window.
+    'REFRESH_USER': (60, 60 * 60),
     # -- core: Web Push (issue #239) --
     # Saving this browser's push subscription (`POST /push/subscribe/`), per user and charged for
     # every call. A browser posts once when push is turned on and once per sign-in after that, so a

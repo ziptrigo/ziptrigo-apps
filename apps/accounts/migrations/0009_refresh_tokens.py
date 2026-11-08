@@ -22,6 +22,7 @@ class Migration(migrations.Migration):
                 ('expires_at', models.DateTimeField(db_index=True)),
                 ('rotated_at', models.DateTimeField(blank=True, null=True)),
                 ('revoked_at', models.DateTimeField(blank=True, null=True)),
+                ('successor_count', models.PositiveSmallIntegerField(db_default=0, default=0)),
                 ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='refresh_tokens', to=settings.AUTH_USER_MODEL)),
             ],
             options={

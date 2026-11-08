@@ -769,12 +769,12 @@ write `$BASE` for `http://localhost:8765`. Each login below is its own family.
 |---|---|---|
 | 1 | `curl -s -X POST $BASE/api/auth/login -H 'Content-Type: application/json' -d '{"email":"<MAIN>","password":"<P5>"}'`. | 200 with `access_token`, `refresh_token`, `token_type` `Bearer` and `expires_in`. Record the refresh token as `R1`. |
 | 2 | `curl -s -X POST $BASE/api/auth/refresh -H 'Content-Type: application/json' -d '{"refresh_token":"<R1>"}'`. | 200 with the same four fields; `refresh_token` is **different** from `R1`: record it as `R2`. The access token from it works: `curl -s -H "Authorization: Bearer <access>" $BASE/api/account` is 200. |
-| 3 | Repeat step 2 at once (still with `R1`, within a minute). | 200 again, with a third refresh token `R3` (two clients racing on one token must not be signed out). |
+| 3 | Repeat step 2 at once (still with `R1`, within a minute). | 200 again, with a third refresh token `R3` (two clients racing on one token must not be signed out). A token has at most three successors in the window: a fourth use of `R1` would be a replay (401, family revoked); do not try it here. |
 | 4 | Refresh with `R2`, then with `R3`. | Both 200, each with a new token (the siblings of one login are all valid). Record the newest as `R4`. |
 | 5 | Wait 70 seconds, then refresh with `R1`. | 401 `{"detail": "Invalid or expired refresh token"}`: a token replaced more than a minute ago is a replay. |
 | 6 | Refresh with `R4` (the newest). | 401 with the same body: the replay revoked the whole login's family. |
 | 7 | Log in again (step 1) and refresh once with the new token. | 200 and a new token: other logins are untouched; signing in again always works. |
-| 8 | In the admin, `/admin/accounts/refreshtoken/` as ADMIN, search MAIN's address. | A read-only list (no Add button, no save on the detail page): the rows of steps 1 to 7 with `created`, `expires` (about 30 days ahead), `rotated` and `revoked`; the first family's rows all have `revoked` set, the last family's do not. No token text is shown anywhere. |
+| 8 | In the admin, `/admin/accounts/refreshtoken/` as ADMIN, search MAIN's address. | A read-only list (no Add button, no save on the detail page): the rows of steps 1 to 7 with `created`, `expires` (about 30 days ahead), `rotated` and `revoked`; the list can be filtered by `revoked` and `rotated` (Yes/No); the first family's rows all have `revoked` set, the last family's do not. No token text is shown anywhere. |
 
 ## Out of scope
 
@@ -782,7 +782,7 @@ write `$BASE` for `http://localhost:8765`. Each login below is its own family.
   account-page and email variants only those accounts get (the `Password` note with `Set a
   password`, the Google/Microsoft wording of `You already have a ZipTrigo account`). On this server
   they are not configured; ACC-18 checks they fail gracefully.
-- The Turnstile captcha and every rate limit (`LOGIN_*`, `CHANGE_PASSWORD_USER`,
+- The Turnstile captcha and every rate limit (`REFRESH_USER` (a 429 from refresh), `LOGIN_*`, `CHANGE_PASSWORD_USER`,
   `SIGNUP_EXISTING_EMAIL*`, `ACCOUNT_TIMEZONE_USER`, ...): switched off on this server, unit-tested.
 - The JWT API (`/api/auth/...`, `PUT /api/account`) apart from ACC-47 (refresh token rotation, by
   `curl`) and the `PUT /api/account` steps of ACC-46, so also the user-facing email change and its
