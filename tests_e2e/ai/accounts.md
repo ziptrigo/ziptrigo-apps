@@ -26,6 +26,8 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
   issue #246), the promo code form's presence, change password (every
   refusal, Django's validators), the "password changed" email and its forgot-password link, other
   sessions signed out; what persists on the account across a new session and another browser.
+- **API refresh tokens** (`POST /api/auth/refresh`): each refresh returns a new refresh token, the old
+  one works for a minute more, a replay after that revokes the login's tokens (ACC-47).
 - **No self-service deletion**: there is no page or control to delete one's own account; a user is
   deleted only from the admin (`admin.md` owns the admin side), after which they cannot sign in.
 - Password rules (6 to 128 characters, at least one digit; Django's too-common / numeric /
@@ -756,6 +758,24 @@ page after the next load, never to public pages, emails or notifications, and ar
 | 10 | Disable JavaScript for the page (or inspect the markup): the form. | It is a normal `<form method="post" action="/account/formats/">` with a `Save Formats` button inside `<noscript>`; submitting it redirects back to `/account/`. |
 | 11 | API: `curl -s -H "Authorization: Bearer <token>" http://localhost:8765/api/account` and then `PUT` `{"date_format": "dmy", "time_format": "24h"}`; then `{"date_format": "ymd"}`. | `GET` returns `date_format` and `time_format`; the `PUT` answers 200 with both in `user` and they are saved; the bad value is a 422. Restore `mm/dd/yyyy` and `12-hour`. |
 
+### ACC-47 API refresh tokens rotate (curl)
+
+**Purpose:** `POST /api/auth/refresh` returns a new refresh token and retires the old one; a replay
+after the 60-second grace window revokes the whole login's tokens (issue #252).
+**Preconditions:** MAIN exists, is confirmed and has password P5 (end of ACC-39). `curl` and a shell;
+write `$BASE` for `http://localhost:8765`. Each login below is its own family.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `curl -s -X POST $BASE/api/auth/login -H 'Content-Type: application/json' -d '{"email":"<MAIN>","password":"<P5>"}'`. | 200 with `access_token`, `refresh_token`, `token_type` `Bearer` and `expires_in`. Record the refresh token as `R1`. |
+| 2 | `curl -s -X POST $BASE/api/auth/refresh -H 'Content-Type: application/json' -d '{"refresh_token":"<R1>"}'`. | 200 with the same four fields; `refresh_token` is **different** from `R1`: record it as `R2`. The access token from it works: `curl -s -H "Authorization: Bearer <access>" $BASE/api/account` is 200. |
+| 3 | Repeat step 2 at once (still with `R1`, within a minute). | 200 again, with a third refresh token `R3` (two clients racing on one token must not be signed out). |
+| 4 | Refresh with `R2`, then with `R3`. | Both 200, each with a new token (the siblings of one login are all valid). Record the newest as `R4`. |
+| 5 | Wait 70 seconds, then refresh with `R1`. | 401 `{"detail": "Invalid or expired refresh token"}`: a token replaced more than a minute ago is a replay. |
+| 6 | Refresh with `R4` (the newest). | 401 with the same body: the replay revoked the whole login's family. |
+| 7 | Log in again (step 1) and refresh once with the new token. | 200 and a new token: other logins are untouched; signing in again always works. |
+| 8 | In the admin, `/admin/accounts/refreshtoken/` as ADMIN, search MAIN's address. | A read-only list (no Add button, no save on the detail page): the rows of steps 1 to 7 with `created`, `expires` (about 30 days ahead), `rotated` and `revoked`; the first family's rows all have `revoked` set, the last family's do not. No token text is shown anywhere. |
+
 ## Out of scope
 
 - "Sign in with Google" / "Sign in with Microsoft" flows (real identity providers), and the
@@ -764,8 +784,10 @@ page after the next load, never to public pages, emails or notifications, and ar
   they are not configured; ACC-18 checks they fail gracefully.
 - The Turnstile captcha and every rate limit (`LOGIN_*`, `CHANGE_PASSWORD_USER`,
   `SIGNUP_EXISTING_EMAIL*`, `ACCOUNT_TIMEZONE_USER`, ...): switched off on this server, unit-tested.
-- The JWT API (`/api/auth/...`, `PUT /api/account`), so also the user-facing email change and its
-  "Your ZipTrigo email address was changed" notice, which only that endpoint triggers.
+- The JWT API (`/api/auth/...`, `PUT /api/account`) apart from ACC-47 (refresh token rotation, by
+  `curl`) and the `PUT /api/account` steps of ACC-46, so also the user-facing email change and its
+  "Your ZipTrigo email address was changed" notice, which only that endpoint triggers. A password
+  change revoking rotated refresh tokens is unit-tested.
 - Link expiry by time (48 hours for a confirmation link, 4 hours for a reset link): too long to
   wait for; unit-tested.
 - The no-JavaScript fallbacks (the `<noscript>` `Save Theme` button, plain-POST redirects): not

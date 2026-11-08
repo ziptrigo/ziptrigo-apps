@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from django.apps import AppConfig
 
@@ -21,6 +22,22 @@ class AccountsConfig(AppConfig):
             sender=get_user_model(),
             dispatch_uid='accounts.announce_new_account',
             weak=False,
+        )
+        self._register_jobs()
+
+    def _register_jobs(self):
+        from apps.core.scheduler import JobSpec
+        from apps.core.scheduler import register as register_job
+
+        from . import jobs
+
+        register_job(
+            JobSpec(
+                name='accounts.purge_refresh_tokens',
+                func=jobs.purge_refresh_tokens,
+                interval=timedelta(hours=24),
+                lease=timedelta(hours=1),
+            )
         )
 
 

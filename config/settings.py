@@ -649,6 +649,10 @@ PASSWORD_RESET_TOKEN_TTL_HOURS = int(os.getenv('PASSWORD_RESET_TOKEN_TTL_HOURS',
 JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
 JWT_EXP_DELTA_SECONDS = int(os.getenv('JWT_EXP_DELTA_SECONDS', str(14 * 24 * 3600)))
+# Refresh tokens rotate (issue #252, `apps.accounts.services.refresh_tokens`): a refresh token that
+# was already replaced may still be refreshed this many seconds later (an app and its widget racing
+# on the same token); after that, using it revokes its whole family.
+JWT_REFRESH_GRACE_SECONDS = int(os.getenv('JWT_REFRESH_GRACE_SECONDS', '60'))
 
 # Production must not run on the development fallbacks above: anyone could forge sessions and
 # JWTs signed with them.
@@ -664,6 +668,8 @@ if os.getenv('ENVIRONMENT') == 'prod':
 NINJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(seconds=JWT_EXP_DELTA_SECONDS),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
+    # ninja_jwt's own rotation/blacklist (its refresh view, the `token_blacklist` app) is unused:
+    # `POST /api/auth/refresh` rotates through `apps.accounts.services.refresh_tokens`.
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': False,
     'UPDATE_LAST_LOGIN': False,

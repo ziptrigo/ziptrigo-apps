@@ -344,6 +344,31 @@ One `AUTH_USER_MODEL`: `accounts.User` (UUID pk, email login, `status`). Two mec
   `User.password`, e.g. Django rehashing it on login after a hasher upgrade: it kills outstanding
   JWTs and password reset links alike. A token without the claim is rejected, so
   tokens issued before this shipped stopped working and CLI users had to log in again once.
+  **Refresh tokens rotate** (issue #252, `services/refresh_tokens.py`, model `accounts.RefreshToken`,
+  migration `0009`): a client in regular use never signs in again, an unused refresh token still dies
+  after 30 days. `POST /api/auth/refresh` (`{"refresh_token"}`) answers the same `TokenResponse`
+  (`access_token`, `refresh_token`, `token_type`, `expires_in`) but `refresh_token` is now a **new**
+  token (`CustomRefreshToken.for_user`, so the `pwd` claim is re-stamped and the 30 days restart); the
+  client must store it. The status, `is_active` and `pwd` checks run first (403 / 401, as before).
+  Login and refresh write one row per issued token (by `jti`; never the token) in a **family** (all
+  descended from one login). The first use of a token marks it rotated; **within
+  `JWT_REFRESH_GRACE_SECONDS` (60) of that** it may be used again and gets another successor (an app
+  and its widget racing on one token; the siblings are all valid); **after the window it is a
+  replay**: the whole family is revoked (`revoked_at`) and the request is a 401
+  `Invalid or expired refresh token` (the same body as every other invalid token), the real client
+  signs in again. A token with no row (a **legacy** one, issued before this shipped) is accepted once
+  and migrated: a row is made for it in a family of its own, so nobody is logged out by the deploy.
+  The decision runs under `select_for_update` in one transaction (the unique `jti` settles two
+  concurrent first uses of a legacy token) and a revocation is committed before the 401. The daily
+  `accounts.purge_refresh_tokens` job (`accounts/jobs.py`, registered from `AccountsConfig.ready()`)
+  deletes rows past `expires_at`. Read-only `RefreshTokenAdmin` (`accounts.refreshtoken` is in
+  `CASCADE_WITH_USER_MODELS`). **Access tokens are not tracked**: revoking a family stops refreshing,
+  not an access token already issued. **Decided, not done:** the access token keeps its 14 days
+  (`JWT_EXP_DELTA_SECONDS`) because the CLIs (`admin/utils.py`) store only an access token and have no
+  refresh; shortening it (to an hour, say) needs them to refresh first, a follow-up. No absolute cap
+  on a family's age either (a client in daily use is signed in until it stops); adding one is a column
+  (`family_started_at`) and a check in `rotate`. ninja_jwt's own `ROTATE_REFRESH_TOKENS` /
+  `token_blacklist` are not used. Tests: `apps/accounts/tests/api/test_refresh_rotation.py`.
 
 `POST /api/auth/login` only issues JWTs; it never starts a session. Register, forgot-password,
 reset-password and resend-confirmation (issue #52) are session form views too, the same as login
