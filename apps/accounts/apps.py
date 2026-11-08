@@ -35,6 +35,11 @@ class AccountsConfig(AppConfig):
             JobSpec(
                 name='accounts.purge_refresh_tokens',
                 func=jobs.purge_refresh_tokens,
+                description=(
+                    'Deletes the records of API refresh tokens that have expired. An '
+                    'expired token is refused anyway, so nobody is signed out by '
+                    'this.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )

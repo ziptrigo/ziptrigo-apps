@@ -37,6 +37,12 @@ class FileTransferConfig(AppConfig):
             JobSpec(
                 name='file_transfer.meter_transfers',
                 func=jobs.meter_transfers,
+                description=(
+                    'Charges one day of storage for each active transfer, suspends '
+                    "transfers whose owner can't pay, re-enables suspended ones "
+                    'whose owner has topped up, and deletes the files of transfers '
+                    'past their suspension grace period.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )
@@ -45,6 +51,11 @@ class FileTransferConfig(AppConfig):
             JobSpec(
                 name='file_transfer.expire_transfers',
                 func=jobs.expire_transfers,
+                description=(
+                    'Ends transfers that have expired or reached their download limit '
+                    'and deletes their files, sends the "expires tomorrow" reminders, '
+                    'and finishes file deletions that were deferred.'
+                ),
                 interval=timedelta(minutes=5),
                 lease=timedelta(minutes=10),
             )
@@ -53,6 +64,10 @@ class FileTransferConfig(AppConfig):
             JobSpec(
                 name='file_transfer.cleanup_drafts',
                 func=jobs.cleanup_drafts,
+                description=(
+                    'Deletes draft and unconfirmed transfers that have been idle for '
+                    '24 hours, aborting their unfinished uploads.'
+                ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),
             )
@@ -61,6 +76,9 @@ class FileTransferConfig(AppConfig):
             JobSpec(
                 name='file_transfer.purge_download_ips',
                 func=jobs.purge_download_ips,
+                description=(
+                    'Removes the IP address from download log entries older than 90 days.'
+                ),
                 interval=timedelta(hours=24),
                 lease=timedelta(hours=1),
             )

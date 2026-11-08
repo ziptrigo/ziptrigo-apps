@@ -5075,6 +5075,9 @@ future app:
   Postgres connection** when the scheduler is enabled (3 by default).
   `./manage.py run_scheduler` remains for local development (the `scheduler` compose service) or a
   dedicated container; job status is a read-only `ScheduledJob` admin.
+  Every `JobSpec` carries a `description` (plain words for staff), which that admin shows at the
+  top of the job's page (`admin/core/scheduledjob/change_form.html`; a row whose job is no longer
+  registered says so); `apps/core/tests/test_scheduled_job_admin.py` fails on a job without one.
 
 `core`'s jobs (`apps/core/jobs.py`) let exceptions propagate (the runner records them in
 `ScheduledJob.last_error`; a swallowed one would show as a success). Besides the email-verification and
