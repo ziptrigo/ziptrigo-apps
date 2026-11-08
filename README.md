@@ -172,6 +172,8 @@ it in `.env.local` to point elsewhere.
 - Site: http://localhost:8000
 - Admin: http://localhost:8000/admin/
 - API docs: http://localhost:8000/api/docs
+- API spec for other clients: [`docs/openapi.yml`](docs/openapi.yml) (OpenAPI 3.1). Regenerate it
+  with `inv api generate` after changing the API; the version goes up only when the spec changed.
 
 ### Local AWS/S3 emulation (Floci)
 
