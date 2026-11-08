@@ -12,10 +12,47 @@ from apps.short_url.api import router as short_url_router
 from apps.todo.api import router as todo_router
 from config.api_version import API_VERSION
 
+# The spec's top-level `tags`: the order Swagger UI and generated clients group the endpoints in,
+# and a line on each. Every tag a router sets must be here (`apps/core/tests/test_openapi_doc.py`).
+TAGS = [
+    {
+        'name': 'Authentication',
+        'description': 'Sign in for a JWT, refresh it, and the password reset and email '
+        'confirmation flows. Accounts are created only on the website.',
+    },
+    {
+        'name': 'Account',
+        'description': 'The signed-in user: name, email, time zone, date and time format.',
+    },
+    {'name': 'Credits', 'description': "Staff only: a user's credit balance and adjustments."},
+    {'name': 'QR Codes', 'description': 'QR codes, tracked or not: create, edit, preview, images.'},
+    {
+        'name': 'File Transfer',
+        'description': 'Send files: drafts, resumable uploads to S3, recipients, the transfers '
+        'you sent.',
+    },
+    {
+        'name': 'Receipts',
+        'description': 'Receipts and invoices: uploads, the fields read from them, vendors, '
+        'categories, the CSV export and the inbox address.',
+    },
+    {
+        'name': 'Short URLs',
+        'description': 'Short links with editable destinations, their paid extras and click '
+        'statistics.',
+    },
+    {
+        'name': 'To-do',
+        'description': 'Tasks, subtasks, labels, comments, reminders, attachments, saved filters '
+        'and settings.',
+    },
+]
+
 api = NinjaAPI(
     title='ZipTrigo API',
     version=API_VERSION,
     description='API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.',
+    openapi_extra={'tags': TAGS},
 )
 
 api.add_router('/', accounts_router)

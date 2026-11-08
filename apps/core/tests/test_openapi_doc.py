@@ -31,6 +31,21 @@ def test_the_spec_is_openapi_3_1(committed):
     assert committed['openapi'].startswith('3.1.')
 
 
+def test_every_operation_tag_is_listed_once_with_a_description(committed):
+    """A new router's tag goes in `config.api.TAGS`, or its group has no place and no line."""
+    listed = [tag['name'] for tag in committed['tags']]
+    used = {
+        tag
+        for operations in committed['paths'].values()
+        for operation in operations.values()
+        for tag in operation.get('tags', [])
+    }
+
+    assert len(listed) == len(set(listed))
+    assert used <= set(listed), f'Add to TAGS in config/api.py: {sorted(used - set(listed))}'
+    assert all(tag.get('description') for tag in committed['tags'])
+
+
 def test_the_live_api_reports_the_same_version():
     from config.api import api as ninja_api
 

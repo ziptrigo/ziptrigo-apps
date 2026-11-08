@@ -4,4 +4,4 @@ Written by `inv api generate` (`admin/api.py`), which raises it whenever the spe
 edit it by hand. Keep the assignment below on a line of its own; the command rewrites that line.
 """
 
-API_VERSION = '1.0.0'
+API_VERSION = '1.0.1'
