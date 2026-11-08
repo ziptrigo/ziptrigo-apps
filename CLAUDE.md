@@ -1624,7 +1624,11 @@ rewriting the one `API_VERSION = '...'` line and the file. The very first file k
 test_openapi_doc.py` runs in CI and fails while the committed file differs from the backend or its
 version from `API_VERSION`; its message says to run `inv api generate`. JSON is served live at
 `/api/openapi.json`. No `servers:` block: a client sets its own base URL (the paths start with
-`/api/`). Tests of the command: `admin/tests/test_api.py`.
+`/api/`). Each app's router sets a tag (accounts' two sub-routers: `Authentication` and
+`Account`); the spec's top-level `tags` list, `TAGS` in `config/api.py` (passed as
+`openapi_extra`), gives the groups their order and a description each, and the same test fails
+when a router uses a tag that isn't in it, so **a new app's router adds its tag to `TAGS`**.
+Tests of the command: `admin/tests/test_api.py`.
 
 `apps/file_transfer/api/` (issue #55 phase 3) is JWT-only (logged-in users; anonymous sending stays
 web-only) and mirrors the web send/dashboard flow endpoint-for-endpoint, calling the exact same

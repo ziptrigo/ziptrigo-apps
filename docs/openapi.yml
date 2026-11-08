@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 1.0.0
+  version: 1.0.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -162,6 +162,42 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/LoginRequest'
+        required: true
+  /api/auth/google:
+    post:
+      operationId: apps_accounts_routers_auth_google_sign_in
+      summary: Google Sign In
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response
+                type: object
+      description: 'Trade a Google ID token (from Credential Manager on Android) for our JWTs (issue #251).
+
+
+        The account is found or linked by the web flow''s rules (`google_oauth.resolve_user`) but never
+
+        created here: accounts are made in the browser. Does not fire `user_logged_in`, so claiming an
+
+        anonymous file transfer stays a web-login thing. The token is never logged.'
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleTokenRequest'
         required: true
   /api/auth/refresh:
     post:
@@ -3611,6 +3647,16 @@ components:
       - email
       - password
       title: LoginRequest
+      type: object
+    GoogleTokenRequest:
+      properties:
+        id_token:
+          maxLength: 8192
+          title: Id Token
+          type: string
+      required:
+      - id_token
+      title: GoogleTokenRequest
       type: object
     RefreshRequest:
       properties:
@@ -7191,3 +7237,20 @@ components:
       type: http
       scheme: bearer
 servers: []
+tags:
+- name: Authentication
+  description: Sign in for a JWT, refresh it, and the password reset and email confirmation flows. Accounts are created only on the website.
+- name: Account
+  description: 'The signed-in user: name, email, time zone, date and time format.'
+- name: Credits
+  description: 'Staff only: a user''s credit balance and adjustments.'
+- name: QR Codes
+  description: 'QR codes, tracked or not: create, edit, preview, images.'
+- name: File Transfer
+  description: 'Send files: drafts, resumable uploads to S3, recipients, the transfers you sent.'
+- name: Receipts
+  description: 'Receipts and invoices: uploads, the fields read from them, vendors, categories, the CSV export and the inbox address.'
+- name: Short URLs
+  description: Short links with editable destinations, their paid extras and click statistics.
+- name: To-do
+  description: Tasks, subtasks, labels, comments, reminders, attachments, saved filters and settings.
