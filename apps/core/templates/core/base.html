@@ -65,6 +65,18 @@
          core/css/color_schemes.css sets per colour scheme (<html data-scheme>, apps.core.color_schemes).
          docs/ui-design/reference/assets/reference.js keeps a copy of this config with Sage's values. -->
     <script>
+      const ACCENT = {
+        50: 'rgb(var(--c-brand-50) / <alpha-value>)',
+        100: 'rgb(var(--c-brand-100) / <alpha-value>)',
+        200: 'rgb(var(--c-brand-200) / <alpha-value>)',
+        300: 'rgb(var(--c-brand-300) / <alpha-value>)',
+        400: 'rgb(var(--c-brand-400) / <alpha-value>)',
+        500: 'rgb(var(--c-brand-500) / <alpha-value>)',
+        600: 'rgb(var(--c-brand-600) / <alpha-value>)',
+        700: 'rgb(var(--c-brand-700) / <alpha-value>)',
+        800: 'rgb(var(--c-brand-800) / <alpha-value>)',
+        900: 'rgb(var(--c-brand-900) / <alpha-value>)'
+      };
       tailwind.config = {
         darkMode: 'class',
         /* hover: styles apply only where the device can hover, so a tap on a phone leaves none stuck. */
@@ -72,21 +84,20 @@
         theme: {
           extend: {
             colors: {
-              sage: {
-                50: 'rgb(var(--c-brand-50) / <alpha-value>)',
-                100: 'rgb(var(--c-brand-100) / <alpha-value>)',
-                200: 'rgb(var(--c-brand-200) / <alpha-value>)',
-                300: 'rgb(var(--c-brand-300) / <alpha-value>)',
-                400: 'rgb(var(--c-brand-400) / <alpha-value>)',
-                500: 'rgb(var(--c-brand-500) / <alpha-value>)',
-                600: 'rgb(var(--c-brand-600) / <alpha-value>)',
-                700: 'rgb(var(--c-brand-700) / <alpha-value>)',
-                800: 'rgb(var(--c-brand-800) / <alpha-value>)',
-                900: 'rgb(var(--c-brand-900) / <alpha-value>)'
+              /* `accent` is the name to use in new markup; `sage` is the same scale under the name
+                 the templates were written with (Sage is only the default scheme). */
+              accent: ACCENT,
+              sage: ACCENT,
+              /* The primary button and things selected like it: fill, hover fill and label.
+                 Midnight and Graphite swap these in light mode (core/css/color_schemes.css). */
+              primary: {
+                DEFAULT: 'rgb(var(--c-primary) / <alpha-value>)',
+                hover: 'rgb(var(--c-primary-hover) / <alpha-value>)',
+                on: 'rgb(var(--c-on-primary) / <alpha-value>)'
               },
               /* Aliases some product templates use for the brand colours. */
               brand: {
-                primary: 'rgb(var(--c-brand-300) / <alpha-value>)',
+                primary: 'rgb(var(--c-primary) / <alpha-value>)',
                 dark: 'rgb(var(--c-brand-800) / <alpha-value>)'
               },
               /* Neutrals tinted a few degrees toward the accent; every gray-* class picks them up. */

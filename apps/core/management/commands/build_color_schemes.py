@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from PIL import Image
 
@@ -67,6 +68,10 @@ class Command(BaseCommand):
         css = STATIC / color_schemes.CSS_PATH
         css.write_text(color_schemes.render_css())
         self.stdout.write(f'Wrote {css.relative_to(STATIC)}')
+
+        reference = Path(settings.PROJECT_ROOT) / color_schemes.REFERENCE_JS_PATH
+        reference.write_text(color_schemes.render_reference_js())
+        self.stdout.write(f'Wrote {color_schemes.REFERENCE_JS_PATH}')
 
         default = color_schemes.SCHEMES[color_schemes.DEFAULT]
         for scheme in color_schemes.all_schemes():

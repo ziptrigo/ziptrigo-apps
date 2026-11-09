@@ -595,7 +595,7 @@ link instead.
 | 2 | Click `Ember`. | Without a Save click and without a reload, the page's accent colours turn terracotta (the selected theme option, primary buttons such as `Save Changes`, focus rings); `Ember` is selected; `<html>` has `data-scheme="ember"`; the logo in the header is terracotta too, and the tab's icon follows. |
 | 3 | Click `Dark` in the theme options, then `Light`. | The scheme stays `Ember` in both; text stays readable in both. |
 | 4 | Open `/`, `/todo/`, `/links/` and `/receipts/`. | All use the Ember colours (header logo, the home page's large logo, primary buttons, active tabs); nothing is left sage green except user content such as To-do label colours. |
-| 5 | Click `Midnight` on `/account/` with the `Light` theme. | Primary buttons are dark navy with a white label; with the `Dark` theme they are light blue with a dark label. |
+| 5 | Click `Midnight` on `/account/` with the `Light` theme. | Primary buttons are dark navy with a white label, and so is the selected theme option; with the `Dark` theme they are light blue with a dark label. Start an upload in `/receipts/upload/`: the progress bar is light blue and does not change colour under the pointer. |
 | 6 | Use only the keyboard: Tab to the color scheme group and press the arrow keys. | A visible focus ring shows on the focused tile; each move applies that scheme at once. |
 | 7 | Sign out; look at the login page. | It is sage green (a visitor always gets the default). |
 | 8 | Sign in from a different browser profile. | The saved scheme applies there too. |

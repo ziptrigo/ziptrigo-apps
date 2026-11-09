@@ -82,6 +82,13 @@ h1, h2, h3 { text-wrap: balance; }
 }
 .btn:active { transform: scale(0.98); }
 
+/* The primary button: `bg-brand-primary text-gray-900 hover:bg-sage-400` in the templates. Its label and
+ * hover follow the scheme's primary variables (core/css/color_schemes.css), which differ from the plain
+ * recipe only in the solid schemes (Midnight, Graphite: a dark fill with a white label in light mode).
+ * Buttons and links only: a `bg-brand-primary` progress bar is not a control and has no hover. */
+:is(a, button, input[type='submit']).bg-brand-primary { color: rgb(var(--c-on-primary)); }
+:is(a, button, input[type='submit']).bg-brand-primary:hover { background-color: rgb(var(--c-primary-hover)); }
+
 /* Focus ring only for the keyboard: a mouse click leaves nothing behind. Templates don't carry focus:ring-*. */
 :is(button, a, summary, [tabindex]):focus { outline: none; }
 :is(button, a, summary, [tabindex]):focus-visible {

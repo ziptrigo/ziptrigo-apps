@@ -56,7 +56,7 @@ Behaviour: static/core/js/date_picker.js (Alpine). Also used by core.forms.DateP
         <i class="fas fa-chevron-right"></i>
       </button>
     </div>
-    <div class="grid grid-cols-7 text-center text-xs text-sage-500 dark:text-sage-300 mb-1">
+    <div class="grid grid-cols-7 text-center text-xs text-sage-600 dark:text-sage-300 mb-1">
       <template x-for="d in weekdays" :key="d"><span x-text="d" class="py-1"></span></template>
     </div>
     <div class="grid grid-cols-7 gap-0.5 text-sm">
@@ -66,7 +66,7 @@ Behaviour: static/core/js/date_picker.js (Alpine). Also used by core.forms.DateP
                   :disabled="cell && cell.disabled" @click="pick(cell)"
                   :data-date="cell && cell.value"
                   :class="{
-                    'bg-sage-300 text-gray-900 font-semibold': cell && cell.selected,
+                    'bg-primary text-primary-on font-semibold': cell && cell.selected,
                     'ring-1 ring-sage-400': cell && cell.today && !cell.selected,
                     'text-sage-800 dark:text-sage-100 hover:bg-sage-100 dark:hover:bg-gray-700': cell && !cell.selected && !cell.disabled,
                     'text-gray-300 dark:text-gray-600 cursor-not-allowed': cell && cell.disabled

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Color scheme proposals - ZipTrigo</title>
+<title>Color schemes - ZipTrigo</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: Figtree, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -140,10 +140,11 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Color scheme proposals</h1>
-  <p class="lead">Eight candidate schemes, each a 10-step accent scale plus its own tinted neutral scale, so every scheme
-    works in light and dark with the same component recipes the site uses today (primary button = accent 300 with dark
-    text, links and active states = accent 600). Click a scheme to load it into the mock below.</p>
+  <h1>Color schemes</h1>
+  <p class="lead">The site's eight colour schemes, each a 10-step accent scale plus its own tinted neutral scale, so every
+    scheme works in light and dark with the same component recipes (primary button = accent 300 with dark text, links
+    and active states = accent 600; Midnight and Graphite use a dark button with a white label in light mode). The
+    values are generated from <code>apps/core/color_schemes.py</code>. Click a scheme to load it into the mock below.</p>
 
   <h2>Schemes</h2>
   <div class="grid" id="grid"></div>
@@ -214,33 +215,9 @@
   </div>
 </template>
 
+<script src="assets/color-schemes.js"></script>
 <script>
-const P = [
-  { id: 'sage', name: 'Sage', tag: 'current', desc: 'Today’s muted green. Calm, a little organic.',
-    b: ['f4f7f6','d4e0da','b5c7be','8fa89e','728e84','5a736a','475a53','3b4a47','2c3432','1e2422'],
-    g: ['f6f8f7','eef1f0','dfe4e2','c6cecb','98a39f','66716d','4f5956','3c4441','282e2c','1a1f1d','111514'] },
-  { id: 'honey', name: 'Honey', tag: 'yellow / cream', desc: 'Warm gold on cream paper. Friendly, stationery-like.',
-    b: ['fbf8ec','f6ecc9','eedb98','e3c463','d1a93a','ab8527','7f611e','664e1c','473717','2f2410'],
-    g: ['faf8f3','f3f0e8','e6e1d5','d1cabb','a59d8b','746c5c','5b5446','453f35','2e2a23','1f1c17','151310'] },
-  { id: 'ember', name: 'Ember', tag: 'red / orange', desc: 'Terracotta and burnt orange. Energetic but not alarming.',
-    b: ['fcf4f0','f8e1d6','f0c3ae','e59d7e','d67753','bb5837','96442b','743524','4f251b','341913'],
-    g: ['faf7f6','f3eeec','e7dfdc','d3c8c4','a89a95','766964','5c514d','463d3a','2f2927','201b1a','161211'] },
-  { id: 'sky', name: 'Sky', tag: 'blue / light', desc: 'Airy light blue. Clean, trustworthy, the classic SaaS look.',
-    b: ['f1f8fc','d9ecf7','b3d9ef','7fbfe2','4fa1cf','3383b3','296890','235372','1b3c52','132837'],
-    g: ['f6f8fa','edf1f5','dee4ea','c5ced8','96a2b0','64707e','4d5864','3b434d','272d34','1a1e24','111419'] },
-  { id: 'midnight', name: 'Midnight', tag: 'blue / dark', solid: true, desc: 'Deep navy with solid buttons and white labels. Formal, high contrast.',
-    b: ['f1f4fb','dde4f5','bccaeb','8fa5dc','6480c8','4762ad','364c8c','2b3c6e','1f2a4d','151c33'],
-    g: ['f6f7fb','eeeff6','dfe1ec','c7cada','999db3','676b82','505368','3c3f50','282a37','1a1c27','10111a'] },
-  { id: 'lagoon', name: 'Lagoon', tag: 'suggested', desc: 'Teal. Fresher and more saturated than Sage, a natural sibling.',
-    b: ['f0f9f8','d3eeeb','a9ddd8','74c5be','47a8a1','308a84','276e6a','225855','1a3f3d','122a29'],
-    g: ['f5f8f8','ecf1f1','dde4e4','c4cece','95a3a3','637171','4c5858','3a4343','272d2d','1a1f1f','111515'] },
-  { id: 'plum', name: 'Plum', tag: 'suggested', desc: 'Soft violet with mauve neutrals. Modern and distinctive.',
-    b: ['f8f4fa','ecdff1','d9c0e3','bf9bd0','a279b8','855d9c','6a497d','543b63','3a2a45','261c2e'],
-    g: ['f8f6f9','f1eef3','e4dfe7','cfc8d4','a39aaa','716878','58505e','433d48','2d2931','1e1b21','141216'] },
-  { id: 'graphite', name: 'Graphite', tag: 'suggested', solid: true, desc: 'Near-monochrome. Minimal; content and status colours do the talking.',
-    b: ['f6f6f7','e6e7e9','cdcfd3','a9acb3','7f838c','62666f','4b4e56','3a3d43','27292e','18191c'],
-    g: ['f7f7f8','efeff1','e1e2e5','c9cbcf','9a9da3','696c73','51545a','3e4045','292b2e','1b1c1f','121214'] },
-];
+const P = window.COLOR_SCHEMES;
 const BS = [50,100,200,300,400,500,600,700,800,900], GS = [...BS, 950];
 let cur = P[0], mode = 'light';
 
@@ -274,7 +251,7 @@ P.forEach(p => {
   const c = document.createElement('button'); c.className = 'choice'; c.dataset.id = p.id;
   const mini = d => `<div class="mini theme ${d ? 'dark' : ''} ${p.solid ? 'solid' : ''}"><div class="bar"></div><div class="bar s"></div>
      <div class="rowx"><span class="b">Save</span><span class="p">Active</span></div></div>`;
-  c.innerHTML = `<div class="name">${p.name}<span class="tag">${p.tag}</span></div><div class="desc">${p.desc}</div>
+  c.innerHTML = `<div class="name">${p.name}${p.isDefault ? '<span class="tag">default</span>' : ''}</div><div class="desc">${p.desc}</div>
     <div class="strip">${p.b.map(h => `<i style="background:#${h}"></i>`).join('')}</div>
     <div class="minis">${mini(false)}${mini(true)}</div>`;
   vars(c, p); c.classList.remove('solid');

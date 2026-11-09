@@ -12,24 +12,30 @@
  * These pages are documentation only. The site itself never loads this file.
  */
 
+const SAGE = {
+  50: '#f4f7f6',
+  100: '#d4e0da',
+  200: '#b5c7be',
+  300: '#8fa89e',
+  400: '#728e84',
+  500: '#5a736a',
+  600: '#475a53',
+  700: '#3b4a47',
+  800: '#2c3432',
+  900: '#1e2422'
+};
+
 tailwind.config = {
   darkMode: 'class',
   future: { hoverOnlyWhenSupported: true },
   theme: {
     extend: {
       colors: {
-        sage: {
-          50: '#f4f7f6',
-          100: '#d4e0da',
-          200: '#b5c7be',
-          300: '#8fa89e',
-          400: '#728e84',
-          500: '#5a736a',
-          600: '#475a53',
-          700: '#3b4a47',
-          800: '#2c3432',
-          900: '#1e2422'
-        },
+        // The site maps all of these to CSS variables per colour scheme (apps/core/color_schemes.py);
+        // the reference pages show Sage, the default. A test keeps these values equal to the module's.
+        accent: SAGE,
+        primary: { DEFAULT: '#8fa89e', hover: '#728e84', on: '#1a1f1d' },
+        sage: SAGE,
         brand: {
           primary: '#8fa89e',
           dark: '#2c3432'

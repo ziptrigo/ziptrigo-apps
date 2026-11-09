@@ -159,11 +159,23 @@ def test_a_visitor_gets_sage(client):
     assert '<meta name="theme-color" content="#8fa89e">' in response.content.decode()
 
 
-def test_a_stale_value_renders_as_sage(client, user):
+def test_a_stale_value_renders_as_sage_and_the_picker_checks_sage(client, user):
     User.objects.filter(pk=user.pk).update(color_scheme='retired')
     client.force_login(user)
 
-    assert 'data-scheme="sage"' in _html_tag(client.get(reverse('core:home')))
+    response = client.get(reverse('accounts:account'))
+
+    assert 'data-scheme="sage"' in _html_tag(response)
+    assert _checked_schemes(response.content.decode()) == ['sage']
+
+
+def test_selected_theme_option_uses_the_primary_colours(client, user):
+    """So it matches the primary button in a solid scheme (Midnight, Graphite)."""
+    client.force_login(user)
+
+    content = client.get(reverse('accounts:account')).content.decode()
+
+    assert 'peer-checked:bg-primary peer-checked:text-primary-on' in content
 
 
 def test_color_scheme_is_read_only_in_the_user_admin(admin_client, user):

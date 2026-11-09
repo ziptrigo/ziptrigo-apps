@@ -16,7 +16,7 @@
           </p>
         </div>
       </div>
-      <a href="{% url 'accounts:account' %}" class="text-sage-300 hover:underline">
+      <a href="{% url 'accounts:account' %}" class="text-sage-600 dark:text-sage-300 hover:underline">
         <i class="fas fa-arrow-left mr-2"></i>Back to Account
       </a>
     </div>
@@ -77,10 +77,10 @@
         </div>
         <div class="flex gap-3">
           {% if page_obj.has_previous %}
-            <a class="text-sage-300 hover:underline" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+            <a class="text-sage-600 dark:text-sage-300 hover:underline" href="?page={{ page_obj.previous_page_number }}">Previous</a>
           {% endif %}
           {% if page_obj.has_next %}
-            <a class="text-sage-300 hover:underline" href="?page={{ page_obj.next_page_number }}">Next</a>
+            <a class="text-sage-600 dark:text-sage-300 hover:underline" href="?page={{ page_obj.next_page_number }}">Next</a>
           {% endif %}
         </div>
       </div>
