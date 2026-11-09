@@ -607,6 +607,17 @@ one `apply` that reads `data-theme` each time (`dark` for "dark", none for "ligh
 theme is `system`, and the `themeChanged` listener sets `data-theme` and calls it. `User.theme` is
 read-only in the user admin ("Personal info"). A visitor without a session is rendered as `system`. The admin's own toggle (`core/js/admin_theme_toggle.js`) is separate.
 
+**Color scheme** is chosen in the same form, under the theme: one of the eight schemes of
+`apps.core.color_schemes` (Sage, the default, Honey, Ember, Sky, Midnight, Lagoon, Plum, Graphite),
+stored in `User.color_scheme` (`default` and `db_default` `sage`, migration `0010`) and independent
+of light and dark. `ThemeForm.color_scheme` is optional (a post with only `theme` keeps the saved
+scheme; an unknown one is the 422), `services.theme.set_color_scheme` saves it, and the
+`themeChanged` event also carries `scheme` (`id`, `theme_color`, `logos` by size), which the
+listener in `core/base.html` applies with no reload. The scheme tiles are radios
+(`partials/color_scheme_option.html`) whose swatches are inline styles. Read-only in the user
+admin. Web only, like the theme. See "Templates and static files" > "Colour schemes". Tests:
+`apps/accounts/tests/test_color_scheme.py`, `apps/core/tests/test_color_schemes.py`, AI case ACC-49.
+
 **Apps** (issue #246) are chosen under "Apps" on the account page (after Appearance): one tile per
 registered product (checkbox, icon and name only, plus a drag handle; one column), stored on the account as two
 `JSONField`s, `User.app_order` (every product label in the user's order, switched-off apps keep their
@@ -5129,6 +5140,27 @@ badge/copy pops in `components.js`. **Themed select** (`core/components/select.h
 tags are one tinted pill from `apps/core/templatetags/core_ui.py` (`{% pill %}`, `pill_html`), which the
 products' own tags (`status_pill`, `link_status_pill`, `due_badge`, ...) wrap; an empty list is
 `core/partials/empty_state.html`. The only un-namespaced templates are core's `admin/` overrides.
+
+**Colour schemes** (`apps/core/color_schemes.py`, the source of truth: a frozen `ColorScheme` per
+scheme with a 10-step accent scale and an 11-step tinted neutral scale, `DEFAULT = 'sage'`,
+`CHOICES`, `get_scheme` / `scheme_for(user)`, which read `user.color_scheme` with `getattr` since
+`core` can't import `accounts` and fall back to Sage for a visitor or a stale value). The Tailwind
+config in `base.html` no longer holds hex values: `sage-*`, `brand-primary` / `brand-dark` and
+`gray-*` are `rgb(var(--c-brand-<step>) / <alpha-value>)` and `rgb(var(--c-gray-<step>) / ...)`, and
+`core/css/color_schemes.css` (loaded before `site.css`, which uses the same variables) gives them
+values per `<html data-scheme="<id>">`, with Sage also on `:root`. So the class names keep saying
+`sage` and mean "the accent". `base.html` renders `data-scheme`, the `theme-color` meta, and the
+favicon and header logo of the scheme through `{% load color_schemes %}{% active_color_scheme as
+scheme %}`; elements marked `data-scheme-logo="<size>"` are swapped by the `themeChanged` listener.
+`solid` schemes (Midnight, Graphite) get a generated rule that makes `.bg-brand-primary` accent 600
+with a white label in light mode only (white on the mid accent fails 4.5:1 in dark).
+**`./manage.py build_color_schemes` writes the stylesheet and the recoloured logos**
+(`core/images/schemes/<id>/logo_{32,128}.png`, a brightness-to-scale mapping of the sage logo with
+Pillow); `test_color_schemes.py` fails while the committed stylesheet differs from `render_css()`,
+when a logo is missing, or when a scheme's text pairs fall under 4.5:1. Not themed, on purpose:
+emails, the web manifest and app icons, the push icon, `qr_code/unavailable.html`, To-do's default
+label colour and the admin (jazzmin). **Never write a brand or neutral hex in a template, script
+or `site.css`**; use the classes or `rgb(var(--c-brand-300))`.
 
 **Date and time wording, and zones** (issue #245). Three independent things decide what a date or time
 on a page looks like; keep them apart:

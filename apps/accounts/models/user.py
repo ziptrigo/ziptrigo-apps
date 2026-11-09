@@ -11,6 +11,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.utils import timezone
 
+from apps.core import color_schemes
+
 from ..validators import validate_timezone
 
 
@@ -132,6 +134,17 @@ class User(AbstractBaseUser, PermissionsMixin):
             choices=THEME_CHOICES,
             default=THEME_SYSTEM,
             db_default=THEME_SYSTEM,
+        ),
+    )
+    # The colour scheme (accent and neutrals) the site shows this user, independent of light and
+    # dark; one of `apps.core.color_schemes`. `db_default` as well, as for `theme`.
+    color_scheme = cast(
+        str,
+        models.CharField(
+            max_length=16,
+            choices=color_schemes.CHOICES,
+            default=color_schemes.DEFAULT,
+            db_default=color_schemes.DEFAULT,
         ),
     )
     # How the site writes dates and times for this user (issue #245): a numeric date order and a

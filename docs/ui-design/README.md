@@ -163,6 +163,31 @@ WCAG 2.x ratios for the pairs that come up:
 | `red-600` on `white` | 4.83 | ✅ |
 | `red-400` on `gray-800` | 5.00 | ✅ |
 
+### Colour schemes
+
+Sage is the default of eight colour schemes a signed-in user can pick under **Appearance** on the
+account page (`User.color_scheme`): Sage, Honey, Ember, Sky, Midnight, Lagoon, Plum, Graphite.
+Each is an accent scale and a tinted neutral scale, defined in `apps/core/color_schemes.py`, and
+each works in light and dark. Live preview of all of them: `reference/color-schemes.html`.
+
+- The class names don't change with the scheme: `sage-*`, `brand-*` and `gray-*` are CSS variables
+  (`--c-brand-<step>`, `--c-gray-<step>`, space-separated RGB channels) that
+  `core/css/color_schemes.css` sets per `<html data-scheme="...">`. So **`sage-300` means "accent
+  300"**, whatever the scheme. In your own CSS write `rgb(var(--c-brand-300))`, or
+  `rgb(var(--c-brand-300) / 0.35)` with an alpha.
+- **Rule:** never write a brand or neutral hex in a template, a script or `site.css`: it would stay
+  sage in every other scheme. Semantic colours (red, amber, sky ...) are the same in every scheme.
+  Emails, the web manifest and public standalone pages stay sage.
+- Midnight and Graphite are *solid* schemes: in light mode `bg-brand-primary` is accent 600 with a
+  white label (a generated rule in `color_schemes.css`), so use `bg-brand-primary` for the primary
+  button, not `bg-sage-300`.
+- The logo is recoloured per scheme (`core/images/schemes/<id>/`); use
+  `{% active_color_scheme as scheme %}` and `{% static scheme.logo_32 %}` with
+  `data-scheme-logo="32"` so a change of scheme swaps it without a reload.
+- After changing `color_schemes.py` run `./manage.py build_color_schemes` (the stylesheet and the
+  logos); a test fails while the stylesheet is stale, and another checks every scheme's text
+  contrast (4.5:1).
+
 ## 4. Dark mode
 
 - `tailwind.config.darkMode = 'class'`. The early-boot script in `base.html` adds `dark` to

@@ -146,7 +146,9 @@ def test_htmx_save_answers_the_partial_without_swapping_it_and_announces_the_the
     assert response.status_code == 200
     # No reload: the page applies the theme itself, from the event.
     assert 'HX-Refresh' not in response
-    assert json.loads(response['HX-Trigger']) == {'themeChanged': {'theme': theme}}
+    detail = json.loads(response['HX-Trigger'])['themeChanged']
+    assert detail['theme'] == theme
+    assert detail['scheme']['id'] == 'sage'
     # Swapping the radios would drop the keyboard focus from the one the user is on.
     assert response['HX-Reswap'] == 'none'
     content = response.content.decode()

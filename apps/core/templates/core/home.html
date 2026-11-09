@@ -1,5 +1,5 @@
 {% extends 'core/base.html' %}
-{% load static %}
+{% load static color_schemes %}
 
 {% block title %}ZipTrigo{% endblock %}
 
@@ -8,7 +8,7 @@
    The delays are in the style attributes; `animate-rise` is in core/css/site.css and is off under reduced motion.{% endcomment %}
 <div class="container mx-auto px-4 py-12 flex flex-col items-center text-center">
     <div class="mb-8 animate-rise">
-        <img src="{% static 'core/images/logo_128x128.png' %}" alt="ZipTrigo logo" class="w-32 h-32 object-contain">
+        {% active_color_scheme as scheme %}<img src="{% static scheme.logo_128 %}" data-scheme-logo="128" alt="ZipTrigo logo" class="w-32 h-32 object-contain">
     </div>
 
     <h1 class="text-4xl font-bold tracking-tight mb-6 text-sage-700 dark:text-sage-300 animate-rise" style="animation-delay: 80ms">Welcome to ZipTrigo</h1>

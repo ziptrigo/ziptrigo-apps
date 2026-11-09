@@ -1,9 +1,9 @@
-{% comment %}
-The account page's "Appearance" form. `theme_form` (a `ThemeForm`) is only passed back with errors.
+{% load color_schemes %}{% comment %}
+The account page's "Appearance" form: the theme (system, light, dark) and the colour scheme. `theme_form` (a `ThemeForm`) is only passed back with errors.
 The saved theme is read from `request.user`. A choice submits straight away (htmx, `change`). On
 success the server answers `HX-Reswap: none` -- the radios stay in place, so the keyboard focus
-isn't lost -- and an `HX-Trigger: themeChanged` event that `core/base.html` applies to the page, no
-reload. Only an error (422) is swapped in, over the form (`hx-target="this"`). `hx-sync` runs one
+isn't lost -- and an `HX-Trigger: themeChanged` event (the theme and the scheme) that `core/base.html`
+applies to the page, no reload. Only an error (422) is swapped in, over the form (`hx-target="this"`). `hx-sync` runs one
 request at a time and keeps only the last click queued, so clicks in quick succession save in order.
 Without JavaScript the Save button, shown only then, does the same with a normal POST and redirect.
 {% endcomment %}
@@ -33,6 +33,17 @@ Without JavaScript the Save button, shown only then, does the same with a normal
     </div>
     <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
       System follows your device's light or dark setting. Your choice applies on every device you sign in on.
+    </p>
+  </fieldset>
+
+  <fieldset class="mt-6">
+    <legend class="mb-2 text-sm font-medium">Color scheme</legend>
+    {% color_schemes as schemes %}
+    <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {% for scheme in schemes %}{% include 'accounts/partials/color_scheme_option.html' %}{% endfor %}
+    </div>
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+      Every color scheme has a light and a dark side, which the theme above picks.
     </p>
   </fieldset>
 
