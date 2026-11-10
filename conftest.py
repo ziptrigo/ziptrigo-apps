@@ -35,6 +35,17 @@ def _welcome_credits_off(request, monkeypatch):
     monkeypatch.setattr('apps.billing.services.welcome.configured_credits', lambda: 0)
 
 
+@pytest.fixture(autouse=True)
+def _terms_gate_off(request, monkeypatch):
+    """The terms acceptance gate (issue #96, `apps.accounts.middleware.TermsAcceptanceMiddleware`)
+    sends every signed-in user who has not accepted the current terms to the accept page, which
+    is every user a test creates without saying so. It is off unless a test is marked
+    `@pytest.mark.terms_gate`."""
+    if request.node.get_closest_marker('terms_gate') is not None:
+        return
+    monkeypatch.setattr('apps.accounts.services.terms.needs_acceptance', lambda user: False)
+
+
 class RateLimitClock:
     """The wall clock `apps.core.ratelimit.limiter` reads, frozen until a test moves it."""
 

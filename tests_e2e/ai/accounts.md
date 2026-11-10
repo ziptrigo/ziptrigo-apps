@@ -134,7 +134,7 @@ too when the line has a field label.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | From the login page click `Create one`. | URL `/account/register/`, tab title `Register`, heading `Create account`. |
-| 2 | Inspect the form. | Fields `Name` (text, `name="name"`), `Email` (`type="email"`), `Password` (`type="password"`, `minlength="6"`), all `required`. Under Password the hint `At least 6 characters with 1 digit`; then an optional `Promo code` field (upper-cased as you type, hint `Its credits are added once you confirm your email.`). Button `Create account`. |
+| 2 | Inspect the form. | Fields `Name` (text, `name="name"`), `Email` (`type="email"`), `Password` (`type="password"`, `minlength="6"`), all `required`. Under Password the hint `At least 6 characters with 1 digit`; then an optional `Promo code` field (upper-cased as you type, hint `Its credits are added once you confirm your email.`); then an **unticked**, `required` checkbox (`name="accept_terms"`) labelled `I agree to the Terms of Use and acknowledge the Privacy Policy.`, where `Terms of Use` links to `/terms/` and `Privacy Policy` to `/privacy/`, both opening in a new tab. Button `Create account`. |
 | 3 | Look for a captcha, Google and Microsoft. | No Cloudflare Turnstile widget and no `Sign up with Google` or `Sign up with Microsoft` button. |
 | 4 | Look below the form. | `Already have an account? Sign in`, linking to `/account/login/`. |
 
@@ -561,7 +561,7 @@ link instead.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | On `/account/register/`, use only Tab / Shift+Tab. | Focus moves Name -> Email -> Password -> `Create account` -> `Sign in` link, with a visible focus ring on each field. |
+| 1 | On `/account/register/`, use only Tab / Shift+Tab. | Focus moves Name -> Email -> Password -> Promo code -> the terms checkbox (Space ticks it) -> its `Terms of Use` and `Privacy Policy` links -> `Create account` -> `Sign in` link, with a visible focus ring on each field. |
 | 2 | Submit an invalid form (Name `   `, Email `foo@bar`, Password `abcdefg`). Then press Tab from the top of the card. | The swapped-in form is fully usable: fields keep their typed Name/Email, Tab order is the same, and submitting again works (htmx still bound after the swap; a second submit produces a fresh error list, not two stacked lists, and the under-field messages are replaced, not duplicated). After the first failed submit, keyboard focus is already on the first invalid field (Name), not on the submit button or the page body. |
 | 3 | Check the error block. | It sits directly above the first field, inside the card, red text, readable in both light and dark themes. To check the other theme while signed out, emulate the other `prefers-color-scheme` (a visitor without a session follows the system), then reload, which clears the form and its errors, so submit the same invalid form again. Restore the emulation afterwards. Check that the block has `role="alert"` and that each failing input has `aria-invalid="true"` and an `aria-describedby` pointing at its under-field message (the field message itself is not a live region; the block is what is announced). Editing an invalid field removes its message and `aria-invalid`. |
 | 4 | On `/account/login/`, sign in with MAIN / `Wrong-0000` twice in a row quickly. | Each submit disables the button while pending (`hx-disabled-elt`), no duplicate error blocks, the eye toggle still works after the swap. |
@@ -791,6 +791,42 @@ need no token are checked; the token paths are unit-tested.
 | 1 | `curl -s -i -X POST $BASE/api/auth/google -H 'Content-Type: application/json' -d '{"id_token":"abc"}'`. | `404` with `{"detail": "Google sign-in is not available."}`. |
 | 2 | Same without a token: `-d '{}'`; then with a 9,000-character `id_token`. | `422` both times (the field is required, at most 8,192 characters), before the off state is considered. |
 | 3 | `curl -s -i $BASE/api/docs` and open the `auth` group. | `POST /api/auth/google` is listed with no lock (no bearer token needed) and answers `TokenResponse` like `/api/auth/login`. |
+
+### ACC-49 Register: the terms checkbox is required
+
+**Purpose:** an account can't be created without agreeing to the Terms of Use, the rule is enforced by
+the server, and an account made with the tick has the acceptance on record (issue #96).
+**Preconditions:** signed out, on `/account/register/`. `TERMS` is a fresh address
+`qa.acc.terms.<random>@example.com`. Context B signed in to the admin as `qa.admin@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Name `Acc Terms`, Email TERMS, Password P1, leave the checkbox unticked. Click `Create account`. | The browser's own "required" validation stops the submit on the checkbox; no request is sent. |
+| 2 | In the developer console run `document.querySelector('[name=accept_terms]').required = false`, then click `Create account`. | The form is replaced in place (422, URL unchanged). The red block reads `Terms: You need to agree to the Terms of Use to continue.`; the same message without the `Terms:` prefix shows under the checkbox line. Name and Email keep what was typed. `/__e2e__/mail/?to=<TERMS>` shows `No emails.` |
+| 3 | Click `Terms of Use` in the checkbox label, then `Privacy Policy`. | Each opens in a new tab (`/terms/`, `/privacy/`); the register tab keeps the typed Name and Email. |
+| 4 | Type P1 again, tick the checkbox, click `Create account`. | `/account/created/`, **Check your email**. |
+| 5 | Context B: `/admin/accounts/user/`, search TERMS, open the user. | Under **Status**: `Terms version` is `2026-11-09` and `Terms accepted at` is a moment ago. Both are read-only (plain text, no input). |
+
+### ACC-50 The accept page for an account that has not accepted the current terms
+
+**Purpose:** a signed-in user without the current terms on record (a "Sign up with Google/Microsoft"
+account, an account older than the feature, or anyone after the documents change) is asked once, can
+still read the documents and sign out, and lands where they were going (issue #96).
+**Preconditions:** ACC-49 done and TERMS confirmed (follow its confirmation email) but signed out. Clear
+its acceptance, which is what an account made by Google sign-up looks like:
+`python tests_e2e/ai/manage.py shell -c "from apps.accounts.models import User; User.objects.filter(email='<TERMS>').update(terms_version='', terms_accepted_at=None)"`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Sign in as TERMS on `/account/login/?next=/links/`. | The browser ends on `/account/terms/?next=%2Flinks%2F`: a card headed `One more step`, the text `Please review and accept our Terms of Use and Privacy Policy to start using ZipTrigo.`, the same unticked checkbox as the register page, an `Accept and continue` button and a `Sign out instead` link-style button. |
+| 2 | Open `/account/`, `/todo/`, `/receipts/` and `/` in turn. | Each redirects to `/account/terms/?next=<that path>`. |
+| 3 | Open `/privacy/` and `/terms/` (also from the footer links). | Both documents open normally. |
+| 4 | Stay on the accept page for 70 seconds with the tab visible. | The page does not reload and the checkbox keeps its state (the header's notification bell polls in the background and gets an empty answer). |
+| 5 | Remove `required` from the checkbox in the console and click `Accept and continue` without ticking. | The page is shown again (HTTP 422) with `You need to agree to the Terms of Use to continue.` under the checkbox. |
+| 6 | Tick the checkbox and click `Accept and continue`. | The browser goes to the `next` of the address bar (`/links/` when the page was opened from step 1). Every page opens normally from now on; `/account/terms/` itself redirects to `/`. |
+| 7 | Clear the acceptance again with the command above, reload, and click `Sign out instead`. | Signed out, on the login page; the gate never blocks signing out. |
+| 8 | Sign in as TERMS again and set an older version instead: `...update(terms_version='2020-01-01')` (run the same command with that value), then open `/account/`. | The accept page, now headed `Our terms have changed` with `We updated our Terms of Use and Privacy Policy. Please review and accept them to keep using ZipTrigo.` Accept: `/account/` opens. |
+| 9 | Context B (`qa.admin`): clear the admin's own acceptance with the command (its address), then open `/admin/` and `/`. | `/admin/` opens (the admin is never gated); `/` shows the accept page. Accept it to restore the account for the other plans. |
 
 ## Out of scope
 

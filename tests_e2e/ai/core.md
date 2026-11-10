@@ -393,6 +393,20 @@ due time** for the time field (TODO-41 covers the rest of To-do).
 | 4 | Open `/feedback/` and click into the textarea. | A soft sage halo around the field and a sage border (fields show it for the mouse too). |
 | 5 | Emulate `prefers-reduced-motion: reduce` and reload `/`. | The logo, heading and cards appear at once, without rising in (`getComputedStyle(document.querySelector('h1')).animationDuration` is a tiny value such as `1e-06s` or `0.000001s`, i.e. 0.001 ms). Open and close the account menu: no visible transition. Remove the emulation: reloading `/` shows the rise again. |
 
+### CORE-27 Privacy Policy and Terms of Use pages
+
+**Purpose:** the two legal documents are public, complete and linked from every page (issue #96).
+**Preconditions:** signed out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/privacy/`. | HTTP 200 without a login. Tab title `Privacy Policy - ZipTrigo`, heading `Privacy Policy`, `Effective date: Nov 9, 2026`. It names the operator (`Joao Coelho`, an individual based in the United States) and the contact address `info@ziptrigo.com` (a `mailto:` link). No `[bracketed]` placeholder, no raw `{{ }}` / `{% %}`, no visible Markdown marks (`##`, `**`). |
+| 2 | Read the section headings. | Numbered 1 to 12: Information we collect, How we use your information, Google user data, How we share information, How long we keep information, Cookies and browser storage, Security, Your rights and choices, Children, Where information is processed, Changes to this Policy, Contact. Section 3 links to the `Google API Services User Data Policy` (opens in a new tab) and mentions `Limited Use`. Section 6 lists the cookies `sessionid`, `csrftoken` and `ft_anon_id`. |
+| 3 | Open `/terms/`. | HTTP 200. Tab title `Terms of Use - ZipTrigo`, heading `Terms of Use`, the same effective date. Section 1 is `A free service, provided as is`; section 10 has the capitals disclaimer with `"AS IS" AND "AS AVAILABLE"`; section 13 names `the State of Texas, United States`. The `Privacy Policy` link in the introduction goes to `/privacy/` in the same tab. |
+| 4 | Look at the footer on `/`, `/account/login/`, `/privacy/` and (signed in as `qa.user`) `/todo/`. | Three links, `Feedback`, `Privacy`, `Terms`; on `/privacy/` the `Privacy` link has `aria-current="page"`, on `/terms/` the `Terms` link has. |
+| 5 | Switch to the dark theme (emulate `prefers-color-scheme: dark` while signed out) and to a 375 px wide window on both pages. | Text stays readable, links are sage coloured and underlined, nothing scrolls sideways (long addresses wrap). |
+| 6 | `curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/terms/`. | `405`. |
+
 ## Out of scope
 
 - A branded 404 page: the project has none (CORE-10 records Django's page as an observation).

@@ -215,7 +215,12 @@ class TestLoginRateLimit:
 class TestSignupRateLimit:
     def test_429_after_ip_limit(self, client, settings):
         _enable(settings, 'SIGNUP_IP', limit=1)
-        payload = {'name': 'A', 'email': 'a@example.com', 'password': 'Str0ngPass!'}
+        payload = {
+            'name': 'A',
+            'email': 'a@example.com',
+            'password': 'Str0ngPass!',
+            'accept_terms': 'on',
+        }
 
         client.post(reverse('accounts:register'), payload, **HTMX)
         response = client.post(

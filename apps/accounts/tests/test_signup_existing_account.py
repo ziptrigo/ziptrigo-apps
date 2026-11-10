@@ -42,6 +42,7 @@ def _register(client, **overrides):
         'name': 'New User',
         'email': 'newuser@example.com',
         'password': 'password123',
+        'accept_terms': 'on',
         **overrides,
     }
     return client.post(reverse('accounts:register'), payload, **HTMX)
@@ -123,7 +124,7 @@ def test_existing_and_new_address_get_the_same_response(user, outbox):
 
 
 def test_existing_and_new_address_get_the_same_redirect_without_htmx(user, outbox):
-    payload = {'name': 'New User', 'password': 'password123'}
+    payload = {'name': 'New User', 'password': 'password123', 'accept_terms': 'on'}
     existing = Client().post(reverse('accounts:register'), {**payload, 'email': user.email})
     new = Client().post(reverse('accounts:register'), {**payload, 'email': 'brandnew@example.com'})
 

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    accept_terms_page,
     account_created_page,
     account_page,
     apps_form_partial,
@@ -32,6 +33,7 @@ urlpatterns = [
     path('theme/', theme_update, name='theme-update'),
     path('formats/', formats_update, name='formats'),
     path('timezone/', timezone_detect, name='timezone'),
+    path('terms/', accept_terms_page, name='terms-accept'),
     path('login/', login_page, name='login'),
     path('register/', register_page, name='register'),
     path('logout/', logout_page, name='logout'),

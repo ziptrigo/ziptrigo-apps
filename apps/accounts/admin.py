@@ -61,6 +61,8 @@ class UserAdmin(DjangoUserAdmin):
         'app_order',
         'hidden_apps',
         'email_confirmed_at',
+        'terms_version',
+        'terms_accepted_at',
         'created_at',
         'updated_at',
     ]
@@ -85,7 +87,15 @@ class UserAdmin(DjangoUserAdmin):
         ),
         (
             'Status',
-            {'fields': ('status', 'email_confirmed', 'email_confirmed_at')},
+            {
+                'fields': (
+                    'status',
+                    'email_confirmed',
+                    'email_confirmed_at',
+                    'terms_version',
+                    'terms_accepted_at',
+                )
+            },
         ),
         (
             'Permissions',

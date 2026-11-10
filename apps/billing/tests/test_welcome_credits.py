@@ -59,7 +59,7 @@ def sent(monkeypatch) -> list[dict]:
 
 def signup(run, email='new@example.com', name='New Person') -> User:
     with run():
-        return create_account(name=name, email=email, password='pw-12345678')
+        return create_account(name=name, email=email, password='pw-12345678', accept_terms=True)
 
 
 def confirm(run, user: User) -> None:
@@ -389,7 +389,10 @@ def test_the_refusal_email_escapes_the_name_and_keeps_it_out_of_the_subject(run,
     new_confirmed(run, 'person@example.com')
     with run():
         user = create_account(
-            name='<script>alert(1)</script>', email='person+2@example.com', password='pw-12345678'
+            name='<script>alert(1)</script>',
+            email='person+2@example.com',
+            password='pw-12345678',
+            accept_terms=True,
         )
     confirm(run, user)
 

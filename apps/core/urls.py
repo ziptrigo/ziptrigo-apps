@@ -6,6 +6,9 @@ app_name = 'core'
 
 urlpatterns = [
     path('', views.home, name='home'),
+    # The legal documents (issue #96): public, and never behind the terms acceptance gate.
+    path('privacy/', views.privacy_page, name='privacy'),
+    path('terms/', views.terms_page, name='terms'),
     # Web Push (issue #239). The service worker and the manifest live at the root: a service
     # worker only controls the pages under its own path.
     path('sw.js', views.service_worker, name='service-worker'),

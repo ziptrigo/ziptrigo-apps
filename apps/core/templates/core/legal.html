@@ -1,0 +1,13 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ legal_title }} - ZipTrigo{% endblock %}
+
+{% block content %}
+{% comment %} A legal document (issue #96): Markdown rendered by `apps.core.views.legal`. The arbitrary variants style the
+   plain tags the renderer emits, as the To-do description does. {% endcomment %}
+<div class="container mx-auto max-w-3xl px-4 py-8">
+  <article class="legal-document text-gray-800 dark:text-gray-200 leading-relaxed [&_h1]:text-3xl [&_h1]:font-semibold [&_h1]:mb-4 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:mt-8 [&_h2]:mb-3 [&_h3]:font-semibold [&_h3]:mt-5 [&_h3]:mb-2 [&_p]:mb-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-4 [&_li]:mb-1.5 [&_code]:font-mono [&_code]:text-sm [&_code]:rounded [&_code]:bg-gray-100 [&_code]:dark:bg-gray-900 [&_code]:px-1 [&_a]:text-sage-600 [&_a]:dark:text-sage-300 [&_a]:underline [&_a]:underline-offset-2 [&_a]:break-words">
+    {{ legal_body }}
+  </article>
+</div>
+{% endblock %}

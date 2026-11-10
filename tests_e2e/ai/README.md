@@ -128,6 +128,12 @@ All share the password `QaE2e-Passw0rd!` (a local test value; see `ACCOUNTS` in 
 Tests that need a fresh account create one through the register page with a unique address such
 as `qa.<area>.<random>@example.com`.
 
+**Terms checkbox.** The register page has a required, unticked checkbox, `I agree to the Terms of Use and
+acknowledge the Privacy Policy.` (issue #96). **Every step in every plan that fills the register form
+also ticks it**, whether or not the step says so, unless the step is about leaving it unticked (ACC-49).
+The seeded accounts have already accepted the current terms, so they never see the accept page
+(`/account/terms/`, ACC-50).
+
 **Welcome credits.** The seeded accounts hold exactly the credits in the table (`serve.py` switches the
 welcome credits off while it seeds them). Any account **registered** during a run gets 1,000 welcome
 credits, once, as soon as its email is confirmed (a ledger line "A gift for your new account" and a bell

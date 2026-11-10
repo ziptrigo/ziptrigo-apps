@@ -23,6 +23,7 @@ from django.db import IntegrityError, transaction
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
+from . import terms
 from .email_confirmation import send_signup_confirmation_email
 
 
@@ -36,14 +37,20 @@ class EmailAlreadyRegistered(Exception):
         self.email = email
 
 
-def create_account(*, name: str, email: str, password: str) -> User:
+def create_account(*, name: str, email: str, password: str, accept_terms: bool) -> User:
     """Create a new user account and queue its confirmation email (a `django.tasks` task, so the
     request doesn't wait for the mail server -- see `send_signup_confirmation_email`).
 
+    `accept_terms` is the sign-up form's required checkbox (issue #96): the account is created
+    with the current terms version on record, and never without it.
+
     Raises:
+        terms.TermsNotAccepted: `accept_terms` is false (a `ValidationError`; nothing is created).
         EmailAlreadyRegistered: `email` is already registered (including when it only differs
             from an existing account by domain case -- see module docstring).
     """
+    if not accept_terms:
+        raise terms.TermsNotAccepted()
     email = User.objects.normalize_email(email)
     # Case-insensitive: `Alice@gmail.com` next to `alice@gmail.com` would be two rows that
     # Google sign-in (which matches `iexact`) then refuses as a conflict forever.
@@ -52,7 +59,9 @@ def create_account(*, name: str, email: str, password: str) -> User:
 
     try:
         with transaction.atomic():
-            user = User.objects.create_user(email=email, password=password, name=name)
+            user = User.objects.create_user(
+                email=email, password=password, name=name, **terms.acceptance_fields()
+            )
     except IntegrityError:
         raise EmailAlreadyRegistered(email) from None
 

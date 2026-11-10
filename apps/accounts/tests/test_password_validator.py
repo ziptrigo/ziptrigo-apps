@@ -24,7 +24,12 @@ def test_the_longest_allowed_password_passes_and_one_more_does_not():
 def test_register_refuses_an_over_long_password(client):
     response = client.post(
         reverse('accounts:register'),
-        {'name': 'New User', 'email': 'new@example.com', 'password': LONG_PASSWORD},
+        {
+            'name': 'New User',
+            'email': 'new@example.com',
+            'password': LONG_PASSWORD,
+            'accept_terms': 'on',
+        },
         HTTP_HX_REQUEST='true',
     )
 

@@ -12,7 +12,8 @@ an account, a credit balance and a layout. Django + HTMX. It started as two micr
 ```
 manage.py
 config/               The Django project: settings, urls, api (one NinjaAPI), environment.py.
-apps/core/            Site shell: base.html, landing page, ProductApp registry, admin site, email,
+apps/core/            Site shell: base.html, landing page, the Privacy Policy and Terms of Use
+                      pages (`apps.core.legal`, issue #96), ProductApp registry, admin site, email,
                       email verification, rate limiting (`apps.core.ratelimit`), client IP,
                       generic S3 storage (`apps.core.services.storage`), a QR image helper
                       (`apps.core.services.qr_image`), in-app notifications (the header bell, issue
@@ -900,6 +901,55 @@ guidance is to identify users by `sub` or `oid` and never by email. So
 - The login and register pages render one "or" divider and the enabled buttons through
   `partials/social_buttons.html` (`google_button.html` and `microsoft_button.html` are the buttons
   alone, each taking `verb`).
+
+**Privacy Policy, Terms of Use and accepting them** (issue #96).
+
+- *The documents.* `GET /privacy/` (`core:privacy`) and `GET /terms/` (`core:terms`) are public pages
+  (`apps/core/views/legal.py`, `core/legal.html`), linked from the footer of every page. The texts are
+  Markdown templates, `core/templates/core/legal/privacy.md` and `terms.md`, filled in with
+  `apps.core.legal.context()` (operator name and country, contact email, governing law, effective
+  date) and rendered once per process through `apps.core.markdown.render` (so: a single newline is a
+  `<br>`, every paragraph is one line, no tables, no raw HTML). They are written for the current
+  situation: **a free service run by an individual** (no company, no purchases, "as is"); revise the
+  Terms' credits, disclaimer, liability and governing-law sections when a company takes over or paid
+  credits arrive. **A change that adds a kind of personal data, a processor, a cookie or a retention
+  period updates `privacy.md` in the same PR.** The owner reviews the text; it is not legal advice.
+- *The version.* `apps.core.legal.TERMS_VERSION` (a date string, equal to `EFFECTIVE_DATE`). **Bump
+  both when either document materially changes**: every signed-in user is then asked to accept again.
+  A typo fix needs no bump.
+- *The record.* `User.terms_version` (`''` = never; `db_default` too) and `User.terms_accepted_at`
+  (migration `accounts.0010`), read-only in the user admin ("Status"). `services.terms`:
+  `needs_acceptance(user)` (recorded version differs from the current one), `accept(user)` (writes the
+  two columns once, keeps the first date), `acceptance_fields()`, `TermsNotAccepted` (a
+  `ValidationError` keyed `accept_terms`) and `TERMS_REQUIRED_MESSAGE`.
+- *Sign-up.* The register form has one required, unticked checkbox (`accept_terms`,
+  `partials/accept_terms_field.html`: "I agree to the Terms of Use and acknowledge the Privacy
+  Policy", both links in a new tab). `RegisterForm` refuses without it (422, `Terms: ...`) and
+  `create_account(..., accept_terms=)` refuses again and creates the account with the acceptance on
+  record. There is no API sign-up (#117), so nothing else to guard.
+- *The gate.* `apps.accounts.middleware.TermsAcceptanceMiddleware` (after
+  `HtmxLoginRedirectMiddleware`) sends a signed-in **session** user for whom `needs_acceptance` is
+  true to `GET|POST /account/terms/` (`accounts:terms-accept`, `views/terms.py`,
+  `accounts/accept_terms.html`: the same checkbox, "Accept and continue", "Sign out instead"; a
+  plain form, 422 without the tick, then a redirect to the same-site `next`). That is how an account
+  made by "Sign up with Google/Microsoft" (which never sees the form), an account older than the
+  feature, one made by `inv users create` and everyone after a version bump accept: once, on their
+  next visit. A GET is redirected with `next` = where it was going; any other method is redirected
+  without being handled; an htmx request gets an empty 204 with `HX-Redirect` (no redirect when it
+  comes *from* the accept page: the bell's polling would reload it). Never gated: the accept page,
+  logout, the two documents, `accounts:timezone`, `/admin/` (staff are never locked out of it; the
+  site itself still asks them), `/__e2e__/` and `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`,
+  `/t/`, `/static/`, `/api/`, the service worker). **The JWT API is not gated** (decided: accounts
+  are created in the browser), so the Android app works for an account that has yet to accept on
+  the web.
+- *Tests.* The gate is **off in every test** (root `conftest.py` patches
+  `terms.needs_acceptance`) unless marked `@pytest.mark.terms_gate`; the e2e seeds
+  (`tests_e2e/conftest.py`, `tests_e2e/ai/serve.py`) mark their accounts accepted.
+  `apps/accounts/tests/test_terms_acceptance.py`, `apps/core/tests/test_legal_pages.py`, AI cases
+  ACC-49, ACC-50, CORE-27, ADM-55.
+- *Not done:* self-service account deletion (the policy says to email `info@ziptrigo.com`), mirroring
+  the links on the `ziptrigo.com` homepage (another repo), and the Google Cloud brand verification
+  steps listed on the issue.
 
 For typed views, use `AuthenticatedHttpRequest` / `MaybeAuthenticatedHttpRequest` from
 `apps/accounts/http.py`.

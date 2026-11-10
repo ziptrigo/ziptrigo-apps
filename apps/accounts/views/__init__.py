@@ -16,10 +16,12 @@ from .profile import profile_update
 from .register import register_page
 from .resend_confirmation import resend_confirmation_page
 from .reset_password import reset_password_page
+from .terms import accept_terms_page
 from .theme import theme_update
 from .timezone import timezone_detect
 
 __all__ = [
+    'accept_terms_page',
     'apps_form_partial',
     'apps_update',
     'formats_update',

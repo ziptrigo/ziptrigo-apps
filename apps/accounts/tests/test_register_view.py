@@ -18,6 +18,7 @@ def _register(client, **overrides):
         'name': 'New User',
         'email': 'newuser@example.com',
         'password': 'password123',
+        'accept_terms': 'on',
         **overrides,
     }
     return client.post(reverse('accounts:register'), payload, **HTMX)
@@ -43,7 +44,12 @@ def test_valid_submission_creates_account_and_redirects(client):
 def test_register_without_htmx_redirects(client):
     response = client.post(
         reverse('accounts:register'),
-        {'name': 'New User', 'email': 'newuser@example.com', 'password': 'password123'},
+        {
+            'name': 'New User',
+            'email': 'newuser@example.com',
+            'password': 'password123',
+            'accept_terms': 'on',
+        },
     )
 
     assert response.status_code == 302
@@ -77,7 +83,12 @@ def test_register_requires_csrf_token():
     client = Client(enforce_csrf_checks=True)
     response = client.post(
         reverse('accounts:register'),
-        {'name': 'New User', 'email': 'newuser@example.com', 'password': 'password123'},
+        {
+            'name': 'New User',
+            'email': 'newuser@example.com',
+            'password': 'password123',
+            'accept_terms': 'on',
+        },
     )
 
     assert response.status_code == 403
@@ -88,7 +99,7 @@ def test_api_signup_endpoint_is_gone(client):
     """Issue #117: accounts are created only through this page, behind its captcha."""
     response = client.post(
         '/api/auth/signup',
-        {'name': 'A', 'email': 'a@example.com', 'password': 'password123'},
+        {'name': 'A', 'email': 'a@example.com', 'password': 'password123', 'accept_terms': 'on'},
         content_type='application/json',
     )
 

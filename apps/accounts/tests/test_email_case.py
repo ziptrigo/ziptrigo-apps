@@ -93,7 +93,7 @@ def test_login_does_not_match_a_different_local_part_case(client, user):
 def test_signup_with_a_case_variant_of_an_existing_address_creates_no_user(
     client, user, django_capture_on_commit_callbacks
 ):
-    payload = {'name': 'Intruder', 'password': 'password123'}
+    payload = {'name': 'Intruder', 'password': 'password123', 'accept_terms': 'on'}
     with django_capture_on_commit_callbacks(execute=True):
         variant = client.post(
             reverse('accounts:register'), {**payload, 'email': 'TestUser@Example.com'}, **HTMX
@@ -119,7 +119,12 @@ def test_signup_with_a_case_variant_sends_the_existing_account_its_notice(
     with django_capture_on_commit_callbacks(execute=True):
         client.post(
             reverse('accounts:register'),
-            {'name': 'x', 'email': 'TESTUSER@example.com', 'password': 'password123'},
+            {
+                'name': 'x',
+                'email': 'TESTUSER@example.com',
+                'password': 'password123',
+                'accept_terms': 'on',
+            },
             **HTMX,
         )
 
@@ -210,7 +215,12 @@ def test_signup_with_a_case_variant_locks_down_the_stored_unconfirmed_row(
     with django_capture_on_commit_callbacks(execute=True):
         response = client.post(
             reverse('accounts:register'),
-            {'name': 'Intruder', 'email': 'TestUser@Example.com', 'password': 'intruder123'},
+            {
+                'name': 'Intruder',
+                'email': 'TestUser@Example.com',
+                'password': 'intruder123',
+                'accept_terms': 'on',
+            },
             **HTMX,
         )
 
@@ -328,7 +338,12 @@ def test_google_sign_in_still_links_the_one_account_after_a_refused_variant_sign
     with django_capture_on_commit_callbacks(execute=True):
         client.post(
             reverse('accounts:register'),
-            {'name': 'x', 'email': 'TestUser@Gmail.com', 'password': 'password123'},
+            {
+                'name': 'x',
+                'email': 'TestUser@Gmail.com',
+                'password': 'password123',
+                'accept_terms': 'on',
+            },
             **HTMX,
         )
 
