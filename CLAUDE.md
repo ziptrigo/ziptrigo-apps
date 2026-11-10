@@ -615,7 +615,13 @@ scheme; an unknown one is the 422), `services.theme.set_color_scheme` saves it, 
 `themeChanged` event also carries `scheme` (`id`, `theme_color`, `logos` by size), which the
 listener in `core/base.html` applies with no reload. The scheme tiles are radios
 (`partials/color_scheme_option.html`) whose swatches are inline styles. A saved value that is no longer a scheme renders as Sage and
-the picker checks Sage. Read-only in the user admin. Web only, like the theme. See "Templates and static files" > "Colour schemes". Tests:
+the picker checks Sage. **High contrast** is a checkbox styled like the theme options, after
+`Dark` in the same form: `User.high_contrast` (boolean, `default` and `db_default` false,
+migration `0011`), `services.theme.set_high_contrast`. An unticked checkbox posts nothing, so the
+form also posts a hidden `contrast_posted`; without it (a post with only `theme`) the setting is
+left alone. The `themeChanged` event carries `high_contrast` and the listener sets or removes
+`<html data-contrast="high">`. It combines with every theme and scheme. Tests:
+`apps/accounts/tests/test_high_contrast.py`, AI case ACC-50. Read-only in the user admin. Web only, like the theme. See "Templates and static files" > "Colour schemes". Tests:
 `apps/accounts/tests/test_color_scheme.py`, `apps/core/tests/test_color_schemes.py`, AI case ACC-49.
 
 **Apps** (issue #246) are chosen under "Apps" on the account page (after Appearance): one tile per
@@ -5152,7 +5158,19 @@ values per `<html data-scheme="<id>">`, with Sage also on `:root`. So the class 
 `sage` and mean "the accent". `base.html` renders `data-scheme`, the `theme-color` meta, and the
 favicon and header logo of the scheme through `{% load color_schemes %}{% active_color_scheme as
 scheme %}`; elements marked `data-scheme-logo="<size>"` are swapped by the `themeChanged` listener.
-`accent-*` is the same scale under its proper name, for new markup. **The primary button has its own
+`accent-*` is the same scale under its proper name, for new markup. **High contrast**
+(`<html data-contrast="high">`, rendered from `user.high_contrast`) is computed by
+`color_schemes.palette(scheme, dark=, high_contrast=)`: the ends are pinned (gray 50 and accent 50
+white, gray 900/950 and accent 900 black; in dark also gray 100 white) and the rest moves one step
+away from the page: in light, gray 100 to 800 and accent 600 to 800 take their darker neighbour's
+value and `--c-surface` becomes the old gray 100; in dark, gray 200 to 700 and accent 100 to 300
+take their lighter neighbour's (gray 800, the cards, is kept). The stylesheet has one block of the
+changed variables per scheme and mode (`html[data-scheme][data-contrast="high"]:not(.dark)` /
+`.dark`). **`bg-white` is `rgb(var(--c-surface))`** (Tailwind `backgroundColor.white`; only the
+background, `text-white` stays white): white, except in light high contrast, where cards, fields
+and menus are a step darker than the page. The page and the header are **`bg-page`** (always
+white), so never put `bg-white` on a page-level wrapper. Tests check that high contrast keeps every
+text pair at 4.5:1, body text at 7:1, and never lowers a contrast. **The primary button has its own
 variables** (`--c-primary`, `--c-primary-hover`, `--c-on-primary`; Tailwind `bg-primary`,
 `hover:bg-primary-hover`, `text-primary-on`, and `bg-brand-primary` is `bg-primary`): accent 300,
 accent 400 and gray 900, set on `:root`, which the `solid` schemes (Midnight, Graphite) override

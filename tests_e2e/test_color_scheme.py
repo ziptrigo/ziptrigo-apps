@@ -142,3 +142,75 @@ def test_a_visitor_always_gets_sage(browser: Browser, receipts_server: ReceiptsS
     finally:
         context.close()
         set_appearance(receipts_server, 'system', 'sage')
+
+
+# --- high contrast ---
+
+WHITE = 'rgb(255, 255, 255)'
+BLACK = 'rgb(0, 0, 0)'
+
+
+def set_high_contrast(server: ReceiptsServer, enabled: bool) -> None:
+    server.shell(
+        'import os\n'
+        'from apps.accounts.models import User\n'
+        "User.objects.filter(email=os.environ['E2E_EMAIL'])"
+        f'.update(high_contrast={enabled!r})\n'
+    )
+
+
+def toggle_high_contrast(page: Page) -> None:
+    with page.expect_response(lambda r: r.url.endswith('/account/theme/') and r.status == 200):
+        page.get_by_text('High contrast', exact=True).click()
+
+
+def test_high_contrast_applies_without_a_reload_in_light_and_dark(
+    browser: Browser, receipts_server: ReceiptsServer
+) -> None:
+    set_appearance(receipts_server, 'light', 'sage')
+    set_high_contrast(receipts_server, False)
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/account/')
+        html = page.locator('html')
+        body = page.locator('body')
+        field = page.locator('#profile-form input[name="name"], input[name="name"]').first
+        expect(html).not_to_have_attribute('data-contrast', 'high')
+        expect(body).to_have_css('color', 'rgb(26, 31, 29)')
+        expect(field).to_have_css('background-color', WHITE)
+        page.evaluate('window.__stillHere = true')
+
+        toggle_high_contrast(page)
+
+        # Light: the page stays white, text is black, fields are a step darker than the page.
+        expect(html).to_have_attribute('data-contrast', 'high')
+        assert page.evaluate('window.__stillHere') is True
+        expect(body).to_have_css('background-color', WHITE)
+        expect(body).to_have_css('color', BLACK)
+        expect(page.locator('header').first).to_have_css('background-color', WHITE)
+        expect(field).to_have_css('background-color', 'rgb(238, 241, 240)')
+        expect(page.locator('input[name="high_contrast"]')).to_be_checked()
+
+        choose(page, 'theme', 'dark')
+
+        # Dark: a black page with white text; the scheme and the switch are kept.
+        expect(html).to_have_class('dark')
+        expect(html).to_have_attribute('data-contrast', 'high')
+        expect(body).to_have_css('background-color', BLACK)
+        expect(body).to_have_css('color', WHITE)
+
+        # Stored on the account: another page renders it from the server.
+        page.goto(f'{receipts_server.url}/')
+        expect(page.locator('html')).to_have_attribute('data-contrast', 'high')
+        expect(page.locator('body')).to_have_css('background-color', BLACK)
+
+        page.goto(f'{receipts_server.url}/account/')
+        toggle_high_contrast(page)
+        expect(page.locator('html')).not_to_have_attribute('data-contrast', 'high')
+        expect(page.locator('body')).to_have_css('background-color', 'rgb(26, 31, 29)')
+    finally:
+        context.close()
+        set_appearance(receipts_server, 'system', 'sage')
+        set_high_contrast(receipts_server, False)

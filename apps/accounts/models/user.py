@@ -147,6 +147,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             db_default=color_schemes.DEFAULT,
         ),
     )
+    # High contrast: the scheme with its ends pinned to black and white and everything on the page
+    # a step further from it (`apps.core.color_schemes.palette`), in light and in dark.
+    # `db_default` as well, as for `theme`.
+    high_contrast = cast(bool, models.BooleanField(default=False, db_default=False))
     # How the site writes dates and times for this user (issue #245): a numeric date order and a
     # 12- or 24-hour clock, set on the account page and applied by `apps.core.datetime_format`.
     # `db_default` as well as `default`, as for `theme`: the previous release's container keeps

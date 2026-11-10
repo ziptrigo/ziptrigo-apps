@@ -13,7 +13,7 @@ from apps.core.htmx import is_htmx
 
 from ..forms import ThemeForm
 from ..http import AuthenticatedHttpRequest
-from ..services.theme import set_color_scheme, set_theme
+from ..services.theme import set_color_scheme, set_high_contrast, set_theme
 from .pages import account_page_context
 
 #: The htmx event a successful save fires (`HX-Trigger`). `core/base.html` listens for it by this
@@ -24,7 +24,7 @@ THEME_CHANGED_EVENT = 'themeChanged'
 @login_required
 @require_POST
 def theme_update(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """Save the theme, and the colour scheme when one is posted, picked on the account page.
+    """Save the theme, and the colour scheme and high contrast when posted, picked on the account page.
 
     For htmx, a save answers 200 with the form re-rendered (the new choice checked), but tells htmx
     not to swap it in (`HX-Reswap: none`): replacing the radios would drop the keyboard focus from
@@ -42,6 +42,8 @@ def theme_update(request: AuthenticatedHttpRequest) -> HttpResponse:
         set_theme(request.user, theme)
         if form.cleaned_data['color_scheme']:
             set_color_scheme(request.user, form.cleaned_data['color_scheme'])
+        if form.cleaned_data['contrast_posted']:
+            set_high_contrast(request.user, form.cleaned_data['high_contrast'])
         if not is_htmx(request):
             return redirect('accounts:account')
         response = render(request, 'accounts/partials/theme_form.html')
@@ -49,6 +51,7 @@ def theme_update(request: AuthenticatedHttpRequest) -> HttpResponse:
         scheme = color_schemes.scheme_for(request.user)
         detail = {
             'theme': theme,
+            'high_contrast': request.user.high_contrast,
             'scheme': {
                 'id': scheme.id,
                 'theme_color': scheme.theme_color,

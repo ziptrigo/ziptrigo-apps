@@ -192,6 +192,17 @@ each works in light and dark. Live preview of all of them: `reference/color-sche
   the primary button (the date picker's chosen day, the chosen theme option) uses
   `bg-primary text-primary-on`. A `bg-brand-primary` element that is not a control (a progress
   bar) is plain accent 300 in every scheme.
+- **High contrast** is a switch next to the theme options (`User.high_contrast`,
+  `<html data-contrast="high">`) that works with every scheme, in light and dark
+  (`color_schemes.palette`): the lightest steps become white and the darkest black, and
+  everything on the page moves one step away from it. In light mode the page stays white while
+  neutrals from 100 up, and accent text (600 to 800), take their darker neighbour's value, and
+  cards, fields and menus are a step darker than the page. In dark mode the page is black,
+  cards keep gray 800, and text and borders are a step lighter.
+- **`bg-white` is the surface, `bg-page` is the page.** `bg-white` paints with `--c-surface`
+  (white, except in light high contrast), so use it for cards, fields, menus and secondary
+  buttons. The page background and the header use `bg-page`, which is always white. `text-white`
+  and `border-white` are plain white.
 - The installed app (the web manifest, its icons and splash colour) and push notifications stay
   sage in every scheme: the manifest is public and shared by every account. Only the page's own
   `<meta name="theme-color">` follows the scheme.

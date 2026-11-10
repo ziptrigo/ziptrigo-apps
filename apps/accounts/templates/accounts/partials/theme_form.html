@@ -30,9 +30,22 @@ Without JavaScript the Save button, shown only then, does the same with a normal
       {% include 'accounts/partials/theme_option.html' with value='system' label='System' icon='fa-circle-half-stroke' %}
       {% include 'accounts/partials/theme_option.html' with value='light' label='Light' icon='fa-sun' %}
       {% include 'accounts/partials/theme_option.html' with value='dark' label='Dark' icon='fa-moon' %}
+      {% comment %}A switch of its own, not a fourth theme: it combines with light and with dark. The hidden input tells the server the checkbox was on the page (an unticked one posts nothing).{% endcomment %}
+      <input type="hidden" name="contrast_posted" value="1">
+      <label class="cursor-pointer sm:ml-4">
+        <input type="checkbox"
+               name="high_contrast"
+               class="peer sr-only"
+               aria-describedby="high-contrast-help"
+               {% if request.user.high_contrast %}checked{% endif %}>
+        <span class="flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-on peer-checked:hover:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-sage-300">
+          <i class="fas fa-universal-access w-4 text-center" aria-hidden="true"></i>High contrast
+        </span>
+      </label>
     </div>
     <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
       System follows your device's light or dark setting. Your choice applies on every device you sign in on.
+      <span id="high-contrast-help">High contrast makes text and borders stronger, with black and white at the ends, in any color scheme.</span>
     </p>
   </fieldset>
 

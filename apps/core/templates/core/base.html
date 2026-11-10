@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-{% load datetime_format color_schemes %}{% active_color_scheme as scheme %}<html lang="en" {% format_data_attrs %} data-theme="{{ user.theme|default:'system' }}" data-scheme="{{ scheme.id }}"{% if user.is_authenticated %} data-user-timezone="{{ user.timezone }}"{% endif %}{% if user.theme == 'dark' %} class="dark"{% endif %}>
+{% load datetime_format color_schemes %}{% active_color_scheme as scheme %}<html lang="en" {% format_data_attrs %} data-theme="{{ user.theme|default:'system' }}" data-scheme="{{ scheme.id }}"{% if user.high_contrast %} data-contrast="high"{% endif %}{% if user.is_authenticated %} data-user-timezone="{{ user.timezone }}"{% endif %}{% if user.theme == 'dark' %} class="dark"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -49,6 +49,11 @@
               });
               const chrome = document.querySelector('meta[name="theme-color"]');
               if (chrome && scheme.theme_color) chrome.setAttribute('content', scheme.theme_color);
+            }
+            // High contrast (saved with them): the variables follow data-contrast.
+            if (typeof e.detail.high_contrast === 'boolean') {
+              if (e.detail.high_contrast) html.setAttribute('data-contrast', 'high');
+              else html.removeAttribute('data-contrast');
             }
             apply();
             setTimeout(() => html.classList.remove('theming'), 300);
@@ -115,6 +120,14 @@
                 950: 'rgb(var(--c-gray-950) / <alpha-value>)'
               }
             },
+            /* `bg-white` is the surface of cards, fields and menus: white, except in light high
+               contrast, where it is a step darker than the page. `bg-page` is the page itself and
+               the header, always white (dark mode uses dark:bg-gray-900). Only the background:
+               `text-white` and `border-white` stay white. */
+            backgroundColor: {
+              white: 'rgb(var(--c-surface) / <alpha-value>)',
+              page: '#fff'
+            },
             fontFamily: {
               sans: ['Figtree', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
               mono: ['IBM Plex Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace']
@@ -173,9 +186,9 @@
 
     {% block extra_css %}{% endblock %}
 </head>
-<body class="min-h-screen flex flex-col antialiased bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+<body class="min-h-screen flex flex-col antialiased bg-page text-gray-900 dark:bg-gray-900 dark:text-gray-100">
     <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg dark:focus:bg-gray-800">Skip to content</a>
-    <header class="relative bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+    <header class="relative bg-page dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
         {% comment %}Below `md` the product links show only their icons (the name stays as the
         accessible name and tooltip; with four products the names only fit from 768 px), the
         gaps are tighter, the wordmark is screen-reader only under 360 px, and the right-hand
