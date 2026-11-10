@@ -950,6 +950,17 @@ push configured (NOTIF-20's preconditions).
 | 3 | As a staff user without superuser who may view push subscriptions (ADM-51's staff user, given `core.view_pushsubscription`): the same list. | The list opens; the action menu has no **Send test notification**. |
 | 4 | `/admin/core/pushaction/` ("Push answers"). | Read-only list: **Created at**, **User**, **Kind**, **Action**; filters kind, action, date. NOTIF-22's `qa.test` / `yes` row is there. |
 
+### ADM-55 A user's terms acceptance
+
+**Purpose:** the user admin shows which version of the terms a user accepted and when, read-only
+(issue #96).
+**Preconditions:** Session A (`qa.admin`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/accounts/user/`, open `qa.user@example.com`. | Under **Status**, after the email confirmation fields: **Terms version** `2026-11-09` and **Terms accepted at** (`-` for the seeded accounts, which were marked accepted without a date; a date and time for an account registered during the run, see ACC-49). Neither is an input. |
+| 2 | Change **Name**, save, reopen. | Saved; the two terms values are unchanged. Restore the name. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

@@ -1,0 +1,7 @@
+{% comment %} The required "I agree" checkbox (issue #96), shared by the sign-up form and the accept page. `checked` keeps
+   the tick when a form is re-rendered after a refusal. The links open in a new tab so the form keeps what was typed. {% endcomment %}
+<label class="flex items-start gap-2 text-sm">
+  <input type="checkbox" name="accept_terms" required {% if checked %}checked{% endif %}
+         class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 dark:border-gray-600 accent-sage-500">
+  <span>I agree to the <a href="{% url 'core:terms' %}" target="_blank" rel="noopener" class="text-sage-600 dark:text-sage-300 underline underline-offset-2">Terms of Use</a> and acknowledge the <a href="{% url 'core:privacy' %}" target="_blank" rel="noopener" class="text-sage-600 dark:text-sage-300 underline underline-offset-2">Privacy Policy</a>.</span>
+</label>

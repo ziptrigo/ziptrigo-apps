@@ -156,9 +156,12 @@ def receipts_server():
         'import os\n'
         'from apps.accounts.models import User\n'
         'from apps.billing.services import add_credits\n'
+        'from apps.core.legal import TERMS_VERSION\n'
         "user = User.objects.create_user(email=os.environ['E2E_EMAIL'],"
         " password=os.environ['E2E_PASSWORD'], name='E2E')\n"
         'user.email_confirmed = True\n'
+        # Past the terms acceptance gate (issue #96), like an account made on the register page.
+        'user.terms_version = TERMS_VERSION\n'
         'user.save()\n'
         "add_credits(user, 50, description='e2e', source='e2e')\n"
     )

@@ -1,4 +1,5 @@
 from .home import home
+from .legal import privacy_page, terms_page
 from .notifications import (
     notification_bell,
     notification_dismiss,
@@ -29,9 +30,11 @@ __all__ = [
     'notification_read',
     'notification_read_all',
     'notifications_page',
+    'privacy_page',
     'push_action',
     'push_public_key',
     'push_subscribe',
     'push_unsubscribe',
     'service_worker',
+    'terms_page',
 ]

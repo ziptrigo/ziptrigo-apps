@@ -42,6 +42,10 @@
     <span class="text-xs text-gray-500 dark:text-gray-400">Its credits are added once you confirm your email.</span>
   </label>
 
+  <div class="mb-4">
+    {% include 'accounts/partials/accept_terms_field.html' with checked=form.accept_terms.value %}
+  </div>
+
   {% include 'accounts/partials/turnstile_widget.html' %}
 
   <button type="submit"

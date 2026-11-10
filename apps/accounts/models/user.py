@@ -169,6 +169,18 @@ class User(AbstractBaseUser, PermissionsMixin):
             db_default=TIME_FORMAT_12H,
         ),
     )
+    # Which version of the Terms of Use and Privacy Policy the user accepted, and when (issue #96).
+    # `terms_version` is `apps.core.legal.TERMS_VERSION` at that moment, `''` for never: the web
+    # shows the accept page to a signed-in user whose version is not the current one
+    # (`apps.accounts.services.terms`, `TermsAcceptanceMiddleware`). `db_default` as for `theme`.
+    terms_version = cast(
+        str,
+        models.CharField(max_length=32, blank=True, default='', db_default=''),
+    )
+    terms_accepted_at = cast(
+        datetime | None,
+        models.DateTimeField(null=True, blank=True),
+    )
     # The user's IANA time zone (issue #177), for "today", due dates with times and reminders in
     # their local time. `''` means not set yet and is treated as UTC everywhere. Set on the account
     # page or detected from the browser (`apps.accounts.services.timezones.set_timezone`, which

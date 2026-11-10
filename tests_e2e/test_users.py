@@ -16,6 +16,7 @@ def test_create_account(page: Page, site_server: str):
     page.fill('input[name="name"]', 'Test User')
     page.fill('input[name="email"]', email)
     page.fill('input[name="password"]', 'Password123!')
+    page.check('input[name="accept_terms"]')
 
     # Click the create account button
     page.click('button[type="submit"]')

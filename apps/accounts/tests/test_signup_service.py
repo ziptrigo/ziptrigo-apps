@@ -24,7 +24,9 @@ def test_create_account_rejects_email_differing_only_by_domain_case(user):
     assert mixed_case_domain.lower() == user.email
 
     with pytest.raises(EmailAlreadyRegistered):
-        create_account(name='Someone Else', email=mixed_case_domain, password='password123')
+        create_account(
+            name='Someone Else', email=mixed_case_domain, password='password123', accept_terms=True
+        )
 
     assert User.objects.filter(email=user.email).count() == 1
 
@@ -38,6 +40,6 @@ def test_create_account_converts_integrity_error_to_email_already_registered(use
     monkeypatch.setattr(QuerySet, 'exists', lambda self: False)
 
     with pytest.raises(EmailAlreadyRegistered):
-        create_account(name='Racer', email=user.email, password='password123')
+        create_account(name='Racer', email=user.email, password='password123', accept_terms=True)
 
     assert User.objects.filter(email=user.email).count() == 1

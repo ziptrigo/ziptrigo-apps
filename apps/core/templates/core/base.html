@@ -257,6 +257,8 @@
         <div class="container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-8">
             <div class="flex justify-center space-x-8 flex-1">
                 <a href="{% url 'feedback:submit' %}" class="hover:text-sage-300"{% if request.resolver_match.view_name == 'feedback:submit' %} aria-current="page"{% endif %}>Feedback</a>
+                <a href="{% url 'core:privacy' %}" class="hover:text-sage-300"{% if request.resolver_match.view_name == 'core:privacy' %} aria-current="page"{% endif %}>Privacy</a>
+                <a href="{% url 'core:terms' %}" class="hover:text-sage-300"{% if request.resolver_match.view_name == 'core:terms' %} aria-current="page"{% endif %}>Terms</a>
             </div>
             <div class="text-sm text-center text-gray-500 dark:text-gray-400 sm:whitespace-nowrap">
                 &copy; {% now "Y" %} Joao Coelho. Licensed under MIT.

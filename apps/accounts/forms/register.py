@@ -1,5 +1,6 @@
 from django import forms
 
+from ..services.terms import TERMS_REQUIRED_MESSAGE
 from ..validators import PasswordValidator
 from .email import NormalizedEmailMixin
 
@@ -23,6 +24,14 @@ class RegisterForm(NormalizedEmailMixin, forms.Form):
     # the view's job (`apps.accounts.signup_codes`, rate limited per IP), so an invalid form never
     # looks a code up.
     promo_code = forms.CharField(required=False, max_length=32, label='Promo code')
+
+    # Required and unticked (issue #96): one sentence covers both documents, since the Terms are
+    # accepted and the Privacy Policy acknowledged. Checked again by `create_account`.
+    accept_terms = forms.BooleanField(
+        required=True,
+        label='Terms',
+        error_messages={'required': TERMS_REQUIRED_MESSAGE},
+    )
 
     def clean_promo_code(self) -> str:
         return (self.cleaned_data.get('promo_code') or '').strip()

@@ -8,9 +8,11 @@ from .profile import ProfileForm
 from .register import RegisterForm
 from .resend_confirmation import ResendConfirmationForm
 from .reset_password import ResetPasswordForm
+from .terms import AcceptTermsForm
 from .theme import ThemeForm
 
 __all__ = [
+    'AcceptTermsForm',
     'AppsForm',
     'DisplayFormatsForm',
     'ChangePasswordForm',

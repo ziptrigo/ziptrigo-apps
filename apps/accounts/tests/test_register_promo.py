@@ -25,6 +25,7 @@ def _register(client, **overrides):
         'name': 'New User',
         'email': 'newuser@example.com',
         'password': 'password123',
+        'accept_terms': 'on',
         **overrides,
     }
     return client.post(reverse('accounts:register'), payload, **HTMX)

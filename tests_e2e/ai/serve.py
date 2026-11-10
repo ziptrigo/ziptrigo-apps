@@ -53,6 +53,7 @@ SEED = f"""
 from apps.accounts.models import User
 from apps.billing.models import BillingSettings
 from apps.billing.services import add_credits
+from apps.core.legal import TERMS_VERSION
 
 # The seeded accounts hold exactly the credits listed above. They are confirmed with a plain
 # save() (no `email_confirmed` signal), so with the welcome credits on they would keep a pending
@@ -71,6 +72,9 @@ for email, name, confirmed, credits, superuser in {ACCOUNTS!r}:
     else:
         user = User.objects.create_user(email=email, password={PASSWORD!r}, name=name)
     user.email_confirmed = confirmed
+    # Seeded accounts are past the terms acceptance gate (issue #96); ACC cases that test the
+    # gate register or sign up with a fresh account.
+    user.terms_version = TERMS_VERSION
     user.save()
     if credits:
         add_credits(user, credits, description='e2e seed', source='e2e')

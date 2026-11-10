@@ -120,6 +120,7 @@ def _create(request: HttpRequest, form: RegisterForm, captcha_enabled: bool) -> 
             name=form.cleaned_data['name'],
             email=form.cleaned_data['email'],
             password=form.cleaned_data['password'],
+            accept_terms=form.cleaned_data['accept_terms'],
         )
     except EmailAlreadyRegistered as exc:
         already_registered = exc.email
