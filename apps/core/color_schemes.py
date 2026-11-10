@@ -1,6 +1,7 @@
 """The site's colour schemes: one accent scale and one tinted neutral scale each.
 
-A scheme is independent of light and dark (`User.theme`): every scheme has both, because the
+A scheme is independent of light and dark (`User.theme`) and of high contrast
+(`User.high_contrast`, `palette`): every scheme has both, because the
 templates pick steps of the two scales (`bg-sage-300`, `dark:bg-gray-800`) and a scheme only says
 which colours those steps are. The Tailwind config in `core/base.html` maps `sage-*`, `brand-*` and
 `gray-*` to the CSS variables `--c-brand-<step>` / `--c-gray-<step>`, and
@@ -339,6 +340,81 @@ def _channels(hex_color: str) -> str:
     return ' '.join(str(int(hex_color[i : i + 2], 16)) for i in (0, 2, 4))
 
 
+WHITE = 'ffffff'
+BLACK = '000000'
+
+
+@dataclass(frozen=True)
+class Palette:
+    """The colours a page really uses: a scheme in one mode (light or dark), normal or high contrast."""
+
+    brand: dict[int, str]
+    gray: dict[int, str]
+    #: What `bg-white` paints: cards, fields, menus. The page itself (`bg-page`) is always white.
+    surface: str
+
+
+def _shifted(scale: dict[int, str], steps: tuple[int, ...], *, darker: bool) -> dict[int, str]:
+    """`scale` with each of `steps` taking the value of its darker (or lighter) neighbour."""
+    order = sorted(scale)
+    result = dict(scale)
+    for step in steps:
+        neighbour = order[order.index(step) + (1 if darker else -1)]
+        result[step] = scale[neighbour]
+    return result
+
+
+def palette(scheme: ColorScheme, *, dark: bool = False, high_contrast: bool = False) -> Palette:
+    """`scheme`'s colours in one mode.
+
+    Normal contrast is the scheme as defined, the same in light and dark. **High contrast** pins
+    the ends (the lightest steps are white, the darkest black) and moves what sits on the page one
+    step away from it:
+
+    - *light*: the page stays white and every neutral from 100 up takes its darker neighbour's
+      value, so borders, muted text and fills are all a step darker; cards and fields
+      (`bg-white`) take the old gray 100 instead of white, so they stand off the page; accent
+      text (600 to 800) is a step darker too.
+    - *dark*: the page is black, neutrals from 100 to 700 take their lighter neighbour's value
+      (text and borders lighter; 800, the cards, is kept), and the accent steps used for text and
+      fills (100 to 300) are a step lighter.
+    """
+    brand = dict(zip(BRAND_STEPS, scheme.brand))
+    gray = dict(zip(GRAY_STEPS, scheme.gray))
+    if not high_contrast:
+        return Palette(brand, gray, WHITE)
+    if dark:
+        new_gray = _shifted(gray, (200, 300, 400, 500, 600, 700), darker=False)
+        new_gray.update({50: WHITE, 100: WHITE, 900: BLACK, 950: BLACK})
+        new_brand = _shifted(brand, (100, 200, 300), darker=False)
+        new_brand.update({50: WHITE, 900: BLACK})
+        return Palette(new_brand, new_gray, WHITE)
+    new_gray = _shifted(gray, (100, 200, 300, 400, 500, 600, 700, 800), darker=True)
+    new_gray.update({50: WHITE, 900: BLACK, 950: BLACK})
+    new_brand = _shifted(brand, (600, 700, 800), darker=True)
+    new_brand.update({50: WHITE, 900: BLACK})
+    return Palette(new_brand, new_gray, gray[100])
+
+
+def _changed_variables(scheme: ColorScheme, *, dark: bool) -> str:
+    """The variables high contrast changes for `scheme` in one mode."""
+    normal = palette(scheme)
+    high = palette(scheme, dark=dark, high_contrast=True)
+    lines = [
+        f'  --c-brand-{step}: {_channels(value)};'
+        for step, value in high.brand.items()
+        if value != normal.brand[step]
+    ]
+    lines += [
+        f'  --c-gray-{step}: {_channels(value)};'
+        for step, value in high.gray.items()
+        if value != normal.gray[step]
+    ]
+    if high.surface != normal.surface:
+        lines.append(f'  --c-surface: {_channels(high.surface)};')
+    return '\n'.join(lines)
+
+
 def _variables(scheme: ColorScheme) -> str:
     lines = [
         f'  --c-brand-{step}: {_channels(value)};' for step, value in zip(BRAND_STEPS, scheme.brand)
@@ -354,7 +430,9 @@ def _variables(scheme: ColorScheme) -> str:
 PRIMARY_VARIABLES = (
     '  --c-primary: var(--c-brand-300);\n'
     '  --c-primary-hover: var(--c-brand-400);\n'
-    '  --c-on-primary: var(--c-gray-900);'
+    '  --c-on-primary: var(--c-gray-900);\n'
+    # What `bg-white` paints (cards, fields, menus); high contrast darkens it in light mode.
+    '  --c-surface: 255 255 255;'
 )
 SOLID_PRIMARY_VARIABLES = (
     '  --c-primary: var(--c-brand-600);\n'
@@ -384,7 +462,20 @@ def render_css() -> str:
             parts.append(
                 f'html[data-scheme="{scheme.id}"]:not(.dark) {{\n{SOLID_PRIMARY_VARIABLES}\n}}'
             )
+    # High contrast (`<html data-contrast="high">`), per scheme and mode: see `palette`.
+    for scheme in _SCHEMES:
+        selector = f'html[data-scheme="{scheme.id}"][data-contrast="high"]'
+        parts.append(f'{selector}:not(.dark) {{\n{_changed_variables(scheme, dark=False)}\n}}')
+        parts.append(f'{selector}.dark {{\n{_changed_variables(scheme, dark=True)}\n}}')
     return '\n\n'.join(parts) + '\n'
+
+
+def _palette_data(colors: Palette) -> dict[str, object]:
+    return {
+        'b': [colors.brand[step] for step in BRAND_STEPS],
+        'g': [colors.gray[step] for step in GRAY_STEPS],
+        'surface': colors.surface,
+    }
 
 
 def render_reference_js() -> str:
@@ -399,6 +490,10 @@ def render_reference_js() -> str:
             'isDefault': scheme.id == DEFAULT,
             'b': list(scheme.brand),
             'g': list(scheme.gray),
+            'highContrast': {
+                'light': _palette_data(palette(scheme, high_contrast=True)),
+                'dark': _palette_data(palette(scheme, dark=True, high_contrast=True)),
+            },
         }
         for scheme in _SCHEMES
     ]

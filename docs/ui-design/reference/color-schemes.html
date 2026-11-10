@@ -50,13 +50,13 @@
   .scale-label { font-size: 12px; color: #666; margin: 10px 0 4px; }
 
   /* ---- themed mock ---- */
-  .theme { --bg: var(--g50); --card: #fff; --border: var(--g200); --field: var(--g300); --text: var(--g900);
+  .theme { --bg: var(--g50); --card: var(--surface, #fff); --border: var(--g200); --field: var(--g300); --text: var(--g900);
            --body: var(--g700); --muted: var(--g500); --hover: var(--g100); --subtle: var(--g100);
            --primary: var(--b300); --primary-hover: var(--b400); --primary-text: var(--g900);
            --accent: var(--b600); --tint: var(--b100); --tint-soft: var(--b50); --ring: var(--b300); }
   .theme.solid { --primary: var(--b600); --primary-hover: var(--b700); --primary-text: #fff; }
-  .theme.dark { --bg: var(--g950); --card: var(--g900); --border: var(--g700); --field: var(--g600); --text: var(--g100);
-           --body: var(--g300); --muted: var(--g400); --hover: var(--g800); --subtle: var(--g800);
+  .theme.dark { --bg: var(--g900); --card: var(--g800); --border: var(--g700); --field: var(--g600); --text: var(--g100);
+           --body: var(--g300); --muted: var(--g400); --hover: var(--g700); --subtle: var(--g700);
            --primary: var(--b300); --primary-hover: var(--b200); --primary-text: var(--g950);
            --accent: var(--b300); --tint: var(--b800); --tint-soft: var(--b900); }
   /* dark: solid schemes use the common recipe (white on accent-400 fails 4.5:1) */
@@ -144,7 +144,7 @@
   <p class="lead">The site's eight colour schemes, each a 10-step accent scale plus its own tinted neutral scale, so every
     scheme works in light and dark with the same component recipes (primary button = accent 300 with dark text, links
     and active states = accent 600; Midnight and Graphite use a dark button with a white label in light mode). The
-    values are generated from <code>apps/core/color_schemes.py</code>. Click a scheme to load it into the mock below.</p>
+    values are generated from <code>apps/core/color_schemes.py</code>. Click a scheme to load it into the mock below; <b>High contrast</b> shows the same scheme with black and white at the ends.</p>
 
   <h2>Schemes</h2>
   <div class="grid" id="grid"></div>
@@ -156,6 +156,7 @@
       <button data-m="dark" aria-pressed="false">Dark</button>
       <button data-m="both" aria-pressed="false">Side by side</button>
     </div>
+    <div class="seg"><button id="hc" aria-pressed="false">High contrast</button></div>
   </div>
 
   <div id="stage"></div>
@@ -219,11 +220,13 @@
 <script>
 const P = window.COLOR_SCHEMES;
 const BS = [50,100,200,300,400,500,600,700,800,900], GS = [...BS, 950];
-let cur = P[0], mode = 'light';
+let cur = P[0], mode = 'light', highContrast = false;
 
-function vars(el, p) {
-  p.b.forEach((h, i) => el.style.setProperty('--b' + BS[i], '#' + h));
-  p.g.forEach((h, i) => el.style.setProperty('--g' + GS[i], '#' + h));
+function vars(el, p, colors) {
+  colors = colors || p;
+  colors.b.forEach((h, i) => el.style.setProperty('--b' + BS[i], '#' + h));
+  colors.g.forEach((h, i) => el.style.setProperty('--g' + GS[i], '#' + h));
+  el.style.setProperty('--surface', '#' + (colors.surface || 'ffffff'));
   el.classList.toggle('solid', !!p.solid);
 }
 function lum(h) { const n = parseInt(h, 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)); }
@@ -233,7 +236,7 @@ function swatches(el, arr, steps) {
 }
 function mock(dark) {
   const m = document.getElementById('mock-tpl').content.firstElementChild.cloneNode(true);
-  vars(m, cur); m.classList.toggle('dark', dark); return m;
+  vars(m, cur, highContrast ? cur.highContrast[dark ? 'dark' : 'light'] : cur); m.classList.toggle('dark', dark); return m;
 }
 function render() {
   document.getElementById('title').textContent = `Mock: ${cur.name}`;
@@ -241,8 +244,10 @@ function render() {
   if (mode !== 'dark') st.append(mock(false));
   if (mode !== 'light') st.append(mock(true));
   if (mode === 'both') st.querySelectorAll('.main').forEach(m => m.style.gridTemplateColumns = '1fr');
-  swatches(document.getElementById('bscale'), cur.b, BS);
-  swatches(document.getElementById('gscale'), cur.g, GS);
+  const shown = highContrast ? cur.highContrast[mode === 'dark' ? 'dark' : 'light'] : cur;
+  swatches(document.getElementById('bscale'), shown.b, BS);
+  swatches(document.getElementById('gscale'), shown.g, GS);
+  document.getElementById('hc').setAttribute('aria-pressed', highContrast);
   document.querySelectorAll('.choice').forEach(c => c.setAttribute('aria-pressed', c.dataset.id === cur.id));
   document.querySelectorAll('#mode button').forEach(b => b.setAttribute('aria-pressed', b.dataset.m === mode));
 }
@@ -258,6 +263,7 @@ P.forEach(p => {
   c.onclick = () => { cur = p; render(); };
   grid.append(c);
 });
+document.getElementById('hc').onclick = () => { highContrast = !highContrast; render(); };
 document.querySelectorAll('#mode button').forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
 render();
 </script>

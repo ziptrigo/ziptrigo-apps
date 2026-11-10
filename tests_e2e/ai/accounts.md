@@ -584,6 +584,23 @@ link instead.
 | 7 | Visit `/account/` as the no-password account (Context with a Google-created account, if available) or note it as not applicable. | The Appearance section is shown there too. |
 | 8 | Restore `System`. | - |
 
+### ACC-50 High contrast
+
+**Purpose:** the High contrast switch strengthens every color scheme, in light and dark, and is stored on the account.
+**Preconditions:** sign in as MAIN / P3 (Context A); theme `Light`, color scheme `Sage`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Go to `/account/`, section `Appearance`. | After `System`, `Light`, `Dark` there is a `High contrast` option, not selected; `<html>` has no `data-contrast` attribute. |
+| 2 | Click `High contrast`. | Without a reload it becomes selected (`Light` stays selected too); `<html>` has `data-contrast="high"`; the page background stays white, text turns black, and cards, fields and dropdowns are slightly darker than the page with darker borders. |
+| 3 | Click `Dark`. | The page background is black, text white, cards dark gray with lighter borders; `High contrast` stays selected. |
+| 4 | Pick `Ember`, then `Midnight`. | Each scheme keeps high contrast (the accents change, black and white stay). |
+| 5 | Open `/`, `/todo/` and `/links/` in `Light`. | High contrast applies on every page; all text is readable; primary buttons keep a readable label. |
+| 6 | Use only the keyboard: Tab to `High contrast`, press Space. | It toggles, with a visible focus ring. |
+| 7 | Sign in from a different browser profile. | High contrast is on there too. Signed out, the login page is normal contrast. |
+| 8 | In `/admin/accounts/user/<id>/change/` (as a superuser). | `High contrast` is shown read-only under Personal info. |
+| 9 | Click `High contrast` again; restore `System` and `Sage`. | The page returns to the normal colours at once. |
+
 ### ACC-49 Color scheme setting
 
 **Purpose:** the Appearance section saves the color scheme on the account and applies it everywhere, in light and dark.

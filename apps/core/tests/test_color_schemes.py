@@ -46,33 +46,42 @@ def test_every_scheme_has_both_whole_scales(scheme):
         assert luminances == sorted(luminances, reverse=True)
 
 
-def _text_pairs(scheme) -> dict[str, tuple[str, str]]:
+def _text_pairs(scheme, *, high_contrast: bool = False) -> dict[str, tuple[str, str]]:
     """The text-on-background pairs the templates use, as (text, background)."""
-    brand = dict(zip(color_schemes.BRAND_STEPS, scheme.brand))
-    gray = dict(zip(color_schemes.GRAY_STEPS, scheme.gray))
-    button = (WHITE, brand[600]) if scheme.solid else (gray[900], brand[300])
-    button_hover = (WHITE, brand[700]) if scheme.solid else (gray[900], brand[400])
+    light = color_schemes.palette(scheme, high_contrast=high_contrast)
+    dark = color_schemes.palette(scheme, dark=True, high_contrast=high_contrast)
+    button = (WHITE, light.brand[600]) if scheme.solid else (light.gray[900], light.brand[300])
+    button_hover = (
+        (WHITE, light.brand[700]) if scheme.solid else (light.gray[900], light.brand[400])
+    )
     pairs = {
         'light button': button,
         'light button hover': button_hover,
-        'light tinted pill': (brand[600], brand[100]),
-        'light flash message': (brand[800], brand[100]),
-        'light picker day hover': (brand[800], brand[100]),
-        'light muted text': (gray[500], gray[50]),
-        'light body text': (gray[700], gray[50]),
-        'dark button': (gray[900], brand[300]),
-        'dark button hover': (gray[900], brand[400]),
-        'dark flash message': (brand[100], brand[800]),
-        'dark muted text': (gray[400], gray[800]),
-        'dark body text': (gray[300], gray[900]),
+        'light tinted pill': (light.brand[600], light.brand[100]),
+        'light flash message': (light.brand[800], light.brand[100]),
+        'light picker day hover': (light.brand[800], light.brand[100]),
+        'light muted text on page': (light.gray[500], WHITE),
+        'light muted text on a card': (light.gray[500], light.surface),
+        'light muted text on gray-50': (light.gray[500], light.gray[50]),
+        'light body text': (light.gray[700], light.gray[50]),
+        'light body text on a card': (light.gray[700], light.surface),
+        'dark button': (dark.gray[900], dark.brand[300]),
+        'dark button hover': (dark.gray[900], dark.brand[400]),
+        'dark flash message': (dark.brand[100], dark.brand[800]),
+        'dark muted text': (dark.gray[400], dark.gray[800]),
+        'dark body text': (dark.gray[300], dark.gray[900]),
     }
     # Every accent step the templates use for text, on each surface a page puts text on.
+    surfaces = (('white', WHITE), ('a card', light.surface), ('gray-50', light.gray[50]))
+    if not high_contrast:
+        # In high contrast gray-100 is a fill a step darker than the cards, not a text surface.
+        surfaces += (('gray-100', light.gray[100]),)
     for step in LIGHT_TEXT_STEPS:
-        for name, surface in (('white', WHITE), ('gray-50', gray[50]), ('gray-100', gray[100])):
-            pairs[f'light text-sage-{step} on {name}'] = (brand[step], surface)
+        for name, surface in surfaces:
+            pairs[f'light text-sage-{step} on {name}'] = (light.brand[step], surface)
     for step in DARK_TEXT_STEPS:
         for name in (800, 900):
-            pairs[f'dark text-sage-{step} on gray-{name}'] = (brand[step], gray[name])
+            pairs[f'dark text-sage-{step} on gray-{name}'] = (dark.brand[step], dark.gray[name])
     return pairs
 
 
@@ -99,6 +108,75 @@ def test_every_scheme_passes_wcag_aa_for_the_text_the_templates_put_on_it(scheme
         if _contrast(*pair) < 4.5
     }
     assert not failing
+
+
+@pytest.mark.parametrize('scheme', color_schemes.all_schemes(), ids=lambda s: s.id)
+def test_high_contrast_passes_aa_everywhere_and_aaa_for_body_text(scheme):
+    pairs = _text_pairs(scheme, high_contrast=True)
+    failing = {
+        name: round(_contrast(*pair), 2) for name, pair in pairs.items() if _contrast(*pair) < 4.5
+    }
+    assert not failing
+    for name in ('light body text', 'light body text on a card', 'dark body text'):
+        assert _contrast(*pairs[name]) >= 7, name
+
+
+@pytest.mark.parametrize('scheme', color_schemes.all_schemes(), ids=lambda s: s.id)
+def test_high_contrast_never_lowers_a_text_contrast(scheme):
+    normal = _text_pairs(scheme)
+    high = _text_pairs(scheme, high_contrast=True)
+    # A card is white normally and a step darker in high contrast, so compare like with like.
+    lower = {
+        name: (round(_contrast(*normal[name]), 2), round(_contrast(*pair), 2))
+        for name, pair in high.items()
+        if name in normal
+        and 'on a card' not in name
+        and _contrast(*pair) < _contrast(*normal[name]) - 0.01
+    }
+    assert not lower
+
+
+@pytest.mark.parametrize('scheme', color_schemes.all_schemes(), ids=lambda s: s.id)
+def test_high_contrast_pins_the_ends_to_black_and_white(scheme):
+    light = color_schemes.palette(scheme, high_contrast=True)
+    dark = color_schemes.palette(scheme, dark=True, high_contrast=True)
+    for colors in (light, dark):
+        assert colors.gray[50] == colors.brand[50] == 'ffffff'
+        assert colors.gray[900] == colors.gray[950] == colors.brand[900] == '000000'
+    assert dark.gray[100] == 'ffffff'
+    # Light: the page is white and cards and fields are a step darker than it; borders too.
+    normal = color_schemes.palette(scheme)
+    assert light.surface == normal.gray[100] != 'ffffff'
+    assert light.gray[300] == normal.gray[400]
+    assert light.gray[100] == normal.gray[200]
+    # Dark: the cards keep their colour on a black page; text and borders are a step lighter.
+    assert dark.surface == 'ffffff'
+    assert dark.gray[800] == normal.gray[800]
+    assert dark.gray[400] == normal.gray[300]
+
+
+def test_normal_contrast_is_the_scheme_as_defined():
+    sage = color_schemes.SCHEMES['sage']
+    for dark in (False, True):
+        colors = color_schemes.palette(sage, dark=dark)
+        assert tuple(colors.brand.values()) == sage.brand
+        assert tuple(colors.gray.values()) == sage.gray
+        assert colors.surface == 'ffffff'
+
+
+def test_stylesheet_has_a_high_contrast_block_per_scheme_and_mode():
+    css = color_schemes.render_css()
+    assert '--c-surface: 255 255 255;' in css.split('}')[0]
+    for scheme in color_schemes.all_schemes():
+        base = f'html[data-scheme="{scheme.id}"][data-contrast="high"]'
+        light = css.split(f'{base}:not(.dark) {{')[1].split('}')[0]
+        dark = css.split(f'{base}.dark {{')[1].split('}')[0]
+        assert '--c-gray-900: 0 0 0;' in light
+        assert '--c-gray-50: 255 255 255;' in light
+        assert '--c-surface:' in light
+        assert '--c-gray-900: 0 0 0;' in dark
+        assert '--c-gray-100: 255 255 255;' in dark
+        assert '--c-surface:' not in dark
 
 
 def _accent_text_classes() -> set[tuple[bool, int]]:
@@ -163,6 +241,11 @@ def test_stylesheet_defines_every_variable_for_every_scheme():
     assert '--c-brand-300: 143 168 158;' in css
     for scheme in color_schemes.all_schemes():
         block = css.split(f'html[data-scheme="{scheme.id}"] {{')[1].split('}')[0]
+        assert (
+            '--c-brand-300: '
+            + ' '.join(str(int(scheme.brand[3][i : i + 2], 16)) for i in (0, 2, 4))
+            in block
+        )
         assert len(re.findall(r'--c-brand-\d+:', block)) == 10
         assert len(re.findall(r'--c-gray-\d+:', block)) == 11
 
@@ -222,3 +305,8 @@ def test_base_template_maps_the_tailwind_colours_to_the_variables():
     assert "primary: 'rgb(var(--c-primary) / <alpha-value>)'" in source
     assert "on: 'rgb(var(--c-on-primary) / <alpha-value>)'" in source
     assert 'core/css/color_schemes.css' in source
+    # `bg-white` is the surface variable; the page and the header are `bg-page`, always white.
+    assert "white: 'rgb(var(--c-surface) / <alpha-value>)'" in source
+    assert "page: '#fff'" in source
+    assert '<body class="min-h-screen flex flex-col antialiased bg-page ' in source
+    assert '<header class="relative bg-page ' in source

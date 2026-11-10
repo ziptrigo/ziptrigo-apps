@@ -37,3 +37,9 @@ def set_color_scheme(user: User, scheme: str) -> None:
         raise ValueError(f'Unknown color scheme: {scheme!r}')
     user.color_scheme = scheme
     user.save(update_fields=['color_scheme', 'updated_at'])
+
+
+def set_high_contrast(user: User, enabled: bool) -> None:
+    """Turn high contrast on or off for `user`."""
+    user.high_contrast = bool(enabled)
+    user.save(update_fields=['high_contrast', 'updated_at'])
