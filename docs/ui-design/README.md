@@ -163,6 +163,46 @@ WCAG 2.x ratios for the pairs that come up:
 | `red-600` on `white` | 4.83 | ✅ |
 | `red-400` on `gray-800` | 5.00 | ✅ |
 
+### Colour schemes
+
+Sage is the default of eight colour schemes a signed-in user can pick under **Appearance** on the
+account page (`User.color_scheme`): Sage, Honey, Ember, Sky, Midnight, Lagoon, Plum, Graphite.
+Each is an accent scale and a tinted neutral scale, defined in `apps/core/color_schemes.py`, and
+each works in light and dark. Live preview of all of them: `reference/color-schemes.html`.
+
+- The class names don't change with the scheme: `sage-*`, `brand-*` and `gray-*` are CSS variables
+  (`--c-brand-<step>`, `--c-gray-<step>`, space-separated RGB channels) that
+  `core/css/color_schemes.css` sets per `<html data-scheme="...">`. So **`sage-300` means "accent
+  300"**, whatever the scheme. **`accent-*` is the same scale under its proper name: use it in new
+  markup** (`text-accent-600`); `sage-*` stays as an alias for the existing templates. In your own
+  CSS write `rgb(var(--c-brand-300))`, or `rgb(var(--c-brand-300) / 0.35)` with an alpha.
+- **Accent text:** words use `text-accent-600` (or 700, 800) with `dark:text-accent-300` (or 100).
+  Steps 300 to 500 without `dark:` are for icons only: they are too pale for words in some schemes
+  (a link is `text-sage-600 dark:text-sage-300 hover:underline`). Tests enforce both.
+- **Rule:** never write a brand or neutral hex in a template, a script or `site.css`: it would stay
+  sage in every other scheme. Semantic colours (red, amber, sky ...) are the same in every scheme.
+  Emails, the web manifest and public standalone pages stay sage.
+- **The primary button has variables of its own**: `--c-primary`, `--c-primary-hover` and
+  `--c-on-primary` (Tailwind: `bg-primary`, `hover:bg-primary-hover`, `text-primary-on`;
+  `bg-brand-primary` is `bg-primary`). They are accent 300, accent 400 and gray 900, except in
+  the *solid* schemes, Midnight and Graphite, where in light mode they are accent 600, accent 700
+  and white. The existing recipe `bg-brand-primary text-gray-900 hover:bg-sage-400` picks them up
+  on `<a>`, `<button>` and submit inputs through two rules in `site.css`, so write the primary
+  button with `bg-brand-primary`, never `bg-sage-300`. Something *selected* that should look like
+  the primary button (the date picker's chosen day, the chosen theme option) uses
+  `bg-primary text-primary-on`. A `bg-brand-primary` element that is not a control (a progress
+  bar) is plain accent 300 in every scheme.
+- The installed app (the web manifest, its icons and splash colour) and push notifications stay
+  sage in every scheme: the manifest is public and shared by every account. Only the page's own
+  `<meta name="theme-color">` follows the scheme.
+- The logo is recoloured per scheme (`core/images/schemes/<id>/`); use
+  `{% active_color_scheme as scheme %}` and `{% static scheme.logo_32 %}` with
+  `data-scheme-logo="32"` so a change of scheme swaps it without a reload.
+- After changing `color_schemes.py` run `./manage.py build_color_schemes` (the stylesheet, the
+  logos and `reference/assets/color-schemes.js`, the data of `reference/color-schemes.html`);
+  tests fail while the stylesheet or that file is stale, while `reference/assets/reference.js`
+  differs from Sage, and when a scheme's text contrast is under 4.5:1.
+
 ## 4. Dark mode
 
 - `tailwind.config.darkMode = 'class'`. The early-boot script in `base.html` adds `dark` to

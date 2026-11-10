@@ -1,0 +1,20 @@
+{% load color_schemes %}{% active_color_scheme as active %}{% comment %}
+One choice of the account page's colour scheme control: a radio styled as a tile. Takes `scheme`
+(an `apps.core.color_schemes.ColorScheme`). The swatches are that scheme's own colours (inline
+styles: the page's Tailwind colours are the active scheme's). The checked one is the user's saved
+scheme.
+{% endcomment %}
+<label class="cursor-pointer">
+  <input type="radio"
+         name="color_scheme"
+         value="{{ scheme.id }}"
+         class="peer sr-only"
+         {% if active.id == scheme.id %}checked{% endif %}>
+  <span class="block rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 peer-checked:border-sage-500 peer-checked:ring-2 peer-checked:ring-sage-300 dark:peer-checked:border-sage-300 peer-focus-visible:ring-2 peer-focus-visible:ring-sage-300">
+    <span class="flex h-5 overflow-hidden rounded" aria-hidden="true">
+      {% for color in scheme.swatches %}<span class="flex-1" style="background-color: {{ color }}"></span>{% endfor %}
+    </span>
+    <span class="mt-2 block text-sm font-medium">{{ scheme.label }}</span>
+    <span class="block text-xs text-gray-500 dark:text-gray-400">{{ scheme.description }}</span>
+  </span>
+</label>

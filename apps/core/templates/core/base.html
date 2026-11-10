@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-{% load datetime_format %}<html lang="en" {% format_data_attrs %} data-theme="{{ user.theme|default:'system' }}"{% if user.is_authenticated %} data-user-timezone="{{ user.timezone }}"{% endif %}{% if user.theme == 'dark' %} class="dark"{% endif %}>
+{% load datetime_format color_schemes %}{% active_color_scheme as scheme %}<html lang="en" {% format_data_attrs %} data-theme="{{ user.theme|default:'system' }}" data-scheme="{{ scheme.id }}"{% if user.is_authenticated %} data-user-timezone="{{ user.timezone }}"{% endif %}{% if user.theme == 'dark' %} class="dark"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,11 +7,11 @@
 
     <!-- Favicon -->
     {% load static %}
-    <link rel="icon" type="image/png" href="{% static 'core/images/logo_32x32.png' %}">
+    <link rel="icon" type="image/png" href="{% static scheme.logo_32 %}" data-scheme-logo="32">
     {% comment %}Makes the site installable (issue #239): an iPhone only delivers push to a site added to the Home Screen.{% endcomment %}
     <link rel="manifest" href="{% url 'core:manifest' %}" crossorigin="use-credentials">
     <link rel="apple-touch-icon" href="{% static 'core/images/app_icon_192.png' %}">
-    <meta name="theme-color" content="#8fa89e">
+    <meta name="theme-color" content="{{ scheme.theme_color }}">
 
     <!-- Early theme boot: the class is set before CSS to avoid FOUC. A signed-in user's saved theme
          is rendered on <html> by the server (data-theme, and the dark class for "dark"); "system"
@@ -38,6 +38,18 @@
             // Cross-fade colours over ~260 ms instead of snapping (core/css/site.css `.theming`).
             html.classList.add('theming');
             html.setAttribute('data-theme', theme);
+            // The colour scheme saved with it (apps.core.color_schemes): the variables follow
+            // data-scheme; the logo, favicon and browser chrome colour are swapped by hand.
+            const scheme = e.detail.scheme;
+            if (scheme && /^[a-z]+$/.test(scheme.id || '')) {
+              html.setAttribute('data-scheme', scheme.id);
+              document.querySelectorAll('[data-scheme-logo]').forEach((el) => {
+                const url = (scheme.logos || {})[el.getAttribute('data-scheme-logo')];
+                if (url) el.setAttribute(el.tagName === 'LINK' ? 'href' : 'src', url);
+              });
+              const chrome = document.querySelector('meta[name="theme-color"]');
+              if (chrome && scheme.theme_color) chrome.setAttribute('content', scheme.theme_color);
+            }
             apply();
             setTimeout(() => html.classList.remove('theming'), 300);
           });
@@ -47,10 +59,24 @@
 
     <!-- Tailwind (Play CDN) -->
     <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-    <!-- Configure Tailwind: the Sage Green palette, sage-tinted neutrals in place of the blue-tinted
-         `gray`, and the font stacks (Figtree and IBM Plex Mono are self-hosted by core/css/site.css).
-         docs/ui-design/reference/assets/reference.js keeps a copy of this config. -->
+    <!-- Configure Tailwind: the accent scale (named `sage`, after the default scheme), tinted neutrals
+         in place of the blue-tinted `gray`, and the font stacks (Figtree and IBM Plex Mono are
+         self-hosted by core/css/site.css). The colours are CSS variables whose values
+         core/css/color_schemes.css sets per colour scheme (<html data-scheme>, apps.core.color_schemes).
+         docs/ui-design/reference/assets/reference.js keeps a copy of this config with Sage's values. -->
     <script>
+      const ACCENT = {
+        50: 'rgb(var(--c-brand-50) / <alpha-value>)',
+        100: 'rgb(var(--c-brand-100) / <alpha-value>)',
+        200: 'rgb(var(--c-brand-200) / <alpha-value>)',
+        300: 'rgb(var(--c-brand-300) / <alpha-value>)',
+        400: 'rgb(var(--c-brand-400) / <alpha-value>)',
+        500: 'rgb(var(--c-brand-500) / <alpha-value>)',
+        600: 'rgb(var(--c-brand-600) / <alpha-value>)',
+        700: 'rgb(var(--c-brand-700) / <alpha-value>)',
+        800: 'rgb(var(--c-brand-800) / <alpha-value>)',
+        900: 'rgb(var(--c-brand-900) / <alpha-value>)'
+      };
       tailwind.config = {
         darkMode: 'class',
         /* hover: styles apply only where the device can hover, so a tap on a phone leaves none stuck. */
@@ -58,36 +84,35 @@
         theme: {
           extend: {
             colors: {
-              sage: {
-                50: '#f4f7f6',
-                100: '#d4e0da',
-                200: '#b5c7be',
-                300: '#8fa89e',
-                400: '#728e84',
-                500: '#5a736a',
-                600: '#475a53',
-                700: '#3b4a47',
-                800: '#2c3432',
-                900: '#1e2422'
+              /* `accent` is the name to use in new markup; `sage` is the same scale under the name
+                 the templates were written with (Sage is only the default scheme). */
+              accent: ACCENT,
+              sage: ACCENT,
+              /* The primary button and things selected like it: fill, hover fill and label.
+                 Midnight and Graphite swap these in light mode (core/css/color_schemes.css). */
+              primary: {
+                DEFAULT: 'rgb(var(--c-primary) / <alpha-value>)',
+                hover: 'rgb(var(--c-primary-hover) / <alpha-value>)',
+                on: 'rgb(var(--c-on-primary) / <alpha-value>)'
               },
-              /* Aliases some product templates use for the sage brand colours. */
+              /* Aliases some product templates use for the brand colours. */
               brand: {
-                primary: '#8fa89e',
-                dark: '#2c3432'
+                primary: 'rgb(var(--c-primary) / <alpha-value>)',
+                dark: 'rgb(var(--c-brand-800) / <alpha-value>)'
               },
-              /* Neutrals tinted a few degrees toward sage; every existing gray-* class picks them up. */
+              /* Neutrals tinted a few degrees toward the accent; every gray-* class picks them up. */
               gray: {
-                50: '#f6f8f7',
-                100: '#eef1f0',
-                200: '#dfe4e2',
-                300: '#c6cecb',
-                400: '#98a39f',
-                500: '#66716d',
-                600: '#4f5956',
-                700: '#3c4441',
-                800: '#282e2c',
-                900: '#1a1f1d',
-                950: '#111514'
+                50: 'rgb(var(--c-gray-50) / <alpha-value>)',
+                100: 'rgb(var(--c-gray-100) / <alpha-value>)',
+                200: 'rgb(var(--c-gray-200) / <alpha-value>)',
+                300: 'rgb(var(--c-gray-300) / <alpha-value>)',
+                400: 'rgb(var(--c-gray-400) / <alpha-value>)',
+                500: 'rgb(var(--c-gray-500) / <alpha-value>)',
+                600: 'rgb(var(--c-gray-600) / <alpha-value>)',
+                700: 'rgb(var(--c-gray-700) / <alpha-value>)',
+                800: 'rgb(var(--c-gray-800) / <alpha-value>)',
+                900: 'rgb(var(--c-gray-900) / <alpha-value>)',
+                950: 'rgb(var(--c-gray-950) / <alpha-value>)'
               }
             },
             fontFamily: {
@@ -128,6 +153,7 @@
     <!-- Site CSS: web fonts, motion tokens, keyframes and the htmx hooks (the little Tailwind can't say).
          The text font is preloaded so the swap from the system font is short on a first visit. -->
     <link rel="preload" href="{% static 'core/fonts/figtree-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="{% static 'core/css/color_schemes.css' %}">
     <link rel="stylesheet" href="{% static 'core/css/site.css' %}">
 
     <!-- CSRF helper for htmx requests -->
@@ -157,7 +183,7 @@
         <nav class="container mx-auto px-4 py-3 flex justify-between items-center gap-2 sm:gap-4">
             <div class="flex flex-wrap items-center gap-x-0.5 md:gap-x-1.5 gap-y-1 min-w-0">
                 <a href="{% url 'core:home' %}" class="btn rounded-lg text-base font-semibold whitespace-nowrap mr-1 md:mr-3">
-                    <img src="{% static 'core/images/logo_32x32.png' %}" alt="" class="inline h-6 w-6 mr-1 align-text-bottom"><span class="max-[359px]:sr-only">ZipTrigo</span>
+                    <img src="{% static scheme.logo_32 %}" data-scheme-logo="32" alt="" class="inline h-6 w-6 mr-1 align-text-bottom"><span class="max-[359px]:sr-only">ZipTrigo</span>
                 </a>
                 {% include 'core/partials/product_nav.html' %}
             </div>
