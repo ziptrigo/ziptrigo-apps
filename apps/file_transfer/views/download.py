@@ -4,6 +4,7 @@ suspended, deleted, or its limit reached all render the same neutral page).
 """
 
 import base64
+from functools import lru_cache
 
 from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ValidationError
@@ -72,6 +73,22 @@ def _password_gated_transfer(request: PublicHttpRequest, slug: str) -> Transfer 
 #: high-density screens get a sharp image.
 QR_SCALE = 10
 
+#: Quiet-zone width in modules around the code (the spec's minimum is 4; the popup's white
+#: frame supplies the rest, and a narrower border keeps the code larger on screen).
+QR_BORDER = 3
+
+#: How many distinct links' rendered codes are kept in memory (a few KB each).
+QR_CACHE_SIZE = 256
+
+
+@lru_cache(maxsize=QR_CACHE_SIZE)
+def _qr_data_uri_for(url: str) -> str:
+    """The `data:` URI of the PNG QR code of `url`. Cached per link, so the page's repeated GETs
+    (and the 422/429 unlock answers) don't encode it again. Keyed on the URL string alone: a link
+    never changes what it encodes, so there is nothing to invalidate."""
+    png = render_png(url, scale=QR_SCALE, border=QR_BORDER)
+    return f'data:image/png;base64,{base64.b64encode(png).decode("ascii")}'
+
 
 def download_qr_data_uri(transfer: Transfer) -> str:
     """The QR code of the transfer's download link as a `data:` URI of a PNG (issue #267).
@@ -80,8 +97,7 @@ def download_qr_data_uri(transfer: Transfer) -> str:
     rendered in memory and stored nowhere. A password-protected transfer needs no special case: the
     link it encodes is the page that asks for the password.
     """
-    png = render_png(transfer.absolute_download_url, scale=QR_SCALE, border=3)
-    return f'data:image/png;base64,{base64.b64encode(png).decode("ascii")}'
+    return _qr_data_uri_for(transfer.absolute_download_url)
 
 
 def _context(request: PublicHttpRequest, transfer: Transfer, password_form: DownloadPasswordForm):
