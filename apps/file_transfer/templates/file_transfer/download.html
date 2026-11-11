@@ -88,7 +88,8 @@
     {% comment %}The QR code popup (design system 10.9: the confirmation modal's overlay and panel). The
        image stays black on white in every theme so it scans in dark mode too. Its only control is
        Close, so Tab stays on it; Escape and a click on the backdrop close it and focus goes back
-       to the button.{% endcomment %}
+       to the button. `@keydown.tab.prevent` on the panel relies on Close being the only focusable
+       control inside it: if another control is ever added, replace it with a real focus trap.{% endcomment %}
     <div id="qr-modal" x-show="qrOpen" style="display: none"
          @keydown.escape.window="if (qrOpen) { qrOpen = false; $refs.qrTrigger.focus(); }"
          @click.self="qrOpen = false; $refs.qrTrigger.focus()"
@@ -108,7 +109,7 @@
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Scan it with a phone to open this download page.</p>
             <div class="flex justify-center mb-4">
                 <img src="{{ qr_data_uri }}" id="qr-image" width="240" height="240"
-                     alt="QR code of the link to this download page: {{ transfer.absolute_download_url }}"
+                     alt="QR code of the link to this download page"
                      class="h-60 w-60 max-w-full bg-white rounded-lg border border-gray-200 dark:border-gray-600">
             </div>
             <p class="font-mono text-xs text-gray-500 dark:text-gray-400 break-all mb-6">{{ transfer.absolute_download_url }}</p>
