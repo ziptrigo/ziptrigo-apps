@@ -201,7 +201,7 @@ def test_staff_holding_every_real_permission_still_does_not_see_the_link(client)
 
     staff = UserFactory(is_staff=True, is_superuser=False)
     # `ty` sees `user_permissions` as the declared `ManyToManyField`, not the related manager.
-    staff.user_permissions.set(Permission.objects.all())  # ty: ignore[unresolved-attribute]
+    staff.user_permissions.set(Permission.objects.all())  # ty: ignore[missing-attribute]
     client.force_login(staff)
 
     html = client.get(reverse('custom_admin:index')).content.decode()

@@ -37,7 +37,7 @@ def staff_with(client, *permissions: str, email='staff@example.com') -> User:
     for permission in permissions:
         app_label, codename = permission.split('.')
         # A `PermissionsMixin` many-to-many manager, which `ty` sees only as the field.
-        member.user_permissions.add(  # ty: ignore[unresolved-attribute]
+        member.user_permissions.add(  # ty: ignore[missing-attribute]
             Permission.objects.get(content_type__app_label=app_label, codename=codename)
         )
     client.force_login(member)

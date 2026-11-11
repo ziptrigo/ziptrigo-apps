@@ -1705,7 +1705,7 @@ class TestSkipped:
 
 class TestIndex:
     def test_one_partial_index_on_unsent_reminders(self):
-        meta = Reminder._meta  # ty: ignore[unresolved-attribute]
+        meta = Reminder._meta  # ty: ignore[missing-attribute]
         [index] = meta.indexes
 
         assert index.fields == ['fire_at']

@@ -41,7 +41,7 @@ class CustomAccessToken(Token):
     # Narrows `Token.for_user`'s `user: AbstractBaseUser` to this service's own concrete `User`,
     # which is technically an LSP violation ty (correctly) flags -- but this project only ever
     # has the one concrete user model, so the narrower signature is deliberate, not a bug.
-    def for_user(cls, user: User) -> 'CustomAccessToken':  # ty: ignore[invalid-method-override]
+    def for_user(cls, user: User) -> 'CustomAccessToken':  # ty: ignore[incompatible-method-override]
         """Create a token for the given user with basic claims."""
         # `Token.for_user` is itself mistyped upstream as `cls: T` instead of `cls: type[T]`, so ty
         # sees `cls` (a class object) checked against a bound of `Token` (an instance) and always
@@ -86,7 +86,7 @@ class CustomRefreshToken(Token):
 
     @classmethod
     # See `CustomAccessToken.for_user` above for why this narrowing is suppressed rather than fixed.
-    def for_user(cls, user: User) -> 'CustomRefreshToken':  # ty: ignore[invalid-method-override]
+    def for_user(cls, user: User) -> 'CustomRefreshToken':  # ty: ignore[incompatible-method-override]
         """Create a refresh token for the given user."""
         # See `CustomAccessToken.for_user` above for why this is suppressed rather than fixed.
         token = super().for_user(user)  # ty: ignore[invalid-argument-type]
@@ -119,7 +119,7 @@ class PasswordResetToken(Token):
 
     @classmethod
     # See `CustomAccessToken.for_user` above for why this narrowing is suppressed rather than fixed.
-    def for_user(cls, user: User) -> 'PasswordResetToken':  # ty: ignore[invalid-method-override]
+    def for_user(cls, user: User) -> 'PasswordResetToken':  # ty: ignore[incompatible-method-override]
         """Create a reset token for the given user, bound to the address it is being sent to."""
         # See `CustomAccessToken.for_user` above for why this is suppressed rather than fixed.
         token = super().for_user(user)  # ty: ignore[invalid-argument-type]

@@ -252,7 +252,7 @@ def test_bulk_form_bounds():
 
 def test_bulk_and_duplicate_need_the_add_permission(client):
     staff = _user(is_staff=True)
-    staff.user_permissions.add(Permission.objects.get(codename='view_promocode'))  # ty: ignore[unresolved-attribute]
+    staff.user_permissions.add(Permission.objects.get(codename='view_promocode'))  # ty: ignore[missing-attribute]
     client.force_login(staff)
     assert client.get(CHANGELIST).status_code == 200
     assert 'Create many' not in client.get(CHANGELIST).content.decode()
@@ -269,7 +269,7 @@ def test_redemption_admin_is_read_only(client, admin_user):
 
     html = client.get(reverse('custom_admin:billing_promoredemption_changelist')).content.decode()
     assert 'LAUNCH2026' in html
-    assert redemption.user.email in html  # ty: ignore[unresolved-attribute]
+    assert redemption.user.email in html  # ty: ignore[missing-attribute]
 
     assert client.get(reverse('custom_admin:billing_promoredemption_add')).status_code == 403
     response = client.get(

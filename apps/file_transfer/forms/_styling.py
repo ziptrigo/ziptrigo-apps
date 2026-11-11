@@ -16,7 +16,7 @@ class StyledFormMixin:
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for field in self.fields.values():  # ty: ignore[unresolved-attribute]
+        for field in self.fields.values():  # ty: ignore[missing-attribute]
             widget = field.widget
             if getattr(widget, 'self_styled', False):
                 continue

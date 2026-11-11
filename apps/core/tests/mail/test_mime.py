@@ -1332,7 +1332,7 @@ class TestStrippedEml:
 
         assert len(stripped) < 20 * 1024
         msg = mime.parse_message(stripped)
-        html_part = msg.get_body(preferencelist=('html',))  # ty: ignore[unresolved-attribute]
+        html_part = msg.get_body(preferencelist=('html',))  # ty: ignore[missing-attribute]
         assert html_part is not None
         assert html_part['X-Receipts-Skipped'] == mime.SKIP_TOO_LARGE
         assert mime.part_text(html_part).strip() == ''

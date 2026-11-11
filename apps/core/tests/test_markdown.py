@@ -35,7 +35,7 @@ def resolver(known: dict[int, str]):
         calls.append(list(numbers))
         return {n: known[n] for n in numbers if n in known}
 
-    resolve.calls = calls  # ty: ignore[unresolved-attribute]
+    resolve.calls = calls  # ty: ignore[missing-attribute]
     return resolve
 
 

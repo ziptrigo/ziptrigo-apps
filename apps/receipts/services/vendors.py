@@ -741,11 +741,11 @@ def with_alias_names(vendors: Iterable[Vendor]) -> None:
     first, for the Vendors page ("Also read as ..."). One query for all of them."""
     by_id = {vendor.pk: vendor for vendor in vendors}
     for vendor in by_id.values():
-        vendor.also_read_as = []  # ty: ignore[unresolved-attribute]
+        vendor.also_read_as = []  # ty: ignore[missing-attribute]
     own_keys = {vendor.pk: normalize_key(vendor.name) for vendor in by_id.values()}
     for alias in VendorAlias.objects.filter(vendor_id__in=by_id).order_by('created_at', 'pk'):
         if alias.key != own_keys[alias.vendor_id]:
-            by_id[alias.vendor_id].also_read_as.append(alias.name)  # ty: ignore[unresolved-attribute]
+            by_id[alias.vendor_id].also_read_as.append(alias.name)  # ty: ignore[missing-attribute]
 
 
 def count_receipts(vendor: Vendor) -> int:

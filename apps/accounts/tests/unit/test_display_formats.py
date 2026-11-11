@@ -43,8 +43,8 @@ def test_defaults_are_month_first_and_twelve_hour(user):
 def test_columns_have_a_database_default():
     """So a container of the previous release, which doesn't know the columns, can still insert
     users while the migration runs."""
-    assert User._meta.get_field('date_format').db_default == 'mdy'  # ty: ignore[unresolved-attribute]
-    assert User._meta.get_field('time_format').db_default == '12h'  # ty: ignore[unresolved-attribute]
+    assert User._meta.get_field('date_format').db_default == 'mdy'  # ty: ignore[missing-attribute]
+    assert User._meta.get_field('time_format').db_default == '12h'  # ty: ignore[missing-attribute]
 
 
 def test_set_display_formats_saves_both(user):

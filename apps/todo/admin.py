@@ -187,7 +187,7 @@ class LabelAdmin(ReadOnlyModelAdmin):
 
     @admin.display(description='Tasks', ordering='_task_count')
     def task_count(self, obj: Label) -> int:
-        return obj._task_count  # ty: ignore[unresolved-attribute]
+        return obj._task_count  # ty: ignore[missing-attribute]
 
 
 class CommentRevisionInline(admin.TabularInline):
