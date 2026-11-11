@@ -123,6 +123,35 @@ main[tabindex='-1']:focus-visible { box-shadow: none; }
 button[aria-invalid='true'] { border-color: #f87171; }
 .dark button[aria-invalid='true'] { border-color: #f87171; }
 input[type='checkbox'], input[type='radio'] { accent-color: rgb(var(--c-brand-500)); }
+/* Native checkboxes and radios are bright white in dark mode, far louder than the muted controls around them
+ * (the "?" help button is gray-400). Draw them ourselves there: a gray-400 box, the accent when checked, with a
+ * check mark or a dot. The visually hidden ones (`.sr-only`, which drive a styled sibling) are left alone. */
+.dark :is(input[type='checkbox'], input[type='radio']):not(.sr-only) {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid rgb(var(--c-gray-500));
+  background-color: rgb(var(--c-gray-400));
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  vertical-align: middle;
+}
+.dark input[type='checkbox']:not(.sr-only) { border-radius: 0.25rem; }
+.dark input[type='radio']:not(.sr-only) { border-radius: 9999px; }
+.dark :is(input[type='checkbox'], input[type='radio']):not(.sr-only):checked {
+  border-color: rgb(var(--c-brand-500));
+  background-color: rgb(var(--c-brand-500));
+}
+.dark input[type='checkbox']:not(.sr-only):checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8.5l2.7 2.7L12 5.5'/%3E%3C/svg%3E");
+}
+.dark input[type='radio']:not(.sr-only):checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3' fill='white'/%3E%3C/svg%3E");
+}
+.dark :is(input[type='checkbox'], input[type='radio']):not(.sr-only):disabled { opacity: 0.5; }
 input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outline: 2px solid rgb(var(--c-brand-300)); outline-offset: 2px; }
 
 /* Skeleton rows shimmer while an htmx list loads. */
