@@ -542,7 +542,7 @@ check the image and the link text.
 |---|---|---|
 | 1 | Visitor window: `/t/<SLUG_A>/`. | A subtle **QR code** button with a small QR icon next to the "Available until ..." line. No popup is visible. |
 | 2 | Click **QR code**. | A popup fades in over a dimmed, slightly blurred page: title "QR code", "Scan it with a phone to open this download page.", a black-on-white QR image about 240 px square, the full link `http://localhost:8765/t/<SLUG_A>/` (the site's configured base URL, in a monospace line that wraps rather than overflowing) and a **Close** button. Keyboard focus is on **Close** (visible ring). |
-| 3 | If you can decode the image (a QR reader, `zbarimg`, or save it from the page: right-click > save image) read it. | It decodes to exactly `http://localhost:8765/t/<SLUG_A>/`. The image has alt text starting "QR code of the link to this download page". |
+| 3 | If you can decode the image (a QR reader, `zbarimg`, or save it from the page: right-click > save image) read it. | It decodes to exactly `http://localhost:8765/t/<SLUG_A>/`. The image has the alt text "QR code of the link to this download page". |
 | 4 | Press Tab and Shift+Tab. | Focus stays on **Close** (the popup is the only thing reachable). |
 | 5 | Press Escape. | The popup fades out; focus is back on the **QR code** button. |
 | 6 | Open it again and click on the dimmed backdrop outside the panel; open it again and click **Close**. | Both close it and return focus to the button. Clicking inside the panel (on the image or the text) does not close it. |

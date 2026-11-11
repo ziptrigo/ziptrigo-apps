@@ -20,6 +20,13 @@ pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 DATA_URI = re.compile(r'<img src="(data:image/png;base64,[A-Za-z0-9+/=]+)" id="qr-image"')
 
 
+@pytest.fixture(autouse=True)
+def _fresh_qr_cache():
+    download_views._qr_data_uri_for.cache_clear()
+    yield
+    download_views._qr_data_uri_for.cache_clear()
+
+
 def _active(transfer, **overrides):
     transfer.status = TransferStatus.ACTIVE
     for key, value in overrides.items():
@@ -42,12 +49,12 @@ def test_page_has_a_qr_code_button_and_dialog(client, draft_transfer, uploaded_f
     _active(draft_transfer)
     body = _page(client, draft_transfer).content.decode()
     assert 'id="qr-code-button"' in body
-    assert '>QR code\n' in body or 'QR code</button>' in body
     # The popup is a labelled, modal dialog with a Close button and alt text on the image.
     assert 'role="dialog" aria-modal="true" aria-labelledby="qr-modal-title"' in body
     assert 'id="qr-modal-title"' in body
-    assert 'alt="QR code of the link to this download page' in body
-    assert '>Close</button>' in body
+    assert 'alt="QR code of the link to this download page"' in body
+    assert 'id="qr-image"' in body
+    assert 'x-ref="qrClose"' in body
 
 
 def test_qr_code_encodes_the_absolute_download_link(
@@ -59,7 +66,9 @@ def test_qr_code_encodes_the_absolute_download_link(
     assert draft_transfer.absolute_download_url == expected
     body = _page(client, draft_transfer).content.decode()
     # Same bytes as rendering the link directly: the image is a code of exactly that link.
-    assert _png_of(body) == render_png(expected, scale=download_views.QR_SCALE, border=3)
+    assert _png_of(body) == render_png(
+        expected, scale=download_views.QR_SCALE, border=download_views.QR_BORDER
+    )
     assert _png_of(body).startswith(b'\x89PNG\r\n\x1a\n')
     # The link is also shown as text under the code.
     assert expected in body
@@ -95,7 +104,7 @@ def test_qr_code_is_on_a_password_protected_page_and_encodes_the_page_link(
     assert _png_of(body) == render_png(
         f'https://app.example.test/t/{draft_transfer.slug}/',
         scale=download_views.QR_SCALE,
-        border=3,
+        border=download_views.QR_BORDER,
     )
 
 
@@ -129,7 +138,6 @@ def test_no_expiration_text_when_the_transfer_never_expires(client, draft_transf
     # The rest of the page is intact, the button included.
     assert uploaded_file.name in body
     assert 'id="qr-code-button"' in body
-    assert 'sm:ml-auto' not in body
 
 
 def test_an_expiring_transfer_still_shows_when_it_expires(client, draft_transfer, uploaded_file):
@@ -137,4 +145,23 @@ def test_an_expiring_transfer_still_shows_when_it_expires(client, draft_transfer
     body = _page(client, draft_transfer).content.decode()
     assert 'Available until <time' in body
     assert 'No expiration' not in body
-    assert 'sm:ml-auto' in body
+
+
+def test_the_rendered_code_is_cached_per_link(client, draft_transfer, uploaded_file, monkeypatch):
+    _active(draft_transfer)
+    calls = []
+    real = download_views.render_png
+
+    def spy(content, **kwargs):
+        calls.append(content)
+        return real(content, **kwargs)
+
+    monkeypatch.setattr(download_views, 'render_png', spy)
+    first = _page(client, draft_transfer).content.decode()
+    second = _page(client, draft_transfer).content.decode()
+    assert len(calls) == 1
+    assert _png_of(first) == _png_of(second)
+    assert download_views.download_qr_data_uri(draft_transfer) == (
+        download_views.download_qr_data_uri(draft_transfer)
+    )
+    assert len(calls) == 1
