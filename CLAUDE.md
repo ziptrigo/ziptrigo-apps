@@ -2106,7 +2106,15 @@ a normal HTMX form and follows the 422 convention. The public download page (`/t
 `apps/file_transfer/download_urls.py`) needs no login and never explains *why* a transfer isn't
 available (expired, disabled, suspended, deleted, or its download limit reached all render the same
 neutral page). A password gates the download links (including "download all", below), not the
-file list itself. `DownloadEvent.ip` is read from `X-Real-IP`
+file list itself. **QR code** (issue #267): a subtle `QR code` button opens an Alpine popup (the
+confirmation modal's look, `role="dialog"`, focus on Close, Escape / backdrop / Close return focus to the
+button) with a black-on-white code of the page's own link, `Transfer.absolute_download_url`
+(`BASE_URL` + the path, never the request's host), rendered in memory by `apps.core.services.qr_image.render_png`
+as a `data:` PNG in the page itself (`views.download.download_qr_data_uri`): no endpoint, no stored file, and
+only on an available transfer's page (the neutral page has none). A password-protected page has it too; it
+encodes the page, which still asks for the password. A transfer with no expiry shows **no** expiry text on this
+page (the dashboard still says "Expires: Never"). Tests: `tests/test_download_qr_code.py`, AI case FT-53.
+`DownloadEvent.ip` is read from `X-Real-IP`
 (`apps.core.services.client_ip.client_ip`, shared by the download views, the anonymous send flow,
 and every per-IP rate limit -- see "Rate limiting" above's "Trusted proxy" for the full story),
 never the client-controlled `X-Forwarded-For` -- **this requires nginx to set `X-Real-IP` from the

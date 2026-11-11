@@ -16,7 +16,8 @@ The `apps/file_transfer` web UI, against the real local S3 (Floci) and real emai
   downloads, password, disable, re-enable, delete now, the "Resume it" link for an unfinished
   upload);
 - the public download page `/t/<slug>/` (file list, per-file download with the right name and
-  bytes, password gate, "Download all (.zip)" built by streaming from S3, the neutral "no longer
+  bytes, password gate, "Download all (.zip)" built by streaming from S3, the **QR code** popup of
+  the page's own link, no expiry text for a transfer that never expires, the neutral "no longer
   available" page, "Report this transfer");
 - the daily jobs' visible effects (metering, suspension and its in-app notification, re-enabling
   on a top-up, the suspension grace period, the expiry reminder, natural expiry, the deferred file
@@ -489,7 +490,7 @@ offers to resume the unfinished draft.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Visitor window: `/t/<SLUG_A>/`. | Title "qa-report.txt - ZipTrigo". Heading **qa-report.txt**, the message on two lines ("Hello from QA." / "Second line."), "Available until <Mon 20, YYYY>, 11:59 PM" (the public wording, local time). |
-| 2 | Read the file list. | Sorted by name: `qa-notes.txt` "1.5 KB" and `qa-report.txt` "2.9 KB", each with **Download**. Below: **Download all (.zip)** and, under a divider, a small "Report this transfer" link. |
+| 2 | Read the file list. | Sorted by name: `qa-notes.txt` "1.5 KB" and `qa-report.txt` "2.9 KB", each with **Download**. Below: **Download all (.zip)** and, under a divider, a small "Report this transfer" link. Under the "Available until" line (on the same row from `sm` up, at the right) a subtle **QR code** button (FT-53). |
 | 3 | Click **Download** for `qa-report.txt`. | The browser saves a file named `qa-report.txt` (3,000 bytes, 2,999 `R` characters and a newline). In the network log the request went to `/t/<SLUG_A>/files/<id>/` and was redirected (302) to a presigned URL on `http://localhost:4566/` (the bucket). Run `ftFetch('<that presigned URL>')` (see Test data; it doesn't count a download): status 200, `bytes` 3000, `sha256` `d47d8e2f...20d5e6` as in Test data. |
 | 4 | Open `/__e2e__/mail/?to=qa.user@example.com`. | Newest email subject `"qa-report.txt" was downloaded`, body `Someone just downloaded "qa-report.txt" from your transfer "qa-report.txt".` and "Manage this transfer: http://localhost:8765/transfer/". Click that link in the main window: the dashboard opens. |
 
@@ -527,6 +528,29 @@ file URL is gated too.
 | 3 | Enter `Open-Sesame-42` and click **Unlock**. | Redirected to `/t/<SLUG_B>/`; the file now has a **Download** button; no password form. |
 | 4 | Copy the Download link's `href` (do **not** click it). Open that href in a third clean context (or clear the visitor window's cookies and open it there). | Redirected to `/t/<SLUG_B>/` with the file **Locked** -- the direct URL doesn't bypass the password, and nothing downloads. If you cleared the visitor window's cookies, unlock B again with `Open-Sesame-42` before FT-24. |
 | 5 | In that clean (locked) context, click **Report this transfer**. | The report form opens without asking for the password (reporting works for anyone with the link). Don't submit it. |
+
+### FT-53 QR code on the download page
+
+**Purpose:** the public download page offers a **QR code** button that pops up a code of the page's
+own link (issue #267), and a transfer with no expiry says nothing about expiry.
+**Preconditions:** FT-23 (B still available, with 0 downloads: this case runs before FT-24 ends it),
+FT-20 (A, with an expiry) and FT-10 (`SLUG_C`, no expiry, still available: FT-26 ends it); visitor
+window logged out. A phone, or a QR reader in the browser tool, helps; without one
+check the image and the link text.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor window: `/t/<SLUG_A>/`. | A subtle **QR code** button with a small QR icon next to the "Available until ..." line. No popup is visible. |
+| 2 | Click **QR code**. | A popup fades in over a dimmed, slightly blurred page: title "QR code", "Scan it with a phone to open this download page.", a black-on-white QR image about 240 px square, the full link `http://localhost:8765/t/<SLUG_A>/` (the site's configured base URL, in a monospace line that wraps rather than overflowing) and a **Close** button. Keyboard focus is on **Close** (visible ring). |
+| 3 | If you can decode the image (a QR reader, `zbarimg`, or save it from the page: right-click > save image) read it. | It decodes to exactly `http://localhost:8765/t/<SLUG_A>/`. The image has alt text starting "QR code of the link to this download page". |
+| 4 | Press Tab and Shift+Tab. | Focus stays on **Close** (the popup is the only thing reachable). |
+| 5 | Press Escape. | The popup fades out; focus is back on the **QR code** button. |
+| 6 | Open it again and click on the dimmed backdrop outside the panel; open it again and click **Close**. | Both close it and return focus to the button. Clicking inside the panel (on the image or the text) does not close it. |
+| 7 | Open `/t/<SLUG_B>/` (password protected, locked) and click **QR code**. | The popup works the same and shows `http://localhost:8765/t/<SLUG_B>/`: the code is the page's link, which still asks for the password; the file stays **Locked**. |
+| 8 | Open `/t/<SLUG_C>/` (no expiry). | There is **no** "No expiration" or "Available until" text anywhere on the page. The **QR code** button sits on its own under the title, left-aligned, with normal spacing before the file list. Its popup works. |
+| 9 | Emulate dark mode, then a 375 px wide viewport, and open the popup on `/t/<SLUG_A>/`. | Dark mode: a dark panel with readable text and Close button, and the QR image still black on white (it must scan). At 375 px: the panel fits with a margin on both sides, the image and the link line do not overflow, the page behind does not scroll sideways. On the page itself the button wraps under the expiry line rather than overflowing. |
+| 10 | Open `/t/AAAAAAAAAAAAAAAAAAAAAA/` (unknown slug). | The neutral "This transfer is no longer available" page (404): no QR code, no button. |
+| 11 | Main window: `/transfer/`. | Dashboard rows still say "Expires: Never" for a transfer with no expiry and the Expiry select still offers "No expiration" (only the public page lost the wording). |
 
 ### FT-24 Max downloads reached: the neutral page
 
@@ -762,7 +786,7 @@ itself written in parts.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor window: `/t/<SLUG_BIG>/`. | Heading **qa-big.bin**, "No expiration", the files sorted by name: `qa-big.bin` "70.0 MB", `qa-dup.txt` "10 bytes" and `qa-dup.txt` "20 bytes" (either order), `relatório café.txt` "5 bytes", each with **Download**, and **Download all (.zip)**. |
+| 1 | Visitor window: `/t/<SLUG_BIG>/`. | Heading **qa-big.bin**, **no** expiry line at all (no "No expiration", no "Available until"; the **QR code** button stands alone, left-aligned, with no empty gap or stray separator), the files sorted by name: `qa-big.bin` "70.0 MB", `qa-dup.txt` "10 bytes" and `qa-dup.txt` "20 bytes" (either order), `relatório café.txt` "5 bytes", each with **Download**, and **Download all (.zip)**. |
 | 2 | Define `ftFetch` and run `ftFetch(<the href of qa-big.bin's Download link>)` (counts one download). | `status` 200, `url` a presigned URL on `http://localhost:4566/`, `bytes` 73400320 and `sha256` `24f1c89f87a1ed78b333d3560219a9faa42c74da56497d5eb9275dbcb0eed34a`: the two parts were joined in order. |
 | 3 | Click **Download** for `relatório café.txt`. | The browser saves a file named exactly `relatório café.txt` (accents and space kept: not `relat_rio`, not percent-encoded), containing `Olá` and a newline (5 bytes). |
 | 4 | Open `/t/<SLUG_BIG>/zip/` directly (before asking for the zip). | Redirected back to `/t/<SLUG_BIG>/`; nothing downloads (no zip yet, so no download is counted). |

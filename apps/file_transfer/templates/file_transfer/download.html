@@ -4,7 +4,7 @@
 {% block title %}{{ transfer.display_name }} - ZipTrigo{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8 max-w-2xl" x-data="{ reportOpen: false }">
+<div class="container mx-auto px-4 py-8 max-w-2xl" x-data="{ reportOpen: false, qrOpen: false }">
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
         <h1 class="text-2xl font-semibold tracking-tight mb-4 text-gray-900 dark:text-gray-100">{{ transfer.display_name }}</h1>
 
@@ -12,9 +12,20 @@
         <p class="text-gray-700 dark:text-gray-300 whitespace-pre-line mb-6">{{ transfer.message }}</p>
         {% endif %}
 
-        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-            {% if transfer.expires_at %}Available until {% local_time transfer.expires_at %}{% else %}No expiration{% endif %}
-        </p>
+        {% comment %}Nothing about expiry is said for a transfer that never expires. The QR code button
+           opens a popup with a code of this page's own link (issue #267); it sits beside the expiry
+           line when there is one and stays on its own otherwise.{% endcomment %}
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-6">
+            {% if transfer.expires_at %}
+            <p class="text-sm text-gray-500 dark:text-gray-400">Available until {% local_time transfer.expires_at %}</p>
+            {% endif %}
+            <button type="button" x-ref="qrTrigger" id="qr-code-button"
+                    aria-haspopup="dialog" aria-controls="qr-modal" :aria-expanded="qrOpen.toString()"
+                    @click="qrOpen = true; $nextTick(() => { if (qrOpen) $refs.qrClose.focus(); })"
+                    class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap{% if transfer.expires_at %} sm:ml-auto{% endif %}">
+                <i class="fas fa-qrcode mr-1" aria-hidden="true"></i>QR code
+            </button>
+        </div>
 
         {% comment %}The file list (names and sizes) is always shown -- only the download itself is
            password-gated (spec section 3).{% endcomment %}
@@ -70,6 +81,40 @@
             </button>
             <div x-show="reportOpen" x-cloak class="mt-3">
                 {% include 'file_transfer/partials/report_box.html' %}
+            </div>
+        </div>
+    </div>
+
+    {% comment %}The QR code popup (design system 10.9: the confirmation modal's overlay and panel). The
+       image stays black on white in every theme so it scans in dark mode too. Its only control is
+       Close, so Tab stays on it; Escape and a click on the backdrop close it and focus goes back
+       to the button.{% endcomment %}
+    <div id="qr-modal" x-show="qrOpen" style="display: none"
+         @keydown.escape.window="if (qrOpen) { qrOpen = false; $refs.qrTrigger.focus(); }"
+         @click.self="qrOpen = false; $refs.qrTrigger.focus()"
+         x-transition:enter="transition-opacity duration-[220ms] ease-out"
+         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+         x-transition:leave="transition-opacity duration-[140ms] ease-in"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70 backdrop-blur-[2px]">
+        <div x-show="qrOpen" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title"
+             @keydown.tab.prevent="$refs.qrClose.focus()"
+             x-transition:enter="transform transition duration-[220ms] ease-out"
+             x-transition:enter-start="opacity-0 translate-y-2 scale-[.97]" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+             x-transition:leave="transform transition duration-[140ms] ease-in"
+             x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 translate-y-2 scale-[.97]"
+             class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-sm w-full mx-4 p-6">
+            <p id="qr-modal-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">QR code</p>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Scan it with a phone to open this download page.</p>
+            <div class="flex justify-center mb-4">
+                <img src="{{ qr_data_uri }}" id="qr-image" width="240" height="240"
+                     alt="QR code of the link to this download page: {{ transfer.absolute_download_url }}"
+                     class="h-60 w-60 max-w-full bg-white rounded-lg border border-gray-200 dark:border-gray-600">
+            </div>
+            <p class="font-mono text-xs text-gray-500 dark:text-gray-400 break-all mb-6">{{ transfer.absolute_download_url }}</p>
+            <div class="flex justify-end">
+                <button type="button" x-ref="qrClose" @click="qrOpen = false; $refs.qrTrigger.focus()"
+                        class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Close</button>
             </div>
         </div>
     </div>

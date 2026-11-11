@@ -3,6 +3,8 @@ link recipients get by email. Never reveals *why* a transfer isn't available (ex
 suspended, deleted, or its limit reached all render the same neutral page).
 """
 
+import base64
+
 from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
@@ -13,6 +15,7 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.core import ratelimit
 from apps.core.htmx import is_htmx
 from apps.core.services.client_ip import client_ip as _client_ip
+from apps.core.services.qr_image import render_png
 
 from .. import services
 from ..forms import AbuseReportForm, DownloadPasswordForm
@@ -65,6 +68,22 @@ def _password_gated_transfer(request: PublicHttpRequest, slug: str) -> Transfer 
     return transfer
 
 
+#: Pixels per module of the page's QR code. The popup shows it much smaller, so scanners and
+#: high-density screens get a sharp image.
+QR_SCALE = 10
+
+
+def download_qr_data_uri(transfer: Transfer) -> str:
+    """The QR code of the transfer's download link as a `data:` URI of a PNG (issue #267).
+
+    The code encodes the absolute, `BASE_URL`-based link (never anything read from the request), is
+    rendered in memory and stored nowhere. A password-protected transfer needs no special case: the
+    link it encodes is the page that asks for the password.
+    """
+    png = render_png(transfer.absolute_download_url, scale=QR_SCALE, border=3)
+    return f'data:image/png;base64,{base64.b64encode(png).decode("ascii")}'
+
+
 def _context(request: PublicHttpRequest, transfer: Transfer, password_form: DownloadPasswordForm):
     return {
         'transfer': transfer,
@@ -73,6 +92,7 @@ def _context(request: PublicHttpRequest, transfer: Transfer, password_form: Down
         or services.is_unlocked_in_session(request.session, transfer.id, transfer.password_hash),
         'password_form': password_form,
         'report_form': AbuseReportForm(),
+        'qr_data_uri': download_qr_data_uri(transfer),
     }
 
 
