@@ -31,7 +31,7 @@ def _checkbox(content: str) -> str:
 def test_high_contrast_is_off_by_default_with_a_database_default(user):
     user.refresh_from_db()
     assert user.high_contrast is False
-    assert User._meta.get_field('high_contrast').db_default is False  # ty: ignore[unresolved-attribute]
+    assert User._meta.get_field('high_contrast').db_default is False  # ty: ignore[missing-attribute]
 
 
 @pytest.mark.parametrize('enabled', [True, False])

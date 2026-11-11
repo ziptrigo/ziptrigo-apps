@@ -40,7 +40,7 @@ def _staff_with_perms(*codenames: str) -> User:
         # `ManyToManyField` descriptor, not the manager Django's metaclass actually produces --
         # same category of gap as `.objects`/`.DoesNotExist`, see the class-level comment in
         # `apps/qr_code/models/qrcode.py`.
-        staff.user_permissions.add(  # ty: ignore[unresolved-attribute]
+        staff.user_permissions.add(  # ty: ignore[missing-attribute]
             Permission.objects.get(content_type__app_label='file_transfer', codename=codename)
         )
     return staff

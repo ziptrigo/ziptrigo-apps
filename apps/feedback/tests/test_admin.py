@@ -77,7 +77,7 @@ def _staff_with(*codenames: str):
     staff = UserFactory(is_staff=True)
     for codename in codenames:
         # `user_permissions` is a many-to-many manager `ty` can't see through the field type.
-        staff.user_permissions.add(  # ty: ignore[unresolved-attribute]
+        staff.user_permissions.add(  # ty: ignore[missing-attribute]
             Permission.objects.get(content_type__app_label='feedback', codename=codename)
         )
     return staff

@@ -67,7 +67,7 @@ def test_timezone_defaults_to_empty(user):
 def test_timezone_column_has_a_database_default():
     """So a container of the previous release, which doesn't know the column, can still insert
     users while the migration runs."""
-    assert User._meta.get_field('timezone').db_default == ''  # ty: ignore[unresolved-attribute]
+    assert User._meta.get_field('timezone').db_default == ''  # ty: ignore[missing-attribute]
 
 
 def test_field_validator_accepts_empty_and_known_zones(user):

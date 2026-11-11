@@ -14,7 +14,7 @@ class _PasswordBoundUserMixin:
     so changing or resetting a password also revokes every API token issued under the old one."""
 
     def get_user(self, validated_token) -> User:
-        user: User = super().get_user(validated_token)  # ty: ignore[unresolved-attribute]
+        user: User = super().get_user(validated_token)  # ty: ignore[missing-attribute]
         if not matches_password(validated_token, user):
             raise AuthenticationFailed('Token was issued before a password change')
         return user

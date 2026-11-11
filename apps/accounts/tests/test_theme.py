@@ -44,7 +44,7 @@ def test_theme_defaults_to_system(user):
 def test_theme_column_has_a_database_default():
     """So a container of the previous release, which doesn't know the column, can still insert
     users while the migration runs."""
-    assert User._meta.get_field('theme').db_default == 'system'  # ty: ignore[unresolved-attribute]
+    assert User._meta.get_field('theme').db_default == 'system'  # ty: ignore[missing-attribute]
 
 
 @pytest.mark.parametrize('theme', THEMES)

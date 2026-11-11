@@ -213,7 +213,7 @@ def test_non_admin_cannot_add_credits(client, regular_user):
 def _staff_with_perms(*codenames: str) -> User:
     staff = cast(User, UserFactory(is_staff=True))
     perms = Permission.objects.filter(codename__in=codenames)
-    staff.user_permissions.add(*perms)  # ty: ignore[unresolved-attribute]
+    staff.user_permissions.add(*perms)  # ty: ignore[missing-attribute]
     return staff
 
 

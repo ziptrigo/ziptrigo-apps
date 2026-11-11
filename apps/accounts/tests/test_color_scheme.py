@@ -41,7 +41,7 @@ def test_color_scheme_defaults_to_sage(user):
 
 
 def test_color_scheme_column_has_a_database_default():
-    assert User._meta.get_field('color_scheme').db_default == 'sage'  # ty: ignore[unresolved-attribute]
+    assert User._meta.get_field('color_scheme').db_default == 'sage'  # ty: ignore[missing-attribute]
 
 
 @pytest.mark.parametrize('scheme', SCHEME_IDS)

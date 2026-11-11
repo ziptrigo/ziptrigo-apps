@@ -524,7 +524,7 @@ class TestAdmin:
         from django.contrib.auth.models import Permission
 
         staff = make_user(is_staff=True)
-        staff.user_permissions.add(  # ty: ignore[unresolved-attribute]
+        staff.user_permissions.add(  # ty: ignore[missing-attribute]
             Permission.objects.get(codename='view_inboundmessage', content_type__app_label='todo')
         )
         message = InboundMessage.objects.create(s3_key=f'{INBOUND_PREFIX}x', status='failed')
@@ -542,7 +542,7 @@ class TestAdmin:
         from django.contrib.auth.models import Permission
 
         staff = make_user(is_staff=True)
-        staff.user_permissions.add(  # ty: ignore[unresolved-attribute]
+        staff.user_permissions.add(  # ty: ignore[missing-attribute]
             Permission.objects.get(codename='view_inboundmessage', content_type__app_label='todo'),
             Permission.objects.get(
                 codename='change_inboundmessage', content_type__app_label='todo'

@@ -317,7 +317,7 @@ def _rename_context(
     """The rename form's context: the vendor's receipts and the names that keep matching it (the
     modal says so), and the clash with another vendor when there is one."""
     with_alias_names([vendor])
-    known = [vendor.name, *vendor.also_read_as[:_RENAME_NAMES_SHOWN]]  # ty: ignore[unresolved-attribute]
+    known = [vendor.name, *vendor.also_read_as[:_RENAME_NAMES_SHOWN]]  # ty: ignore[missing-attribute]
     return {
         'vendor': vendor,
         'name': vendor.name if name is None else name,
@@ -421,7 +421,7 @@ def _merge_context(
         'errors': errors or [],
         'into': into,
         'keep_id': keep_id,
-        'total': sum(vendor.receipt_count for vendor in vendors),  # ty: ignore[unresolved-attribute]
+        'total': sum(vendor.receipt_count for vendor in vendors),  # ty: ignore[missing-attribute]
     }
     if into:
         source = vendors[0]
@@ -431,7 +431,7 @@ def _merge_context(
     else:
         ordered = sorted(
             vendors,
-            key=lambda v: (not v.vetted, -v.receipt_count, v.name.casefold()),  # ty: ignore[unresolved-attribute]
+            key=lambda v: (not v.vetted, -v.receipt_count, v.name.casefold()),  # ty: ignore[missing-attribute]
         )
         context['vendors'] = ordered
         if keep_id is None:

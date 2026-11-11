@@ -59,7 +59,7 @@ class Recurrence(models.Model):
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
 
     def __str__(self) -> str:
-        return f'{self.rrule} ({self.get_mode_display()})'  # ty: ignore[unresolved-attribute]
+        return f'{self.rrule} ({self.get_mode_display()})'  # ty: ignore[missing-attribute]
 
     @property
     def is_active(self) -> bool:

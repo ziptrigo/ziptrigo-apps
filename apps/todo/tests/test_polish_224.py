@@ -359,7 +359,7 @@ class TestAdminCopy:
     """TODO-F15."""
 
     def test_the_plural_is_spelled_out(self):
-        assert str(ReminderDelivery._meta.verbose_name_plural) == 'reminder deliveries'  # ty: ignore[unresolved-attribute]
+        assert str(ReminderDelivery._meta.verbose_name_plural) == 'reminder deliveries'  # ty: ignore[missing-attribute]
 
     def test_unpaid_is_text_for_the_exception_only(self, funded_user):
         from ..admin import TaskAdmin

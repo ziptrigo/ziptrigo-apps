@@ -141,7 +141,7 @@ def _ratelimit_counter_table() -> str:
     -- see CLAUDE.md's Conventions section on this exact kind of attribute."""
     from ..models import RateLimitCounter  # lazy: avoids a module-load-time model import
 
-    return RateLimitCounter._meta.db_table  # ty: ignore[unresolved-attribute]
+    return RateLimitCounter._meta.db_table  # ty: ignore[missing-attribute]
 
 
 def _db_increment(storage_key: str, window_end_epoch: int) -> int:

@@ -103,7 +103,7 @@ class VendorAdmin(ReadOnlyModelAdmin):
 
     @admin.display(description='Receipts', ordering='_receipt_count')
     def receipt_count(self, obj: Vendor) -> int:
-        return obj._receipt_count  # ty: ignore[unresolved-attribute]
+        return obj._receipt_count  # ty: ignore[missing-attribute]
 
 
 class InboundEmailInline(admin.TabularInline):

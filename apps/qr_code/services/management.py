@@ -33,7 +33,7 @@ MAX_CONTENT_LENGTH = 1000
 MIN_SIZE, MAX_SIZE = 1, 50
 MIN_BORDER, MAX_BORDER = 0, 20
 # ty can't see Django's `_meta`; this is the colour columns' max_length.
-MAX_COLOR_LENGTH = QRCode._meta.get_field('foreground_color').max_length or 0  # ty: ignore[unresolved-attribute]
+MAX_COLOR_LENGTH = QRCode._meta.get_field('foreground_color').max_length or 0  # ty: ignore[missing-attribute]
 
 MAX_SHORT_CODE_LENGTH = 16
 SHORT_CODE_PATTERN = re.compile(rf'^[A-Za-z0-9]{{4,{MAX_SHORT_CODE_LENGTH}}}\Z')

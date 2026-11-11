@@ -82,9 +82,9 @@ from email import policy
 
 # Not in typeshed (they are public module-level names of the stdlib parser, just undeclared).
 from email.feedparser import (
-    BufferedSubFile,  # ty: ignore[unresolved-import]
-    NeedMoreData,  # ty: ignore[unresolved-import]
-    headerRE,  # ty: ignore[unresolved-import]
+    BufferedSubFile,  # ty: ignore[import-not-found]
+    NeedMoreData,  # ty: ignore[import-not-found]
+    headerRE,  # ty: ignore[import-not-found]
 )
 from email.message import EmailMessage, Message
 from email.parser import BytesFeedParser
@@ -283,7 +283,7 @@ def parse_message(raw: bytes) -> Message:
     # what we expect; a stdlib that has changed must fail the ingest, not silently skip the limits.
     if type(getattr(parser, '_input', None)) is not BufferedSubFile:
         raise RuntimeError('The stdlib email parser has changed: cannot bound its header reads.')
-    parser._input = lines  # ty: ignore[unresolved-attribute]
+    parser._input = lines  # ty: ignore[missing-attribute]
     # In chunks, like `BytesParser.parsebytes` does, so only a chunk is split into lines at a time.
     for start in range(0, len(raw), 8192):
         parser.feed(raw[start : start + 8192])
@@ -959,7 +959,7 @@ def is_attachment_like(part: Message) -> bool:
 def part_text(part: Message) -> str:
     """The decoded text of a `text/*` part (its declared charset, replacing what won't decode)."""
     try:
-        content = part.get_content()  # ty: ignore[unresolved-attribute]
+        content = part.get_content()  # ty: ignore[missing-attribute]
         if isinstance(content, str):
             return content
     except Exception:

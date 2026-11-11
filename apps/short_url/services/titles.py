@@ -92,7 +92,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def connect(self) -> None:
         sock = socket.create_connection((self._ip, self.port), self.timeout)
         # `server_hostname` is the real host: the certificate must be valid for it.
-        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)  # ty: ignore[unresolved-attribute]
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)  # ty: ignore[missing-attribute]
 
 
 def _abort(connection: http.client.HTTPConnection) -> None:

@@ -31,7 +31,7 @@ def _tiles(content: str) -> list[tuple[str, bool]]:
     form = re.search(r'<form id="apps-form".*?</form>', content, flags=re.DOTALL)
     assert form is not None
     inputs = re.findall(r'<input type="checkbox"[^>]*>', form.group(0))
-    return [(re.search(r'value="(.*?)"', tag).group(1), 'checked' in tag) for tag in inputs]  # ty: ignore[unresolved-attribute]
+    return [(re.search(r'value="(.*?)"', tag).group(1), 'checked' in tag) for tag in inputs]  # ty: ignore[missing-union-attribute]
 
 
 def _order_inputs(content: str) -> list[str]:
@@ -53,7 +53,7 @@ def test_columns_have_database_defaults():
     """So a container of the previous release, which doesn't know the columns, can still insert
     users while the migration runs."""
     for name in ('app_order', 'hidden_apps'):
-        assert User._meta.get_field(name).db_default == []  # ty: ignore[unresolved-attribute]
+        assert User._meta.get_field(name).db_default == []  # ty: ignore[missing-attribute]
 
 
 def test_set_app_preferences_saves_order_and_hidden_in_order(user):

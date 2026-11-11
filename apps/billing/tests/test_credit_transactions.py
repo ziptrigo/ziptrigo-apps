@@ -89,7 +89,7 @@ def test_credit_transaction_related_name():
 
     # The reverse accessor is added at runtime by `CreditTransaction.user`'s `related_name`; `User`
     # can't declare it, since `accounts` sits below `billing` and must not import it.
-    assert user.credit_transactions.count() == 2  # ty: ignore[unresolved-attribute]
+    assert user.credit_transactions.count() == 2  # ty: ignore[missing-attribute]
 
 
 def test_credit_transaction_cascade_delete():

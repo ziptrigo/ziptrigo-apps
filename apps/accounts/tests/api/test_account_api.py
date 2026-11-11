@@ -150,7 +150,7 @@ def test_name_only_change_needs_no_password(client, user, sent_confirmations):
 def test_name_longer_than_the_model_field_is_a_422_not_a_500(client, user, sent_confirmations):
     from apps.accounts.schemas.account import NAME_MAX_LENGTH
 
-    assert NAME_MAX_LENGTH == User._meta.get_field('name').max_length  # ty: ignore[unresolved-attribute]
+    assert NAME_MAX_LENGTH == User._meta.get_field('name').max_length  # ty: ignore[missing-attribute]
 
     ok = _put(client, user, {'name': 'x' * NAME_MAX_LENGTH}, password=None)
     too_long = _put(client, user, {'name': 'x' * (NAME_MAX_LENGTH + 1)}, password=None)
