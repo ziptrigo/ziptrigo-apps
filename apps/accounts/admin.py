@@ -17,7 +17,7 @@ from .services.timezones import set_timezone
 # their own admins refuse delete (a ledger row must not be removed by hand, but deleting the
 # account removes ledger and balance together, which keeps them consistent). Named by label because
 # `accounts` can't import them. Receipts' files are deleted by its own `pre_delete(User)` receiver.
-CASCADE_WITH_USER_APP_LABELS = ('billing', 'receipts', 'short_url', 'todo')
+CASCADE_WITH_USER_APP_LABELS = ('billing', 'receipts', 'short_url', 'todo', 'notes')
 # The same, for single models (`'<app label>.<model name>'`) of an app that has other models which
 # must keep asking: `core` is a grab bag, so only its notifications and push subscriptions and
 # answers (issue #239; all read-only in the admin) are listed, and a future `core` model with a

@@ -1,0 +1,93 @@
+/* The Notes pages: the rendered Markdown of a note (`.note-body`, shared by the note page, the
+   editor's preview and the history) and the tag chips' dark-mode colour. Colours come from the
+   scheme variables, never a hex (the code colours are core/css/highlight.css). */
+
+.dark input.task-list-item-checkbox { color-scheme: dark; }
+.dark .tag-chip { color: var(--chip-dark) !important; }
+
+.note-body {
+    font-size: 0.875rem;
+    line-height: 1.65;
+    color: rgb(var(--c-gray-800));
+    overflow-wrap: anywhere;
+}
+.dark .note-body { color: rgb(var(--c-gray-200)); }
+.note-body > :last-child { margin-bottom: 0; }
+.note-body p { margin-bottom: 0.75rem; }
+.note-body h1, .note-body h2, .note-body h3, .note-body h4, .note-body h5, .note-body h6 {
+    font-weight: 600;
+    margin: 1.25rem 0 0.5rem;
+    color: rgb(var(--c-gray-900));
+}
+.dark .note-body h1, .dark .note-body h2, .dark .note-body h3,
+.dark .note-body h4, .dark .note-body h5, .dark .note-body h6 { color: rgb(var(--c-gray-100)); }
+.note-body h1 { font-size: 1.5rem; }
+.note-body h2 { font-size: 1.25rem; }
+.note-body h3 { font-size: 1.125rem; }
+.note-body ul { list-style: disc; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+.note-body ol { list-style: decimal; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+.note-body li > ul, .note-body li > ol { margin-bottom: 0; }
+.note-body li.task-list-item { list-style: none; margin-left: -1.5rem; }
+.note-body li.task-list-item > input { margin-right: 0.5rem; }
+.note-body pre {
+    position: relative;
+    overflow-x: auto;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+.note-body pre:not(.hl) { background: rgb(var(--c-gray-100)); }
+.dark .note-body pre:not(.hl) { background: rgb(var(--c-gray-900)); }
+.note-body code { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+.note-body :not(pre) > code {
+    border-radius: 0.25rem;
+    padding: 0.05rem 0.3rem;
+    background: rgb(var(--c-gray-100));
+}
+.dark .note-body :not(pre) > code { background: rgb(var(--c-gray-900)); }
+.note-body blockquote {
+    border-left: 4px solid rgb(var(--c-brand-200));
+    padding-left: 0.75rem;
+    margin-bottom: 0.75rem;
+    color: rgb(var(--c-gray-600));
+}
+.dark .note-body blockquote { color: rgb(var(--c-gray-400)); }
+.note-body a { color: rgb(var(--c-brand-600)); text-decoration: underline; }
+.dark .note-body a { color: rgb(var(--c-brand-300)); }
+.note-body hr { margin: 1rem 0; border-color: rgb(var(--c-gray-200)); }
+.dark .note-body hr { border-color: rgb(var(--c-gray-700)); }
+.note-body .md-table { margin-bottom: 0.75rem; }
+.note-body table { border-collapse: collapse; }
+.note-body th { font-weight: 600; background: rgb(var(--c-gray-50)); }
+.dark .note-body th { background: rgb(var(--c-gray-800)); }
+.note-body .text-left { text-align: left; }
+.note-body .text-center { text-align: center; }
+.note-body .text-right { text-align: right; }
+
+/* The copy button note_view.js puts on every code block. */
+.note-body .note-copy-code {
+    position: absolute;
+    top: 0.375rem;
+    right: 0.375rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    background: rgb(var(--c-surface));
+    color: rgb(var(--c-gray-700));
+    border: 1px solid rgb(var(--c-gray-200));
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+.dark .note-body .note-copy-code {
+    background: rgb(var(--c-gray-800));
+    color: rgb(var(--c-gray-200));
+    border-color: rgb(var(--c-gray-700));
+}
+.note-body pre:hover .note-copy-code,
+.note-body .note-copy-code:focus-visible { opacity: 1; }
+@media (hover: none) { .note-body .note-copy-code { opacity: 1; } }

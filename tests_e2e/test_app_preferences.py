@@ -37,6 +37,7 @@ def test_switch_an_app_off_and_reorder_with_the_keyboard(
             'Receipts',
             'Short URLs',
             'To-do',
+            'Notes',
         ]
 
         # Switching an app off saves at once and drops it from the header.
@@ -44,7 +45,7 @@ def test_switch_an_app_off_and_reorder_with_the_keyboard(
             page.get_by_role('checkbox', name='Receipts').uncheck()
         assert saved.value.status == 200
         expect(page.locator('#product-nav a[aria-label="Receipts"]')).to_have_count(0)
-        assert _nav_names(page) == ['QR Codes', 'File Transfer', 'Short URLs', 'To-do']
+        assert _nav_names(page) == ['QR Codes', 'File Transfer', 'Short URLs', 'To-do', 'Notes']
 
         # The arrow keys on a tile's handle move it; focus stays on the handle.
         handle = page.get_by_role('button', name='Reorder To-do')
@@ -55,13 +56,13 @@ def test_switch_an_app_off_and_reorder_with_the_keyboard(
                 page.keyboard.press('ArrowUp')
         assert moved.value.status == 200
         expect(handle).to_be_focused()
-        expect(page.locator('[data-apps-live]')).to_contain_text('To-do moved to position 1 of 5.')
-        assert _nav_names(page) == ['To-do', 'QR Codes', 'File Transfer', 'Short URLs']
+        expect(page.locator('[data-apps-live]')).to_contain_text('To-do moved to position 1 of 6.')
+        assert _nav_names(page) == ['To-do', 'QR Codes', 'File Transfer', 'Short URLs', 'Notes']
         assert page.evaluate('window.__noReload') is True
 
         # The choice survives a reload, switched-off app and order alike.
         page.reload()
-        assert _nav_names(page) == ['To-do', 'QR Codes', 'File Transfer', 'Short URLs']
+        assert _nav_names(page) == ['To-do', 'QR Codes', 'File Transfer', 'Short URLs', 'Notes']
         expect(page.get_by_role('checkbox', name='Receipts')).not_to_be_checked()
         expect(page.get_by_role('checkbox', name='To-do')).to_be_checked()
 
@@ -71,7 +72,14 @@ def test_switch_an_app_off_and_reorder_with_the_keyboard(
         page.goto(f'{receipts_server.url}/account/')
         page.get_by_role('checkbox', name='Receipts').check()
         expect(page.locator('#product-nav a[aria-label="Receipts"]')).to_have_count(1)
-        assert _nav_names(page) == ['To-do', 'QR Codes', 'File Transfer', 'Receipts', 'Short URLs']
+        assert _nav_names(page) == [
+            'To-do',
+            'QR Codes',
+            'File Transfer',
+            'Receipts',
+            'Short URLs',
+            'Notes',
+        ]
     finally:
         receipts_server.shell(RESET)
 
@@ -149,9 +157,9 @@ def test_arrow_keys_announce_the_ends_of_the_list(page: Page, receipts_server: R
         handle.focus()
         page.keyboard.press('ArrowUp')
         expect(page.locator('[data-apps-live]')).to_have_text('QR Codes is already first.')
-        page.get_by_role('button', name='Reorder To-do').focus()
+        page.get_by_role('button', name='Reorder Notes').focus()
         page.keyboard.press('ArrowDown')
-        expect(page.locator('[data-apps-live]')).to_have_text('To-do is already last.')
+        expect(page.locator('[data-apps-live]')).to_have_text('Notes is already last.')
     finally:
         receipts_server.shell(RESET)
 
@@ -164,6 +172,6 @@ def test_the_apps_are_one_column(page: Page, receipts_server: ReceiptsServer):
     boxes = page.locator('[data-app]').evaluate_all(
         'tiles => tiles.map(tile => { const r = tile.getBoundingClientRect(); return [r.left, r.top]; })'
     )
-    assert len(boxes) == 5
+    assert len(boxes) == 6
     assert len({left for left, _ in boxes}) == 1  # all the same left edge
     assert [top for _, top in boxes] == sorted(top for _, top in boxes)

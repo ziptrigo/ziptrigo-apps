@@ -90,6 +90,7 @@ INSTALLED_APPS = [
     'apps.receipts',
     'apps.short_url',
     'apps.todo',
+    'apps.notes',
     # Task queue: an ORM-backed store for `django.tasks` (Django 6's built-in task queue API).
     'django_tasks_db',
 ]
@@ -480,6 +481,17 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'TODO_BLOCKER_SUGGEST_USER': (120, 60),
     # Retiring the email address and issuing a new one (issue #186), per user.
     'TODO_REGENERATE_USER': (5, 60 * 60),
+    # -- notes (issue #260): the Notes pages (and, later, `/api/notes/`) --
+    # Creating a note (and duplicating or restoring one that may cost credits): per user, shared
+    # by the web and the API. Each is a row of up to 50,000 characters and may cost credits.
+    'NOTES_CREATE_USER': (60, 60),
+    # Every other change (save, ticking a box, tags, archive, trash, reorder, restore a version):
+    # per user, shared by the web and the API. Looser than creating: dragging or ticking a list is
+    # a burst of small writes.
+    'NOTES_EDIT_USER': (240, 60),
+    # The editor's live preview, `POST /notes/preview/`: one render per pause in typing, session
+    # bound and cheap. Over it the view answers 204 and the last preview stays.
+    'NOTES_PREVIEW_USER': (120, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -1007,6 +1019,9 @@ JAZZMIN_SETTINGS = {
         'receipts.Receipt': 'fas fa-receipt',
         'receipts.ReceiptsAccount': 'fas fa-inbox',
         'receipts.ReceiptsSettings': 'fas fa-sliders-h',
+        'notes.Note': 'fas fa-note-sticky',
+        'notes.NotesAccount': 'fas fa-inbox',
+        'notes.NotesSettings': 'fas fa-sliders-h',
     },
     'topmenu_links': [
         {'name': 'Site', 'url': 'core:home'},

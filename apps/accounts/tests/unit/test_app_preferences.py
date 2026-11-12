@@ -12,7 +12,7 @@ from apps.core.products import get_products, products_for
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
-LABELS = ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo']
+LABELS = ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo', 'notes']
 
 
 def _except(*hidden: str) -> list[str]:
@@ -61,7 +61,7 @@ def test_set_app_preferences_saves_order_and_hidden_in_order(user):
 
     user.refresh_from_db()
     # The stored order always lists every product; hidden apps keep their place.
-    assert user.app_order == ['todo', 'receipts', 'qr_code', 'file_transfer', 'short_url']
+    assert user.app_order == ['todo', 'receipts', 'qr_code', 'file_transfer', 'short_url', 'notes']
     assert user.hidden_apps == ['todo', 'qr_code']
 
 
@@ -123,6 +123,7 @@ def test_account_page_follows_the_saved_order_and_unchecks_hidden_apps(client, u
         ('file_transfer', True),
         ('receipts', True),
         ('short_url', True),
+        ('notes', True),
     ]
 
 
@@ -184,7 +185,7 @@ def test_htmx_save_stores_the_choice_and_answers_the_nav_out_of_band(client, use
     assert reverse('file_transfer:dashboard') not in content
     user.refresh_from_db()
     assert user.hidden_apps == ['receipts', 'file_transfer', 'short_url']
-    assert user.app_order == ['todo', 'receipts', 'qr_code', 'file_transfer', 'short_url']
+    assert user.app_order == ['todo', 'receipts', 'qr_code', 'file_transfer', 'short_url', 'notes']
 
 
 def test_without_htmx_saves_and_redirects_to_the_account_page(client, user):
@@ -195,7 +196,7 @@ def test_without_htmx_saves_and_redirects_to_the_account_page(client, user):
     assert response.status_code == 302
     assert response['Location'] == reverse('accounts:account')
     user.refresh_from_db()
-    assert user.hidden_apps == ['file_transfer', 'receipts', 'short_url', 'todo']
+    assert user.hidden_apps == ['file_transfer', 'receipts', 'short_url', 'todo', 'notes']
 
 
 def test_unchecking_everything_hides_every_app(client, user):
@@ -214,7 +215,9 @@ def test_switching_an_app_back_on_puts_it_where_it_was(client, user):
     _post(client, ['todo', 'qr_code'], ['qr_code'])  # todo off, but first in the order
 
     _post(
-        client, ['todo', 'qr_code'], ['qr_code', 'todo', 'file_transfer', 'receipts', 'short_url']
+        client,
+        ['todo', 'qr_code'],
+        ['qr_code', 'todo', 'file_transfer', 'receipts', 'short_url', 'notes'],
     )
 
     user.refresh_from_db()

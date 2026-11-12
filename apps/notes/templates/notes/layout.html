@@ -1,0 +1,46 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% comment %} Shared by every Notes page: the sidebar (a top bar on phones), the page-level message slot and the one
+   confirmation modal the whole page shares. Pages that reorder load SortableJS and the shared helper
+   (core/partials/sortable_script.html) in `notes_js_libs`. {% endcomment %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'notes/css/notes.css' %}">{% endblock %}
+
+{% block content %}
+<div x-data="confirmModal" class="container mx-auto px-4 py-6 max-w-6xl">
+    <div class="flex flex-col gap-4 md:flex-row md:gap-8">
+        <div class="md:w-48 md:flex-shrink-0">
+        <a href="{% url 'notes:new' %}"
+           class="btn mb-3 inline-flex w-full items-center justify-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+            <i class="fas fa-plus mr-2" aria-hidden="true"></i>New note
+        </a>
+        <nav aria-label="Notes">
+            <ul class="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-col md:overflow-visible md:pb-0">
+                {% for key, label, icon, url in nav_items %}
+                <li class="flex-shrink-0">
+                    <a href="{{ url }}"{% if nav == key %} aria-current="page"{% endif %}
+                       class="btn flex items-center gap-2 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors {% if nav == key %}bg-sage-100 dark:bg-gray-700 font-semibold text-gray-900 dark:text-gray-100{% else %}text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800{% endif %}">
+                        <i class="{{ icon }} w-4 text-center text-sage-400" aria-hidden="true"></i>
+                        <span>{{ label }}</span>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+        </nav>
+        </div>
+
+        <div class="min-w-0 flex-1">
+            <div id="notes-msg" class="mb-4 text-sm" aria-live="polite"></div>
+            {% block notes_content %}{% endblock %}
+        </div>
+    </div>
+    {% include 'core/partials/confirm_modal.html' %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% block notes_js_libs %}{% endblock %}
+<script defer src="{% static 'notes/js/notes.js' %}"></script>
+<script defer src="{% static 'notes/js/note_view.js' %}"></script>
+<script defer src="{% static 'notes/js/editor.js' %}"></script>
+{% endblock %}
