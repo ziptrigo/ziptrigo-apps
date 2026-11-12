@@ -122,15 +122,17 @@ def delete_filter(request, filter_id: UUID):
 def run_filter(request, filter_id: UUID, limit: int = DEFAULT_LIMIT, offset: int = 0):
     """Run a saved filter: the notes it selects (in its scope, never the Trash), in its sort
     order, as `GET /notes` lists them. `limit` (1-100, default 50) and `offset` page the result;
-    `count` is the total. Spends `NOTES_SEARCH_USER`. When the filter has search text each note
-    carries the snippet fields of `GET /notes`; without it they are `null`."""
+    `count` is the total. Spends `NOTES_SEARCH_USER` (nothing when its search text can't run: that
+    is a 400). When the filter has search text each note carries the snippet fields of
+    `GET /notes`; without it they are `null`."""
     saved = _owned(request, filter_id)
     user = request.auth
     limit, offset = clamp_page(limit, offset)
     params = stored_params(saved, user)
-    charge(request, 'NOTES_SEARCH_USER')
     with mapped_errors():
-        queryset = services.filter_notes(user, params, ordered=False)  # validates the search text
-        ordered = order_results(queryset, params.sort, params.dir or None)
+        # Validated before the budget is spent: a saved search that can't run costs nothing.
         query = prepare_query(params.q, params.mode) if params.q.strip() else None
+        charge(request, 'NOTES_SEARCH_USER')
+        queryset = services.filter_notes(user, params, ordered=False)
+        ordered = order_results(queryset, params.sort, params.dir or None)
         return note_page(request, queryset, ordered, query=query, limit=limit, offset=offset)

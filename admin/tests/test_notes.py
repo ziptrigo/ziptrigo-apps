@@ -799,6 +799,7 @@ def test_delete_yes(api):
 
 
 def test_duplicate_asks_and_sends_the_cost(api):
+    api.on('get', NOTE_PATH, FakeResponse(200, NOTE))
     api.on('get', '/notes/settings', FakeResponse(200, SETTINGS))
     copy = {**NOTE, 'id': WORK_ID, 'title': 'Weekly plan (copy)', 'charged_credits': 3}
     api.on('post', f'{NOTE_PATH}/duplicate', FakeResponse(201, copy))
@@ -812,13 +813,15 @@ def test_duplicate_asks_and_sends_the_cost(api):
 
 
 def test_duplicate_yes_sends_no_expectation(api):
+    api.on('get', NOTE_PATH, FakeResponse(200, NOTE))
     api.on('post', f'{NOTE_PATH}/duplicate', FakeResponse(201, NOTE))
 
     assert invoke('duplicate', 'local', NOTE_ID, '--yes').exit_code == 0
-    assert api.calls[0].get('params') is None and len(api.calls) == 1
+    assert api.writes()[0].get('params') is None and len(api.writes()) == 1
 
 
 def test_duplicate_declined(api):
+    api.on('get', NOTE_PATH, FakeResponse(200, NOTE))
     api.on('get', '/notes/settings', FakeResponse(200, SETTINGS))
 
     result = invoke('duplicate', 'local', NOTE_ID, input='n\n')
@@ -826,7 +829,21 @@ def test_duplicate_declined(api):
     assert result.exit_code == 1 and api.writes() == []
 
 
-def test_duplicate_a_taken_down_note(api):
+def test_duplicate_a_taken_down_note_is_refused_before_a_price_is_asked(api):
+    api.on('get', NOTE_PATH, FakeResponse(200, {**NOTE, 'taken_down': True}))
+    api.on('get', '/notes/settings', FakeResponse(200, SETTINGS))
+
+    result = invoke('duplicate', 'local', NOTE_ID)
+
+    assert (
+        result.exit_code == 1 and 'This note was taken down and cannot be copied.' in result.output
+    )
+    assert 'Continue?' not in flat(result)
+    assert api.writes() == [] and api.requests('get', '/notes/settings') == []
+
+
+def test_duplicate_a_note_taken_down_meanwhile_shows_the_servers_refusal(api):
+    api.on('get', NOTE_PATH, FakeResponse(200, NOTE))
     api.on('get', '/notes/settings', FakeResponse(200, {**SETTINGS, 'next_note_cost': 0}))
     api.on(
         'post',
@@ -1128,6 +1145,17 @@ def test_filter_run_by_name_or_id(api):
     assert by_name.exit_code == 0 and 'Weekly plan' in by_name.output
     assert api.requests('get', '/notes')[-1]['params'] == {'limit': 5, 'offset': 10}
     assert invoke('filter-run', 'local', FILTER_ID).exit_code == 0
+
+
+def test_filter_run_prints_a_name_with_markup_as_typed(api):
+    saved = {**SAVED, 'name': 'Work [/] [bold]x'}
+    api.on('get', '/notes/filters', FakeResponse(200, [saved]))
+    api.on('get', f'/notes/filters/{FILTER_ID}/notes', FakeResponse(200, page(ITEM)))
+
+    result = invoke('filter-run', 'local', FILTER_ID)
+
+    assert result.exit_code == 0, result.output
+    assert 'Work [/] [bold]x' in flat(result)
 
 
 def test_filter_run_an_unknown_filter(api):

@@ -428,6 +428,20 @@ class TestFilters:
 
         assert get(client, f'/filters/{saved.pk}/notes', auth).status_code == 400
 
+    def test_a_saved_search_that_cannot_run_spends_nothing(
+        self, client, auth, funded_user, settings, ratelimit_clock
+    ):
+        broken = SavedFilter.objects.create(
+            user=funded_user, name='broken', params={'q': '/(/', 'mode': 'glob'}
+        )
+        fine = SavedFilter.objects.create(user=funded_user, name='fine', params={'q': 'x'})
+        limit_rule(settings, 'NOTES_SEARCH_USER', limit=1)
+
+        for _ in range(3):
+            assert get(client, f'/filters/{broken.pk}/notes', auth).status_code == 400
+        assert get(client, f'/filters/{fine.pk}/notes', auth).status_code == 200
+        assert get(client, f'/filters/{fine.pk}/notes', auth).status_code == 429
+
     def test_the_edit_budget(self, client, auth, settings):
         limit_rule(settings, 'NOTES_EDIT_USER', limit=1)
 
@@ -435,7 +449,50 @@ class TestFilters:
         assert post(client, '/filters', auth, {'name': 'b'}).status_code == 429
 
 
+class TestUnknownKeysInOrderBodies:
+    def test_reorder_bodies_forbid_extra_keys(self, client, auth):
+        for path in ('/tags/reorder', '/filters/reorder'):
+            response = post(client, path, auth, {'ids': [], 'extra': 1})
+            assert response.status_code == 422
+            assert post(client, path, auth, {'ids': []}).status_code == 200
+
+
 class TestSharedDuplicate:
+    def test_a_note_that_stops_working_during_the_copy_is_the_same_404(
+        self, client, other_auth, funded_user, other_user, monkeypatch
+    ):
+        """The link is looked up, then the note is taken down / trashed / locked / unshared before
+        the copy is made: the answer is the neutral 404, never the takedown's 409."""
+        from apps.notes.api import shared
+
+        def stale_lookup(link):
+            monkeypatch.setattr(shared.links, 'get_available', lambda code: link)
+
+        unknown = post(client, '/shared/nope/duplicate', other_auth)
+        stoppers = {
+            'taken down': lambda note, link: takedown.take_down_note(
+                note, by=make_user(is_staff=True), reason='x'
+            ),
+            'trashed': lambda note, link: trash(note),
+            'locked': lambda note, link: Note.objects.filter(pk=note.pk).update(
+                locked_at=timezone.now()
+            ),
+            'revoked': lambda note, link: links.revoke_link(link),
+        }
+        for name, stop in stoppers.items():
+            note = create_note(funded_user, title=name)
+            link = links.create_link(note, mode='read')
+            held = links.get_available(link.code)
+            assert held is not None
+            stale_lookup(held)  # the endpoint's own lookup saw it working
+            stop(note, link)
+
+            response = post(client, f'/shared/{link.code}/duplicate', other_auth)
+
+            assert response.status_code == 404, name
+            assert response.content == unknown.content, name
+        assert not Note.objects.filter(user=other_user).exists()
+
     def test_copy_a_shared_note(self, client, other_auth, funded_user, other_user):
         # `other_user` copies a note `funded_user` shared.
         note = create_note(

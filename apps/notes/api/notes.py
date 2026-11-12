@@ -33,7 +33,7 @@ from ..services import (
     order_notes,
     trashed_notes,
 )
-from ..services.filters import NO_TAG, SHARED_VALUES, UPDATED_RANGES
+from ..services.filters import NO_TAG, SHARED_FILTERS, UPDATED_RANGES
 from ..services.search import MODES, prepare_query, search_condition
 from .common import (
     DEFAULT_LIMIT,
@@ -48,6 +48,9 @@ from .common import (
     parse_date,
 )
 from .router import router
+
+#: The `expected_cost` query parameter of the endpoints that can charge: credits, so never negative.
+ExpectedCost = Annotated[int | None, Query(ge=0)]  # ty: ignore[call-non-callable]
 
 VIEWS = ('active', 'archived', 'trash', 'all')
 #: The sort a view uses when none is asked for (the Trash has its own order, newest deleted first).
@@ -108,7 +111,8 @@ def list_notes(
       `dir: Choose a sort to reverse.`
     - `limit` (1-100, default 50) and `offset` page the result; `count` is the total.
 
-    A search, or any of `tag`, `shared` and `updated`, spends `NOTES_SEARCH_USER`.
+    A search, or any of `tag`, `shared` and `updated`, spends `NOTES_SEARCH_USER`; a search text
+    that is refused (a 400) spends nothing.
 
     With `q`, each note also carries `search_field`, `search_snippet`, `match_start` and
     `match_end` (see `NoteListItemSchema`); without it all four are `null`.
@@ -124,7 +128,7 @@ def list_notes(
             # The Trash's own order is not a sort: a bare `dir` would silently replace it.
             raise HttpError(400, 'dir: Choose a sort to reverse.')
     if shared is not None:
-        choice('shared', shared, SHARED_VALUES[1:])
+        choice('shared', shared, SHARED_FILTERS)
     if updated is not None:
         choice('updated', updated, UPDATED_RANGES)
     first = parse_date('updated_from', updated_from)
@@ -144,12 +148,13 @@ def list_notes(
             'dir': [direction or ''],
         }
     )
-    searching = params.has_criteria
-    if searching:
-        charge(request, 'NOTES_SEARCH_USER')
     user = request.auth
     with mapped_errors():
+        # The pattern is validated before the budget is spent: one that can't run costs nothing
+        # (only a database timeout, which needs the query, still does).
         query = prepare_query(params.q, params.mode) if params.q.strip() else None
+        if params.has_criteria:
+            charge(request, 'NOTES_SEARCH_USER')
         if view == 'trash':
             queryset = trashed_notes(user)
             if query is not None:
@@ -171,12 +176,14 @@ def list_notes(
 def create_note(request, payload: NoteCreateSchema):
     """Make a note, first in the manual order. A free slot makes a free note; otherwise it costs
     the creation price (`GET /settings`) and is paid for a year. `expected_cost` guards the cost
-    (a 409 if it differs; leave it out to accept any). A 402 when the balance can't pay."""
+    (a 409 if it differs; leave it out to accept any). A 402 when the balance can't pay, which
+    spends no rate-limit budget."""
     with mapped_errors():
         # The fields and the cap first: a refused request spends no budget.
         services.check_can_create(
             request.auth, title=payload.title, content=payload.content, tags=payload.tags
         )
+        services.check_can_afford(request.auth, services.quote_create(request.auth))
         charge(request, 'NOTES_CREATE_USER')
         note = services.create_note(
             request.auth,
@@ -307,7 +314,7 @@ def unarchive_note(request, note_id: UUID):
 
 
 @router.post('/notes/{note_id}/restore', response=NoteSchema)
-def restore_note(request, note_id: UUID, expected_cost: int | None = None):
+def restore_note(request, note_id: UUID, expected_cost: ExpectedCost = None):
     """Take a note out of the Trash (a note that isn't in it is returned as it is). A free note
     with no free slot left becomes a paid note (the creation price, paid for a year); a paid note
     whose renewal fell due while it was in the Trash is renewed (the renewal price) and unlocked;
@@ -317,7 +324,10 @@ def restore_note(request, note_id: UUID, expected_cost: int | None = None):
     if not note.is_trashed:
         return note_response(request, note)
     with mapped_errors():
+        # The cap and the balance first: a refused restore spends no budget.
+        services.check_restorable(note)
         cost = services.quote_restore(note)
+        services.check_can_afford(request.auth, cost)
         charge(request, 'NOTES_CREATE_USER' if cost else 'NOTES_EDIT_USER')
         services.restore(note, expected_cost=expected_cost)
     return note_response(request, note)
@@ -335,7 +345,7 @@ def delete_note_forever(request, note_id: UUID):
 
 
 @router.post('/notes/{note_id}/duplicate', response={201: NoteSchema})
-def duplicate_note(request, note_id: UUID, expected_cost: int | None = None):
+def duplicate_note(request, note_id: UUID, expected_cost: ExpectedCost = None):
     """Copy a note (its content, no tags, links or history) as `<title> (copy)`: a normal new note,
     free while a slot is open, else the creation price (`expected_cost` guards it: a 409 if it
     differs). A note taken down cannot be copied (409)."""
@@ -343,6 +353,7 @@ def duplicate_note(request, note_id: UUID, expected_cost: int | None = None):
     with mapped_errors():
         services.check_duplicable(note)
         services.check_can_create(request.auth, title=note.title, content=note.content)
+        services.check_can_afford(request.auth, services.quote_create(request.auth))
         charge(request, 'NOTES_CREATE_USER')
         copy = services.duplicate(note, request.auth, expected_cost=expected_cost)
     return 201, note_response(request, copy)

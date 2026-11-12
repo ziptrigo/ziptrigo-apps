@@ -264,7 +264,7 @@ def _print_notes(body: dict, title: str, *, trash: bool = False) -> None:
     if not body['results']:
         _say('No notes found.')
         return
-    table = Table(title=title)
+    table = Table(title=Text(title))  # a saved filter's name is the user's: not markup
     table.add_column('Title', overflow='fold')
     table.add_column('Tags', style='blue')
     table.add_column('Flags', style='green')
@@ -612,6 +612,10 @@ def notes_duplicate(
         notes duplicate local 1b6e2f4a-...
     """
     select_environment(environment)
+    note = _call('get', f'/notes/{note_id}')
+    if note.get('taken_down'):
+        # Refused before a price is asked: the server refuses a taken-down note whatever it costs.
+        raise _fail('This note was taken down and cannot be copied.')
     expected = None
     if not yes:
         cost = _call('get', '/settings')['next_note_cost']

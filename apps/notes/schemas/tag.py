@@ -55,4 +55,6 @@ class NoteTagOrderSchema(Schema):
     """Body for `POST /tags/reorder`: the tag ids in the new order (ids that aren't yours are
     ignored; at most 500, a longer list is a 422)."""
 
+    model_config = ConfigDict(extra='forbid')
+
     ids: Annotated[list[UUID], Field(max_length=MAX_REORDER_IDS)]

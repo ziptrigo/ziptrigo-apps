@@ -95,4 +95,6 @@ class NoteFilterOrderSchema(Schema):
     """Body for `POST /filters/reorder`: the filter ids in the new order (at most 50, the most saved
     filters one user can have; a longer list is a 422)."""
 
+    model_config = ConfigDict(extra='forbid')
+
     ids: Annotated[list[UUID], Field(max_length=MAX_SAVED_FILTERS)]

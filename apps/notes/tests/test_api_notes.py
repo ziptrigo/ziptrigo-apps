@@ -308,6 +308,15 @@ class TestList:
         second = get(client, '/notes', auth, q='x')
         assert second.status_code == 429 and 'Retry-After' in second
 
+    def test_a_search_that_is_refused_spends_nothing(self, client, auth, settings, ratelimit_clock):
+        limit_rule(settings, 'NOTES_SEARCH_USER', limit=1)
+
+        for pattern in ('/(/', '/a\\1/', '/(?=x)/'):
+            response = get(client, '/notes', auth, q=pattern)
+            assert response.status_code == 400
+        assert get(client, '/notes', auth, q='x').status_code == 200  # the one hit is still there
+        assert get(client, '/notes', auth, q='x').status_code == 429
+
 
 class TestQueries:
     def test_a_list_of_100_notes_does_not_query_per_note(
@@ -812,6 +821,45 @@ class TestArchiveTrashRestore:
         assert response.status_code == 402
         assert Note.objects.get(pk=first.pk).deleted_at is not None
 
+    def test_a_restore_refused_at_the_cap_spends_nothing(
+        self, client, auth, funded_user, config, settings, ratelimit_clock
+    ):
+        """A free restore spends `NOTES_EDIT_USER`: the cap is told before it is charged."""
+        config.max_notes_per_user = 2
+        config.save()
+        first = create_note(funded_user, title='First')
+        trash(first)
+        create_note(funded_user, title='A')
+        create_note(funded_user, title='B')
+        limit_rule(settings, 'NOTES_EDIT_USER', limit=1)
+
+        for _ in range(3):
+            response = post(client, f'/notes/{first.pk}/restore', auth)
+            assert response.status_code == 400
+            assert response.json()['detail'] == 'You have too many notes. Delete some first.'
+        config.max_notes_per_user = 10
+        config.save()
+        assert post(client, f'/notes/{first.pk}/restore', auth).status_code == 200
+        assert post(client, f'/notes/{first.pk}/archive', auth).status_code == 429  # one hit spent
+
+    def test_a_paid_restore_refused_at_the_cap_spends_no_create_budget(
+        self, client, auth, funded_user, config, settings, ratelimit_clock
+    ):
+        notes = fill_free_slots(funded_user)
+        trash(notes[0])
+        create_note(funded_user, title='Takes the slot')  # the restore would now cost 3
+        config.max_notes_per_user = 5
+        config.save()
+        limit_rule(settings, 'NOTES_CREATE_USER', limit=1)
+
+        for _ in range(3):
+            assert post(client, f'/notes/{notes[0].pk}/restore', auth).status_code == 400
+        config.max_notes_per_user = 10
+        config.save()
+        assert post(client, f'/notes/{notes[0].pk}/restore', auth).status_code == 200
+        assert balance(funded_user) == 97
+        assert post(client, '/notes', auth, {'title': 'T'}).status_code == 429  # the one hit
+
     def test_restoring_a_note_that_is_not_in_the_trash_changes_nothing(
         self, client, auth, funded_user
     ):
@@ -906,6 +954,47 @@ class TestDuplicate:
         row.save()
         assert post(client, f'/notes/{notes[0].pk}/duplicate', auth).status_code == 201
         assert post(client, f'/notes/{notes[0].pk}/duplicate', auth).status_code == 429
+
+
+class TestNoChargeForARefusal:
+    """A request that can only end in a 402 spends no create budget: the balance is checked first."""
+
+    def test_create_and_duplicate_and_restore_with_no_credits(
+        self, client, auth, funded_user, settings, ratelimit_clock
+    ):
+        from apps.billing.services import add_credits, spend_credits
+
+        notes = fill_free_slots(funded_user)
+        trash(notes[1])
+        create_note(funded_user, title='Takes the slot')  # a restore now costs 3 too
+        spend_credits(funded_user, 100, source='test', description='drain')
+        limit_rule(settings, 'NOTES_CREATE_USER', limit=1)
+
+        for _ in range(2):
+            assert post(client, '/notes', auth, {'title': 'T'}).status_code == 402
+            assert post(client, f'/notes/{notes[0].pk}/duplicate', auth).status_code == 402
+            assert post(client, f'/notes/{notes[1].pk}/restore', auth).status_code == 402
+        add_credits(funded_user, 100, description='t', source='test')
+        assert post(client, '/notes', auth, {'title': 'T'}).status_code == 201  # the one hit
+        assert post(client, '/notes', auth, {'title': 'T2'}).status_code == 429
+
+    def test_a_free_create_needs_no_balance(self, client, auth, user, config):
+        # An empty balance doesn't matter while a free slot is open.
+        assert post(client, '/notes', auth, {'title': 'T'}).status_code == 201
+
+
+class TestExpectedCostRange:
+    def test_a_negative_expected_cost_is_a_422(self, client, auth, funded_user):
+        note = create_note(funded_user, title='T')
+        trash(note)
+        other = create_note(funded_user, title='U')
+
+        for path in (f'/notes/{note.pk}/restore', f'/notes/{other.pk}/duplicate'):
+            response = post(client, path, auth, expected_cost=-1)
+            assert response.status_code == 422 and isinstance(response.json()['detail'], list)
+        assert (
+            post(client, f'/notes/{other.pk}/duplicate', auth, expected_cost=0).status_code == 201
+        )
 
 
 class TestReorder:

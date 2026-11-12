@@ -52,7 +52,9 @@ from .search import (
 SORT_DEFAULT = 'updated'
 #: A note without a tag, in `tags`.
 NO_TAG = 'none'
-SHARED_VALUES = ('', 'yes', 'no')
+#: What `shared` can be set to; the empty value (no narrowing) is also accepted when read.
+SHARED_FILTERS = ('yes', 'no')
+SHARED_VALUES = ('', *SHARED_FILTERS)
 
 UPDATED_ANY = 'any'
 UPDATED_CUSTOM = 'custom'
@@ -457,6 +459,7 @@ __all__ = [
     'NO_TAG',
     'QUERY_KEYS',
     'SCOPES',
+    'SHARED_FILTERS',
     'SHARED_VALUES',
     'SORT_DEFAULT',
     'UPDATED_ANY',

@@ -4137,9 +4137,11 @@ paths:
 
         order, as `GET /notes` lists them. `limit` (1-100, default 50) and `offset` page the result;
 
-        `count` is the total. Spends `NOTES_SEARCH_USER`. When the filter has search text each note
+        `count` is the total. Spends `NOTES_SEARCH_USER` (nothing when its search text can''t run: that
 
-        carries the snippet fields of `GET /notes`; without it they are `null`.'
+        is a 400). When the filter has search text each note carries the snippet fields of
+
+        `GET /notes`; without it they are `null`.'
       tags:
       - Notes
       security:
@@ -4382,7 +4384,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NoteListSchema'
-      description: "List the caller's notes (no content: an `excerpt` instead; read a note for its text).\n\n- `view`: `active` (not archived; the default), `archived`, `trash` or `all` (active and\n  archived; the Trash is never included).\n- `q`: search the titles and contents, ignoring case, accents and punctuation: `*` and `?` are\n  wildcards (`mode=glob`, the default) or a regular expression (`mode=regex`, or `/.../`). 200\n  characters at most; a 400 for an empty, invalid or too slow pattern. Edit history is not\n  searched.\n- `tag`: comma-separated tag ids, and `none` for notes without a tag; any of them.\n- `shared`: `yes` (the note has a share link that is active and works) or `no`.\n- `updated`: `any`, `today`, `last_7_days`, `last_30_days` or `custom` with `updated_from` /\n  `updated_to` (`YYYY-MM-DD`, inclusive, either may be left out; dates alone mean `custom`).\n  Relative ranges are the caller's own days.\n- `sort`: `manual` (the order set by hand; the default of `active`), `updated` (the default of\n  the other views), `created` or `title`. The Trash lists the most recently deleted first.\n- `dir`: `asc` or `desc`, the direction of the sort: each sort's own default when left out\n  (`manual` and `title` ascending, `updated` and `created` newest first), the exact reverse\n  for the other one; a 400 for any other value. Without `sort`, `dir` reverses the view's\n  default sort; for `view=trash`, whose own order is not a sort, it is a 400\n  `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `tag`, `shared` and `updated`, spends `NOTES_SEARCH_USER`.\n\nWith `q`, each note also carries `search_field`, `search_snippet`, `match_start` and\n`match_end` (see `NoteListItemSchema`); without it all four are `null`."
+      description: "List the caller's notes (no content: an `excerpt` instead; read a note for its text).\n\n- `view`: `active` (not archived; the default), `archived`, `trash` or `all` (active and\n  archived; the Trash is never included).\n- `q`: search the titles and contents, ignoring case, accents and punctuation: `*` and `?` are\n  wildcards (`mode=glob`, the default) or a regular expression (`mode=regex`, or `/.../`). 200\n  characters at most; a 400 for an empty, invalid or too slow pattern. Edit history is not\n  searched.\n- `tag`: comma-separated tag ids, and `none` for notes without a tag; any of them.\n- `shared`: `yes` (the note has a share link that is active and works) or `no`.\n- `updated`: `any`, `today`, `last_7_days`, `last_30_days` or `custom` with `updated_from` /\n  `updated_to` (`YYYY-MM-DD`, inclusive, either may be left out; dates alone mean `custom`).\n  Relative ranges are the caller's own days.\n- `sort`: `manual` (the order set by hand; the default of `active`), `updated` (the default of\n  the other views), `created` or `title`. The Trash lists the most recently deleted first.\n- `dir`: `asc` or `desc`, the direction of the sort: each sort's own default when left out\n  (`manual` and `title` ascending, `updated` and `created` newest first), the exact reverse\n  for the other one; a 400 for any other value. Without `sort`, `dir` reverses the view's\n  default sort; for `view=trash`, whose own order is not a sort, it is a 400\n  `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `tag`, `shared` and `updated`, spends `NOTES_SEARCH_USER`; a search text\nthat is refused (a 400) spends nothing.\n\nWith `q`, each note also carries `search_field`, `search_snippet`, `match_start` and\n`match_end` (see `NoteListItemSchema`); without it all four are `null`."
       tags:
       - Notes
       security:
@@ -4402,7 +4404,9 @@ paths:
 
         the creation price (`GET /settings`) and is paid for a year. `expected_cost` guards the cost
 
-        (a 409 if it differs; leave it out to accept any). A 402 when the balance can''t pay.'
+        (a 409 if it differs; leave it out to accept any). A 402 when the balance can''t pay, which
+
+        spends no rate-limit budget.'
       tags:
       - Notes
       requestBody:
@@ -4634,7 +4638,8 @@ paths:
         name: expected_cost
         schema:
           anyOf:
-          - type: integer
+          - minimum: 0
+            type: integer
           - type: 'null'
           title: Expected Cost
         required: false
@@ -4696,7 +4701,8 @@ paths:
         name: expected_cost
         schema:
           anyOf:
-          - type: integer
+          - minimum: 0
+            type: integer
           - type: 'null'
           title: Expected Cost
         required: false
@@ -4750,7 +4756,8 @@ paths:
         name: expected_cost
         schema:
           anyOf:
-          - type: integer
+          - minimum: 0
+            type: integer
           - type: 'null'
           title: Expected Cost
         required: false
@@ -4769,7 +4776,7 @@ paths:
 
         work (revoked, expired, unknown, or its note is in the Trash, locked or taken down: the same
 
-        answer for all).'
+        answer for all, also when that changes while the copy is being made).'
       tags:
       - Notes
       security:
@@ -9969,6 +9976,7 @@ components:
       title: NoteFilterCreateSchema
       type: object
     NoteFilterOrderSchema:
+      additionalProperties: false
       description: 'Body for `POST /filters/reorder`: the filter ids in the new order (at most 50, the most saved
 
         filters one user can have; a longer list is a 422).'
@@ -10670,6 +10678,7 @@ components:
       title: NoteTagCreateSchema
       type: object
     NoteTagOrderSchema:
+      additionalProperties: false
       description: 'Body for `POST /tags/reorder`: the tag ids in the new order (ids that aren''t yours are
 
         ignored; at most 500, a longer list is a 422).'

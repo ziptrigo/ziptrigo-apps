@@ -6090,12 +6090,16 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   - **Duplicate for a visitor.** `POST /n/<code>/duplicate`: without a session a redirect to sign in with
     `next=/n/<code>`; a signed-in visitor who has yet to accept the current terms is sent to the accept page
     (the shared pages are never gated, making a note in an account is -- a small addition to the plan); else
-    `duplicate(note, user, keep_title=True)` (title and content, no tags, no links, no history; `check_duplicable`
-    and `check_can_create` run **before** `NOTES_CREATE_USER` is charged, so a refused copy spends no budget),
+    `services.duplicate_shared(link, user)` (title and content, no tags, no links, no history; `check_can_create`
+    runs **before** `NOTES_CREATE_USER` is charged, so a refused copy spends no budget),
     free while a slot is open, else the creation price **confirmed first** (the shared modal, `confirm_cost`; a missing,
     wrong or changed cost is a flash and nothing is charged; too few credits a flash with a Top up link),
-    `NOTES_CREATE_USER`, then a redirect to the new note. A taken-down note can't be copied (`This note was
-    taken down and cannot be copied.`, also for the owner: `services.check_duplicable`, read afresh).
+    `NOTES_CREATE_USER`, then a redirect to the new note. **Whether the link still works is decided again inside
+    `duplicate_shared`, on a fresh read** (the visitor's account locked first, then the source note's row, then the
+    link re-read and `links.is_available` checked, the order of `reports.create_report`): a takedown, Trash, lock,
+    revoke or expiry that landed since the page looked the link up is `LinkUnavailableError`, answered as an unknown
+    code is (the neutral 404 page), never as "taken down". The owner's own `duplicate` of a taken-down note says
+    `This note was taken down and cannot be copied.` (`services.check_duplicable`, read afresh).
   - **Reports** (`models.NoteReport`: `note` cascade, `link` `SET_NULL`, `reason` Short URLs' choices,
     `details` 2,000, `reporter_email`, `reporter_ip`, `status` `pending` / `actioned` / `dismissed`, plus
     `reviewed_by`, `reviewed_at`, `resolution_note` like `LinkReport`; `services/reports.py`, `views.public.
@@ -6275,12 +6279,15 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
     `params.narrow` plus the text condition). `view=active` sorts `manual` by default, the others `updated`; the
     Trash lists the most recently deleted first, and there **`dir` without `sort` is a 400** `dir: Choose a sort to
     reverse.` (its own order isn't a sort), while for the other views it reverses the default sort. A search, or any
-    of `tag`, `shared` and `updated`, spends `NOTES_SEARCH_USER` (charged before the query, like To-do's; a refused
-    pattern still spends it); a plain list spends nothing. **A list of 100 notes is 4 queries** (the token's user, the
+    of `tag`, `shared` and `updated`, spends `NOTES_SEARCH_USER`, **charged after the pattern is validated**
+    (`prepare_query`), **unlike To-do's** (where a refused pattern still spends it): an empty, invalid or
+    unsupported pattern is a 400 that costs nothing, and only a database timeout, which needs the query, still
+    does; a plain list spends nothing. **A list of 100 notes is 4 queries** (the token's user, the
     count, the page, the tags of the page; the active-link flag is a subquery column, the search copy of the content
     is `defer`red, a Trash list adds the settings and the free-slot count once), pinned by
     `test_api_notes.py::TestQueries`. `GET /filters/{id}/notes` is the same page for a saved filter (its scope, sort
-    and direction; `NOTES_SEARCH_USER`).
+    and direction; `NOTES_SEARCH_USER`, charged after its stored pattern is validated, so a saved search that
+    can't run is a 400 that costs nothing).
   - **`PATCH /notes/{id}`** applies `model_dump(exclude_unset=True)`: a key left out is unchanged, an explicit `null`
     clears `content` (to empty) and `tags` (to none), a `title` cannot be empty (a 400 `title: Give the note a title.`).
     **`base_version` is required with a `title` or `content`** (`400 base_version: Send the version you edited.`);
@@ -6295,7 +6302,8 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
     `InsufficientCreditsError` **and any change refused because the note is locked**; **404** another user's note,
     tag, link, version or filter (never 403), a shared code that doesn't work (every reason alike) and delete-forever
     of a note that isn't in the Trash (as the web); **409** `NoteConflictError`, `CostChangedError` (the detail names the real total and
-    says to send `expected_cost=N`) and **any change, copy or share refused because the note was taken down**;
+    says to send `expected_cost=N`) and **any change, copy or share refused because the note was taken down**
+    (**except** `POST /shared/{code}/duplicate`, where a takedown is the same 404 as any other reason);
     **422** ninja's own; **429** the site handler. The two statuses by kind need the services to tell the refusals
     apart without reading text, so `require_writable`, `links.require_shareable` and `check_duplicable` now raise
     **`NoteLockedError` / `NoteTakenDownError`** (`services/errors.py`; `ValidationError` subclasses with the same
@@ -6303,16 +6311,24 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   - **Costs and `expected_cost`.** The API has no one to ask, so it accepts whatever a request costs **unless the
     client says what it expects** (Short URLs' rule): `expected_cost` is a field of the `POST /notes` body and a
     **query parameter** of `restore`, `duplicate` and `POST /shared/{code}/duplicate` (action POSTs with no body;
-    the plan said only that they "take" it). It is passed to the service, which works the cost out again under the
+    the plan said only that they "take" it; `Query(ge=0)`: a negative value is a 422). It is passed to the service, which works the cost out again under the
     account lock and answers 409 when it differs, nothing charged. `restore` of a note that isn't in the Trash is
     returned as it is (idempotent, spends nothing). `duplicate` is the owner's `<title> (copy)`; `/shared/{code}/duplicate`
-    keeps the title (`keep_title=True`) and needs only the JWT (the API isn't terms-gated, like the rest of it); a
-    code that doesn't work is a 404 before anything else. The CLI quotes `next_note_cost` (`GET /settings`) and a
+    keeps the title and needs only the JWT (the API isn't terms-gated, like the rest of it); a
+    code that doesn't work is a 404 before anything else, **and so is one that stops working while the copy is
+    made** (`services.duplicate_shared` re-checks on a fresh read inside; the endpoint maps its
+    `LinkUnavailableError` to the same `Http404` and never a 409 "taken down", so a visitor can't learn the
+    note's state). The CLI quotes `next_note_cost` (`GET /settings`) and a
     note's `restore_cost` and sends the confirmed amount, 0 included.
   - **Rate limits** are the web's: `NOTES_CREATE_USER` for `POST /notes`, `duplicate`, the shared copy and a restore that
     costs, `NOTES_EDIT_USER` for every other change, `NOTES_SEARCH_USER` for a search. **A refused request spends no
     budget** wherever the check needs no lock: the fields, the cap, the tags, the read-only state, the version of a
-    PATCH (the `check_*` functions and `require_writable` run first, then the charge, then the write).
+    PATCH (the `check_*` functions and `require_writable` run first, then the charge, then the write). That
+    includes **the cap on notes for a restore** (`services.check_restorable`, the lock-free count `restore` makes
+    again under the lock) and **the balance** (`services.check_can_afford(user, cost)`, a lock-free read of
+    `get_balance`): `POST /notes`, `duplicate`, the shared copy and a restore that costs answer a 402 **before**
+    `NOTES_CREATE_USER` is spent, so an account that can't pay, or a user at the cap who retries a restore, can't
+    burn the budget on refusals. (The charge still decides atomically; a race for the last credit costs one hit.)
   - **Links.** Creating or changing one is refused on a read-only note (400 in the Trash, 402 locked, 409 taken
     down); **`DELETE` revokes** (204, idempotent, allowed whatever the note's state). `expires_at` takes a bare date
     (the end of that day in the owner's zone) **or an ISO date-time** (that instant; one with no UTC offset is read
@@ -6323,14 +6339,17 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
     changed). `TAGS` has `Notes`.
   - **CLI** (`admin/notes.py`, `inv notes ...`; `NOTES_PASSWORD`, token `~/.notes_token.<env>`): the commands are in
     the "Commands" block. On `admin/utils.py`'s shared plumbing (`api_request`, `get_headers('notes')`,
-    `select_environment`, `password_from_prompt_or_env`); no password argument; titles are printed escaped (Rich
-    markup in a title shows as typed). `get` writes **the Markdown to stdout and everything else (title, id, version,
+    `select_environment`, `password_from_prompt_or_env`); no password argument; every user-provided title is printed
+    escaped or as `Text(...)` (Rich markup in a note title, a version title or a saved filter's name -- which
+    is a table's title in `filter-run` -- shows as typed, and `[/]` can't crash a command). `get` writes **the Markdown to stdout and everything else (title, id, version,
     tags, billing) to stderr**, so `get ... > plan.md` works. `add` takes the title as words and the content from
     `--file` (`-` is stdin) or, when stdin is piped, from it; **a cost can't be confirmed when stdin was the
     content**, so a paid note then needs `--yes` (a free one just goes through). `edit` reads the note first,
     sends its `version` as `base_version` when the text changes, merges `--tag` / `--remove-tag` into the note's
     tags and prints a 409's message and the version it is at now, exit 1. Tags are given by name (or id) and
-    resolved with `GET /tags`; an unknown one stops before anything is written. Anything that can charge
+    resolved with `GET /tags`; an unknown one stops before anything is written. `duplicate` reads the note first and, when it
+    was taken down, exits 1 with the server's wording (`This note was taken down and cannot be copied.`) before
+    any price is asked (the cap is still the server's). Anything that can charge
     (`add`, `duplicate`, `restore`) asks first with the quoted cost and sends it as `expected_cost`; `--yes`
     skips the question and sends none. `delete` needs the Trash and asks, `unshare`, `version-restore` and
     `tag-delete` ask (`--yes` skips). `download` writes `<slugified title>.md` through a `.part` file and refuses to
@@ -6353,7 +6372,8 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   `test_reports.py`, `test_takedown.py`, `test_admin.py` (including the refused `code` lookups) and the link
   cases of `test_versions.py`; PR 5: `test_search.py` and `test_saved_filters.py` (see "Search and saved filters");
   PR 6: `test_api_notes.py` (list, search, create, read, change with the version and its conflicts, checklist,
-  archive, Trash, restore with costs, duplicate, reorder, the 100-note query pin), `test_api_versions_links.py`,
+  archive, Trash, restore with costs, duplicate, reorder, refusals that spend no budget (a search pattern, the
+  cap on a restore, a 402), the 100-note query pin), `test_api_versions_links.py`,
   `test_api_tags_filters_settings.py` (tags, saved filters and running them, settings, the shared copy),
   `test_api_wiring.py` (the tag, a token on every route, unique schema names), the instant-expiry cases of
   `test_links.py` and `admin/tests/test_notes.py` (the CLI, HTTP mocked).
