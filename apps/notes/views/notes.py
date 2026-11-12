@@ -88,6 +88,10 @@ def _note_context(request: AuthenticatedHttpRequest, note: Note) -> dict:
         'tags': list(Tag.objects.filter(user=request.user)),
         'selected_tag_ids': set(note.tags.values_list('pk', flat=True)),
         'can_edit': not note.is_read_only,
+        # A paid note in the Trash whose renewal fell due: restoring it pays that renewal.
+        'renewal_overdue': bool(
+            note.paid_through is not None and note.paid_through <= timezone.now()
+        ),
     }
     if note.is_trashed:
         context['restore_cost'] = quote_restore(note)

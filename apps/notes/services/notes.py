@@ -22,7 +22,7 @@ from apps.core.markdown import count_checklist_items, toggle_checklist_item
 
 from ..limits import CONTENT_MAX, TITLE_MAX
 from ..models import Note, NotesSettings, NoteVersion, Tag
-from . import versions
+from . import notices, versions
 from .accounts import get_account, lock_account
 from .errors import CostChangedError, NoteConflictError
 from .versions import Editor
@@ -132,7 +132,12 @@ def _copy_title(title: str) -> str:
 
 
 def _description(prefix: str, title: str) -> str:
-    return f'{prefix}: "{title[:60]}"'
+    return f'{prefix}: "{title[: notices.TITLE_CUT]}"'
+
+
+def renewal_description(title: str) -> str:
+    """The ledger line of a renewal, charged by the daily job, by `resume` and by `restore`."""
+    return _description('Notes renewal', title)
 
 
 # -- Creating ------------------------------------------------------------------------------------
@@ -424,12 +429,13 @@ def restore(note: Note, expected_cost: int | None = None) -> Note:
         cost, becomes_paid, renews = _restore_plan(locked, config)
         if expected_cost is not None and expected_cost != cost:
             raise CostChangedError(cost)
+        was_locked = locked.locked_at is not None
         now = timezone.now()
         if cost:
-            prefix = 'Notes renewal' if renews else 'Notes'
-            spend_credits(
-                note.user, cost, source='notes', description=_description(prefix, locked.title)
+            description = (
+                renewal_description(locked.title) if renews else _description('Notes', locked.title)
             )
+            spend_credits(note.user, cost, source='notes', description=description)
         fields = ['deleted_at']
         if becomes_paid or renews:
             if becomes_paid:
@@ -442,6 +448,9 @@ def restore(note: Note, expected_cost: int | None = None) -> Note:
                 fields.append('charged_credits')
         locked.deleted_at = None
         locked.save(update_fields=fields)
+        if was_locked and renews:
+            # The renewal it skipped is paid: the "locked" notice is stale.
+            notices.clear_locked(note.user_id, locked.pk)
     return locked
 
 
@@ -453,7 +462,11 @@ def delete_forever(note: Note) -> None:
         locked = _locked_note(note)
         if locked.deleted_at is None:
             raise _error(NON_FIELD_ERRORS, 'Only a note in the Trash can be deleted for good.')
+        was_locked = locked.locked_at is not None
+        note_pk, user_id = locked.pk, locked.user_id
         locked.delete()
+        if was_locked:
+            notices.clear_locked(user_id, note_pk)
 
 
 def purge_trash() -> int:
@@ -467,17 +480,19 @@ def purge_trash() -> int:
             Note.objects.filter(deleted_at__lt=cutoff)
             .exclude(pk__in=failed)
             .order_by('deleted_at')
-            .values_list('pk', 'user_id')[:200]
+            .values_list('pk', 'user_id', 'locked_at')[:200]
         )
         if not batch:
             return deleted
-        for pk, user_id in batch:
+        for pk, user_id, locked_at in batch:
             try:
                 with transaction.atomic():
                     lock_account(user_id)
                     # Re-checked under the lock: a note restored meanwhile stays.
                     count, _ = Note.objects.filter(pk=pk, deleted_at__lt=cutoff).delete()
                     deleted += 1 if count else 0
+                    if count and locked_at is not None:
+                        notices.clear_locked(user_id, pk)
             except Exception:
                 failed.add(pk)
                 logger.exception('Could not purge note %s', pk)

@@ -14,7 +14,7 @@ notification**, each in its own case: welcome credits, a promo code granted at s
 transfer suspended (and the notice removed when it is re-enabled), Receipts storage paused (and
 removed on unfreeze), a To-do reminder delivered in-app, To-do storage paused (and removed), a
 To-do repeating task whose next occurrence could not be created, and To-do "emailed tasks were not
-created", and the two blocker notices (a task no longer blocked, a blocker reopened). Also **Web Push** (issue #239): the service worker and manifest at the root, the account
+created", the two blocker notices (a task no longer blocked, a blocker reopened) and the three Notes renewal notices (a note locked, the renewal warning, and the locked notice going when credits arrive). Also **Web Push** (issue #239): the service worker and manifest at the root, the account
 page's **Notifications on this device** section, the answer endpoint and sign-out (NOTIF-19 to
 NOTIF-22). The read-only admin of notifications is in `admin.md` (ADM-32), push in ADM-54. The emails these events
 send are checked here only for arrival, subject and links; `emails.md` has them in full.
@@ -463,6 +463,47 @@ the account's format; pushes use the same public wording.
 | 1 | Reopen `Notif blocker` (it is closed and still linked to `Notif waits`). | One new notification `#<blocker number> was reopened and blocks #<waits number>`, body naming both tasks and saying `Notif waits` keeps its state. `Notif waits` is still To do. |
 | 2 | Trash `Notif blocker`, restore it. | The notification is replaced by a new one (same key). |
 | 3 | Complete `Notif waits`, reopen `Notif blocker`. | No notification (only open tasks are told). |
+
+### NOTIF-27 Notes: a note is locked, and the notice removed when it is unlocked
+
+**Purpose:** a renewal the balance can't cover locks the note and tells the owner (issue #260); topping up unlocks it and
+deletes that notice. The full case is `notes.md` NOTES-17 / NOTES-18; the email is MAIL-24.
+**Preconditions:** a fresh account `NOTIF_C` = `qa.notif.c.<r>@example.com` (1,000 welcome credits) with five free notes
+and two paid notes `Notif lock A` and `Notif lock B`; a shell; the admin has spent the balance down to 0.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | (shell step) Make both due and run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.notes.models import Note; from apps.notes.jobs import renew; Note.objects.filter(user__email='<NOTIF_C>', is_free=False).update(paid_through=timezone.now()-timedelta(hours=1)); renew()"` | No traceback. |
+| 2 | Sign in as `<NOTIF_C>`; the bell. | Badge `2`; two notifications `Your note "Notif lock A" is locked` and `Your note "Notif lock B" is locked`, source `Notes`, body "Its renewal of 5 credits (every 365 days) could not be paid. Top up to unlock it." |
+| 3 | Click the first. | The note's page `/notes/<id>/` with the amber locked banner. |
+| 4 | (shell step) Run `renew()` again. | No new notification and the count is unchanged (a locked note is not locked again). |
+| 5 | Admin: add 5 credits to `<NOTIF_C>`. Reload `/notifications/`. | Exactly one note is unlocked (the older lock) and **its** notification is gone (deleted, not only read); the other stays. Add 5 more: both gone. |
+| 6 | Re-lock a note, move it to the Trash, and restore it after topping up (`notes.md` NOTES-19 step 3 to 4). | The locked notification is gone after the restore (the restore paid the renewal). |
+| 7 | Lock a note, move it to the Trash and delete it for good (or purge it, `notes.md` NOTES-17 step 10). | Its locked notification is gone too: the bell never keeps a link to a deleted note. |
+| 8 | Lock a note of a deactivated account (`notes.md` NOTES-17 step 11). | The note locks but that account has no notification. |
+
+### NOTIF-28 Notes: the renewal warning is one notice, replaced
+
+**Purpose:** a balance short of the renewals due within 7 days makes one notification per window, which a later warning
+replaces (same key `notes_renewal_warning`). The full case is `notes.md` NOTES-20; the email is MAIL-25.
+**Preconditions:** NOTIF-27 done for `<NOTIF_C>` (two paid notes, balance 0 and no locked notes: unlock them first).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Admin: add 7 credits. (shell step) Make both paid notes due in 3 and 5 days and run `renew()` as in `notes.md` NOTES-20 step 1 with `<NOTIF_C>`. | The bell has a new notification `Notes renewal: not enough credits`, body "2 notes renew in the next 7 days for 10 credits and your balance is 7."; clicking it opens `/billing/credits/`. |
+| 2 | Run `renew()` again. | Nothing new (once per window). |
+| 3 | Reset the stamp 8 days back (`NotesAccount.objects.filter(user__email='<NOTIF_C>').update(renewal_warned_at=timezone.now()-timedelta(days=8))`) and run `renew()`. | `/notifications/` still lists **one** such notification, new again (the old one was replaced, not added to). |
+
+### NOTIF-29 Notes: notice texts follow no account setting
+
+**Purpose:** the Notes notices carry the public wording and no dates that depend on the account's format; a note title
+with markup is shown as text.
+**Preconditions:** NOTIF-27 done.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Create a paid note titled `<i>Notif</i> & more`, make it due, run `renew()` with no credits. | The notification title is `Your note "<i>Notif</i> & more" is locked`, shown as text on the dropdown and `/notifications/` (no italics, no raw tag). |
+| 2 | Set the account to `dd/mm/yyyy` and 24-hour (ACC-46). | The body and title are unchanged (no date in them); only times shown by `{% local_time %}` elsewhere follow the setting. |
 
 ## Out of scope
 

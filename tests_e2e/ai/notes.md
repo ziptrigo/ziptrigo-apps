@@ -2,8 +2,8 @@
 
 ## Scope
 
-The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6): Markdown notes with a live-preview
-editor, tags, versions, free slots and creation billing, archive and Trash:
+The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3): Markdown notes with a
+live-preview editor, tags, versions, free slots, creation billing and renewals, archive and Trash:
 
 - the sidebar (a **New note** button, then Notes, Archived, Trash, Tags; a row of scrolling links on phones);
 - the lists **Notes** `/notes/` (manual drag-and-drop order, the sort bar, the tag filter, 50 per page),
@@ -17,12 +17,16 @@ editor, tags, versions, free slots and creation billing, archive and Trash:
 - history `/notes/<id>/history/` (who and when, view, restore) and the one-version page;
 - tags `/notes/tags/` (add, edit in place, colour, description tooltip, reorder, delete);
 - billing: the first 5 notes a user has outside the Trash are free for as long as they live; every other note costs 1
-  credit to create (and 5 credits a year after that: renewals, the lock and the warnings are later sub-issues);
+  credit to create and 5 credits every 365 days after that: the daily `notes.renew` job charges the renewal silently,
+  **locks** a note whose renewal the balance can't cover (read-only, nothing deleted), unlocks it when credits arrive
+  (oldest first) and warns 7 days ahead; the note page says "Free" or "Renews <date>" (NOTES-16 to NOTES-19);
 - access control: logged-out visitors and another user's notes, tags and versions.
 
-Not covered here (later sub-issues of #260): yearly renewals, locking and their emails and notices, share links and the
-public `/n/<code>` pages, reports and takedown, search and saved filters, the JWT API and the `inv notes` CLI. Cases
-that touch a **locked** note use a shell step because nothing locks a note yet.
+Not covered here (later sub-issues of #260): share links and the public `/n/<code>` pages (so a locked note's links
+stopping is checked there), reports and takedown, search and saved filters, the JWT API and the `inv notes` CLI. The
+renewal cases use shell steps: the scheduler does not run on the test server, so the daily job is run by hand. The two
+emails and three notices they cause are checked in full in `emails.md` (MAIL-24, MAIL-25) and `notifications.md`
+(NOTIF-27 to NOTIF-29).
 
 ## Preconditions
 
@@ -298,7 +302,102 @@ confirmed first. Trashing a free note frees its slot; a paid note never becomes 
 | 3 | On a note page: **Archive**, **Move to trash**, **Restore**. | Each is a plain form: a flash message and a redirect. Duplicate when a cost applies shows `Duplicating this note costs ... Confirm it from the Duplicate button to continue.` (the confirm dialog needs JavaScript). |
 | 4 | The tag popover. | Its box list works with a **Save tags** button (the checkboxes do not save on their own). |
 
+### NOTES-16 A paid note renews silently, once per period
+
+**Purpose:** the daily job charges each paid note whose renewal date has passed, one period at a time, with a ledger
+line and nothing else; free notes, notes in the Trash and notes not yet due are untouched.
+**Preconditions:** a **fresh** account `NOTES_USER` = `qa.notes.renew.<random>@example.com` (1,000 welcome credits),
+Context A, with `Free 1` ... `Free 5` (free) and three paid notes `Paid A`, `Paid B`, `Paid C` made as in NOTES-08
+(each cost 1 credit). Record the balance as `B0` (the credits history `/billing/credits/`). `<DUE>` below is the shell
+step `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.notes.models import Note; Note.objects.filter(user__email='<NOTES_USER>', title='<TITLE>').update(paid_through=timezone.now()-timedelta(hours=1))"`
+and `<RENEW>` is `python tests_e2e/ai/manage.py shell -c "from apps.notes.jobs import renew; renew()"`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `Paid A` and `Free 1`. | Under the title, after "Updated ...", `Paid A` says **Renews <mm/dd/yyyy>** (a year from its creation); `Free 1` says **Free**. |
+| 2 | Run `<RENEW>` now. | No traceback. Nothing is due: the balance is still `B0`, no ledger line from Notes since the creations. |
+| 3 | Run `<DUE>` for `Paid A`, then `<RENEW>`. Reload `/billing/credits/`. | A new line `Notes renewal: "Paid A"` for **-5** (source Notes); the balance is `B0 - 5`. No notification in the bell and no email in `/__e2e__/mail/?to=<NOTES_USER>` (a successful renewal is silent). |
+| 4 | Open `Paid A`. | **Renews <date>** is now one year after the old date (about a year from today minus one hour), the note is not locked and is editable. |
+| 5 | Run `<RENEW>` again. | No second charge (the note is paid for a year). |
+| 6 | Archive `Paid B`, run `<DUE>` for it and `<RENEW>`. | The ledger has `Notes renewal: "Paid B"` -5: archived notes renew like active ones; it is still archived. |
+| 7 | Move `Paid C` to the Trash, run `<DUE>` for it and `<RENEW>`. | No charge, no lock, no notification: a note in the Trash on its renewal date is skipped. Open it: the page says **Renewal was due <date>** and the red Trash banner; the Trash row's button is **Restore for 5 credits**. |
+| 8 | Click **Restore for 5 credits** and confirm the dialog ("Its renewal fell due while it was in the Trash, so restoring it costs 5 credits."). | **Note restored.**; the ledger has `Notes renewal: "Paid C"` -5; the page says **Renews <a year from now>** and is not locked. |
+| 9 | Admin (Context B): `/admin/notes/notessettings/`, **Renewal price (credits)** `0`, save. Run `<DUE>` for `Paid A` and `<RENEW>`. | No new ledger line; `Paid A`'s **Renews** date moved on by a year. Restore the price to 5. |
+| 10 | Admin: **Renewal days** `30`, save. Run `<DUE>` for `Paid A` and `<RENEW>`. | -5 and **Renews** about 30 days from the old date. Restore 365. |
+| 11 | Set `Paid A`'s date two years back with `Note.objects.filter(...).update(paid_through=timezone.now()-timedelta(days=800))` and run `<RENEW>` twice. | Each run charges one period (-5 each) and moves the date on by a year only; after the second the date is still not in the future (the third run would charge again). |
+
+### NOTES-17 A renewal the balance can't cover locks the note
+
+**Purpose:** when the renewal can't be paid the job locks the note: read-only, nothing deleted, the owner told in the
+app and by one email; trashing, deleting, copying and downloading still work.
+**Preconditions:** a **fresh** account `LOCK_USER` = `qa.notes.lock.<random>@example.com` (1,000 welcome credits),
+Context A, with `Free 1` ... `Free 5` and three paid notes `Lock A`, `Lock B`, `Lock C` (content `- [ ] one`). Admin
+(Context B): `/admin/billing/credittransaction/adjust/`, User email `LOCK_USER`, Direction **Spend**, Amount = the
+balance minus 7 (leave **7** credits). Use the `<DUE>` / `<RENEW>` steps of NOTES-16 with `LOCK_USER`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Run `<DUE>` for `Lock A`, `Lock B` and `Lock C` (set `Lock A` two days back, `Lock B` one day back, `Lock C` one hour back), then `<RENEW>`. | No traceback. With 7 credits: `Lock A` (the oldest) is renewed for 5 (the ledger line `Notes renewal: "Lock A"`), the other two are locked; the balance is 2. |
+| 2 | Open `Lock B`. | An amber banner **This note is locked until its renewal is paid.** "You can still read, copy, download and delete it. Nothing was deleted; it unlocks when you add credits." with a **Top up** button to `/billing/credits/`; under the title **Renewal unpaid since <date>**. No **Edit**, **Archive** or **Edit tags** controls; the checkbox `one` is disabled; **Download**, **Copy**, **Duplicate** and **Move to trash** are there. |
+| 3 | Open `/notes/<id of Lock B>/edit/` directly and press Save after a change. | A 422 with `This note is locked until its renewal is paid.`; nothing changes. (`/notes/<id>/archive/`, `/tags/` via a form POST give the same message.) |
+| 4 | `/notes/`. | The rows of `Lock B` and `Lock C` have an amber lock icon (tooltip "Locked until its renewal is paid"); `Lock A` does not. |
+| 5 | The bell. | Two new notifications `Your note "Lock B" is locked` and `Your note "Lock C" is locked`, body "Its renewal of 5 credits (every 365 days) could not be paid. Top up to unlock it."; clicking one opens that note's page. |
+| 6 | `/__e2e__/mail/?to=<LOCK_USER>` (reload until it arrives). | **One** email, subject `Some of your notes are locked`, naming both `Lock B` and `Lock C` (see MAIL-24). |
+| 7 | Run `<RENEW>` again. | Nothing changes: no new charge, no new notification, no new email (a locked note isn't renewed again). |
+| 8 | Move `Lock C` to the Trash, then restore it (the button names the cost, "Restore for 5 credits"; the balance is only 2). | The dialog opens; confirming shows the red `You don't have enough credits to restore this note.` with a **Top up your credits** link; the note stays in the Trash and locked. |
+| 9 | Delete `Lock C` forever from the Trash. | **Note deleted for good.** (a locked note can be deleted); the bell no longer has `Your note "Lock C" is locked` (its notice went with the note; `Lock B`'s stays). |
+| 10 | (Purge) Lock a note again, trash it, shell: `Note.objects.filter(title='Lock D').update(deleted_at=timezone.now()-timedelta(days=400))` and run `from apps.notes.jobs import purge_trash; purge_trash()`. | The note is gone and so is its `Your note "Lock D" is locked` notification. |
+| 11 | (Inactive account) Deactivate a second fresh account with a due paid note and no credits (`User.objects.filter(email=...).update(status='INACTIVE')`), run `<RENEW>`. | The note is locked, but no notification is written for that account (and no email, MAIL-24 step 9); an account with credits is still charged. |
+
+### NOTES-18 Topping up unlocks automatically, oldest first
+
+**Purpose:** a top-up unlocks the user's locked notes without any click, oldest lock first, stopping at the first the
+balance can't cover; the locked days are not billed; the notices go.
+**Preconditions:** NOTES-17 done up to step 7 but with `Lock C` still locked (re-lock it if you deleted it: make a
+new paid note, run `<DUE>` and `<RENEW>`); `LOCK_USER` has 2 credits; Admin in Context B. Make sure `Lock B` was locked
+before `Lock C` (`Note.objects.filter(title='Lock B').update(locked_at=...)` a day earlier if needed).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Admin: **Adjust credits**, User email `LOCK_USER`, Direction **Add**, Amount `3` (balance 5), **Apply**. | "Adjusted credits ...". The background task runs inline on this server. |
+| 2 | Context A: reload `/notes/`. | `Lock B` (the older lock) is unlocked: no lock icon; `Lock C` is still locked. The balance is 0 and the ledger has `Notes renewal: "Lock B"` -5. |
+| 3 | The bell / `/notifications/`. | `Your note "Lock B" is locked` is **gone** (deleted, not just read); `Your note "Lock C" is locked` is still there. |
+| 4 | Open `Lock B`. | No banner, **Edit** is back, **Renews <a year from today>** (a new period starting now, not from the old date); the checkbox works. |
+| 5 | Admin: add `10` credits. | `Lock C` is unlocked too (ledger -5), its notice is gone, the balance is 5. |
+| 6 | Admin: add `1` credit (a user with no locked note). | Nothing happens to any note; no error. |
+| 7 | (A trashed locked note is left alone.) Lock a note again (`<DUE>`, `<RENEW>` with a balance under 5), move it to the Trash, then add 20 credits. | The note stays in the Trash and locked (restoring it pays the renewal: NOTES-16 step 8); the balance is unchanged by the top-up. |
+
+### NOTES-19 The daily job's snapshot rule and the Trash restore of a locked note
+
+**Purpose:** one run does not lock a note and unlock it again at once; restoring a locked note from the Trash pays its
+renewal and clears its notice.
+**Preconditions:** `LOCK_USER` from NOTES-18 with the balance at 5 and no locked notes (adjust with **Spend** or **Add**);
+two paid notes `Snap A`, `Snap B` (create them, 1 credit each; balance 3: add credits to get back to 5).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Run `<DUE>` for both `Snap A` (two days back) and `Snap B` (one hour back), then `<RENEW>`. | The balance covers one renewal: `Snap A`, the older due date, is renewed (-5, balance 0) and `Snap B` is locked. It is **not** unlocked by the same run (the job never offers a resume to a note it locked itself). |
+| 2 | Run `<RENEW>` again twice. | Nothing changes: no new charge, notification or email (the note was already locked before those runs, and a locked note is not renewed again; it is only unlocked when the owner can pay). |
+| 3 | Move the locked `Snap B` to the Trash. Add 5 credits in the admin. Open the Trash page. | The note is still locked (a top-up leaves a trashed note alone); its row says **Restore for 5 credits** (the renewal it skipped). |
+| 4 | Restore it (confirm). | **Note restored.**; the note is unlocked, **Renews <a year from now>**, the ledger has `Notes renewal: ...` -5, and its `Your note ... is locked` notification is gone. |
+
+### NOTES-20 The renewal warning, seven days ahead
+
+**Purpose:** a user whose balance won't cover the notes renewing in the next 7 days gets one notice and one email per
+window; none when the balance covers them.
+**Preconditions:** a **fresh** account `WARN_USER` = `qa.notes.warn.<random>@example.com`, five free notes and two paid
+notes `Soon A`, `Soon B`; then in the admin **Spend** credits so that exactly 7 remain. `<DUE+n>` is the shell step with
+`paid_through=timezone.now()+timedelta(days=n)` in place of the `-hours=1` of `<DUE>`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Run `<DUE+3>` for `Soon A` and `<DUE+5>` for `Soon B`; run `<RENEW>`. | Neither is renewed or locked (not due). The bell has `Notes renewal: not enough credits` with the body "2 notes renew in the next 7 days for 10 credits and your balance is 7." linking to `/billing/credits/`; one email `Your notes renew soon` (MAIL-25). |
+| 2 | Run `<RENEW>` again. | No second notice and no second email (once per 7-day window). |
+| 3 | Admin: add `3` credits (balance 10) and `Spend` back to 7; shell: `NotesAccount.objects.filter(user__email='<WARN_USER>').update(renewal_warned_at=timezone.now()-timedelta(days=8))` and run `<RENEW>`. | A new warning (a new window): the bell still has **one** such entry (the old one was replaced), now new again; one more email. |
+| 4 | Admin: add `3` credits (balance 10, exactly the cost), reset `renewal_warned_at` as in step 3 and run `<RENEW>`. | No warning (the balance covers the renewals). |
+| 5 | Move `Soon B` to the Trash, spend back to 7, reset the stamp, run `<DUE+3>` for `Soon A` and `<RENEW>`. | No warning (one renewal = 5 credits, balance 7; trashed and free notes don't count). |
+
 ## Out of scope
 
-- Share links and the public pages, reports and takedown, renewals, search and saved filters, the JWT API and the CLI (later sub-issues).
-- The scheduler actually running `notes.purge_trash` on this server (NOTES-10 step 8 runs the job from a shell).
+- Share links and the public pages (including a locked note's links showing the neutral page), reports and takedown, search and saved filters, the JWT API and the CLI (later sub-issues).
+- The scheduler actually running `notes.purge_trash` and `notes.renew` on this server (NOTES-10 step 8 and NOTES-16 to NOTES-20 run the jobs from a shell).

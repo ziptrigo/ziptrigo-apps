@@ -1,0 +1,10 @@
+{% autoescape off %}{{ count }} of your notes {{ count|pluralize:"renews,renew" }} in the next {{ days }} days{% if overdue %} (one renewal is overdue){% elif first_due %} (the first on {{ first_due }}){% endif %} for {{ credits }} credit{{ credits|pluralize }} in all, and your balance is {{ balance }} credit{{ balance|pluralize }}.
+
+If the balance can't cover a renewal when it falls due, that note is locked: it can't be edited and its share links stop working until you add credits. Nothing is deleted. Adding {{ missing }} more credit{{ missing|pluralize }} covers them.
+
+Add credits: {{ top_up_url }}
+Your notes: {{ notes_url }}
+
+--
+The ZipTrigo Team
+{% endautoescape %}

@@ -53,6 +53,16 @@ def web(funded_user):
 
 
 @pytest.fixture
+def sent_emails(monkeypatch):
+    """Capture what the Notes emails hand to `send_email` instead of sending anything."""
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        'apps.notes.services.emails.send_email', lambda **kwargs: sent.append(kwargs) or (1, 0)
+    )
+    return sent
+
+
+@pytest.fixture
 def freeze_now(monkeypatch):
     """`freeze_now(2026, 10, 28, 12, 0)` makes `timezone.now()` that UTC instant."""
 

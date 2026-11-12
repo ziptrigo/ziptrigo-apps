@@ -999,7 +999,7 @@ push configured (NOTIF-20's preconditions).
 | 6 | Set Renewal days `0`, Trash days `0` and Creation price `-1`; **Save**. | `Ensure this value is greater than or equal to 1.` under the first two and `Ensure this value is greater than or equal to 0.` under the price. Restore the defaults; Save: the settings are saved ("Notes settings" changed successfully). |
 | 7 | Set **Max versions per note** to `2`, save; as `qa.user` save a note's content three times with different editors or after ten minutes. | Only two versions remain on the note's History (the oldest was dropped). Restore 50. |
 | 8 | As a **staff** user without permissions (ADM-51's user), open `/admin/notes/notessettings/`. | 403 / not shown (singletons are superuser-only). |
-| 9 | `/admin/core/scheduledjob/`. | A job `notes.purge_trash` once the scheduler ran it; its page describes it: "Permanently deletes notes that have been in the Trash longer than the Trash period in the Notes settings." |
+| 9 | `/admin/core/scheduledjob/`. | Jobs `notes.purge_trash` and `notes.renew` once the scheduler ran them; their pages describe them: "Permanently deletes notes that have been in the Trash longer than the Trash period in the Notes settings." and "Charges the renewal of paid notes that fall due, locking a note whose owner's balance cannot cover it; unlocks notes locked earlier once the owner can pay; and warns users whose balance will not cover the renewals coming up." After `notes.md` NOTES-20 the **Notes accounts** list shows the user's **Renewal warned at** time (if the admin lists it). |
 
 ### ADM-59 Delete a user who has Notes
 

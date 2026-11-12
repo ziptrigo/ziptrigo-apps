@@ -1,0 +1,6 @@
+<div style="font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: #2c3432; line-height: 1.5;">
+  <p>{{ count }} of your notes {{ count|pluralize:"renews,renew" }} in the next {{ days }} days{% if overdue %} (one renewal is overdue){% elif first_due %} (the first on {{ first_due }}){% endif %} for {{ credits }} credit{{ credits|pluralize }} in all, and your balance is {{ balance }} credit{{ balance|pluralize }}.</p>
+  <p>If the balance can't cover a renewal when it falls due, that note is locked: it can't be edited and its share links stop working until you add credits. Nothing is deleted. Adding {{ missing }} more credit{{ missing|pluralize }} covers them.</p>
+  <p><a href="{{ top_up_url }}" style="color: #3b4a47;">Add credits</a> &middot; <a href="{{ notes_url }}" style="color: #3b4a47;">Your notes</a></p>
+  <p>--<br>The ZipTrigo Team</p>
+</div>
