@@ -9,6 +9,7 @@
 <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
     <h1 class="min-w-0 break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ note.title }}</h1>
     {% if note.is_archived %}<span class="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300"><i class="fas fa-box-archive text-[10px]" aria-hidden="true"></i>Archived</span>{% endif %}
+    <span id="share-indicator">{% if links_work %}<span class="inline-flex items-center gap-1.5 rounded-full bg-sage-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"><i class="fas fa-link text-[10px]" aria-hidden="true"></i>Shared</span>{% endif %}</span>
 </div>
 <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">Updated {% local_time note.updated_at %}
     <span data-renewal class="ml-2">&middot;
@@ -32,6 +33,14 @@
     </p>
     <a href="{% url 'billing:credits-history' %}"
        class="btn inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">Top up</a>
+</div>
+{% endif %}
+{% if note.is_taken_down %}
+<div role="alert" id="takedown-banner" class="mb-4 rounded-xl border border-red-600/40 dark:border-red-400/40 bg-red-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+    <i class="fas fa-ban mr-1 text-red-600 dark:text-red-400" aria-hidden="true"></i>
+    <span class="font-medium text-gray-900 dark:text-gray-100">This note was taken down.</span>
+    It can no longer be changed, shared or copied, and its links don't work. You can still read, download, trash and delete it.
+    {% if note.takedown_reason %}<p class="mt-2"><span class="font-medium text-gray-900 dark:text-gray-100">Reason:</span> {{ note.takedown_reason|linebreaksbr }}</p>{% endif %}
 </div>
 {% endif %}
 
@@ -76,14 +85,16 @@
 <div x-data="copyText" class="mb-6 flex flex-wrap items-center gap-2">
     <pre x-ref="text" class="hidden" aria-hidden="true">{{ note.content }}</pre>
     {% if not note.is_trashed %}
-    {% if not note.is_locked %}
+    {% if can_edit %}
     <a href="{% url 'notes:edit' note.pk %}"
        class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
         <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit</a>
     {% endif %}
+    {% if show_share %}{% include 'notes/partials/share_button.html' %}{% endif %}
     <a href="{% url 'notes:history' note.pk %}"
        class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
         <i class="fas fa-clock-rotate-left mr-2" aria-hidden="true"></i>History</a>
+    {% if not note.is_taken_down %}
     {% if duplicate_cost %}
     <button type="button" @click="show($el)"
             data-url="{% url 'notes:duplicate' note.pk %}" data-tone="primary" data-label="Duplicate for {{ duplicate_cost }} credit{{ duplicate_cost|pluralize }}"
@@ -100,6 +111,7 @@
     </form>
     {% endif %}
     {% endif %}
+    {% endif %}
     <a href="{% url 'notes:download' note.pk %}"
        class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
         <i class="fas fa-download mr-2" aria-hidden="true"></i>Download</a>
@@ -108,6 +120,7 @@
         <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
         <span x-text="copied ? 'Copied' : 'Copy'">Copy</span></button>
     {% if note.is_trashed %}
+    {% if show_share %}{% include 'notes/partials/share_button.html' %}{% endif %}
     {% if restore_cost %}
     <button type="button" @click="show($el)"
             data-url="{% url 'notes:restore' note.pk %}" data-tone="primary" data-label="Restore for {{ restore_cost }} credit{{ restore_cost|pluralize }}"
@@ -129,7 +142,7 @@
             class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
         <i class="fas fa-trash mr-2" aria-hidden="true"></i>Delete forever</button>
     {% else %}
-    {% if not note.is_locked %}
+    {% if can_edit %}
     <form method="post" action="{% if note.is_archived %}{% url 'notes:unarchive' note.pk %}{% else %}{% url 'notes:archive' note.pk %}{% endif %}">
         {% csrf_token %}
         <button type="submit"
@@ -145,6 +158,9 @@
     </form>
     {% endif %}
 </div>
+
+{% comment %} The share panel: empty until the Share button fetches it (or `?share=1`, after a plain-POST action, opens it). {% endcomment %}
+<section id="share-panel" class="mb-6"{% if open_share %} hx-get="{% url 'notes:share' note.pk %}" hx-trigger="load" hx-swap="innerHTML"{% endif %}></section>
 
 <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
     {% include 'notes/partials/note_body.html' %}

@@ -40,11 +40,13 @@ from ..services import (
     NoteConflictError,
     archive,
     check_can_create,
+    check_duplicable,
     check_tags,
     check_toggle,
     create_note,
     delete_forever,
     duplicate,
+    links,
     quote_create,
     quote_restore,
     reorder,
@@ -56,8 +58,9 @@ from ..services import (
     trash,
     unarchive,
 )
-from ..services.notes import IN_TRASH_MESSAGE, LOCKED_MESSAGE
+from ..services.notes import IN_TRASH_MESSAGE, LOCKED_MESSAGE, TAKEN_DOWN_MESSAGE
 from .common import (
+    conflict_panel,
     credits_text,
     form_error_lines,
     limited,
@@ -83,11 +86,18 @@ def note_url(note: Note) -> str:
 
 
 def _note_context(request: AuthenticatedHttpRequest, note: Note) -> dict:
+    flags = links.share_flags(note, links.has_active_link(note))
     context: dict = {
         'note': note,
         'tags': list(Tag.objects.filter(user=request.user)),
         'selected_tag_ids': set(note.tags.values_list('pk', flat=True)),
         'can_edit': not note.is_read_only,
+        'checklist_url': None if note.is_read_only else reverse('notes:checklist', args=[note.pk]),
+        # Sharing: the Share button is for a note that isn't read-only, or one that is but still has
+        # an active link (to revoke it); the panel opens on its own after a plain-POST action
+        # (`?share=1`).
+        **flags,
+        'open_share': request.GET.get('share') == '1' and flags['show_share'],
         # A paid note in the Trash whose renewal fell due: restoring it pays that renewal.
         'renewal_overdue': bool(
             note.paid_through is not None and note.paid_through <= timezone.now()
@@ -99,7 +109,7 @@ def _note_context(request: AuthenticatedHttpRequest, note: Note) -> dict:
         assert note.deleted_at is not None  # trashed
         purge_at = note.deleted_at + timedelta(days=trash_days)
         context['days_left'] = max(ceil((purge_at - timezone.now()).total_seconds() / 86400), 0)
-    else:
+    elif not note.is_taken_down:
         context['duplicate_cost'] = quote_create(request.user)
     return context
 
@@ -196,14 +206,7 @@ def _conflict_response(
 ) -> HttpResponse:
     """The conflict panel: the editor again with the person's own text kept, the current version
     beside it and "Save mine anyway" (the form's `base_version` is now the current one)."""
-    conflict = {
-        'version': exc.current_version,
-        'title': exc.current_title,
-        'content': exc.current_content,
-        'title_differs': exc.current_title != values.get('title', '').strip(),
-        'message': NoteConflictError.MESSAGE,
-    }
-    values = {**values, 'base_version': exc.current_version}
+    conflict, values = conflict_panel(exc, values)
     context = _editor_context(request, note, values, conflict=conflict)
     if not is_htmx(request):
         return _editor_page(request, context, status=422)
@@ -289,7 +292,11 @@ def note_edit(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
         if note.is_read_only:
             messages.error(
                 request,
-                IN_TRASH_MESSAGE if note.is_trashed else LOCKED_MESSAGE,
+                IN_TRASH_MESSAGE
+                if note.is_trashed
+                else TAKEN_DOWN_MESSAGE
+                if note.is_taken_down
+                else LOCKED_MESSAGE,
             )
             return redirect(note_url(note))
         return _editor_page(request, _editor_context(request, note, _values(note)))
@@ -367,7 +374,14 @@ def note_checklist(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResp
     if not is_htmx(request):
         return redirect(note_url(note))
     return render(
-        request, 'notes/partials/note_body.html', {'note': note, 'can_edit': not note.is_read_only}
+        request,
+        'notes/partials/note_body.html',
+        {
+            'note': note,
+            'checklist_url': None
+            if note.is_read_only
+            else reverse('notes:checklist', args=[note.pk]),
+        },
     )
 
 
@@ -467,6 +481,20 @@ def note_delete(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpRespons
     return redirect_back(request, reverse('notes:trash'), not_to=str(note.pk))
 
 
+def _links_work_again(note: Note) -> str:
+    """` N share link(s) work again.` for a restored note whose links work now, else nothing: a
+    restore (which may also pay a renewal and unlock the note) silently reactivates the links the
+    owner made before, so say so and let them revoke the ones they forgot."""
+    if note.is_trashed or note.is_locked or note.is_taken_down:
+        return ''
+    count = links.active_links(note).count()
+    if not count:
+        return ''
+    return (
+        f' {count} share link works again.' if count == 1 else f' {count} share links work again.'
+    )
+
+
 @login_required
 @require_POST
 def note_restore(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
@@ -486,7 +514,7 @@ def note_restore(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpRespon
     ) is not None:
         return response
     try:
-        restore(note, expected_cost=cost)
+        restored = restore(note, expected_cost=cost)
     except CostChangedError as exc:
         messages.error(
             request,
@@ -500,7 +528,7 @@ def note_restore(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpRespon
     except ValidationError as exc:
         messages.error(request, ' '.join(exc.messages))
     else:
-        messages.success(request, 'Note restored.')
+        messages.success(request, 'Note restored.' + _links_work_again(restored))
         return redirect(note_url(note))
     return redirect_back(request, note_url(note))
 
@@ -511,6 +539,11 @@ def note_duplicate(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResp
     """A copy of the note ("<title> (copy)", no tags). A normal new note: free if a slot is open,
     else the creation price, confirmed first (`confirm_cost`)."""
     note = owned_note(request, note_id, trashed=False)
+    try:
+        check_duplicable(note)
+    except ValidationError as exc:
+        messages.error(request, ' '.join(exc.messages))
+        return redirect_back(request, note_url(note))
     cost = quote_create(request.user)
     if cost and parse_cost(request.POST.get('confirm_cost')) != cost:
         messages.error(

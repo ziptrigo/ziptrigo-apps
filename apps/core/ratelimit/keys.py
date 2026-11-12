@@ -66,6 +66,17 @@ def hit_ip(request: HttpRequest, rule: str) -> RateLimitResult:
     return hit(normalize_ip_for_key(ip), rule)
 
 
+def peek_ip(request: HttpRequest, rule: str) -> RateLimitResult:
+    """Like `hit_ip`, but reports the current state without counting this call: for a caller that
+    checks several rules first and charges them all only when every one allows the request."""
+    from apps.core.services.client_ip import client_ip
+
+    ip = client_ip(request)
+    if ip is None:
+        return RateLimitResult.unlimited()
+    return peek(normalize_ip_for_key(ip), rule)
+
+
 def hit_user(user: _HasPk, rule: str) -> RateLimitResult:
     """Count against an authenticated user's id. Callers pass the user explicitly (`request.user`
     for a session view, `request.auth` for a JWT-authenticated ninja endpoint) rather than this

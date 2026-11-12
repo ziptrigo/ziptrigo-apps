@@ -1,11 +1,12 @@
 """Helpers that build users, notes and tags in the states the tests need."""
 
+import secrets
 import uuid
 from datetime import UTC, datetime
 
 from apps.accounts.models import User
 
-from ..models import Note, NoteVersion, Tag
+from ..models import Note, NoteReport, NoteVersion, ShareLink, Tag
 from ..services import get_account
 
 
@@ -42,3 +43,15 @@ def make_version(note: Note, number: int, **fields) -> NoteVersion:
 
 def utc(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> datetime:
     return datetime(year, month, day, hour, minute, tzinfo=UTC)
+
+
+def make_link(note: Note, **fields) -> ShareLink:
+    """A share link straight in the database (no services): read-only and active by default."""
+    fields.setdefault('code', secrets.token_urlsafe(16))
+    return ShareLink.objects.create(note=note, **fields)
+
+
+def make_report(note: Note, link: ShareLink | None = None, **fields) -> NoteReport:
+    fields.setdefault('reason', 'spam')
+    fields.setdefault('reporter_ip', '203.0.113.9')
+    return NoteReport.objects.create(note=note, link=link, **fields)

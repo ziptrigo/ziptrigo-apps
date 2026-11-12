@@ -39,6 +39,7 @@ from .keys import (
     hit_user,
     hit_value,
     normalize_ip_for_key,
+    peek_ip,
     peek_value,
 )
 from .limiter import CACHE_ALIAS, RateLimitResult, hit, peek, purge_expired
@@ -61,6 +62,7 @@ __all__ = [
     'normalize_ip_for_key',
     'page_response',
     'peek',
+    'peek_ip',
     'peek_value',
     'purge_expired',
     'retry_message',

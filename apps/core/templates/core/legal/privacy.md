@@ -16,8 +16,8 @@ ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ o
 - **Receipts:** the receipts and invoices you upload or send by email, the details read from them (vendor, amount, date, category and, where present, the last 4 digits of a payment method), and your notes. For receipts sent by email we also keep the sender's address, the subject, and a copy of the message with its attachments removed.
 - **Short links:** the destination address, title, tags and settings of each link, and an optional password (stored as a hash).
 - **To-do:** your tasks, descriptions, comments (including earlier versions of a comment you edited), labels, reminders, saved filters, and the files you attach. For tasks added by email we keep the sender's address and the subject.
-- **Notes:** the title and Markdown content of your notes, their tags, and the earlier versions that edits of a note keep (a limited number per note).
-- **Feedback and reports:** messages you send through the Feedback page, and abuse reports about a transfer or a short link, which include the reason, any details you write and, optionally, your email address.
+- **Notes:** the title and Markdown content of your notes, their tags, and the earlier versions that edits of a note keep (a limited number per note). If you share a note with a link, we also keep the link (with the label and expiry you set), and anyone who has the link can see the note without signing in. If someone changes a note through an editable link, we keep the earlier versions as for any edit; when that person was signed in, the version records their account, and the note's owner can see which account made it (a visitor who was not signed in appears only as someone using the link).
+- **Feedback and reports:** messages you send through the Feedback page, and abuse reports about a transfer, a short link or a shared note, which include the reason, any details you write and, optionally, your email address.
 
 ### 1.2 Information from Google and Microsoft
 
@@ -28,6 +28,7 @@ If you choose **Sign in with Microsoft**, Microsoft shares with us your name, yo
 ### 1.3 Information collected automatically
 
 - **Download records:** we record the IP address and time of each download of a transfer, so the sender can see download activity and we can investigate abuse.
+- **Shared notes:** when someone opens a shared note we do not record who they are; the page is not stored by search engines and is not cached. If a shared note is edited through an editable link, we record the time of the edit.
 - **Short link clicks:** when someone follows a short link we record the time, the website they came from (its host name only), their country, their type of device, browser and operating system, and whether the visit looks automated. We do not store the visitor's IP address. We store a keyed, one-way hash of it that changes every day, used only to count unique visitors per day.
 - **QR code scans:** for tracked QR codes we count how many times a code was scanned. We do not record who scanned it.
 - **Abuse prevention:** we use IP addresses to enforce rate limits and usage caps. For rate limiting we store only a keyed, one-way hash, never the address itself. An abuse report stores the reporter's IP address.
@@ -66,7 +67,7 @@ ZipTrigo's use of information received from Google APIs adheres to the [Google A
 
 We share personal information only:
 
-- **With the people you choose:** the recipients of a transfer receive an email with your name or email address, your message and a download link. Anyone who has the address of a short link, a tracked QR code or a transfer can follow it.
+- **With the people you choose:** the recipients of a transfer receive an email with your name or email address, your message and a download link. Anyone who has the address of a short link, a tracked QR code, a transfer or a shared note can follow it.
 - **With service providers** that process data for us:
     - Amazon Web Services (file storage, and sending and receiving email);
     - a server hosting provider in the United States;

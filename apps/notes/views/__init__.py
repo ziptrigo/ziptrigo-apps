@@ -1,4 +1,5 @@
 from .history import history_list, history_restore, history_version
+from .links import share_create, share_edit, share_panel, share_revoke
 from .lists import archived_page, note_list, notes_page, trash_page
 from .notes import (
     note_archive,
@@ -15,6 +16,16 @@ from .notes import (
     note_tags,
     note_trash,
     note_unarchive,
+)
+from .public import (
+    report_note,
+    shared_checklist,
+    shared_download,
+    shared_duplicate,
+    shared_edit,
+    shared_page,
+    shared_preview,
+    shared_raw,
 )
 from .tags import tag_delete, tag_edit, tag_reorder, tags_page
 
@@ -39,6 +50,18 @@ __all__ = [
     'note_trash',
     'note_unarchive',
     'notes_page',
+    'report_note',
+    'share_create',
+    'share_edit',
+    'share_panel',
+    'share_revoke',
+    'shared_checklist',
+    'shared_download',
+    'shared_duplicate',
+    'shared_edit',
+    'shared_page',
+    'shared_preview',
+    'shared_raw',
     'tag_delete',
     'tag_edit',
     'tag_reorder',

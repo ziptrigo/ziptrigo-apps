@@ -1,8 +1,8 @@
 {% load notes_ui %}
 {% comment %} The note's rendered content. Checklist boxes are rendered disabled; `notes/js/note_view.js` enables them on a note
-   that can be edited (`data-checklist-url`) and posts the change there; the answer is this block again. {% endcomment %}
+   that can be edited (`data-checklist-url`, from the context's `checklist_url`; none for a note that can't be) and posts the change there; the answer is this block again. {% endcomment %}
 <section id="note-body" aria-label="Note content"
-         {% if can_edit %}data-checklist-url="{% url 'notes:checklist' note.pk %}"{% endif %}
+         {% if checklist_url %}data-checklist-url="{{ checklist_url }}"{% endif %}
          hx-target="#note-body" hx-swap="outerHTML">
     <div class="note-body">
         {% if note.content.strip %}{% render_note note %}{% else %}<p class="text-gray-500 dark:text-gray-400">This note is empty.</p>{% endif %}

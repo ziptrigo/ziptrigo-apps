@@ -215,3 +215,43 @@ def test_version_author_wording(user, other_user, config):
     other_user.delete()
     refreshed = {v.number: v for v in list_versions(note)}
     assert version_author(refreshed[2]) == 'Someone'
+
+
+class TestLinkEditorsNeverMerge:
+    """Coalescing also compares the share link (`NoteVersion.link`): two anonymous editors on
+    different links are different people."""
+
+    def test_the_same_editor_on_a_different_link_gets_its_own_version(self, user, config):
+        from ..models import EditorKind
+        from .factories import make_link
+
+        note = create_note(user, title='A', content='one')
+        first = make_link(note, mode='edit')
+        second = make_link(note, mode='edit')
+        anon_one = Editor(EditorKind.ANONYMOUS, None, first)
+        anon_two = Editor(EditorKind.ANONYMOUS, None, second)
+        save(note, anon_one, 'from one', link=first)
+        save(note, anon_one, 'from one again', link=first)
+        save(note, anon_two, 'from two', link=second)
+        rows = list(note.versions.order_by('number').values_list('content', 'link_id'))
+        assert rows == [('one', None), ('from one again', first.pk), ('from two', second.pk)]
+
+    def test_an_owner_through_a_link_is_not_merged_with_the_owner_on_the_site(self, user, config):
+        from .factories import make_link
+
+        note = create_note(user, title='A', content='one')
+        link = make_link(note, mode='edit')
+        save(note, Editor.for_user(note, user), 'direct')
+        save(note, Editor.for_user(note, user, link), 'via link', link=link)
+        assert note.versions.count() == 2
+        newest = note.versions.order_by('-number').first()
+        assert newest is not None and newest.link_id == link.pk and newest.editor_kind == 'owner'
+
+    def test_the_history_says_via_a_shared_link(self, user, config):
+        from .factories import make_link
+
+        note = create_note(user, title='A', content='one')
+        link = make_link(note, mode='edit')
+        save(note, Editor.for_user(note, None, link), 'x', link=link)
+        newest = note.versions.order_by('-number').first()
+        assert newest is not None and version_author(newest) == 'Someone via a shared link'

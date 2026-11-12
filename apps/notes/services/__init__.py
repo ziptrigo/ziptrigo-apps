@@ -1,6 +1,11 @@
-from . import billing, lists, notes, tags, versions
+from . import billing, links, lists, notes, reports, tags, takedown, versions
 from .accounts import get_account, lock_account
-from .errors import CostChangedError, NoteConflictError
+from .errors import (
+    CostChangedError,
+    LinkUnavailableError,
+    NoteConflictError,
+    ReportUnavailableError,
+)
 from .lists import (
     DEFAULT_DIRECTIONS,
     DIRECTIONS,
@@ -15,6 +20,7 @@ from .lists import (
 from .notes import (
     archive,
     check_can_create,
+    check_duplicable,
     check_tags,
     check_toggle,
     clean_content,
@@ -39,6 +45,7 @@ from .notes import (
     unarchive,
 )
 from .tags import create_tag, delete_tag, list_tags, reorder_tags, update_tag
+from .takedown import take_down_note
 from .versions import Editor, list_versions
 
 __all__ = [
@@ -52,12 +59,18 @@ __all__ = [
     'sort_for',
     'trashed_notes',
     'billing',
+    'links',
     'lists',
+    'reports',
+    'takedown',
     'CostChangedError',
     'Editor',
+    'LinkUnavailableError',
+    'ReportUnavailableError',
     'NoteConflictError',
     'archive',
     'check_can_create',
+    'check_duplicable',
     'check_tags',
     'check_toggle',
     'clean_content',
@@ -84,6 +97,7 @@ __all__ = [
     'restore_cost_for',
     'restore_version',
     'save_note',
+    'take_down_note',
     'set_tags',
     'tags',
     'toggle_checklist',

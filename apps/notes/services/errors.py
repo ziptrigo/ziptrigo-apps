@@ -27,3 +27,21 @@ class NoteConflictError(ValidationError):
         self.current_version = current_version
         self.current_title = current_title
         self.current_content = current_content
+
+
+class LinkUnavailableError(ValidationError):
+    """The share link a save came through can no longer be used (revoked, expired, or no longer an
+    editable link) by the time the write ran under its locks. Nothing was written."""
+
+    MESSAGE = 'This link is no longer available.'
+
+    def __init__(self) -> None:
+        super().__init__(self.MESSAGE)
+
+
+class ReportUnavailableError(LinkUnavailableError):
+    """The note a report was for stopped being shared (its link was revoked or expired, or the note
+    was trashed, locked or taken down) between the page being served and the report arriving.
+    Nothing was recorded. The same neutral page answers it as for any link that doesn't work."""
+
+    MESSAGE = 'This note is no longer available.'

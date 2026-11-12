@@ -1,0 +1,26 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <div class="card">
+        <div class="card-header"><h3 class="card-title mb-0">{{ title }}</h3></div>
+        <div class="card-body">
+            <p>You are about to take down the following note(s). Each becomes read-only for its owner, who sees the reason below on the note's page; every share link of it stops working for good, and it can't be shared or copied. There is no way to undo this. The owner is not emailed.</p>
+            <ul>
+                {% for note in notes %}
+                <li><strong>{{ note.title }}</strong> &mdash; {{ note.user.email }}{% if note.is_taken_down %} (already taken down){% elif note.is_trashed %} (in the Trash){% endif %}</li>
+                {% endfor %}
+            </ul>
+
+            <form method="post" class="mt-4">
+                {% csrf_token %}
+                {% include "admin/notes/_field.html" with field=form.reason %}
+                {% include "admin/notes/_field.html" with field=form.internal_note %}
+                {% include "admin/notes/_hidden.html" %}
+                <button type="submit" class="btn btn-danger">Take down</button>
+                <a href="{{ request.path }}" class="btn btn-link">Cancel</a>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

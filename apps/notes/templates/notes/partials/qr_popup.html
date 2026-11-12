@@ -1,0 +1,43 @@
+{% comment %}A QR code button and its popup (design system 10.9: the confirmation modal's overlay and panel), the file transfer download
+   page's. Needs `qr_id` (unique on the page), `qr_uri` (the `data:` URI of a PNG), `qr_url` (what it encodes, shown under it) and
+   optionally `qr_label` (the sentence above the image). The image stays black on white in every theme so it scans in dark mode too.
+   Its only control is Close, so Tab stays on it; Escape and a click on the backdrop close it and focus goes back to the button.
+   `@keydown.tab.prevent` on the panel relies on Close being the only focusable control inside it: if another control is ever
+   added, replace it with a real focus trap. Self-contained: its own `x-data`.{% endcomment %}
+<div x-data="{ qrOpen: false }" class="inline-block">
+    <button type="button" x-ref="qrTrigger" id="qr-button-{{ qr_id }}"
+            aria-haspopup="dialog" aria-controls="qr-modal-{{ qr_id }}" :aria-expanded="qrOpen.toString()"
+            @click="qrOpen = true; $nextTick(() => { if (qrOpen) $refs.qrClose.focus(); })"
+            class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors whitespace-nowrap">
+        <i class="fas fa-qrcode mr-2" aria-hidden="true"></i>QR code
+    </button>
+    <div id="qr-modal-{{ qr_id }}" x-show="qrOpen" style="display: none"
+         @keydown.escape.window="if (qrOpen) { qrOpen = false; $refs.qrTrigger.focus(); }"
+         @click.self="qrOpen = false; $refs.qrTrigger.focus()"
+         x-transition:enter="transition-opacity duration-[220ms] ease-out"
+         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+         x-transition:leave="transition-opacity duration-[140ms] ease-in"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70 backdrop-blur-[2px]">
+        <div x-show="qrOpen" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title-{{ qr_id }}"
+             @keydown.tab.prevent="$refs.qrClose.focus()"
+             x-transition:enter="transform transition duration-[220ms] ease-out"
+             x-transition:enter-start="opacity-0 translate-y-2 scale-[.97]" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+             x-transition:leave="transform transition duration-[140ms] ease-in"
+             x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 translate-y-2 scale-[.97]"
+             class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-sm w-full mx-4 p-6 text-left">
+            <p id="qr-modal-title-{{ qr_id }}" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">QR code</p>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">{% firstof qr_label 'Scan it with a phone to open this note.' %}</p>
+            <div class="flex justify-center mb-4">
+                <img src="{{ qr_uri }}" width="240" height="240" data-qr-image
+                     alt="QR code of the link to this note"
+                     class="h-60 w-60 max-w-full bg-white rounded-lg border border-gray-200 dark:border-gray-600">
+            </div>
+            <p class="font-mono text-xs text-gray-500 dark:text-gray-400 break-all mb-6">{{ qr_url }}</p>
+            <div class="flex justify-end">
+                <button type="button" x-ref="qrClose" @click="qrOpen = false; $refs.qrTrigger.focus()"
+                        class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Close</button>
+            </div>
+        </div>
+    </div>
+</div>

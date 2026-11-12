@@ -1,0 +1,16 @@
+{% comment %}The mode radios of a share link's form: Read-only or Editable. Needs `prefix` (unique on the page) and `mode` (the one checked).{% endcomment %}
+<fieldset>
+    <legend class="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">Who can do what</legend>
+    <div class="space-y-1">
+        <label class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input type="radio" name="mode" value="read" id="{{ prefix }}-mode-read" {% if mode != 'edit' %}checked{% endif %}
+                   class="mt-0.5 h-4 w-4 border-gray-300 dark:border-gray-600 accent-sage-500">
+            <span><span class="font-medium">Read-only</span><br><span class="text-xs text-gray-500 dark:text-gray-400">Anyone with the link can read, copy and download the note.</span></span>
+        </label>
+        <label class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input type="radio" name="mode" value="edit" id="{{ prefix }}-mode-edit" {% if mode == 'edit' %}checked{% endif %}
+                   class="mt-0.5 h-4 w-4 border-gray-300 dark:border-gray-600 accent-sage-500">
+            <span><span class="font-medium">Editable</span><br><span class="text-xs text-amber-700 dark:text-amber-300">Anyone with this link can change the note's content.</span></span>
+        </label>
+    </div>
+</fieldset>

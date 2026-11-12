@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
@@ -13,6 +13,9 @@ from apps.core.markdown import normalize_for_search, search_text
 
 from ..limits import TITLE_MAX
 from .tag import Tag
+
+if TYPE_CHECKING:
+    from .link import ShareLink
 
 
 class EditorKind(models.TextChoices):
@@ -40,6 +43,10 @@ class Note(models.Model):
     DoesNotExist: ClassVar[type[ObjectDoesNotExist]]
     #: The reverse accessor of `NoteVersion.note`.
     versions: ClassVar['models.Manager']
+    #: The reverse accessor of `ShareLink.note`.
+    links: ClassVar['models.Manager']
+    #: The reverse accessor of `NoteReport.note`.
+    reports: ClassVar['models.Manager']
     # `ty` types `pk` as the primary key field object itself, not the value it holds.
     pk: uuid.UUID
     user_id: uuid.UUID
@@ -73,10 +80,42 @@ class Note(models.Model):
         int, models.PositiveIntegerField(default=0, help_text='What creating this note cost.')
     )
 
+    # A takedown (`services.takedown`, admin only) is final: the note becomes read-only for its
+    # owner and every share link of it stops working. Its columns have a `db_default` so the
+    # container still serving while the migration runs can keep inserting notes.
+    taken_down_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    taken_down_by = cast(
+        'User | None',
+        models.ForeignKey(
+            settings.AUTH_USER_MODEL,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='+',
+            help_text='The staff user who took this note down.',
+        ),
+    )
+    takedown_reason = cast(
+        str,
+        models.TextField(
+            blank=True,
+            default='',
+            db_default='',
+            help_text='Shown to the owner on the note page. Never says who reported it.',
+        ),
+    )
+    takedown_internal_note = cast(
+        str,
+        models.TextField(
+            blank=True, default='', db_default='', help_text='Staff only: shown nowhere else.'
+        ),
+    )
+
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
     updated_at = cast(datetime, models.DateTimeField(default=timezone.now))
 
     class Meta:
+        permissions = [('takedown_note', 'Can take down notes and dismiss reports')]
         indexes = [
             models.Index(fields=['user', 'deleted_at', 'archived_at', 'position']),
             models.Index(fields=['user', 'updated_at']),
@@ -103,10 +142,14 @@ class Note(models.Model):
         return self.locked_at is not None
 
     @property
+    def is_taken_down(self) -> bool:
+        return self.taken_down_at is not None
+
+    @property
     def is_read_only(self) -> bool:
-        """Locked or in the Trash: the title, content and checklist can't be changed. (A takedown,
-        a later sub-issue, joins them.)"""
-        return self.is_locked or self.is_trashed
+        """Locked, taken down or in the Trash: the title, content and checklist can't be
+        changed."""
+        return self.is_locked or self.is_trashed or self.is_taken_down
 
     def save(self, *args, **kwargs) -> None:
         self.title_text = normalize_for_search(self.title)[:TITLE_MAX]
@@ -134,6 +177,7 @@ class NoteVersion(models.Model):
     pk: uuid.UUID
     note_id: uuid.UUID
     editor_id: uuid.UUID | None
+    link_id: uuid.UUID | None
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     note = cast('Note', models.ForeignKey(Note, on_delete=models.CASCADE, related_name='versions'))
@@ -151,6 +195,18 @@ class NoteVersion(models.Model):
         ),
     )
     editor_kind = cast(str, models.CharField(max_length=10, choices=EditorKind))
+    #: The share link the save was made through, if any (`SET_NULL`: the history keeps the version
+    #: even if the link row goes). `via a shared link` in the owner's history.
+    link = cast(
+        'ShareLink | None',
+        models.ForeignKey(
+            'ShareLink',
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='versions',
+        ),
+    )
     created_at = cast(datetime, models.DateTimeField(auto_now_add=True))
     updated_at = cast(datetime, models.DateTimeField(default=timezone.now))
 

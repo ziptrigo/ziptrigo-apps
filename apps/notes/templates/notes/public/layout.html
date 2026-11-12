@@ -1,0 +1,14 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% comment %} Shared by the shared note pages: no sidebar, a `noindex` meta (the headers say so too), the note styles and the scripts
+   of the rendered note (checklist boxes, a Copy button on each code block) and of the editor. {% endcomment %}
+{% block extra_css %}
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="{% static 'notes/css/notes.css' %}">
+{% endblock %}
+
+{% block extra_js %}
+<script defer src="{% static 'notes/js/note_view.js' %}"></script>
+<script defer src="{% static 'notes/js/editor.js' %}"></script>
+{% endblock %}

@@ -39,6 +39,8 @@ urlpatterns = [
     path('', include('apps.file_transfer.download_urls')),
     # Short links live at the root (`/s/<code>`) too, for the same reason.
     path('', include('apps.short_url.redirect_urls')),
+    # Shared notes live at the root (`/n/<code>`) as well: the address of a share link.
+    path('', include('apps.notes.public_urls')),
     path('', include('apps.core.urls')),
 ]
 

@@ -23,7 +23,7 @@ from apps.core.field_errors import validation_lines as core_validation_lines
 from apps.core.htmx import is_htmx
 
 from ..models import Note
-from ..services import get_account
+from ..services import NoteConflictError, get_account
 
 FIELD_LABELS = {
     'title': 'Title',
@@ -35,6 +35,11 @@ FIELD_LABELS = {
     'index': 'Item',
     'base_version': 'Version',
     'confirm_cost': 'Cost',
+    'mode': 'Mode',
+    'label': 'Label',
+    'expires_on': 'Expires on',
+    'reason': 'Reason',
+    'reporter_email': 'Your email',
 }
 
 
@@ -183,3 +188,22 @@ def limited(request: AuthenticatedHttpRequest, rule: str, *, retarget: str = '#n
     if result.allowed:
         return None
     return ratelimit.web_response(request, result, retarget=retarget)
+
+
+def conflict_panel(
+    exc: NoteConflictError, values: dict, *, compare_title: bool = True
+) -> tuple[dict, dict]:
+    """What the editor's conflict panel shows for a save that lost a race: `(conflict, values)`,
+    the panel's data (the version, title and content stored now, whether the title differs and the
+    message) and the posted `values` with `base_version` moved to the current version, so
+    "Save mine anyway" is a plain re-post. `compare_title` is false for an edit through a share link,
+    where the title can't be changed."""
+    conflict = {
+        'version': exc.current_version,
+        'title': exc.current_title,
+        'content': exc.current_content,
+        'title_differs': compare_title
+        and exc.current_title != str(values.get('title', '')).strip(),
+        'message': NoteConflictError.MESSAGE,
+    }
+    return conflict, {**values, 'base_version': exc.current_version}

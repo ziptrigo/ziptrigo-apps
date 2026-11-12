@@ -34,6 +34,7 @@ from ..services import (
     archived_notes,
     free_slot_open,
     get_account,
+    links,
     order_notes,
     quote_create,
     restore_cost_for,
@@ -127,7 +128,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
         queryset = queryset.order_by('-deleted_at', 'pk')
     else:
         queryset = order_notes(queryset, sort, direction)
-    queryset = queryset.prefetch_related('tags')
+    queryset = links.with_active_link_flag(queryset).prefetch_related('tags')
     page_obj = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get('page'))
     notes = list(page_obj.object_list)
     for note in notes:
