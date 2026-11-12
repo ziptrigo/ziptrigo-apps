@@ -72,7 +72,8 @@ tests_e2e/            Playwright end-to-end tests (separate `pytest_e2e.ini`); `
                       test plans" under Conventions).
 conftest.py           Fixtures shared by every app's tests (`user`, `api_client`, ...).
 pyproject.toml        Deps, ruff/ty/pytest/import-linter config, `inv` module registry.
-.github/workflows/    CI (`ci.yml`): `inv lint all --check` then `inv test unit` on every push/PR.
+.github/workflows/    CI (`ci.yml`): `inv lint all --check` on every push/PR, then `inv test unit` only
+                      when the push or PR changes a file under `apps/`.
 ```
 
 `AGENTS.md` just redirects here.
@@ -6730,7 +6731,10 @@ proxy"). A coarse per-IP `limit_req` in nginx itself is configured in the `infra
 ## State of the test suites
 
 Run everything with `inv test unit`: 0 failures, gated by CI (`.github/workflows/ci.yml`, `inv lint
-all --check` then `inv test unit`). Two contracts are worth knowing since they aren't obvious from
+all --check` then `inv test unit`). CI runs the tests only when the push or PR changes a file
+under `apps/` (lint always runs), so a change elsewhere that tests depend on -- `admin/`'s CLI
+tests, `config/`, `conftest.py`, `pyproject.toml`, `uv.lock` -- is not tested by CI: run
+`inv test unit` locally for those. Two contracts are worth knowing since they aren't obvious from
 the code alone:
 
 - `JWTAuth`/`AsyncJWTAuth` (`apps/accounts/auth.py`) catch ninja_jwt's `InvalidToken`/

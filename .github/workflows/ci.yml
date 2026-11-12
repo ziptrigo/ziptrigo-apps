@@ -22,6 +22,38 @@ jobs:
       UV_FROZEN: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, so the step below can diff against the PR's base or the previous push.
+          fetch-depth: 0
+
+      # The test suite runs only when a file under `apps/` changed: the suite takes about 20
+      # minutes, and a change elsewhere (docs, `admin/` CLIs, `tests_e2e/`, workflows) doesn't
+      # need it. Lint always runs. When there is nothing to compare with (a new branch's first
+      # push), the tests run.
+      - name: Check for changes under apps/
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          HEAD: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          else
+            base="$PUSH_BEFORE"
+          fi
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "No base commit to compare with: running the tests."
+            echo "apps=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base" "$HEAD" | grep -q '^apps/'; then
+            echo "Files under apps/ changed: running the tests."
+            echo "apps=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No file under apps/ changed: skipping the tests."
+            echo "apps=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -40,4 +72,5 @@ jobs:
         run: uv run inv lint all --check
 
       - name: Test
+        if: steps.changes.outputs.apps == 'true'
         run: uv run inv test unit
