@@ -5704,6 +5704,10 @@ budgets are listed under "API" above; this is how they are built and what the CL
     **normalised** one (lower case, no accents, punctuation or formatting), as on the website. The list items
     are `TaskListItemSchema` (`TaskSchema` plus those four).
   - **`GET /settings` adds `credits_balance`** (`apps.billing.services.get_balance`: the shared balance).
+  - **`GET /settings` (and the `PATCH` answer) add `max_attachment_bytes` and `max_attachments_per_task`** (API 2.3.0),
+    read-only, read live from the `TodoSettings` singleton so a client can refuse a file before uploading (the
+    per-task cap counts pending uploads and unsaved comment-file drafts too). `PATCH` still refuses them (422,
+    `extra='forbid'`). `inv todo settings` prints them as "Largest file" and "Files per task".
   - **CLI**: `list --dir asc|desc` and, for a search, a "Where it matched" block under the table with the
     match in bold; `comment <n> text... --file PATH` (repeatable: each is uploaded as a draft first, the comment
     is posted with their ids, and if any step fails the drafts already uploaded are discarded and nothing is

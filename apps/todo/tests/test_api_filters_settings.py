@@ -257,7 +257,24 @@ class TestSettings:
             'storage_credits_per_day': '0.0000',
             'storage_frozen': False,
             'credits_balance': 100,
+            'max_attachment_bytes': 50 * 1024 * 1024,
+            'max_attachments_per_task': 20,
         }
+
+    def test_attachment_limits_follow_the_singleton(self, client, auth, funded_user):
+        from ..models import TodoSettings
+
+        TodoSettings.objects.update_or_create(
+            pk=TodoSettings.load().pk,
+            defaults={'max_attachment_bytes': 1234, 'max_attachments_per_task': 3},
+        )
+
+        body = get(client, '/settings', auth).json()
+        patched = patch(client, '/settings', auth, {'snooze_minutes': 60}).json()
+
+        for answer in (body, patched):
+            assert answer['max_attachment_bytes'] == 1234
+            assert answer['max_attachments_per_task'] == 3
 
     def test_usage_and_storage_figures(self, client, auth, funded_user, fake_storage):
         from .factories import make_attachment
@@ -363,7 +380,13 @@ class TestSettings:
         assert get_account(funded_user).default_due_time == time(9, 0)
 
     def test_an_unknown_key_is_a_422(self, client, auth):
-        for body in ({'task_price': 0}, {'stored_bytes': 0}, {'default_due_time': 'noon'}):
+        for body in (
+            {'task_price': 0},
+            {'stored_bytes': 0},
+            {'max_attachment_bytes': 1},
+            {'max_attachments_per_task': 1},
+            {'default_due_time': 'noon'},
+        ):
             assert patch(client, '/settings', auth, body).status_code == 422
 
     def test_an_empty_patch_spends_nothing(self, client, auth, settings):

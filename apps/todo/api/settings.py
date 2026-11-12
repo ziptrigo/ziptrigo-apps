@@ -39,6 +39,8 @@ def _settings(user: User) -> dict:
         'storage_credits_per_day': f'{services.daily_storage_rate(account.stored_bytes):f}',
         'storage_frozen': account.is_frozen,
         'credits_balance': get_balance(user),
+        'max_attachment_bytes': config.max_attachment_bytes,
+        'max_attachments_per_task': config.max_attachments_per_task,
     }
 
 

@@ -26,7 +26,9 @@ class SettingsSchema(Schema):
     `storage_credits_per_day` (what storing them costs a day, a decimal string) and
     `storage_frozen` (storage could not be paid for: uploads and downloads are refused) and
     `credits_balance`, the user's credit balance (the shared balance, not only To-do's: what a new
-    task beyond the free ones is paid from).
+    task beyond the free ones is paid from). Also read-only, the attachment limits
+    (`max_attachment_bytes`, `max_attachments_per_task`), so a client can refuse a file before
+    uploading it.
     """
 
     default_due_time: time
@@ -43,6 +45,13 @@ class SettingsSchema(Schema):
     storage_credits_per_day: str
     storage_frozen: bool
     credits_balance: int = Field(description="The user's current credit balance.")
+    max_attachment_bytes: int = Field(
+        description='The largest file, in bytes, that can be attached to a task or a comment.'
+    )
+    max_attachments_per_task: int = Field(
+        description='The most files a task can hold. Uploads still pending and comment files '
+        'not yet saved count toward it too.'
+    )
 
 
 class SettingsUpdateSchema(Schema):

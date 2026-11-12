@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.2.0
+  version: 2.3.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -8779,7 +8779,11 @@ components:
 
         `credits_balance`, the user''s credit balance (the shared balance, not only To-do''s: what a new
 
-        task beyond the free ones is paid from).'
+        task beyond the free ones is paid from). Also read-only, the attachment limits
+
+        (`max_attachment_bytes`, `max_attachments_per_task`), so a client can refuse a file before
+
+        uploading it.'
       properties:
         default_due_time:
           format: time
@@ -8833,6 +8837,14 @@ components:
           description: The user's current credit balance.
           title: Credits Balance
           type: integer
+        max_attachment_bytes:
+          description: The largest file, in bytes, that can be attached to a task or a comment.
+          title: Max Attachment Bytes
+          type: integer
+        max_attachments_per_task:
+          description: The most files a task can hold. Uploads still pending and comment files not yet saved count toward it too.
+          title: Max Attachments Per Task
+          type: integer
       required:
       - default_due_time
       - default_reminder_minutes
@@ -8848,6 +8860,8 @@ components:
       - storage_credits_per_day
       - storage_frozen
       - credits_balance
+      - max_attachment_bytes
+      - max_attachments_per_task
       title: SettingsSchema
       type: object
     SettingsUpdateSchema:
