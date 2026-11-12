@@ -14,7 +14,7 @@ notification**, each in its own case: welcome credits, a promo code granted at s
 transfer suspended (and the notice removed when it is re-enabled), Receipts storage paused (and
 removed on unfreeze), a To-do reminder delivered in-app, To-do storage paused (and removed), a
 To-do repeating task whose next occurrence could not be created, and To-do "emailed tasks were not
-created", the two blocker notices (a task no longer blocked, a blocker reopened) and the three Notes renewal notices (a note locked, the renewal warning, and the locked notice going when credits arrive). Also **Web Push** (issue #239): the service worker and manifest at the root, the account
+created", the two blocker notices (a task no longer blocked, a blocker reopened) the three Notes renewal notices (a note locked, the renewal warning, and the locked notice going when credits arrive) and the Notes "edited through a shared link" notice (NOTIF-30). Also **Web Push** (issue #239): the service worker and manifest at the root, the account
 page's **Notifications on this device** section, the answer endpoint and sign-out (NOTIF-19 to
 NOTIF-22). The read-only admin of notifications is in `admin.md` (ADM-32), push in ADM-54. The emails these events
 send are checked here only for arrival, subject and links; `emails.md` has them in full.
@@ -504,6 +504,25 @@ with markup is shown as text.
 |---|---|---|
 | 1 | Create a paid note titled `<i>Notif</i> & more`, make it due, run `renew()` with no credits. | The notification title is `Your note "<i>Notif</i> & more" is locked`, shown as text on the dropdown and `/notifications/` (no italics, no raw tag). |
 | 2 | Set the account to `dd/mm/yyyy` and 24-hour (ACC-46). | The body and title are unchanged (no date in them); only times shown by `{% local_time %}` elsewhere follow the setting. |
+
+### NOTIF-30 Notes: an edit through a shared link is one notice, replaced
+
+**Purpose:** when someone other than the owner changes a note through an editable link, the owner gets one notice
+(key `note_edited:<note id>`), replaced by the next; the owner's own edits and edits that change nothing make none; no
+email. The full flow is `notes.md` NOTES-24.
+**Preconditions:** `qa.user@example.com` has `Shared note` with an editable link `LINK_E`; Visitor (no session) and the
+owner's session in another context; the bell empty of `Shared note` notices.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `LINK_E`, **Edit**, change the content, **Save**. | The owner's bell badge counts one more (within a minute, or on a reload). |
+| 2 | The bell. | A new notification **Your note "Shared note" was edited through a shared link** with no body; clicking it opens the note's page (and marks it read). |
+| 3 | Visitor: edit again and tick a checklist box. | `/notifications/` still lists **one** such notification (new again): the earlier one was replaced, not added to. |
+| 4 | Visitor: save without changing anything (open **Edit**, **Save**). | No new notification. |
+| 5 | The owner edits through `LINK_E` themselves. | No notification (an owner's edit through their own link is not "someone else"). |
+| 6 | Another note with a 100-character title is edited through a link. | The notification's title carries the title cut to 60 characters: `Your note "<60 characters>" was edited through a shared link`. A title with markup (`<i>x</i>`) shows as text. |
+| 7 | `/__e2e__/mail/?to=qa.user@example.com`. | No email about the edits (there is no email channel for this notice). |
+| 8 | Deactivate the owner (`User.objects.filter(email=...).update(status='INACTIVE')`) and edit through the link. | The edit is saved; no notification is written for the account (and nothing fails). Reactivate it. |
 
 ## Out of scope
 

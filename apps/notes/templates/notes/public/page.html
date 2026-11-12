@@ -1,0 +1,72 @@
+{% extends 'notes/public/layout.html' %}
+{% load local_time notes_ui %}
+
+{% block title %}{{ note.title }} - ZipTrigo{% endblock %}
+
+{% block content %}
+{% comment %} A shared note, for anyone who has the link. Shows nothing about the owner or any editor. Needs `note`, `link`, `tags`, `checklist_url`
+   (set for an editable link), `qr_data_uri`, `page_url`, `duplicate_cost` (0 for a visitor without a session), `report_form`,
+   `reported` and `report_open`. {% endcomment %}
+<div x-data="confirmModal" class="container mx-auto px-4 py-8 max-w-3xl">
+    <div class="mb-2">
+        <h1 class="break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ note.title }}</h1>
+    </div>
+    <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">Updated {% local_time note.updated_at %}</p>
+
+    {% if tags %}
+    <div class="mb-4 flex flex-wrap items-center gap-2">{% for tag in tags %}{% tag_chip tag %}{% endfor %}</div>
+    {% endif %}
+
+    <div id="note-msg" class="mb-3 text-sm" aria-live="polite"></div>
+
+    <div x-data="copyText" class="mb-6 flex flex-wrap items-center gap-2">
+        <pre x-ref="text" class="hidden" aria-hidden="true">{{ note.content }}</pre>
+        {% if link.is_editable %}
+        <a href="{% url 'n:edit' link.code %}"
+           class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+            <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit</a>
+        {% endif %}
+        <button type="button" @click="copy()"
+                class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+            <span x-text="copied ? 'Copied' : 'Copy note'">Copy note</span></button>
+        <a href="{% url 'n:raw' link.code %}" rel="nofollow"
+           class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i class="fas fa-file-lines mr-2" aria-hidden="true"></i>Raw</a>
+        <a href="{% url 'n:download' link.code %}" rel="nofollow"
+           class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i class="fas fa-download mr-2" aria-hidden="true"></i>Download</a>
+        {% include 'notes/partials/qr_popup.html' with qr_id='page' qr_uri=qr_data_uri qr_url=page_url %}
+        {% if duplicate_cost %}
+        <button type="button" @click="show($el)"
+                data-url="{% url 'n:duplicate' link.code %}" data-tone="primary" data-label="Duplicate for {{ duplicate_cost }} credit{{ duplicate_cost|pluralize }}"
+                data-cost="{{ duplicate_cost }}" data-title="Duplicate this note?"
+                data-body="Your free notes are all in use, so the copy costs {{ duplicate_cost }} credit{{ duplicate_cost|pluralize }}."
+                class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i class="fas fa-clone mr-2" aria-hidden="true"></i>Duplicate</button>
+        {% else %}
+        <form method="post" action="{% url 'n:duplicate' link.code %}">
+            {% csrf_token %}
+            <button type="submit"
+                    class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <i class="fas fa-clone mr-2" aria-hidden="true"></i>Duplicate</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
+        {% include 'notes/partials/note_body.html' %}
+    </div>
+
+    <div class="mt-8 border-t border-gray-200 dark:border-gray-700 pt-4" x-data="{ reportOpen: {{ report_open|yesno:'true,false' }} }">
+        <button type="button" @click="reportOpen = !reportOpen" :aria-expanded="reportOpen" aria-controls="report-box"
+                class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-md">
+            <i class="fas fa-flag mr-1" aria-hidden="true"></i>Report this note
+        </button>
+        <div x-show="reportOpen" {% if not report_open %}style="display: none" {% endif %}x-cloak class="mt-3">
+            {% include 'notes/public/report_box.html' %}
+        </div>
+    </div>
+    {% include 'core/partials/confirm_modal.html' %}
+</div>
+{% endblock %}

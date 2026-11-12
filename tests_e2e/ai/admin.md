@@ -31,6 +31,8 @@ The custom Django admin site at `/admin/` (`apps/core/admin_site.py`, themed wit
 - Short URLs moderation: link reports (dismiss, which releases a hold), auto-hold and "Release
   abuse-review hold", take down with the owner's email, "Block the destination domain",
   "Deactivate the owner's account", the blocked domains list;
+- Notes moderation: share links (read-only list that never shows a full code), note reports (dismiss) and the
+  **Take down** actions on notes and reports behind `notes.takedown_note`;
 - the History entries the admin actions write, feedback triage, notifications, scheduled jobs
   after a scheduler run, the read-only Receipts and To-do admins with their filters and search,
   both apps' inbound message "retry" action, and the other read-only admins (email verifications,
@@ -1012,6 +1014,41 @@ push configured (NOTIF-20's preconditions).
 | 2 | Confirm. | "The user ... was deleted successfully." |
 | 3 | Search the user's email in `/admin/notes/note/`, `/admin/notes/tag/` and `/admin/notes/notesaccount/`. | No rows. |
 
+
+### ADM-60 Share links in the admin never show a code
+
+**Purpose:** a share link's code is the capability to its note, so no admin page shows it in full (issue #260).
+**Preconditions:** Session A (`qa.admin`); `notes.md` NOTES-21 and NOTES-22 done: `Shared note` has an active read-only link `LINK_R`, an editable
+link `LINK_E` and a revoked one.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/`, find **Share links** in the Notes group. | A **View** entry, no Add. |
+| 2 | `/admin/notes/sharelink/`. | A list with **Code** (only the first 6 characters and `...`, e.g. `Vq3xK9...`), **Note** (a link to the note's admin page), **Owner** (`qa.user@example.com`), **Mode**, **Now** (`active`, `revoked`, `expired`, or `active (note unavailable)` for a link whose note is in the Trash, locked or taken down), **Label**, **Expires at**, **Last edited at**, **Created at**. No full 22-character code anywhere in the page source. |
+| 3 | Search for the note's title and for `qa.user@example.com`; filter by **Mode**. | Each narrows the list; searching for a full code (copy it from the owner's panel) finds **nothing** (the code is not searchable). |
+| 4 | Open a link. | Every field read-only, again only `Vq3xK9...`; no Save, no Delete. `/admin/notes/sharelink/add/` and `.../<id>/delete/` are 403. |
+| 5 | `/admin/notes/note/<id>/change/` of `Shared note`. | The note's own page does not list its links' codes either (it shows its versions inline). |
+| 6 | After the visitor edited through `LINK_E` (NOTES-24): the list's **Last edited at** for `LINK_E` is set; `LINK_R`'s is empty. | As described. |
+
+### ADM-61 Note reports and takedown
+
+**Purpose:** staff review reports of shared notes, dismiss them or take the note down, behind a permission and a confirmation page (issue #260).
+**Preconditions:** Session A (`qa.admin`); `notes.md` NOTES-26 steps 1 to 4 done (two reports on `Shared note`, one `spam`, one from another address as `phishing`);
+another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for the permission steps.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/notes/notereport/`. | A list newest first with **Note** (a link), **Reason**, **Status** (`pending`), **Reporter email**, **Reporter ip**, **Created at**; filters **Status**, **Reason**, **Created at**; search by the note's title, the owner's email, the reporter's email and IP; no Add; open a report: all fields read-only (details, link, reviewer). |
+| 2 | Tick one report; choose **Dismiss selected report(s)**, **Go**. | "Dismissed 1 report(s)."; the report is `dismissed` (open it: reviewed by `qa.admin`, "Dismissed via admin."); the note is untouched (its owner sees nothing). Run it again on the same report: "Dismissed 0 report(s)." |
+| 3 | The note's and the report's **History**. | The report has "Dismissed." by `qa.admin`. |
+| 4 | Tick the remaining pending report; choose **Take down the reported note(s)**, **Go**. | A confirmation page **Take down note(s)** listing `Shared note` and its owner, a required **Reason** ("... always shown to its owner ... It never says who reported the note ..."), **Internal note (staff only)**, and **Take down** / **Cancel**. There is **no** "notify the owner" box ("The owner is not emailed."). Nothing has changed yet. |
+| 5 | **Take down** with no reason. | The page again with a red "This field is required." under **Reason**; nothing changed. Then Reason `Copyright complaint`, internal note `ticket 12`, **Take down**. |
+| 6 | The list after the redirect. | "Took down 1 note(s)."; the report is `actioned`. `/admin/notes/note/<id>/change/`: **Taken down at**, **Taken down by** `qa.admin`, **Takedown reason** `Copyright complaint`, **Takedown internal note** `ticket 12`; the list's **Taken down** column is a green tick and the **Taken down** filter finds it. The note's **History**: "Taken down: Copyright complaint". |
+| 7 | Owner and visitor (NOTES-26 steps 8 to 11). | The banner shows the reason only; the links give the neutral page; the owner got no email (`/__e2e__/mail/?to=qa.user@example.com` has nothing new) and no notification. |
+| 8 | Take down the same note again from the **Notes** list (select it, **Take down selected note(s)**), reason `again`. | "Took down 0 note(s). 1 had already been taken down."; the reason is still `Copyright complaint` (a takedown is final: there is no release action anywhere). |
+| 9 | Select `Fine note` and `Shared note` together in the **Notes** list, **Take down selected note(s)**. | The page lists both; after confirming, "Took down 1 note(s). 1 had already been taken down." |
+| 10 | Permissions (ADM-51's STAFF, Session B): give STAFF only "Notes | note | Can view note" and "Notes | note report | Can view note report". Open both lists. | Both load with **no** action menu entry for take down or dismiss; POSTing `action=take_down_action` / `dismiss_action` (devtools) changes nothing. |
+| 11 | Session A: add "Notes | note | Can take down notes and dismiss reports" to STAFF. Session B: reload. | The notes list offers **Take down selected note(s)** and the report list **Dismiss selected report(s)** and **Take down the reported note(s)**; they work and log in History. |
 
 ## Out of scope
 

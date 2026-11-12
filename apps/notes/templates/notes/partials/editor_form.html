@@ -1,7 +1,8 @@
 {% load notes_ui %}
 {% comment %} The note editor (new and edit). Needs `action`, `cancel_url`, `values` (title, content, base_version), `tags` and
    `selected_tag_ids` (a new note picks its tags here; an existing one has them on its page), `note` (None for a new
-   one), `error_lines` and, after a refused save of an out-of-date note, `conflict` (what is stored now): the form is then
+   one), `preview_url` (where the live preview posts; the owner's by default) and `title_readonly` (an edit through a share link:
+   the title is shown, not sent), `error_lines` and, after a refused save of an out-of-date note, `conflict` (what is stored now): the form is then
    sent again (422, swapped over itself) with the person's own text kept and "Save mine anyway" posting the current
    version. The live preview posts the textarea to `notes:preview` after a pause in typing (and once on load).
    `notes/js/editor.js` adds Ctrl+S / Cmd+S and the warning about unsaved changes. {% endcomment %}
@@ -40,8 +41,14 @@
 
     <div class="mb-4">
         <label for="note-title" class="block mb-1 text-sm font-medium">Title</label>
+        {% if title_readonly %}
+        <input id="note-title" type="text" value="{{ values.title }}" readonly aria-describedby="note-title-help"
+               class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 text-gray-600 dark:text-gray-300">
+        <p id="note-title-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">The title can only be changed by the note's owner.</p>
+        {% else %}
         <input id="note-title" name="title" type="text" value="{{ values.title }}" maxlength="200" required
                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+        {% endif %}
     </div>
 
     {% if not note and tags %}
@@ -70,7 +77,7 @@
         <div id="pane-write" role="tabpanel" aria-labelledby="tab-write" :class="tab === 'write' ? '' : 'hidden lg:block'">
             <label for="note-content" class="mb-1 text-sm font-medium sr-only lg:not-sr-only">Content (Markdown)</label>
             <textarea id="note-content" name="content" rows="22" maxlength="50000" spellcheck="true"
-                      hx-post="{% url 'notes:preview' %}" hx-trigger="input changed delay:400ms, load"
+                      hx-post="{% if preview_url %}{{ preview_url }}{% else %}{% url 'notes:preview' %}{% endif %}" hx-trigger="input changed delay:400ms, load"
                       hx-target="#note-preview" hx-swap="innerHTML" hx-sync="this:replace" hx-disabled-elt="unset"
                       class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 font-mono text-sm">{{ values.content }}</textarea>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">

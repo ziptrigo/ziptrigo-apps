@@ -2,8 +2,9 @@
 
 ## Scope
 
-The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3): Markdown notes with a
-live-preview editor, tags, versions, free slots, creation billing and renewals, archive and Trash:
+The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3, sharing: PR 4): Markdown
+notes with a live-preview editor, tags, versions, free slots, creation billing and renewals, archive and Trash, share
+links and the public pages:
 
 - the sidebar (a **New note** button, then Notes, Archived, Trash, Tags; a row of scrolling links on phones);
 - the lists **Notes** `/notes/` (manual drag-and-drop order, the sort bar, the tag filter, 50 per page),
@@ -20,10 +21,14 @@ live-preview editor, tags, versions, free slots, creation billing and renewals, 
   credit to create and 5 credits every 365 days after that: the daily `notes.renew` job charges the renewal silently,
   **locks** a note whose renewal the balance can't cover (read-only, nothing deleted), unlocks it when credits arrive
   (oldest first) and warns 7 days ahead; the note page says "Free" or "Renews <date>" (NOTES-16 to NOTES-19);
+- sharing (NOTES-21 to NOTES-26): the owner's **Share** panel (links that are read-only or editable, a label, an expiry,
+  a QR code, revoking), the public pages `/n/<code>` (the note, **Raw**, **Download**, **QR code**, **Duplicate** for a
+  signed-in visitor, the neutral page every dead link shows), editing through an editable link (content only, the
+  conflict panel, who is recorded), reporting a note, and an admin's takedown as the owner sees it;
 - access control: logged-out visitors and another user's notes, tags and versions.
 
-Not covered here (later sub-issues of #260): share links and the public `/n/<code>` pages (so a locked note's links
-stopping is checked there), reports and takedown, search and saved filters, the JWT API and the `inv notes` CLI. The
+Not covered here (later sub-issues of #260): search and saved filters, the JWT API and the `inv notes` CLI. The staff side
+of reports and takedown is in `admin.md` (ADM-60, ADM-61) and the owner's edit notice in `notifications.md` (NOTIF-30). The
 renewal cases use shell steps: the scheduler does not run on the test server, so the daily job is run by hand. The two
 emails and three notices they cause are checked in full in `emails.md` (MAIL-24, MAIL-25) and `notifications.md`
 (NOTIF-27 to NOTIF-29).
@@ -397,7 +402,125 @@ notes `Soon A`, `Soon B`; then in the admin **Spend** credits so that exactly 7 
 | 4 | Admin: add `3` credits (balance 10, exactly the cost), reset `renewal_warned_at` as in step 3 and run `<RENEW>`. | No warning (the balance covers the renewals). |
 | 5 | Move `Soon B` to the Trash, spend back to 7, reset the stamp, run `<DUE+3>` for `Soon A` and `<RENEW>`. | No warning (one renewal = 5 credits, balance 7; trashed and free notes don't count). |
 
+### NOTES-21 The Share panel: create, copy, QR code, edit and revoke a link
+
+**Purpose:** the owner makes read-only and editable links, sees their addresses and QR codes, changes and revokes them.
+**Preconditions:** Context A as `qa.user@example.com`; a note `Shared note` with `CONTENT_A`; Visitor (no session) in a
+private window. Record `LINK_R` and `LINK_E` (the addresses) as you go.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `Shared note`. | A **Share** button between **Edit** and **History**; no **Shared** pill yet. |
+| 2 | Click **Share**. | A panel **Share this note** opens above the note ("Anyone who has a link can open the note without signing in. 0 of 10 active links used."): two radios **Read-only** (checked; "Anyone with the link can read, copy and download the note.") and **Editable** ("Anyone with this link can change the note's content."), a **Label (optional)** ("Only you see it."), an **Expires on (optional)** date field and **Create link**; "This note has no links yet." below. |
+| 3 | Leave the defaults, label `for Ann`, **Create link**. | The list shows one link: a **Read-only** pill, the label `for Ann`, an address `http://localhost:8765/n/<22 characters>` in mono type, **Copy link**, "Created <date>", and the buttons **QR code**, **Edit**, **Revoke**. A **Shared** pill appears next to the title. Record `LINK_R`. |
+| 4 | Click **Copy link**, paste it into the address bar of Visitor's window. | The button says **Copied** for a moment; the pasted text is `LINK_R` (NOTES-22). |
+| 5 | Click **QR code**. | A dialog **QR code** ("Scan it with a phone to open this note.") with a black-on-white image, also in dark mode, and the address under it; focus is on **Close**; Tab stays on **Close**; Escape or a click outside closes it and focus returns to the button. A phone scan (or a QR reader) opens `LINK_R`. |
+| 6 | Choose **Editable**, label `team`, expiry = tomorrow's date (type it in your date order, or use the calendar), **Create link**. | The new link is listed first (newest) with an **Editable** pill (amber), `team` and "Expires <tomorrow>"; "2 of 10 active links used". Record `LINK_E`. |
+| 7 | Expiry `01/01/2020` (any past date), **Create link**. | A red `Expires on: Choose a date that has not passed.` above the form; no link is made. |
+| 8 | Click **Edit** on `LINK_R`'s row; change **Editable**, label `Ann edit`, clear nothing, **Save link**. | The row now says **Editable** and `Ann edit`; its address is unchanged. Edit it back to **Read-only**. |
+| 9 | Click **Edit** on `LINK_E`, clear the expiry date (the calendar's **Clear**), **Save link**. | The "Expires ..." text is gone from that row. |
+| 10 | Click **Revoke** on `LINK_R`; the dialog says "Revoke this link?" / "Anyone who has it can no longer open the note through it. This can't be undone: you can make a new link."; **Revoke**. | **Link revoked.**; the note page reloads with the panel open: `LINK_R`'s row is greyed with a **Revoked** pill and has no QR code, Edit or Revoke; `LINK_E` is still active. |
+| 11 | Make links until 10 are active (create 8 more), then try an 11th. | A red `A note can have at most 10 active links.`; revoked links do not count. Revoke the extras. |
+| 12 | Close the panel (**Close**), reload the note, open **Notes** (`/notes/`). | The panel stays closed; the note's row on the list has a small link icon (tooltip "Shared by link"). Revoke `LINK_E` too: the **Shared** pill and the row icon disappear (after a reload). |
+| 13 | Open a trashed note and a locked note (NOTES-17). | Neither has a **Share** button (they can't be shared); a taken-down note neither (NOTES-26). |
+
+### NOTES-22 The public page of a read-only link
+
+**Purpose:** a visitor with no account reads the note and uses its buttons; nothing about the owner shows.
+**Preconditions:** NOTES-21 steps 1 to 3 (an active read-only link `LINK_R` for `Shared note`); `Shared note` has a tag and `CONTENT_A`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `LINK_R`. | The site header (with the sign-in links), the title `Shared note`, "Updated <local time>", the tag chip (name and colour, not a link), the rendered content with the coloured Python block and the table; buttons **Copy note**, **Raw**, **Download**, **QR code**, **Duplicate**; **Report this note** at the bottom. No **Edit**, nothing about the owner's name or email and no label (`for Ann`). The tab title is `Shared note - ZipTrigo`. |
+| 2 | In devtools check the response headers and the page source. | `Cache-Control: no-store, private`, `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: same-origin`, and `<meta name="robots" content="noindex">`. |
+| 3 | The checklist boxes. | Disabled: clicking does nothing. |
+| 4 | **Copy note**, paste into a text editor. | The note's Markdown (the content, not the title). **Raw**: the Markdown as plain text in the browser (`text/plain`), no HTML. **Download**: a file `shared-note.md` with the Markdown. |
+| 5 | **QR code**. | As NOTES-21 step 5; the address under the image is `LINK_R`. |
+| 6 | Open `LINK_R/edit`, `LINK_R/preview` (GET) and POST `LINK_R/checklist` (devtools). | `/edit` is the page **This note isn't available** (404): a read link has no editor. The others give the same page or a 405. |
+| 7 | Edit the note as the owner (add a line), reload Visitor's page. | The new text shows at once (the page is not cached). |
+| 8 | Archive the note as the owner. | The link keeps working (archiving changes nothing for links). Unarchive it. |
+| 9 | A note with a very long content (about 50,000 characters of text) shared by a link. | The page renders (a plain, escaped text if it is over the Markdown limit) and does not fail. |
+| 10 | Dark theme in Context A is **not** Visitor's: set the browser to dark (prefers-color-scheme). | The page follows the browser's theme (a visitor has no account setting); the code block and table are readable; the page is readable at 375 px wide (the table scrolls inside the page). |
+
+### NOTES-23 Every dead link shows the same page
+
+**Purpose:** an unknown code, a revoked or expired link, a note in the Trash, a locked note and a taken-down note all give
+one neutral page that never says why.
+**Preconditions:** NOTES-22; one link per case below (make them as `qa.user`): `L_REV` (revoked), `L_EXP`, `L_TRASH`
+(its note in the Trash), `L_LOCK` (its note locked, NOTES-17 or `Note.objects.filter(...).update(locked_at=timezone.now())`), `L_DOWN` (its note taken down in
+the admin, ADM-61 step 4), and `L_OK` (alive). Expire `L_EXP` with the shell step
+`ShareLink.objects.filter(label='expired').update(expires_at=timezone.now()-timedelta(days=1))`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `L_OK`. | The note (control). |
+| 2 | Visitor: open `http://localhost:8765/n/doesnotexist1234567890` and each of `L_REV`, `L_EXP`, `L_TRASH`, `L_LOCK`, `L_DOWN`. | The **same** page every time: no site header, the logo, **This note isn't available** and "The link may have expired, been switched off, or been removed.", a **Go to ZipTrigo** link; HTTP 404; `Cache-Control: no-store, private`. No difference in wording, timing of the page or title between the cases. |
+| 3 | The same for `<link>/raw` and `<link>/download` of each. | The same page (404), never the Markdown. |
+| 4 | Restore `L_TRASH`'s note from the Trash; unlock `L_LOCK`'s note (add credits, NOTES-18). | Both links work again. `L_REV` and `L_DOWN` never do. |
+| 5 | As the owner extend `L_EXP`'s expiry to tomorrow (Share panel, **Edit**). | It works again; a revoked link cannot be edited at all (its row has no **Edit**). |
+| 6 | Visitor: open `<L_OK>/` (trailing slash) and a different case of the code. | The slash works; the different case is the neutral page (codes are case-sensitive). |
+
+### NOTES-24 Editing through an editable link
+
+**Purpose:** anyone with an editable link can change the content (not the title); conflicts are caught; the owner sees who.
+**Preconditions:** `Shared note` with an active **Editable** link `LINK_E` (NOTES-21 step 6; remove its expiry), the owner in
+Context A, Visitor (no session) and `qa.admin@example.com` (Context B).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `LINK_E`. | As NOTES-22 plus an **Edit** button; the checklist boxes are enabled. |
+| 2 | Click **Edit**. | The editor titled **Edit note** with "You are editing the content of a shared note. Only its owner can change the title."; the title is a grey read-only box ("The title can only be changed by the note's owner."); no tags; the live preview works (side by side from 1024 px wide); **Cancel** returns to the page. |
+| 3 | Change the content, **Save**. | The page shows **Saved.** and the new text; the title is unchanged. In devtools POST a different `title` to `LINK_E/edit`: the title still does not change. |
+| 4 | Tick a checklist box on the shared page. | It saves (no reload): the box stays ticked after a reload. |
+| 5 | Context A (owner): open the note, then **History**. | New rows by **Someone via a shared link** (the edit, and the ticked box if it was more than 10 minutes later or by another editor); **View** shows the text; the oldest row is by **You**. Visitor's page shows nothing about who edited. |
+| 6 | Context B (`qa.admin`, signed in): open `LINK_E` and edit the content. | Saved. The owner's History row says `<qa.admin's name> via a shared link`. A second edit by Visitor within 10 minutes is a **separate** row (different editor). |
+| 7 | Two editors at once: Visitor opens the editor; Context B saves a change; Visitor then **Save**s. | A red **This note was changed by someone else while you were editing.** panel over the editor with Visitor's text kept in the box, a read-only **Current version** with **Copy current version**, and the buttons **Save mine anyway** and **Discard my changes**; nothing was written. **Save mine anyway** saves it and the owner's History keeps the text it replaced. |
+| 8 | The owner opens `LINK_E` themselves and saves. | It is recorded as **You via a shared link** (the owner, through a link), and the owner gets **no** notice for it (NOTIF-30). |
+| 9 | The owner restores the version before the edits (**History > Restore**). | The note has the earlier content; the visitor sees it after a reload; the owner's History keeps every version. |
+| 10 | The owner revokes `LINK_E` while Visitor has the editor open; Visitor presses **Save**. | The page reloads into **This note isn't available**; nothing was written. |
+| 11 | Visitor: save content over 50,000 characters (paste a long text). | The editor stays with `Content: Keep the note to 50,000 characters or fewer.` and the text kept. |
+| 12 | Switch `LINK_E` to **Read-only** in the Share panel while Visitor is on the page. | Visitor's next save or tick is the neutral page / a reload; a read link has no **Edit**. |
+
+### NOTES-25 Duplicate from a shared page
+
+**Purpose:** a signed-in visitor copies the note into their own notes; a visitor without a session is asked to sign in.
+**Preconditions:** `Shared note` with an active link `LINK_R`; `qa.admin` (Context B) with free slots; a user whose slots are full and 100
+credits (NOTES-08 step 6).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor (no session): open `LINK_R`, click **Duplicate**. | The sign-in page (`/account/login/?next=/n/<code>`); after signing in as `qa.admin` you land on the shared page again. |
+| 2 | Context B: click **Duplicate**. | **Note duplicated.**; the new note opens in `qa.admin`'s notes titled exactly `Shared note` (no "(copy)"), same content, **No tags**, History with version 1 only, no links; the owner's note is unchanged. |
+| 3 | As the user with full slots: open `LINK_R`, click **Duplicate**. | A dialog "Duplicate this note?" "Your free notes are all in use, so the copy costs 1 credit."; **Duplicate for 1 credit** creates the note and spends 1 credit (the ledger has `Notes: "Shared note"`). |
+| 4 | In devtools change the dialog's `confirm_cost` to `0` and confirm. | A flash `Duplicating this note costs 1 credit. Confirm it from the Duplicate button to continue.`; no copy; balance unchanged. |
+| 5 | A user with no credits and full slots confirms. | `You don't have enough credits to duplicate this note.` with a **Top up your credits** link. |
+| 6 | The owner opens their own link while signed in and duplicates. | A copy is made in the owner's notes (the same rules and cost). |
+| 7 | A user who has not accepted the current terms (`User.terms_version=''` by shell) opens a shared page and clicks **Duplicate**. | The shared page itself opens (it is never gated); **Duplicate** goes to the accept-terms page first. |
+| 8 | A taken-down or revoked link: POST `<link>/duplicate`. | The neutral page (404); nothing is created. |
+
+### NOTES-26 Reports and takedown, as the reporter and the owner see them
+
+**Purpose:** anyone can report a shared note; an admin's takedown makes the note read-only for its owner and kills its links.
+**Preconditions:** `Shared note` with an active link `LINK_R` (read-only) and `LINK_E`; Visitor; the owner in Context A;
+`qa.admin` (Context B) for the admin steps (ADM-60, ADM-61).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `LINK_R`, click **Report this note**. | A form opens under it: **Reason** (Choose a reason, Phishing or scam, Malware, Spam, Illegal content, Copyright infringement, Other), **Details (optional)**, **Your email (optional)** ("In case we need to follow up. We won't share it with the owner of the note.") and **Submit report**. |
+| 2 | Submit with no reason. | The form stays with a red `Reason` error; nothing is sent. |
+| 3 | Choose **Spam**, details `ads`, **Submit report**. | A green **Thank you, your report has been submitted.** (no reload). |
+| 4 | Submit again within 10 minutes (reload and report). | `You already reported this note recently. Thank you.`; no second report. After 10 minutes (or from another network) it works. |
+| 5 | Submit with `not-an-email` as the email. | A red error under the email field. |
+| 6 | The owner revokes the link while the form is open; Visitor submits. | The page reloads into **This note isn't available**; no report is stored. |
+| 7 | (Only with rate limiting on, which this server has off: otherwise skip, the unit tests cover it.) Submit 6 reports from one address within an hour. | The sixth is `Too many requests. Please wait a moment and try again.` (429). |
+| 8 | Admin takes the note down (ADM-61 step 4) with the reason `Copyright complaint`. Owner: reload the note page. | A red banner **This note was taken down.** "It can no longer be changed, shared or copied, and its links don't work. You can still read, download, trash and delete it." and **Reason:** `Copyright complaint`; the internal note and the reporter appear nowhere. No **Edit**, **Share**, **Duplicate**, **Archive**, **Edit tags**; the checkboxes are disabled; **Download**, **Copy**, **History** (no **Restore**) and **Move to trash** are there; the list row has a red ban icon (tooltip "Taken down"). |
+| 9 | Owner: open `/notes/<id>/edit/` directly. | Redirected to the note with the flash `This note was taken down and can no longer be changed.` |
+| 10 | Owner: POST `/notes/<id>/duplicate/` and `/notes/<id>/share/new/` (devtools). | `This note was taken down and cannot be copied.` / `This note was taken down and cannot be shared.`; nothing changes. |
+| 11 | Visitor: reload `LINK_R` and `LINK_E`. | **This note isn't available**, like NOTES-23. |
+| 12 | Owner: **Move to trash**, then **Restore**, then **Move to trash** and **Delete forever**. | All work; after the restore the note is still taken down. The owner has no email and no notification about the takedown. |
+| 13 | Run `<RENEW>` for a paid taken-down note due for renewal (as NOTES-16). | It is renewed like any note (a taken-down note keeps renewing until it is deleted). |
+
 ## Out of scope
 
-- Share links and the public pages (including a locked note's links showing the neutral page), reports and takedown, search and saved filters, the JWT API and the CLI (later sub-issues).
+- Search and saved filters, the JWT API and the CLI (later sub-issues).
 - The scheduler actually running `notes.purge_trash` and `notes.renew` on this server (NOTES-10 step 8 and NOTES-16 to NOTES-20 run the jobs from a shell).

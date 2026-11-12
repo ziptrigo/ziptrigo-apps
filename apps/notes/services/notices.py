@@ -1,5 +1,5 @@
-"""The in-app notices Notes writes about renewals: "a note is locked" and "not enough credits for
-the renewals coming up". Each runs in a savepoint of its own and logs rather than raises, so a
+"""The in-app notices Notes writes about renewals ("a note is locked", "not enough credits for
+the renewals coming up") and about edits made through a shared link. Each runs in a savepoint of its own and logs rather than raises, so a
 failing notice can never undo a lock, a resume or a warning stamp (the way Receipts' and To-do's
 freeze notices work).
 """
@@ -20,6 +20,8 @@ SOURCE = 'notes'
 LOCKED_KEY_PREFIX = 'note_locked:'
 #: One renewal warning per user, replaced by the latest.
 WARNING_KEY = 'notes_renewal_warning'
+#: `Notification.key` of the "edited through a shared link" notice is this plus the note's id.
+EDITED_KEY_PREFIX = 'note_edited:'
 #: The part of a note's title that goes into a notice, an email or a ledger line.
 TITLE_CUT = 60
 
@@ -92,3 +94,30 @@ def notify_warning(user: User, *, count: int, credits: int, balance: int, days: 
             )
     except Exception:
         logger.exception('Could not write the renewal warning of user %s', user.pk)
+
+
+def edited_key(note_id: UUID | str) -> str:
+    return f'{EDITED_KEY_PREFIX}{note_id}'
+
+
+def notify_edited(user: User, note_id: UUID, title: str) -> None:
+    """Tell the owner their note was edited through a shared link by someone else (key
+    `note_edited:<note id>`, written as `delete_for_key` then `notify`, so a burst of edits is one
+    notice, the latest; the url is the note's page). No email. Meant to be called inside the
+    saving transaction: it runs in a savepoint of its own and logs rather than raises, so a failing
+    notice can never undo the edit. Nothing for an account that can't sign in."""
+    if not can_notify(user):
+        return
+    try:
+        with transaction.atomic():
+            key = edited_key(note_id)
+            notifications.delete_for_key(user, key, source=SOURCE)
+            notifications.notify(
+                user,
+                source=SOURCE,
+                title=f'Your note "{title[:TITLE_CUT]}" was edited through a shared link',
+                url=reverse('notes:note', args=[note_id]),
+                key=key,
+            )
+    except Exception:
+        logger.exception('Could not notify user %s that note %s was edited', user.pk, note_id)

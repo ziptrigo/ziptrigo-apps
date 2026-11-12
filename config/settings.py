@@ -114,15 +114,17 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 # Paths `TimezoneMiddleware` leaves alone: it would otherwise resolve `request.user` (a session and
-# a user query) on the hot public ones. The short links and the download page serve visitors, not
-# accounts, static files render nothing, and the API authenticates with JWTs, not sessions, so none
-# of them has a saved zone to activate; they render in `TIME_ZONE` (UTC).
+# a user query) on the hot public ones. The short links, the download page and the shared note
+# pages (`/n/<code>`, issue #260) serve visitors, not accounts, static files render nothing, and
+# the API authenticates with JWTs, not sessions, so none of them has a saved zone to activate;
+# they render in `TIME_ZONE` (UTC).
 # The service worker, the manifest and the push answer endpoint (issue #239) are fetched by the
 # browser on its own, with nothing to render in a zone.
 TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = (
     '/go/',
     '/s/',
     '/t/',
+    '/n/',
     '/static/',
     '/api/',
     '/sw.js',
@@ -492,6 +494,25 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # The editor's live preview, `POST /notes/preview/`: one render per pause in typing, session
     # bound and cheap. Over it the view answers 204 and the last preview stays.
     'NOTES_PREVIEW_USER': (120, 60),
+    # The shared note pages (`/n/<code>`, issue #260, PR 4): every GET (page, raw, download, the
+    # editor), per IP, charged *before* the code is looked up so made-up codes spend it too. Over
+    # it a plain 429 page. A person reading a shared note stays far below it; a script guessing
+    # codes (128 bits: it never will) or scraping one note does not.
+    'NOTES_VIEW_IP': (120, 60),
+    # Editing a note through an editable share link (a save and a ticked box), where the visitor
+    # may have no account: per IP (strict, 30 per 10 minutes) and per link, across every IP
+    # (looser: a note several people edit). Both charged after validation, like every Notes limit.
+    'NOTES_LINK_EDIT_IP': (30, 10 * 60),
+    'NOTES_LINK_EDIT_LINK': (120, 60 * 60),
+    # The editor's live preview on an editable link, `POST /n/<code>/preview`: per IP. Over it the
+    # view answers 204 and the last preview stays.
+    'NOTES_LINK_PREVIEW_IP': (60, 60),
+    # Abuse reports on a shared note (`/n/<code>/report`), the same split as Short URLs'
+    # `SU_REPORT_*` and for the same reason (see its comment): `NOTES_REPORT_IP` is strict and
+    # counts every submission; `NOTES_REPORT_NOTE` is a looser per-note ceiling, peeked before a
+    # report is tried and hit only once one was created.
+    'NOTES_REPORT_IP': (5, 60 * 60),
+    'NOTES_REPORT_NOTE': (20, 60 * 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -1022,6 +1043,8 @@ JAZZMIN_SETTINGS = {
         'notes.Note': 'fas fa-note-sticky',
         'notes.NotesAccount': 'fas fa-inbox',
         'notes.NotesSettings': 'fas fa-sliders-h',
+        'notes.ShareLink': 'fas fa-link',
+        'notes.NoteReport': 'fas fa-flag',
     },
     'topmenu_links': [
         {'name': 'Site', 'url': 'core:home'},

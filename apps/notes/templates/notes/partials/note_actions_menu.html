@@ -1,6 +1,6 @@
 {% comment %} The row menu: Edit, Duplicate, Archive/Unarchive, Move to trash. Needs `note`, `list_next` and
    `duplicate_cost`. Duplicating a note that costs credits opens the page's confirmation modal (an ancestor with
-   x-data="confirmModal"). A locked note can't be edited or archived. {% endcomment %}
+   x-data="confirmModal"). A locked or taken-down note can't be edited or archived, and a taken-down one can't be duplicated. {% endcomment %}
 <div class="relative" x-data="{ menu: false }" @click.outside="menu = false"
      @keydown.escape="if (menu) { menu = false; $refs.trigger.focus() }">
     <button type="button" x-ref="trigger" @click="menu = !menu" :aria-expanded="menu" aria-haspopup="menu"
@@ -10,12 +10,13 @@
     </button>
     <div x-show="menu" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none" role="menu"
          class="absolute right-0 top-full mt-2 w-52 z-30 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 origin-top">
-        {% if not note.is_locked %}
+        {% if not note.is_read_only %}
         <a href="{% url 'notes:edit' note.pk %}" role="menuitem"
            class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
             <i class="fas fa-pen mr-2 w-4 text-center" aria-hidden="true"></i>Edit</a>
         {% endif %}
-        {% if duplicate_cost %}
+        {% if note.is_taken_down %}
+        {% elif duplicate_cost %}
         <button type="button" role="menuitem" @click="menu = false; show($el)"
                 data-url="{% url 'notes:duplicate' note.pk %}" data-tone="primary" data-label="Duplicate for {{ duplicate_cost }} credit{{ duplicate_cost|pluralize }}"
                 data-cost="{{ duplicate_cost }}" data-title="Duplicate this note?"
@@ -30,7 +31,7 @@
                 <i class="fas fa-clone mr-2 w-4 text-center" aria-hidden="true"></i>Duplicate</button>
         </form>
         {% endif %}
-        {% if not note.is_locked %}
+        {% if not note.is_read_only %}
         <form method="post" action="{% if note.is_archived %}{% url 'notes:unarchive' note.pk %}{% else %}{% url 'notes:archive' note.pk %}{% endif %}">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ list_next }}">

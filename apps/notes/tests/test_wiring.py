@@ -56,7 +56,17 @@ class TestWiring:
         assert not Note.objects.filter(pk=old.pk).exists()
 
     def test_the_rate_limit_rules_exist(self, settings):
-        for rule in ('NOTES_CREATE_USER', 'NOTES_EDIT_USER', 'NOTES_PREVIEW_USER'):
+        for rule in (
+            'NOTES_CREATE_USER',
+            'NOTES_EDIT_USER',
+            'NOTES_PREVIEW_USER',
+            'NOTES_VIEW_IP',
+            'NOTES_LINK_EDIT_IP',
+            'NOTES_LINK_EDIT_LINK',
+            'NOTES_LINK_PREVIEW_IP',
+            'NOTES_REPORT_IP',
+            'NOTES_REPORT_NOTE',
+        ):
             assert rule in settings.RATELIMIT_RULES
 
     def test_every_markdown_call_uses_the_extended_profile(self):

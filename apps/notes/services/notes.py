@@ -21,16 +21,18 @@ from apps.billing.services import spend_credits
 from apps.core.markdown import count_checklist_items, toggle_checklist_item
 
 from ..limits import CONTENT_MAX, TITLE_MAX
-from ..models import Note, NotesSettings, NoteVersion, Tag
+from ..models import EditorKind, LinkMode, Note, NotesSettings, NoteVersion, ShareLink, Tag
 from . import notices, versions
 from .accounts import get_account, lock_account
-from .errors import CostChangedError, NoteConflictError
+from .errors import CostChangedError, LinkUnavailableError, NoteConflictError
 from .versions import Editor
 
 logger = logging.getLogger(__name__)
 
 IN_TRASH_MESSAGE = 'This note is in the Trash.'
 LOCKED_MESSAGE = 'This note is locked until its renewal is paid.'
+TAKEN_DOWN_MESSAGE = 'This note was taken down and can no longer be changed.'
+COPY_TAKEN_DOWN_MESSAGE = 'This note was taken down and cannot be copied.'
 TOO_MANY_NOTES_MESSAGE = 'You have too many notes. Delete some first.'
 COPY_SUFFIX = ' (copy)'
 
@@ -73,12 +75,14 @@ def _own_tags(user: User, tag_ids: Iterable[UUID | str]) -> list[Tag]:
 
 
 def require_writable(note: Note) -> None:
-    """Refuse a change to a note that is read-only (in the Trash, or locked for an unpaid
-    renewal)."""
+    """Refuse a change to a note that is read-only (in the Trash, locked for an unpaid renewal, or
+    taken down by staff)."""
     if note.is_trashed:
         raise _error(NON_FIELD_ERRORS, IN_TRASH_MESSAGE)
     if note.is_locked:
         raise _error(NON_FIELD_ERRORS, LOCKED_MESSAGE)
+    if note.is_taken_down:
+        raise _error(NON_FIELD_ERRORS, TAKEN_DOWN_MESSAGE)
 
 
 def check_tags(note: Note, tag_ids: Iterable[UUID | str]) -> None:
@@ -104,6 +108,25 @@ def check_toggle(note: Note, index: int) -> None:
 def _locked_note(note: Note) -> Note:
     """The note's row, locked. Call inside a transaction, after `lock_account`."""
     return Note.objects.select_for_update().get(pk=note.pk)
+
+
+def _lock_editing_link(link: ShareLink, note: Note) -> ShareLink:
+    """The share link a save came through, locked and re-read: it must still be an active,
+    editable link of this note, or `LinkUnavailableError` (a revoke or an expiry that landed
+    while the request was on its way). Call inside a transaction, after the note's lock."""
+    fresh = ShareLink.objects.select_for_update().filter(pk=link.pk, note_id=note.pk).first()
+    if fresh is None or fresh.mode != LinkMode.EDIT or not fresh.is_active():
+        raise LinkUnavailableError
+    return fresh
+
+
+def _after_link_edit(note: Note, owner: User, editor: Editor, link: ShareLink) -> None:
+    """What an edit through a share link leaves behind: the link's `last_edited_at` and, unless the
+    owner made it, the owner's "edited through a shared link" notice."""
+    link.last_edited_at = timezone.now()
+    link.save(update_fields=['last_edited_at'])
+    if editor.kind != EditorKind.OWNER:
+        notices.notify_edited(owner, note.pk, note.title)
 
 
 # -- Free slots and costs ------------------------------------------------------------------------
@@ -216,12 +239,21 @@ def check_can_create(
         raise _error(NON_FIELD_ERRORS, TOO_MANY_NOTES_MESSAGE)
 
 
+def check_duplicable(note: Note) -> None:
+    """Refuse copying a note that was taken down (read afresh: a takedown is final, but the
+    instance may predate it)."""
+    if note.is_taken_down or Note.objects.filter(pk=note.pk, taken_down_at__isnull=False).exists():
+        raise _error(NON_FIELD_ERRORS, COPY_TAKEN_DOWN_MESSAGE)
+
+
 def duplicate(
     note: Note, user: User, *, expected_cost: int | None = None, keep_title: bool = False
 ) -> Note:
     """A new note in `user`'s account with `note`'s content and no tags, share links or history. It
     is a normal note (free if a slot is open, else the creation price). The title is the source's
-    when `keep_title` (a visitor's copy of a shared note), else `<title> (copy)`."""
+    when `keep_title` (a visitor's copy of a shared note), else `<title> (copy)`. A note staff took
+    down can't be copied."""
+    check_duplicable(note)
     title = note.title if keep_title else _copy_title(note.title)
     return create_note(user, title=title, content=note.content, expected_cost=expected_cost)
 
@@ -236,7 +268,7 @@ def save_note(
     title: str | None = None,
     content: str | None = None,
     base_version: int,
-    link: object | None = None,
+    link: ShareLink | None = None,
     coalesce: bool = True,
 ) -> Note:
     """Change the title and/or content: the one function that does, for the owner and for share
@@ -246,9 +278,13 @@ def save_note(
     version (see `versions.record`); the web passes it for "Save mine anyway", so the text it
     overwrote stays in the history.
 
+    `link` is the share link the save came through (an editable one): it is re-checked under the
+    locks (`LinkUnavailableError`), its `last_edited_at` is set and, unless the owner made the
+    change, the owner gets the "edited through a shared link" notice.
+
     Raises:
         ValidationError: the note is read-only, or a field is invalid.
-        NoteConflictError
+        NoteConflictError, LinkUnavailableError
     """
     if link is not None and editor.link is None:
         editor = Editor(editor.kind, editor.user, link)
@@ -259,6 +295,7 @@ def save_note(
         lock_account(note.user_id)
         locked = _locked_note(note)
         require_writable(locked)
+        used_link = _lock_editing_link(editor.link, locked) if editor.link is not None else None
         next_title = locked.title if new_title is None else new_title
         next_content = locked.content if new_content is None else new_content
         if next_title == locked.title and next_content == locked.content:
@@ -276,15 +313,17 @@ def save_note(
         locked.updated_at = timezone.now()
         locked.save(update_fields=['title', 'content', 'version', 'updated_at'])
         versions.record(locked, editor, coalesce=coalesce, before=before)
+        if used_link is not None:
+            _after_link_edit(locked, note.user, editor, used_link)
     return locked
 
 
 def toggle_checklist(
-    note: Note, index: int, checked: bool, *, editor: Editor, link: object | None = None
+    note: Note, index: int, checked: bool, *, editor: Editor, link: ShareLink | None = None
 ) -> Note:
     """Tick or untick the `index`th checklist box of the content as it is now (read under the row
     lock, so two boxes ticked at once both survive; no `base_version`). Records a version like a
-    save. Returns the note."""
+    save; `link` works as in `save_note`. Returns the note."""
     if link is not None and editor.link is None:
         editor = Editor(editor.kind, editor.user, link)
     get_account(note.user)
@@ -292,6 +331,7 @@ def toggle_checklist(
         lock_account(note.user_id)
         locked = _locked_note(note)
         require_writable(locked)
+        used_link = _lock_editing_link(editor.link, locked) if editor.link is not None else None
         try:
             content = toggle_checklist_item(locked.content, index, checked, profile='extended')
         except IndexError:
@@ -304,6 +344,8 @@ def toggle_checklist(
         locked.updated_at = timezone.now()
         locked.save(update_fields=['content', 'version', 'updated_at'])
         versions.record(locked, editor, before=before)
+        if used_link is not None:
+            _after_link_edit(locked, note.user, editor, used_link)
     return locked
 
 

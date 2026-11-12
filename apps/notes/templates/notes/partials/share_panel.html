@@ -1,0 +1,105 @@
+{% load datetime_format local_time %}
+{% comment %} The share panel on the note page (htmx: fetched by the Share button, re-rendered by every action; the target is
+   `#share-panel`, swapped as innerHTML). Needs `note`, `links` (`services.links.list_links`: each with `url`, `state`, `expiry_value`,
+   `expires_field_id` and, when active, `qr`), `active_count`, `max_links`, `can_share` and `has_active_link`. A refusal is a 422 into `#share-msg`. {% endcomment %}
+<span id="share-indicator" hx-swap-oob="true">{% if has_active_link %}<span class="inline-flex items-center gap-1.5 rounded-full bg-sage-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"><i class="fas fa-link text-[10px]" aria-hidden="true"></i>Shared</span>{% endif %}</span>
+<section aria-labelledby="share-heading" x-data
+         class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
+    <div class="mb-3 flex items-center justify-between gap-3">
+        <h2 id="share-heading" class="text-lg font-semibold text-gray-900 dark:text-gray-100">Share this note</h2>
+        <button type="button" @click="$root.closest('#share-panel').innerHTML = ''"
+                class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Close</button>
+    </div>
+    <div id="share-msg" class="mb-3 text-sm" aria-live="polite"></div>
+
+    {% if can_share %}
+    <form id="share-form" method="post" action="{% url 'notes:share-create' note.pk %}"
+          hx-post="{% url 'notes:share-create' note.pk %}" hx-target="#share-panel" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']"
+          class="mb-6 space-y-3 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+        {% csrf_token %}
+        <p class="text-sm text-gray-600 dark:text-gray-400">Anyone who has a link can open the note without signing in. {{ active_count }} of {{ max_links }} active links used.</p>
+        {% include 'notes/partials/link_mode_fields.html' with prefix='new' mode='read' %}
+        <div>
+            <label for="share-label" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Label (optional)</label>
+            <input id="share-label" name="label" type="text" maxlength="100" autocomplete="off" placeholder="Who is it for?"
+                   class="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Only you see it.</p>
+        </div>
+        <div>
+            <label for="share-expires" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Expires on (optional)</label>
+            <div class="mt-1 max-w-xs">{% include 'core/components/date_picker.html' with name='expires_on' id='share-expires' min=today compact=True %}</div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The link stops working at the end of that day. Leave it empty for no expiry.</p>
+        </div>
+        <button type="submit"
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
+            <i class="fas fa-link mr-2" aria-hidden="true"></i>Create link</button>
+    </form>
+    {% else %}
+    <p class="mb-4 rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+        This note can't be shared right now, and its links don't work while that is so.</p>
+    {% endif %}
+
+    {% if links %}
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700" id="share-links">
+        {% for link in links %}
+        <li id="link-{{ link.pk }}" x-data="{ edit: false }" class="py-4{% if link.state != 'active' %} opacity-70{% endif %}">
+            <div class="mb-2 flex flex-wrap items-center gap-2">
+                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {% if link.mode == 'edit' %}bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">{{ link.get_mode_display }}</span>
+                {% if link.state == 'revoked' %}<span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-400/10 dark:text-red-300">Revoked</span>
+                {% elif link.state == 'expired' %}<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">Expired</span>{% endif %}
+                {% if link.label %}<span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ link.label }}</span>{% endif %}
+            </div>
+            <div x-data="copyText" class="mb-2 flex flex-wrap items-center gap-2">
+                <code x-ref="text" class="min-w-0 break-all rounded-lg bg-gray-50 dark:bg-gray-900 px-2 py-1 font-mono text-xs text-gray-700 dark:text-gray-300">{{ link.url }}</code>
+                {% if link.state == 'active' %}
+                <button type="button" @click="copy()"
+                        class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+                    <span x-text="copied ? 'Copied' : 'Copy link'">Copy link</span></button>
+                {% endif %}
+            </div>
+            <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">Created {% local_time link.created_at 'short' %}
+                {% if link.state == 'revoked' %}&middot; Revoked {% local_time link.revoked_at 'short' %}
+                {% elif link.expires_at %}&middot; {% if link.state == 'expired' %}Expired{% else %}Expires{% endif %} {{ link.expires_at|fdate }}{% endif %}
+                {% if link.last_edited_at %}&middot; Last edited through it {% local_time link.last_edited_at 'short' %}{% endif %}</p>
+            {% if link.state != 'revoked' and can_share %}
+            <div class="flex flex-wrap items-center gap-2">
+                {% if link.state == 'active' %}
+                {% include 'notes/partials/qr_popup.html' with qr_id=link.pk qr_uri=link.qr qr_url=link.url %}
+                {% endif %}
+                <button type="button" @click="edit = !edit" :aria-expanded="edit" aria-controls="link-edit-{{ link.pk }}"
+                        class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit</button>
+                <button type="button" @click="show($el)"
+                        data-url="{% url 'notes:share-revoke' note.pk link.pk %}" data-title="Revoke this link?"
+                        data-body="Anyone who has it can no longer open the note through it. This can't be undone: you can make a new link."
+                        data-label="Revoke"
+                        class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    <i class="fas fa-ban mr-2" aria-hidden="true"></i>Revoke</button>
+            </div>
+            <form id="link-edit-{{ link.pk }}" x-show="edit" style="display: none" method="post" action="{% url 'notes:share-edit' note.pk link.pk %}"
+                  hx-post="{% url 'notes:share-edit' note.pk link.pk %}" hx-target="#share-panel" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']"
+                  class="mt-3 space-y-3 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                {% csrf_token %}
+                {% include 'notes/partials/link_mode_fields.html' with prefix=link.pk mode=link.mode %}
+                <div>
+                    <label for="label-{{ link.pk }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Label (optional)</label>
+                    <input id="label-{{ link.pk }}" name="label" type="text" maxlength="100" autocomplete="off" value="{{ link.label }}"
+                           class="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label for="expires-{{ link.pk }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Expires on (optional)</label>
+                    <div class="mt-1 max-w-xs">{% include 'core/components/date_picker.html' with name='expires_on' id=link.expires_field_id value=link.expiry_value min=today compact=True %}</div>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Clear the date for no expiry.</p>
+                </div>
+                <button type="submit"
+                        class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save link</button>
+            </form>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-gray-500 dark:text-gray-400">This note has no links yet.</p>
+    {% endif %}
+</section>
