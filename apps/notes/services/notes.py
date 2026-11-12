@@ -24,7 +24,13 @@ from ..limits import CONTENT_MAX, TITLE_MAX
 from ..models import EditorKind, LinkMode, Note, NotesSettings, NoteVersion, ShareLink, Tag
 from . import notices, versions
 from .accounts import get_account, lock_account
-from .errors import CostChangedError, LinkUnavailableError, NoteConflictError
+from .errors import (
+    CostChangedError,
+    LinkUnavailableError,
+    NoteConflictError,
+    NoteLockedError,
+    NoteTakenDownError,
+)
 from .versions import Editor
 
 logger = logging.getLogger(__name__)
@@ -81,9 +87,9 @@ def require_writable(note: Note) -> None:
     if note.is_trashed:
         raise _error(NON_FIELD_ERRORS, IN_TRASH_MESSAGE)
     if note.is_taken_down:
-        raise _error(NON_FIELD_ERRORS, TAKEN_DOWN_MESSAGE)
+        raise NoteTakenDownError(TAKEN_DOWN_MESSAGE)
     if note.is_locked:
-        raise _error(NON_FIELD_ERRORS, LOCKED_MESSAGE)
+        raise NoteLockedError(LOCKED_MESSAGE)
 
 
 def check_tags(note: Note, tag_ids: Iterable[UUID | str]) -> None:
@@ -244,7 +250,7 @@ def check_duplicable(note: Note) -> None:
     """Refuse copying a note that was taken down (read afresh: a takedown is final, but the
     instance may predate it)."""
     if note.is_taken_down or Note.objects.filter(pk=note.pk, taken_down_at__isnull=False).exists():
-        raise _error(NON_FIELD_ERRORS, COPY_TAKEN_DOWN_MESSAGE)
+        raise NoteTakenDownError(COPY_TAKEN_DOWN_MESSAGE)
 
 
 def duplicate(

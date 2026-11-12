@@ -1,6 +1,6 @@
 """Errors the Notes services raise that callers tell apart from a plain `ValidationError`."""
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 
 
 class CostChangedError(ValidationError):
@@ -45,3 +45,20 @@ class ReportUnavailableError(LinkUnavailableError):
     Nothing was recorded. The same neutral page answers it as for any link that doesn't work."""
 
     MESSAGE = 'This note is no longer available.'
+
+
+class NoteLockedError(ValidationError):
+    """A change refused because the note is locked (its yearly renewal could not be paid). Its own
+    class so the API can answer 402 without comparing message text. Same shape as the plain
+    non-field `ValidationError` it replaces."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__({NON_FIELD_ERRORS: message})
+
+
+class NoteTakenDownError(ValidationError):
+    """A change (or a copy, or a share link) refused because staff took the note down. Final. Its
+    own class so the API can answer 409 without comparing message text."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__({NON_FIELD_ERRORS: message})

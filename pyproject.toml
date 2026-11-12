@@ -175,6 +175,7 @@ modules = [
     'admin.email',
     'admin.filetransfer',
     'admin.lint',
+    'admin.notes',
     'admin.pip',
     'admin.qrcode',
     'admin.receipts',

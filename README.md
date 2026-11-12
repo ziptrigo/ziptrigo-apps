@@ -37,6 +37,12 @@ A single Django project (a "modular monolith") with one Django app per concern:
   Repeating tasks, comments with `#1234` references, search and saved filters, reminders,
   attachments, AI date parsing in the title, tasks added by email, a JWT API (`/api/todo/`) and the
   `admin/todo.py` CLI (`inv todo ...`) (#161, #187).
+- **notes** — Markdown notes (#260): tables, coloured code blocks and checklists, coloured tags, a
+  live-preview editor, a version history with conflict detection, manual order, archive and Trash.
+  The first 5 notes are free; the rest cost credits to create and renew yearly (a note whose renewal
+  can't be paid is locked, never deleted). Share links with public `/n/<code>` pages (read-only or
+  editable), search and saved filters, a JWT API (`/api/notes/`) and the `admin/notes.py` CLI
+  (`inv notes ...`).
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -66,7 +72,8 @@ ziptrigo-apps/
 │   ├── file_transfer/
 │   ├── receipts/
 │   ├── short_url/
-│   └── todo/
+│   ├── todo/
+│   └── notes/
 ├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, receipts, ...), run via `inv`
 ├── tests_e2e/               # Playwright end-to-end tests; ai/: test plans an AI agent runs in a browser
 ├── conftest.py              # Fixtures shared by every app's tests
@@ -105,16 +112,18 @@ apps/<app>/
 | `/links/…` | short_url: dashboard (`/links/`), create and edit, a link's page and its stats (`<id>/stats/`) |
 | `/s/<code>` | short_url short links (`/s/<code>+` previews one, `/s/<code>/unlock` is the password page of a protected one) — at the root because they're printed and shared |
 | `/todo/…` | todo: Today (`/todo/`), `upcoming/`, `all/`, `completed/`, `trash/`, a task's page (`<number>/`), `labels/`, `settings/` |
+| `/notes/…` | notes: the list (`/notes/`), `archived/`, `trash/`, `tags/`, `search/`, `filters/`, a note's page (`<id>/`), the editor (`new/`, `<id>/edit/`), history |
+| `/n/<code>` | notes: shared notes (`/n/<code>/raw`, `/download`, `/edit` for an editable link) — at the root because they're shared as addresses |
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
-| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…`, `/api/s/…` (short_url), `/api/todo/…` |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…`, `/api/s/…` (short_url), `/api/todo/…`, `/api/notes/…` |
 | `/admin/` | Django admin (Jazzmin) |
 
 ### Dependency rules
 
 ```
-qr_code, file_transfer, receipts, short_url, todo   (products: may not import each other)
+qr_code, file_transfer, receipts, short_url, todo, notes   (products: may not import each other)
         ↓
  billing, feedback
         ↓
@@ -464,6 +473,34 @@ The Lookup API receives the destination URLs themselves, so the privacy policy s
 are checked with Google. Google offers it for non-commercial use; for commercial use it points to
 [Web Risk](https://cloud.google.com/web-risk), which has the same shape and would only change
 `apps/short_url/services/safe_browsing.py`.
+
+### Notes
+
+Nothing needs configuring: Notes has no environment variables, no external service and no migration to
+run by hand. What a note costs is set in the admin, at `/admin/notes/notessettings/` (superusers):
+how many notes are free (5), the creation price (1 credit), the yearly renewal price (5 credits) and
+period (365 days), how many days before a renewal users are warned (7), how long the Trash keeps a
+note (30 days) and the caps on notes, tags, links per note and versions per note. A price of 0 makes
+that part free. The daily `notes.renew` and `notes.purge_trash` jobs run inside the web workers like
+the other scheduled jobs (`/admin/core/scheduledjob/`); the first deploy after Notes is enabled
+charges every paid note whose renewal date has already passed, and locks the ones that can't be paid.
+
+The API (`/api/notes/`, documented in `docs/openapi.yml`) and the command line use the same JWT login
+as the other products. A save through either must carry the `version` it read, so an edit made on an
+out-of-date copy is refused (HTTP 409) instead of overwriting someone else's; a cost the client
+confirms is sent as `expected_cost`:
+
+```bash
+export NOTES_PASSWORD=...                                  # or be asked, with the echo hidden
+inv notes login local me@example.com
+inv notes add local "Weekly plan" --file plan.md --tag work   # asks first when it costs credits
+inv notes list local --q "deploy*" --tag work --shared
+inv notes get local <note-id> > plan.md                    # the Markdown on stdout
+inv notes edit local <note-id> --title "Weekly plan v2" --file plan.md
+inv notes share local <note-id> --edit --expires 2026-12-31
+```
+
+See CLAUDE.md, "Notes" > "API and CLI" for every endpoint, status code and command.
 
 ### Push notifications (Web Push)
 

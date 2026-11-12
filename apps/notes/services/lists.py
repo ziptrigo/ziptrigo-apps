@@ -3,7 +3,9 @@
 from django.db.models import QuerySet
 
 from apps.accounts.models import User
+from apps.core.markdown import to_plain_text
 
+from ..limits import EXCERPT_CHARS
 from ..models import Note
 
 SORTS = {
@@ -18,6 +20,19 @@ DEFAULT_DIRECTIONS = {'manual': 'asc', 'updated': 'desc', 'created': 'desc', 'ti
 DIRECTIONS = ('asc', 'desc')
 #: The sort each view uses when none is asked for. Archived has no manual order.
 VIEW_DEFAULT_SORT = {'notes': 'manual', 'archived': 'updated'}
+#: How much of a note's text is turned into plain text for its row's excerpt: the row shows 140
+#: characters, so parsing a 50,000-character note in full for each of 50 rows would be wasted work.
+EXCERPT_SOURCE_CHARS = 1500
+
+
+def excerpt(note: Note) -> str:
+    """The first characters of the note's text without Markdown marks, on one line."""
+    try:
+        text = to_plain_text(note.content[:EXCERPT_SOURCE_CHARS], profile='extended')
+    except ValueError:
+        text = note.content[:EXCERPT_SOURCE_CHARS]
+    text = ' '.join(text.split())
+    return text if len(text) <= EXCERPT_CHARS else text[: EXCERPT_CHARS - 1].rstrip() + '…'
 
 
 def active_notes(user: User) -> QuerySet:

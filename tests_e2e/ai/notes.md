@@ -2,9 +2,10 @@
 
 ## Scope
 
-The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3, sharing: PR 4, search and
-saved filters: PR 5): Markdown notes with a live-preview editor, tags, versions, free slots, creation billing and
-renewals, archive and Trash, share links and the public pages, search and saved filters:
+The Notes product (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3, sharing: PR 4, search and
+saved filters: PR 5, the JWT API and the CLI: PR 6): Markdown notes with a live-preview editor, tags, versions, free
+slots, creation billing and renewals, archive and Trash, share links and the public pages, search and saved filters,
+and the JWT API and `inv notes` CLI over all of it:
 
 - the sidebar (a **New note** button, a "Search notes" box, then Notes, Archived, Trash, Tags, then the saved
   **Filters** with their counts; a row of scrolling links on phones);
@@ -29,9 +30,12 @@ renewals, archive and Trash, share links and the public pages, search and saved 
 - search and saved filters (NOTES-27, NOTES-28): `/notes/search/` (glob and regular expressions over titles and
   content, the scope, tags, sharing and updated filters, snippets), **Save as filter**, the sidebar's **Filters** with
   their counts and `/notes/filters/` (rename, reorder, delete, the deleted-tag notice);
+- the JWT API `/api/notes/` and the `inv notes` CLI (NOTES-29 to NOTES-34): the same notes, versions, links, tags and
+  saved filters over HTTP, the version a save must carry, the 409 of a conflict, the cost a client confirms with
+  `expected_cost`, and a status code per kind of refusal;
 - access control: logged-out visitors and another user's notes, tags and versions.
 
-Not covered here (later sub-issues of #260): the JWT API and the `inv notes` CLI. The staff side
+The staff side
 of reports and takedown is in `admin.md` (ADM-60, ADM-61) and the owner's edit notice in `notifications.md` (NOTIF-30). The
 renewal cases use shell steps: the scheduler does not run on the test server, so the daily job is run by hand. The two
 emails and three notices they cause are checked in full in `emails.md` (MAIL-24, MAIL-25) and `notifications.md`
@@ -589,7 +593,118 @@ deleted; a deleted tag drops out of a filter and says so.
 | 16 | In dark mode and at 375 px wide, open the search page, the filters page and the save dialog. | Every surface has a dark twin; the highlighted match is readable; nothing scrolls horizontally; the dialog fits. |
 | 17 | (Admin) open `/admin/notes/savedfilter/`. | A read-only list (name, user, position, search text, created); search by user email; no Add, no Save, no Delete; deleting a user who has filters is not blocked. |
 
+### NOTES-29 The JWT API: notes
+
+**Purpose:** `/api/notes/` lists, creates, reads, changes and moves notes, and a save must carry the version it read (issue #260 PR 6).
+**Preconditions:** Context A as `qa.user@example.com` with the notes of NOTES-27 (some tagged `Work`, one archived, one in the
+Trash, one shared); a JWT for the account (`POST /api/auth/login` with `{"email": ..., "password": ...}`), sent as
+`Authorization: Bearer <token>` on every call below; shell access as in NOTES-16.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Without the header: `GET /api/notes/notes`. | 401. With a malformed token: also 401. |
+| 2 | `GET /api/notes/notes`. | 200 `{count, limit: 50, offset: 0, results}` of the **active** notes, in the website's manual order. A result has `id, title, excerpt, version, tags [{id, name, color}], archived_at, deleted_at, is_free, paid_through, locked, taken_down, takedown_reason, has_active_link, charged_credits, restore_cost, created_at, updated_at` and **no** `content`; `excerpt` is the first 140 characters of the text without Markdown marks (`...` at the end of a longer one). `Shared plan` has `has_active_link` true. `search_field`, `search_snippet`, `match_start` and `match_end` are `null`. |
+| 3 | `?view=archived`, `?view=trash`, `?view=all`. | Archived only; the Trash only (each with `restore_cost`: a number); active and archived, never the Trash. `?view=everything` is a 400 `view must be one of: active, archived, trash, all.` |
+| 4 | `?sort=title`, `?sort=title&dir=desc`, `?sort=updated`, `?sort=updated&dir=asc`, `?dir=desc` (active view), `?view=trash&dir=asc`, `?sort=size`. | Each `dir` is the exact reverse of the same sort without it (`title` and `manual` ascending, `updated` and `created` newest first by default); `?dir=desc` alone reverses the manual order; the Trash with a bare `dir` is a 400 `dir: Choose a sort to reverse.`; the last is a 400 `sort must be one of: manual, updated, created, title.` |
+| 5 | `?q=deploy`, `?q=cao%20walk`, `?q=%2F%5Edeploy%2F`, `?q=(&mode=regex`, `?q=` plus 201 characters. | The notes the website's search finds (case, accents and punctuation ignored; the Trash and earlier versions are not searched); each result has `search_field` (`title` or `content`), `search_snippet` (plain text, no HTML) and `match_start` / `match_end` that frame the match inside it. The invalid pattern and the long one are 400s (`Invalid regular expression.` / `The pattern is too long.`). `?view=trash&q=gone` finds `Gone note`. |
+| 6 | `?tag=<Work id>`, `?tag=none`, `?tag=<Work id>,none`, `?tag=work`, `?shared=yes`, `?shared=no`, `?updated=last_7_days`, `?updated=custom&updated_from=2026-01-01`, `?updated_from=10/11/2026`, `?limit=2&offset=1`, `?limit=500`. | The website's filters (any of the tags; shared means an active link that works); a non-id tag is a 400 `tag must be a comma-separated list of tag ids and "none".`; a bad date a 400 `updated_from must be a date like 2026-10-09.`; paging shows `count` as the total and `limit` is clamped to 100. |
+| 7 | `POST /api/notes/notes` with `{"title": "Api note", "content": "# Hi\n\n- [ ] one\n- [ ] two\n", "tags": ["<Work id>"]}`. Record `N_API`. | 201 with the keys above plus `content` and `content_html` (an `h1` and the two boxes); `version` 1, `source` is not a field; `is_free` true while a slot is open (else `charged_credits` is the price), the note is first in the website's list, and **History** shows one version by You. |
+| 8 | The same with `{"title": " "}`, with a title of 201 characters, with content of 50,001 characters, with `"tags": ["<another user's tag id>"]`, `{"title": "x", "color": "red"}` and `{"content": "x"}`. | 400 `title: Give the note a title.`, 400 `title: Keep the title to 200 characters or fewer.`, 400 `content: Keep the note to 50,000 characters or fewer.`, 400 `tags: Choose your own tags.`, then two 422s (an unknown key; a missing title) whose `detail` is a list. Nothing is created. |
+| 9 | `GET /api/notes/notes/<N_API>`, and for a note of the other account (`qa.broke@example.com`'s). | 200 with `content`; 404 `Not Found` for the other account's (never 403). `GET` of a note in the Trash is 200 with `deleted_at` and `restore_cost` set. |
+| 10 | `PATCH /api/notes/notes/<N_API>` with `{"content": "# Hi again"}`. | 400 `base_version: Send the version you edited.` Nothing changes. The same with `{"title": "Api note 2", "base_version": 1}`: 200, `version` 2 and the website's page shows the new title; the first history version is overwritten in place (same editor within 10 minutes) -- open **History**. |
+| 11 | `PATCH` with `{"content": "mine", "base_version": 1}` (stale). | **409** `{"detail": "This note was changed by someone else while you were editing.", "current_version": 2, "current_title": "Api note 2", "current_content": ...}`; the website shows the note unchanged. Retrying with `"base_version": 2` is 200. |
+| 12 | `PATCH` with `{"tags": []}`, then `{"tags": ["<Work id>"]}`, then `{"content": null, "base_version": <current>}`, then `{"title": null, "base_version": <current>}`, then `{}`, then `{"archived_at": null}`. | Tags alone need no version and do not move **Updated**; `content: null` empties the content (a new version); a null title is a 400 `title: Give the note a title.`; `{}` changes nothing; an unknown key is a 422. |
+| 13 | `POST /api/notes/notes/<N_API>/checklist` with `{"index": 1, "checked": true}`, then `{"index": 9, "checked": true}`, then `{"index": -1, "checked": true}`. | 200 and the second box is `- [x] two` on the website (no version sent); the next is a 400 `index: That checklist item no longer exists.`; the last a 422. |
+| 14 | `POST .../archive`, `.../archive` again, `.../unarchive`; then `DELETE /api/notes/notes/<N_API>` twice; then `GET` it. | 200 each (the repeat changes nothing); the DELETE is 204 both times and the note is in the website's Trash, with its slot freed; `GET` shows `deleted_at`. Archiving a note in the Trash is a 400 `This note is in the Trash.` |
+| 15 | `POST .../restore`, then `POST .../delete-forever` on a note that is not in the Trash, then trash it again and `POST .../delete-forever`. | The restore is 200 (`deleted_at` null; restoring a note that isn't in the Trash returns it as it is); delete-forever of a note outside the Trash is a **404**; after trashing it is 204 and it is gone from the website's Trash and from `GET`. |
+| 16 | `POST /api/notes/notes/reorder` with `{"ids": [<three of your note ids, one of them in the Trash, one of the other account's, one random>]}`, then 501 ids. | 200 `{"count": 2}` and the website's manual order follows the ids sent; the notes not listed keep their places; 501 ids is a 422. |
+| 17 | `POST /api/notes/notes/<id>/duplicate`. | 201: `<title> (copy)`, the same content, **no tags**, no links, one version; free while a slot is open. |
+
+### NOTES-30 The JWT API: what a refusal looks like
+
+**Purpose:** each kind of refusal has its own status, and a client that has no one to ask confirms costs with `expected_cost`.
+**Preconditions:** NOTES-29's JWT; the account's free slots **full** (NOTES-08/12), 100 credits; the shell steps of NOTES-16/17 (lock a note) and
+NOTES-26 (take one down).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/notes/settings`. | `{free_notes: 5, free_notes_used: 5, creation_price: 1, renewal_price: 5, renewal_days: 365, next_note_cost: 1, trash_days: 30}`. Trash a free note: `free_notes_used` 4 and `next_note_cost` 0. |
+| 2 | `POST /api/notes/notes` with `{"title": "Paid", "expected_cost": 0}` while the slots are full. | **409** `The cost changed: it is now 1 credit. Send expected_cost=1 to confirm it, or leave expected_cost out to accept any cost.` Nothing is created and no credit is spent. With `"expected_cost": 1`: 201, `is_free` false, `charged_credits` 1, `paid_through` a year ahead, and the credits page shows one line. Without `expected_cost`: accepted at whatever it costs. |
+| 3 | With a balance of 0 (`qa.broke@example.com`'s JWT, slots full): `POST /api/notes/notes` `{"title": "x"}`. | **402** `Insufficient credits`; no note. |
+| 4 | Trash a free note, make another free one take its slot (website), then `POST /api/notes/notes/<trashed id>/restore?expected_cost=0`, then `?expected_cost=1`, then without it. | `GET` of the trashed note first shows `restore_cost` 1. The first is 409 (the cost is 1 now); the second restores it, **paid** from now (`is_free` false, `paid_through`, one credit spent); the third on a restored note changes nothing. A trashed paid note whose renewal fell due has `restore_cost` 5. |
+| 5 | `POST /api/notes/notes/<id>/duplicate?expected_cost=0` with the slots full, then `?expected_cost=1`. | 409 with the same message, then 201 and one credit spent. |
+| 6 | Lock a note (NOTES-17). `PATCH` it with `{"title": "x", "base_version": <v>}`, `POST .../checklist`, `.../archive`, `POST .../links`, `POST .../versions/<id>/restore`. | Each is **402** `This note is locked until its renewal is paid.`; reading it, `DELETE` (to the Trash) and `POST .../duplicate` still work. Topping up unlocks it (NOTES-18) and the same calls work. |
+| 7 | Take a note down (NOTES-26). `PATCH`, `.../checklist`, `.../archive`, `POST .../links`, `.../duplicate`. | Each is **409**: `This note was taken down and can no longer be changed.` (`... cannot be shared.` / `... cannot be copied.`). `GET` shows `taken_down` true and `takedown_reason` (never the internal note); `DELETE` still works. |
+| 8 | `PATCH` a note that is in the Trash. | 400 `This note is in the Trash.` |
+| 9 | With `qa.broke@example.com`'s JWT use an id of `qa.user`'s note on `GET`, `PATCH`, `DELETE`, `POST .../archive|restore|delete-forever|duplicate|checklist`, `GET .../versions`, `GET|POST .../links`, and a tag and a filter id. | **404** every time, never 403. |
+
+### NOTES-31 The JWT API: versions, links, tags and saved filters
+
+**Purpose:** the history, share links, tags and saved filters over HTTP.
+**Preconditions:** NOTES-29's JWT; a note `N_V` with three saved versions (two by You, one made through an editable link by an anonymous visitor: NOTES-24).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/notes/notes/<N_V>/versions`. | Newest first; each `{id, number, title, editor_kind, editor_name, via_link, created_at, updated_at}` and **no content**. The anonymous one has `editor_kind` `anonymous`, `editor_name` null and `via_link` true; yours `owner`. `GET .../versions/<id>` adds `content`. A version id of another note is a 404. |
+| 2 | `POST .../versions/<oldest id>/restore`. | 200, the note holds that version's title and content with `version` one higher; **History** shows a new version by You and the text it replaced is still there. Restoring the newest version changes nothing. |
+| 3 | `POST /api/notes/notes/<N_V>/links` with `{}`, then `{"mode": "edit", "label": "for Sam", "expires_at": "<a date 10 days ahead>"}`, then `{"expires_at": "<an ISO date-time 3 days ahead, with Z>"}`, then `{"expires_at": "2020-01-01"}`, `{"mode": "admin"}` and `{"label": "<101 characters>"}`. | 201 each for the first three: `{id, url, mode, label, expires_at, revoked_at, active, created_at, last_edited_at}`, `url` = `<site>/n/<22-character code>` that opens the page of NOTES-22; the date means the end of that day in the account's zone (the website's panel shows it), the date-time that instant. Then a 400 `expires_on: Choose a date that has not passed.`, a 422 and a 400 `label: Keep the label to 100 characters or fewer.` An eleventh active link is a 400 `A note can have at most 10 active links.` |
+| 4 | `GET .../links`; `PATCH .../links/<id>` with `{"mode": "edit"}`, `{"label": null, "expires_at": null}`, `{"mode": null}`, `{}`. | Active first. The PATCHes change what is sent (null clears the label and the expiry; the mode cannot be null: 400 `mode: Cannot be null.`; `{}` changes nothing). The website's Share panel agrees. |
+| 5 | `DELETE .../links/<id>` twice, then `PATCH` it, then open its URL as a Visitor. | 204 and 204; the PATCH is a 400 `This link was revoked and can no longer be changed.`; the page is the neutral one of NOTES-23. Revoking works on a locked note too. |
+| 6 | `GET /api/notes/tags`; `POST` `{"name": "Api tag", "color": "#336699", "description": "x"}`; again with `"API TAG"`; `{"name": "t", "color": "red"}`; `PATCH` `{"name": "Api tag 2", "description": null}`; `POST .../tags/reorder`; `DELETE`. | 201 with `note_count` 0; 400 `name: You already have a tag with this name.`; 400 `color: Use a colour like #8fa89e.`; the PATCH renames and clears the description; the reorder answers the list in the new order (ids that aren't yours are ignored); the DELETE is 204 and notes that had it keep their other tags. The Tags page agrees. |
+| 7 | `POST /api/notes/filters` with `{"name": "Api deploys", "params": {"q": "deploy*", "scope": "all", "tags": ["<Work id>"], "shared": "no", "updated": "last_7_days", "sort": "title", "dir": "desc"}}`. | 201 `{id, name, position, params, summary, created_at}`; `summary` is `@Work · not shared · last 7 days · "deploy*" · including archived · by title (Z to A)`; the website's sidebar lists it. |
+| 8 | The same with a duplicate name, with `"q": "/(/"`, with `"mode": "fuzzy"`, `"scope": "trash"`, `"tags": ["work"]`, `"priority": 1`. | 400 `name: You already have a filter with this name.`; 400 `Invalid regular expression.`; the rest are 422s. Nothing is saved. |
+| 9 | `GET /api/notes/filters/<id>/notes`; `?limit=1&offset=1`. | The notes the website's page for that filter lists (never the Trash), in its sort and direction, each with the snippet fields; `count` the total. |
+| 10 | `PATCH /api/notes/filters/<id>` with `{"name": "Renamed"}`, `{"params": {"scope": "archived"}}`, `{"name": null}`, `{}`; `POST .../filters/reorder` with the ids; delete the tag `Work` on the website and `GET /api/notes/filters`; `DELETE` the filter. | The rename keeps the params; `params` replaces them as a whole (the rest take their defaults); a null is a 400 `name: Cannot be null.`; `{}` changes nothing; the reorder lists the new order; the deleted tag is gone from `params.tags` and the `summary`; the DELETE is 204. |
+
+### NOTES-32 Copying a shared note over the API
+
+**Purpose:** `POST /api/notes/shared/<code>/duplicate` copies a note someone shared into the caller's account.
+**Preconditions:** a note of `qa.user@example.com` with a read-only link `LINK_R` (code `<CODE>`) and the other
+account's JWT (`qa.other@example.com`, or a second registered account) with the free slots full and 100 credits.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Without a token: `POST /api/notes/shared/<CODE>/duplicate`. | 401. |
+| 2 | With the other account's JWT and `?expected_cost=0`. | **409** (the copy now costs 1 credit); nothing is created. |
+| 3 | The same with `?expected_cost=1`. | 201, a note in the **other** account named exactly like the shared one (the title is kept), the same content, no tags, no links, `charged_credits` 1; the other account's website shows it first in its list. |
+| 4 | Revoke the link, let one expire, trash the note, lock it, take it down (one at a time) and repeat. A made-up code too. | **404** `Not Found` every time, the same body for each reason, and nothing is created. |
+| 5 | With a balance of 0. | **402** `Insufficient credits`. |
+
+### NOTES-33 The `inv notes` CLI: notes
+
+**Purpose:** the command line over the same API (issue #260 PR 6).
+**Preconditions:** a shell in the repo root; `NOTES_PASSWORD='QaE2e-Passw0rd!'` exported; the test server of the README
+(`API_BASE_URL=http://localhost:8765`); `inv notes <command> local ...` with `local` the environment.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `inv notes list local` before logging in; then `inv notes login local qa.user@example.com`; then the same with a third argument. | The first exits 1 `Not authenticated on local. Please login first.`; the login prints `Successfully authenticated!` and `~/.notes_token.local` exists and is readable by you only; a third argument is a usage error (exit 2): the password is never an argument. |
+| 2 | `inv notes list local`, then `--view trash`, `--q "deploy*" --tag Work --shared --sort updated --dir desc`, `--regex --q "^deploy"`, `--tag nope`. | A table (title, tags, flags, updated, id) like the website's list; the Trash view has a **Restore** column (`free` or N credits); a search prints "Where it matched" with the match in bold; an unknown tag stops with `No tag called "nope". Make it with `tag-add`.` before any request. A title with `[bold]` in it is printed as typed. |
+| 3 | `printf '# Plan\n\n- [ ] one\n' \| inv notes add local Weekly plan --yes`, then `inv notes add local "From a file" --file plan.md --tag Work`. | `Added "Weekly plan".` with the id (and `Charged N credits.` when it cost); the title words were joined; the content came from the pipe; the second used the file and the tag. With a pipe and **no** `--yes` while the slots are full: exit 1 `... costs 1 credit, and the content came from standard input, so it cannot be confirmed. Read it with --file, or pass --yes to accept the cost.` |
+| 3a | With the slots full: `inv notes add local Plan --file plan.md`, answer `n`, then again and answer `y`. | `Adding this note costs 1 credit. Continue? [y/N]`; `n` exits 1 `Cancelled; nothing was charged.` and creates nothing; `y` creates it and says `Charged 1 credit.` |
+| 4 | `inv notes get local <id> > out.md`. | `out.md` holds exactly the note's Markdown; the terminal shows the title, id, version, tags, "Free" or "renews by <date>" (stderr). |
+| 5 | `inv notes edit local <id> --title "Weekly plan v2" --file plan.md`, then `--tag Home --remove-tag Work`, then with no option. | `Saved "Weekly plan v2" (version N).`; the tags change without touching the text (no new version); no option: exit 1 `Nothing to change: pass at least one option.` |
+| 6 | Run `inv notes edit local <id> --title X` while saving the same note from the website between the CLI's read and write (or `PATCH` it with the old version over HTTP). | Exit 1: `409: This note was changed by someone else while you were editing. It is at version N now: read it with `get`, then edit it again.` The website's note is unchanged by the CLI. |
+| 7 | `inv notes archive local <id>`, `unarchive`, `trash`, `restore` (free), `trash` again, `delete` (answer `n`, then `y`), `delete` on a note that is not in the Trash. | Each prints what it did; `restore` of a free note asks nothing; `delete` asks `Delete "..." for good? This cannot be undone.` and the second ask removes it; outside the Trash: exit 1 `... is not in the Trash. Move it there with `trash`, then delete it.` |
+| 8 | With the slots full: trash a free note, fill its slot, `inv notes restore local <id>` (answer `n`, then `y`), and `inv notes duplicate local <id>` (answer `y`). | Both ask `Restoring "..." costs 1 credit. Continue?` / `Duplicating this note costs 1 credit. Continue?`; `n` charges nothing; with `y` the restored note is paid and the copy is `<title> (copy)`. With `--yes` neither asks. |
+| 9 | `inv notes download local <id> --out ./plans/`, again, again with `--force`, and with an unknown folder. | A `weekly-plan-v2.md` (the title slugified) written through a `.part` file; the second run exits 1 `... already exists. Use --force to overwrite it.`; `--force` overwrites; an unknown folder: `Not a folder: ...`. |
+
+### NOTES-34 The `inv notes` CLI: versions, sharing, tags and filters
+
+**Purpose:** the rest of the commands.
+**Preconditions:** NOTES-33's shell and token; a note `N_V` with a few versions (NOTES-31) and a saved filter `Api deploys`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `inv notes versions local <N_V>`, then `inv notes version-restore local <N_V> <version id>` (answer `n`, then `y`). | A table of versions (number, when, by `You` / `Someone (via a link)`, title, id); the restore asks `Restore version N ("...")? The current text stays in the history.` and then says `Restored version N: "..." is now version M.`; `--yes` skips the question. |
+| 2 | `inv notes share local <N_V>`, then `--edit --label "for Sam" --expires 2026-12-31`, `--expires "2026-12-31 18:00"` and `--expires soon`. | `Made a read-only link: <url>` / `Made an editable link: <url>` with the link id; a date means the end of that day in your time zone, a date-time that moment; `soon` is a usage error (exit 2) before any request. |
+| 3 | `inv notes links local <N_V>`, `inv notes unshare local <N_V> <link id>` (answer `n`, then `y`), `links` again. | A table (mode, state, expires, label, url, id); `n` exits 1 and keeps the link; `y` says `Revoked the link.` and the link is `revoked` in the table; the page is the neutral one for a Visitor. |
+| 4 | `inv notes tags local`, `tag-add local Api --color "#336699" --description x`, `tag-edit local api --name Apis`, `tag-delete local Apis` (answer `n`, then `y`). | The tags table with their note counts; the add and edit print the tag's name and colour; the delete asks `Delete the tag Apis (N notes)?`; an unknown tag: `No tag called "...". Make it with `tag-add`.`; `tag-edit` with no option: `Nothing to change: pass at least one option.` |
+| 5 | `inv notes filters local`, `inv notes filter-run local "api deploys" --limit 5`, `inv notes filter-run local <id>`, `inv notes filter-run local nope`. | The filters table (name, summary, id); the run prints the filter's notes like `list` (by name ignoring case, or id); an unknown one: `No saved filter called "nope". See `filters`.` |
+| 6 | Let the token expire or edit `~/.notes_token.local` to garbage and run `inv notes list local`; then trigger a 429 (not possible here: skip) and a 422 (`inv notes list local --limit abc`). | `401: Unauthorized (run `login` again)`; `--limit abc` is rejected by the CLI itself (exit 2). |
+
 ## Out of scope
 
-- The JWT API and the CLI (a later sub-issue).
+- **Rate limits over the API** (switched off on this server): the budgets are the website's and are unit-tested
+  (`apps/notes/tests/test_api_*.py`), as is every status code of every endpoint. The cases above exercise one of each.
 - The scheduler actually running `notes.purge_trash` and `notes.renew` on this server (NOTES-10 step 8 and NOTES-16 to NOTES-20 run the jobs from a shell).

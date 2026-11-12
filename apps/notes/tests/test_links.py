@@ -124,6 +124,43 @@ class TestExpiry:
         assert not link.is_expired(link.expires_at - timedelta(seconds=1))
 
 
+class TestExpiryAsAnInstant:
+    """The API may give the expiry as a date-time instead of a date."""
+
+    def test_an_aware_date_time_is_that_instant(self, note, freeze_now):
+        freeze_now(2026, 11, 10, 12, 0)
+        moment = datetime(2026, 11, 12, 18, 30, tzinfo=UTC)
+        link = links.create_link(note, mode='read', expires_on=moment)
+        assert link.expires_at == moment
+
+    def test_a_naive_date_time_is_read_in_the_owners_zone(self, user, note, freeze_now):
+        freeze_now(2026, 11, 10, 12, 0)
+        user.timezone = 'Asia/Tokyo'
+        user.save()
+        note.user = user
+        link = links.create_link(note, mode='read', expires_on=datetime(2026, 11, 12, 18, 0))
+        assert link.expires_at == datetime(2026, 11, 12, 9, 0, tzinfo=UTC)  # 18:00 JST
+
+    def test_a_date_time_in_the_past_is_refused(self, note, freeze_now):
+        freeze_now(2026, 11, 10, 12, 0)
+        with pytest.raises(ValidationError) as exc:
+            links.create_link(
+                note, mode='read', expires_on=datetime(2026, 11, 10, 11, 0, tzinfo=UTC)
+            )
+        assert exc.value.message_dict == {'expires_on': ['Choose a date that has not passed.']}
+
+    def test_the_same_instant_is_no_change_and_another_one_is(self, note, freeze_now):
+        freeze_now(2026, 11, 10, 12, 0)
+        moment = datetime(2026, 11, 12, 18, 30, tzinfo=UTC)
+        link = links.create_link(note, mode='read', expires_on=moment)
+        link.note = note
+
+        same = links.update_link(link, expires_on=moment)
+        assert same.expires_at == moment
+        later = datetime(2026, 11, 13, 8, 0, tzinfo=UTC)
+        assert links.update_link(link, expires_on=later).expires_at == later
+
+
 class TestUpdate:
     def test_mode_label_and_expiry_change(self, note):
         link = links.create_link(note, mode='read', label='A')

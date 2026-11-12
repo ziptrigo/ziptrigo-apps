@@ -6,6 +6,7 @@ from apps.accounts.api import router as accounts_router
 from apps.billing.api import router as billing_router
 from apps.core.ratelimit import RateLimitExceeded
 from apps.file_transfer.api import router as file_transfer_router
+from apps.notes.api import router as notes_router
 from apps.qr_code.api import router as qr_code_router
 from apps.receipts.api import router as receipts_router
 from apps.short_url.api import router as short_url_router
@@ -52,6 +53,10 @@ TAGS = [
         'task: also `unpaid_task_numbers`), 422 a malformed request, 429 rate limited (see '
         '`Retry-After`).',
     },
+    {
+        'name': 'Notes',
+        'description': 'Markdown notes, their versions, tags, share links and saved filters.',
+    },
 ]
 
 api = NinjaAPI(
@@ -68,6 +73,7 @@ api.add_router('/ft/', file_transfer_router)
 api.add_router('/receipts/', receipts_router)
 api.add_router('/s/', short_url_router)
 api.add_router('/todo/', todo_router)
+api.add_router('/notes/', notes_router)
 
 
 @api.exception_handler(RateLimitExceeded)

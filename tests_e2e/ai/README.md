@@ -22,7 +22,7 @@ One file per area, plus the preflight that runs before any of them:
 | [`receipts.md`](receipts.md) | Upload, extraction, receipt page, vendors, trash, settings, CSV export |
 | [`short_url.md`](short_url.md) | Short links: dashboard, editor and costs, `/s/<code>` redirect and neutral page, password, preview and reports, stats, blocked domains, takedown |
 | [`todo.md`](todo.md) | To-do: views, tasks, subtasks, labels, repeats, comments, attachments, reminders, search and filters, settings, credits |
-| [`notes.md`](notes.md) | Notes: the lists, the editor with its live preview and conflict panel, history, tags, free slots and the cost of a note, archive, Trash |
+| [`notes.md`](notes.md) | Notes: the lists, the editor with its live preview and conflict panel, history, tags, free slots and the cost of a note, archive, Trash, renewals, share links and the public pages, search and saved filters, the JWT API and the `inv notes` CLI |
 | [`admin.md`](admin.md) | The Django admin: users, tools page, credit adjustment, settings singletons, promo codes, moderation, every product's admin |
 
 ## The test server
