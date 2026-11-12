@@ -1908,6 +1908,8 @@ SETTINGS = {
     'storage_credits_per_day': '0.0001',
     'storage_frozen': False,
     'credits_balance': 1250,
+    'max_attachment_bytes': 52428800,
+    'max_attachments_per_task': 20,
 }
 
 
@@ -1922,6 +1924,7 @@ def test_settings_shows_them(api):
     assert '5 minutes before (in_app)' in out and 'me@example.com' in out
     assert '4 (10 free, then 10 credits each)' in out and '2,048 bytes' in out
     assert 'Credits' in out and '1,250' in out
+    assert '52,428,800 bytes' in out and 'Files per task' in out
 
 
 def test_settings_warns_about_a_block_and_a_frozen_storage(api):

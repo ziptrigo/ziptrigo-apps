@@ -416,6 +416,38 @@ class TestAttachments:
         assert response.status_code == 400
         assert response.json()['detail'] == 'A task can have up to 1 files.'
 
+    def test_the_size_limit_is_inclusive(self, client, auth, task, config):
+        from ..models import TodoSettings
+
+        limit = TodoSettings.load().max_attachment_bytes
+
+        assert start(client, auth, task, size=limit).status_code == 201
+        refused = start(client, auth, task, size=limit + 1)
+
+        assert refused.status_code == 400
+        assert refused.json()['detail'].startswith('The file is too large')
+
+    def test_files_toward_limit_matches_what_start_refuses_at(
+        self, client, auth, task, funded_user, fake_storage
+    ):
+        from ..models import TodoSettings
+        from .api_support import get
+
+        row = TodoSettings.load()
+        row.max_attachments_per_task = 3
+        row.save()
+        make_attachment(task, fake_storage)  # the task's own
+        make_attachment(task, fake_storage, for_comment=True)  # a comment's
+        make_attachment(task, fake_storage, uploaded=False)  # still uploading
+
+        detail = get(client, f'/tasks/{task.number}', auth).json()
+
+        assert detail['attachment_count'] == 1
+        assert detail['files_toward_limit'] == 3 == TodoSettings.load().max_attachments_per_task
+        refused = start(client, auth, task)
+        assert refused.status_code == 400
+        assert refused.json()['detail'] == 'A task can have up to 3 files.'
+
     def test_a_frozen_account_is_a_402(self, client, auth, task, funded_user):
         TodoAccount.objects.filter(pk=funded_user.pk).update(frozen_at=timezone.now())
 

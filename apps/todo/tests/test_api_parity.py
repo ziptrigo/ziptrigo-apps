@@ -1129,10 +1129,14 @@ class TestOffersStopRepeating:
         with CaptureQueriesContext(connection) as not_repeating:
             get(client, f'/tasks/{plain.number}', auth)
 
-        # The occurrence count is a column of the task's own query, never a query of its own.
+        # The occurrence count is a column of the task's own query, never a query of its own
+        # (the one COUNT is `files_toward_limit`, over the attachments).
         for captured in (repeating, not_repeating):
             assert not [
-                q for q in captured.captured_queries if q['sql'].upper().startswith('SELECT COUNT(')
+                q
+                for q in captured.captured_queries
+                if q['sql'].upper().startswith('SELECT COUNT(')
+                and 'todo_attachment' not in q['sql']
             ]
         assert len(repeating) == len(not_repeating)
 
