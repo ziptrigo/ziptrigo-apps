@@ -24,7 +24,7 @@ from ..schemas import (
     TaskListSchema,
 )
 from ..services import saved_filters
-from ..services.filters import filter_tasks, label_names
+from ..services.filters import FilterParams, filter_tasks, label_names
 from ..services.saved_filters import filter_counts, stored_params
 from ..services.search import attach_matches, prepare_query, search_guard
 from .common import (
@@ -47,11 +47,12 @@ def _owned(request, filter_id: UUID) -> SavedFilter:
     )
 
 
-def _data(saved: SavedFilter, user, names: dict[str, str]) -> dict:
+def _data(saved: SavedFilter, names: dict[str, str]) -> dict:
     """A saved filter as `FilterSchema`: what it selects (`states` and the resolution of closed
     tasks included, whether it was saved here or on the website) and its summary in the public
     wording."""
-    params = stored_params(saved, user)
+    valid = set(names)  # the user's label ids, loaded once by the caller
+    params = FilterParams.from_dict(saved.params, valid_label_ids=valid)
     return {
         'id': saved.pk,
         'name': saved.name,
@@ -59,6 +60,7 @@ def _data(saved: SavedFilter, user, names: dict[str, str]) -> dict:
         'params': FilterParamsSchema.from_stored(params),
         'summary': services.describe_params(params, names, PUBLIC),
         'created_at': saved.created_at,
+        'dropped_labels': saved_filters.dropped_labels(saved, valid),
     }
 
 
@@ -67,7 +69,7 @@ def list_filters(request):
     """The caller's saved filters in order. A label deleted since a filter was saved is dropped
     from its `params`."""
     names = label_names(request.auth)
-    return [_data(saved, request.auth, names) for saved in services.list_filters(request.auth)]
+    return [_data(saved, names) for saved in services.list_filters(request.auth)]
 
 
 # Registered before the `{filter_id}` routes, like `reorder`: a path is matched in the order added.
@@ -97,7 +99,7 @@ def create_filter(request, payload: FilterCreateSchema):
         saved_filters.clean_params(request.auth, payload.params.to_params())
         charge(request, 'TODO_EDIT_USER')
         saved = services.save_filter(request.auth, payload.name, payload.params.to_params())
-    return 201, _data(saved, request.auth, label_names(request.auth))
+    return 201, _data(saved, label_names(request.auth))
 
 
 # Registered before the `{filter_id}` routes (a different method and a `uuid` converter, so
@@ -136,7 +138,7 @@ def update_filter(request, filter_id: UUID, payload: FilterUpdateSchema):
                     services.rename_filter(saved, changes['name'])
                 if new_params is not None:
                     services.update_filter_params(saved, new_params)
-    return _data(saved, request.auth, label_names(request.auth))
+    return _data(saved, label_names(request.auth))
 
 
 @router.delete('/filters/{filter_id}', response={204: None})

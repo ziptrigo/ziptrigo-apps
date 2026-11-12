@@ -5576,6 +5576,11 @@ budgets are listed under "API" above; this is how they are built and what the CL
   and `FilterParams.to_legacy_dict` / `closed_wording` are gone); the old key `include_completed` is a 422
   (the schema is closed). Re-running the shown `params` through `GET /tasks` (`include_closed`,
   `resolution`, `state`) lists what `GET /filters/{id}/tasks` lists (a test pins it).
+  Every filter response (list, create, patch, reorder) also carries **`dropped_labels`** (int): how many
+  labels the filter was saved with that have since been deleted, the count the website's notice shows
+  ("N labels it used were deleted"; `params.labels` already omits them). It returns to 0 when `params` are
+  updated (a rename alone doesn't reset it). Computed from the user's label ids loaded once per request,
+  so a list costs the same queries whatever the number of filters (a test pins it).
 - **`POST /tasks`.** `source='api'`, billed like any task (the free allowance, then the price;
   `charged_credits` in the answer). `labels` are ids, `parent` a number. `reminders` replaces the
   default reminder `create_task` gave the task, inside one `transaction.atomic()` with the creation,

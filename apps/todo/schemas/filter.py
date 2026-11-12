@@ -120,6 +120,14 @@ class FilterSchema(Schema):
     params: FilterParamsSchema
     summary: str
     created_at: datetime
+    dropped_labels: int = Field(
+        description=(
+            'How many labels this filter was saved with that have since been deleted. They no '
+            'longer count in `params`, so a filter whose only criterion was one now selects every '
+            'open task; the website says "N labels it used were deleted". It is 0 again once the '
+            "filter's `params` are updated (renaming alone does not reset it)."
+        )
+    )
 
 
 class FilterCreateSchema(Schema):

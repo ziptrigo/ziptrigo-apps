@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.4.0
+  version: 2.5.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -8192,6 +8192,10 @@ components:
           format: date-time
           title: Created At
           type: string
+        dropped_labels:
+          description: How many labels this filter was saved with that have since been deleted. They no longer count in `params`, so a filter whose only criterion was one now selects every open task; the website says "N labels it used were deleted". It is 0 again once the filter's `params` are updated (renaming alone does not reset it).
+          title: Dropped Labels
+          type: integer
       required:
       - id
       - name
@@ -8199,6 +8203,7 @@ components:
       - params
       - summary
       - created_at
+      - dropped_labels
       title: FilterSchema
       type: object
     FilterCreateSchema:
