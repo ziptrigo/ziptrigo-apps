@@ -1098,9 +1098,96 @@ class TestOffersStopRepeating:
 
         assert self.shown(client, auth, task)['offers_stop_repeating'] is False
 
-    def test_the_list_carries_it_without_a_query_per_task(
-        self, client, auth, funded_user, django_assert_max_num_queries
+    def test_a_trashed_occurrence_is_not_counted_for_an_open_one(self, client, auth, funded_user):
+        first = self.repeating(funded_user)
+        complete_task(first)
+        second = Task.objects.get(recurrence=first.recurrence, completed_at__isnull=True)
+        first.refresh_from_db()
+        first.completed_at = None
+        first.save()
+        trash_task(first)
+
+        body = self.shown(client, auth, second)
+
+        assert body['recurrence']['open_occurrences'] == 1
+        assert body['offers_stop_repeating'] is True
+
+    def test_a_lone_trashed_occurrence_counts_none(self, client, auth, funded_user):
+        task = self.repeating(funded_user)
+        trash_task(task)
+
+        body = self.shown(client, auth, task)
+
+        assert body['recurrence']['open_occurrences'] == 0
+        assert body['offers_stop_repeating'] is False
+
+    def test_the_detail_path_needs_no_extra_count(self, client, auth, funded_user):
+        task = self.repeating(funded_user)
+        plain = create_task(funded_user, title='Plain')
+        with CaptureQueriesContext(connection) as repeating:
+            get(client, f'/tasks/{task.number}', auth)
+        with CaptureQueriesContext(connection) as not_repeating:
+            get(client, f'/tasks/{plain.number}', auth)
+
+        # The occurrence count is a column of the task's own query, never a query of its own.
+        for captured in (repeating, not_repeating):
+            assert not [
+                q for q in captured.captured_queries if q['sql'].upper().startswith('SELECT COUNT(')
+            ]
+        assert len(repeating) == len(not_repeating)
+
+    def test_trash_with_stop_recurrence_does_both_for_one_charge(
+        self, client, auth, funded_user, settings
     ):
+        task = self.repeating(funded_user)
+        limit_rule(settings, 'TODO_EDIT_USER')
+
+        response = delete(client, f'/tasks/{task.number}?stop_recurrence=true', auth)
+
+        assert response.status_code == 204
+        task.refresh_from_db()
+        task.recurrence.refresh_from_db()
+        assert task.deleted_at is not None
+        assert task.recurrence.ended_at is not None
+        # One hit was spent: the budget (1) is now gone.
+        assert delete(client, f'/tasks/{task.number}', auth).status_code == 429
+
+    def test_repeating_the_call_changes_nothing_more(self, client, auth, funded_user):
+        task = self.repeating(funded_user)
+        delete(client, f'/tasks/{task.number}?stop_recurrence=true', auth)
+        task.recurrence.refresh_from_db()
+        ended, deleted = task.recurrence.ended_at, Task.objects.get(pk=task.pk).deleted_at
+
+        assert delete(client, f'/tasks/{task.number}?stop_recurrence=true', auth).status_code == 204
+
+        task.recurrence.refresh_from_db()
+        assert task.recurrence.ended_at == ended
+        assert Task.objects.get(pk=task.pk).deleted_at == deleted
+
+    def test_without_the_flag_the_repeat_goes_on(self, client, auth, funded_user):
+        task = self.repeating(funded_user)
+
+        assert delete(client, f'/tasks/{task.number}', auth).status_code == 204
+
+        task.recurrence.refresh_from_db()
+        assert task.recurrence.ended_at is None
+
+    def test_the_flag_is_ignored_for_a_task_that_does_not_repeat(self, client, auth, funded_user):
+        plain = create_task(funded_user, title='Plain')
+
+        assert (
+            delete(client, f'/tasks/{plain.number}?stop_recurrence=true', auth).status_code == 204
+        )
+
+        assert Task.objects.get(pk=plain.pk).deleted_at is not None
+
+    def test_a_missing_task_is_a_404_and_spends_nothing(self, client, auth, settings):
+        limit_rule(settings, 'TODO_EDIT_USER')
+
+        assert delete(client, '/tasks/999999?stop_recurrence=true', auth).status_code == 404
+        assert delete(client, '/tasks/999998?stop_recurrence=true', auth).status_code == 404
+
+    def test_the_list_carries_it_without_a_query_per_task(self, client, auth, funded_user):
         for n in range(8):
             self.repeating(funded_user, f'Repeating {n}')
         with CaptureQueriesContext(connection) as one:

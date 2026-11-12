@@ -139,7 +139,8 @@ class TaskSchema(Schema):
         '(`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or '
         'non-repeating task too. Trashing an older occurrence with stop repeating while a newer one '
         'is open would end the rule for that one as well, so a client offers the choice only '
-        'when this is true.'
+        'when this is true. To act on it send `DELETE /tasks/{number}?stop_recurrence=true`, which '
+        'trashes the task and stops the repeat in one request.'
     )
     reminders: list[ReminderSchema]
     blocked_by: list[TaskRefSchema] = Field(

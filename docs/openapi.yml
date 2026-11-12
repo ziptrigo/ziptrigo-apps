@@ -3582,12 +3582,30 @@ paths:
           title: Number
           type: integer
         required: true
+      - in: query
+        name: stop_recurrence
+        schema:
+          default: false
+          title: Stop Recurrence
+          type: boolean
+        required: false
       responses:
         '204':
           description: No Content
       description: 'Move a task, and its subtasks, to the Trash (restorable until `trash_days` have passed).
 
-        Idempotent: a task already in the Trash stays there. Nothing is refunded.'
+        Idempotent: a task already in the Trash stays there. Nothing is refunded.
+
+
+        `stop_recurrence=true` is the web''s "Also stop repeating": the task is trashed and its running
+
+        repeat rule ended in one transaction, for one `TODO_EDIT_USER` charge (the next occurrence is
+
+        then never made). Offer it when the task''s `offers_stop_repeating` is true. It is ignored for a
+
+        task that doesn''t repeat or whose rule already ended, and repeating the call changes nothing
+
+        more.'
       tags:
       - To-do
       security:
@@ -6705,7 +6723,7 @@ components:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
         offers_stop_repeating:
-          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true. To act on it send `DELETE /tasks/{number}?stop_recurrence=true`, which trashes the task and stops the repeat in one request.'
           title: Offers Stop Repeating
           type: boolean
         reminders:
@@ -7292,7 +7310,7 @@ components:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
         offers_stop_repeating:
-          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true. To act on it send `DELETE /tasks/{number}?stop_recurrence=true`, which trashes the task and stops the repeat in one request.'
           title: Offers Stop Repeating
           type: boolean
         reminders:
@@ -8053,7 +8071,7 @@ components:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
         offers_stop_repeating:
-          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true. To act on it send `DELETE /tasks/{number}?stop_recurrence=true`, which trashes the task and stops the repeat in one request.'
           title: Offers Stop Repeating
           type: boolean
         reminders:
@@ -8438,7 +8456,7 @@ components:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
         offers_stop_repeating:
-          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true. To act on it send `DELETE /tasks/{number}?stop_recurrence=true`, which trashes the task and stops the repeat in one request.'
           title: Offers Stop Repeating
           type: boolean
         reminders:

@@ -1864,12 +1864,13 @@ for `close` / `reopen` (the two old routes stay only to answer **410**; see "To-
 files, recent emails, filter counts, blocker suggestions, search snippets, the credit balance, and a task's
 `offers_stop_repeating` plus `recurrence.open_occurrences`: the web's `Task.offers_stop_repeating` read from
 the same `open_occurrences` annotation that `decorated` adds, `false` for a closed, trashed or
-non-repeating task; 2.1.0 is not released, so these joined it; see "To-do" >
+non-repeating task, and `DELETE /tasks/{number}?stop_recurrence=true`, the web's "Also stop repeating": trash and end the
+running rule in one transaction for one `TODO_EDIT_USER` charge, ignored for a task that doesn't repeat; 2.1.0 is not released, so these joined it; see "To-do" >
 "API and CLI"). Endpoints, relative to the mount: `GET /tasks` (`view`, `q`,
 `mode`, `include_closed`, `resolution`, `state`, `priority`, `label`, `date_range`/`date_from`/
 `date_to`, `sort`, `dir`, `parent`, `limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`),
 `POST /tasks` (201),
-`GET|PATCH|DELETE /tasks/{number}` (`DELETE` moves to the Trash, 204, idempotent; `GET` also returns
+`GET|PATCH|DELETE /tasks/{number}` (`DELETE` moves to the Trash, 204, idempotent, optional `stop_recurrence`; `GET` also returns
 a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tasks/{number}/` with
 `close`, `reopen`, `resolution`, `state`, `restore`, `delete-forever`, `postpone`, `checklist`,
 `recurrence/stop`, `POST|DELETE /tasks/{number}/blockers[/{blocker_number}]`, `GET /tasks/{number}/blockers/suggest`,

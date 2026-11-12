@@ -181,8 +181,9 @@ def linked_tasks(side: str) -> QuerySet:
 
 def decorated(queryset: QuerySet) -> QuerySet:
     """What a task's JSON needs, loaded without a query per task: the subtask, comment and
-    attachment counts, `open_occurrences` (one more subquery column), the parent, the repeat rule, the labels, the reminders and the tasks it is
-    linked to (`blocked_by` and `blocks`: one query each for the whole page)."""
+    attachment counts, `open_occurrences` (one more subquery column), the parent, the repeat rule,
+    the labels, the reminders and the tasks it is linked to (`blocked_by` and `blocks`: one query
+    each for the whole page)."""
     reminders = Reminder.objects.order_by('-minutes_before', 'created_at')
     blocked_by = linked_tasks('blocker').order_by('blocker__number')
     blocks = linked_tasks('blocked').order_by('blocked__number')
@@ -250,11 +251,7 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
     # The web's `Task.offers_stop_repeating`, which also reads the `open_occurrences` annotation;
     # a trashed task is never offered it (its own count would not include it).
     offers_stop = task.deleted_at is None and task.offers_stop_repeating
-    open_occurrences = getattr(task, 'open_occurrences', None)
-    if open_occurrences is None and active is not None:  # not loaded by `decorated`
-        open_occurrences = Task.objects.filter(
-            recurrence_id=task.recurrence_id, completed_at__isnull=True, deleted_at__isnull=True
-        ).count()
+    open_occurrences = getattr(task, 'open_occurrences', None)  # set by `decorated`
     return {
         'id': task.pk,
         'number': task.number,
