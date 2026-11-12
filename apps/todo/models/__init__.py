@@ -2,6 +2,7 @@ from .account import MutedOverdue, TodoAccount
 from .attachment import Attachment
 from .blocker import TaskBlocker
 from .comment import Comment, CommentRevision
+from .event import EventChannel, EventKind, TaskEvent
 from .inbox import (
     InboundEmail,
     InboundEmailStatus,
@@ -37,6 +38,8 @@ __all__ = [
     'Attachment',
     'DEFAULT_LABEL_COLOR',
     'DeliveryChannel',
+    'EventChannel',
+    'EventKind',
     'InboundEmail',
     'InboundEmailStatus',
     'InboundMessage',
@@ -57,6 +60,7 @@ __all__ = [
     'SnoozeChoice',
     'Task',
     'TaskBlocker',
+    'TaskEvent',
     'TaskReference',
     'TaskSource',
     'TaskState',

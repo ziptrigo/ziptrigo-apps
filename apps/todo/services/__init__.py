@@ -4,6 +4,8 @@ from . import (
     blockers,
     comments,
     dates,
+    event_text,
+    events,
     filters,
     inbound,
     labels,
@@ -161,6 +163,8 @@ from .tasks import (
 )
 
 __all__ = [
+    'event_text',
+    'events',
     'MAX_BLOCKERS_PER_TASK',
     'add_blocker',
     'blockers',

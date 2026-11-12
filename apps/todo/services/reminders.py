@@ -78,6 +78,7 @@ from ..limits import MAX_REMINDER_MINUTES, MAX_REMINDERS_PER_TASK
 from ..models import (
     MUTED_STATES,
     DeliveryChannel,
+    EventChannel,
     Reminder,
     ReminderChannel,
     ReminderDelivery,
@@ -85,6 +86,7 @@ from ..models import (
     Task,
     TodoAccount,
 )
+from . import events
 from .accounts import get_account
 from .dates import due_at
 from .references import render_markdown
@@ -1001,7 +1003,8 @@ def answer_push(answer: PushAction) -> str | None:
         subtasks = Task.objects.filter(
             parent=task, completed_at__isnull=True, deleted_at__isnull=True
         ).count()
-        complete_task(task)
+        with events.channel(EventChannel.PUSH):
+            complete_task(task)
         if subtasks:
             return f'Completed, with {subtasks} open subtask{"" if subtasks == 1 else "s"}.'
         return 'Completed.'

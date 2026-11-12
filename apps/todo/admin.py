@@ -27,10 +27,12 @@ from .models import (
     SavedFilter,
     Task,
     TaskBlocker,
+    TaskEvent,
     TodoAccount,
     TodoSettings,
 )
 from .services.billing import month_key
+from .services.event_text import describe
 from .services.inbound import reset_message_for_retry
 
 
@@ -146,6 +148,27 @@ class TaskAdmin(ReadOnlyModelAdmin):
     def unpaid(self, obj: Task) -> str:
         """Text for the exception only: a red cross for the normal state read as an alarm."""
         return 'Unpaid' if obj.is_unpaid else ''  # an empty value shows as the admin's dash
+
+
+class TaskEventAdmin(ReadOnlyModelAdmin):
+    """The activity log of the tasks (issue #274), for support: what changed, when, whether it was
+    automatic and through which channel (web, API, email, push, system). Written only by
+    `services.events`; it goes with its task."""
+
+    list_display = ['created_at', 'task_number', 'user', 'kind', 'what', 'automatic', 'channel']
+    list_filter = ['kind', 'automatic', 'channel', 'created_at']
+    search_fields = ['task__title', 'task__number', 'user__email']
+    list_select_related = ['task', 'user']
+    date_hierarchy = 'created_at'
+    ordering = ['-created_at']
+
+    @admin.display(description='Task', ordering='task__number')
+    def task_number(self, obj: TaskEvent) -> str:
+        return f'#{obj.task.number}'
+
+    @admin.display(description='What')
+    def what(self, obj: TaskEvent) -> str:
+        return describe(obj)
 
 
 class TaskBlockerAdmin(ReadOnlyModelAdmin):
@@ -445,6 +468,7 @@ class InboundEmailAdmin(ReadOnlyModelAdmin):
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
 custom_admin_site.register(TaskBlocker, TaskBlockerAdmin)
+custom_admin_site.register(TaskEvent, TaskEventAdmin)
 custom_admin_site.register(Recurrence, RecurrenceAdmin)
 custom_admin_site.register(TodoAccount, TodoAccountAdmin)
 custom_admin_site.register(Label, LabelAdmin)

@@ -46,8 +46,8 @@ from apps.accounts.services.timezones import user_today
 from apps.core.datetime_format import DisplayFormats, format_date, month_day_words
 from apps.core.services import notifications
 
-from ..models import Recurrence, RecurrenceMode, Task, TaskSource
-from . import reminders
+from ..models import EventKind, Recurrence, RecurrenceMode, Task, TaskSource
+from . import events, reminders
 
 logger = logging.getLogger(__name__)
 
@@ -427,11 +427,14 @@ def stop(task: Task) -> bool:
     if task.recurrence_id is None:
         return False
     now = timezone.now()
+    rule = task.recurrence.rrule if task.recurrence is not None else ''
     ended = Recurrence.objects.filter(pk=task.recurrence_id, ended_at__isnull=True).update(
         ended_at=now
     )
     if ended and task.recurrence is not None:
         task.recurrence.ended_at = now
+    if ended:
+        events.record(task, EventKind.REPEAT, {'from': rule, 'to': ''})
     return bool(ended)
 
 
@@ -486,6 +489,12 @@ def on_completed(task: Task) -> Task | None:
             ended_at = timezone.now()
             Recurrence.objects.filter(pk=recurrence.pk).update(ended_at=ended_at)
             task.recurrence.ended_at = ended_at  # the caller's copy reflects it
+            events.record(
+                task,
+                EventKind.REPEAT,
+                {'from': recurrence.rrule, 'to': '', 'reason': 'ended'},
+                automatic=True,
+            )
             return None
         created, dropped_subtasks = _create_with_fallback(task, recurrence, nxt, task_service)
         _notify(task, recurrence, created, dropped_subtasks)
@@ -588,6 +597,7 @@ def _create_occurrence(
         recurrence=recurrence,
         source=TaskSource.RECURRENCE,
         allow_unpaid=True,
+        previous=task,
     )
     open_subtasks = (
         list(

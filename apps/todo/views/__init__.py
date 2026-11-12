@@ -1,3 +1,4 @@
+from .activity import task_activity
 from .attachments import (
     attachment_cancel,
     attachment_complete,
@@ -114,6 +115,7 @@ __all__ = [
     'task_delete',
     'task_edit',
     'task_list',
+    'task_activity',
     'task_page',
     'task_postpone',
     'task_resolution',

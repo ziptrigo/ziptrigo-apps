@@ -63,7 +63,8 @@ from django.utils import timezone
 
 from apps.core.services.sniff import SNIFF_BYTES, sniff_inline_type
 
-from ..models import Attachment, Comment, Task, TodoSettings
+from ..models import Attachment, Comment, EventKind, Task, TodoSettings
+from . import events
 from .accounts import add_stored_bytes, get_account, is_frozen
 from .errors import AccountFrozenError
 from .storage import GET_URL_EXPIRES_SECONDS, PUT_URL_EXPIRES_SECONDS, attachment_key, get_storage
@@ -284,6 +285,17 @@ def complete_upload(attachment: Attachment) -> Attachment:
             )
             if won:
                 add_stored_bytes(attachment.user_id, attachment.size_bytes)
+                if not attachment.for_comment:  # a comment's file is logged once it is attached
+                    events.record_many(
+                        [
+                            events.Entry(
+                                attachment.task_id,
+                                attachment.user_id,
+                                EventKind.ATTACHMENT_ADDED,
+                                {'filename': attachment.filename, 'comment': False},
+                            )
+                        ]
+                    )
     if won:
         attachment.uploaded = True
         attachment.inline_type = inline_type
@@ -376,6 +388,18 @@ def delete_attachment(attachment: Attachment) -> None:
         current.delete()
         if current.uploaded:
             add_stored_bytes(current.user_id, -current.size_bytes)
+            if not current.for_comment or current.comment_id is not None:
+                # A comment's file that was never attached was never logged either.
+                events.record_many(
+                    [
+                        events.Entry(
+                            current.task_id,
+                            current.user_id,
+                            EventKind.ATTACHMENT_REMOVED,
+                            {'filename': current.filename, 'comment': current.for_comment},
+                        )
+                    ]
+                )
 
 
 def delete_for_tasks(task_ids: Iterable[UUID]) -> int:
@@ -473,10 +497,20 @@ def link_to_comment(comment: Comment, attachment_ids: Iterable[object]) -> list[
         raise ValidationError(
             {'attachment_ids': 'A file is not ready to be attached. Wait for uploads to finish.'}
         )
+    linked: list[events.Entry] = []
     for row in ready:
         if row.comment_id is None:
             row.comment = comment
             row.save(update_fields=['comment'])
+            linked.append(
+                events.Entry(
+                    row.task_id,
+                    row.user_id,
+                    EventKind.ATTACHMENT_ADDED,
+                    {'filename': row.filename, 'comment': True},
+                )
+            )
+    events.record_many(linked)
     return ready
 
 

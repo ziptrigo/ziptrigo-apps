@@ -45,6 +45,7 @@ urlpatterns = [
     path('filters/<uuid:filter_id>/update/', views.filter_update, name='filter-update'),
     path('filters/<uuid:filter_id>/delete/', views.filter_delete, name='filter-delete'),
     path('<int:number>/', views.task_page, name='task'),
+    path('<int:number>/activity/', views.task_activity, name='task-activity'),
     path('<int:number>/edit/', views.task_edit, name='edit'),
     path('<int:number>/complete/', views.task_complete, name='complete'),
     path('<int:number>/wont-do/', views.task_wont_do, name='wont-do'),

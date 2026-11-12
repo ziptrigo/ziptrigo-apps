@@ -43,6 +43,11 @@ deadlocks the review of #278 found needed two such writers at once). After the a
 is: the task acted on (the closing one), then its subtasks, then the tasks it blocks (the
 dependents, in pk order, `released`). Nothing else locks the account while holding a task. The
 same lock is what makes the no-cycle rule hold for any number of links added at once.
+
+**The activity log** (issue #274, `services.events`) records, on the task that is blocked or freed:
+a blocker added or removed by the user (`blocker_added` / `blocker_removed`) and, as separate entries,
+the automatic state change that came of it (`blocked`, `unblocked`, which names the blockers that
+closed, were trashed or deleted). Inserts only, in the transactions above: no lock is added.
 """
 
 import logging
@@ -61,7 +66,8 @@ from apps.core.markdown import normalize_for_search
 from apps.core.services import notifications
 
 from ..limits import MAX_BLOCKERS_PER_TASK
-from ..models import Task, TaskBlocker, TaskState
+from ..models import EventKind, Task, TaskBlocker, TaskState
+from . import events
 from .accounts import lock_account
 from .task_state import lock_tasks, write_state
 
@@ -354,12 +360,26 @@ def add_blocker(task: Task, blocker: Task) -> bool:
                 TaskBlocker.objects.create(blocker=other, blocked=current)
         except IntegrityError:  # a racing identical add won
             return False
+        entries = [events.entry(current, EventKind.BLOCKER_ADDED, events.task_ref(other))]
         if current.completed_at is None and other.completed_at is None:
-            write_state(current, TaskState.BLOCKED, now)
+            previous = current.state
+            if write_state(current, TaskState.BLOCKED, now):
+                entries.append(_blocked_entry(current, previous, [other]))
+        events.record_many(entries)
     task.state = current.state
     task.today_position = current.today_position
     task.updated_at = current.updated_at
     return True
+
+
+def _blocked_entry(task: Task, previous: str, blockers: Sequence[Task]) -> events.Entry:
+    """The automatic entry of a task that became Blocked."""
+    return events.entry(
+        task,
+        EventKind.BLOCKED,
+        {'from': previous, 'blockers': [events.task_ref(other) for other in blockers]},
+        automatic=True,
+    )
 
 
 def link_new_task(task: Task, blockers: Sequence[Task]) -> None:
@@ -376,9 +396,16 @@ def link_new_task(task: Task, blockers: Sequence[Task]) -> None:
     TaskBlocker.objects.bulk_create(
         [TaskBlocker(blocker=other, blocked=task) for other in blockers], ignore_conflicts=True
     )
+    entries = [
+        events.entry(task, EventKind.BLOCKER_ADDED, events.task_ref(other)) for other in blockers
+    ]
     if has_open_blocker(task.pk):
+        previous = task.state
         task.state = TaskState.BLOCKED
         Task.objects.filter(pk=task.pk).update(state=TaskState.BLOCKED)
+        open_ones = [other for other in blockers if other.is_open]
+        entries.append(_blocked_entry(task, previous, open_ones))
+    events.record_many(entries)
 
 
 def remove_blocker(task: Task, blocker: Task) -> bool:
@@ -395,12 +422,17 @@ def remove_blocker(task: Task, blocker: Task) -> bool:
         removed = TaskBlocker.objects.filter(blocked=current, blocker=blocker).delete()[0]
         if not removed:
             return False
+        entries = [events.entry(current, EventKind.BLOCKER_REMOVED, events.task_ref(blocker))]
         if (
             current.completed_at is None
             and current.state == TaskState.BLOCKED
             and not has_open_blocker(current.pk)
         ):
             write_state(current, TaskState.TODO, now)
+            entries.append(
+                _unblocked_entry(current, [events.task_ref(blocker) | {'reason': 'removed'}])
+            )
+        events.record_many(entries)
     task.state = current.state
     task.updated_at = current.updated_at
     return True
@@ -427,20 +459,53 @@ def _notice(user_id: UUID, key: str, title: str, body: str, number: int) -> None
         logger.exception('Could not write the notice %s', key)
 
 
-def released(dependent_ids: Iterable[UUID], now: datetime | None = None) -> int:
+def _unblocked_entry(task: Task, blockers: list[dict]) -> events.Entry:
+    """The automatic entry of a task that is no longer Blocked: `blockers` are `{number, title,
+    reason}` (reason `closed`, `trashed`, `deleted` or `removed`)."""
+    return events.entry(task, EventKind.UNBLOCKED, {'blockers': blockers}, automatic=True)
+
+
+def causes_of(blocker_ids: Iterable[UUID], reason: str) -> dict[UUID, list[dict]]:
+    """For each task the blockers `blocker_ids` block, those of them that block it, as `{number,
+    title, reason}`: what `released` writes in the log of a task it frees. One query. Read it
+    *before* the links go (a task deleted for good takes its links with it)."""
+    ids = list(blocker_ids)
+    found: dict[UUID, list[dict]] = {}
+    if not ids:
+        return found
+    links = (
+        TaskBlocker.objects.filter(blocker_id__in=ids)
+        .select_related('blocker')
+        .order_by('blocker__number')
+    )
+    for link in links:
+        found.setdefault(link.blocked_id, []).append(
+            events.task_ref(link.blocker) | {'reason': reason}
+        )
+    return found
+
+
+def released(
+    dependent_ids: Iterable[UUID],
+    now: datetime | None = None,
+    causes: dict[UUID, list[dict]] | None = None,
+) -> int:
     """The blockers of these tasks stopped being open (closed, trashed or deleted: `ended` finds the
     dependents, a delete finds them before the rows go): every one with no open blocker left that
     is open and not in the Trash is told, and a Blocked one goes back to To do. Returns how many
     were told. Call it in the transaction that ended the blockers, which holds the account lock
     (`lock_account`): the dependents are locked here, in pk order, after the task that closed and its
     subtasks. However many tasks the blocker blocks, which of them still have an open blocker is
-    one query over all the locked rows."""
+    one query over all the locked rows. `causes` (`causes_of`) names, for the log entry of a task that
+    goes back to To do, the blockers that ended."""
     ids = list(dict.fromkeys(dependent_ids))
     if not ids:
         return 0
     now = now or timezone.now()
     told = 0
+    causes = causes or {}
     locked = lock_tasks(*ids)
+    entries: list[events.Entry] = []
     still_blocked = set(
         TaskBlocker.objects.filter(
             blocked_id__in=list(locked),
@@ -453,6 +518,7 @@ def released(dependent_ids: Iterable[UUID], now: datetime | None = None) -> int:
             continue
         if dependent.state == TaskState.BLOCKED:
             write_state(dependent, TaskState.TODO, now, release=not dependent.is_trashed)
+            entries.append(_unblocked_entry(dependent, causes.get(dependent.pk, [])))
         if dependent.is_trashed:
             continue
         _notice(
@@ -463,13 +529,17 @@ def released(dependent_ids: Iterable[UUID], now: datetime | None = None) -> int:
             dependent.number,
         )
         told += 1
+    events.record_many(entries)
     return told
 
 
-def ended(blocker_ids: Iterable[UUID], now: datetime | None = None) -> int:
-    """`blocker_ids` were open and are not any more: `released` for the tasks they block."""
+def ended(blocker_ids: Iterable[UUID], now: datetime | None = None, reason: str = 'closed') -> int:
+    """`blocker_ids` were open and are not any more (`reason`: `closed` or `trashed`, for the log):
+    `released` for the tasks they block."""
     ids = list(blocker_ids)
-    return released(dependents_of(ids), now) if ids else 0
+    if not ids:
+        return 0
+    return released(dependents_of(ids), now, causes_of(ids, reason))
 
 
 def reopened(blocker_ids: Iterable[UUID]) -> int:

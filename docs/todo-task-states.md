@@ -91,6 +91,10 @@ Every change to a task is recorded and listed on the task page: state, resolutio
 removed, automatic unblocks, and also title, due date, priority, labels and the repeat rule. Each
 entry has its time and says whether it was automatic.
 
+Built in #274 (see CLAUDE.md, "To-do" > "Activity log"): the list is not shown with the task but loaded
+by a small "History" button, the latest 20 entries with "Show more"; an entry lives as long as its
+task; nothing is searchable; reminders and comments are not logged (comments keep their own history).
+
 ## 7. API and CLI
 
 A **breaking** change, cut in one release: `completed_at` becomes `closed_at`, `view=completed`

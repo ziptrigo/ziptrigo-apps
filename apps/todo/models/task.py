@@ -89,6 +89,8 @@ class Task(models.Model):
     #: blocked (`blocked_by_links`: its blockers) and where it blocks another (`blocks_links`).
     blocked_by_links: ClassVar['models.Manager']
     blocks_links: ClassVar['models.Manager']
+    #: The reverse accessor of `TaskEvent.task` (the activity log, issue #274).
+    events: ClassVar['models.Manager']
     # `ty` types `pk` as the primary key field object itself, not the value it holds.
     pk: uuid.UUID
     user_id: uuid.UUID

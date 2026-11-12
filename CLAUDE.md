@@ -3765,8 +3765,8 @@ saved filters" below), attachments (#184, "Attachments and storage billing" belo
 (#182, "Reminders" below), AI date parsing in the title (#183, "AI date parsing" below) and tasks
 added by email (#186, "Email intake" below), the JWT API with the `inv todo` CLI (#187, "API and
 CLI" below), task states and resolutions (#272, part 1 of 4 of #271, "States and resolutions"
-below) and blockers (#273, part 2 of 4, "Blockers" below; the activity log and the API/CLI/Android
-change are #274 and #275).
+below) blockers (#273, part 2 of 4, "Blockers" below) and the activity log (#274, part 3 of 4,
+"Activity log" below; the API/CLI/Android change is #275).
 Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
 `templates/todo/`, `static/todo/`, `jobs.py`, `admin.py`, `checks.py`, `urls.py` (mounted at
 `/todo/`, `app_name = 'todo'`).
@@ -4101,8 +4101,8 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
 #### States and resolutions
 
 Issue #272 (part 1 of 4 of #271; spec `docs/todo-task-states.md`; migration `0011_task_states`).
-The fourth, muted *Blocked* state is #273 ("Blockers" below); the activity log (#274) and the
-API/CLI/Android change (#275) are not here.
+The fourth, muted *Blocked* state is #273 ("Blockers" below), the activity log is #274 ("Activity
+log" below); the API/CLI/Android change (#275) is not here.
 
 - **Model.** `Task.state` (`TaskState`: `todo`, `in_progress`, `blocked` (#273), `on_hold`; default `todo`, `db_default`
   too: the #102 lesson, the old container keeps inserting while `0011` runs) is what an *open* task is
@@ -4370,6 +4370,91 @@ one through it gives Blocked when a blocker is open.
   API unchanged), `test_blocker_locking.py` (the lock order, the races it closes, the stale-page refusal,
   closing blocked subtasks, many dependents, the suggestions and their rate limit), the Playwright `tests_e2e/test_todo_blockers.py`; the AI plan has TODO-49 to TODO-55,
   `notifications.md` NOTIF-25 and NOTIF-26 and `admin.md` ADM-56.
+
+#### Activity log
+
+Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migration
+`0013_task_events`). Every change to a task is recorded and can be read on its page, on request.
+
+- **Model** (`models/event.py`). `TaskEvent`: UUID `id`, `task` (`CASCADE`, `related_name='events'`),
+  `user` (the owner, `CASCADE`), `kind` (`EventKind`), `data` (JSON snapshot), `automatic`, `channel`
+  (`EventChannel`: `web`, `api`, `email`, `push`, `system`), `created_at`; ordered newest first
+  (`-created_at, -id`, a total order, which the paging relies on), index `(task, created_at)`. `data`
+  holds the values themselves (old and new titles, task numbers and titles, label names, file names), so
+  an entry still reads right after the task, label or file it mentions is gone. `db_default`s on
+  `data`, `automatic` and `channel`.
+- **Retention: as long as the task.** The rows cascade with the task (delete forever, the daily
+  `todo.purge_trash`, a deleted account), so there is no purge job. `delete_forever` counts the *task*
+  rows it removed (`delete()[1]['todo.Task']`), since the total now includes the log. **Not searchable**
+  (no search column); revisions of comments and reminders have their own histories and are not logged here.
+- **Recording** (`services/events.py`, the module docstring lists every kind and its `data`). By the
+  **services**, never the views, so the web, the API, the phone's buttons, the email intake and jobs
+  all record. `record(task, kind, data, automatic=)` / `record_many(entries)` is **one insert inside the
+  transaction of the change** (so it commits or rolls back with it) in **its own savepoint**, and a
+  failure is **logged, never raised**: a history line can't refuse the user's edit. **It adds no
+  lock**: `lock_account` first, then the tasks, exactly as "Blockers" > "Locking" says; a test spies on
+  `select_for_update` and fails if the log ever asks for one. Only **real changes** are recorded (callers
+  compare the locked row with the new values; an empty `PATCH`, the same title, a no-op state, closing a
+  closed task record nothing). **One entry per logical field**: an `update_task` that changes the title,
+  priority and description writes three; a due date and its time are one `due` entry; the labels are one
+  entry listing `added` and `removed` names; entries of one call are written in one bulk insert with
+  times a microsecond apart so "newest first" keeps their order.
+- **What is recorded.** `created` (source, parent, the occurrence it follows, the repeat rule; automatic
+  for a next occurrence and for a task made from an email), `state`, `closed` (resolution; the parent's
+  entry carries how many open subtasks the same close closed), `reopened`, `resolution`, `title`,
+  `priority`, `due` (set, changed, cleared; also **postpone** and "Reschedule overdue to today", one entry
+  per task), `labels`, `repeat` (set, changed, mode changed, stopped; an automatic one when the rule runs
+  out), `description` ("Description edited", no text stored), `checklist` (**a ticked or unticked box is
+  its own entry, "Checklist item ticked: <text>"**, not a description edit: `toggle_checklist` passes
+  `update_task(checklist=(checked, text))`), blockers (`blocker_added` / `blocker_removed` by the user and,
+  as **separate automatic** entries, `blocked` when it turned the task Blocked and `unblocked` naming the
+  blockers that were closed, trashed, deleted or removed: `blockers.causes_of` reads them before the links
+  go), subtasks on the parent's log (`subtask_added`, `subtask_removed`, `subtask_closed` with the
+  resolution; a move under or out of a parent is also `moved` on the task itself; the copies a repeating
+  task makes of its subtasks don't flood the new parent) , `attachment_added` / `attachment_removed` (by
+  file name; a comment's file is logged when it is attached to a comment, not when the draft uploads, and a
+  discarded draft never), `trashed` / `restored`. **Cascades are automatic**: a parent closed with its
+  subtasks, trashed or restored gives each subtask its own entry, `automatic`, naming the parent. **Not
+  logged:** reminders, comments, reordering, a label renamed or deleted, saved filters, settings.
+- **Automatic** means nobody asked for it in that moment: unblocking, the next occurrence, a task made from
+  an email (and its files), a rule that ended, what a parent's close/trash does to its subtasks. The phone's
+  Complete button is the user's own action, so it is **not**.
+- **Channel** is not passed down the services: a context variable holds it (`events.channel(name)`,
+  default `system`: jobs, the shell). `apps.todo.middleware.EventChannelMiddleware` (in `MIDDLEWARE`,
+  sync and async) sets `api` for `/api/` and `web` for every other request; the push answer handler
+  (`reminders.answer_push`, for Complete) wraps its work in `push`, and `inbound.ingest` in `email`. A new
+  entry point that is not a request wraps its work in `with events.channel(...)`.
+- **Sentences** (`services/event_text.py`, `describe(event)`): from `kind` and `data` only, **no query**,
+  so a page of entries costs none beyond the page's own. Dates and times inside them are written in the
+  viewer's formats (`apps.core.datetime_format`, the active ones: `Due date changed from 11/05/2026, 3:00 PM
+  to 11/07/2026, 9:00 AM`, `dd/mm/yyyy` and 24-hour for another user, the public wording outside a request)
+  and a repeat rule is described when shown, not when stored. Plain text: the template escapes it, so a
+  hostile task title can't inject markup.
+- **The page** (`views/activity.py`, `GET /todo/<n>/activity/`, `todo:task-activity`). **Not visible by
+  default and not even queried:** the task page has a small muted "History" button
+  (`#task-activity-toggle`, `aria-expanded`, `aria-controls="task-activity-body"`) in `#task-activity`
+  after the comments, outside `#task-panel`. `static/todo/js/activity.js` fetches the first page on the
+  first press (`htmx.ajax` into `#task-activity-body`, then focus moves to the heading), later presses
+  show or hide what is there ("Hide history"), and the history is fetched again after an action on the
+  task (`htmx:afterSettle` of `#task-panel` or the attachments list) while it is open. The first page is
+  the latest `PAGE_SIZE` (20) entries newest first (sentence, an "Automatic" pill, the time as
+  `{% local_time %}`); "Show more" is a keyset cursor `?before=<time>_<id>` (so entries written meanwhile
+  never repeat or skip one; a malformed cursor is a 404) that appends rows to `#task-activity-list` and
+  replaces `#task-activity-more` out of band, and focus moves to the first new row
+  (`data-activity-new`). It only reads, so a task in the Trash works too; another user's task is a 404;
+  `@login_required`. **No rate-limit rule**, like the notification endpoints: session-bound and one
+  indexed query per page.
+- **Admin.** Read-only `TaskEventAdmin` (time, task, user, kind, the sentence, automatic, channel; filters
+  kind, automatic, channel, date; search task title/number and email). `todo` is already in
+  `CASCADE_WITH_USER_APP_LABELS`.
+- **The JWT API is unchanged** (`docs/openapi.yml` too): API actions record entries with channel `api`,
+  but the log is exposed through the API in #275.
+- **Tests.** `apps/todo/tests/test_activity_log.py` (every kind from every path, no-change records
+  nothing, automatic flags and channels through the web, the API, the push answer, the email intake and
+  the shell, cascades, the failing insert, no lock, the sentences in both date formats, the endpoint's
+  paging, cursor, 404s, escaping and query counts, that the task page neither renders nor queries the
+  log, the admin) and the Playwright `tests_e2e/test_todo_activity.py`; the AI plan has TODO-56 to
+  TODO-58 and `admin.md` ADM-57.
 
 #### Comments and references
 

@@ -1,0 +1,16 @@
+{% load local_time core_ui %}
+{% comment %} Rows of a task's activity log (`entries`: `(event, sentence)`), newest first, and the "Show more" slot. Used by
+   `activity.html` for the first page and, alone, as the answer of a "Show more" (`before`): the rows are appended to
+   `#task-activity-list` and the slot `#task-activity-more` is replaced out of band. The rows of a later page carry
+   `data-activity-new`, which `static/todo/js/activity.js` moves focus to once they are in. The sentences are plain text
+   written by `services.event_text`; everything is escaped. {% endcomment %}
+{% for event, sentence in entries %}
+<li class="py-3 flex flex-wrap items-baseline gap-x-3 gap-y-1"{% if not first_page and forloop.first %} tabindex="-1" data-activity-new{% endif %}>
+    <span class="text-sm text-gray-900 dark:text-gray-100">{{ sentence }}</span>
+    {% if event.automatic %}{% pill 'gray' 'Automatic' title='Nobody made this change by hand' %}{% endif %}
+    <span class="text-xs text-gray-500 dark:text-gray-400">{% local_time event.created_at 'long' %}</span>
+</li>
+{% endfor %}
+{% if not first_page %}
+<div id="task-activity-more" hx-swap-oob="true">{% include 'todo/partials/activity_more.html' %}</div>
+{% endif %}
