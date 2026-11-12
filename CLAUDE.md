@@ -4169,6 +4169,10 @@ log" below); the API/CLI change (#275) is described under "API and CLI".
   *today* stays in Today's list in its group whatever the setting. `dates.today_count(user, account)`
   (the number beside Today; replaces `today_set(...).count()` in the views) leaves muted overdue tasks
   out unless they are shown dimmed. The search "overdue" date range leaves them out too.
+  **The API reads and writes it:** `GET /api/todo/settings` returns `muted_overdue` (`"dimmed" | "hidden" |
+  "section"`) and `PATCH` accepts it, through the same `set_muted_overdue` (`clean_muted_overdue` first,
+  so an unknown value, `null` included, is a 400 `muted_overdue: Choose Today (dimmed), ...` before
+  `TODO_EDIT_USER` is spent); `inv todo settings local --muted-overdue dimmed|hidden|section`.
 - **Held reminders** (`services/reminders.py`; see its module docstring). `deliver_due` skips a muted
   task's reminders (they stay unsent, due) and `sweep_stale` does not sweep them while the task is open
   and muted. Leaving a muted state (`set_state`, or an automatic unblock: `task_state.write_state`, in its transaction) calls `reminders.release_held(task)`:

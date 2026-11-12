@@ -322,6 +322,14 @@ def _channel(value: str | None) -> str | None:
     return value
 
 
+MUTED_OVERDUE_CHOICES = ('dimmed', 'hidden', 'section')
+_MUTED_OVERDUE_TEXT = {
+    'dimmed': 'dimmed (at the bottom of Overdue)',
+    'hidden': 'hidden (not on Today)',
+    'section': 'section (collapsed "On hold & blocked" at the bottom)',
+}
+
+
 def _snooze_text(minutes: int | None) -> str:
     if minutes is None:
         return '-'
@@ -1497,11 +1505,13 @@ def _print_settings(settings: dict) -> None:
         if reminder is None
         else f'{reminder} minutes before ({settings["default_reminder_channel"]})'
     )
+    muted = settings.get('muted_overdue')
     rows = [
         ('Default due time', settings['default_due_time'][:5]),
         ('Default reminder', default_reminder),
         ('Default channel', settings['default_reminder_channel']),
         ('Snooze for', _snooze_text(settings.get('snooze_minutes'))),
+        ('Muted overdue on Today', _MUTED_OVERDUE_TEXT.get(muted, muted) if muted else '-'),
         (
             'Accepted senders',
             ', '.join(settings['sender_allowlist']) or 'anyone (see `settings` on the website)',
@@ -1547,6 +1557,11 @@ def todo_settings(
         '--snooze',
         help='Minutes the Snooze button of a pushed reminder waits: 15, 60, 480 or 1440.',
     ),
+    muted_overdue: str | None = typer.Option(
+        None,
+        '--muted-overdue',
+        help='Where an overdue On hold or Blocked task shows on Today: dimmed, hidden or section.',
+    ),
 ):
     """
     Show the settings and this month's usage; pass options to change the defaults.
@@ -1556,6 +1571,7 @@ def todo_settings(
         todo settings local --default-due-time 08:30 --default-reminder 15 --default-channel both
         todo settings local --default-reminder none
         todo settings local --snooze 60
+        todo settings local --muted-overdue section
     """
     select_environment(environment)
     payload: dict = {}
@@ -1580,6 +1596,10 @@ def todo_settings(
         if snooze not in SNOOZE_MINUTES:
             raise typer.BadParameter('use 15, 60, 480 or 1440 minutes.')
         payload['snooze_minutes'] = snooze
+    if muted_overdue is not None:
+        if muted_overdue not in MUTED_OVERDUE_CHOICES:
+            raise typer.BadParameter('use dimmed, hidden or section.')
+        payload['muted_overdue'] = muted_overdue
 
     if payload:
         settings = _call('patch', '/settings', json=payload)

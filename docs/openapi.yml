@@ -3048,7 +3048,9 @@ paths:
 
         `default_reminder_channel`; `null` minutes: no default reminder), how long Snooze waits on a
 
-        pushed reminder (`snooze_minutes`: 15, 60, 480 or 1440) and/or who may add tasks by
+        pushed reminder (`snooze_minutes`: 15, 60, 480 or 1440), where an overdue task that is On hold
+
+        or Blocked shows on Today (`muted_overdue`: `dimmed`, `hidden` or `section`) and/or who may add tasks by
 
         email (`sender_allowlist`; `[]` or `null`: anyone). Only the fields present are applied, all or
 
@@ -3059,7 +3061,9 @@ paths:
 
         A missing due time, a reminder time outside 0 to 43,200 minutes, an unknown channel and a
 
-        snooze that isn''t one of the four are refused before `TODO_EDIT_USER` is spent; a sender allowlist the service then refuses still
+        snooze that isn''t one of the four, a `muted_overdue` that isn''t one of the three (`null`
+
+        included) are refused before `TODO_EDIT_USER` is spent; a sender allowlist the service then refuses still
 
         spends one.'
       tags:
@@ -7172,7 +7176,13 @@ components:
 
         new task with a date gets. `snooze_minutes` (15, 60, 480 or 1440) is how long the Snooze button
 
-        of a pushed reminder waits. `sender_allowlist` is who may add tasks by email (exact addresses
+        of a pushed reminder waits. `muted_overdue` is where an overdue task that is On hold or Blocked
+
+        shows on Today: `dimmed` (at the bottom of the Overdue group, dimmed; the default), `hidden`
+
+        (not on Today at all) or `section` (in a collapsed "On hold & blocked" section at the bottom of
+
+        Today). A muted task due today stays in Today''s list whatever this says. `sender_allowlist` is who may add tasks by email (exact addresses
 
         and `*@domain`; an empty list accepts anyone).
 
@@ -7202,6 +7212,13 @@ components:
         snooze_minutes:
           title: Snooze Minutes
           type: integer
+        muted_overdue:
+          enum:
+          - dimmed
+          - hidden
+          - section
+          title: Muted Overdue
+          type: string
         sender_allowlist:
           items:
             type: string
@@ -7233,6 +7250,7 @@ components:
       - default_reminder_minutes
       - default_reminder_channel
       - snooze_minutes
+      - muted_overdue
       - sender_allowlist
       - tasks_created_this_month
       - free_tasks_per_month
@@ -7249,9 +7267,11 @@ components:
 
         or not at all. An explicit `null` clears: `default_reminder_minutes` to no default reminder,
 
-        `sender_allowlist` to accept anyone. `default_due_time`, `default_reminder_channel` and
+        `sender_allowlist` to accept anyone. `default_due_time`, `default_reminder_channel`,
 
-        `snooze_minutes` cannot be empty, so `null` there is a 400. A key that is not one of these is a 422.'
+        `snooze_minutes` and `muted_overdue` (`dimmed`, `hidden` or `section`; any other value is a 400)
+
+        cannot be empty, so `null` there is a 400. A key that is not one of these is a 422.'
       properties:
         default_due_time:
           anyOf:
@@ -7274,6 +7294,11 @@ components:
           - type: integer
           - type: 'null'
           title: Snooze Minutes
+        muted_overdue:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Muted Overdue
         sender_allowlist:
           anyOf:
           - items:

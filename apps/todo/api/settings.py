@@ -13,6 +13,7 @@ from .. import services
 from ..models import TodoAccount, TodoSettings
 from ..schemas import InboxSchema, SettingsSchema, SettingsUpdateSchema
 from ..services import reminders
+from ..services.accounts import clean_muted_overdue, set_muted_overdue
 from .common import charge, mapped_errors
 from .router import router
 
@@ -26,6 +27,7 @@ def _settings(user: User) -> dict:
         'default_reminder_minutes': account.default_reminder_minutes,
         'default_reminder_channel': account.default_reminder_channel,
         'snooze_minutes': account.snooze_minutes,
+        'muted_overdue': account.muted_overdue,
         'sender_allowlist': list(account.sender_allowlist),
         'tasks_created_this_month': used,
         'free_tasks_per_month': free,
@@ -58,6 +60,8 @@ def _save(account: TodoAccount, user: User, changes: dict) -> None:
             reminders.set_defaults(account, minutes=minutes, channel=channel or '')
         if 'snooze_minutes' in changes:
             reminders.set_snooze(account, changes['snooze_minutes'])
+        if 'muted_overdue' in changes:
+            set_muted_overdue(account, changes['muted_overdue'])
         if 'sender_allowlist' in changes:
             services.update_inbox_settings(user, sender_allowlist=changes['sender_allowlist'] or [])
 
@@ -72,6 +76,8 @@ def _check(changes: dict) -> None:
         reminders.clean_channel(changes['default_reminder_channel'] or '')
     if 'snooze_minutes' in changes:
         reminders.clean_snooze(changes['snooze_minutes'])
+    if 'muted_overdue' in changes:
+        clean_muted_overdue(changes['muted_overdue'])
 
 
 @router.get('/settings', response=SettingsSchema)
@@ -84,13 +90,15 @@ def get_settings(request):
 def update_settings(request, payload: SettingsUpdateSchema):
     """Change the default due time, the default reminder (`default_reminder_minutes` and
     `default_reminder_channel`; `null` minutes: no default reminder), how long Snooze waits on a
-    pushed reminder (`snooze_minutes`: 15, 60, 480 or 1440) and/or who may add tasks by
+    pushed reminder (`snooze_minutes`: 15, 60, 480 or 1440), where an overdue task that is On hold
+    or Blocked shows on Today (`muted_overdue`: `dimmed`, `hidden` or `section`) and/or who may add tasks by
     email (`sender_allowlist`; `[]` or `null`: anyone). Only the fields present are applied, all or
     none. They apply to tasks created (or first given a date) afterwards; changing the default due
     time moves the reminders of date-only tasks.
 
     A missing due time, a reminder time outside 0 to 43,200 minutes, an unknown channel and a
-    snooze that isn't one of the four are refused before `TODO_EDIT_USER` is spent; a sender allowlist the service then refuses still
+    snooze that isn't one of the four, a `muted_overdue` that isn't one of the three (`null`
+    included) are refused before `TODO_EDIT_USER` is spent; a sender allowlist the service then refuses still
     spends one."""
     changes = payload.model_dump(exclude_unset=True)
     if changes:
