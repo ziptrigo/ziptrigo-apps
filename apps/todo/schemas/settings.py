@@ -49,8 +49,10 @@ class SettingsSchema(Schema):
         description='The largest file, in bytes, that can be attached to a task or a comment.'
     )
     max_attachments_per_task: int = Field(
-        description='The most files a task can hold. Uploads still pending and comment files '
-        'not yet saved count toward it too.'
+        description='The most files a task can hold, counting every file of the task: its own '
+        "and its comments' (saved, draft or still uploading; a deleted comment's files too). "
+        "A task's `attachment_count` counts only its own uploaded files; `files_toward_limit` "
+        '(on `GET /tasks/{number}`) is the number to compare with this.'
     )
 
 

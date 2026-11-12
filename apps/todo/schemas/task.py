@@ -176,6 +176,13 @@ class TaskDetailSchema(TaskSchema):
 
     attachments: list[AttachmentSchema]
     referenced_by: list[ReferencedBySchema]
+    files_toward_limit: int = Field(
+        description="How many files count toward the task's file limit "
+        '(`max_attachments_per_task` in the settings): every file of the task, its own and its '
+        "comments' (saved, draft or still uploading; a deleted comment's files too). Another "
+        'upload is refused when this reaches the limit. Unlike `attachment_count`, which counts '
+        "only the task's own uploaded files."
+    )
 
 
 class ParsedInfoSchema(Schema):

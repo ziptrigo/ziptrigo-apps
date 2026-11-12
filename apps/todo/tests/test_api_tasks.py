@@ -645,7 +645,7 @@ class TestRead:
 
         body = get(client, f'/tasks/{task.number}', auth).json()
 
-        assert set(body) == TASK_KEYS | {'attachments', 'referenced_by'}
+        assert set(body) == TASK_KEYS | {'attachments', 'referenced_by', 'files_toward_limit'}
         assert [a['filename'] for a in body['attachments']] == ['plan.png']
         assert set(body['attachments'][0]) == {
             'id',

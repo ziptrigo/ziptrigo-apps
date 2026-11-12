@@ -1680,7 +1680,6 @@ def _print_settings(settings: dict) -> None:
         rows.append(('Largest file', f'{settings["max_attachment_bytes"]:,} bytes'))
     if 'max_attachments_per_task' in settings:
         rows.append(('Files per task', str(settings['max_attachments_per_task'])))
-    rows += []
     if settings['creation_blocked']:
         rows.append(('New tasks', 'blocked until a repeating task is paid for: top up'))
     if settings['storage_frozen']:

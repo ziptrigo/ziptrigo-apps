@@ -905,7 +905,7 @@ class TestOtherSurfaces:
 
         body = get(client, f'/tasks/{task.number}', auth).json()
 
-        assert set(body) == TASK_KEYS | {'attachments', 'referenced_by'}
+        assert set(body) == TASK_KEYS | {'attachments', 'referenced_by', 'files_toward_limit'}
         assert body['state'] == 'blocked'
         assert body['blocked_by'] == [
             {'number': blocker.number, 'title': 'Blocker', 'open': True, 'trashed': False}

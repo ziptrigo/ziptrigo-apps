@@ -70,7 +70,7 @@ class TodoSettings(models.Model):
         models.PositiveBigIntegerField(
             default=50 * 1024 * 1024,
             validators=[MinValueValidator(1)],
-            help_text='The largest file that can be attached to a task, in bytes (default 50 MiB).',
+            help_text='The largest file that can be attached to a task or a comment, in bytes (default 50 MiB).',
         ),
     )
     max_attachments_per_task = cast(
@@ -78,7 +78,7 @@ class TodoSettings(models.Model):
         models.PositiveIntegerField(
             default=20,
             validators=[MinValueValidator(1)],
-            help_text='Files that can be attached to one task (uploads in progress count).',
+            help_text='Files that can be attached to one task and its comments (uploads in progress count).',
         ),
     )
 

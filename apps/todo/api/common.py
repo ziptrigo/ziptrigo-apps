@@ -360,6 +360,7 @@ def task_detail(request, task: Task) -> dict[str, Any]:
         'created_at', 'id'
     )
     data['attachments'] = [attachment_data(item, task.number) for item in uploaded]
+    data['files_toward_limit'] = Attachment.objects.filter(task=task).count()
     data['referenced_by'] = [
         {'number': source.number, 'title': source.title, 'comment': comment.pk if comment else None}
         for source, comment in referenced_by(task)

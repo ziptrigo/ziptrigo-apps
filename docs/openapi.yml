@@ -8842,7 +8842,7 @@ components:
           title: Max Attachment Bytes
           type: integer
         max_attachments_per_task:
-          description: The most files a task can hold. Uploads still pending and comment files not yet saved count toward it too.
+          description: 'The most files a task can hold, counting every file of the task: its own and its comments'' (saved, draft or still uploading; a deleted comment''s files too). A task''s `attachment_count` counts only its own uploaded files; `files_toward_limit` (on `GET /tasks/{number}`) is the number to compare with this.'
           title: Max Attachments Per Task
           type: integer
       required:
@@ -9561,6 +9561,10 @@ components:
             $ref: '#/components/schemas/ReferencedBySchema'
           title: Referenced By
           type: array
+        files_toward_limit:
+          description: 'How many files count toward the task''s file limit (`max_attachments_per_task` in the settings): every file of the task, its own and its comments'' (saved, draft or still uploading; a deleted comment''s files too). Another upload is refused when this reaches the limit. Unlike `attachment_count`, which counts only the task''s own uploaded files.'
+          title: Files Toward Limit
+          type: integer
       required:
       - id
       - number
@@ -9597,6 +9601,7 @@ components:
       - updated_at
       - attachments
       - referenced_by
+      - files_toward_limit
       title: TaskDetailSchema
       type: object
     TaskUpdateSchema:
