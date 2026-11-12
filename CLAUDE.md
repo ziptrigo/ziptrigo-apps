@@ -120,11 +120,18 @@ inv shorturl qr local <link-id> --out link.png
 inv todo login local <email>                    # password: TODO_PASSWORD, else a hidden prompt (never an argument)
 inv todo add local "pay rent every month on the 1st"   # the date is read from the title (--no-parse: don't)
 inv todo add local call the dentist --due 2026-11-05T15:00 --priority 2 --label health --parent 1200
-inv todo list local [--view today|upcoming|all|completed|trash --q "rent*" --regex --include-completed]
+inv todo list local [--view today|upcoming|all|closed|trash --q "rent*" --regex --include-closed]
+inv todo list local --state in-progress --state blocked | --view closed --resolution wont-do
 inv todo list local --priority 1,2 --label home --from 2026-11-01 --to 2026-11-30 --sort priority
-inv todo get local 1234                         # everything: description, comments, reminders, files, referenced by
+inv todo get local 1234 [--history]             # everything: state, blockers, description, comments, reminders, files, referenced by
+inv todo history local 1234 [--limit 50 --before <cursor>]   # the activity log, newest first
 inv todo edit local 1234 [--title ... --priority 1 --due 2026-11-05T09:00 --clear-due --label home --remove-label later]
-inv todo done local 1234 1235 | undone local 1234 | trash local 1234 | restore local 1234
+inv todo edit local 1234 --state on-hold | --blocked-by 1200 --blocked-by 1201 | --clear-blocked-by
+inv todo add local "send invoice" --state in-progress --blocked-by 1200
+inv todo done local 1234 1235 | trash local 1234 | restore local 1234    # done = close as Done
+inv todo close local 1234 [--wont-do --note "not needed" --subtasks done|wont-do|leave] | reopen local 1234
+inv todo resolution local 1234 done|wont-do | state local 1234 todo|in-progress|on-hold
+inv todo block local 1234 1200 1201 | unblock local 1234 1200
 inv todo postpone local 1234 tomorrow|next-week|next-weekend|2026-12-24
 inv todo overdue-to-today local
 inv todo comment local 1234 asked the landlord  # comments local 1234 lists them
@@ -1848,12 +1855,18 @@ test_api_*.py` over Django's test client (the real `/api/receipts/...` URLs), he
 `reminders.py`, `attachments.py`, `filters.py`, `settings.py`, `parse.py` share that one `Router`;
 schemas in `apps/todo/schemas/`) and calls the exact same `apps.todo.services` the web views do,
 adding no rule of its own. A task is addressed by its **number** (`/tasks/{number}`), everything
-else by its UUID. Endpoints, relative to the mount: `GET /tasks` (`view`, `q`, `mode`,
-`include_completed`, `priority`, `label`, `date_range`/`date_from`/`date_to`, `sort`, `parent`,
-`limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`), `POST /tasks` (201),
+else by its UUID. **Version 2 of the API (issue #275, `docs/openapi.yml` 2.0.0) is a breaking
+change** of this router: `completed_at` is `closed_at`, `view=completed` is `view=closed`,
+`include_completed` is `include_closed` (the old name is a 400), and `complete` / `uncomplete` are gone
+for `close` / `reopen` (the two old routes stay only to answer **410**; see "To-do" > "API and CLI"). Endpoints, relative to the mount: `GET /tasks` (`view`, `q`,
+`mode`, `include_closed`, `resolution`, `state`, `priority`, `label`, `date_range`/`date_from`/
+`date_to`, `sort`, `parent`, `limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`),
+`POST /tasks` (201),
 `GET|PATCH|DELETE /tasks/{number}` (`DELETE` moves to the Trash, 204, idempotent; `GET` also returns
 a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tasks/{number}/` with
-`complete`, `uncomplete`, `restore`, `delete-forever`, `postpone`, `checklist`, `recurrence/stop`,
+`close`, `reopen`, `resolution`, `state`, `restore`, `delete-forever`, `postpone`, `checklist`,
+`recurrence/stop`, `POST|DELETE /tasks/{number}/blockers[/{blocker_number}]`,
+`GET /tasks/{number}/activity`,
 `POST /tasks/reschedule-overdue` and `POST /tasks/reorder` (both `{count}`), labels (`GET|POST
 /labels`, `PATCH|DELETE /labels/{id}`, `POST /labels/reorder`), comments
 (`GET|POST /tasks/{number}/comments`, `PATCH|DELETE .../comments/{id}`, `POST .../restore`, `GET
@@ -1879,7 +1892,7 @@ or over-long title for `POST /parse`; **429** from the site handler;
 that isn't the caller's (`labels`, `parent`) is a 400 with the service's own message, like Receipts'
 foreign `vendor_id`. The rate limits are the web's, so the budgets are shared: `TODO_CREATE_USER`
 (`POST /tasks`), `TODO_EDIT_USER` (every other change; an empty `PATCH`, and deleting or restoring
-a comment that already is, spend nothing), `TODO_COMMENT_USER` (adding and editing a comment),
+a comment that already is, spend nothing), `TODO_COMMENT_USER` (adding and editing a comment, and the note of `close` as Won't do),
 `TODO_SEARCH_USER` (a `GET /tasks` with `q` or any of `priority`, `label`, `date_range`, and
 `GET /filters/{id}/tasks`; charged before the query, so a refused pattern still spends it),
 `TODO_PARSE_USER` and `TODO_PARSE_USER_DAY` (`POST /parse` and `parse_title`; peeked first and hit
@@ -3802,7 +3815,8 @@ saved filters" below), attachments (#184, "Attachments and storage billing" belo
 added by email (#186, "Email intake" below), the JWT API with the `inv todo` CLI (#187, "API and
 CLI" below), task states and resolutions (#272, part 1 of 4 of #271, "States and resolutions"
 below) blockers (#273, part 2 of 4, "Blockers" below) and the activity log (#274, part 3 of 4,
-"Activity log" below; the API/CLI/Android change is #275).
+"Activity log" below) and the API/CLI change for all of that (#275, version 2 of the JWT API, "API and
+CLI" below; the Android app follows in its own repository).
 Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
 `templates/todo/`, `static/todo/`, `jobs.py`, `admin.py`, `checks.py`, `urls.py` (mounted at
 `/todo/`, `app_name = 'todo'`).
@@ -4138,7 +4152,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
 
 Issue #272 (part 1 of 4 of #271; spec `docs/todo-task-states.md`; migration `0011_task_states`).
 The fourth, muted *Blocked* state is #273 ("Blockers" below), the activity log is #274 ("Activity
-log" below); the API/CLI/Android change (#275) is not here.
+log" below); the API/CLI change (#275) is described under "API and CLI".
 
 - **Model.** `Task.state` (`TaskState`: `todo`, `in_progress`, `blocked` (#273), `on_hold`; default `todo`, `db_default`
   too: the #102 lesson, the old container keeps inserting while `0011` runs) is what an *open* task is
@@ -4162,7 +4176,7 @@ log" below); the API/CLI/Android change (#275) is not here.
   occurrence is created and billed exactly as on Done and starts To do (a changed resolution later
   never triggers it) -- then the open, non-trashed subtasks per `subtasks` (`done`, `wont_do`, or
   `leave`; `SUBTASK_ACTIONS`; nothing said is `done`, which is what the circle, the push notification's
-  Complete button and `POST /api/todo/tasks/{n}/complete` do, so where nobody can be asked Done closes
+  Complete button and `POST /api/todo/tasks/{n}/close` do, so where nobody can be asked Done closes
   them as Done) and, for a non-empty `note`, `comments.add_comment` (its rules; the length is checked
   up front by `clean_note`, so a refusal writes nothing). A task already closed (another tab won the
   conditional `UPDATE`) is left as it is, **but a typed note is still added as a comment** and the
@@ -4188,6 +4202,10 @@ log" below); the API/CLI/Android change (#275) is not here.
   *today* stays in Today's list in its group whatever the setting. `dates.today_count(user, account)`
   (the number beside Today; replaces `today_set(...).count()` in the views) leaves muted overdue tasks
   out unless they are shown dimmed. The search "overdue" date range leaves them out too.
+  **The API reads and writes it:** `GET /api/todo/settings` returns `muted_overdue` (`"dimmed" | "hidden" |
+  "section"`) and `PATCH` accepts it, through the same `set_muted_overdue` (`clean_muted_overdue` first,
+  so an unknown value, `null` included, is a 400 `muted_overdue: Choose Today (dimmed), ...` before
+  `TODO_EDIT_USER` is spent); `inv todo settings local --muted-overdue dimmed|hidden|section`.
 - **Held reminders** (`services/reminders.py`; see its module docstring). `deliver_due` skips a muted
   task's reminders (they stay unsent, due) and `sweep_stale` does not sweep them while the task is open
   and muted. Leaving a muted state (`set_state`, or an automatic unblock: `task_state.write_state`, in its transaction) calls `reminders.release_held(task)`:
@@ -4244,30 +4262,23 @@ log" below); the API/CLI/Android change (#275) is not here.
 - **Search and saved filters.** `FilterParams` gained `states` (a subset of the open states; an open task
   in any of them matches; closed tasks are not narrowed by it) and `resolution` (`done` / `wont_do`, read
   as empty unless `include_completed`: which closed tasks "Include closed" lists; a closed task with no
-  resolution counts as Done). **The `include_completed` key and query parameter are unchanged** (the API
-  uses it); only the label says "Include closed", and the resolution `<select>` ("Closed as") shows while
-  it is ticked. `has_criteria` counts states, not the resolution alone. `to_dict()` writes `states` and
+  resolution counts as Done). **The `include_completed` key and query parameter of the website are
+  unchanged** (the API calls it `include_closed`, below); the label says "Include closed", and the
+  resolution `<select>` ("Closed as") shows while it is ticked. `has_criteria` counts states, not the resolution alone. `to_dict()` writes `states` and
   `resolution` **only when set**, so a filter saved before them reads back identically and the stored
   form of everything else did not change; `describe_params` says `state in progress, on hold` and
-  `including closed` / `including won't do`. **The API is untouched by them**: `FilterParamsSchema`
-  stays closed to the new keys, a saved filter's `params` in the API leaves them out
-  (`FilterParams.to_legacy_dict()`), its `summary` describes only those legacy params (never states or the resolution; `closed_wording=False`
-  says "including completed"), `PATCH /filters/{id}` carrying new `params` **keeps the states and
-  resolution the filter was saved with** on the website (the API can't express them, so it must not
-  clear them; website updates replace them as before) and running one (`GET /filters/{id}/tasks`) honours
-  its states as saved. `docs/openapi.yml` did not change.
-- **The API behaves as before** (the hard constraint of this issue): a Won't do task is reported as
-  completed (it has `completed_at`), `view=completed` and `include_completed` list both resolutions,
-  `POST .../complete` is Done (open subtasks closed as Done), `uncomplete` reopens (To do), no field was
-  added (a test pins `TASK_KEYS`) and `view=today` is still `today_set` / `order_today`, so it still
-  lists an On hold task. **A muted (On hold) task is not overdue** for the API either, per the spec:
-  `date_range=overdue` leaves it out, and `POST /tasks/reschedule-overdue` neither moves it nor counts
-  it. #275 changes the API.
+  `including closed` / `including won't do`. The JWT API shows and takes them (#275): see "API and CLI"
+  > "Saved filters".
+- **The API** (#272 kept it unchanged on purpose; #275 changes it): the fields `state`, `resolution` and
+  `closed_at`, `close` / `reopen` / `resolution` / `state` and the list filters are described under "API
+  and CLI". A muted (On hold, Blocked) task is **not overdue** for the API: `date_range=overdue` leaves
+  it out and `POST /tasks/reschedule-overdue` neither moves nor counts it, while `view=today` still lists
+  it (`today_set` / `order_today`).
 - **Admin.** `TaskAdmin` lists and filters `state` and `resolution`; the "completed" filter is titled
   "closed".
 - **Tests.** `apps/todo/tests/test_states.py` (model and migration function, every service rule, held
   reminders per channel, the three Today settings, grouping and manual order, the endpoints, the dialog's
-  POSTs, the Closed page, the settings page, filters, the API unchanged); the AI plan has TODO-42 to
+  POSTs, the Closed page, the settings page, filters, the API's states and saved filters); the AI plan has TODO-42 to
   TODO-48. Existing tests changed legitimately: the Completed page is `todo:closed`, the task page says
   "Done"/"Reopen" instead of "Completed"/"Uncomplete", a parent's row opens the close dialog
   (`data-count`) instead of the confirm modal text, and the summary of `include_completed` is "including
@@ -4277,11 +4288,10 @@ log" below); the API/CLI/Android change (#275) is not here.
 
 Issue #273 (part 2 of 4 of #271; spec `docs/todo-task-states.md` section 4; migration
 `0012_task_blockers`: the `TaskBlocker` table, the `blocked` choice of `Task.state` and the wording of
-`MutedOverdue.section`). The activity log (#274) and the API/CLI/Android change (#275) are not here:
-**the JWT API and the CLI look and behave exactly as before** (`docs/openapi.yml` did not change, no
-response gained a field, the API cannot set a state or a blocker), but the rules below apply to what it
-does through the services: a task closed or trashed by an API call frees what it blocked, and reopening
-one through it gives Blocked when a blocker is open.
+`MutedOverdue.section`). The activity log is #274 and the API/CLI change #275 ("API and CLI"): the
+rules below apply to everything that closes, trashes or reopens a task, the JWT API included: a task
+closed or trashed by an API call frees what it blocked, and reopening one through it gives Blocked when
+a blocker is open.
 
 - **Model** (`models/blocker.py`). `TaskBlocker` (UUID, `blocker` and `blocked` FKs to `Task`, both
   `CASCADE`, so deleting a task for good, or its user, removes its links; `blocks_links` /
@@ -4327,7 +4337,7 @@ one through it gives Blocked when a blocker is open.
   that is open and not in the Trash, whatever its state, gets one in-app notice** (a task the user put In
   progress or On hold by hand keeps its state, still told). A **trashed** dependent only has its state
   corrected, silently and without delivering reminders. Every close path therefore works: the web, the
-  phone's Complete button (`reminders.answer_push`), `POST /api/todo/tasks/{n}/complete`, a repeating
+  phone's Complete button (`reminders.answer_push`), `POST /api/todo/tasks/{n}/close`, a repeating
   task, a parent closing its subtasks.
 - **A blocker coming back** (`blockers.reopened(ids)`: `uncomplete_task`, and `restore_task` for the
   restored tasks that are open -- the task and the subtasks restored with it): the **open** tasks it blocks
@@ -4377,7 +4387,7 @@ one through it gives Blocked when a blocker is open.
   "On hold & blocked (N)" and its option "On hold & blocked section".
 - **Search and filters.** Blocked is a state in the search's multi-select (`FilterParams.states` accepts it;
   `describe_params`: `state blocked, on hold`); the "overdue" range leaves a Blocked task out. The API's
-  saved filters are untouched (see "States and resolutions").
+  saved filters carry `states` too ("API and CLI" > "Saved filters").
 - **Admin.** Read-only `TaskBlockerAdmin` (blocker, blocked, user; search by title and number) and two
   read-only inlines on `TaskAdmin` ("Blocked by", "Blocks").
 - **Layout note.** `services/task_state.py` holds `lock_tasks` and `write_state`, shared by `tasks` and
@@ -4403,7 +4413,7 @@ one through it gives Blocked when a blocker is open.
   lock's hook.
 - **Tests.** `apps/todo/tests/test_blockers.py` (links, caps, cycles, every close path, notices, reopen and
   restore, the dialog's POSTs and JSON, the page, quick add, rows and their query count, search, admin, the
-  API unchanged), `test_blocker_locking.py` (the lock order, the races it closes, the stale-page refusal,
+  the API's blocker fields), `test_blocker_locking.py` (the lock order, the races it closes, the stale-page refusal,
   closing blocked subtasks, many dependents, the suggestions and their rate limit), the Playwright `tests_e2e/test_todo_blockers.py`; the AI plan has TODO-49 to TODO-55,
   `notifications.md` NOTIF-25 and NOTIF-26 and `admin.md` ADM-56.
 
@@ -4492,8 +4502,9 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
   checklist, blockers, subtask add, comment add/edit, the attachments list refresh) send `HX-Trigger:
   taskChanged` on a successful htmx answer, which `activity.js` listens for (no list of swap targets). The first page is
   the latest `PAGE_SIZE` (20) entries newest first (sentence, an "Automatic" pill, the time as
-  `{% local_time %}`); "Show more" is a keyset cursor `?before=<time>_<id>` (so entries written meanwhile
-  never repeat or skip one; a malformed cursor, or one without a time zone, is a 404) that appends rows to `#task-activity-list` and
+  `{% local_time %}`); "Show more" is a keyset cursor `?before=<cursor>` (the time and id of the last entry as
+  base64url without padding, URL-safe as it is; so entries written meanwhile
+  never repeat or skip one; a malformed cursor, the earlier `time_id` text or one without a time zone is a 404) that appends rows to `#task-activity-list` and
   replaces `#task-activity-more` out of band, and focus moves to the first new row
   (`data-activity-new`). It only reads, so a task in the Trash works too; another user's task is a 404;
   `@login_required`. **No rate-limit rule**, like the notification endpoints: session-bound and one
@@ -4501,8 +4512,9 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
 - **Admin.** Read-only `TaskEventAdmin` (time, task, user, kind, the sentence, automatic, channel; filters
   kind, automatic, channel, date; search task title/number and email). `todo` is already in
   `CASCADE_WITH_USER_APP_LABELS`.
-- **The JWT API is unchanged** (`docs/openapi.yml` too): API actions record entries with channel `api`,
-  but the log is exposed through the API in #275.
+- **The JWT API exposes the log** (#275): API actions record entries with channel `api`, and
+  `GET /api/todo/tasks/{number}/activity` reads them ("API and CLI" > "Activity log"). The paging helpers
+  (`events.page`, `cursor_of`, `parse_cursor`) are shared with the web view.
 - **Tests.** `apps/todo/tests/test_activity_log.py` (every kind from every path, no-change records
   nothing, automatic flags and channels through the web, the API, the push answer, the email intake and
   the shell, cascades, the failing insert, no lock and no foreign key constraint, the `taskChanged` header,
@@ -5406,9 +5418,10 @@ intake ("Receipts" > "Email intake": SES to S3, a poller, claim and lease, parke
 
 #### API and CLI
 
-Issue #187 (`api/`, `schemas/`, `admin/todo.py`; no migration). The endpoints, status codes and the
-shared rate-limit budgets are listed under "API" above; this is how they are built and what the
-CLI does with them.
+Issue #187 (`api/`, `schemas/`, `admin/todo.py`; no migration), reshaped by #275 (**version 2 of the
+API**, `docs/openapi.yml` 2.0.0, a breaking change cut in one release with no deprecation period: the
+Android app is rebuilt from the document). The endpoints, status codes and the shared rate-limit
+budgets are listed under "API" above; this is how they are built and what the CLI does with them.
 
 - **Shape.** One module per domain on one `Router` (`api/router.py`, `auth=JWTAuth()`), the
   Receipts API's layout. `api/common.py` holds `mapped_errors()` (`AccountFrozenError` and
@@ -5421,12 +5434,14 @@ CLI does with them.
   one reference resolver for `description_html`, made once per request (`TaskContext`).
   `decorated(queryset)` loads what a task's JSON needs without a query per task: the subtask,
   comment and attachment counts (`services.with_attachment_counts`, new, a subquery like
-  `with_comment_counts`), the parent, the repeat rule, the labels and the reminders; a test pins the
-  number of queries of a 100-task page. Routes that are not a task number (`/tasks/reorder`,
+  `with_comment_counts`), the parent, the repeat rule, the labels, the reminders and the tasks it is
+  linked to (`blocked_by` and `blocks`: two more queries for the whole page, `TaskBlocker` rows with the
+  other task `select_related` and loaded with `.only(number, title, completed_at, deleted_at)` -- not
+  its description -- by `common.linked_tasks`, the per-task fallback too); a test pins the number of queries of a 100-task page with blockers. Routes that are not a task number (`/tasks/reorder`,
   `/labels/reorder`, ...) are registered before the `{number}` / `{id}` ones: a router tries paths
   in the order they were added.
-- **`GET /tasks`** is the Today / Upcoming / All / Completed (both resolutions) / Trash pages and the search page in
-  one. `view` picks the base set (`dates.today_set`, `upcoming_set`, `open_tasks`, `completed_set`,
+- **`GET /tasks`** is the Today / Upcoming / All / Closed (both resolutions) / Trash pages and the search page in
+  one. `view` picks the base set (`dates.today_set`, `upcoming_set`, `open_tasks`, `closed_set`,
   `trash_set`, which the web's list pages use too; `parent=<number>` alone lists that task's subtasks, completed ones too, in the
   user's manual order when they gave one), `FilterParams` the rest (`condition(user)` is the
   structured filters and the search text as one `Q`; the text is validated by `search.prepare_query`
@@ -5434,9 +5449,100 @@ CLI does with them.
   pages' 50-row pages, so the web's snippets are not computed. The default order is each page's own
   (`services.dates.order_today` is the Today list in one query: overdue first, then today's in
   `today_position` order once the user ordered it by hand, never the stale position of an overdue
-  task; Completed latest first, Trash latest first, else by date); `sort` wins; with `view=all` and
-  `include_completed` the completed ones go last (`search.order_results`). A search, or any of the
-  structured filters, spends `TODO_SEARCH_USER`; a plain list spends nothing.
+  task; Closed latest first, Trash latest first, else by date); `sort` wins; with `view=all` and
+  `include_closed` the closed ones go last (`search.order_results`). A search, or any of the
+  structured filters (`state` included), spends `TODO_SEARCH_USER`; a plain list spends nothing, and so does
+  `view=closed` with a `resolution`.
+- **States, resolutions and the list filters** (#275). A task has `closed_at` (was `completed_at`: when it was
+  closed, either resolution; `null` while open), `state` (`todo`, `in_progress`, `on_hold`, `blocked`;
+  what an *open* task is doing; **`null` while the task is closed**) and `has_open_blocker` (any
+  `blocked_by` entry has `open: true`, computed from the prefetch; true also for an open task the owner
+  moved to `in_progress` while a blocker is open) and `resolution` (`done` / `wont_do` for a closed task, `done` also for
+  one with none recorded; `null` while open: `api/common.resolution_of`). The query parameters:
+  `view` is `today|upcoming|all|closed|trash` (**`completed` is a 400**, like any unknown view),
+  `include_closed` (was `include_completed`, which is now a 400 `include_completed: Use include_closed.`,
+  read from `request.GET` so it is not in the spec; with `view=all`), `resolution` (`done|wont_do`; a 400 unless
+  `view=closed` or `include_closed` with `view=all`; the Closed view narrows through `closed_set`, the
+  other through `FilterParams.resolution`, which is why the endpoint applies the condition whenever a
+  resolution is given: `has_criteria` does not count it) and `state` (comma list of the four states, a
+  400 for another; narrows open tasks only, closed ones are not narrowed; counts as a criterion, so it
+  spends `TODO_SEARCH_USER`). **Muted tasks (On hold, Blocked) are not overdue** in the API:
+  `date_range=overdue` leaves them out and `POST /tasks/reschedule-overdue` neither moves nor counts them
+  (their descriptions say so), while `view=today` lists them (they are due today or earlier).
+  Request enums (`state`, `resolution`, `subtasks`) are plain strings in the schemas on purpose
+  (`SettableState` etc.: an `enum` in `json_schema_extra` documents the choices for generated clients),
+  so a bad value is the service's 400 with its message (`state: Choose To do, In progress or On hold.`;
+  `blocked` included, which only blockers set), not ninja's list-valued 422; responses use `Literal`s
+  (a real `enum`).
+- **Closing and reopening** (`api/tasks.py`). `POST /tasks/{n}/close` takes `{resolution = "done",
+  subtasks = "done" | "wont_do" | "leave", note}` (every field optional but the body itself, `{}`, is
+  required: ninja answers a bodyless POST with 400) and answers the task: `services.close_task`, so a
+  repeating task creates its next occurrence **whichever the resolution**, what the task blocked is freed,
+  and open blockers are **not** asked about (the links are kept). `note` is a comment, **only with
+  `wont_do`** (a 400 `note: A note can only be added when closing as Won't do.`), and spends
+  `TODO_COMMENT_USER` as well as `TODO_EDIT_USER`: both are peeked first (`ratelimit.peek_value`), so a
+  refusal spends neither, then both are charged. Everything is checked before any budget is spent (the
+  resolution, the subtask choice, the note's length, the Trash). Closing a task that is **already
+  closed is a 409** `{"detail": "This task is already closed as Done."}` (`... as Won't do.`), checked
+  after the 400s and before any budget: nothing is written, no note is added, nothing is spent
+  (`resolution` is never applied to a closed task: that is `/resolution`). The web's behaviour is
+  unchanged (the note is kept when the close loses a real race). `POST
+  /tasks/{n}/reopen` (`uncomplete_task`: Blocked while a blocker is open, else To do; on an
+  open task it answers the task and **spends nothing**; the Trash is a 400 checked before the budget), `POST /tasks/{n}/resolution`
+  (`{resolution}`, `set_resolution`: 400 for an open task, `Only a closed task has a resolution to
+  change.`; the resolution it already has is answered and spends nothing) and `POST /tasks/{n}/state` (`{state:
+  todo|in_progress|on_hold}`, `set_state`: 400 for `blocked`, for a closed task `Reopen the task before
+  changing its state.` and the Trash; the state it already has is answered and spends nothing). The others spend
+  `TODO_EDIT_USER`, after the checks, and each looks the task up once (`_run`). **`complete` and
+  `uncomplete` are removed** but stay as `deprecated` routes answering **410** `{"detail": "This app is
+  out of date. Update it to keep using To-do."}` (the router's JWT only, no budget, so an installed
+  version 1 app says so instead of failing with a 404); `GET /tasks?view=completed` stays a 400.
+- **State and blockers on create and `PATCH`.** `POST /tasks` takes `state` (default `todo`) and
+  `blocked_by` (task numbers, at most 20 in the schema, a 422 over it) through `check_new_task` and
+  `create_task`; an open blocker makes the task Blocked over the state asked for; a number that isn't the
+  caller's or doesn't exist is `blocked_by: There is no task #N.`. `PATCH` takes `state` (never `null`: a
+  400; refused for a closed task) and `blocked_by`, which **replaces** the set (`null` and `[]` both
+  remove every blocker): `_plan_blockers` computes the difference and does every check that needs no
+  write (`tasks_by_numbers`, the cap judged on the **final set** -- `len(numbers)`, and
+  `check_add(..., count_links=False)` -- so swapping one of 20 blockers works since the removals run
+  first, a Trash task) before
+  `TODO_EDIT_USER` is spent; then **one `transaction.atomic()`** runs `update_task`, the
+  removals, the additions and last the state, so a late refusal rolls the whole `PATCH` back. **The rule
+  for `state` with `blocked_by`** (same words in the endpoint docstring and `TaskUpdateSchema`): when both
+  are sent, after the links are written the task is `blocked` if any of its blockers is open (whatever
+  `state` says), else it has the requested state (`tasks.settle_state`); `state` alone keeps the links
+  (`set_state`). A `state` equal to the task's current one is a no-op, so `state: "blocked"` echoed
+  back is accepted when the task is blocked (as a change it is the 400). **A no-op spends nothing**: the
+  same `blocked_by`, the same `state` and no other key is answered without `TODO_EDIT_USER`.
+- **Blockers** (`api/blockers.py`). `POST /tasks/{n}/blockers` `{number}` makes that task block this one
+  and answers this task (200; an existing link is a 200 that spends nothing); `DELETE
+  /tasks/{n}/blockers/{blocker_number}` is a 204, idempotent, also for a number that doesn't exist or
+  isn't the caller's (so it can't be probed) and spending nothing when there is no link. The refusals are
+  `services.blockers`' messages as 400s (`number: There is no task #N.` for an unknown or foreign number,
+  never a 404, `number: A task cannot block itself.`, the cycle, the cap of 20, a task in the Trash
+  either side: **every refusal is keyed by the input the caller used** -- `number` here, `blocked_by`
+  on `POST /tasks` and `PATCH` -- through the `field` argument of `check_add` / `add_blocker`, which
+  defaults to the task page's `blocker`); the task in the path that isn't the caller's is the usual 404. `TODO_EDIT_USER` after
+  the checks. `TaskRefSchema` (`{number, title, open, trashed}`; `open` is not closed and not trashed)
+  lists `blocked_by` (every blocker, closed and trashed ones too) and `blocks` on every task.
+- **Activity log** (`api/activity.py`). `GET /tasks/{number}/activity?limit=20&before=<cursor>` answers
+  `{results: [{id, kind, text, data, automatic, channel, created_at}], next}` newest first: `limit` is
+  clamped to 1-100, `next` is the cursor of the following page (`events.cursor_of`, the time and id of the
+  last entry as **base64url without padding**, only `A-Z a-z 0-9 - _`, so it needs no percent-encoding;
+  `null` on the last page) to send as `before`, a malformed one (the earlier `time_id` text included) is a
+  400 `before: Not a valid cursor.`. `text` is `event_text.describe` under `override(PUBLIC)`, so it is the public wording whatever
+  the account's formats (and English); `kind` / `channel` are enums in the spec, `data` the raw snapshot.
+  A task in the Trash works, another user's is a 404. **No rate-limit rule** (documented in the
+  endpoint), like the web page.
+- **Saved filters** (#275) expose everything: `FilterParamsSchema` has `include_closed` (the API's name; the
+  stored key stays `include_completed`: `to_params()` and `from_stored()` translate), `resolution`
+  (`done|wont_do|null`; a 422 without `include_closed`) and `states` (list of the four states); `params` in
+  `FilterSchema` is typed (`FilterParamsSchema`, so the spec documents it), and its `summary` is
+  `describe_params(..., PUBLIC)` ("state on hold · including won't do", "including closed"). `PATCH
+  /filters/{id}` replaces `params` as a whole, as the website does (the #272 carry-over of hidden keys
+  and `FilterParams.to_legacy_dict` / `closed_wording` are gone); the old key `include_completed` is a 422
+  (the schema is closed). Re-running the shown `params` through `GET /tasks` (`include_closed`,
+  `resolution`, `state`) lists what `GET /filters/{id}/tasks` lists (a test pins it).
 - **`POST /tasks`.** `source='api'`, billed like any task (the free allowance, then the price;
   `charged_credits` in the answer). `labels` are ids, `parent` a number. `reminders` replaces the
   default reminder `create_task` gave the task, inside one `transaction.atomic()` with the creation,
@@ -5475,9 +5581,6 @@ CLI does with them.
   own prefix; a completed file is a 400 -- use `DELETE`; `TODO_EDIT_USER`), and `DELETE
   /attachments/{id}` on a pending row does the same. The CLI's `upload` calls it after any failure
   following the start (best effort: a failed cancel is a warning; the hourly job remains the net).
-- **Saved filters** take and return `params` (the stored `FilterParams` dict, validated by
-  `FilterParamsSchema`; labels that are not the caller's are dropped by the service) and a `summary`.
-  `GET /filters/{id}/tasks` runs the filter as saved (a deleted label has dropped out of it).
 - **CLI** (`admin/todo.py`, `inv todo ...`; `TODO_PASSWORD`, token `~/.todo_token.<env>`): every
   command takes the environment first. **`login <email>` has no password argument** (issue #187 had
   `[password]`, but this file's rule is that no CLI takes a password on the command line): it reads
@@ -5488,10 +5591,22 @@ CLI does with them.
   list flattened), a 409 names the unpaid task numbers and says to top up, exit 1. `add` sends
   `parse_title=true` unless `--no-parse` and prints what was read; labels are given by name (or
   id) and resolved with `GET /labels`, an unknown one stops before anything is created. `list`
-  prints a table (number, due date and time as the owner wrote them, `!1`, title, labels, a repeat
-  mark and a bell); `get` prints everything (the description as Markdown, comments, reminders, files
-  and the tasks that mention it). `done` takes several numbers and carries on past a failure (exit 1
-  if any failed); `upload` hashes each file, skips an empty file or a folder with a warning, carries
+  prints a table (number, due date and time as the owner wrote them, `!1`, the state -- blank for To do,
+  Done / Won't do for a closed task --, title, labels, a repeat mark and a bell); `get` prints everything
+  (the state or how it was closed, the description as Markdown, **Blocked by** and **Blocks** with a
+  `(closed)` / `(in the trash)` note, comments, reminders, files and the tasks that mention it; `--history`
+  adds the latest 20 log entries and `history <n> [--limit --before]` pages the whole log: `time  text
+  (automatic)  [channel]`, with the `--before` cursor printed when there is more). Version 2 commands
+  (#275): `list --view closed|--include-closed|--resolution done|wont-do|--state ...` (repeatable; the
+  old `--include-completed` and `--view completed` still work, quietly mapped), `add` and `edit` take
+  `--state todo|in-progress|on-hold` and `--blocked-by N` (repeatable; on `edit` it **replaces** the set,
+  `--clear-blocked-by` empties it; the two together are a usage error), `close <n>... [--wont-do --note
+  --subtasks done|wont-do|leave]` (a note without `--wont-do` is a usage error; one request per number),
+  `done` (shorthand: `close` with the API's defaults, prints "Completed"), `reopen` (`undone` stays as a
+  hidden alias), `resolution <n> done|wont-do`, `state <n> todo|in-progress|on-hold` (typed with hyphens
+  or underscores, any case; `blocked` is a usage error before any request), `block <n> <blocker>...` and
+  `unblock <n> <blocker>...` (carry on past a failure, exit 1 if any failed). `done` and `close` take
+  several numbers and carry on past a failure (exit 1 if any failed); `upload` hashes each file, skips an empty file or a folder with a warning, carries
   on past a failed file (exit 1 if any) and PUTs with the exact headers the API returned;
   `download` asks for a presigned URL and streams it **without the API token** to
   `.<name>.part` next to the target, renaming it into place only when complete (and refusing to

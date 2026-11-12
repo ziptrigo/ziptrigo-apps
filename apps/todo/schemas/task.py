@@ -2,20 +2,41 @@
 
 import datetime as dt
 from datetime import date, datetime, time
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from ninja import Schema
 from pydantic import ConfigDict, Field
 
-from ..limits import MAX_REORDER_IDS, TITLE_MAX
+from ..limits import MAX_BLOCKERS_PER_TASK, MAX_REORDER_IDS, TITLE_MAX
 from .attachment import AttachmentSchema
 from .label import LabelRefSchema
 from .reminder import ReminderCreateSchema, ReminderSchema
 
+#: The states and resolutions as responses name them (an `enum` in the OpenAPI document).
+StateName = Literal['todo', 'in_progress', 'blocked', 'on_hold']
+ResolutionName = Literal['done', 'wont_do']
+
+#: The same values in a request body, which is read as a plain string on purpose: the services
+#: refuse a bad one with a 400 and their own message (a state of `blocked`, which only blockers set,
+#: in particular), where a closed enum would be ninja's list-valued 422. The `enum` documents the
+#: choices for generated clients.
+SettableState = Annotated[
+    str, Field(json_schema_extra={'enum': ['todo', 'in_progress', 'on_hold']})
+]
+ResolutionChoice = Annotated[str, Field(json_schema_extra={'enum': ['done', 'wont_do']})]
+SubtaskChoice = Annotated[str, Field(json_schema_extra={'enum': ['done', 'wont_do', 'leave']})]
+
 #: A title is refused over `TITLE_MAX` before anything else is done with it (the AI reading in
 #: particular); a 422.
 Title = Annotated[str, Field(max_length=TITLE_MAX)]
+
+
+class ErrorSchema(Schema):
+    """An error answer that carries only a `detail` sentence (the 409 of `POST /close` on a task that
+    is already closed, the 410 of the removed endpoints)."""
+
+    detail: str
 
 
 class RecurrenceSchema(Schema):
@@ -31,6 +52,20 @@ class RecurrenceSchema(Schema):
     ended_at: datetime | None
 
 
+class TaskRefSchema(Schema):
+    """A task another task is linked to (`blocked_by`, `blocks`). `open` says whether it is open:
+    not closed and not in the Trash, which is when it still blocks what it blocks; `trashed` says it
+    is in the Trash. A link is kept when either task closes or is trashed, so closed and trashed
+    tasks are listed too (`open: false`)."""
+
+    number: int = Field(description="The linked task's number.")
+    title: str = Field(description="The linked task's title.")
+    open: bool = Field(
+        description='Not closed and not in the Trash: it still blocks what it blocks.'
+    )
+    trashed: bool = Field(description='In the Trash.')
+
+
 class TaskSchema(Schema):
     """One task, as every task endpoint returns it.
 
@@ -43,6 +78,21 @@ class TaskSchema(Schema):
     /tasks`). `subtask_count` and `open_subtask_count` count the subtasks that aren't in the
     Trash, `comment_count` the comments that aren't deleted and `attachment_count` the uploaded
     files.
+
+    **Open and closed.** A task is open while `closed_at` is `null` and closed from the moment it is
+    closed (as Done or as Won't do), until it is reopened. `resolution` says how a closed task was
+    closed (`done` or `wont_do`; a closed task with none recorded reads as `done`) and is `null` for
+    an open one. `state` is what an *open* task is doing: `todo`, `in_progress`, `on_hold` (chosen
+    by the owner) or `blocked` (set automatically while a task in `blocked_by` is open; nobody
+    chooses it). `on_hold` and `blocked` are *muted*: such a task is never overdue and is not moved
+    by `POST /tasks/reschedule-overdue`, and its reminders wait until it leaves the state. A closed
+    task has no state: `state` is `null` while `closed_at` is set (reopening gives it `todo`, or
+    `blocked` while a blocker is open). `has_open_blocker` is true when any task in `blocked_by` is
+    open (`open: true`), whatever `state` says: an open task the owner moved to `in_progress` while
+    a blocker was open still has one.
+
+    `blocked_by` lists the tasks that block this one and `blocks` the tasks it blocks, by number
+    (see `TaskRefSchema`); the links are kept when either task closes or is trashed.
     """
 
     id: UUID
@@ -54,7 +104,16 @@ class TaskSchema(Schema):
     due_date: date | None
     due_time: time | None
     due_at: datetime | None
-    completed_at: datetime | None
+    closed_at: datetime | None = Field(
+        description="When the task was closed (as Done or as Won't do); `null` while it is open."
+    )
+    state: StateName | None = Field(
+        description='What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` '
+        '(set only by blockers); `null` while the task is closed (`closed_at` is set).'
+    )
+    resolution: ResolutionName | None = Field(
+        description='How a closed task was closed, `done` or `wont_do`; `null` while it is open.'
+    )
     deleted_at: datetime | None
     position: int
     source: str
@@ -62,6 +121,15 @@ class TaskSchema(Schema):
     labels: list[LabelRefSchema]
     recurrence: RecurrenceSchema | None
     reminders: list[ReminderSchema]
+    blocked_by: list[TaskRefSchema] = Field(
+        description='The tasks that block this one, by number (closed and trashed ones too).'
+    )
+    has_open_blocker: bool = Field(
+        description='Whether any task in `blocked_by` is open (`open: true`).'
+    )
+    blocks: list[TaskRefSchema] = Field(
+        description='The tasks this one blocks, by number (closed and trashed ones too).'
+    )
     subtask_count: int
     open_subtask_count: int
     comment_count: int
@@ -132,6 +200,12 @@ class TaskCreateSchema(Schema):
     words); an AI that is not configured, busy, over its limits or that finds nothing just creates
     the task as typed. `parsed` in the answer says which.
 
+    `state` is the state the task starts in: `todo` (the default), `in_progress` or `on_hold` (a 400
+    for anything else: `blocked` is set only by blockers). `blocked_by` lists the numbers of the
+    caller's own tasks that block the new one (at most 20, none in the Trash; one that doesn't exist,
+    or isn't the caller's, is a 400 `There is no task #N.`); when one of them is open the task starts
+    `blocked`, whatever `state` says.
+
     A key that is not one of these is refused with a 422.
     """
 
@@ -148,6 +222,12 @@ class TaskCreateSchema(Schema):
     recurrence_mode: str = 'fixed'
     reminders: list[ReminderCreateSchema] | None = None
     parse_title: bool = False
+    state: SettableState = Field(
+        default='todo', description='The starting state: `todo`, `in_progress` or `on_hold`.'
+    )
+    blocked_by: Annotated[list[int], Field(max_length=MAX_BLOCKERS_PER_TASK)] = Field(
+        default=[], description="Numbers of the caller's tasks that block the new one (at most 20)."
+    )
 
 
 class TaskUpdateSchema(Schema):
@@ -155,6 +235,19 @@ class TaskUpdateSchema(Schema):
     applied; an explicit `null` **clears** the field (`description` to empty, `priority` to none,
     `due_date` and `due_time`, `labels` to no labels, `parent` to a top-level task, `rrule` to
     stop repeating). A `title` cannot be empty, so `null` there is a 400.
+
+    `state` sets an open task's state: `todo`, `in_progress` or `on_hold` (a 400 for anything else,
+    and for a closed task: reopen it first; it cannot be `null`). `blocked_by` **replaces** the set
+    of tasks that block this one with the numbers given (the difference is linked and unlinked, all
+    or nothing; `null` or `[]` removes every blocker): when one of them is open the task becomes
+    `blocked`, and when none is left a `blocked` task goes back to `todo`. A closed task can be given
+    blockers too (the links only).
+
+    **`state` together with `blocked_by`:** the links are written first and then the task is
+    `blocked` if any of its blockers is open (whatever `state` says), else it gets `state`. A
+    `state` equal to the task's current state is a no-op, so a client may send back the state it
+    read (`blocked` included); `blocked` as a change is a 400. A request that changes nothing (the
+    same `blocked_by`, the same `state`, no other field) spends no budget.
 
     Clearing `due_date` clears the time with it. A key that is not one of these (a typo, `status`,
     `reminders`, ...) is refused with a 422 rather than ignored.
@@ -171,6 +264,67 @@ class TaskUpdateSchema(Schema):
     parent: int | None = None
     rrule: str | None = None
     recurrence_mode: str | None = None
+    state: SettableState | None = Field(
+        default=None, description="The open task's new state: `todo`, `in_progress` or `on_hold`."
+    )
+    blocked_by: Annotated[list[int], Field(max_length=MAX_BLOCKERS_PER_TASK)] | None = Field(
+        default=None,
+        description='Replaces the set of tasks that block this one (numbers, at most 20); '
+        '`null` or `[]` removes them all.',
+    )
+
+
+class CloseSchema(Schema):
+    """Body for `POST /tasks/{number}/close`. `resolution` is `done` (the default) or `wont_do`.
+
+    `subtasks` says what happens to the open subtasks of the task being closed: `done` (the default)
+    or `wont_do` closes them with that resolution, `leave` leaves them open.
+
+    `note` (a Markdown text of up to 10,000 characters) is added to the task as a comment; it is
+    allowed only with `resolution=wont_do` (a 400 otherwise), where it says why.
+
+    A key that is not one of these is refused with a 422.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    resolution: ResolutionChoice = Field(default='done', description='`done` or `wont_do`.')
+    subtasks: SubtaskChoice = Field(
+        default='done',
+        description='What happens to the open subtasks: closed as `done`, closed as `wont_do`, or '
+        'left open (`leave`).',
+    )
+    note: str | None = Field(
+        default=None,
+        description='A comment explaining the close, up to 10,000 characters; only with '
+        '`resolution=wont_do`.',
+    )
+
+
+class ResolutionSchema(Schema):
+    """Body for `POST /tasks/{number}/resolution`: how the closed task is now to be read, `done` or
+    `wont_do`."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    resolution: ResolutionChoice = Field(description='`done` or `wont_do`.')
+
+
+class StateSchema(Schema):
+    """Body for `POST /tasks/{number}/state`: the open task's new state, `todo`, `in_progress` or
+    `on_hold`. `blocked` is refused with a 400: only blockers set it."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    state: SettableState = Field(description='`todo`, `in_progress` or `on_hold`.')
+
+
+class BlockerSchema(Schema):
+    """Body for `POST /tasks/{number}/blockers`: the number of the task that is to block it."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    number: int = Field(description='The number of the task that blocks this one.')
 
 
 class PostponeSchema(Schema):

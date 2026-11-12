@@ -38,9 +38,6 @@ PRIORITIES = (0, 1, 2, 3)
 #: The open states a filter can select, and the resolutions that narrow "Include closed".
 STATES = tuple(TaskState.values)
 RESOLUTIONS = tuple(Resolution.values)
-#: The keys `to_dict` only writes when set: the API's saved filters never had them
-#: (`FilterParams.to_legacy_dict`).
-NEW_KEYS = ('states', 'resolution')
 #: A task without a label, in `labels`.
 NO_LABEL = 'none'
 MAX_LABELS = 50
@@ -233,11 +230,6 @@ class FilterParams:
             data['resolution'] = self.resolution
         return data
 
-    def to_legacy_dict(self) -> dict[str, Any]:
-        """`to_dict` without the keys added by issue #272: what the JWT API has always shown as a
-        saved filter's `params` (its schema is closed to them)."""
-        return {key: value for key, value in self.to_dict().items() if key not in NEW_KEYS}
-
     def to_pairs(self, *, keep_sort: bool = False) -> list[tuple[str, str]]:
         """The query-string pairs, defaults left out (`keep_sort` writes the sort anyway)."""
         pairs: list[tuple[str, str]] = []
@@ -409,14 +401,10 @@ def describe_params(
     params: FilterParams,
     names: Mapping[str, str] | None = None,
     formats: DisplayFormats | None = None,
-    *,
-    closed_wording: bool = True,
 ) -> str:
     """A short summary: `priority 1 · @home · next 7 days · "rent*"`. `names` maps label ids
     to names (`label_names(user)`); a label it doesn't know is left out. Dates are written in
-    `formats` (default: the formats active for the request; the API passes `PUBLIC`).
-    `closed_wording=False` says "including completed" for the closed switch (what the API has
-    always said); the pages say "including closed"."""
+    `formats` (default: the formats active for the request; the API passes `PUBLIC`)."""
 
     def _day(value: date) -> str:
         return format_date(value, 'full', formats)
@@ -455,7 +443,7 @@ def describe_params(
         if params.resolution:
             parts.append(f'including {Resolution(params.resolution).label.lower()}')
         else:
-            parts.append('including closed' if closed_wording else 'including completed')
+            parts.append('including closed')
     if params.sort != SORT_DEFAULT:
         parts.append(f'by {SORTS[params.sort].lower()}')
     return ' · '.join(parts) or 'all open tasks'

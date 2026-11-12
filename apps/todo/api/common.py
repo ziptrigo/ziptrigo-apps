@@ -45,7 +45,7 @@ from apps.core import ratelimit
 from apps.core.datetime_format import PUBLIC
 from apps.core.markdown import ReferenceResolver
 
-from ..models import Attachment, Reminder, Task, TodoAccount
+from ..models import Attachment, Reminder, Resolution, Task, TaskBlocker, TodoAccount
 from ..services import (
     AccountFrozenError,
     dates,
@@ -58,6 +58,9 @@ from ..services import (
     with_comment_counts,
     with_subtask_counts,
 )
+
+#: The columns of a linked task that `task_ref` reads.
+LINK_FIELDS = ('number', 'title', 'completed_at', 'deleted_at')
 
 #: Page size bounds of the list endpoints (clamped, not rejected).
 DEFAULT_LIMIT = 50
@@ -166,14 +169,31 @@ def context_for(request) -> TaskContext:
     return context
 
 
+def linked_tasks(side: str) -> QuerySet:
+    """The `TaskBlocker` rows with the task on `side` (`blocker` or `blocked`) loaded for `task_ref`
+    only (number, title, closed, trashed): not the description, a page of 100 tasks with 20 links
+    each would load 2,000 of them whole."""
+    return TaskBlocker.objects.select_related(side).only(
+        'id', 'blocker', 'blocked', *(f'{side}__{name}' for name in LINK_FIELDS)
+    )
+
+
 def decorated(queryset: QuerySet) -> QuerySet:
     """What a task's JSON needs, loaded without a query per task: the subtask, comment and
-    attachment counts, the parent, the repeat rule, the labels and the reminders."""
+    attachment counts, the parent, the repeat rule, the labels, the reminders and the tasks it is
+    linked to (`blocked_by` and `blocks`: one query each for the whole page)."""
     reminders = Reminder.objects.order_by('-minutes_before', 'created_at')
+    blocked_by = linked_tasks('blocker').order_by('blocker__number')
+    blocks = linked_tasks('blocked').order_by('blocked__number')
     return (
         with_attachment_counts(with_comment_counts(with_subtask_counts(queryset)))
         .select_related('parent', 'recurrence')
-        .prefetch_related('labels', Prefetch('reminders', reminders, to_attr='api_reminders'))
+        .prefetch_related(
+            'labels',
+            Prefetch('reminders', reminders, to_attr='api_reminders'),
+            Prefetch('blocked_by_links', blocked_by, to_attr='api_blocked_by'),
+            Prefetch('blocks_links', blocks, to_attr='api_blocks'),
+        )
     )
 
 
@@ -193,6 +213,23 @@ def reminder_data(reminder: Reminder) -> dict[str, Any]:
     }
 
 
+def task_ref(other: Task) -> dict[str, Any]:
+    """A linked task as `TaskRefSchema`: open means not closed and not in the Trash."""
+    return {
+        'number': other.number,
+        'title': other.title,
+        'open': other.is_open,
+        'trashed': other.is_trashed,
+    }
+
+
+def resolution_of(task: Task) -> str | None:
+    """How a closed task was closed (`done` also for one with none recorded), `None` while open."""
+    if task.completed_at is None:
+        return None
+    return Resolution.WONT_DO.value if task.is_wont_do else Resolution.DONE.value
+
+
 def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
     """A task (loaded by `decorated`) as the `TaskSchema` dict."""
     task.user = context.user  # already loaded: no query per task for the zone
@@ -200,6 +237,13 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
     reminders = getattr(task, 'api_reminders', None)
     if reminders is None:
         reminders = list(task.reminders.order_by('-minutes_before', 'created_at'))
+    blocked_by = getattr(task, 'api_blocked_by', None)
+    if blocked_by is None:
+        blocked_by = list(linked_tasks('blocker').filter(blocked=task).order_by('blocker__number'))
+    blocks = getattr(task, 'api_blocks', None)
+    if blocks is None:
+        blocks = list(linked_tasks('blocked').filter(blocker=task).order_by('blocked__number'))
+    blocked_by_refs = [task_ref(link.blocker) for link in blocked_by]
     return {
         'id': task.pk,
         'number': task.number,
@@ -212,7 +256,9 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
         'due_date': task.due_date,
         'due_time': task.due_time,
         'due_at': dates.due_at(task, context.account),
-        'completed_at': task.completed_at,
+        'closed_at': task.completed_at,
+        'state': task.state if task.completed_at is None else None,
+        'resolution': resolution_of(task),
         'deleted_at': task.deleted_at,
         'position': task.position,
         'source': task.source,
@@ -231,6 +277,9 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
             'ended_at': active.ended_at,
         },
         'reminders': [reminder_data(reminder) for reminder in reminders],
+        'blocked_by': blocked_by_refs,
+        'has_open_blocker': any(ref['open'] for ref in blocked_by_refs),
+        'blocks': [task_ref(link.blocked) for link in blocks],
         'subtask_count': task.subtask_total,
         'open_subtask_count': task.subtask_open,
         'comment_count': task.comment_count,

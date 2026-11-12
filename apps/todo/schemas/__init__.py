@@ -1,5 +1,6 @@
 """Pydantic/ninja schemas for the To-do JWT API (`/api/todo/`)."""
 
+from .activity import ActivityEventSchema, ActivityPageSchema
 from .attachment import (
     AttachmentSchema,
     FileUrlSchema,
@@ -31,25 +32,35 @@ from .reminder import (
 )
 from .settings import InboxSchema, SettingsSchema, SettingsUpdateSchema
 from .task import (
+    BlockerSchema,
     ChecklistSchema,
+    CloseSchema,
     CountSchema,
+    ErrorSchema,
     ParsedInfoSchema,
     PostponeSchema,
     RecurrenceSchema,
     ReferencedBySchema,
     ReorderSchema,
+    ResolutionSchema,
+    StateSchema,
     TaskCreatedSchema,
     TaskCreateSchema,
     TaskDetailSchema,
     TaskListSchema,
+    TaskRefSchema,
     TaskSchema,
     TaskUpdateSchema,
     UnpaidBlockSchema,
 )
 
 __all__ = [
+    'ActivityEventSchema',
+    'ActivityPageSchema',
     'AttachmentSchema',
+    'BlockerSchema',
     'ChecklistSchema',
+    'CloseSchema',
     'CommentBodySchema',
     'CommentSchema',
     'CountSchema',
@@ -77,13 +88,17 @@ __all__ = [
     'ReminderSchema',
     'ReminderUpdateSchema',
     'ReorderSchema',
+    'ResolutionSchema',
     'RevisionSchema',
     'SettingsSchema',
     'SettingsUpdateSchema',
+    'StateSchema',
     'TaskCreateSchema',
     'TaskCreatedSchema',
+    'ErrorSchema',
     'TaskDetailSchema',
     'TaskListSchema',
+    'TaskRefSchema',
     'TaskSchema',
     'TaskUpdateSchema',
     'UnpaidBlockSchema',

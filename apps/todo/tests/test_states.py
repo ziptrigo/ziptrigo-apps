@@ -1284,7 +1284,7 @@ class TestFilterParams:
     def test_the_stored_form_is_unchanged_until_they_are_used(self):
         assert 'states' not in FilterParams().to_dict()
         assert 'resolution' not in FilterParams().to_dict()
-        assert set(FilterParams(states=('todo',)).to_legacy_dict()) == set(FilterParams().to_dict())
+        assert FilterParams(states=('todo',)).to_dict()['states'] == ['todo']
 
     def test_reading_is_lenient(self):
         params = FilterParams.from_raw(
@@ -1316,10 +1316,6 @@ class TestFilterParams:
 
         assert describe_params(params) == "state in progress, on hold · including won't do"
         assert describe_params(FilterParams(include_completed=True)) == 'including closed'
-        assert (
-            describe_params(FilterParams(include_completed=True), closed_wording=False)
-            == 'including completed'
-        )
 
 
 class TestFilteringTasks:
@@ -1447,48 +1443,63 @@ def close(user, title, resolution) -> Task:
 # -- Everything that must stay as it was: the JWT API, the push button, the admin -----------------
 
 
-class TestTheApiIsUnchanged:
-    def test_a_task_looks_exactly_as_it_did(self, client, auth, funded_user):
+class TestTheApi:
+    """What the API (version 2, issue #275) says about states and resolutions; the endpoints
+    themselves are in `test_api_states.py`."""
+
+    def test_a_task_carries_its_state_and_resolution(self, client, auth, funded_user):
         create_task(funded_user, title='T', state='on_hold')
 
         listed = get(client, '/tasks', auth).json()['results'][0]
 
         assert set(listed) == TASK_KEYS
+        assert listed['state'] == 'on_hold' and listed['resolution'] is None
+        assert 'completed_at' not in listed
 
-    def test_a_wont_do_task_is_reported_as_completed(self, client, auth, funded_user):
+    def test_both_resolutions_are_closed_tasks(self, client, auth, funded_user):
         done = create_task(funded_user, title='Done')
         complete_task(done)
         wont = create_task(funded_user, title='Wont')
         close_task(wont, Resolution.WONT_DO)
         open_ = create_task(funded_user, title='Open')
 
-        completed = get(client, '/tasks', auth, view='completed')
-        everything = get(client, '/tasks', auth, view='all', include_completed='true')
+        closed = get(client, '/tasks', auth, view='closed')
+        everything = get(client, '/tasks', auth, view='all', include_closed='true')
 
-        assert set(numbers(completed)) == {done.number, wont.number}
-        assert all(row['completed_at'] for row in completed.json()['results'])
+        assert set(numbers(closed)) == {done.number, wont.number}
+        assert all(row['closed_at'] for row in closed.json()['results'])
         assert numbers(everything)[:1] == [open_.number]  # the open ones first
         assert set(numbers(everything)) == {done.number, wont.number, open_.number}
-        assert get(client, f'/tasks/{wont.number}', auth).json()['completed_at'] is not None
+        body = get(client, f'/tasks/{wont.number}', auth).json()
+        assert body['closed_at'] is not None and body['resolution'] == 'wont_do'
 
-    def test_complete_means_done_and_closes_the_open_subtasks_as_done(
-        self, client, auth, funded_user
-    ):
+    def test_the_old_names_are_gone(self, client, auth, funded_user):
+        task = create_task(funded_user, title='T')
+
+        assert get(client, '/tasks', auth, view='completed').status_code == 400
+        for name in ('complete', 'uncomplete'):  # a clear 410, not a 404
+            response = post(client, f'/tasks/{task.number}/{name}', auth)
+            assert response.status_code == 410
+            assert response.json() == {
+                'detail': 'This app is out of date. Update it to keep using To-do.'
+            }
+
+    def test_close_means_done_and_closes_the_open_subtasks_as_done(self, client, auth, funded_user):
         parent = create_task(funded_user, title='P')
         sub = create_task(funded_user, title='S', parent=parent)
 
-        body = post(client, f'/tasks/{parent.number}/complete', auth).json()
+        body = post(client, f'/tasks/{parent.number}/close', auth, {}).json()
 
-        assert body['completed_at'] is not None
+        assert body['closed_at'] is not None and body['resolution'] == 'done'
         assert reload(parent).resolution == 'done' and reload(sub).resolution == 'done'
 
-    def test_uncomplete_reopens_a_wont_do_task_as_to_do(self, client, auth, funded_user):
+    def test_reopen_reopens_a_wont_do_task_as_to_do(self, client, auth, funded_user):
         task = create_task(funded_user, title='T')
         close_task(task, Resolution.WONT_DO)
 
-        body = post(client, f'/tasks/{task.number}/uncomplete', auth).json()
+        body = post(client, f'/tasks/{task.number}/reopen', auth).json()
 
-        assert body['completed_at'] is None
+        assert body['closed_at'] is None and body['resolution'] is None
         task = reload(task)
         assert task.state == 'todo' and task.resolution == '' and task.is_open
 
@@ -1499,9 +1510,7 @@ class TestTheApiIsUnchanged:
 
         assert numbers(get(client, '/tasks', auth, view='today')) == [held.number]
 
-    def test_a_saved_filter_made_on_the_site_shows_only_the_old_keys(
-        self, client, auth, funded_user, zoo_filter=None
-    ):
+    def test_a_saved_filter_made_on_the_site_shows_the_new_keys(self, client, auth, funded_user):
         saved = save_filter(
             funded_user,
             'Paused',
@@ -1511,12 +1520,12 @@ class TestTheApiIsUnchanged:
         body = get(client, '/filters', auth).json()[0]
 
         assert body['id'] == str(saved.pk)
-        assert set(body['params']) == set(FilterParams().to_dict())
-        assert body['summary'] == '"x" · including completed'  # never the new criteria
+        assert body['params']['states'] == ['on_hold']
+        assert body['params']['resolution'] == 'wont_do'
+        assert body['params']['include_closed'] is True
+        assert body['summary'] == 'state on hold · "x" · including won\'t do'
 
-    def test_patching_params_through_the_api_keeps_the_states_and_resolution(
-        self, client, auth, funded_user
-    ):
+    def test_patching_params_replaces_them_as_the_site_does(self, client, auth, funded_user):
         saved = save_filter(
             funded_user,
             'Paused',
@@ -1527,14 +1536,14 @@ class TestTheApiIsUnchanged:
             client,
             f'/filters/{saved.pk}',
             auth,
-            {'params': {'q': 'y', 'include_completed': True}},
+            {'params': {'q': 'y', 'include_closed': True}},
         )
 
         assert response.status_code == 200
         assert response.json()['params']['q'] == 'y'
         stored = FilterParams.from_dict(SavedFilter.objects.get(pk=saved.pk).params)
-        assert stored.q == 'y'
-        assert stored.states == ('on_hold',) and stored.resolution == 'wont_do'
+        assert stored.q == 'y' and stored.include_completed
+        assert stored.states == () and stored.resolution == ''  # not carried over
 
     def test_renaming_through_the_api_keeps_the_states_and_resolution(
         self, client, auth, funded_user
@@ -1551,12 +1560,12 @@ class TestTheApiIsUnchanged:
         stored = FilterParams.from_dict(SavedFilter.objects.get(pk=saved.pk).params)
         assert stored.states == ('on_hold',) and stored.resolution == 'wont_do'
 
-    def test_the_summary_keeps_its_old_wording(self, client, auth, funded_user):
+    def test_the_summary_says_closed(self, client, auth, funded_user):
         save_filter(funded_user, 'Everything', FilterParams(q='x', include_completed=True))
 
         body = get(client, '/filters', auth).json()[0]
 
-        assert body['summary'] == '"x" · including completed'
+        assert body['summary'] == '"x" · including closed'
 
     def test_running_a_saved_filter_honours_its_states(self, client, auth, funded_user):
         create_task(funded_user, title='Plain')
@@ -1567,13 +1576,39 @@ class TestTheApiIsUnchanged:
 
         assert numbers(body) == [held.number]
 
-    def test_the_api_cannot_set_the_new_keys(self, client, auth):
+    def test_the_api_can_save_states_and_a_resolution(self, client, auth, funded_user):
         response = post(
             client,
             '/filters',
             auth,
-            {'name': 'X', 'params': {'states': ['on_hold']}},
+            {
+                'name': 'X',
+                'params': {
+                    'states': ['on_hold', 'blocked'],
+                    'include_closed': True,
+                    'resolution': 'done',
+                },
+            },
         )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body['params']['states'] == ['blocked', 'on_hold']  # stored sorted
+        assert body['params']['resolution'] == 'done'
+        stored = FilterParams.from_dict(SavedFilter.objects.get(name='X').params)
+        assert stored.states == ('blocked', 'on_hold') and stored.resolution == 'done'
+
+    @pytest.mark.parametrize(
+        'params',
+        [
+            {'states': ['sleeping']},
+            {'resolution': 'maybe', 'include_closed': True},
+            {'resolution': 'done'},  # a resolution needs include_closed
+            {'include_completed': True},  # the old name is gone
+        ],
+    )
+    def test_a_bad_saved_filter_is_a_422(self, client, auth, params):
+        response = post(client, '/filters', auth, {'name': 'X', 'params': params})
 
         assert response.status_code == 422
 

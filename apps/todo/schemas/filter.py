@@ -2,11 +2,11 @@
 
 from collections.abc import Collection
 from datetime import date, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from ninja import Schema
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from ..limits import MAX_SAVED_FILTERS
 from ..services.dates import SORTS
@@ -21,17 +21,32 @@ def _one_of(value: str, allowed: Collection[str], name: str) -> str:
 
 
 class FilterParamsSchema(Schema):
-    """What a saved filter selects (the same as the query of `GET /tasks`): search text `q` in
-    `mode` `glob` or `regex`, `include_completed`, `priorities` (0 to 3), `labels` (label ids, and
-    `none` for tasks without one), a `date_range` (`any`, `overdue`, `today`, `next_7_days`,
-    `next_30_days`, `no_date` or `custom` with `date_from` / `date_to`) and a `sort`. A label id
-    that isn't yours is dropped, as is one deleted later."""
+    """What a saved filter selects (the same criteria as the query of `GET /tasks`, under the
+    names a saved filter has always used): search text `q` in `mode` `glob` or `regex`,
+    `include_closed` (closed tasks too), `resolution` (`done` or `wont_do`: which closed tasks
+    `include_closed` lists; `null` for both; only with `include_closed`, else a 422), `states`
+    (`todo`, `in_progress`, `blocked`, `on_hold`: an open task in any of them matches; closed tasks
+    are not narrowed by it), `priorities` (0 to 3), `labels` (label ids, and `none` for tasks
+    without one), a `date_range` (`any`, `overdue`, `today`, `next_7_days`, `next_30_days`,
+    `no_date` or `custom` with `date_from` / `date_to`) and a `sort`. A label id that isn't yours is
+    dropped, as is one deleted later. `overdue` leaves out On hold and Blocked tasks, which are
+    never overdue.
+
+    A saved filter made on the website can carry `states` and `resolution` too; they are read and
+    written here like the rest."""
 
     model_config = ConfigDict(extra='forbid')
 
     q: str = ''
     mode: str = 'glob'
-    include_completed: bool = False
+    include_closed: bool = Field(default=False, description='List closed tasks too.')
+    resolution: Literal['done', 'wont_do'] | None = Field(
+        default=None,
+        description='Only the closed tasks closed that way; needs `include_closed`.',
+    )
+    states: list[Literal['todo', 'in_progress', 'blocked', 'on_hold']] = Field(
+        default=[], description='An open task in any of these states matches.'
+    )
     priorities: list[int] = []
     labels: list[str] = []
     date_range: str = 'any'
@@ -54,6 +69,12 @@ class FilterParamsSchema(Schema):
     def _sort(cls, value: str) -> str:
         return _one_of(value, tuple(SORTS), 'sort')
 
+    @model_validator(mode='after')
+    def _resolution_needs_closed(self) -> 'FilterParamsSchema':
+        if self.resolution is not None and not self.include_closed:
+            raise ValueError('resolution applies only with include_closed.')
+        return self
+
     @field_validator('priorities')
     @classmethod
     def _priorities(cls, value: list[int]) -> list[int]:
@@ -72,18 +93,31 @@ class FilterParamsSchema(Schema):
         return value
 
     def to_params(self) -> dict[str, Any]:
-        """The dict `services.saved_filters` takes."""
-        return self.model_dump(mode='json')
+        """The dict `services.saved_filters` takes (its key for the closed switch is the old
+        one)."""
+        data = self.model_dump(mode='json')
+        data['include_completed'] = data.pop('include_closed')
+        data['resolution'] = data['resolution'] or ''
+        return data
+
+    @classmethod
+    def from_stored(cls, params: Any) -> 'FilterParamsSchema':
+        """The schema of a `FilterParams` (what a saved filter holds)."""
+        data = params.to_dict()
+        data['include_closed'] = data.pop('include_completed')
+        data['resolution'] = data.get('resolution') or None
+        data.setdefault('states', [])
+        return cls.model_validate(data)
 
 
 class FilterSchema(Schema):
-    """A saved filter. `params` is the stored form (see `FilterParamsSchema`) and `summary` a short
-    description of it (`priority 1 · @home · next 7 days`)."""
+    """A saved filter. `params` is what it selects (see `FilterParamsSchema`) and `summary` a short
+    description of it in the public wording (`priority 1 · state on hold · @home · next 7 days`)."""
 
     id: UUID
     name: str
     position: int
-    params: dict[str, Any]
+    params: FilterParamsSchema
     summary: str
     created_at: datetime
 

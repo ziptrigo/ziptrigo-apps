@@ -875,12 +875,12 @@ class TestOtherSurfaces:
         add_blocker(task, blocker)
         add_blocker(waiting, task)
 
-        assert post(client, f'/tasks/{blocker.number}/complete', auth).status_code == 200
+        assert post(client, f'/tasks/{blocker.number}/close', auth, {}).status_code == 200
         assert reload(task).state == TaskState.TODO
 
         add_blocker(task, make(funded_user, 'Another'))  # open blocker again
         assert (
-            post(client, f'/tasks/{task.number}/complete', auth).status_code == 200
+            post(client, f'/tasks/{task.number}/close', auth, {}).status_code == 200
         )  # no question
         assert reload(task).resolution == 'done'
         assert reload(waiting).state == TaskState.TODO
@@ -896,27 +896,34 @@ class TestOtherSurfaces:
 
         complete_task(task)
         add_blocker(task, make(funded_user, 'Open'))  # a closed task: link only
-        post(client, f'/tasks/{task.number}/uncomplete', auth)
+        post(client, f'/tasks/{task.number}/reopen', auth)
         assert reload(task).state == TaskState.BLOCKED  # the rule applies through the API
 
-    def test_nothing_changed_in_the_api(self, client, auth, funded_user):
+    def test_a_task_lists_what_blocks_it_and_what_it_blocks(self, client, auth, funded_user):
         task, blocker = make(funded_user, 'Task'), make(funded_user, 'Blocker')
         add_blocker(task, blocker)
 
         body = get(client, f'/tasks/{task.number}', auth).json()
 
         assert set(body) == TASK_KEYS | {'attachments', 'referenced_by'}
-        listed = get(client, '/tasks', auth, view='all').json()['results'][0]
-        assert set(listed) == TASK_KEYS
+        assert body['state'] == 'blocked'
+        assert body['blocked_by'] == [
+            {'number': blocker.number, 'title': 'Blocker', 'open': True, 'trashed': False}
+        ]
+        assert get(client, f'/tasks/{blocker.number}', auth).json()['blocks'] == [
+            {'number': task.number, 'title': 'Task', 'open': True, 'trashed': False}
+        ]
 
-    def test_the_api_cannot_set_a_state_or_a_blocker(self, client, auth, funded_user):
-        task = make(funded_user)
+    def test_the_api_can_set_a_blocker_but_not_the_blocked_state(self, client, auth, funded_user):
+        task, other = make(funded_user), make(funded_user, 'Other')
 
-        assert patch(client, f'/tasks/{task.number}', auth, {'state': 'blocked'}).status_code == 422
+        assert patch(client, f'/tasks/{task.number}', auth, {'state': 'blocked'}).status_code == 400
         assert (
-            patch(client, f'/tasks/{task.number}', auth, {'blocked_by': [1000]}).status_code == 422
+            patch(client, f'/tasks/{task.number}', auth, {'blocked_by': [other.number]}).status_code
+            == 200
         )
-        assert post(client, '/tasks', auth, {'title': 'x', 'blocked_by': [1000]}).status_code == 422
+        assert reload(task).state == TaskState.BLOCKED
+        assert post(client, '/tasks', auth, {'title': 'x', 'state': 'blocked'}).status_code == 400
 
     def test_a_blocked_task_is_not_overdue_through_the_api_either(
         self, client, auth, funded_user, wednesday

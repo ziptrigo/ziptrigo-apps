@@ -43,8 +43,14 @@ TAGS = [
     },
     {
         'name': 'To-do',
-        'description': 'Tasks, subtasks, labels, comments, reminders, attachments, saved filters '
-        'and settings.',
+        'description': 'Tasks and subtasks with states (to do, in progress, on hold, blocked), '
+        "resolutions (done, won't do) and blockers, labels, comments, reminders, attachments, "
+        "saved filters, settings and each task's activity log. A task is addressed by its number, "
+        'everything else by its id. Errors are `{"detail": ...}`: 400 a value refused (a service '
+        'message, or a bad query parameter), 402 not enough credits or storage unpaid, 404 not '
+        'yours or not there (never 403), 409 a conflict (creation blocked by an unpaid repeating '
+        'task: also `unpaid_task_numbers`), 422 a malformed request, 429 rate limited (see '
+        '`Retry-After`).',
     },
 ]
 

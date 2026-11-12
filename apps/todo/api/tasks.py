@@ -1,5 +1,6 @@
-"""The task endpoints (`/api/todo/tasks`): list and search, create, read, edit, complete, postpone,
-trash and restore, reorder, tick a checklist item and stop repeating.
+"""The task endpoints (`/api/todo/tasks`): list and search, create, read, edit, close and reopen,
+change the state or the resolution, postpone, trash and restore, reorder, tick a checklist item and
+stop repeating. Blockers and the activity log are in `blockers.py` and `activity.py`.
 
 Every endpoint calls the same `apps.todo.services` function the web views do, so the same
 validation, billing and ordering rules apply either way. A task is addressed by its **number**
@@ -16,15 +17,20 @@ from django.db.models import QuerySet
 from ninja.errors import HttpError
 
 from apps.accounts.services.timezones import user_today
+from apps.core import ratelimit
 
 from .. import services
 from ..limits import MAX_REMINDERS_PER_TASK
-from ..models import Reminder, Task, TaskSource
+from ..models import Reminder, Resolution, Task, TaskBlocker, TaskSource
 from ..schemas import (
     ChecklistSchema,
+    CloseSchema,
     CountSchema,
+    ErrorSchema,
     PostponeSchema,
     ReorderSchema,
+    ResolutionSchema,
+    StateSchema,
     TaskCreatedSchema,
     TaskCreateSchema,
     TaskDetailSchema,
@@ -37,7 +43,8 @@ from ..services import (
     SORT_DEFAULT,
     SORTS,
     FilterParams,
-    completed_set,
+    blockers,
+    closed_set,
     has_manual_order,
     open_tasks,
     order_tasks,
@@ -49,8 +56,9 @@ from ..services import (
     trash_set,
     upcoming_set,
 )
-from ..services.filters import DATE_RANGES, NO_LABEL, PRIORITIES
+from ..services.filters import DATE_RANGES, NO_LABEL, PRIORITIES, RESOLUTIONS, STATES
 from ..services.search import MODES, order_results, search_guard
+from ..services.tasks import NOT_OPEN_MESSAGE
 from .common import (
     DEFAULT_LIMIT,
     charge,
@@ -61,6 +69,7 @@ from .common import (
     mapped_errors,
     owned_task,
     parse_date,
+    resolution_of,
     task_data,
     task_detail,
     task_from_body,
@@ -71,7 +80,7 @@ from .common import (
 from .parse import read_title
 from .router import router
 
-VIEWS = ('today', 'upcoming', 'all', 'completed', 'trash')
+VIEWS = ('today', 'upcoming', 'all', 'closed', 'trash')
 
 
 # -- List and search -----------------------------------------------------------------------------
@@ -85,6 +94,14 @@ def _priorities(value: str | None) -> list[str]:
     return tokens
 
 
+def _states(value: str | None) -> list[str]:
+    tokens = [part.strip().lower() for part in (value or '').split(',') if part.strip()]
+    for token in tokens:
+        if token not in STATES:
+            raise HttpError(400, f'state must be a comma-separated list of: {", ".join(STATES)}.')
+    return tokens
+
+
 def _labels(value: str | None) -> list[str]:
     tokens = [part.strip().lower() for part in (value or '').split(',') if part.strip()]
     for token in tokens:
@@ -93,28 +110,28 @@ def _labels(value: str | None) -> list[str]:
     return tokens
 
 
-def _view_queryset(user, view: str, include_completed: bool) -> QuerySet:
+def _view_queryset(user, view: str, include_closed: bool, resolution: str = '') -> QuerySet:
     if view == 'today':
         return today_set(user)
     if view == 'upcoming':
         return upcoming_set(user)
-    if view == 'completed':
-        return completed_set(user)
+    if view == 'closed':
+        return closed_set(user, resolution)
     if view == 'trash':
         return trash_set(user)
-    if include_completed:
+    if include_closed:
         return Task.objects.filter(user=user, deleted_at__isnull=True)
     return open_tasks(user)
 
 
 def _ordered(
-    queryset: QuerySet, user, *, view: str | None, parent, sort: str | None, include_completed: bool
+    queryset: QuerySet, user, *, view: str | None, parent, sort: str | None, include_closed: bool
 ) -> QuerySet:
     """`queryset` in the order the web shows it: `sort` when asked for, else Today's (overdue
     first, then today's in the order the user gave it), a parent's subtasks (the user's order when
-    they gave one), the Completed page's (latest first) and the Trash's, else by date."""
-    if view == 'all' and include_completed:
-        return order_results(queryset, sort or SORT_DEFAULT)  # completed ones after the open
+    they gave one), the Closed page's (latest first) and the Trash's, else by date."""
+    if view == 'all' and include_closed:
+        return order_results(queryset, sort or SORT_DEFAULT)  # closed ones after the open
     if sort is not None:
         return order_tasks(queryset, sort)
     if view == 'today':
@@ -123,7 +140,7 @@ def _ordered(
     if view is None and parent is not None:
         manual = has_manual_order(subtasks_of(parent))
         return order_tasks(queryset, 'manual' if manual else SORT_DEFAULT)
-    if view == 'completed':
+    if view == 'closed':
         return queryset.order_by('-completed_at', '-number')
     if view == 'trash':
         return queryset.order_by('-deleted_at', '-number')
@@ -136,7 +153,9 @@ def list_tasks(
     view: str | None = None,
     q: str = '',
     mode: str = 'glob',
-    include_completed: bool = False,
+    include_closed: bool = False,
+    resolution: str | None = None,
+    state: str | None = None,
     priority: str | None = None,
     label: str | None = None,
     date_range: str | None = None,
@@ -149,26 +168,36 @@ def list_tasks(
 ):
     """List the caller's tasks, subtasks included.
 
-    - `view`: `today` (open, due today or overdue), `upcoming` (open, due in the next 14 days),
-      `all` (open; the default), `completed` or `trash`.
-    - `parent`: a task number; lists its subtasks (completed ones too). With a `view`, only those
-      of the subtasks that are in the view.
+    - `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked
+      ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in
+      the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest
+      first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)
+    - `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of
+      the subtasks that are in the view.
     - `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:
       `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression
       (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow
       pattern. Deleted comments and edit history are not searched.
-    - `include_completed`: with `view=all`, completed tasks too (after the open ones).
+    - `include_closed`: with `view=all`, closed tasks too (after the open ones).
+      (`include_completed`, this parameter's name before version 2, is a 400.)
+    - `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with
+      `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.
+    - `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open
+      task in any of them. Closed tasks are not narrowed by it.
     - `priority`: comma-separated priorities, 0 (none) to 3; any of them.
     - `label`: comma-separated label ids, and `none` for tasks without a label; any of them.
-    - `date_range`: `any`, `overdue`, `today`, `next_7_days`, `next_30_days`, `no_date` or
+    - `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:
+      a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or
       `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;
       dates alone mean `custom`). Relative ranges are the caller's own today.
     - `sort`: `date` (the default), `priority`, `created` or `title`.
     - `limit` (1-100, default 50) and `offset` page the result; `count` is the total.
 
-    A search, or any of `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.
+    A search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.
     """
     user = request.auth
+    if 'include_completed' in request.GET:  # the name before version 2: fail loudly, not silently
+        raise HttpError(400, 'include_completed: Use include_closed.')
     limit, offset = clamp_page(limit, offset)
     if view is not None:
         view = choice('view', view, VIEWS)
@@ -180,12 +209,21 @@ def list_tasks(
     parent_task = owned_task(request, parent) if parent is not None else None
     if view is None and parent_task is None:
         view = 'all'
+    if resolution is not None:
+        choice('resolution', resolution, RESOLUTIONS)
+        if view != 'closed' and not (include_closed and view in ('all', None)):
+            raise HttpError(
+                400,
+                'resolution applies only with view=closed, or with include_closed and view=all.',
+            )
 
     params = FilterParams.from_raw(
         {
             'q': [q],
             'mode': [mode],
-            'include_completed': ['1' if include_completed else ''],
+            'include_completed': ['1' if include_closed or view == 'closed' else ''],
+            'resolution': [resolution or ''],
+            'states': _states(state),
             'priorities': _priorities(priority),
             'labels': _labels(label),
             'date_range': [date_range or ''],
@@ -202,11 +240,11 @@ def list_tasks(
         assert parent_task is not None  # `view` is only unset with a `parent`
         queryset = subtasks_of(parent_task)
     else:
-        queryset = _view_queryset(user, view, include_completed)
+        queryset = _view_queryset(user, view, include_closed, resolution or '')
         if parent_task is not None:
             queryset = queryset.filter(parent=parent_task)
     with mapped_errors():
-        if searching:
+        if searching or params.resolution:
             queryset = queryset.filter(params.condition(user))  # validates the search text
         with search_guard() if params.q.strip() else nullcontext():
             count = queryset.count()
@@ -218,7 +256,7 @@ def list_tasks(
                         view=view,
                         parent=parent_task,
                         sort=sort,
-                        include_completed=include_completed,
+                        include_closed=include_closed,
                     )
                 )[offset : offset + limit]
             )
@@ -307,6 +345,8 @@ def _check_create(user, payload: TaskCreateSchema, parent: Task | None) -> None:
         labels=payload.labels,
         rrule=payload.rrule,
         recurrence_mode=payload.recurrence_mode,
+        state=payload.state,
+        blocked_by=payload.blocked_by,
     )
     fields = payload.model_fields_set
     # The reading of the title may still set the date, when the body doesn't.
@@ -343,6 +383,8 @@ def _create(user, payload: TaskCreateSchema, parent: Task | None):
             parent=parent,
             labels=payload.labels,
             recurrence_mode=payload.recurrence_mode,
+            state=payload.state,
+            blocked_by=payload.blocked_by,
             source=TaskSource.API,
             **values,
         )
@@ -358,11 +400,11 @@ def create_task(request, payload: TaskCreateSchema):
     (`{detail, unpaid_task_numbers}`) while an occurrence of a repeating task is waiting to be paid
     for (a top-up settles it). `source` is `api`.
 
-    See `TaskCreateSchema` for the body, `parse_title` and `reminders` in particular; `parsed` in
-    the answer says what `parse_title` did.
+    See `TaskCreateSchema` for the body, `parse_title`, `reminders`, `state` and `blocked_by` in
+    particular; `parsed` in the answer says what `parse_title` did.
 
     The request is checked first (the fields, the 409, the cap on open tasks, the balance, the
-    reminders; a title over 500 characters is a 422), and only then are `TODO_CREATE_USER` and, for
+    reminders, the state and the blockers; a title over 500 characters is a 422), and only then are `TODO_CREATE_USER` and, for
     `parse_title`, the date reader's budget spent: a refused request costs neither and never calls
     the model. What only the creating transaction can decide (a race for the last slot or the last
     credits, a repeat rule that fails against the final date) is still refused after the create
@@ -393,7 +435,8 @@ def create_task(request, payload: TaskCreateSchema):
 @router.post('/tasks/reschedule-overdue', response=CountSchema)
 def reschedule_overdue(request):
     """Set the due date of every overdue open task to today, keeping the times. `count` is how many
-    changed."""
+    changed. A task that is On hold or Blocked is never overdue, so it is neither moved nor
+    counted."""
     charge(request, 'TODO_EDIT_USER')
     return {'count': services.reschedule_overdue(request.auth)}
 
@@ -425,6 +468,28 @@ def get_task(request, number: int):
     return task_detail(request, owned_task(request, number))
 
 
+def _plan_blockers(task: Task, user, wanted: list[int] | None) -> tuple[list[Task], list[Task]]:
+    """`(to_add, to_remove)` to make `wanted` (task numbers; `None` is none) the set of tasks that
+    block `task`, with every refusal that can be told without writing (an unknown or trashed task,
+    itself, a cycle, more than the cap). Every refusal is keyed `blocked_by`. The cap is judged on
+    the final set (`len(numbers)`), not on the links there are now: the links to remove go before
+    the ones to add, so swapping one of 20 blockers is fine."""
+    numbers = list(dict.fromkeys(wanted or []))
+    if len(numbers) > services.MAX_BLOCKERS_PER_TASK:
+        raise ValidationError({'blocked_by': blockers.TOO_MANY_MESSAGE})
+    current = {
+        link.blocker.number: link.blocker
+        for link in TaskBlocker.objects.filter(blocked=task).select_related('blocker')
+    }
+    to_add = blockers.tasks_by_numbers(user, [n for n in numbers if n not in current])
+    to_remove = [other for number, other in current.items() if number not in numbers]
+    if task.is_trashed and (to_add or to_remove):
+        raise ValidationError('Restore the task before changing it.')
+    for other in to_add:
+        blockers.check_add(task, other, 'blocked_by', count_links=False)
+    return to_add, to_remove
+
+
 @router.patch('/tasks/{number}', response=TaskSchema)
 def update_task(request, number: int, payload: TaskUpdateSchema):
     """Edit a task. Only the fields present in the body are applied, all or none (a refusal
@@ -432,13 +497,25 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
     Trash is a 400: restore it first. Changing `rrule` or `recurrence_mode` edits the repeat rule
     (an empty `rrule` stops repeating), and a new `due_date` moves the task's reminders.
 
+    `state` sets an open task's state (`todo`, `in_progress` or `on_hold`) and `blocked_by`
+    replaces the set of tasks that block it (see `TaskUpdateSchema`). **Sent together**, the links
+    are written first and then the task is `blocked` if any of its blockers is open (whatever
+    `state` says), else it gets `state`. Sent alone, `state` keeps the links. A `state` equal to the
+    task's current one is a no-op (so a client may send back the state it read, `blocked`
+    included; `blocked` as a change is a 400), and a request that changes nothing -- the same
+    `blocked_by`, the same `state`, no other field -- spends no budget.
+
     The fields are checked before `TODO_EDIT_USER` is spent, so a bad value costs nothing. What
-    only the locked write can decide (the task was trashed or completed meanwhile, a task with
-    subtasks moved under a parent, a subtask given a repeat rule) is refused after it was spent."""
+    only the locked write can decide (the task was trashed or closed meanwhile, a task with
+    subtasks moved under a parent, a subtask given a repeat rule, a link another request made first
+    that now closes a cycle) is refused after it was spent."""
     task = owned_task(request, number)
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         return task_response(request, task)
+    for key in ('title', 'state'):
+        if key in changes and changes[key] is None:
+            raise HttpError(400, f'{key}: Cannot be null.')
     if changes.get('priority', 1) is None:
         changes['priority'] = 0
     if 'description' in changes and changes['description'] is None:
@@ -447,12 +524,38 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
         changes['labels'] = []
     if 'rrule' in changes and changes['rrule'] is None:
         changes['rrule'] = ''
+    new_state = changes.pop('state', None)
+    set_blockers = 'blocked_by' in changes
+    wanted = changes.pop('blocked_by', None)
     with mapped_errors():
         if 'parent' in changes:
             changes['parent'] = task_from_body(request.auth, changes['parent'])
-        services.check_update_task(task, changes=changes)  # a refusal here spends no budget
+        if changes:
+            services.check_update_task(task, changes=changes)  # a refusal here spends no budget
+        state_change: str | None = None
+        if new_state is not None:
+            if task.is_trashed:
+                raise ValidationError('Restore the task before changing it.')
+            if task.is_completed:
+                raise ValidationError(NOT_OPEN_MESSAGE)
+            if new_state != task.state:  # the state it already has is a no-op
+                state_change = services.tasks.clean_state(new_state)
+        to_add, to_remove = _plan_blockers(task, request.auth, wanted) if set_blockers else ([], [])
+        if not (changes or state_change or to_add or to_remove):
+            return task_response(request, task)
         charge(request, 'TODO_EDIT_USER')
-        services.update_task(task, changes=changes)
+        with transaction.atomic():  # the fields, the state and the links stand or fall together
+            if changes:
+                services.update_task(task, changes=changes)
+            for other in to_remove:
+                blockers.remove_blocker(task, other)
+            for other in to_add:
+                blockers.add_blocker(task, other, 'blocked_by')
+            if state_change is not None:
+                if set_blockers:
+                    services.tasks.settle_state(task, state_change)
+                else:
+                    services.set_state(task, state_change)
     return task_response(request, task)
 
 
@@ -466,29 +569,114 @@ def trash_task(request, number: int):
     return 204, None
 
 
-def _act(request, number: int, action, *, trashed: bool | None = None) -> dict[str, Any]:
-    """Look the task up (a 404), spend the edit budget, run `action(task)` and answer with the task
-    as it is now."""
-    task = owned_task(request, number, trashed=trashed)
+def _run(request, task: Task, action) -> dict[str, Any]:
+    """Spend the edit budget, run `action(task)` and answer with the task as it is now."""
     charge(request, 'TODO_EDIT_USER')
     with mapped_errors():
         action(task)
     return task_response(request, task)
 
 
-@router.post('/tasks/{number}/complete', response=TaskSchema)
-def complete_task(request, number: int):
-    """Complete a task and its open subtasks. Completing a repeating task creates its next
-    occurrence (always: one the balance can't cover is created unpaid, see `POST /tasks`).
-    Idempotent."""
-    return _act(request, number, services.complete_task)
+def _act(request, number: int, action) -> dict[str, Any]:
+    """Look the task up (a 404), then `_run` the action on it."""
+    return _run(request, owned_task(request, number), action)
 
 
-@router.post('/tasks/{number}/uncomplete', response=TaskSchema)
-def uncomplete_task(request, number: int):
-    """Make a completed task open again. The next occurrence of a repeating task, if one was
-    created, stays."""
-    return _act(request, number, services.uncomplete_task)
+def _refuse_trashed(task: Task) -> None:
+    if task.is_trashed:
+        raise ValidationError('Restore the task before changing it.')
+
+
+@router.post('/tasks/{number}/close', response={200: TaskSchema, 409: ErrorSchema})
+def close_task(request, number: int, payload: CloseSchema):
+    """Close a task as Done (the default) or as Won't do (`resolution`), and deal with its open
+    subtasks (`subtasks`: closed as Done by default, closed as Won't do, or left open). Every field is
+    optional, so `{}` closes the task and its open subtasks as Done. Closing a
+    repeating task creates its next occurrence **whichever the resolution** (Won't do means "skip
+    this one"); one the balance can't cover is created unpaid, see `POST /tasks`. A closed task
+    has no state: it goes back to `todo` and is `blocked` again only if it is reopened while a
+    blocker is open. What the task blocks is freed when this was its last open blocker.
+
+    `note` (only with `resolution=wont_do`, else a 400) is added as a comment: it spends
+    `TODO_COMMENT_USER` as well as `TODO_EDIT_USER`.
+
+    The API closes without asking about open blockers or subtasks that have some: the links are
+    kept. A task that is **already closed** is a **409** `{"detail": "This task is already closed
+    as Done."}` (or `... as Won't do.`): nothing is written, no note is added and no budget is
+    spent; to change how it was closed use `POST /tasks/{number}/resolution`. A task in the Trash
+    is a 400.
+
+    Everything is checked before the budgets are spent, so a refusal costs nothing."""
+    task = owned_task(request, number)
+    with mapped_errors():
+        resolution = services.tasks.clean_resolution(payload.resolution)
+        subtasks = services.tasks.clean_subtask_action(payload.subtasks)
+        note = services.tasks.clean_note(payload.note)
+        if note and resolution != Resolution.WONT_DO:
+            raise ValidationError({'note': "A note can only be added when closing as Won't do."})
+        _refuse_trashed(task)
+    if task.is_completed:
+        label = "Won't do" if task.is_wont_do else 'Done'
+        raise HttpError(409, f'This task is already closed as {label}.')
+    rules = ['TODO_EDIT_USER'] + (['TODO_COMMENT_USER'] if note else [])
+    for rule in rules:  # both are looked at first, so a refusal spends neither
+        ratelimit.enforce(ratelimit.peek_value(str(request.auth.pk), rule))
+    for rule in rules:
+        charge(request, rule)
+    with mapped_errors():
+        services.close_task(task, resolution, subtasks=subtasks, note=note)
+    return task_response(request, task)
+
+
+@router.post('/tasks/{number}/reopen', response=TaskSchema)
+def reopen_task(request, number: int):
+    """Make a closed task open again, whichever way it was closed: `blocked` when one of its
+    blockers is still open, else `todo`; its resolution is cleared. The next occurrence of a
+    repeating task, if one was created, stays; the open tasks it blocks are told it is back and
+    keep their state. Reopening an open task changes nothing and spends nothing (the answer is the
+    task). A task in the Trash is a 400."""
+    task = owned_task(request, number)
+    with mapped_errors():
+        _refuse_trashed(task)
+    if not task.is_completed:
+        return task_response(request, task)
+    return _run(request, task, services.uncomplete_task)
+
+
+@router.post('/tasks/{number}/resolution', response=TaskSchema)
+def set_resolution(request, number: int, payload: ResolutionSchema):
+    """Change how a **closed** task was closed (`done` or `wont_do`). It creates no occurrence,
+    touches no subtasks and keeps the time the task was closed at. A 400 for an open task (it has
+    no resolution; close it instead) and for a task in the Trash. Setting the resolution the task
+    already has changes nothing and spends nothing (the answer is the task)."""
+    task = owned_task(request, number)
+    with mapped_errors():  # a refusal here spends no budget
+        resolution = services.tasks.clean_resolution(payload.resolution)
+        _refuse_trashed(task)
+        if task.completed_at is None:
+            raise ValidationError(services.tasks.NOT_CLOSED_MESSAGE)
+    if resolution_of(task) == resolution:
+        return task_response(request, task)
+    return _run(request, task, lambda task: services.set_resolution(task, resolution))
+
+
+@router.post('/tasks/{number}/state', response=TaskSchema)
+def set_state(request, number: int, payload: StateSchema):
+    """Set an open task's state: `todo`, `in_progress` or `on_hold`. Each task has its own state:
+    nothing propagates between a parent and its subtasks. A 400 for `blocked` (only blockers set
+    it; a Blocked task can still be given any of the three, which keeps its links), for a closed
+    task (reopen it first) and for a task in the Trash. Leaving On hold or Blocked delivers one
+    reminder for what was missed while it was muted. Setting the state the task already has changes
+    nothing and spends nothing (the answer is the task)."""
+    task = owned_task(request, number)
+    with mapped_errors():  # a refusal here spends no budget
+        state = services.tasks.clean_state(payload.state)
+        _refuse_trashed(task)
+        if task.completed_at is not None:
+            raise ValidationError(NOT_OPEN_MESSAGE)
+    if state == task.state:
+        return task_response(request, task)
+    return _run(request, task, lambda task: services.set_state(task, state))
 
 
 @router.post('/tasks/{number}/restore', response=TaskSchema)
@@ -542,3 +730,28 @@ def toggle_checklist(request, number: int, payload: ChecklistSchema):
 def stop_recurrence(request, number: int):
     """Stop repeating: the rule ends and the task stays. Idempotent."""
     return _act(request, number, services.recurrence.stop)
+
+
+# -- Removed in version 2 ------------------------------------------------------------------------
+# `complete` and `uncomplete` became `close` and `reopen`. An installed app of version 1 gets a
+# clear answer instead of a 404.
+
+OUT_OF_DATE = 'This app is out of date. Update it to keep using To-do.'
+
+
+@router.post(
+    '/tasks/{number}/complete', response={410: ErrorSchema}, deprecated=True, summary='Removed'
+)
+def complete_removed(request, number: int):
+    """**Removed in version 2.0.0** of the API: always a 410. Use `POST /tasks/{number}/close`.
+    Spends nothing and does nothing."""
+    return 410, {'detail': OUT_OF_DATE}
+
+
+@router.post(
+    '/tasks/{number}/uncomplete', response={410: ErrorSchema}, deprecated=True, summary='Removed'
+)
+def uncomplete_removed(request, number: int):
+    """**Removed in version 2.0.0** of the API: always a 410. Use `POST /tasks/{number}/reopen`.
+    Spends nothing and does nothing."""
+    return 410, {'detail': OUT_OF_DATE}

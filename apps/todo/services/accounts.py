@@ -174,14 +174,20 @@ def update_inbox_settings(user: User, *, sender_allowlist: str | Iterable[str]) 
     return allowlist
 
 
-def set_muted_overdue(account: TodoAccount, value: str) -> TodoAccount:
-    """Choose where an overdue task that is On hold or Blocked shows on Today (`MutedOverdue`)."""
+def clean_muted_overdue(value: object) -> str:
+    """The `MutedOverdue` value, or a `ValidationError` keyed `muted_overdue` (no database)."""
     if value not in MutedOverdue.values:
         raise ValidationError(
             {
                 'muted_overdue': 'Choose Today (dimmed), Hidden from Today or On hold & blocked section.'
             }
         )
+    return str(value)
+
+
+def set_muted_overdue(account: TodoAccount, value: str) -> TodoAccount:
+    """Choose where an overdue task that is On hold or Blocked shows on Today (`MutedOverdue`)."""
+    value = clean_muted_overdue(value)
     account.muted_overdue = value
     account.save(update_fields=['muted_overdue'])
     return account

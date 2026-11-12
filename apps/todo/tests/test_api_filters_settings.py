@@ -67,7 +67,20 @@ class TestFilters:
     def test_the_params_default_to_everything(self, client, auth):
         body = post(client, '/filters', auth, {'name': 'All open'}).json()
 
-        assert body['params'] == FilterParams().to_dict()
+        assert body['params'] == {
+            'q': '',
+            'mode': 'glob',
+            'include_closed': False,
+            'resolution': None,
+            'states': [],
+            'priorities': [],
+            'labels': [],
+            'date_range': 'any',
+            'date_from': None,
+            'date_to': None,
+            'sort': 'date',
+        }
+        assert body['summary'] == 'all open tasks'
 
     def test_a_label_that_is_not_yours_is_dropped(self, client, auth, other_user):
         theirs = make_label(other_user, 'Theirs')
@@ -234,6 +247,7 @@ class TestSettings:
             'default_reminder_minutes': 5,
             'default_reminder_channel': 'in_app',
             'snooze_minutes': 15,
+            'muted_overdue': 'dimmed',
             'sender_allowlist': [],
             'tasks_created_this_month': 0,
             'free_tasks_per_month': 2,
@@ -277,6 +291,34 @@ class TestSettings:
         assert body.json()['sender_allowlist'] == ['me@example.com', '*@work.example']
         account = get_account(funded_user)
         assert account.default_due_time == time(18, 30)
+
+    def test_muted_overdue_round_trips(self, client, auth, funded_user):
+        for value in ('section', 'hidden', 'dimmed'):
+            body = patch(client, '/settings', auth, {'muted_overdue': value})
+            assert body.status_code == 200 and body.json()['muted_overdue'] == value
+            assert get_account(funded_user).muted_overdue == value
+            assert get(client, '/settings', auth).json()['muted_overdue'] == value
+
+    def test_muted_overdue_leaves_the_others_alone(self, client, auth, funded_user):
+        patch(client, '/settings', auth, {'default_reminder_minutes': 30})
+        body = patch(client, '/settings', auth, {'muted_overdue': 'hidden'}).json()
+
+        assert body['default_reminder_minutes'] == 30 and body['muted_overdue'] == 'hidden'
+
+    @pytest.mark.parametrize('value', ['nowhere', '', None, 3])
+    def test_a_bad_muted_overdue_is_a_400_and_spends_nothing(
+        self, client, auth, funded_user, settings, value
+    ):
+        limit_rule(settings, 'TODO_EDIT_USER')
+
+        response = patch(client, '/settings', auth, {'muted_overdue': value})
+
+        assert response.status_code in (400, 422)
+        if value != 3:
+            assert response.status_code == 400
+            assert 'muted_overdue: Choose Today (dimmed)' in response.json()['detail']
+        assert get_account(funded_user).muted_overdue == 'dimmed'
+        assert patch(client, '/settings', auth, {'muted_overdue': 'hidden'}).status_code == 200
 
     def test_only_the_fields_present_change(self, client, auth, funded_user):
         patch(client, '/settings', auth, {'default_reminder_minutes': 30})

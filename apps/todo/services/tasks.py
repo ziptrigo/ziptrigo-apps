@@ -999,6 +999,37 @@ def set_state(task: Task, state: str) -> Task:
     return task
 
 
+def settle_state(task: Task, state: str) -> Task:
+    """Set an open task's state *after* its blockers were changed in the same request (`PATCH` with
+    both `state` and `blocked_by`): the task is Blocked when any of its blockers is open (the
+    automatic state wins over the one asked for, entry `blocked`), else it gets `state`
+    (To do, In progress or On hold, entry `state`). Same locks and rules as `set_state`."""
+    state = clean_state(state)
+    now = timezone.now()
+    with transaction.atomic():
+        lock_account(task.user_id)
+        current = lock_tasks(task.pk).get(task.pk)
+        if current is None:
+            raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
+        if current.is_trashed:
+            raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
+        if current.completed_at is not None:
+            raise _error(NON_FIELD_ERRORS, NOT_OPEN_MESSAGE)
+        previous = current.state
+        open_ids = blockers.open_blocker_ids(task.pk)
+        final = TaskState.BLOCKED if open_ids else state
+        if write_state(current, final, now):
+            task.today_position = current.today_position
+            if open_ids:
+                open_ones = list(Task.objects.filter(pk__in=open_ids).order_by('number'))
+                events.record_many([blockers.blocked_entry(current, previous, open_ones)])
+            else:
+                events.record(task, EventKind.STATE, {'from': previous, 'to': final})
+            task.updated_at = now
+    task.state = final
+    return task
+
+
 # -- Postponing ----------------------------------------------------------------------------------
 
 

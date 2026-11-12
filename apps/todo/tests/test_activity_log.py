@@ -2,6 +2,7 @@
 entry point, with its channel and whether it was automatic; it reads right in the viewer's date and
 time formats, loads only on demand, and goes with its task."""
 
+import base64
 import logging
 from datetime import date, time, timedelta
 from unittest import mock
@@ -698,7 +699,7 @@ class TestChannels:
         assert response.status_code == 201
         task = Task.objects.get(title='Via API')
         patch(client, f'/tasks/{task.number}', auth, {'priority': 1})
-        post(client, f'/tasks/{task.number}/complete', auth)
+        post(client, f'/tasks/{task.number}/close', auth, {})
 
         assert [(e.kind, e.channel) for e in log(task)] == [
             ('created', 'api'),
@@ -1052,7 +1053,16 @@ class TestEndpoint:
         assert second.count('Title changed') + first.count('Title changed') == 25
         assert 'Title changed from "Title 0" to "Title 1"' in second
 
-    @pytest.mark.parametrize('cursor', ['x', '2026-01-01T00:00:00_notauuid', '_'])
+    @pytest.mark.parametrize(
+        'cursor',
+        [
+            'x',
+            '2026-01-01T00:00:00_notauuid',
+            '_',
+            '2026-11-11T10:00:00+00:00_00000000-0000-0000-0000-000000000000',  # the old format
+            'MjAyNi0xMS0xMVQxMDowMDowMCswMDowMF9ub3QtYS11dWlk',  # base64url, not a cursor
+        ],
+    )
     def test_a_bad_cursor_is_a_404(self, web, funded_user, cursor):
         task = make(funded_user)
 
@@ -1060,7 +1070,8 @@ class TestEndpoint:
 
     def test_a_cursor_without_a_time_zone_is_a_404(self, web, funded_user):
         task = make(funded_user)
-        cursor = '2026-11-11T10:00:00_00000000-0000-0000-0000-000000000000'
+        raw = '2026-11-11T10:00:00_00000000-0000-0000-0000-000000000000'
+        cursor = base64.urlsafe_b64encode(raw.encode()).decode().rstrip('=')
 
         assert web.get(self.url(task, before=cursor)).status_code == 404
 

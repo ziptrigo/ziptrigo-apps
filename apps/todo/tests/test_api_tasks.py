@@ -42,7 +42,9 @@ TASK_KEYS = {
     'due_date',
     'due_time',
     'due_at',
-    'completed_at',
+    'closed_at',
+    'state',
+    'resolution',
     'deleted_at',
     'position',
     'source',
@@ -50,6 +52,9 @@ TASK_KEYS = {
     'labels',
     'recurrence',
     'reminders',
+    'blocked_by',
+    'has_open_blocker',
+    'blocks',
     'subtask_count',
     'open_subtask_count',
     'comment_count',
@@ -422,7 +427,7 @@ class TestList:
             ('today', ['overdue', 'today']),
             ('upcoming', ['soon']),
             ('all', ['overdue', 'today', 'soon', 'later', 'nodate']),
-            ('completed', ['done']),
+            ('closed', ['done']),
             ('trash', ['trashed']),
         ],
     )
@@ -431,8 +436,8 @@ class TestList:
 
         assert numbers(response) == [tasks[key].number for key in expected]
 
-    def test_include_completed_lists_them_last(self, client, auth, tasks):
-        response = get(client, '/tasks', auth, include_completed='true')
+    def test_include_closed_lists_them_last(self, client, auth, tasks):
+        response = get(client, '/tasks', auth, include_closed='true')
 
         assert numbers(response)[-1] == tasks['done'].number
         assert response.json()['count'] == 6
@@ -550,17 +555,23 @@ class TestList:
         assert len(row['reminders']) == 1
 
     def test_the_number_of_queries_does_not_grow_with_the_tasks(
-        self, client, auth, funded_user, django_assert_max_num_queries
+        self, client, auth, funded_user, config, django_assert_max_num_queries
     ):
+        config.task_price = 0
+        config.save()
         label = make_label(funded_user, 'Home')
         for n in range(8):
             task = create_task(
                 funded_user, title=f'Task {n}', due_date=date(2026, 12, 1), labels=[label]
             )
             create_task(funded_user, title=f'Child {n}', parent=task)
+            blocker = create_task(funded_user, title=f'Blocking {n}')
+            blocked = create_task(funded_user, title=f'Blocked {n}', blocked_by=[blocker.number])
+            assert blocked.state == 'blocked'
 
-        with django_assert_max_num_queries(12):
-            assert get(client, '/tasks', auth, limit=100).json()['count'] == 16
+        # The blockers and what they block are two more queries for the page, never one a task.
+        with django_assert_max_num_queries(14):
+            assert get(client, '/tasks', auth, limit=100).json()['count'] == 32
 
 
 class TestSearch:
@@ -593,11 +604,11 @@ class TestSearch:
 
         assert response.status_code == 400
 
-    def test_completed_tasks_only_when_asked(self, client, auth, funded_user, found):
+    def test_closed_tasks_only_when_asked(self, client, auth, funded_user, found):
         complete_task(found['title'])
 
         assert numbers(get(client, '/tasks', auth, q='rent')) == []
-        assert numbers(get(client, '/tasks', auth, q='rent', include_completed='true')) == [
+        assert numbers(get(client, '/tasks', auth, q='rent', include_closed='true')) == [
             found['title'].number
         ]
 
@@ -804,18 +815,20 @@ class TestUpdate:
 
 
 class TestStateChanges:
-    def test_complete_and_uncomplete(self, client, auth, funded_user):
+    def test_close_and_reopen(self, client, auth, funded_user):
         task = create_task(funded_user, title='x')
         child = create_task(funded_user, title='child', parent=task)
 
-        done = post(client, f'/tasks/{task.number}/complete', auth).json()
-        again = post(client, f'/tasks/{task.number}/complete', auth)
-        reopened = post(client, f'/tasks/{task.number}/uncomplete', auth).json()
+        done = post(client, f'/tasks/{task.number}/close', auth, {}).json()
+        again = post(client, f'/tasks/{task.number}/close', auth, {})
+        reopened = post(client, f'/tasks/{task.number}/reopen', auth).json()
 
-        assert done['completed_at'] is not None and again.status_code == 200
+        assert done['closed_at'] is not None and again.status_code == 409
+        assert again.json() == {'detail': 'This task is already closed as Done.'}
+        assert done['resolution'] == 'done'
         child.refresh_from_db()
         assert child.completed_at is not None  # its open subtasks went with it
-        assert reopened['completed_at'] is None
+        assert reopened['closed_at'] is None and reopened['resolution'] is None
 
     def test_completing_a_repeating_task_creates_the_next_one(
         self, client, auth, funded_user, wednesday
@@ -824,7 +837,7 @@ class TestStateChanges:
             funded_user, title='Rent', due_date=date(2026, 10, 28), rrule='FREQ=DAILY'
         )
 
-        post(client, f'/tasks/{task.number}/complete', auth)
+        post(client, f'/tasks/{task.number}/close', auth, {})
 
         nxt = Task.objects.get(title='Rent', completed_at__isnull=True)
         assert nxt.due_date == date(2026, 10, 29) and nxt.source == 'recurrence'
@@ -881,7 +894,7 @@ class TestStateChanges:
     ):
         trashed = trash_task(create_task(funded_user, title='x', due_date=date(2026, 11, 1)))
 
-        assert post(client, f'/tasks/{trashed.number}/complete', auth).status_code == 400
+        assert post(client, f'/tasks/{trashed.number}/close', auth, {}).status_code == 400
         assert (
             post(
                 client, f'/tasks/{trashed.number}/postpone', auth, {'preset': 'tomorrow'}
@@ -1006,8 +1019,11 @@ class TestStateChanges:
         n = theirs.number
 
         for path, payload in [
-            (f'/tasks/{n}/complete', None),
-            (f'/tasks/{n}/uncomplete', None),
+            (f'/tasks/{n}/close', {}),
+            (f'/tasks/{n}/reopen', None),
+            (f'/tasks/{n}/resolution', {'resolution': 'done'}),
+            (f'/tasks/{n}/state', {'state': 'on_hold'}),
+            (f'/tasks/{n}/blockers', {'number': 1}),
             (f'/tasks/{n}/restore', None),
             (f'/tasks/{n}/delete-forever', None),
             (f'/tasks/{n}/postpone', {'preset': 'tomorrow'}),
@@ -1021,8 +1037,8 @@ class TestStateChanges:
         task = create_task(funded_user, title='x')
         limit_rule(settings, 'TODO_EDIT_USER')
 
-        assert post(client, f'/tasks/{task.number}/complete', auth).status_code == 200
-        assert post(client, f'/tasks/{task.number}/uncomplete', auth).status_code == 429
+        assert post(client, f'/tasks/{task.number}/close', auth, {}).status_code == 200
+        assert post(client, f'/tasks/{task.number}/reopen', auth).status_code == 429
         assert post(client, '/tasks/reschedule-overdue', auth).status_code == 429
 
 
