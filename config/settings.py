@@ -107,6 +107,8 @@ MIDDLEWARE = [
     'apps.core.middleware.HtmxLoginRedirectMiddleware',
     # Sends a signed-in user who has not accepted the current terms to the accept page (#96).
     'apps.accounts.middleware.TermsAcceptanceMiddleware',
+    # Which entry point a request is, for the To-do activity log (issue #274).
+    'apps.core.request_channel.RequestChannelMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

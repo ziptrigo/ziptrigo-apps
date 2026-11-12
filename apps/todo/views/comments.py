@@ -34,7 +34,14 @@ from ..services import (
     resolver_for_request,
     restore_comment,
 )
-from .common import form_error_lines, limited, owned_task, refuse, validation_lines
+from .common import (
+    announces_change,
+    form_error_lines,
+    limited,
+    owned_task,
+    refuse,
+    validation_lines,
+)
 
 ADD_MSG = '#comment-msg'
 
@@ -103,6 +110,7 @@ def _refuse(
 
 @login_required
 @require_POST
+@announces_change
 def comment_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     task = owned_task(request, number)
     form = CommentForm(request.POST)
@@ -124,6 +132,7 @@ def comment_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
 
 @login_required
 @require_POST
+@announces_change
 def comment_edit(request: AuthenticatedHttpRequest, number: int, comment_id: UUID) -> HttpResponse:
     task = owned_task(request, number)
     comment = _owned_comment(task, comment_id)

@@ -45,7 +45,7 @@ from apps.core.json_numbers import whole_number
 from ..models import Attachment, Task, TodoSettings
 from ..services import attachments, get_account
 from ..services.errors import AccountFrozenError
-from .common import credits_url, limited, owned_task
+from .common import announces_change, credits_url, limited, owned_task
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,7 @@ def attachment_discard(
 
 @login_required
 @require_GET
+@announces_change
 def attachment_list(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """The task's attachment list (what the upload script refreshes after a file lands). Opened
     directly rather than by htmx it goes to the task page."""

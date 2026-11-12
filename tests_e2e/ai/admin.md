@@ -972,6 +972,18 @@ push configured (NOTIF-20's preconditions).
 | 2 | Open a row. | All fields read-only, no Save and no Delete (a row cannot be deleted from here). |
 | 3 | `/admin/todo/task/`, open `Block main`. | Inlines **Blocked by** (its blockers) and **Blocks** are read-only. Filter the list by **State** = Blocked: `Block main` is there. |
 
+### ADM-57 Task events: the activity log
+
+**Purpose:** staff can read the activity log of the tasks, read-only (issue #274).
+**Preconditions:** Session A (`qa.admin`); `todo.md` TODO-57 done (`Log main` has a long log, with automatic entries).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/todo/taskevent/` (the "Task events" entry under To-do). | A list newest first with **Created at**, **Task** (`#<n>`), **User**, **Kind**, **What** (the sentence, e.g. `Closed as Done`), **Automatic** and **Channel** (`Web`, `API`, `Email`, `Push notification`, `System`); no "Add" button. |
+| 2 | Filter by **Automatic** = Yes, then by **Channel** = Web, then by a **Kind**; search for a task's number and for `qa.user@example.com`. | Each narrows the list as named; the unblocked and "Created as the next occurrence" entries are the Automatic ones. |
+| 3 | Open a row. | Every field is read-only, there is no Save and no Delete (an entry goes only with its task). |
+| 4 | Delete a task forever on the website (TODO-58 step 4) and reload the list. | Its entries are gone. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

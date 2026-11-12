@@ -13,10 +13,19 @@
        comment draft. Order: the task, its files, then the discussion. {% endcomment %}
     {% include 'todo/partials/attachments.html' %}
     {% include 'todo/partials/comments.html' %}
+    {% comment %} The activity log (issue #274) is not part of the page: this small button fetches it on demand
+       (static/todo/js/activity.js), the latest 20 entries with a "Show more". It sits outside `#task-panel` too. {% endcomment %}
+    <section id="task-activity" class="mb-8" aria-label="Task history">
+        <button type="button" id="task-activity-toggle" aria-expanded="false" aria-controls="task-activity-body"
+                data-url="{% url 'todo:task-activity' task.number %}"
+                class="text-xs text-gray-500 dark:text-gray-400 hover:underline rounded-md">History</button>
+        <div id="task-activity-body" class="mt-3" hidden></div>
+    </section>
 </div>
 {% endblock %}
 
 {% block todo_js_libs %}
+<script defer src="{% static 'todo/js/activity.js' %}"></script>
 {% include 'core/partials/sortable_script.html' %}
 {% comment %} Comments take files on a completed task too, and the comment forms appear when a trashed task is restored, so these two are
    not tied to `attachments_can_upload`. {% endcomment %}

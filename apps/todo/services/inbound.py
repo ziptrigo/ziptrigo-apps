@@ -106,6 +106,8 @@ from apps.core.services.storage import ObjectTooLargeError
 from ..limits import INLINE_IMAGE_MIN_PX
 from ..models import (
     Attachment,
+    EventChannel,
+    EventKind,
     InboundEmail,
     InboundEmailStatus,
     InboundMessage,
@@ -116,7 +118,7 @@ from ..models import (
     TodoSettings,
 )
 from . import attachments as attachments_service
-from . import billing, dates, parsing, tasks
+from . import billing, dates, events, parsing, tasks
 from .accounts import add_stored_bytes
 from .limits import DESCRIPTION_MAX, TITLE_MAX
 from .storage import INBOUND_PREFIX, attachment_key, failed_key_for, get_storage
@@ -369,7 +371,8 @@ def ingest(message_id: int, *, recipients: Sequence[str] | None = None) -> None:
     if message is None:
         return
     try:
-        _ingest_claimed(message, recipients)
+        with events.channel(EventChannel.EMAIL):  # what the tasks it makes log as their channel
+            _ingest_claimed(message, recipients)
     except PermanentIngestError as exc:
         logger.error('Inbound message %s cannot be ingested: %s', message.s3_key, exc)
         _mark_failed(message, str(exc))
@@ -767,6 +770,15 @@ def _create(
                 for item in files
             )
             add_stored_bytes(user.pk, sum(len(item.data) for item in files))
+            events.record_many(
+                events.entry(
+                    created,
+                    EventKind.ATTACHMENT_ADDED,
+                    {'filename': item.filename, 'comment': False},
+                    automatic=True,
+                )
+                for item in files
+            )
     except BaseException as exc:
         # Another worker may have finished this very recipient meanwhile (the keys are the same
         # for both of us): then the objects are its, and must stay.

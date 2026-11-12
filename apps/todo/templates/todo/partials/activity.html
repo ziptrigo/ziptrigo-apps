@@ -1,0 +1,12 @@
+{% comment %} The first page of a task's activity log, fetched into `#task-activity-body` when "History" is pressed (issue #274).
+   Needs `task`, `entries` and `more` (`views.activity.activity_context`). {% endcomment %}
+<h2 id="task-activity-heading" tabindex="-1" class="pb-2 mb-2 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">History</h2>
+{% if entries %}
+<ol id="task-activity-list" aria-labelledby="task-activity-heading" class="divide-y divide-sage-200 dark:divide-sage-700">
+    {% include 'todo/partials/activity_rows.html' %}
+</ol>
+<div id="task-activity-more">{% include 'todo/partials/activity_more.html' %}</div>
+{% else %}
+<ol id="task-activity-list" aria-labelledby="task-activity-heading"></ol>
+<p class="text-sm text-gray-500 dark:text-gray-400">Nothing has been recorded for this task yet.</p>
+{% endif %}

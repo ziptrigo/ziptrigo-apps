@@ -5,7 +5,7 @@
 The To-do product's web UI (`apps/todo`, issue #161 and its sub-issues): tasks (#178), repeating tasks (#179),
 comments and task references (#180), search and saved filters (#181), reminders (#182), AI date parsing (#183),
 attachments and storage billing (#184), the "Add tasks by email" settings (#186), task states and resolutions
-(#272), blockers (#273) and the polish of the E2E run (#224):
+(#272), blockers (#273), the activity log (#274) and the polish of the E2E run (#224):
 
 - the sidebar (a search box, then Today with a count, Upcoming, All, Closed, Labels, Trash, Settings, then
   a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
@@ -17,7 +17,8 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 - the task page `/todo/<number>/`: inline title edit, the Markdown description (checklists, `#1234` references,
   links), Complete, Close as won't do, the state chip, Postpone, Move to trash, Restore, Delete forever, then the details (the "Or type a date" box, due
   date, time, priority, labels, repeat), reminders, subtasks (add, complete, reorder), "Referenced by", then,
-  outside the panel, **Attachments** and **Comments** (with their own files);
+  outside the panel, **Attachments** and **Comments** (with their own files), then the small **History** button that
+  loads the task's activity log on demand;
 - task states (To do, In progress, Blocked, On hold: the chip on rows and the page, quick add, Today and Upcoming grouping and
   drag order, muted tasks and where they show on Today, held reminders), blockers ("Blocked by" and "Blocks" on the task
   page and in quick add, the Blocked state, automatic unblocking and its notifications, a blocker coming back, the
@@ -1107,6 +1108,54 @@ its blockers (issue #273).
 | 3 | `GET /api/todo/tasks?view=all&date_range=overdue` with a Blocked overdue task. | It is not listed (muted tasks are not overdue for the API either). |
 | 4 | `POST /api/todo/tasks/<B_MAIN>/complete` for a task with open blockers. | Closes without any question (the API never asks); the links are kept on the website. |
 
+### TODO-56 Activity log: hidden until History is pressed
+
+**Purpose:** the log of a task is not part of the page; a small button loads it, 20 entries at a time (issue #274).
+**Preconditions:** Session A (`qa.user@example.com`, formats `mm/dd/yyyy` and 12-hour); a task `Log main` created in
+the quick-add box (no other change yet).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/todo/<L_MAIN>/`. | Below the comments there is only a small muted **History** button (`aria-expanded="false"`); no entries are on the page and the network shows no `/activity/` request. |
+| 2 | Press **History** (mouse, then try again from the keyboard with Tab and Enter). | A **History** heading and a list appear, focus is on the heading. One entry: `Created` with its time (`11/11/2026, 8:35 PM` style, the zone of the browser) and no "Automatic" pill. The button now reads **Hide history** (`aria-expanded="true"`). |
+| 3 | Change the title of `Log main` to `Log main 2` (click the title, edit, save). | The open history shows `Title changed from "Log main" to "Log main 2"` on top, by itself (it re-fetches after the action). |
+| 4 | Press **Hide history**, then **History** again. | The list hides and shows again with the same entries; the button text follows. |
+| 5 | Reload the page. | The history is closed again and nothing of it is in the page source. |
+| 6 | Open `/todo/<L_MAIN>/activity/` directly (address bar, as the same user). | A bare fragment with the heading and the list (it is a partial for the button); `?before=x` is a 404. As a **different** user (Session B) both are 404. Signed out: redirected to the login page. |
+
+### TODO-57 Activity log: what is recorded, in the viewer's formats
+
+**Purpose:** every kind of change is a sentence with its time, automatic ones are marked, and dates follow the
+account's formats (issue #274).
+**Preconditions:** TODO-56 done; `Log main` (open), two other tasks `Log blocker` and `Log sub`, a label `logone`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `Log main`: set priority 1 then none, set a due date (`<tomorrow>` 3:00 PM), change it to the day after at 9:00 AM, add the label `logone` then remove it, set a repeat "every week", change to "every 2 weeks", **Stop repeating**, edit the description, tick and untick a checklist box (`- [ ] buy milk`). | The history (reload it with History) lists, newest first: `Checklist item unticked: buy milk`, `Checklist item ticked: buy milk` (not "Description edited"), `Description edited`, `Repeat stopped (it was: Every 2 weeks)`, `Repeat changed from Every week to Every 2 weeks`, `Repeat set: Every week`, `Labels: removed @logone`, `Labels: added @logone`, `Due date changed from 11/12/2026, 3:00 PM to 11/13/2026, 9:00 AM`, `Due date set to 11/12/2026, 3:00 PM`, `Priority changed from priority 1 to no priority`, `Priority changed from no priority to priority 1`, ... Saving the details form with nothing changed adds no entry. |
+| 2 | Postpone `Log main` to tomorrow from the Postpone menu. | A `Due date changed from ... to ...` entry (a postpone is a due date change). |
+| 3 | Add `Log blocker` as a blocker of `Log main`. | Two entries: `Blocker added: #<n> Log blocker` and, with the **Automatic** pill, `Blocked by #<n> Log blocker`. |
+| 4 | Complete `Log blocker`; reopen `Log main`'s history. | An **Automatic** entry `Unblocked: #<n> Log blocker was closed`. |
+| 5 | Set `Log main` to **In progress** from its chip, then close it as **Won't do**, then **Reopen**, then mark it done again from the Closed page. | `State changed from To do to In progress`, `Closed as Won't do`, `Reopened`, `Resolution changed from ...` entries, no pill on any (all by the user). |
+| 6 | Add `Log sub` as a subtask of `Log main` (Subtasks "Add"), complete `Log sub` by its circle, then trash `Log main` and restore it from the Trash. | `Log main`'s history has `Subtask added: #<n> Log sub`, `Subtask #<n> Log sub closed as Done`, `Moved to the Trash`, `Restored`. `Log sub`'s own page: `Created, as a subtask of #<L_MAIN> Log main`, `Closed as Done`. |
+| 7 | Create a subtask `Log sub 2`, then close `Log main` choosing **Close them as Done**. | `Log sub 2`'s history has `Closed as Done with its parent, #<L_MAIN> Log main` with the **Automatic** pill; `Log main`'s says `Closed as Done, with 1 open subtask closed as Done`. |
+| 8 | Attach a PNG to `Log main` (Attachments), then remove it. | `File attached: <name>` and `File removed: <name>`. Attach a file to a **comment** and save it: `File attached to a comment: <name>`; a file added to the comment form and then removed before saving adds nothing. |
+| 9 | Account page > Appearance: set the date format to `dd/mm/yyyy` and the clock to 24-hour. Reload `Log main`'s history. | The due date entries now read `Due date changed from 12/11/2026, 15:00 to 13/11/2026, 09:00`; the time under each entry follows the 24-hour clock; the repeat sentences keep working. Switch back. |
+| 10 | Create a task whose title is `<img src=x onerror=alert(1)>` and rename it; open its history. | The markup shows as text (no alert, no image). |
+| 11 | Make a task by the quick add with a due date, complete it (a repeating one, every day) and open the **next occurrence**'s history. | `Created as the next occurrence of #<n>` with the **Automatic** pill. |
+
+### TODO-58 Activity log: paging, the Trash and deletion
+
+**Purpose:** Show more, a trashed task, and the log going with its task (issue #274).
+**Preconditions:** TODO-56 done.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On a task `Log page`, change its priority 25 times (1, 2, 3, 1, 2, ...). Open its history. | 20 entries and a **Show more** button. |
+| 2 | Press **Show more** (also try from the keyboard: Tab to it, Enter). | The remaining 6 entries are added below (26 in all, the last is `Created`), focus is on the first new entry, the button is gone. Changing the priority again while the history is open adds the new entry on top. |
+| 3 | Move `Log page` to the Trash and open it from the Trash list. | The page is read-only (Restore only) and **History** works: the newest entry is `Moved to the Trash`. |
+| 4 | Restore it, then delete it forever from the Trash (move to Trash again first), then open `/todo/<L_PAGE>/`. | 404; nothing of its log remains (the admin's Task events list, ADM-57, has no entry for it). |
+| 5 | Another user (Session B) opens `/todo/<L_PAGE>/activity/` of a task of `qa.user`. | 404. |
+
 ---
 
 ## Out of scope
@@ -1123,7 +1172,10 @@ its blockers (issue #273).
   the shell steps (the scheduler does not run on this server).
 - **A reminder email to an unconfirmed address** ("not sent: your email address is not confirmed"): reaching it
   needs an email change through the JWT API, which is out of scope here; unit-tested.
-- **Rate limits** (switched off on this server), the JWT API `/api/todo/` and the `inv todo` CLI (unit tests).
+- **Rate limits** (switched off on this server), the JWT API `/api/todo/` and the `inv todo` CLI (unit tests). The
+  activity log's entries made through the API, the email intake (automatic, with the files), the phone's Complete
+  button and the daily purge, and the channel each is recorded under, are unit-tested (`test_activity_log.py`); the
+  log is not in the API yet (#275).
 - **A reminder reaching a real phone** and the notification the phone shows after a tap ("Snoozed until ..."): that
   needs a phone and HTTPS; TODO-40 posts the same answer with `curl`. That a due in-app reminder is pushed, with
   which buttons, and that a snoozed reminder is left alone by a time-zone change and replaced by a new due date, are

@@ -27,10 +27,11 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 from apps.billing.services import InsufficientCreditsError
-from apps.core.markdown import toggle_checklist_item
+from apps.core.markdown import checklist_item_text, toggle_checklist_item
 
 from ..models import (
     SELECTABLE_STATES,
+    EventKind,
     Label,
     Priority,
     Recurrence,
@@ -41,7 +42,7 @@ from ..models import (
     TaskState,
     TodoSettings,
 )
-from . import attachments, blockers, comments, dates, reminders
+from . import attachments, blockers, comments, dates, events, reminders
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account, lock_account
 from .billing import cannot_afford, charge_task_creation
@@ -362,6 +363,7 @@ def create_task(
     email_from: str = '',
     email_from_authenticated: bool = False,
     allow_unpaid: bool = False,
+    previous: Task | None = None,
 ) -> Task:
     """Create a task (or a subtask under `parent`), numbered and charged.
 
@@ -385,6 +387,11 @@ def create_task(
     `email_from` and `email_from_authenticated` (a task made from an email, issue #186) are stored
     on the task so its page needs no lookup of the email: the From address and whether SES
     authenticated the sender.
+
+    The activity log (`services.events`) gets a `created` entry (automatic for a next occurrence and
+    for a task made from an email; `previous` is the occurrence it follows, which the entry names)
+    and the parent's log a `subtask_added` one, except for the copies a repeating task makes of its
+    subtasks.
     """
     cleaned = _clean_new_task(
         user,
@@ -446,6 +453,7 @@ def create_task(
             today_position=next_today_position(user, cleaned_date),
         )
         task.save()
+        _record_created(task, cleaned_parent, previous, cleaned_rule or _rule_of(recurrence))
         if cleaned_labels:
             task.labels.set(cleaned_labels)
         if cleaned_description:
@@ -453,6 +461,28 @@ def create_task(
         blockers.link_new_task(task, cleaned.blockers)
         reminders.apply_defaults(task, account)
     return task
+
+
+def _rule_of(recurrence: Recurrence | None) -> str:
+    return recurrence.rrule if recurrence is not None else ''
+
+
+def _record_created(task: Task, parent: Task | None, previous: Task | None, rrule: str) -> None:
+    """The log entries of a task just made: its own `created`, and the parent's `subtask_added`."""
+    data: dict[str, Any] = {'source': task.source}
+    if parent is not None:
+        data['parent'] = events.task_ref(parent)
+    if previous is not None:
+        data['previous'] = {'number': previous.number}
+    if rrule:
+        data['rrule'] = rrule
+    automatic = task.source in (TaskSource.RECURRENCE, TaskSource.EMAIL)
+    entries = [events.entry(task, EventKind.CREATED, data, automatic=automatic)]
+    if parent is not None and task.source != TaskSource.RECURRENCE:
+        entries.append(
+            events.entry(parent, EventKind.SUBTASK_ADDED, events.task_ref(task) | {'moved': False})
+        )
+    events.record_many(entries)
 
 
 def _clean_changes(
@@ -507,7 +537,9 @@ def check_update_task(task: Task, *, changes: Mapping[str, Any]) -> None:
     _rule_action(task, changes)  # the repeat rule's syntax
 
 
-def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
+def update_task(
+    task: Task, *, changes: Mapping[str, Any], checklist: tuple[bool, str] | None = None
+) -> Task:
     """Apply a partial update (`UPDATABLE` keys only) with the same validation as `create_task`.
 
     Clearing `due_date` clears `due_time` too. A task moves under a `parent` only when it has no
@@ -519,6 +551,13 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
     rule's first date when the task has none); the same rule and mode change nothing, the anchor
     included; an empty `rrule` stops repeating. A change also makes this task the occurrence whose
     completion creates the next one (`Task.recurrence_anchor`) and starts the `COUNT` again.
+
+    Every real change is written to the task's activity log (`services.events`), one entry per
+    field: the title, the priority, the due date with its time, the labels (what was added and
+    removed), the repeat rule, the description, and a move under or away from a parent (on the
+    task, and on the parents' logs). Values that did not change record nothing. `checklist`
+    (`(checked, item text)`, from `toggle_checklist`) says a description change is a ticked box:
+    it is recorded as that, not as an edit.
     """
     values, labels, new_parent, moves = _clean_changes(task, changes)
 
@@ -572,11 +611,34 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
             'due_time' in values and values['due_time'] != current.due_time
         )
         had_date = current.due_date is not None
+        old_labels = (
+            {label.pk: label.name for label in task.labels.all()} if labels is not None else {}
+        )
+        old_rule = current.active_recurrence if rule_action is not None else None
+        old_parent = (
+            _loaded_parent(task, current.parent_id)
+            if moves and current.parent_id is not None
+            else None
+        )
         for name, value in values.items():
             setattr(task, name, value)
         task.save(update_fields=[*values, 'updated_at'])
         if labels is not None:
             task.labels.set(labels)
+        _record_update(
+            task,
+            current,
+            values,
+            labels,
+            old_labels,
+            rule_action,
+            old_rule,
+            old_parent,
+            new_parent if moves else None,
+            moves,
+            description_changed,
+            checklist,
+        )
         if description_changed:
             sync_references(task)
         if due_changed:
@@ -585,6 +647,100 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
             recurrence_service.stop(current)
             task.recurrence = current.recurrence
     return task
+
+
+def _record_update(
+    task: Task,
+    current: Task,
+    values: Mapping[str, Any],
+    labels: list[Label] | None,
+    old_labels: dict[Any, str],
+    rule_action: tuple[str, str, str] | None,
+    old_rule: Recurrence | None,
+    old_parent: Task | None,
+    new_parent: Task | None,
+    moves: bool,
+    description_changed: bool,
+    checklist: tuple[bool, str] | None,
+) -> None:
+    """The activity-log entries of an `update_task` that wrote: one per field that really changed
+    (`current` is the row as it was under the lock). A stopped repeat rule is recorded by
+    `recurrence.stop`."""
+    entries: list[events.Entry] = []
+    if 'title' in values and values['title'] != current.title:
+        entries.append(
+            events.entry(task, EventKind.TITLE, {'from': current.title, 'to': values['title']})
+        )
+    if 'priority' in values and values['priority'] != current.priority:
+        entries.append(
+            events.entry(
+                task, EventKind.PRIORITY, {'from': current.priority, 'to': values['priority']}
+            )
+        )
+    due = events.due_entry(
+        task,
+        current.due_date,
+        current.due_time,
+        values.get('due_date', current.due_date),
+        values.get('due_time', current.due_time),
+    )
+    if due is not None:
+        entries.append(due)
+    if labels is not None:
+        new_labels = {label.pk: label.name for label in labels}
+        added = sorted(name for pk, name in new_labels.items() if pk not in old_labels)
+        removed = sorted(name for pk, name in old_labels.items() if pk not in new_labels)
+        if added or removed:
+            entries.append(
+                events.entry(task, EventKind.LABELS, {'added': added, 'removed': removed})
+            )
+    if rule_action is not None and rule_action[0] == 'set':
+        entries.append(
+            events.entry(
+                task,
+                EventKind.REPEAT,
+                {
+                    'from': old_rule.rrule if old_rule is not None else '',
+                    'to': rule_action[1],
+                    'mode_from': old_rule.mode if old_rule is not None else '',
+                    'mode': rule_action[2],
+                },
+            )
+        )
+    if description_changed:
+        if checklist is not None:
+            entries.append(
+                events.entry(
+                    task, EventKind.CHECKLIST, {'checked': checklist[0], 'text': checklist[1]}
+                )
+            )
+        else:
+            entries.append(events.entry(task, EventKind.DESCRIPTION))
+    if moves:
+        entries.append(
+            events.entry(
+                task,
+                EventKind.MOVED,
+                {'parent': events.task_ref(new_parent) if new_parent is not None else None},
+            )
+        )
+        if old_parent is not None:
+            entries.append(
+                events.entry(
+                    old_parent,
+                    EventKind.SUBTASK_REMOVED,
+                    events.task_ref(task) | {'moved': True},
+                )
+            )
+        if new_parent is not None:
+            entries.append(
+                events.entry(
+                    new_parent,
+                    EventKind.SUBTASK_ADDED,
+                    events.task_ref(task) | {'moved': True},
+                )
+            )
+    events.record_many(entries)
 
 
 def _rule_action(task: Task, changes: Mapping[str, Any]) -> tuple[str, str, str] | None:
@@ -625,7 +781,20 @@ def toggle_checklist(task: Task, index: int, checked: bool) -> Task:
             description = toggle_checklist_item(fresh.description, index, checked)
         except IndexError, ValueError:
             raise _error('index', 'No such checklist item.') from None
-        return update_task(fresh, changes={'description': description})
+        text = _item_text(fresh.description, index)
+        return update_task(fresh, changes={'description': description}, checklist=(checked, text))
+
+
+ITEM_TEXT_CHARS = 80
+
+
+def _item_text(description: str, index: int) -> str:
+    """The text of the `index`th checklist item (as `toggle_checklist_item` numbers them), plain
+    and cut short, for the activity log."""
+    text = checklist_item_text(description, index)
+    if len(text) > ITEM_TEXT_CHARS:
+        text = f'{text[: ITEM_TEXT_CHARS - 1].rstrip()}…'
+    return text
 
 
 # -- Closing and states --------------------------------------------------------------------------
@@ -677,17 +846,24 @@ def close_task(
             return task
         recurrence_service.on_completed(task)
         ended = [task.pk]
+        cascaded: list[Task] = []
         if subtasks != SUBTASKS_LEAVE:
             open_subtasks = Task.objects.filter(
                 parent=task, completed_at__isnull=True, deleted_at__isnull=True
             )
             subtask_ids = list(open_subtasks.values_list('pk', flat=True))
             if subtask_ids:
-                lock_tasks(*subtask_ids)
+                # Re-read under the lock: what is still open now is what this close closes.
+                cascaded = [
+                    sub
+                    for sub in lock_tasks(*subtask_ids).values()
+                    if sub.completed_at is None and sub.deleted_at is None
+                ]
             ended += subtask_ids
             open_subtasks.update(
                 completed_at=now, resolution=subtasks, state=TaskState.TODO, updated_at=now
             )
+        _record_closed(task, resolution, cascaded, subtasks)
         if note:
             comments.add_comment(task, task.user, note)
         # What they blocked is free of them now (an open blocker that closes with its parent too).
@@ -697,6 +873,41 @@ def close_task(
     task.state = TaskState.TODO
     task.updated_at = now
     return task
+
+
+def _loaded_parent(task: Task, parent_id: UUID) -> Task | None:
+    """The task `parent_id`, for an activity-log entry: the parent already loaded on `task` when
+    it is that one (the pages load it with `select_related`), else one query."""
+    if Task.parent.is_cached(task) and task.parent is not None and task.parent.pk == parent_id:  # ty: ignore[missing-attribute]
+        return task.parent
+    return Task.objects.filter(pk=parent_id).first()
+
+
+def _record_closed(task: Task, resolution: str, cascaded: list[Task], subtasks: str) -> None:
+    """The activity-log entries of a close: the task's own `closed`, an automatic one on each open
+    subtask the same close closed (naming the parent), and, for a subtask closed on its own, the
+    parent's `subtask_closed`."""
+    data: dict[str, Any] = {'resolution': resolution}
+    if cascaded:
+        data['subtasks'] = len(cascaded)
+        data['subtasks_resolution'] = subtasks
+    entries = [events.entry(task, EventKind.CLOSED, data)]
+    via = events.task_ref(task)
+    entries += [
+        events.entry(sub, EventKind.CLOSED, {'resolution': subtasks, 'via': via}, automatic=True)
+        for sub in cascaded
+    ]
+    if task.parent_id is not None:
+        parent = _loaded_parent(task, task.parent_id)
+        if parent is not None:
+            entries.append(
+                events.entry(
+                    parent,
+                    EventKind.SUBTASK_CLOSED,
+                    events.task_ref(task) | {'resolution': resolution},
+                )
+            )
+    events.record_many(entries)
 
 
 def complete_task(task: Task, *, subtasks: str = SUBTASKS_DONE) -> Task:
@@ -713,9 +924,17 @@ def set_resolution(task: Task, resolution: str) -> Task:
     now = timezone.now()
     with transaction.atomic():
         lock_account(task.user_id)
+        # Read before the write; no lock of its own: the account lock serialises these.
+        previous = (
+            Task.objects.filter(pk=task.pk, completed_at__isnull=False, deleted_at__isnull=True)
+            .values_list('resolution', flat=True)
+            .first()
+        )
         changed = Task.objects.filter(
             pk=task.pk, completed_at__isnull=False, deleted_at__isnull=True
         ).update(resolution=resolution, updated_at=now)
+        if changed and previous != resolution:
+            events.record(task, EventKind.RESOLUTION, {'from': previous, 'to': resolution})
     if not changed:
         if Task.objects.filter(pk=task.pk, deleted_at__isnull=False).exists():
             raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
@@ -742,6 +961,7 @@ def uncomplete_task(task: Task) -> Task:
             Task.objects.filter(pk=task.pk).update(
                 completed_at=None, resolution='', state=state, updated_at=now
             )
+            events.record(task, EventKind.REOPENED, {'to': state, 'resolution': current.resolution})
             blockers.reopened([task.pk])
     task.refresh_from_db()
     return task
@@ -768,9 +988,11 @@ def set_state(task: Task, state: str) -> Task:
             raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
         if current.completed_at is not None:
             raise _error(NON_FIELD_ERRORS, NOT_OPEN_MESSAGE)
+        previous = current.state
         changed = write_state(current, state, now)
         if changed:
             task.today_position = current.today_position
+            events.record(task, EventKind.STATE, {'from': previous, 'to': state})
     task.state = state
     if changed:
         task.updated_at = now
@@ -808,6 +1030,7 @@ def postpone_task(task: Task, *, preset: str, date: date | None = None) -> Task:
     target = postpone_target(user_today(task.user), preset, date)
     had_date = task.due_date is not None
     moved = target != task.due_date
+    old_date = task.due_date
     with transaction.atomic():
         if moved:
             task.due_date = target
@@ -815,6 +1038,9 @@ def postpone_task(task: Task, *, preset: str, date: date | None = None) -> Task:
         task.save(update_fields=['due_date', 'today_position', 'updated_at'])
         if moved:  # its reminders follow the new date (a task with no date gets the default one)
             reminders.on_due_changed(task, had_date=had_date)
+            due = events.due_entry(task, old_date, task.due_time, target, task.due_time)
+            if due is not None:
+                events.record_many([due])
     return task
 
 
@@ -828,7 +1054,14 @@ def reschedule_overdue(user: User) -> int:
         # Their reminders follow the new date, re-armed when it is ahead (the user asked for this):
         # loaded in one query before the move and rewritten in one `bulk_update` after it.
         pending = reminders.reminders_of_tasks(overdue)
+        moved = list(overdue.values_list('pk', 'user_id', 'due_date', 'due_time'))
         count = overdue.update(due_date=today, today_position=0, updated_at=timezone.now())
+        events.record_many(
+            events.Entry(
+                pk, user_id, EventKind.DUE, events.due_data(old_date, old_time, today, old_time)
+            )
+            for pk, user_id, old_date, old_time in moved
+        )
         reminders.move_reminders(pending, user, today)
     return count
 
@@ -857,10 +1090,19 @@ def trash_task(task: Task) -> Task:
         if not won:
             task.refresh_from_db()
             return task
+        cascaded = list(Task.objects.filter(parent=task, deleted_at__isnull=True))
         Task.objects.filter(parent=task, deleted_at__isnull=True).update(
             deleted_at=now, updated_at=now
         )
-        blockers.ended(was_open, now)
+        via = events.task_ref(task)
+        events.record_many(
+            [events.entry(task, EventKind.TRASHED)]
+            + [
+                events.entry(sub, EventKind.TRASHED, {'via': via}, automatic=True)
+                for sub in cascaded
+            ]
+        )
+        blockers.ended(was_open, now, 'trashed')
     task.deleted_at = now
     task.updated_at = now
     return task
@@ -890,7 +1132,16 @@ def restore_task(task: Task) -> Task:
         )
         if won:
             restored = [task.pk, *subtask_ids]
+            cascaded = list(subtasks)
             subtasks.update(deleted_at=None, updated_at=now)
+            via = events.task_ref(task)
+            events.record_many(
+                [events.entry(task, EventKind.RESTORED)]
+                + [
+                    events.entry(sub, EventKind.RESTORED, {'via': via}, automatic=True)
+                    for sub in cascaded
+                ]
+            )
             # An open task that is back blocks again only in the sense of a notice: what it blocks
             # keeps its state (`services.blockers`).
             blockers.reopened(
@@ -942,10 +1193,13 @@ def _delete_with_attachments(task_id: UUID) -> int:
         attachments.delete_for_tasks(ids)
         # Normally in the Trash already (nothing left to release); one that is deleted while open
         # frees what it blocked. Its dependents are found before the links go with it.
-        dependents = blockers.dependents_of(blockers.open_ids(ids))
-        # A parent's delete takes its subtasks too, so this counts the rows it removed.
-        deleted = Task.objects.filter(pk=task_id).delete()[0]
-        blockers.released(set(dependents) - set(ids))
+        open_blockers = blockers.open_ids(ids)
+        dependents = blockers.dependents_of(open_blockers)
+        causes = blockers.causes_of(open_blockers, 'deleted')  # before the links go with the rows
+        # A parent's delete takes its subtasks too, so this counts the task rows it removed (not the
+        # comments, links and log entries that cascade with them).
+        deleted = Task.objects.filter(pk=task_id).delete()[1].get('todo.Task', 0)
+        blockers.released(set(dependents) - set(ids), causes=causes)
         return deleted
 
 
