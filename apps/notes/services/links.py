@@ -100,7 +100,8 @@ def expiry_date(link: ShareLink) -> date | None:
 
 
 def require_shareable(note: Note) -> None:
-    """Refuse changing a note's links while it is read-only (in the Trash, locked or taken down)."""
+    """Refuse creating or changing a note's links while it is read-only (in the Trash, locked or
+    taken down; a takedown is checked before the lock). Revoking is exempt: see `revoke_link`."""
     if note.is_taken_down:
         raise _error(NON_FIELD_ERRORS, TAKEN_DOWN_SHARE_MESSAGE)
     require_writable(note)
@@ -122,6 +123,20 @@ def active_links(note: Note) -> QuerySet:
 
 def has_active_link(note: Note) -> bool:
     return active_links(note).exists()
+
+
+def share_flags(note: Note, has_active: bool) -> dict[str, bool]:
+    """What the note page and the share panel show about sharing, given whether the note has an
+    active link: `can_share` (create and edit links: the note is not read-only), `links_work` (the
+    "Shared" chip: an active link *and* the note readable through it) and `show_share` (the Share
+    button: also for a read-only note that still has an active link, so the owner can revoke it)."""
+    can_share = not note.is_read_only
+    return {
+        'can_share': can_share,
+        'has_active_link': has_active,
+        'links_work': has_active and can_share,
+        'show_share': can_share or has_active,
+    }
 
 
 def with_active_link_flag(queryset: QuerySet) -> QuerySet:
@@ -225,8 +240,14 @@ def check_update(
         clean_mode(mode)
     if label is not None:
         clean_label(label)
-    if not clear_expiry and isinstance(expires_on, date) and expires_on != expiry_date(link):
+    clearing = clear_expiry or expires_on is None
+    changing = not clearing and isinstance(expires_on, date) and expires_on != expiry_date(link)
+    if changing:
+        assert isinstance(expires_on, date)
         _clean_expiry(note, expires_on)
+    if not link.is_active() and (clearing or changing):
+        # An expired link made active again counts against the cap (as `update_link` decides).
+        _check_cap(note, NotesSettings.load(), exclude=link)
 
 
 def create_link(
@@ -328,16 +349,14 @@ def update_link(
 
 def revoke_link(link: ShareLink) -> ShareLink:
     """Revoke the link: it stops working for good (idempotent; a revoked link is never
-    re-activated).
-
-    Raises:
-        ValidationError: the note is read-only (in the Trash, locked or taken down).
+    re-activated). **Always allowed, whatever the note's state** (locked, in the Trash, taken
+    down): revoking only reduces what is exposed, so an owner who learns that a link leaked can
+    kill it even while the note is read-only. (Creating and changing links keep their refusals.)
     """
     get_account(link.note.user)
     with transaction.atomic():
         lock_account(link.note.user_id)
         note, fresh = _locked_link(link)
-        require_shareable(note)
         if fresh.revoked_at is None:
             fresh.revoked_at = timezone.now()
             fresh.save(update_fields=['revoked_at'])
@@ -365,6 +384,7 @@ __all__ = [
     'qr_data_uri',
     'require_shareable',
     'revoke_link',
+    'share_flags',
     'state',
     'update_link',
     'with_active_link_flag',

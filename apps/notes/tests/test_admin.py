@@ -75,6 +75,32 @@ class TestShareLinkAdmin:
             assert link.code not in page.content.decode()
         assert f'{link.code[:6]}...' in client.get(LINKS).content.decode()
 
+    @pytest.mark.parametrize(
+        'url_name, query',
+        [
+            ('admin:notes_sharelink_changelist', 'code__startswith={start}'),
+            ('admin:notes_sharelink_changelist', 'code__exact={code}'),
+            ('admin:notes_sharelink_changelist', 'code__contains={start}'),
+            ('admin:notes_notereport_changelist', 'link__code__startswith={start}'),
+            ('admin:notes_notereport_changelist', 'link__code={code}'),
+            ('admin:notes_note_changelist', 'links__code__startswith={start}'),
+            ('admin:notes_note_changelist', 'links__code={code}'),
+            ('admin:notes_note_changelist', 'versions__link__code__startswith={start}'),
+        ],
+    )
+    def test_no_lookup_reaches_a_code(self, client, superuser, reported, link, url_name, query):
+        """`?code__startswith=` would narrow a full code down one character at a time (Django
+        accepts any lookup on a local field), so a lookup with a `code` part is refused outright:
+        even a superuser gets the admin's "bad lookup" answer, never a filtered list."""
+        url = reverse(url_name) + '?' + query.format(start=link.code[:1], code=link.code)
+        response = client.get(url)
+        assert response.status_code in (400, 302)
+        if response.status_code == 302:  # the changelist's "?e=1" redirect for a bad lookup
+            assert 'e=1' in response['Location']
+
+    def test_a_lookup_without_code_still_works(self, client, superuser, link):
+        assert client.get(LINKS + '?mode__exact=edit').status_code == 200
+
     def test_the_list_shows_note_owner_mode_and_state(self, client, superuser, link, user):
         body = client.get(LINKS).content.decode()
         assert 'Findable bad note' in body and user.email in body and 'active' in body

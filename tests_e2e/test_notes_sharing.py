@@ -154,7 +154,7 @@ def test_a_read_only_link_raw_download_duplicate_and_report(
         raw = visitor.request.get(f'{address}/raw')
         assert raw.status == 200 and raw.headers['content-type'].startswith('text/plain')
         assert raw.text() == ORIGINAL
-        assert raw.headers['referrer-policy'] == 'same-origin'
+        assert raw.headers['referrer-policy'] == 'strict-origin'
         download = visitor.request.get(f'{address}/download')
         assert 'attachment; filename="zn-shared-plan.md"' in download.headers['content-disposition']
         assert visitor.request.get(f'{address}/edit').status == 404  # a read link has no editor

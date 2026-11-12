@@ -1,6 +1,11 @@
 from . import billing, links, lists, notes, reports, tags, takedown, versions
 from .accounts import get_account, lock_account
-from .errors import CostChangedError, LinkUnavailableError, NoteConflictError
+from .errors import (
+    CostChangedError,
+    LinkUnavailableError,
+    NoteConflictError,
+    ReportUnavailableError,
+)
 from .lists import (
     DEFAULT_DIRECTIONS,
     DIRECTIONS,
@@ -61,6 +66,7 @@ __all__ = [
     'CostChangedError',
     'Editor',
     'LinkUnavailableError',
+    'ReportUnavailableError',
     'NoteConflictError',
     'archive',
     'check_can_create',

@@ -1029,6 +1029,7 @@ link `LINK_E` and a revoked one.
 | 4 | Open a link. | Every field read-only, again only `Vq3xK9...`; no Save, no Delete. `/admin/notes/sharelink/add/` and `.../<id>/delete/` are 403. |
 | 5 | `/admin/notes/note/<id>/change/` of `Shared note`. | The note's own page does not list its links' codes either (it shows its versions inline). |
 | 6 | After the visitor edited through `LINK_E` (NOTES-24): the list's **Last edited at** for `LINK_E` is set; `LINK_R`'s is empty. | As described. |
+| 7 | Try to read a code back through the query string: `/admin/notes/sharelink/?code__startswith=<first character of LINK_E's code>` (also `?code__exact=...`, `/admin/notes/notereport/?link__code__startswith=...` and `/admin/notes/note/?links__code__startswith=...`). | Each answers Django's "bad lookup" error (HTTP 400, or a redirect to `?e=1`), never a filtered list: no admin page can be used to narrow a code down a character at a time. A harmless lookup such as `?mode__exact=edit` still filters. |
 
 ### ADM-61 Note reports and takedown
 

@@ -3,7 +3,7 @@ read-only or editable; plus its raw Markdown, a download, a QR code, "Duplicate"
 visitor, editing through an editable link and the "report this note" form.
 
 **The code is the capability**, so every answer is `Cache-Control: no-store, private`,
-`Referrer-Policy: same-origin` and `X-Robots-Tag: noindex, nofollow` (and the pages carry a
+`Referrer-Policy: strict-origin` and `X-Robots-Tag: noindex, nofollow` (and the pages carry a
 `noindex` meta). **Every unavailable case** (unknown code, revoked, expired, the note in the Trash,
 locked or taken down, or a `read` link asked for an edit page) renders the same standalone
 `notes/unavailable.html` with status 404: it never says why. These paths are in
@@ -13,7 +13,7 @@ the public date wording; the visitor may have no account at all.
 Rate limits: `NOTES_VIEW_IP` is charged before the lookup on every GET (over it, a plain 429 page);
 saving and ticking a box spend `NOTES_LINK_EDIT_IP` and `NOTES_LINK_EDIT_LINK`, the preview
 `NOTES_LINK_PREVIEW_IP` (204 over it), reporting `NOTES_REPORT_IP` and `NOTES_REPORT_NOTE` (see
-`report_note`), duplicating `NOTES_CREATE_USER`; all after validation.
+`report_note`), duplicating `NOTES_CREATE_USER`; all after validation (a refused request spends no budget).
 """
 
 from urllib.parse import urlencode
@@ -45,6 +45,8 @@ from ..services import (
     Editor,
     LinkUnavailableError,
     NoteConflictError,
+    check_can_create,
+    check_duplicable,
     check_toggle,
     duplicate,
     links,
@@ -80,6 +82,22 @@ def signed_in_user(request: PublicHttpRequest) -> User | None:
     return user if user.is_authenticated and isinstance(user, User) else None
 
 
+SIGNED_IN_NOTICE = (
+    "You're signed in: the note's owner will see your account name next to your changes."
+)
+ANONYMOUS_NOTICE = "Your changes are saved as 'Someone'."
+
+
+def identity_notice(request: PublicHttpRequest, note: Note) -> str:
+    """What the owner's history will say about the person who edits through the link, shown where
+    they act (the editor and the checklist boxes): a signed-in visitor who isn't the owner is
+    recorded by account, anyone else as "Someone". Nothing for the owner (their own edits)."""
+    user = signed_in_user(request)
+    if user is None:
+        return ANONYMOUS_NOTICE
+    return '' if user.pk == note.user_id else SIGNED_IN_NOTICE
+
+
 # -- What every answer shares ------------------------------------------------------------------
 
 
@@ -87,13 +105,16 @@ def private(response: HttpResponse) -> HttpResponse:
     """Mark an answer about one shared note as not cacheable, not to be sent as a referrer and not
     for search engines: the code in the address is the capability.
 
-    The policy is `same-origin`, not `no-referrer`: nothing is sent to another site either way (a
-    link in the note, or the QR code's address, never carries the page's address), but with
-    `no-referrer` a browser sends `Origin: null` on a same-origin form POST (the Fetch spec), which
-    Django's CSRF check refuses, so the page's own plain forms (Duplicate, the report form without
-    JavaScript) would all fail with a 403. Found by the Playwright test."""
+    The policy is `strict-origin`, not `no-referrer`: nothing but the site's origin is ever sent as a
+    `Referer` (never the path, which holds the code: not to another site, and not on a same-site
+    request either, such as a link in the note to `/s/...` or another `/n/...`, whose address nginx
+    would write into its access log), but with `no-referrer` a browser sends `Origin: null` on a
+    same-origin form POST (the Fetch spec), which Django's CSRF check refuses, so the page's own
+    plain forms (Duplicate, the report form without JavaScript) would all fail with a 403. With
+    `strict-origin` the `Origin` header is still the page's own origin, so CSRF keeps working
+    (verified by the Playwright test)."""
     response['Cache-Control'] = 'no-store, private'
-    response['Referrer-Policy'] = 'same-origin'
+    response['Referrer-Policy'] = 'strict-origin'
     response['X-Robots-Tag'] = 'noindex, nofollow'
     return response
 
@@ -158,6 +179,7 @@ def _page_context(
         'reported': reported,
         'report_open': reported or report_form is not None,
         'duplicate_cost': quote_create(user) if user is not None else 0,
+        'identity_notice': identity_notice(request, note) if link.is_editable else '',
     }
     return context
 
@@ -222,6 +244,7 @@ def _edit_values(note: Note) -> dict:
 
 
 def _edit_context(
+    request: PublicHttpRequest,
     link: ShareLink,
     values: dict,
     *,
@@ -240,6 +263,7 @@ def _edit_context(
         'cancel_url': _page_url(link),
         'preview_url': reverse('n:preview', args=[link.code]),
         'title_readonly': True,
+        'identity_notice': identity_notice(request, link.note),
     }
 
 
@@ -259,20 +283,26 @@ def _edit_refusal(
         response['HX-Retarget'] = EDITOR_MSG
         response['HX-Reswap'] = 'innerHTML'
         return private(response)
-    return _edit_page(request, _edit_context(link, values, error_lines=list(lines)), status=422)
+    return _edit_page(
+        request, _edit_context(request, link, values, error_lines=list(lines)), status=422
+    )
 
 
 def _edit_limited(
     request: PublicHttpRequest, link: ShareLink, retarget: str
 ) -> HttpResponse | None:
-    """The 429 when the visitor's address or the link has had too many edits (both charged: one
-    request spends one of each)."""
+    """The 429 when the visitor's address or the link has had too many edits. Both rules are
+    *peeked* first and charged (one hit each) only when both allow the request, so one refused by
+    the link's ceiling doesn't also use up one of the visitor's own."""
+    link_key = str(link.pk)
     for result in (
-        ratelimit.hit_ip(request, 'NOTES_LINK_EDIT_IP'),
-        ratelimit.hit_value(str(link.pk), 'NOTES_LINK_EDIT_LINK'),
+        ratelimit.peek_ip(request, 'NOTES_LINK_EDIT_IP'),
+        ratelimit.peek_value(link_key, 'NOTES_LINK_EDIT_LINK'),
     ):
         if not result.allowed:
             return private(ratelimit.web_response(request, result, retarget=retarget))
+    ratelimit.hit_ip(request, 'NOTES_LINK_EDIT_IP')
+    ratelimit.hit_value(link_key, 'NOTES_LINK_EDIT_LINK')
     return None
 
 
@@ -288,7 +318,7 @@ def shared_edit(request: PublicHttpRequest, code: str) -> HttpResponse:
         return _became_unavailable(request) if request.method == 'POST' else unavailable(request)
     note = link.note
     if request.method == 'GET':
-        return _edit_page(request, _edit_context(link, _edit_values(note)))
+        return _edit_page(request, _edit_context(request, link, _edit_values(note)))
 
     form = NoteForm(request.POST)
     values = {
@@ -321,7 +351,7 @@ def shared_edit(request: PublicHttpRequest, code: str) -> HttpResponse:
         )
     except NoteConflictError as exc:
         conflict, values = conflict_panel(exc, values, compare_title=False)
-        context = _edit_context(link, values, conflict=conflict)
+        context = _edit_context(request, link, values, conflict=conflict)
         if not is_htmx(request):
             return _edit_page(request, context, status=422)
         response = render(request, 'notes/partials/editor_form.html', context, status=422)
@@ -415,8 +445,15 @@ def shared_duplicate(request: PublicHttpRequest, code: str) -> HttpResponse:
         # account is, like everything else a signed-in user does.
         accept = reverse('accounts:terms-accept')
         return private(redirect(f'{accept}?{urlencode({"next": _page_url(link)})}'))
-    cost = quote_create(user)
     back = _page_url(link)
+    note = link.note
+    try:  # validated first, charged after: a refused request spends no budget
+        check_duplicable(note)
+        check_can_create(user, title=note.title, content=note.content)
+    except ValidationError as exc:
+        messages.error(request, ' '.join(exc.messages))
+        return private(redirect(back))
+    cost = quote_create(user)
     if cost and parse_cost(request.POST.get('confirm_cost')) != cost:
         messages.error(
             request,
@@ -506,9 +543,9 @@ def report_note(request: PublicHttpRequest, code: str) -> HttpResponse:
                 reporter_email=form.cleaned_data['reporter_email'],
                 reporter_ip=client_ip(request),
             )
+        except LinkUnavailableError:
+            return _became_unavailable(request)
         except ValidationError as exc:
-            if exc.messages == [reports.UNAVAILABLE_MESSAGE]:
-                return _became_unavailable(request)
             form.add_error(None, exc.messages[0])
         else:
             # Only a report that was actually created counts against the per-note ceiling.

@@ -218,7 +218,7 @@ class TestReadOnlyNotes:
             ('taken_down', 'This note was taken down and cannot be shared.'),
         ],
     )
-    def test_every_change_is_refused(self, user, config, state, text):
+    def test_creating_and_editing_are_refused(self, user, config, state, text):
         note = create_note(user, title='A')
         link = links.create_link(note, mode='read')
         link.note = note
@@ -233,11 +233,60 @@ class TestReadOnlyNotes:
         for call in (
             lambda: links.create_link(fresh, mode='read'),
             lambda: links.update_link(link, label='x'),
-            lambda: links.revoke_link(link),
         ):
             with pytest.raises(ValidationError) as exc:
                 call()
             assert message(exc) == text
+
+    @pytest.mark.parametrize('state', ['trashed', 'locked', 'taken_down'])
+    def test_revoking_is_always_allowed(self, user, config, state):
+        """Revoking only reduces what is exposed: an owner who learns a link leaked can kill it
+        while the note is locked, in the Trash or taken down."""
+        note = create_note(user, title='A')
+        link = links.create_link(note, mode='edit')
+        link.note = note
+        if state == 'trashed':
+            trash(note)
+        elif state == 'locked':
+            type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
+        else:
+            takedown.take_down_note(note, by=make_user(is_staff=True), reason='x')
+        fresh = type(note).objects.select_related('user').get(pk=note.pk)
+        link.note = fresh
+        assert links.revoke_link(link).revoked_at is not None
+        assert ShareLink.objects.get(pk=link.pk).revoked_at is not None
+        assert links.revoke_link(link).revoked_at is not None  # idempotent
+
+    def test_a_takedown_is_reported_before_the_lock(self, user, config):
+        from ..services import require_writable
+
+        note = create_note(user, title='A')
+        takedown.take_down_note(note, by=make_user(is_staff=True), reason='x')
+        fresh = type(note).objects.select_related('user').get(pk=note.pk)
+        fresh.locked_at = timezone.now()
+        with pytest.raises(ValidationError) as exc:
+            require_writable(fresh)
+        assert 'taken down' in message(exc)
+        with pytest.raises(ValidationError) as exc:
+            links.require_shareable(fresh)
+        assert 'taken down' in message(exc)
+
+    def test_check_update_applies_the_cap_to_an_expired_link_made_active_again(self, user, config):
+        note = create_note(user, title='A')
+        config.max_links_per_note = 1
+        config.save()
+        link = links.create_link(note, mode='read')
+        link.note = note
+        ShareLink.objects.filter(pk=link.pk).update(expires_at=timezone.now() - timedelta(1))
+        link.refresh_from_db()
+        link.note = note
+        links.create_link(note, mode='read')  # takes the one active slot
+        later = timezone.localdate() + timedelta(days=5)
+        with pytest.raises(ValidationError):
+            links.check_update(link, expires_on=later)
+        with pytest.raises(ValidationError):
+            links.check_update(link, clear_expiry=True)
+        links.check_update(link, label='still editable')  # no reactivation: no cap involved
 
 
 class TestAvailability:

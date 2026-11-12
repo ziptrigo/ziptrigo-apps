@@ -21,12 +21,13 @@ from ..models import (
     ReportStatus,
     ShareLink,
 )
+from .errors import ReportUnavailableError
 from .links import is_available
 
 #: A report from the same address against the same note inside this window is a repeat
 #: submission (a double click, a reload), not a second, independent report.
 DEDUPE_WINDOW = timedelta(minutes=10)
-UNAVAILABLE_MESSAGE = 'This note is no longer available.'
+UNAVAILABLE_MESSAGE = ReportUnavailableError.MESSAGE
 REPEAT_MESSAGE = 'You already reported this note recently. Thank you.'
 
 
@@ -43,10 +44,10 @@ def create_report(
     The note's row is locked for the checks and the insert, so two reports from one address
     arriving together can't both pass the repeat check.
 
-    Raises `ValidationError` when `reason` isn't one of `ReportReason`, `details` is too long, the
-    link no longer works (revoked, expired, or its note trashed, locked or taken down since the
-    page was served), or this is an obvious repeat (same normalised address, same note, within
-    `DEDUPE_WINDOW`).
+    Raises `ReportUnavailableError` (a `LinkUnavailableError`) when the link no longer works
+    (revoked, expired, or its note trashed, locked or taken down since the page was served), and
+    `ValidationError` when `reason` isn't one of `ReportReason`, `details` is too long, or this is
+    an obvious repeat (same normalised address, same note, within `DEDUPE_WINDOW`).
     """
     if reason not in ReportReason.values:
         raise ValidationError('Choose a reason for the report.')
@@ -57,10 +58,10 @@ def create_report(
         note = Note.objects.select_for_update().filter(pk=link.note_id).first()
         fresh = ShareLink.objects.filter(pk=link.pk).first()
         if note is None or fresh is None:
-            raise ValidationError(UNAVAILABLE_MESSAGE)
+            raise ReportUnavailableError
         fresh.note = note
         if not is_available(fresh):
-            raise ValidationError(UNAVAILABLE_MESSAGE)
+            raise ReportUnavailableError
 
         if reporter_ip:
             # Compared as *normalised* keys (an IPv6 address collapsed to its /64, an IPv4-mapped

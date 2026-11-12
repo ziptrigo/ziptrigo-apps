@@ -93,7 +93,7 @@ class TestThePage:
     def test_the_headers_make_the_code_a_secret(self, visitor, read_link):
         response = visitor.get(public('page', read_link.code))
         assert response['Cache-Control'] == 'no-store, private'
-        assert response['Referrer-Policy'] == 'same-origin'
+        assert response['Referrer-Policy'] == 'strict-origin'
         assert response['X-Robots-Tag'] == 'noindex, nofollow'
         assert '<meta name="robots" content="noindex">' in text(response)
 
@@ -162,7 +162,7 @@ class TestEveryUnavailableCaseIsTheSame:
             assert response.status_code == 404, kind
             assert response.content == reference.content, kind
             assert response['Cache-Control'] == 'no-store, private'
-            assert response['Referrer-Policy'] == 'same-origin'
+            assert response['Referrer-Policy'] == 'strict-origin'
             assert response['X-Robots-Tag'] == 'noindex, nofollow'
         body = text(reference)
         assert "isn't available" in body and 'secret' not in body
@@ -199,7 +199,7 @@ class TestRawAndDownload:
         assert response['Content-Type'] == 'text/plain; charset=utf-8'
         assert response['X-Content-Type-Options'] == 'nosniff'
         assert response.content.decode() == CONTENT
-        assert response['Referrer-Policy'] == 'same-origin'
+        assert response['Referrer-Policy'] == 'strict-origin'
 
     def test_a_script_in_the_markdown_is_never_html(self, visitor, note, read_link):
         Note.objects.filter(pk=note.pk).update(content='<script>alert(1)</script>')
@@ -341,7 +341,8 @@ class TestAttribution:
         edit_post(visitor, edit_link, note.version, 'by someone')
         page = text(web.get(reverse('notes:history', args=[note.pk])))
         assert 'Someone via a shared link' in page and 'You' in page
-        assert 'Someone' not in text(visitor.get(public('page', edit_link.code)))
+        # The visitor is told how they will be recorded, but never sees the history's wording or who edited.
+        assert 'Someone via a shared link' not in text(visitor.get(public('page', edit_link.code)))
 
     def test_two_anonymous_editors_on_different_links_never_merge(self, visitor, note, edit_link):
         second = links.create_link(note, mode='edit')
@@ -362,6 +363,45 @@ class TestAttribution:
         original = self.versions(note)[0]
         restore_version(Note.objects.select_related('user').get(pk=note.pk), original)
         assert Note.objects.get(pk=note.pk).content == CONTENT
+
+
+class TestWhoTheOwnerWillSee:
+    """The visitor is told, where they act, how an edit is recorded (a signed-in account is shown
+    to the owner by name)."""
+
+    SIGNED_IN = (
+        "You're signed in: the note's owner will see your account name next to your changes."
+    )
+    ANONYMOUS = 'Your changes are saved as &#x27;Someone&#x27;.'
+
+    @pytest.fixture
+    def member(self, other_user):
+        client = Client()
+        client.force_login(other_user)
+        return client
+
+    def test_an_anonymous_visitor_is_told_they_are_recorded_as_someone(self, visitor, edit_link):
+        for name in ('page', 'edit'):
+            body = text(visitor.get(public(name, edit_link.code)))
+            assert self.ANONYMOUS in body and "You're signed in" not in body
+
+    def test_a_signed_in_visitor_is_told_the_owner_sees_their_account_name(self, member, edit_link):
+        for name in ('page', 'edit'):
+            body = text(member.get(public(name, edit_link.code)))
+            assert self.SIGNED_IN.replace("'", '&#x27;') in body and 'Someone' not in body
+
+    def test_the_owner_is_told_nothing(self, web, edit_link):
+        for name in ('page', 'edit'):
+            body = text(web.get(public(name, edit_link.code)))
+            assert 'identity-notice' not in body
+
+    def test_a_read_only_link_has_nothing_to_say(self, visitor, member, read_link):
+        for client in (visitor, member):
+            assert 'identity-notice' not in text(client.get(public('page', read_link.code)))
+
+    def test_the_notice_survives_a_refused_save(self, member, edit_link):
+        refused = member.post(public('edit', edit_link.code), {'content': 'x'})
+        assert refused.status_code == 422 and 'identity-notice' in text(refused)
 
 
 class TestTheOwnersNotice:
@@ -469,7 +509,7 @@ class TestRateLimits:
         blocked = visitor.get(public('page', read_link.code))
         assert blocked.status_code == 429 and blocked['Retry-After'] == '20'
         assert blocked['Cache-Control'] == 'no-store, private'
-        assert blocked['Referrer-Policy'] == 'same-origin'
+        assert blocked['Referrer-Policy'] == 'strict-origin'
         assert visitor.get(public('raw', read_link.code)).status_code == 429
         assert visitor.get(public('download', read_link.code)).status_code == 429
         assert visitor.get(public('edit', read_link.code)).status_code == 429
@@ -507,6 +547,22 @@ class TestRateLimits:
             bad = visitor.post(public('edit', edit_link.code), {'content': 'x'}, **HTMX)
             assert bad.status_code == 422
         assert edit_post(visitor, edit_link, 1, 'fine').status_code == 200
+
+    def test_a_request_the_link_refuses_does_not_spend_the_visitors_own_budget(
+        self, note, edit_link, settings
+    ):
+        """Both rules are peeked first and charged only when both allow: the link's ceiling being
+        spent must not also use up one of this address' saves."""
+        from apps.core import ratelimit
+
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'NOTES_LINK_EDIT_LINK': (1, 3600)}
+        first = Client(REMOTE_ADDR='198.51.100.1')
+        assert edit_post(first, edit_link, 1, 'one').status_code == 200
+        second = Client(REMOTE_ADDR='198.51.100.2')
+        for _ in range(3):
+            assert edit_post(second, edit_link, 2, 'two').status_code == 429
+        assert ratelimit.peek('198.51.100.2', 'NOTES_LINK_EDIT_IP').remaining == 2
+        assert ratelimit.peek('198.51.100.1', 'NOTES_LINK_EDIT_IP').remaining == 1
 
     def test_the_preview_answers_204_over_its_limit(self, visitor, edit_link):
         assert visitor.post(public('preview', edit_link.code), {'content': 'a'}).status_code == 200
@@ -603,6 +659,25 @@ class TestDuplicate:
         response = client.post(public('duplicate', read_link.code))
         assert response.status_code == 302 and response['Location'].startswith('/account/terms/')
         assert not Note.objects.filter(user=other_user).exists()
+
+    def test_a_refused_copy_spends_no_budget(
+        self, note, read_link, other_user, config, settings, ratelimit_clock
+    ):
+        """Too many notes (or a taken-down note) is told before `NOTES_CREATE_USER` is charged."""
+        from apps.core import ratelimit
+
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'NOTES_CREATE_USER': (1, 60)}
+        config.max_notes_per_user = 1
+        config.save()
+        create_note(other_user, title='Mine')
+        client = Client()
+        client.force_login(other_user)
+        for _ in range(3):
+            response = client.post(public('duplicate', read_link.code), follow=True)
+            assert response.status_code == 200
+        assert Note.objects.filter(user=other_user).count() == 1
+        assert ratelimit.peek(str(other_user.pk), 'NOTES_CREATE_USER').remaining == 1
 
     def test_duplicates_are_limited_per_user(
         self, note, read_link, other_user, settings, ratelimit_clock

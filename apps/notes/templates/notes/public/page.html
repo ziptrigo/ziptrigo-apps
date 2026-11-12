@@ -6,7 +6,7 @@
 {% block content %}
 {% comment %} A shared note, for anyone who has the link. Shows nothing about the owner or any editor. Needs `note`, `link`, `tags`, `checklist_url`
    (set for an editable link), `qr_data_uri`, `page_url`, `duplicate_cost` (0 for a visitor without a session), `report_form`,
-   `reported` and `report_open`. {% endcomment %}
+   `reported`, `report_open` and `identity_notice` (for an editable link: who the owner will see an edit as). {% endcomment %}
 <div x-data="confirmModal" class="container mx-auto px-4 py-8 max-w-3xl">
     <div class="mb-2">
         <h1 class="break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ note.title }}</h1>
@@ -54,6 +54,7 @@
         {% endif %}
     </div>
 
+    {% if identity_notice %}<p id="identity-notice" class="mb-3 text-sm text-gray-600 dark:text-gray-400"><i class="fas fa-user mr-1" aria-hidden="true"></i>This note can be changed through this link, with the boxes below or Edit. {{ identity_notice }}</p>{% endif %}
     <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
         {% include 'notes/partials/note_body.html' %}
     </div>

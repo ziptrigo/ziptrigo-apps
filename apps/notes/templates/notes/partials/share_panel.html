@@ -1,8 +1,9 @@
 {% load datetime_format local_time %}
 {% comment %} The share panel on the note page (htmx: fetched by the Share button, re-rendered by every action; the target is
    `#share-panel`, swapped as innerHTML). Needs `note`, `links` (`services.links.list_links`: each with `url`, `state`, `expiry_value`,
-   `expires_field_id` and, when active, `qr`), `active_count`, `max_links`, `can_share` and `has_active_link`. A refusal is a 422 into `#share-msg`. {% endcomment %}
-<span id="share-indicator" hx-swap-oob="true">{% if has_active_link %}<span class="inline-flex items-center gap-1.5 rounded-full bg-sage-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"><i class="fas fa-link text-[10px]" aria-hidden="true"></i>Shared</span>{% endif %}</span>
+   `expires_field_id` and, when active on a note that isn't read-only, `qr`), `active_count`, `max_links`, `can_share` and `links_work`
+   (`services.links.share_flags`). On a read-only note (locked, in the Trash, taken down) only Revoke is offered. A refusal is a 422 into `#share-msg`. {% endcomment %}
+<span id="share-indicator" hx-swap-oob="true">{% if links_work %}<span class="inline-flex items-center gap-1.5 rounded-full bg-sage-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"><i class="fas fa-link text-[10px]" aria-hidden="true"></i>Shared</span>{% endif %}</span>
 <section aria-labelledby="share-heading" x-data
          class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-6">
     <div class="mb-3 flex items-center justify-between gap-3">
@@ -35,8 +36,9 @@
             <i class="fas fa-link mr-2" aria-hidden="true"></i>Create link</button>
     </form>
     {% else %}
-    <p class="mb-4 rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-        This note can't be shared right now, and its links don't work while that is so.</p>
+    <p id="share-unavailable" class="mb-4 rounded-xl border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+        {% if note.is_taken_down %}This note was taken down; its links no longer work.{% else %}This note can't be shared right now, and its links don't work while that is so.{% endif %}
+        {% if has_active_link %}You can still revoke them.{% endif %}</p>
     {% endif %}
 
     {% if links %}
@@ -51,7 +53,7 @@
             </div>
             <div x-data="copyText" class="mb-2 flex flex-wrap items-center gap-2">
                 <code x-ref="text" class="min-w-0 break-all rounded-lg bg-gray-50 dark:bg-gray-900 px-2 py-1 font-mono text-xs text-gray-700 dark:text-gray-300">{{ link.url }}</code>
-                {% if link.state == 'active' %}
+                {% if link.state == 'active' and can_share %}
                 <button type="button" @click="copy()"
                         class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                     <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
@@ -62,14 +64,16 @@
                 {% if link.state == 'revoked' %}&middot; Revoked {% local_time link.revoked_at 'short' %}
                 {% elif link.expires_at %}&middot; {% if link.state == 'expired' %}Expired{% else %}Expires{% endif %} {{ link.expires_at|fdate }}{% endif %}
                 {% if link.last_edited_at %}&middot; Last edited through it {% local_time link.last_edited_at 'short' %}{% endif %}</p>
-            {% if link.state != 'revoked' and can_share %}
+            {% if link.state != 'revoked' %}
             <div class="flex flex-wrap items-center gap-2">
+                {% if can_share %}
                 {% if link.state == 'active' %}
                 {% include 'notes/partials/qr_popup.html' with qr_id=link.pk qr_uri=link.qr qr_url=link.url %}
                 {% endif %}
                 <button type="button" @click="edit = !edit" :aria-expanded="edit" aria-controls="link-edit-{{ link.pk }}"
                         class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                     <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit</button>
+                {% endif %}
                 <button type="button" @click="show($el)"
                         data-url="{% url 'notes:share-revoke' note.pk link.pk %}" data-title="Revoke this link?"
                         data-body="Anyone who has it can no longer open the note through it. This can't be undone: you can make a new link."
@@ -77,6 +81,7 @@
                         class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                     <i class="fas fa-ban mr-2" aria-hidden="true"></i>Revoke</button>
             </div>
+            {% if can_share %}
             <form id="link-edit-{{ link.pk }}" x-show="edit" style="display: none" method="post" action="{% url 'notes:share-edit' note.pk link.pk %}"
                   hx-post="{% url 'notes:share-edit' note.pk link.pk %}" hx-target="#share-panel" hx-swap="innerHTML" hx-disabled-elt="find button[type='submit']"
                   class="mt-3 space-y-3 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
@@ -95,6 +100,7 @@
                 <button type="submit"
                         class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save link</button>
             </form>
+            {% endif %}
             {% endif %}
         </li>
         {% endfor %}

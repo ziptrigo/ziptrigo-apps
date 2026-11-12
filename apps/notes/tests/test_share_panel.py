@@ -79,14 +79,40 @@ class TestOpening:
         assert 'HX-Redirect' in client.get(url('share', note.pk), **HTMX)
         assert client.post(url('share-create', note.pk), {'mode': 'read'}).status_code == 302
 
-    def test_a_note_in_the_trash_has_no_panel(self, web, note):
-        trash(note)
-        assert web.get(url('share', note.pk), **HTMX).status_code == 404
-
-    def test_a_locked_notes_panel_offers_no_form(self, web, note):
+    def test_a_locked_notes_panel_offers_no_form_only_revoke(self, web, note):
+        link = links.create_link(note, mode='edit')
         type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
         body = text(web.get(url('share', note.pk), **HTMX))
         assert "can't be shared right now" in body and 'share-form' not in body
+        assert 'You can still revoke them.' in body
+        assert url('share-revoke', note.pk, link.pk) in body
+        assert url('share-edit', note.pk, link.pk) not in body
+        assert 'data-qr-image' not in body and 'Copy link' not in body  # it doesn't work now
+        assert 'fa-link text-[10px]' not in body  # no "Shared" chip
+
+    def test_a_note_in_the_trash_has_a_panel_to_revoke_in(self, web, note):
+        link = links.create_link(note, mode='edit')
+        trash(note)
+        page = text(web.get(url('note', note.pk)))
+        assert f'hx-get="{url("share", note.pk)}"' in page  # the Share button is there
+        assert 'fa-link text-[10px]' not in page  # but the links don't work: no "Shared" chip
+        body = text(web.get(url('share', note.pk), **HTMX))
+        assert 'share-form' not in body and url('share-revoke', note.pk, link.pk) in body
+
+    def test_a_taken_down_notes_panel_says_its_links_are_dead_for_good(self, web, note):
+        from ..services import takedown
+        from .factories import make_user
+
+        link = links.create_link(note, mode='read')
+        takedown.take_down_note(note, by=make_user(is_staff=True), reason='x')
+        body = text(web.get(url('share', note.pk), **HTMX))
+        assert 'This note was taken down; its links no longer work.' in body
+        assert "can't be shared right now" not in body
+        assert url('share-revoke', note.pk, link.pk) in body
+
+    def test_a_read_only_note_without_an_active_link_has_no_share_button(self, web, note):
+        type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
+        assert f'hx-get="{url("share", note.pk)}"' not in text(web.get(url('note', note.pk)))
 
 
 class TestCreating:
@@ -145,6 +171,60 @@ class TestCreating:
         response = web.post(url('share-create', note.pk), {'mode': 'read'}, **HTMX)
         assert response.status_code == 422
         assert 'This note is locked until its renewal is paid.' in text(response)
+
+
+class TestRevokingOnAReadOnlyNote:
+    """Revoking is always the owner's: it only reduces what is exposed."""
+
+    @pytest.fixture
+    def link(self, note):
+        return links.create_link(note, mode='edit', label='leaked')
+
+    @pytest.mark.parametrize('state', ['locked', 'trashed', 'taken_down'])
+    def test_revoke_works(self, web, note, link, state):
+        from ..services import takedown
+        from .factories import make_user
+
+        if state == 'locked':
+            type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
+        elif state == 'trashed':
+            trash(note)
+        else:
+            takedown.take_down_note(note, by=make_user(is_staff=True), reason='x')
+        response = web.post(url('share-revoke', note.pk, link.pk), **HTMX)
+        assert response.status_code == 200
+        link.refresh_from_db()
+        assert link.revoked_at is not None
+        plain = web.post(url('share-revoke', note.pk, link.pk), follow=True)
+        assert plain.status_code == 200 and 'Link revoked.' in text(plain)
+
+    def test_create_and_edit_still_refuse(self, web, note, link):
+        type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
+        assert web.post(url('share-create', note.pk), {'mode': 'read'}, **HTMX).status_code == 422
+        edit = web.post(url('share-edit', note.pk, link.pk), {'label': 'x'}, **HTMX)
+        assert edit.status_code == 422
+
+    def test_restoring_from_the_trash_says_how_many_links_work_again(self, web, note, link):
+        links.create_link(note, mode='read')
+        trash(note)
+        response = web.post(url('restore', note.pk), follow=True)
+        assert 'Note restored. 2 share links work again.' in text(response)
+
+    def test_one_link_is_singular_and_none_says_nothing(self, web, note, link):
+        trash(note)
+        assert 'Note restored. 1 share link works again.' in text(
+            web.post(url('restore', note.pk), follow=True)
+        )
+        trash(note)
+        links.revoke_link(link)
+        restored = text(web.post(url('restore', note.pk), follow=True))
+        assert 'Note restored.' in restored and 'work again' not in restored
+
+    def test_an_expired_or_revoked_link_is_not_counted(self, web, note, link):
+        make_link(note, expires_at=timezone.now() - timedelta(days=1))
+        trash(note)
+        links.revoke_link(link)
+        assert 'work again' not in text(web.post(url('restore', note.pk), follow=True))
 
 
 class TestEditingAndRevoking:
@@ -224,6 +304,12 @@ class TestTheShareIcon:
     def test_an_expired_link_shows_no_icon(self, web, note):
         make_link(note, expires_at=timezone.now() - timedelta(minutes=1))
         assert 'data-shared' not in text(web.get(url('list')))
+
+    def test_no_icon_while_the_note_is_read_only_and_its_links_dont_work(self, web, note):
+        links.create_link(note, mode='read')
+        type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
+        assert 'data-shared' not in text(web.get(url('list')))
+        assert 'fa-link text-[10px]' not in text(web.get(url('note', note.pk)))
 
     def test_the_list_does_not_query_per_row(self, web, funded_user, django_assert_max_num_queries):
         for number in range(6):

@@ -10,7 +10,15 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ..models import NoteReport, ReportStatus, ShareLink
-from ..services import create_note, links, reports, takedown, trash
+from ..services import (
+    LinkUnavailableError,
+    ReportUnavailableError,
+    create_note,
+    links,
+    reports,
+    takedown,
+    trash,
+)
 from .factories import make_report, make_user
 
 pytestmark = pytest.mark.django_db
@@ -91,9 +99,17 @@ class TestService:
             type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
         else:
             takedown.take_down_note(note, by=make_user(is_staff=True), reason='x')
-        with pytest.raises(ValidationError) as exc:
+        with pytest.raises(LinkUnavailableError) as exc:  # a typed error: the view never reads text
             reports.create_report(link, reason='spam')
+        assert isinstance(exc.value, ReportUnavailableError)
         assert exc.value.messages == ['This note is no longer available.']
+        assert NoteReport.objects.count() == 0
+
+    def test_a_repeat_is_not_the_unavailable_error(self, link):
+        reports.create_report(fresh(link), reason='spam', reporter_ip='203.0.113.7')
+        with pytest.raises(ValidationError) as exc:
+            reports.create_report(fresh(link), reason='spam', reporter_ip='203.0.113.7')
+        assert not isinstance(exc.value, LinkUnavailableError)
 
     def test_dismiss_is_conditional(self, link, note):
         report = make_report(note, link)

@@ -9,7 +9,7 @@
 <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
     <h1 class="min-w-0 break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ note.title }}</h1>
     {% if note.is_archived %}<span class="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300"><i class="fas fa-box-archive text-[10px]" aria-hidden="true"></i>Archived</span>{% endif %}
-    <span id="share-indicator">{% if has_active_link %}<span class="inline-flex items-center gap-1.5 rounded-full bg-sage-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"><i class="fas fa-link text-[10px]" aria-hidden="true"></i>Shared</span>{% endif %}</span>
+    <span id="share-indicator">{% if links_work %}<span class="inline-flex items-center gap-1.5 rounded-full bg-sage-100 dark:bg-gray-700 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300"><i class="fas fa-link text-[10px]" aria-hidden="true"></i>Shared</span>{% endif %}</span>
 </div>
 <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">Updated {% local_time note.updated_at %}
     <span data-renewal class="ml-2">&middot;
@@ -90,11 +90,7 @@
        class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
         <i class="fas fa-pen mr-2" aria-hidden="true"></i>Edit</a>
     {% endif %}
-    {% if can_share %}
-    <a href="{% url 'notes:share' note.pk %}" hx-get="{% url 'notes:share' note.pk %}" hx-target="#share-panel" hx-swap="innerHTML"
-       class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-        <i class="fas fa-share-nodes mr-2" aria-hidden="true"></i>Share</a>
-    {% endif %}
+    {% if show_share %}{% include 'notes/partials/share_button.html' %}{% endif %}
     <a href="{% url 'notes:history' note.pk %}"
        class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
         <i class="fas fa-clock-rotate-left mr-2" aria-hidden="true"></i>History</a>
@@ -124,6 +120,7 @@
         <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
         <span x-text="copied ? 'Copied' : 'Copy'">Copy</span></button>
     {% if note.is_trashed %}
+    {% if show_share %}{% include 'notes/partials/share_button.html' %}{% endif %}
     {% if restore_cost %}
     <button type="button" @click="show($el)"
             data-url="{% url 'notes:restore' note.pk %}" data-tone="primary" data-label="Restore for {{ restore_cost }} credit{{ restore_cost|pluralize }}"

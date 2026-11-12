@@ -5762,8 +5762,10 @@ API, the `inv notes` CLI and `docs/openapi.yml` (6). Where a page will get a sea
   paid note never becomes free later; nothing is ever refunded.
 - **Saving and versions.** `save_note(note, *, editor, title=None, content=None, base_version, link=None,
   coalesce=True)` is the one function that changes title or content (for the owner and for link editors):
-  under the locks it refuses a read-only note (`This note is in the Trash.`, `This note is locked
-  until its renewal is paid.`, `This note was taken down and can no longer be changed.`), validates, returns without writing when nothing changed (even with a stale
+  under the locks it refuses a read-only note (`This note is in the Trash.`, `This note was taken down and can
+  no longer be changed.`, `This note is locked until its renewal is paid.`: in that order, a takedown before the
+  lock, since paying a renewal will never make a taken-down note editable; `require_writable` and the note
+  page's flash for the editor share it), validates, returns without writing when nothing changed (even with a stale
   `base_version`), raises **`NoteConflictError`** (a `ValidationError` carrying `current_version`,
   `current_title`, `current_content`; message `This note was changed by someone else while you were
   editing.`) when `base_version != note.version`, else writes, bumps `version`, sets `updated_at` and records
@@ -5972,36 +5974,55 @@ API, the `inv notes` CLI and `docs/openapi.yml` (6). Where a page will get a sea
     date a link already expires on is no change, so an expired link's label can be edited.
   - **Services** (`links`): `create_link(note, *, mode, label='', expires_on=None)`, `update_link(link, *, mode,
     label, expires_on=UNCHANGED, clear_expiry=False)` (`None` leaves a field; `UNCHANGED` is a sentinel since
-    `None` means "no expiry"), `revoke_link(link)`, all refused on a read-only note (`require_shareable`: the
-    Trash and locked messages, `This note was taken down and cannot be shared.`) and all in the usual lock
-    order: the owner's `NotesAccount` row, the note, then the link. `check_create` / `check_update` make the
-    same refusals with no locks and no writes (the views run them before charging a rate limit).
+    `None` means "no expiry"), `revoke_link(link)`. Creating and changing a link are refused on a read-only note
+    (`require_shareable`: the Trash and locked messages, `This note was taken down and cannot be shared.`;
+    taken down before locked). **Revoking is always allowed, whatever the note's state** (locked, in the Trash,
+    taken down): it only reduces what is exposed, so an owner who learns a link leaked can kill it while the
+    note is read-only. All in the usual lock order: the owner's `NotesAccount` row, the note, then the link. `check_create` / `check_update` make the
+    same refusals with no locks and no writes (the views run them before charging a rate limit;
+    `check_update` also applies the cap when an expired link would become active again).
     `get_available(code)` returns the link with its note and owner loaded or `None` for **every** reason
     alike; `list_links(note)` (active first, then revoked and expired, each with `url`, `state`,
-    `expiry_value`), `with_active_link_flag(queryset)` (one `Exists` annotation, no query per row, for the list's
+    `expiry_value`), `share_flags(note, has_active)` (`can_share`, `links_work`, `show_share`, see below),
+    `with_active_link_flag(queryset)` (one `Exists` annotation, no query per row, for the list's
     share icon), `link_url(link)` (`BASE_URL` + `/n/<code>`, never read from a request) and `qr_data_uri(url)`
     (`apps.core.services.qr_image.render_png` as a `data:` PNG, cached per address, stored nowhere).
   - **The owner's panel** (`views/links.py`, `partials/share_panel.html`): the note page's **Share** button
-    (hidden while the note is read-only) fetches `GET /notes/<id>/share/` into `#share-panel` (`notes:share`; a
+    (hidden while the note is read-only **unless it still has an active link**, `show_share`, so the owner can
+    revoke it: also for a note in the Trash) fetches `GET /notes/<id>/share/` into `#share-panel` (`notes:share`; a
     direct GET redirects to `<note>?share=1`, which opens the panel on load), `POST share/new/` (`share-create`),
     `POST share/<link>/edit/` (`share-edit`: a field missing from the POST is left alone, a posted empty
     `expires_on` removes the expiry) and `POST share/<link>/revoke/` (`share-revoke`, the shared confirmation
     modal, a plain POST: a flash and the note page with the panel open). Each htmx action answers the panel
-    again (and the "Shared" indicator out of band); a refusal is a 422 into `#share-msg`. The panel lists links
+    again (and the "Shared" indicator out of band); a refusal is a 422 into `#share-msg`. **On a read-only
+    note** (locked, in the Trash, taken down) the panel has no create form, Edit, Copy or QR code, only the list
+    with a **Revoke** button per link and a line saying why: `This note can't be shared right now, and its links
+    don't work while that is so. You can still revoke them.`, or, for a taken-down note, `This note was taken
+    down; its links no longer work.` The panel lists links
     active first, then revoked/expired greyed with their state, each with its address (shared `copyText`), a mode
     pill, label, expiry (core date picker), a **QR code** popup (`partials/qr_popup.html`, the file transfer
     download page's, self-contained; one per active link) and Edit / Revoke; the create form has the mode
     radios (Read-only by default; Editable says "Anyone with this link can change the note's content."), an
     optional label and expiry. Changes spend `NOTES_EDIT_USER`, validated first and charged after; another
-    user's note or link is a 404. A note with an active link shows a **Shared** pill on its page and a link
-    icon on its list row.
+    user's note or link is a 404. A note with an active link **that works** (`links_work`: not locked, in the
+    Trash or taken down) shows a **Shared** pill on its page and a link icon on its list row; a read-only note
+    shows neither. **Restoring a note** from the Trash (the web restore view; its renewal may also unlock it)
+    reactivates the links the owner made before, so the flash says `Note restored. N share link(s) work
+    again.` (singular for one) when any are active and now work; the automatic unlock after a renewal has no
+    notice of its own.
   - **The public pages** (`public_urls.py`, `app_name = 'n'`, root-mounted; `/n/` is in
     `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`, so they render in UTC and the public wording and are never
     terms-gated). Every answer is `Cache-Control: no-store, private`, `X-Robots-Tag: noindex, nofollow` and
-    `Referrer-Policy: same-origin` (**deviation from the plan's `no-referrer`**: with `no-referrer` browsers send
+    `Referrer-Policy: strict-origin` (**deviation from the plan's `no-referrer`**: with `no-referrer` browsers send
     `Origin: null` on a same-origin form POST (Fetch spec) and Django's CSRF check refuses it with a 403, so
-    the page's plain forms would all fail -- found by the Playwright test; `same-origin` sends nothing to
-    another site either), and the pages carry a `noindex` meta. **Every unavailable case** (unknown or
+    the page's plain forms would all fail -- found by the Playwright test; `strict-origin` sends only the
+    origin as a `Referer`, never the path that holds the code, not to another site and not on a same-site
+    request either (a link in the note to `/s/...`, `/go/...` or another `/n/...`), while `Origin` stays the
+    page's own and CSRF keeps working. `same-origin` was tried first and sent the full URL to same-site
+    requests), and the pages carry a `noindex` meta. **Codes appear in access logs**: every `/n/<code>`
+    request writes its code into gunicorn's and nginx's access logs, and Django's `django.request` ERROR log
+    does the same on a 500, as `/t/<slug>` and `/s/<code>` already do (nothing here masks them; a log filter
+    that cuts the path to its first 6 characters, the way the admin shows it, would, if it ever matters). **Every unavailable case** (unknown or
     over-long code, revoked, expired, the note in the Trash, locked or taken down, or a `read` link asked
     for an edit page) is the same **standalone** `notes/unavailable.html` rendered from no context (404; every
     case byte for byte identical, a test pins it); an htmx POST that finds its link gone gets a 204 with
@@ -6013,7 +6034,11 @@ API, the `inv notes` CLI and `docs/openapi.yml` (6). Where a page will get a sea
     `GET|POST /edit`, `POST /preview`, `POST /checklist` (edit links only), `POST /duplicate`, `POST /report`.
     `NOTES_VIEW_IP` (120/min per IP) is charged **before** the lookup on every GET (made-up codes spend it
     too); over it a plain 429 page. POSTs are CSRF-protected (the page sets the cookie for a visitor with no
-    session; the flash after a save is kept in the message cookie). nginx's coarse per-IP zone counts `/n/`
+    session; the flash after a save is kept in the message cookie). **The visitor is told how an edit is
+    recorded**, where they act (the editor and, on an editable link's page, above the checklist boxes:
+    `identity_notice`): a signed-in visitor who isn't the owner sees `You're signed in: the note's owner will
+    see your account name next to your changes.`, one who isn't signed in `Your changes are saved as
+    'Someone'.`, the owner and a `read` link nothing. nginx's coarse per-IP zone counts `/n/`
     in the main zone (the infra repo; nothing changed there).
   - **Editing through an editable link.** `/n/<code>/edit` is the editor of the owner's pages with the title
     shown read-only (`title_readonly`, `preview_url` in `partials/editor_form.html`); a POST saves the
@@ -6027,14 +6052,23 @@ API, the `inv notes` CLI and `docs/openapi.yml` (6). Where a page will get a sea
     raised): `delete_for_key(owner, 'note_edited:<note id>')` then `notify(... 'Your note "<title cut to 60>" was
     edited through a shared link', url the note page)`, so a burst of edits is one notice; **no email**; none
     for an account that can't sign in. A save that changes nothing makes no version, no notice and no
-    `last_edited_at`. Limits (both charged after validation, on save and on a ticked box): `NOTES_LINK_EDIT_IP`
-    (30 per 10 minutes per IP) and `NOTES_LINK_EDIT_LINK` (120 per hour per link, across every IP);
+    `last_edited_at`. Limits (charged after validation, on save and on a ticked box): `NOTES_LINK_EDIT_IP`
+    (30 per 10 minutes per IP) and `NOTES_LINK_EDIT_LINK` (120 per hour per link, across every IP), **both
+    peeked first and hit only when both allow** (`ratelimit.peek_ip` is new in `core`), so a request the
+    link's ceiling refuses doesn't also spend one of the visitor's;
     the preview has `NOTES_LINK_PREVIEW_IP` (60/min, 204 over it).
+  - **Accepted: anonymous editors of one link share a version.** Version coalescing keys on the editor kind,
+    the account and the link, so two *anonymous* people editing through the same link within
+    `VERSION_COALESCE` (10 minutes) are one editor to it and merge into one version (the version is only
+    overwritten while it still holds exactly the text before the save, so nothing but the first person's own
+    intermediate text is lost from the history). Keying on something per visitor (a hashed session key) is the
+    fix if that ever matters.
   - **Duplicate for a visitor.** `POST /n/<code>/duplicate`: without a session a redirect to sign in with
     `next=/n/<code>`; a signed-in visitor who has yet to accept the current terms is sent to the accept page
     (the shared pages are never gated, making a note in an account is -- a small addition to the plan); else
-    `duplicate(note, user, keep_title=True)` (title and content, no tags, no links, no history), free while a
-    slot is open, else the creation price **confirmed first** (the shared modal, `confirm_cost`; a missing,
+    `duplicate(note, user, keep_title=True)` (title and content, no tags, no links, no history; `check_duplicable`
+    and `check_can_create` run **before** `NOTES_CREATE_USER` is charged, so a refused copy spends no budget),
+    free while a slot is open, else the creation price **confirmed first** (the shared modal, `confirm_cost`; a missing,
     wrong or changed cost is a flash and nothing is charged; too few credits a flash with a Top up link),
     `NOTES_CREATE_USER`, then a redirect to the new note. A taken-down note can't be copied (`This note was
     taken down and cannot be copied.`, also for the owner: `services.check_duplicable`, read afresh).
@@ -6046,7 +6080,8 @@ API, the `inv notes` CLI and `docs/openapi.yml` (6). Where a page will get a sea
     `NOTES_REPORT_NOTE` (20/hour per note) is *peeked* and **hit only once a report was created**; a repeat from
     the same **normalised** IP (an IPv6 address as its /64) against the same note within 10 minutes is a form
     error; the note's row is locked for the checks and the insert; `HX-Refresh` when the link stopped
-    working. htmx gets the report box back (a 422 with the errors, or the thank-you), a plain POST the whole
+    working (`create_report` raises the typed `ReportUnavailableError`, a `LinkUnavailableError`, which the view
+    catches: it never compares message text). htmx gets the report box back (a 422 with the errors, or the thank-you), a plain POST the whole
     page in the same state.
   - **Takedown** (`services/takedown.take_down_note(note, *, by, reason, internal_note='')`, admin only, **final:
     there is no release**): one conditional `UPDATE ... WHERE taken_down_at IS NULL` setting the four columns
@@ -6057,7 +6092,10 @@ API, the `inv notes` CLI and `docs/openapi.yml` (6). Where a page will get a sea
     renewing like any note. **No email** to the owner and no notification.
   - **Admin** (`admin.py`): **`ShareLinkAdmin`** (read-only; lists the note, owner, mode, state and dates and
     **shows only the first 6 characters of a code**, `abc123...`: the code is the capability, so it is in no
-    list, detail page or search); **`NoteReportAdmin`** (read-only list; filters status, reason, date; a link to
+    list, detail page or search, **and in no query-string lookup**: Django accepts any lookup on a model's own
+    fields, so `?code__startswith=Ab` would narrow a full code down a character at a time, and an editable
+    link's code is a write capability. `ReadOnlyModelAdmin.lookup_allowed`, the base of every Notes admin,
+    refuses any lookup with a `code` part, on the model or through a relation, with Django's usual 400); **`NoteReportAdmin`** (read-only list; filters status, reason, date; a link to
     the note; actions **Dismiss selected report(s)** and **Take down the reported note(s)**); **Take down** on
     `NoteAdmin`. Take down is two-step (`admin/notes/takedown_confirm.html`, copied from Short URLs': a required
     **reason** the owner sees, a staff-only **internal note**, no "notify" box), several reports of one note
@@ -6080,7 +6118,8 @@ API, the `inv notes` CLI and `docs/openapi.yml` (6). Where a page will get a sea
   icon), `test_public_pages.py` (every unavailable case identical, headers, raw and download, a read link
   cannot edit, content-only edits, attribution for owner / user / anonymous, conflicts, the coalesced
   notice, the checklist, the preview, rate limits, Duplicate with and without a session and a cost),
-  `test_reports.py`, `test_takedown.py`, `test_admin.py` and the link cases of `test_versions.py`.
+  `test_reports.py`, `test_takedown.py`, `test_admin.py` (including the refused `code` lookups) and the link
+  cases of `test_versions.py`.
   Playwright `tests_e2e/test_notes.py` (a Python block and a table with live preview and colours, ticking a
   box, keyboard reorder, archive, Trash, restore, the conflict panel) and `tests_e2e/test_notes_sharing.py`
   (an editable link edited from a second, anonymous browser context, the owner's notice, "Someone via a

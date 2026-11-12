@@ -241,7 +241,7 @@ confirmed first. Trashing a free note frees its slot; a paid note never becomes 
 | 1 | Row menu of `Charlie` > **Move to trash**. | **Note moved to the Trash.** on `/notes/`; Charlie is gone from the list. |
 | 2 | Open `/notes/trash/`. | Charlie's row: "deleted in 30 days" (muted), a **Restore** button and a trash icon button. No drag handle, no sort bar, no tag row. |
 | 3 | Open Charlie's page. | Red banner **This note is in the Trash.**; the buttons **Download**, **Copy**, **Restore**, **Delete forever** only (no Edit, History is also hidden, no tags popover). Its checkboxes (if any) are disabled. |
-| 4 | Click **Restore**. | **Note restored.**; the note page without the banner. |
+| 4 | Click **Restore**. | **Note restored.**; the note page without the banner. (A note with active share links says so: NOTES-21 step 16.) |
 | 5 | Trash it again; on the Trash page click the trash icon. | A dialog `Delete forever`, "Are you sure you want to delete Charlie forever? This can't be undone." |
 | 6 | Confirm. | **Note deleted for good.** and back on `/notes/trash/`, Charlie gone; opening its old URL is a 404. |
 | 7 | Open the URL of a note that is **not** in the Trash with `/delete/` appended through a form POST (devtools). | A 404 (only a trashed note can be deleted forever). |
@@ -422,7 +422,10 @@ private window. Record `LINK_R` and `LINK_E` (the addresses) as you go.
 | 10 | Click **Revoke** on `LINK_R`; the dialog says "Revoke this link?" / "Anyone who has it can no longer open the note through it. This can't be undone: you can make a new link."; **Revoke**. | **Link revoked.**; the note page reloads with the panel open: `LINK_R`'s row is greyed with a **Revoked** pill and has no QR code, Edit or Revoke; `LINK_E` is still active. |
 | 11 | Make links until 10 are active (create 8 more), then try an 11th. | A red `A note can have at most 10 active links.`; revoked links do not count. Revoke the extras. |
 | 12 | Close the panel (**Close**), reload the note, open **Notes** (`/notes/`). | The panel stays closed; the note's row on the list has a small link icon (tooltip "Shared by link"). Revoke `LINK_E` too: the **Shared** pill and the row icon disappear (after a reload). |
-| 13 | Open a trashed note and a locked note (NOTES-17). | Neither has a **Share** button (they can't be shared); a taken-down note neither (NOTES-26). |
+| 13 | Open a trashed note and a locked note (NOTES-17) that have **no** active link. | Neither has a **Share** button (they can't be shared); a taken-down note neither once its links are revoked (NOTES-26). |
+| 14 | Give a note an **Editable** link `LINK_L`, then lock it (NOTES-17) and open it. | No **Shared** pill (the link doesn't work while the note is locked), no link icon on its list row, but a **Share** button. The panel has no create form, no **Edit**, **QR code** or **Copy link**: a line "This note can't be shared right now, and its links don't work while that is so. You can still revoke them." and the link's row with **Revoke** only. |
+| 15 | Click **Revoke** on `LINK_L` (the dialog as in step 10). | **Link revoked.**; the row is greyed with **Revoked**. Revoking works the same for a note in the Trash and for a taken-down note: an owner can always kill a link. The **Share** button is gone after a reload (no active link left). Creating or changing a link on that note stays refused (`This note is locked until its renewal is paid.`; the unlocked state is NOTES-18). |
+| 16 | Give a trashed note two active links, **Restore** it. | The flash is **Note restored. 2 share links work again.** (one link: `1 share link works again.`; none active: just **Note restored.**), and the **Shared** pill is back. A note unlocked by a renewal or a top-up has no notice of its own: look at its Share panel. |
 
 ### NOTES-22 The public page of a read-only link
 
@@ -432,7 +435,7 @@ private window. Record `LINK_R` and `LINK_E` (the addresses) as you go.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Visitor: open `LINK_R`. | The site header (with the sign-in links), the title `Shared note`, "Updated <local time>", the tag chip (name and colour, not a link), the rendered content with the coloured Python block and the table; buttons **Copy note**, **Raw**, **Download**, **QR code**, **Duplicate**; **Report this note** at the bottom. No **Edit**, nothing about the owner's name or email and no label (`for Ann`). The tab title is `Shared note - ZipTrigo`. |
-| 2 | In devtools check the response headers and the page source. | `Cache-Control: no-store, private`, `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: same-origin`, and `<meta name="robots" content="noindex">`. |
+| 2 | In devtools check the response headers and the page source. | `Cache-Control: no-store, private`, `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: strict-origin`, and `<meta name="robots" content="noindex">`. |
 | 3 | The checklist boxes. | Disabled: clicking does nothing. |
 | 4 | **Copy note**, paste into a text editor. | The note's Markdown (the content, not the title). **Raw**: the Markdown as plain text in the browser (`text/plain`), no HTML. **Download**: a file `shared-note.md` with the Markdown. |
 | 5 | **QR code**. | As NOTES-21 step 5; the address under the image is `LINK_R`. |
@@ -468,12 +471,12 @@ Context A, Visitor (no session) and `qa.admin@example.com` (Context B).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor: open `LINK_E`. | As NOTES-22 plus an **Edit** button; the checklist boxes are enabled. |
-| 2 | Click **Edit**. | The editor titled **Edit note** with "You are editing the content of a shared note. Only its owner can change the title."; the title is a grey read-only box ("The title can only be changed by the note's owner."); no tags; the live preview works (side by side from 1024 px wide); **Cancel** returns to the page. |
+| 1 | Visitor: open `LINK_E`. | As NOTES-22 plus an **Edit** button; the checklist boxes are enabled, with a line above them: "This note can be changed through this link. Your changes are saved as 'Someone'." |
+| 2 | Click **Edit**. | The editor titled **Edit note** with "You are editing the content of a shared note. Only its owner can change the title." and under it "Your changes are saved as 'Someone'."; the title is a grey read-only box ("The title can only be changed by the note's owner."); no tags; the live preview works (side by side from 1024 px wide); **Cancel** returns to the page. |
 | 3 | Change the content, **Save**. | The page shows **Saved.** and the new text; the title is unchanged. In devtools POST a different `title` to `LINK_E/edit`: the title still does not change. |
 | 4 | Tick a checklist box on the shared page. | It saves (no reload): the box stays ticked after a reload. |
 | 5 | Context A (owner): open the note, then **History**. | New rows by **Someone via a shared link** (the edit, and the ticked box if it was more than 10 minutes later or by another editor); **View** shows the text; the oldest row is by **You**. Visitor's page shows nothing about who edited. |
-| 6 | Context B (`qa.admin`, signed in): open `LINK_E` and edit the content. | Saved. The owner's History row says `<qa.admin's name> via a shared link`. A second edit by Visitor within 10 minutes is a **separate** row (different editor). |
+| 6 | Context B (`qa.admin`, signed in): open `LINK_E` and edit the content. | Both the shared page and the editor say "You're signed in: the note's owner will see your account name next to your changes." (the owner, opening their own link, sees no such line). Saved. The owner's History row says `<qa.admin's name> via a shared link`. A second edit by Visitor within 10 minutes is a **separate** row (different editor). |
 | 7 | Two editors at once: Visitor opens the editor; Context B saves a change; Visitor then **Save**s. | A red **This note was changed by someone else while you were editing.** panel over the editor with Visitor's text kept in the box, a read-only **Current version** with **Copy current version**, and the buttons **Save mine anyway** and **Discard my changes**; nothing was written. **Save mine anyway** saves it and the owner's History keeps the text it replaced. |
 | 8 | The owner opens `LINK_E` themselves and saves. | It is recorded as **You via a shared link** (the owner, through a link), and the owner gets **no** notice for it (NOTIF-30). |
 | 9 | The owner restores the version before the edits (**History > Restore**). | The note has the earlier content; the visitor sees it after a reload; the owner's History keeps every version. |
@@ -513,7 +516,7 @@ credits (NOTES-08 step 6).
 | 5 | Submit with `not-an-email` as the email. | A red error under the email field. |
 | 6 | The owner revokes the link while the form is open; Visitor submits. | The page reloads into **This note isn't available**; no report is stored. |
 | 7 | (Only with rate limiting on, which this server has off: otherwise skip, the unit tests cover it.) Submit 6 reports from one address within an hour. | The sixth is `Too many requests. Please wait a moment and try again.` (429). |
-| 8 | Admin takes the note down (ADM-61 step 4) with the reason `Copyright complaint`. Owner: reload the note page. | A red banner **This note was taken down.** "It can no longer be changed, shared or copied, and its links don't work. You can still read, download, trash and delete it." and **Reason:** `Copyright complaint`; the internal note and the reporter appear nowhere. No **Edit**, **Share**, **Duplicate**, **Archive**, **Edit tags**; the checkboxes are disabled; **Download**, **Copy**, **History** (no **Restore**) and **Move to trash** are there; the list row has a red ban icon (tooltip "Taken down"). |
+| 8 | Admin takes the note down (ADM-61 step 4) with the reason `Copyright complaint`. Owner: reload the note page. | A red banner **This note was taken down.** "It can no longer be changed, shared or copied, and its links don't work. You can still read, download, trash and delete it." and **Reason:** `Copyright complaint`; the internal note and the reporter appear nowhere. No **Edit**, **Duplicate**, **Archive**, **Edit tags**, no **Shared** pill; a **Share** button only while a link is still active, whose panel says "This note was taken down; its links no longer work." and offers **Revoke** only; the checkboxes are disabled; **Download**, **Copy**, **History** (no **Restore**) and **Move to trash** are there; the list row has a red ban icon (tooltip "Taken down"). |
 | 9 | Owner: open `/notes/<id>/edit/` directly. | Redirected to the note with the flash `This note was taken down and can no longer be changed.` |
 | 10 | Owner: POST `/notes/<id>/duplicate/` and `/notes/<id>/share/new/` (devtools). | `This note was taken down and cannot be copied.` / `This note was taken down and cannot be shared.`; nothing changes. |
 | 11 | Visitor: reload `LINK_R` and `LINK_E`. | **This note isn't available**, like NOTES-23. |

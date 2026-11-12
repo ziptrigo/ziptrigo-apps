@@ -183,7 +183,7 @@ class TestTheOwnersView:
         body = self.page()
         for gone in (
             reverse('notes:edit', args=[self.note.pk]),
-            reverse('notes:share', args=[self.note.pk]),
+            reverse('notes:share-create', args=[self.note.pk]),
             reverse('notes:duplicate', args=[self.note.pk]),
             reverse('notes:archive', args=[self.note.pk]),
             'Edit tags',
@@ -196,6 +196,12 @@ class TestTheOwnersView:
             reverse('notes:history', args=[self.note.pk]),
         ):
             assert kept in body
+
+    def test_the_share_button_stays_only_while_a_link_could_be_revoked(self):
+        share = reverse('notes:share', args=[self.note.pk])
+        assert share in self.page()  # the link made before the takedown is still active
+        links.revoke_link(type(self.link).objects.select_related('note__user').get(pk=self.link.pk))
+        assert share not in self.page()
 
     def test_the_actions_are_refused_with_the_reason_in_a_message(self):
         edit = self.web.get(reverse('notes:edit', args=[self.note.pk]), follow=True)

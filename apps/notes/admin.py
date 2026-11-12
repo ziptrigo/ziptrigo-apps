@@ -18,6 +18,7 @@ History line (`apps.core.admin_log`).
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.db.models import Count, Q
+from django.db.models.constants import LOOKUP_SEP
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -44,7 +45,19 @@ from .services import links, reports, take_down_note
 
 
 class ReadOnlyModelAdmin(admin.ModelAdmin):
-    """No add, change or delete: everything is shown, nothing is edited."""
+    """No add, change or delete: everything is shown, nothing is edited.
+
+    **No lookup may reach a share link's code** (`lookup_allowed`): Django accepts any lookup on a
+    model's own fields from the query string, so `?code__startswith=Ab` on the share link list would
+    narrow a full code down one character at a time, however little the page shows of it; an
+    editable link's code is a write capability. Every Notes admin refuses a lookup with a `code`
+    part, on the model itself or through a relation (`link__code`, `links__code`,
+    `note__links__code`)."""
+
+    def lookup_allowed(self, lookup: str, value, request: HttpRequest | None = None) -> bool:
+        if 'code' in lookup.split(LOOKUP_SEP):
+            return False
+        return super().lookup_allowed(lookup, value, request)
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False

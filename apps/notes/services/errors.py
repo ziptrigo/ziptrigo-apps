@@ -37,3 +37,11 @@ class LinkUnavailableError(ValidationError):
 
     def __init__(self) -> None:
         super().__init__(self.MESSAGE)
+
+
+class ReportUnavailableError(LinkUnavailableError):
+    """The note a report was for stopped being shared (its link was revoked or expired, or the note
+    was trashed, locked or taken down) between the page being served and the report arriving.
+    Nothing was recorded. The same neutral page answers it as for any link that doesn't work."""
+
+    MESSAGE = 'This note is no longer available.'

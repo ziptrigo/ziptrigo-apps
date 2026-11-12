@@ -76,13 +76,14 @@ def _own_tags(user: User, tag_ids: Iterable[UUID | str]) -> list[Tag]:
 
 def require_writable(note: Note) -> None:
     """Refuse a change to a note that is read-only (in the Trash, locked for an unpaid renewal, or
-    taken down by staff)."""
+    taken down by staff). A takedown is checked before the lock: it is final, and paying a renewal
+    will never make such a note editable."""
     if note.is_trashed:
         raise _error(NON_FIELD_ERRORS, IN_TRASH_MESSAGE)
-    if note.is_locked:
-        raise _error(NON_FIELD_ERRORS, LOCKED_MESSAGE)
     if note.is_taken_down:
         raise _error(NON_FIELD_ERRORS, TAKEN_DOWN_MESSAGE)
+    if note.is_locked:
+        raise _error(NON_FIELD_ERRORS, LOCKED_MESSAGE)
 
 
 def check_tags(note: Note, tag_ids: Iterable[UUID | str]) -> None:

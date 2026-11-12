@@ -1,0 +1,5 @@
+{% comment %} The Share button of the note page: opens the share panel (`#share-panel`). Shown while the note can be shared, and for a
+   read-only note (locked, in the Trash, taken down) only while it still has an active link, so the owner can revoke it. {% endcomment %}
+<a href="{% url 'notes:share' note.pk %}" hx-get="{% url 'notes:share' note.pk %}" hx-target="#share-panel" hx-swap="innerHTML"
+   class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+    <i class="fas fa-share-nodes mr-2" aria-hidden="true"></i>Share</a>

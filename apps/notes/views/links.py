@@ -5,7 +5,9 @@ The panel is an htmx fragment opened by the note page's Share button (`GET share
 re-rendered by each action; a refusal is the usual 422 with `Label: message` lines in `#share-msg`.
 Without htmx every action is a plain POST that flashes a message and goes back to the note page
 with the panel open (`?share=1`). Changes spend `NOTES_EDIT_USER`, validated first and charged
-after. Another user's note or link is a 404.
+after. Creating and editing a link are refused on a read-only note (locked, in the Trash, taken
+down); **revoking is always allowed**, and the panel opens for such a note to do it. Another
+user's note or link is a 404.
 """
 
 from uuid import UUID
@@ -41,8 +43,9 @@ def share_page_url(note: Note) -> str:
 
 def panel_context(note: Note) -> dict:
     items = links.list_links(note)
+    can_share = not note.is_read_only
     for link in items:
-        if link.state == 'active':
+        if link.state == 'active' and can_share:  # on a read-only note its links don't work
             link.qr = links.qr_data_uri(link.url)
     active = sum(1 for link in items if link.state == 'active')
     config = NotesSettings.load()
@@ -51,9 +54,8 @@ def panel_context(note: Note) -> dict:
         'links': items,
         'active_count': active,
         'max_links': config.max_links_per_note,
-        'can_share': not note.is_read_only,
-        'has_active_link': active > 0,
         'today': user_today(note.user).isoformat(),
+        **links.share_flags(note, active > 0),
     }
 
 
@@ -90,8 +92,9 @@ def _owned_link(note: Note, link_id: UUID) -> ShareLink:
 @login_required
 @require_GET
 def share_panel(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
-    """The panel (htmx). Opened directly it goes to the note page with the panel open."""
-    note = owned_note(request, note_id, trashed=False)
+    """The panel (htmx). Opened directly it goes to the note page with the panel open. Also for a
+    locked, trashed or taken-down note, where it only lists the links with a Revoke button each."""
+    note = owned_note(request, note_id)
     if not is_htmx(request):
         return redirect(share_page_url(note))
     return _panel(request, note)
@@ -156,13 +159,10 @@ def share_edit(request: AuthenticatedHttpRequest, note_id: UUID, link_id: UUID) 
 @login_required
 @require_POST
 def share_revoke(request: AuthenticatedHttpRequest, note_id: UUID, link_id: UUID) -> HttpResponse:
-    """Revoke a link for good (from the confirmation modal, a plain POST)."""
-    note = owned_note(request, note_id, trashed=False)
+    """Revoke a link for good (from the confirmation modal, a plain POST). Always allowed for the
+    owner, whatever the note's state: revoking only reduces what is exposed."""
+    note = owned_note(request, note_id)
     link = _owned_link(note, link_id)
-    try:
-        links.require_shareable(note)
-    except ValidationError as exc:
-        return _refused(request, note, exc)
     if (response := limited(request, 'NOTES_EDIT_USER', retarget=SHARE_MSG)) is not None:
         return response
     try:
