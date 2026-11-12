@@ -3150,7 +3150,9 @@ paths:
 
         matched by the number copied at delivery, so it also works once the task is deleted for good;
 
-        a number that is not yours matches nothing.'
+        a number that is not yours matches nothing. Rows and a task''s `skipped` reminders do not map
+
+        one to one (see `DeliverySchema`).'
       tags:
       - To-do
       security:
@@ -7542,9 +7544,11 @@ components:
 
         `fire_at` is then that instant. `skipped` is true when it was marked sent without a delivery
 
-        (it was more than an hour overdue, or already past when it was created): `sent_at` is then
+        of its own: too late to deliver (more than an hour past its time, or created more than a day
 
-        when it was swept, not when anything was delivered.'
+        late), or folded into the single reminder sent when a task left On hold or Blocked. `sent_at`
+
+        is then when that happened, not when anything was delivered.'
       properties:
         id:
           format: uuid
@@ -8724,7 +8728,13 @@ components:
 
         delivery. `channel` is `in_app`, `email` or `push` (an in-app reminder also pushed to the
 
-        owner''s devices). `note` is `unconfirmed`, `failed`, `skipped` or empty.'
+        owner''s devices). `note` is `unconfirmed`, `failed`, `skipped` or empty. History rows and
+
+        skipped reminders do not map one to one: there is no row for a reminder created already due,
+
+        for reminders folded into the one a release sent, or for one swept while its task was closed or
+
+        trashed or its owner inactive.'
       properties:
         id:
           format: uuid

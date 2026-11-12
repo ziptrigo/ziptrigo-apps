@@ -4964,9 +4964,12 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     the snooze when the due moment itself changes (`rearm`: a new date or time, postpone,
     reschedule overdue). Editing the reminder's time drops it too, and so does delivering it (the
     claim clears `snoozed_until`). The task panel says "Snoozed until ..." for one, and the API's
-    reminder has `snoozed_until`, and `skipped` (marked sent without a delivery: `sent_at` is then
-    when it was swept). `GET /api/todo/reminders/history?task=<number>` keeps one task's deliveries
-    (by the number copied at delivery, so it works after the task is purged).
+    reminder has `snoozed_until`, and `skipped` (marked sent without a delivery of its own: too late to
+    deliver, i.e. more than an hour past its time or created more than a day late, or folded into the
+    single reminder sent when a task left On hold/Blocked; `sent_at` is then when that happened). `GET /api/todo/reminders/history?task=<number>` keeps one task's deliveries
+    (by the number copied at delivery, so it works after the task is purged). History rows and
+    `skipped` reminders do not map one to one (no row for a reminder created already due, for ones
+    folded by a release, or swept while the task was closed/trashed or the owner inactive).
   - **Snooze for** (`TodoAccount.snooze_minutes`, `SnoozeChoice`: 15, 60, 480 or 1440 minutes,
     default 15, `db_default` too) is set on the settings page ("Reminders on your phone", the
     settings form's `snooze_minutes`; a post without it leaves it), `GET|PATCH /api/todo/settings`

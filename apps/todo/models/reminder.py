@@ -181,7 +181,12 @@ class ReminderDelivery(models.Model):
 
     class Meta:
         ordering = ['-sent_at']
-        indexes = [models.Index(fields=['user', '-sent_at'])]
+        indexes = [
+            models.Index(fields=['user', '-sent_at']),
+            models.Index(
+                fields=['user', 'task_number', '-sent_at'], name='todo_delivery_user_task_sent'
+            ),
+        ]
         verbose_name_plural = 'reminder deliveries'  # Django would say "deliverys"
 
     def __str__(self) -> str:

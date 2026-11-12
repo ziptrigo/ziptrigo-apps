@@ -81,7 +81,8 @@ def reminder_history(request, limit: int = DEFAULT_LIMIT, offset: int = 0, task:
     """Every reminder delivered to you, newest first. `limit` (1-100, default 50) and `offset`
     page the result; `count` is the total. `task` (a task number) keeps only that task's deliveries,
     matched by the number copied at delivery, so it also works once the task is deleted for good;
-    a number that is not yours matches nothing."""
+    a number that is not yours matches nothing. Rows and a task's `skipped` reminders do not map
+    one to one (see `DeliverySchema`)."""
     limit, offset = clamp_page(limit, offset)
     queryset = ReminderDelivery.objects.filter(user=request.auth).order_by('-sent_at', 'pk')
     if task is not None:

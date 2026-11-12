@@ -2,13 +2,22 @@
 `/reminders/history`, `.../attachments`, `/attachments/{id}`)."""
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, time
 
 import pytest
 from django.utils import timezone
 
 from ..models import Attachment, Reminder, ReminderDelivery, TodoAccount
-from ..services import complete_task, create_task, get_account, trash_task
+from ..services import (
+    complete_task,
+    create_task,
+    get_account,
+    set_state,
+    trash_task,
+)
+from ..services import (
+    reminders as reminder_service,
+)
 from ..services.storage import attachment_key
 from .api_support import (  # noqa: F401 -- the fixtures are used by name
     auth,
@@ -292,6 +301,54 @@ class TestReminders:
 
         assert got[str(quiet.pk)]['skipped'] is True
         assert got[str(live.pk)]['skipped'] is False
+
+    def test_a_reminder_added_over_a_day_late_is_skipped(
+        self, client, auth, funded_user, wednesday
+    ):
+        task = create_task(funded_user, title='Old', due_date=date(2026, 10, 20))
+        Reminder.objects.filter(task=task).delete()
+
+        reminder_service.add_reminder(task, minutes_before=5)
+
+        got = get(client, f'/tasks/{task.number}', auth).json()['reminders']
+        assert [r['skipped'] for r in got] == [True]
+        assert got[0]['sent_at'] is not None
+
+    def test_a_swept_reminder_is_skipped(self, client, auth, funded_user, wednesday):
+        task = create_task(
+            funded_user, title='Late', due_date=date(2026, 10, 28), due_time=time(14, 30)
+        )
+
+        reminder_service.sweep_stale(datetime(2026, 10, 28, 20, 0, tzinfo=UTC))
+
+        got = get(client, f'/tasks/{task.number}', auth).json()['reminders']
+        assert got and all(r['skipped'] is True for r in got)
+
+    def test_a_release_folds_all_but_the_delivered_one(
+        self, client, auth, funded_user, wednesday, freeze_now, django_capture_on_commit_callbacks
+    ):
+        task = create_task(
+            funded_user, title='Held', due_date=date(2026, 10, 28), due_time=time(14, 30)
+        )
+        set_state(task, 'on_hold')
+        reminder_service.add_reminder(task, minutes_before=60)
+        freeze_now(2026, 10, 28, 15, 0)
+
+        with django_capture_on_commit_callbacks(execute=True):
+            set_state(task, 'todo')
+
+        got = get(client, f'/tasks/{task.number}', auth).json()['reminders']
+        by_time = sorted(got, key=lambda r: r['fire_at'])
+        assert [r['skipped'] for r in by_time] == [False, True]
+        assert all(r['sent_at'] is not None for r in by_time)
+
+    def test_the_delivery_index_exists(self):
+        indexes = {i.name: i for i in ReminderDelivery._meta.indexes}  # ty: ignore[missing-attribute]
+        assert list(indexes['todo_delivery_user_task_sent'].fields) == [
+            'user',
+            'task_number',
+            '-sent_at',
+        ]
 
     def test_the_history_of_one_task(self, client, auth, funded_user, dated):
         other = create_task(funded_user, title='Other', due_date=date(2026, 11, 1))
