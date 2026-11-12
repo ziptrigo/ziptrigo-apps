@@ -5,7 +5,7 @@
     {% endfor %}
   </ul>
   {% if more %}<p>...and {{ more }} more.</p>{% endif %}
-  <p>Nothing was deleted. You can still read, copy, download and delete a locked note; it can't be edited and its share links stop working until you add credits. Adding {{ total }} credit{{ total|pluralize }} unlocks {{ count|pluralize:"it,them all" }} automatically.</p>
+  <p>Nothing was deleted. You can still read, copy, download and delete a locked note; it can't be edited and its share links stop working until you add credits. {% if missing %}Adding {{ missing }} credit{{ missing|pluralize }} unlocks all your locked notes; they are unlocked oldest first as soon as your balance covers each one.{% else %}Your balance now covers them; they will be unlocked shortly.{% endif %}</p>
   <p><a href="{{ top_up_url }}" style="color: #3b4a47;">Add credits</a> &middot; <a href="{{ notes_url }}" style="color: #3b4a47;">Your notes</a></p>
   <p>--<br>The ZipTrigo Team</p>
 </div>

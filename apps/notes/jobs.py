@@ -22,30 +22,32 @@ def purge_trash() -> None:
 
 
 def renew() -> None:
-    """Daily: renew the paid notes that are due (locking the ones the balance can't cover),
-    unlock the notes that were already locked before this run if their owner can pay now, and warn
-    the users whose balance won't cover the renewals coming up.
+    """Daily: renew the paid notes that are due (locking the ones the balance can't cover), unlock
+    the notes that were locked before this run if their owner can pay now, and warn the users whose
+    balance won't cover the renewals coming up.
 
-    The notes locked before the run are snapshotted first: one this very run locks must not be
-    offered a resume at once (the day would be forgiven).
+    A note this very run locks has `locked_at == run_start`, so `resume(locked_before=run_start)`
+    leaves it alone (offering it a resume at once would forgive its day).
     """
-    now = timezone.now()
-    already_locked: dict = {}
-    for note_id, user_id in Note.objects.filter(
-        locked_at__isnull=False, deleted_at__isnull=True
-    ).values_list('pk', 'user_id'):
-        already_locked.setdefault(user_id, set()).add(note_id)
-
-    result = billing.renew_due(now)
+    run_start = timezone.now()
+    result = billing.renew_due(run_start)
     if result.renewed or result.locked_count:
         logger.info('Renewed %d note(s), locked %d.', result.renewed, result.locked_count)
 
-    for user_id, note_ids in already_locked.items():
+    user_ids = list(
+        Note.objects.filter(
+            locked_at__isnull=False, locked_at__lt=run_start, deleted_at__isnull=True
+        )
+        .order_by('user_id')
+        .values_list('user_id', flat=True)
+        .distinct()
+    )
+    for user_id in user_ids:
         try:
-            billing.resume(str(user_id), only=note_ids)
+            billing.resume(str(user_id), locked_before=run_start)
         except Exception:
             logger.exception('Could not resume the notes of user %s', user_id)
 
-    warned = billing.warn_upcoming(now)
+    warned = billing.warn_upcoming(run_start)
     if warned:
         logger.info('Warned %d user(s) about upcoming note renewals.', warned)

@@ -3,7 +3,7 @@
 {% for note in notes %}- {{ note.title }}{% if note.due %} (renewal due {{ note.due }}){% endif %}
 {% endfor %}{% if more %}...and {{ more }} more.
 {% endif %}
-Nothing was deleted. You can still read, copy, download and delete a locked note; it can't be edited and its share links stop working until you add credits. Adding {{ total }} credit{{ total|pluralize }} unlocks {{ count|pluralize:"it,them all" }} automatically.
+Nothing was deleted. You can still read, copy, download and delete a locked note; it can't be edited and its share links stop working until you add credits. {% if missing %}Adding {{ missing }} credit{{ missing|pluralize }} unlocks all your locked notes; they are unlocked oldest first as soon as your balance covers each one.{% else %}Your balance now covers them; they will be unlocked shortly.{% endif %}
 
 Add credits: {{ top_up_url }}
 Your notes: {{ notes_url }}

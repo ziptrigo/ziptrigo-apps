@@ -3,7 +3,7 @@
 ## Scope
 
 The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3): Markdown notes with a
-live-preview editor, tags, versions, free slots, creation billing and yearly renewals, archive and Trash:
+live-preview editor, tags, versions, free slots, creation billing and renewals, archive and Trash:
 
 - the sidebar (a **New note** button, then Notes, Archived, Trash, Tags; a row of scrolling links on phones);
 - the lists **Notes** `/notes/` (manual drag-and-drop order, the sort bar, the tag filter, 50 per page),
@@ -341,11 +341,13 @@ balance minus 7 (leave **7** credits). Use the `<DUE>` / `<RENEW>` steps of NOTE
 | 2 | Open `Lock B`. | An amber banner **This note is locked until its renewal is paid.** "You can still read, copy, download and delete it. Nothing was deleted; it unlocks when you add credits." with a **Top up** button to `/billing/credits/`; under the title **Renewal unpaid since <date>**. No **Edit**, **Archive** or **Edit tags** controls; the checkbox `one` is disabled; **Download**, **Copy**, **Duplicate** and **Move to trash** are there. |
 | 3 | Open `/notes/<id of Lock B>/edit/` directly and press Save after a change. | A 422 with `This note is locked until its renewal is paid.`; nothing changes. (`/notes/<id>/archive/`, `/tags/` via a form POST give the same message.) |
 | 4 | `/notes/`. | The rows of `Lock B` and `Lock C` have an amber lock icon (tooltip "Locked until its renewal is paid"); `Lock A` does not. |
-| 5 | The bell. | Two new notifications `Your note "Lock B" is locked` and `Your note "Lock C" is locked`, body "Its yearly renewal of 5 credits could not be paid. Top up to unlock it."; clicking one opens that note's page. |
+| 5 | The bell. | Two new notifications `Your note "Lock B" is locked` and `Your note "Lock C" is locked`, body "Its renewal of 5 credits (every 365 days) could not be paid. Top up to unlock it."; clicking one opens that note's page. |
 | 6 | `/__e2e__/mail/?to=<LOCK_USER>` (reload until it arrives). | **One** email, subject `Some of your notes are locked`, naming both `Lock B` and `Lock C` (see MAIL-24). |
 | 7 | Run `<RENEW>` again. | Nothing changes: no new charge, no new notification, no new email (a locked note isn't renewed again). |
 | 8 | Move `Lock C` to the Trash, then restore it (the button names the cost, "Restore for 5 credits"; the balance is only 2). | The dialog opens; confirming shows the red `You don't have enough credits to restore this note.` with a **Top up your credits** link; the note stays in the Trash and locked. |
-| 9 | Delete `Lock C` forever from the Trash. | **Note deleted for good.** (a locked note can be deleted). |
+| 9 | Delete `Lock C` forever from the Trash. | **Note deleted for good.** (a locked note can be deleted); the bell no longer has `Your note "Lock C" is locked` (its notice went with the note; `Lock B`'s stays). |
+| 10 | (Purge) Lock a note again, trash it, shell: `Note.objects.filter(title='Lock D').update(deleted_at=timezone.now()-timedelta(days=400))` and run `from apps.notes.jobs import purge_trash; purge_trash()`. | The note is gone and so is its `Your note "Lock D" is locked` notification. |
+| 11 | (Inactive account) Deactivate a second fresh account with a due paid note and no credits (`User.objects.filter(email=...).update(status='INACTIVE')`), run `<RENEW>`. | The note is locked, but no notification is written for that account (and no email, MAIL-24 step 9); an account with credits is still charged. |
 
 ### NOTES-18 Topping up unlocks automatically, oldest first
 

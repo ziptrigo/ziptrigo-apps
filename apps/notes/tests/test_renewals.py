@@ -32,6 +32,7 @@ from ..services import (
     trash,
 )
 from ..services import emails as emails_module
+from ..services import notes as notes_service
 from .factories import make_note, make_tag, make_user, utc
 
 pytestmark = pytest.mark.django_db
@@ -213,7 +214,7 @@ class TestLocking:
         assert notice.key == f'note_locked:{note.pk}'
         assert notice.title == 'Your note "Rent" is locked'
         assert notice.body == (
-            'Its yearly renewal of 5 credits could not be paid. Top up to unlock it.'
+            'Its renewal of 5 credits (every 365 days) could not be paid. Top up to unlock it.'
         )
         assert notice.url == reverse('notes:note', args=[note.pk])
 
@@ -427,14 +428,15 @@ class TestResume:
         assert all(Note.objects.get(pk=n.pk).locked_at is None for n in notes)
         assert ledger(user) == []
 
-    def test_only_limits_it_to_the_given_notes(self, user, config):
+    def test_locked_before_limits_it_to_the_notes_locked_earlier(self, user, config):
         a = locked_note(user, locked_at=NOW - timedelta(days=3))
         b = locked_note(user, locked_at=NOW - timedelta(days=2))
         add_credits(user, 50, description='Top up', source='test')
-        assert billing.resume(str(user.pk), only={b.pk}) == 1
+        cutoff = NOW - timedelta(days=2)  # strictly before: `b` (locked exactly then) is left
+        assert billing.resume(str(user.pk), locked_before=cutoff) == 1
         a.refresh_from_db()
         b.refresh_from_db()
-        assert a.locked_at is not None and b.locked_at is None
+        assert a.locked_at is None and b.locked_at is not None
 
     def test_an_unknown_or_malformed_user_does_nothing(self, db):
         assert billing.resume('not-a-uuid') == 0
@@ -641,16 +643,38 @@ class TestTheDailyJob:
         self, user, config, freeze_now, monkeypatch
     ):
         freeze_now(2026, 11, 11, 12, 0)
-        before = locked_note(user, title='before')
+        locked_note(user, title='before')  # locked a day before the run
         this_run = paid_note(user, title='this run')
         calls = []
         monkeypatch.setattr(
-            billing, 'resume', lambda user_id, only=None: calls.append((user_id, only)) or 0
+            billing,
+            'resume',
+            lambda user_id, locked_before=None: calls.append((user_id, locked_before)) or 0,
         )
         jobs.renew()
         this_run.refresh_from_db()
-        assert this_run.locked_at is not None
-        assert calls == [(str(user.pk), {before.pk})]
+        assert this_run.locked_at == NOW
+        assert calls == [(str(user.pk), NOW)]  # `before` is locked_at < NOW, `this_run` is not
+
+    def test_the_real_resume_leaves_the_note_this_run_locked(
+        self, user, config, freeze_now, monkeypatch
+    ):
+        freeze_now(2026, 11, 11, 12, 0)
+        before = locked_note(user, title='before')
+        this_run = paid_note(user, title='this run')
+        real = billing.renew_due
+
+        def renew_then_top_up(now):
+            result = real(now)
+            add_credits(user, 50, description='Top up', source='test')  # arrives mid-run
+            return result
+
+        monkeypatch.setattr(billing, 'renew_due', renew_then_top_up)
+        jobs.renew()
+        before.refresh_from_db()
+        this_run.refresh_from_db()
+        assert before.locked_at is None
+        assert this_run.locked_at == NOW and get_balance(user) == 45
 
     def test_a_user_without_earlier_locks_gets_no_resume(
         self, funded_user, freeze_now, monkeypatch
@@ -755,3 +779,171 @@ class TestThePages:
         paid_note(funded_user, due=timezone.now() - timedelta(days=2), deleted_at=timezone.now())
         page = web.get(reverse('notes:trash')).content.decode()
         assert 'Restore for 5 credits' in page
+
+
+class TestTheLockedEmailAmount:
+    def send(self, user, notes):
+        emails_module.send_notes_locked_email.call(str(user.pk), [str(n.pk) for n in notes])
+
+    def test_the_amount_covers_every_locked_note_not_just_this_runs(
+        self, user, config, sent_emails
+    ):
+        earlier = locked_note(user, title='earlier', locked_at=NOW - timedelta(days=5))
+        this_run = locked_note(user, title='this run')
+        add_credits(user, 3, description='Top up', source='test')
+        self.send(user, [this_run])
+        [mail] = sent_emails
+        assert earlier.title not in mail['text_body']  # only this run's note is listed
+        # 2 locked notes x 5 = 10, minus the balance of 3
+        for body in (mail['text_body'], mail['html_body']):
+            assert 'Adding 7 credits unlocks all your locked notes;' in body
+            assert 'unlocked oldest first as soon as your balance covers each one.' in body
+
+    def test_trashed_locked_notes_do_not_count(self, user, config, sent_emails):
+        locked_note(user, deleted_at=NOW - timedelta(days=1))
+        one = locked_note(user)
+        self.send(user, [one])
+        assert 'Adding 5 credits unlocks all' in sent_emails[0]['text_body']
+
+    def test_a_balance_that_already_covers_them_says_so(self, user, config, sent_emails):
+        one = locked_note(user)
+        add_credits(user, 50, description='Top up', source='test')
+        self.send(user, [one])
+        body = sent_emails[0]['text_body']
+        assert 'Your balance now covers them; they will be unlocked shortly.' in body
+        assert 'Adding' not in body
+
+
+class TestTheLockedNoticeLifecycle:
+    def test_deleting_a_locked_note_forever_clears_its_notice(self, user, config):
+        note = paid_note(user)
+        other = paid_note(user, title='other')
+        billing.renew_due(NOW)
+        trash(note)
+        delete_forever(note)
+        keys = set(Notification.objects.values_list('key', flat=True))
+        assert keys == {f'note_locked:{other.pk}'}
+
+    def test_purging_a_locked_note_clears_its_notice(self, user, config):
+        note = paid_note(user)
+        other = paid_note(user, title='other')
+        billing.renew_due(NOW)
+        trash(note)
+        Note.objects.filter(pk=note.pk).update(deleted_at=timezone.now() - timedelta(days=400))
+        assert notes_service.purge_trash() == 1
+        keys = set(Notification.objects.values_list('key', flat=True))
+        assert keys == {f'note_locked:{other.pk}'}
+
+    def test_a_failing_clear_does_not_stop_the_delete(self, user, config, monkeypatch):
+        note = paid_note(user)
+        billing.renew_due(NOW)
+        trash(note)
+
+        def boom(*args, **kwargs):
+            raise RuntimeError('nope')
+
+        monkeypatch.setattr('apps.notes.services.notices.notifications.delete_for_key', boom)
+        delete_forever(note)
+        assert not Note.objects.filter(pk=note.pk).exists()
+
+    def test_the_notice_names_the_configured_period(self, user, config):
+        config.renewal_days = 30
+        config.save()
+        paid_note(user)
+        billing.renew_due(NOW)
+        assert Notification.objects.get(user=user).body == (
+            'Its renewal of 5 credits (every 30 days) could not be paid. Top up to unlock it.'
+        )
+
+
+class TestInactiveAccounts:
+    @pytest.fixture(params=['inactive', 'deleted'])
+    def gone(self, user, request):
+        if request.param == 'inactive':
+            user.deactivate('test')
+        else:
+            user.mark_deleted()
+        return user
+
+    def test_the_note_still_locks_but_nothing_is_written_or_sent(
+        self, gone, config, sent_emails, django_capture_on_commit_callbacks
+    ):
+        note = paid_note(gone)
+        with django_capture_on_commit_callbacks(execute=True):
+            billing.renew_due(NOW)
+        note.refresh_from_db()
+        assert note.locked_at == NOW
+        assert not Notification.objects.filter(user=gone).exists()
+        assert sent_emails == []
+
+    def test_the_note_is_still_charged(self, gone, config):
+        add_credits(gone, 20, description='Top up', source='test')
+        paid_note(gone)
+        assert billing.renew_due(NOW).renewed == 1
+        assert get_balance(gone) == 15
+
+    def test_the_warning_is_neither_written_nor_stamped(self, gone, config, sent_emails):
+        add_credits(gone, 1, description='Top up', source='test')
+        paid_note(gone, due=NOW + timedelta(days=1))
+        assert billing.warn_upcoming(NOW) == 0
+        assert not Notification.objects.filter(user=gone).exists()
+        assert get_account(gone).renewal_warned_at is None
+        assert sent_emails == []
+
+
+class TestTheWarningDate:
+    def test_a_past_first_renewal_reads_as_overdue(self, poor_user, sent_emails):
+        paid_note(poor_user, due=timezone.now() - timedelta(days=2))
+        paid_note(poor_user, due=timezone.now() + timedelta(days=2))
+        emails_module.send_renewal_warning_email.call(str(poor_user.pk), 2, 10, 5, 7)
+        [mail] = sent_emails
+        for body in (mail['text_body'], mail['html_body']):
+            assert '(one renewal is overdue)' in body
+            assert 'the first on' not in body
+
+    def test_a_future_first_renewal_names_the_date(self, poor_user, sent_emails):
+        paid_note(poor_user, due=timezone.now() + timedelta(days=2))
+        emails_module.send_renewal_warning_email.call(str(poor_user.pk), 1, 5, 2, 7)
+        assert '(the first on ' in sent_emails[0]['text_body']
+        assert 'overdue' not in sent_emails[0]['text_body']
+
+
+class TestOneRenewalDescription:
+    def test_the_job_resume_and_restore_write_the_same_line(self, funded_user):
+        title = 'Same ' + 'x' * 100
+        job_note = paid_note(funded_user, title=title)
+        billing.renew_due(NOW)
+        resumed = locked_note(funded_user, title=title)
+        billing.resume(str(funded_user.pk))
+        restored = paid_note(funded_user, title=title, deleted_at=NOW - timedelta(days=3))
+        restore(restored)
+        lines = {row.description for row in ledger(funded_user)}
+        assert lines == {billing.renewal_description(title)}
+        assert len(ledger(funded_user)) == 3
+        assert job_note and resumed
+
+
+class TestTheLockedEmailGoesOutPerUser:
+    def test_a_crash_after_the_first_user_still_queued_that_users_email(
+        self, user, config, sent_emails, django_capture_on_commit_callbacks, monkeypatch
+    ):
+        class Crash(BaseException):
+            pass
+
+        other = make_user()
+        a = paid_note(user, title='first user', due=NOW - timedelta(days=3))
+        paid_note(other, title='second user', due=NOW - timedelta(days=1))
+        real = billing._renew_one
+
+        def crashing(note_id, user_id, *args, **kwargs):
+            if user_id == other.pk:
+                raise Crash
+            return real(note_id, user_id, *args, **kwargs)
+
+        monkeypatch.setattr(billing, '_renew_one', crashing)
+        with django_capture_on_commit_callbacks(execute=True):
+            with pytest.raises(Crash):
+                billing.renew_due(NOW)
+        [mail] = sent_emails
+        assert mail['to'] == user.email and 'first user' in mail['text_body']
+        assert Note.objects.get(pk=a.pk).locked_at == NOW

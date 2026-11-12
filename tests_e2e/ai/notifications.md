@@ -474,11 +474,13 @@ and two paid notes `Notif lock A` and `Notif lock B`; a shell; the admin has spe
 | # | Action | Expected result |
 |---|---|---|
 | 1 | (shell step) Make both due and run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.notes.models import Note; from apps.notes.jobs import renew; Note.objects.filter(user__email='<NOTIF_C>', is_free=False).update(paid_through=timezone.now()-timedelta(hours=1)); renew()"` | No traceback. |
-| 2 | Sign in as `<NOTIF_C>`; the bell. | Badge `2`; two notifications `Your note "Notif lock A" is locked` and `Your note "Notif lock B" is locked`, source `Notes`, body "Its yearly renewal of 5 credits could not be paid. Top up to unlock it." |
+| 2 | Sign in as `<NOTIF_C>`; the bell. | Badge `2`; two notifications `Your note "Notif lock A" is locked` and `Your note "Notif lock B" is locked`, source `Notes`, body "Its renewal of 5 credits (every 365 days) could not be paid. Top up to unlock it." |
 | 3 | Click the first. | The note's page `/notes/<id>/` with the amber locked banner. |
 | 4 | (shell step) Run `renew()` again. | No new notification and the count is unchanged (a locked note is not locked again). |
 | 5 | Admin: add 5 credits to `<NOTIF_C>`. Reload `/notifications/`. | Exactly one note is unlocked (the older lock) and **its** notification is gone (deleted, not only read); the other stays. Add 5 more: both gone. |
 | 6 | Re-lock a note, move it to the Trash, and restore it after topping up (`notes.md` NOTES-19 step 3 to 4). | The locked notification is gone after the restore (the restore paid the renewal). |
+| 7 | Lock a note, move it to the Trash and delete it for good (or purge it, `notes.md` NOTES-17 step 10). | Its locked notification is gone too: the bell never keeps a link to a deleted note. |
+| 8 | Lock a note of a deactivated account (`notes.md` NOTES-17 step 11). | The note locks but that account has no notification. |
 
 ### NOTIF-28 Notes: the renewal warning is one notice, replaced
 

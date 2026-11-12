@@ -5827,29 +5827,43 @@ search box there is nothing yet (no dead buttons).
     due after that is charged again by the next run). Archived and active notes renew alike. A **successful
     renewal is silent** (a ledger line). `InsufficientCreditsError` **locks** the note instead: `locked_at =
     now`, `paid_through` unchanged, an in-app notice (title `Your note "<title cut to 60>" is locked`, body
-    `Its yearly renewal of N credits could not be paid. Top up to unlock it.`, url the note page, key
+    `Its renewal of N credits (every D days) could not be paid. Top up to unlock it.` with D the configured
+    `renewal_days`, url the note page, key
     `note_locked:<note id>`, written in a savepoint of its own and logged, never raised, so it can't undo the
-    lock) and, **after the loop, one email per user per run** (`emails.send_notes_locked_email(user_id,
-    note_ids)`, queued with `enqueue_after_commit` on the `default` queue; subject `Some of your notes are
+    lock) and **one email per user per run, queued as soon as that user's notes are done** (the due notes
+    are grouped by user, so a run that dies later has still told the earlier users;
+    `emails.send_notes_locked_email(user_id, note_ids)`, queued with `enqueue_after_commit` on the `default` queue; subject `Some of your notes are
     locked`; `notes/emails/notes_locked.{txt,html}`; lists up to 20 titles with the renewal date they missed
     in the public wording, UTC (`Nov 10, 2026`), then "...and N more"; only the notes of the run that are
     **still locked and out of the Trash when it runs**, so a top-up in between sends nothing; only to a
-    confirmed, active address; the HTML is autoescaped; no title in the subject). A **trashed note is never
+    confirmed, active (`is_active` and `status == ACTIVE`) address; the HTML is autoescaped; no title in
+    the subject). **The amount it states** is computed when the task runs from *all* the user's locked,
+    non-trashed notes (count x current renewal price) minus the current balance, floored at 0: "Adding N
+    credits unlocks all your locked notes; they are unlocked oldest first as soon as your balance covers each
+    one."; at 0, "Your balance now covers them; they will be unlocked shortly." (earlier runs' locked notes
+    take credits first, so the amount is not just this email's notes). A **trashed note is never
     charged or locked**: restoring it pays the renewal it skipped (`services.notes.restore`, which now also
-    deletes the note's `note_locked` notice when that restore unlocks it). The result is a `RenewalResult`
+    deletes the note's `note_locked` notice when that restore unlocks it; `delete_forever` and `purge_trash`
+    clear the notice of a note that was locked, each in its own savepoint, so the bell never keeps a link to
+    a deleted note). The ledger line of a renewal is one helper, `services.notes.renewal_description`, used by
+    the job, `resume` and `restore` (`Notes renewal: "<title cut to 60>"`). The result is a `RenewalResult`
     (`renewed`, `locked`: `{user id: [note ids]}`).
+  - **Inactive accounts (decided).** A deactivated or deleted account (`is_active` false or `status !=
+    ACTIVE`) keeps being charged and its notes keep locking, consistent with Receipts' and file transfer's
+    metering, but **no in-app notice is written for it** (`notices.can_notify`: the locked notice, and the
+    renewal warning, which is not stamped either) and no email is sent.
   - **A locked note** is `is_read_only` (the foundation's rules: title, content, checklist, tags and archive
     are refused with `This note is locked until its renewal is paid.`); its share links stop in PR 4. The
     owner can still open, copy, download, duplicate, trash and delete it. The note page shows the amber
     banner with a Top up link and "Renewal unpaid since <date>".
-  - **`resume(user_id, *, only=None)`** (task `resume_notes` on the `default` queue, queued by the
+  - **`resume(user_id, *, locked_before=None)`** (task `resume_notes` on the `default` queue, queued by the
     `credits_added` receiver in `apps.py`: `weak=False`, `dispatch_uid='notes.resume_on_credits_added'`,
     wrapped in `try/except` because the signal is sent with `send`, queues only for a user with a locked,
     non-trashed note, `billing.on_credits_added`): takes the user's locked, non-trashed notes, **oldest
     `locked_at` first**, each in its own transaction re-checked under the locks; each is charged `renewal_price`,
     gets `paid_through = now + renewal_days` and `locked_at = None` and has its `note_locked` notice deleted
     (`delete_for_key`, its own savepoint, logged); **stops at the first the balance can't cover**. The locked
-    days are never billed. `only` (a set of note ids) limits it; the job passes the snapshot below.
+    days are never billed. `locked_before` limits it to notes with `locked_at < locked_before`; the job passes its start (below).
   - **`warn_upcoming(now)`** (the job's third step): for each user with paid, unlocked, non-trashed notes
     whose `paid_through <= now + renewal_warning_days`, when `count x renewal_price` **exceeds** the balance
     (equal is enough) and `NotesAccount.renewal_warned_at` is null or **older than** `renewal_warning_days`
@@ -5858,14 +5872,16 @@ search box there is nothing yet (no dead buttons).
     renews` in the singular --, url `billing:credits-history`, key `notes_renewal_warning`, written as
     `delete_for_key` then `notify`, so there is one, the latest), one email (`emails.send_renewal_warning_email`,
     subject `Your notes renew soon`, `notes/emails/renewal_warning.{txt,html}`: the numbers, the first renewal
-    date and how many credits are missing) and the stamp, all under the account lock with the count and
+    date and how many credits are missing; when the earliest renewal date has already passed, "(one renewal is
+    overdue)" replaces "(the first on <date>)") and the stamp, all under the account lock with the count and
     stamp **re-read under it**. A per-user `try/except`: one user failing doesn't stop the rest. The account
     row is created if it is missing.
-  - **The job's snapshot rule** (`jobs.renew`): before `renew_due` it reads which notes are **already locked**
-    (non-trashed); after it, it calls `resume(user, only=<those ids>)` per user, so a note this very run
-    locked is not offered an unlock in the same run (the day would be forgiven), then `warn_upcoming`. Each
-    step's failure is logged (a failed resume doesn't skip the warnings); `renew_due` and `warn_upcoming`
-    isolate per row themselves. Idempotent.
+  - **The job's snapshot rule** (`jobs.renew`): it records `run_start` before `renew_due` (which locks with
+    `locked_at = run_start`), then calls `resume(user, locked_before=run_start)` for each user that has a
+    locked, non-trashed note with `locked_at < run_start` (a `values_list('user_id').distinct()` query, no
+    in-memory snapshot of note ids), so a note this very run locked is not offered an unlock in the same run
+    (the day would be forgiven), then `warn_upcoming`. Each step's failure is logged (a failed resume doesn't
+    skip the warnings); `renew_due` and `warn_upcoming` isolate per row themselves. Idempotent.
   - **What the pages show.** The note page's first line ends with "Free" (a free note), "Renews <date>" (the
     user's date wording), "Renewal unpaid since <date>" (locked) or, for a paid note in the Trash whose
     renewal fell due, "Renewal was due <date>" (the Restore button and the Trash rows name the cost, from

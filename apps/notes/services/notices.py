@@ -10,6 +10,7 @@ from uuid import UUID
 from django.db import transaction
 from django.urls import reverse
 
+from apps.accounts.models import User
 from apps.core.services import notifications
 
 logger = logging.getLogger(__name__)
@@ -27,25 +28,37 @@ def locked_key(note_id: UUID | str) -> str:
     return f'{LOCKED_KEY_PREFIX}{note_id}'
 
 
-def notify_locked(user_id: UUID, note_id: UUID, title: str, renewal_price: int) -> None:
-    """Tell the owner the note is locked (key `note_locked:<note id>`; the url is the note's page)."""
+def can_notify(user: User) -> bool:
+    """Whether the account can sign in. A deactivated or deleted account is still charged and its
+    notes still lock (as Receipts and file transfer meter regardless), but nothing is written to
+    its bell."""
+    return bool(user.is_active and user.status == User.STATUS_ACTIVE)
+
+
+def notify_locked(
+    user: User, note_id: UUID, title: str, renewal_price: int, renewal_days: int
+) -> None:
+    """Tell the owner the note is locked (key `note_locked:<note id>`; the url is the note's page).
+    Nothing for an account that can't sign in."""
+    if not can_notify(user):
+        return
     try:
         with transaction.atomic():
             key = locked_key(note_id)
-            notifications.delete_for_key(user_id, key, source=SOURCE)
+            notifications.delete_for_key(user, key, source=SOURCE)
             notifications.notify(
-                user_id,
+                user,
                 source=SOURCE,
                 title=f'Your note "{title[:TITLE_CUT]}" is locked',
                 body=(
-                    f'Its yearly renewal of {renewal_price} credits could not be paid. '
-                    'Top up to unlock it.'
+                    f'Its renewal of {renewal_price} credits (every {renewal_days} days) '
+                    'could not be paid. Top up to unlock it.'
                 ),
                 url=reverse('notes:note', args=[note_id]),
                 key=key,
             )
     except Exception:
-        logger.exception('Could not notify user %s that note %s is locked', user_id, note_id)
+        logger.exception('Could not notify user %s that note %s is locked', user.pk, note_id)
 
 
 def clear_locked(user_id: UUID, note_id: UUID) -> None:
@@ -57,14 +70,17 @@ def clear_locked(user_id: UUID, note_id: UUID) -> None:
         logger.exception('Could not clear the locked notice of note %s', note_id)
 
 
-def notify_warning(user_id: UUID, *, count: int, credits: int, balance: int, days: int) -> None:
-    """The renewal warning: written as `delete_for_key` then `notify`, so there is one, the latest."""
+def notify_warning(user: User, *, count: int, credits: int, balance: int, days: int) -> None:
+    """The renewal warning: written as `delete_for_key` then `notify`, so there is one, the latest.
+    Nothing for an account that can't sign in."""
+    if not can_notify(user):
+        return
     notes = 'note renews' if count == 1 else 'notes renew'
     try:
         with transaction.atomic():
-            notifications.delete_for_key(user_id, WARNING_KEY, source=SOURCE)
+            notifications.delete_for_key(user, WARNING_KEY, source=SOURCE)
             notifications.notify(
-                user_id,
+                user,
                 source=SOURCE,
                 title='Notes renewal: not enough credits',
                 body=(
@@ -75,4 +91,4 @@ def notify_warning(user_id: UUID, *, count: int, credits: int, balance: int, day
                 key=WARNING_KEY,
             )
     except Exception:
-        logger.exception('Could not write the renewal warning of user %s', user_id)
+        logger.exception('Could not write the renewal warning of user %s', user.pk)

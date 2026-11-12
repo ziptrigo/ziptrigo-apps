@@ -18,8 +18,10 @@ from django.db.models import Min
 from django.tasks import task
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.billing.services import get_balance
 from apps.core.datetime_format import utc_date_time
 from apps.core.services.email import send_email
 
@@ -43,7 +45,12 @@ def _confirmed_user(user_id: str) -> User | None:
         user = User.objects.get(pk=UUID(user_id))
     except User.DoesNotExist, ValueError:
         return None
-    if not user.is_active or not user.email or not user.email_confirmed:
+    if (
+        not user.is_active
+        or user.status != User.STATUS_ACTIVE
+        or not user.email
+        or not user.email_confirmed
+    ):
         return None
     return user
 
@@ -67,6 +74,12 @@ def send_notes_locked_email(user_id: str, note_ids: list[str]) -> None:
     if not locked:
         return
     price = NotesSettings.load().renewal_price
+    # What unlocks them *all*: every locked note of the user (earlier runs' too: a top-up unlocks
+    # the oldest lock first), minus what the balance already holds.
+    all_locked = Note.objects.filter(
+        user=user, locked_at__isnull=False, deleted_at__isnull=True
+    ).count()
+    missing = max(price * all_locked - get_balance(user), 0)
     listed = [
         {
             'title': note.title[:TITLE_CUT],
@@ -79,7 +92,7 @@ def send_notes_locked_email(user_id: str, note_ids: list[str]) -> None:
         'notes': listed,
         'more': max(len(locked) - MAX_LISTED, 0),
         'renewal_price': price,
-        'total': price * len(locked),
+        'missing': missing,
         'top_up_url': _absolute('billing:credits-history'),
         'notes_url': _absolute('notes:list'),
     }
@@ -109,6 +122,7 @@ def send_renewal_warning_email(
         'balance': balance,
         'days': days,
         'first_due': utc_date_time(first)[0] if first else '',
+        'overdue': bool(first and first <= timezone.now()),
         'missing': max(credits - balance, 0),
         'top_up_url': _absolute('billing:credits-history'),
         'notes_url': _absolute('notes:list'),
