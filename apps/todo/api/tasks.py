@@ -598,12 +598,21 @@ def update_task(request, number: int, payload: TaskUpdateSchema):
 
 
 @router.delete('/tasks/{number}', response={204: None})
-def trash_task(request, number: int):
+def trash_task(request, number: int, stop_recurrence: bool = False):
     """Move a task, and its subtasks, to the Trash (restorable until `trash_days` have passed).
-    Idempotent: a task already in the Trash stays there. Nothing is refunded."""
+    Idempotent: a task already in the Trash stays there. Nothing is refunded.
+
+    `stop_recurrence=true` is the web's "Also stop repeating": the task is trashed and its running
+    repeat rule ended in one transaction, for one `TODO_EDIT_USER` charge (the next occurrence is
+    then never made). Offer it when the task's `offers_stop_repeating` is true. It is ignored for a
+    task that doesn't repeat or whose rule already ended, and repeating the call changes nothing
+    more."""
     task = owned_task(request, number)
     charge(request, 'TODO_EDIT_USER')
-    services.trash_task(task)
+    with transaction.atomic():
+        services.trash_task(task)
+        if stop_recurrence:
+            services.recurrence.stop(task)
     return 204, None
 
 
