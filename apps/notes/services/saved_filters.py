@@ -67,19 +67,25 @@ def clean_params(user: User, params: FilterParams | Mapping[str, Any]) -> Filter
     return cleaned
 
 
-def stored_params(saved: SavedFilter, user: User | None = None) -> FilterParams:
-    """The filter's params, read leniently; with `user`, tags deleted since are dropped."""
-    return FilterParams.from_dict(
-        saved.params, valid_tag_ids=tag_ids(user) if user is not None else None
-    )
+def stored_params(
+    saved: SavedFilter, user: User | None = None, *, valid_tag_ids: set[str] | None = None
+) -> FilterParams:
+    """The filter's params, read leniently; with `user`, tags deleted since are dropped. A caller
+    that already read the user's tag ids passes them as `valid_tag_ids` (which wins), so the
+    tags aren't queried again."""
+    if valid_tag_ids is None and user is not None:
+        valid_tag_ids = tag_ids(user)
+    return FilterParams.from_dict(saved.params, valid_tag_ids=valid_tag_ids)
 
 
-def dropped_tag_count(saved: SavedFilter, user: User) -> int:
+def dropped_tag_count(saved: SavedFilter, user: User, *, stored: FilterParams | None = None) -> int:
     """How many tags the filter was saved with that no longer exist (deleted since). They simply
     drop out of the filter when it runs; a filter whose only criterion was one then selects every
     note in its scope, which the pages say instead of leaving it as a surprise."""
     saved_with = set(FilterParams.from_dict(saved.params).tags)
-    return len(saved_with - set(stored_params(saved, user).tags))
+    if stored is None:
+        stored = stored_params(saved, user)
+    return len(saved_with - set(stored.tags))
 
 
 def list_filters(user: User) -> QuerySet:

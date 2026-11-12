@@ -16,7 +16,6 @@ urlpatterns = [
     path('search/list/', views.search_list, name='search-list'),
     path('filters/', views.filters_page, name='filters'),
     path('filters/counts/', views.filter_counts_view, name='filter-counts'),
-    path('filters/sidebar/', views.sidebar_view, name='filter-sidebar'),
     path('filters/reorder/', views.filter_reorder, name='filter-reorder'),
     path('filters/<uuid:filter_id>/', views.filter_page, name='filter'),
     path('filters/<uuid:filter_id>/rename/', views.filter_rename, name='filter-rename'),

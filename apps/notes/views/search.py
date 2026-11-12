@@ -8,6 +8,7 @@ the filter's params applied. The rules are `services.search` / `services.filters
 empty, too long or invalid pattern, a search that took too long) is a 422 line in `#search-msg`.
 """
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
@@ -24,14 +25,14 @@ from apps.core.htmx import is_htmx
 
 from ..models import SavedFilter, Tag
 from ..services import (
+    DEFAULT_DIRECTIONS,
     SORTS,
     FilterParams,
     describe_params,
     filter_page,
-    parse_filter_params,
     quote_create,
 )
-from ..services.filters import QUERY_KEYS, UPDATED_RANGES, tag_names
+from ..services.filters import QUERY_KEYS, UPDATED_RANGES
 from ..services.saved_filters import dropped_tag_count, stored_params
 from ..services.search import MAX_QUERY_CHARS, SCOPES
 from .common import limited, message_response, render_page, validation_lines
@@ -40,6 +41,8 @@ from .lists import decorate, excerpt
 SEARCH_MSG = '#search-msg'
 #: What the "Shared" select offers: any note, or only the shared / the not shared ones.
 SHARED_CHOICES = (('', 'Any'), ('yes', 'Shared'), ('no', 'Not shared'))
+#: What the sort direction select offers.
+DIRECTION_CHOICES = (('asc', 'Ascending'), ('desc', 'Descending'))
 
 
 def search_url() -> str:
@@ -51,12 +54,55 @@ def page_url_for(saved: SavedFilter | None) -> str:
     return reverse('notes:filter', args=[saved.pk]) if saved is not None else search_url()
 
 
-def requested_params(request: AuthenticatedHttpRequest, saved: SavedFilter | None) -> FilterParams:
-    """The params the request asks for. A saved filter's page without any of the filter keys in
-    its query string shows the filter as saved."""
-    if saved is not None and not any(key in request.GET for key in QUERY_KEYS):
-        return stored_params(saved, request.user)
-    return parse_filter_params(request.GET, request.user)
+@dataclass(frozen=True, slots=True)
+class UserTags:
+    """The requester's tags, read once per request and passed down: the filter bar's checkboxes,
+    the ids that validate a query's `tags` and the names a summary prints."""
+
+    tags: list[Tag]
+    ids: set[str]
+    names: dict[str, str]
+
+    @classmethod
+    def load(cls, user) -> 'UserTags':
+        tags = list(Tag.objects.filter(user=user))
+        return cls(
+            tags=tags,
+            ids={str(tag.pk) for tag in tags},
+            names={str(tag.pk): tag.name for tag in tags},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SearchState:
+    """What one search request works with, computed once: the user's tags, the filter as saved
+    (`stored`, read with those tags) and the params the request asks for."""
+
+    saved: SavedFilter | None
+    user_tags: UserTags
+    stored: FilterParams | None
+    params: FilterParams
+
+    @property
+    def runs(self) -> bool:
+        """Whether the page runs a query: when `params` select anything, and also on a saved filter
+        shown as saved (one whose tag was deleted selects "every note in its scope", as its count
+        says)."""
+        return self.params.has_criteria or (self.stored is not None and self.params == self.stored)
+
+
+def search_state(
+    request: AuthenticatedHttpRequest, saved: SavedFilter | None, *, stored_default: bool
+) -> SearchState:
+    """The state of a search request. With `stored_default` (a saved filter's page), a request
+    without any of the filter keys in its query string asks for the filter as saved."""
+    user_tags = UserTags.load(request.user)
+    stored = stored_params(saved, valid_tag_ids=user_tags.ids) if saved is not None else None
+    if stored is not None and stored_default and not any(key in request.GET for key in QUERY_KEYS):
+        params = stored
+    else:
+        params = FilterParams.from_query(request.GET, valid_tag_ids=user_tags.ids)
+    return SearchState(saved=saved, user_tags=user_tags, stored=stored, params=params)
 
 
 def _page_query(params: FilterParams, saved: SavedFilter | None, page: int = 1) -> str:
@@ -66,32 +112,25 @@ def _page_query(params: FilterParams, saved: SavedFilter | None, page: int = 1) 
     return params.to_query(keep_sort=saved is not None, page=page if page > 1 else None)
 
 
-def runs_search(user, params: FilterParams, saved: SavedFilter | None) -> bool:
-    """Whether the page runs a query: when `params` select anything, and also on a saved filter
-    shown as saved (one whose tag was deleted selects "every note in its scope", as its count
-    says)."""
-    return params.has_criteria or (saved is not None and params == stored_params(saved, user))
-
-
-def build_context(
-    request: AuthenticatedHttpRequest, params: FilterParams, saved: SavedFilter | None
-) -> dict:
-    """Everything the page and the results partial need. The search runs here when `params` select
+def build_context(request: AuthenticatedHttpRequest, state: SearchState) -> dict:
+    """Everything the page and the results partial need. The search runs here when the params select
     anything; a refusal is `error_lines`, with no results. Charge the rate limit before calling."""
     user = request.user
-    tags = list(Tag.objects.filter(user=user))
+    params, saved, stored = state.params, state.saved, state.stored
     context: dict = {
         'view': 'search',
         'params': params,
         'saved': saved,
         'current_filter_id': saved.pk if saved is not None else None,
         'heading': saved.name if saved is not None else 'Search',
-        'tags': tags,
+        'tags': state.user_tags.tags,
         'selected_tags': set(params.tags),
         'scopes': SCOPES,
         'shared_choices': SHARED_CHOICES,
         'updated_ranges': UPDATED_RANGES,
         'sorts': SORTS,
+        'directions': DIRECTION_CHOICES,
+        'default_directions': DEFAULT_DIRECTIONS,
         'max_query_chars': MAX_QUERY_CHARS,
         'today': user_today(user),
         'page_url': page_url_for(saved),
@@ -100,16 +139,16 @@ def build_context(
         'ran': False,
         'error_lines': [],
         'show_sidebar_search': False,
-        'differs': saved is not None and params != stored_params(saved, user),
+        'differs': stored is not None and params != stored,
         'filter_summary': '',
         'dropped_tags': 0,
         # What a result row's menu needs.
         'duplicate_cost': quote_create(user),
     }
-    if saved is not None:
-        context['filter_summary'] = describe_params(stored_params(saved, user), tag_names(user))
-        context['dropped_tags'] = dropped_tag_count(saved, user)
-    if not runs_search(user, params, saved):
+    if saved is not None and stored is not None:
+        context['filter_summary'] = describe_params(stored, state.user_tags.names)
+        context['dropped_tags'] = dropped_tag_count(saved, user, stored=stored)
+    if not state.runs:
         return context
     try:
         page_obj = filter_page(user, params, page=request.GET.get('page'), decorate=decorate)
@@ -143,13 +182,15 @@ def build_context(
 
 
 def render_search_page(
-    request: AuthenticatedHttpRequest, params: FilterParams, saved: SavedFilter | None
+    request: AuthenticatedHttpRequest, saved: SavedFilter | None
 ) -> HttpResponse:
-    """The full page for `params` (rate limited when it runs a search)."""
-    if runs_search(request.user, params, saved):
+    """The full page for the request's params (a saved filter's page without filter keys shows the
+    filter as saved); rate limited when it runs a search."""
+    state = search_state(request, saved, stored_default=True)
+    if state.runs:
         if (response := limited(request, 'NOTES_SEARCH_USER', retarget=SEARCH_MSG)) is not None:
             return response
-    context = build_context(request, params, saved)
+    context = build_context(request, state)
     nav = f'filter-{saved.pk}' if saved is not None else 'search'
     return render_page(
         request,
@@ -164,7 +205,7 @@ def render_search_page(
 @require_GET
 @ensure_csrf_cookie
 def search_page(request: AuthenticatedHttpRequest) -> HttpResponse:
-    return render_search_page(request, parse_filter_params(request.GET, request.user), None)
+    return render_search_page(request, None)
 
 
 @login_required
@@ -180,16 +221,17 @@ def search_list(request: AuthenticatedHttpRequest) -> HttpResponse:
             saved = SavedFilter.objects.filter(pk=UUID(raw_filter), user=request.user).first()
         except ValueError:
             saved = None
-    params = parse_filter_params(request.GET, request.user)
+    state = search_state(request, saved, stored_default=False)
+    params = state.params
     page_url = page_url_for(saved)
     if not is_htmx(request):
         query = _page_query(params, saved, _page_number(request))
         return redirect(f'{page_url}?{query}' if query else page_url)
 
-    if runs_search(request.user, params, saved):
+    if state.runs:
         if (response := limited(request, 'NOTES_SEARCH_USER', retarget=SEARCH_MSG)) is not None:
             return response
-    context = build_context(request, params, saved)
+    context = build_context(request, state)
     if context['error_lines']:
         return message_response(request, context['error_lines'], retarget=SEARCH_MSG)
     context['clear_message'] = True

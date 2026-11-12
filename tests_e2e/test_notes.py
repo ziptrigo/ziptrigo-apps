@@ -220,6 +220,19 @@ def test_search_narrow_save_a_filter_and_manage_it(page: Page, receipts_server: 
         rows = results.locator('li.note-row a.truncate')
         expect(rows.first).to_have_text('Zn Deploy plan')
 
+        # The direction: title runs ascending by default; reversing it writes `dir`, and choosing a
+        # sort puts the direction back to that sort's own default (updated: newest first).
+        expect(page.locator('#search-dir')).to_have_value('asc')
+        page.select_option('#search-dir', 'desc')
+        page.wait_for_url(re.compile(r'q=deploy&sort=title&dir=desc'))
+        expect(rows.first).to_have_text('Zn Release notes')
+        page.select_option('#search-sort', 'updated')
+        expect(page.locator('#search-dir')).to_have_value('desc')
+        page.wait_for_url(re.compile(r'q=deploy$'))
+        page.select_option('#search-sort', 'title')
+        expect(page.locator('#search-dir')).to_have_value('asc')
+        page.wait_for_url(re.compile(r'q=deploy&sort=title$'))
+
         # A refused pattern is a line above the form, not a crash.
         page.fill('#search-q', '/(/')
         page.press('#search-q', 'Enter')
@@ -251,5 +264,48 @@ def test_search_narrow_save_a_filter_and_manage_it(page: Page, receipts_server: 
         page.click('[role="dialog"] button[type="submit"]')
         expect(page.get_by_text('Deleted the filter Zn Shipping.')).to_be_visible()
         expect(page.locator('#filters')).to_contain_text('No saved filters yet')
+    finally:
+        receipts_server.shell(CLEANUP)
+
+
+SEED_FILTERS = (
+    'import os\n'
+    'from apps.accounts.models import User\n'
+    'from apps.notes.services import FilterParams, save_filter\n'
+    "user = User.objects.get(email=os.environ['E2E_EMAIL'])\n"
+    "for name in ('Zn One', 'Zn Two', 'Zn Three'):\n"
+    '    save_filter(user, name, FilterParams(q=name))\n'
+)
+
+
+def test_reordering_filters_reorders_the_sidebar_without_asking_again(
+    page: Page, receipts_server: ReceiptsServer
+):
+    receipts_server.shell(CLEANUP)
+    receipts_server.shell(SEED_FILTERS)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/notes/filters/')
+        sidebar_names = page.locator('#sidebar-filters li[data-filter-id] span.truncate')
+        expect(sidebar_names).to_have_text(['Zn One', 'Zn Two', 'Zn Three'])
+        expect(page.locator('[id^="page-count-"]').first).to_contain_text('note')
+        asked: list[str] = []
+        page.on('request', lambda request: asked.append(request.url))
+
+        # Move "Zn Three" to the top with the arrow keys (the drag handle's keyboard path).
+        page.focus('.drag-handle[data-name="Zn Three"]')
+        with page.expect_response(re.compile(r'/notes/filters/reorder/$')) as saved:
+            page.keyboard.press('ArrowUp')
+            page.keyboard.press('ArrowUp')
+        assert saved.value.status == 204
+
+        expect(sidebar_names).to_have_text(['Zn Three', 'Zn One', 'Zn Two'])
+        # Only the order was posted: no counts, no sidebar, nothing that spends the search budget.
+        page.wait_for_timeout(500)
+        assert [url for url in asked if '/notes/filters/' in url] == [
+            url for url in asked if url.endswith('/notes/filters/reorder/')
+        ]
+        page.reload()
+        expect(sidebar_names).to_have_text(['Zn Three', 'Zn One', 'Zn Two'])
     finally:
         receipts_server.shell(CLEANUP)

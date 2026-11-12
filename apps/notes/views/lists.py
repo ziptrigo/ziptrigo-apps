@@ -237,9 +237,14 @@ def note_list(request: AuthenticatedHttpRequest) -> HttpResponse:
         sort = request.GET.get('sort', '')
         direction = request.GET.get('dir', '')
         page = request.GET.get('page', '')
+        # The same rule as the list itself and the search: a direction is written only when it isn't
+        # the sort's default.
+        effective = sort_for(view, sort)
         query = _query(
             sort=sort if sort in SORTS else '',
-            dir=direction if direction in DIRECTIONS else '',
+            dir=direction
+            if direction in DIRECTIONS and direction != DEFAULT_DIRECTIONS[effective]
+            else '',
             tag=_uuid_or_empty(request.GET.get('tag', '')),
             page=str(int(page)) if page.isascii() and page.isdigit() else '',
         )

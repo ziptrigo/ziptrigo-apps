@@ -29,6 +29,7 @@ from typing import Protocol
 from django.core.exceptions import ValidationError
 from django.core.paginator import Page, Paginator
 from django.db.models import BooleanField, ExpressionWrapper, Q, QuerySet
+from django.db.models.functions import Substr
 from django.utils.safestring import SafeString
 
 from apps.accounts.models import User
@@ -118,6 +119,9 @@ class Narrowing(Protocol):
     @property
     def sort(self) -> str: ...
 
+    @property
+    def dir(self) -> str: ...
+
     def narrow(self, queryset: QuerySet, user: User) -> QuerySet: ...
 
 
@@ -165,29 +169,32 @@ def _matched_texts(
 ) -> dict[object, list[tuple[str, str]]] | None:
     """What the database says matched, per note id: `[(field, text)]` in the order the snippet looks
     (the title, then the content), each text cut to `SNIPPET_SCAN_MAX`. One query for the page's
-    rows only, under the search guard, flagging both fields. `None` when the database refused (a
+    rows only, under the search guard, flagging both fields and returning each field already cut to
+    `SNIPPET_SCAN_MAX` by the database (`Substr`), so the scan cap bounds what is read, not just what
+    is scanned, whatever the list query loaded. `None` when the database refused (a
     timeout): the page then has no snippets."""
-    by_id = {note.pk: note for note in notes}
+    ids = [note.pk for note in notes]
     matched: dict[object, list[tuple[str, str]]] = {note.pk: [] for note in notes}
     flag = BooleanField()
     try:
         with search_guard():
             flagged = (
-                Note.objects.filter(pk__in=list(by_id))
+                Note.objects.filter(pk__in=ids)
                 .annotate(
                     in_title=ExpressionWrapper(Q(title_text__regex=db_pattern), output_field=flag),
                     in_content=ExpressionWrapper(
                         Q(content_text__regex=db_pattern), output_field=flag
                     ),
+                    title_head=Substr('title_text', 1, SNIPPET_SCAN_MAX),
+                    content_head=Substr('content_text', 1, SNIPPET_SCAN_MAX),
                 )
-                .values_list('pk', 'in_title', 'in_content')
+                .values_list('pk', 'in_title', 'in_content', 'title_head', 'content_head')
             )
-            for pk, in_title, in_content in flagged:
-                note = by_id[pk]
+            for pk, in_title, in_content, title_head, content_head in flagged:
                 if in_title:
-                    matched[pk].append(('title', note.title_text[:SNIPPET_SCAN_MAX]))
+                    matched[pk].append(('title', title_head or ''))
                 if in_content:
-                    matched[pk].append(('content', note.content_text[:SNIPPET_SCAN_MAX]))
+                    matched[pk].append(('content', content_head or ''))
     except ValidationError:
         return None
     return matched
@@ -270,12 +277,14 @@ def search_notes(
 ) -> Page:
     """A page of the user's notes matching `q` in `scope`, narrowed by the structured `filters`
     when given (their own `q`, `mode` and `scope` are ignored: the arguments win) and ordered by
-    the filters' sort (newest updated first otherwise). Each note carries `search_field` and
+    the filters' sort and direction (newest updated first otherwise). Each note carries `search_field` and
     `search_snippet`. Raises `ValidationError`."""
     query = prepare_query(q, mode)
     queryset = search_queryset(user, q=q, mode=mode, scope=scope)
-    sort = 'updated'
+    sort, direction = 'updated', None
     if filters is not None:
         queryset = filters.narrow(queryset, user)
-        sort = filters.sort
-    return paginate(order_results(queryset, sort), query=query, page=page, decorate=decorate)
+        sort, direction = filters.sort, filters.dir or None
+    return paginate(
+        order_results(queryset, sort, direction), query=query, page=page, decorate=decorate
+    )

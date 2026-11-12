@@ -42,7 +42,7 @@ from ..services import (
 )
 from ..services.saved_filters import SIDEBAR_LIMIT, filter_counts, filter_rows
 from .common import limited, refuse, render_page, validation_lines
-from .search import render_search_page, requested_params
+from .search import render_search_page
 
 SAVE_SLOT = '#filter-save-msg'
 LIST_SLOT = '#filter-msg'
@@ -81,18 +81,6 @@ def _sidebar_context(request: AuthenticatedHttpRequest, **extra) -> dict:
         'current_filter_id': None,
         **extra,
     }
-
-
-@login_required
-@require_GET
-def sidebar_view(request: AuthenticatedHttpRequest) -> HttpResponse:
-    """The sidebar's filters block alone, with its counts requested: what the filters page fetches
-    after a drag, so the sidebar shows the new order. Opened directly it goes to the page."""
-    if not is_htmx(request):
-        return redirect(_filters_url())
-    return render(
-        request, 'notes/partials/sidebar_filters.html', _sidebar_context(request, load_counts=True)
-    )
 
 
 @login_required
@@ -147,7 +135,7 @@ def filter_page(request: AuthenticatedHttpRequest, filter_id: UUID) -> HttpRespo
     """A saved filter run: the search page with its params (or the edited ones in the query
     string), headed by its name."""
     saved = _owned(request, filter_id)
-    return render_search_page(request, requested_params(request, saved), saved)
+    return render_search_page(request, saved)
 
 
 @login_required

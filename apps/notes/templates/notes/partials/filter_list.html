@@ -5,7 +5,7 @@
 {% if rows %}<div hidden hx-get="{% url 'notes:filter-counts' %}?scope=all" hx-trigger="load" hx-swap="none"></div>{% endif %}
 <ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
     data-sortable data-reorder-url="{% url 'notes:filter-reorder' %}" data-msg="#filter-msg"
-    data-after-reorder-url="{% url 'notes:filter-sidebar' %}" data-after-reorder-target="#sidebar-filters">
+    data-sync-order-with="#sidebar-filters">
     {% for row in rows %}
     <li x-data="{ editing: false }" data-sort-id="{{ row.filter.pk }}" class="flex items-center gap-3 px-3 py-2">
         <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"

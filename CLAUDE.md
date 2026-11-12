@@ -6122,13 +6122,26 @@ logged-in users only. Layout like To-do: `models/`, `services/`, `forms/`, `view
   - **Snippets**: the database says which field matched (one query for the page's rows flags the title and the content),
     and the snippet is taken from the title, else the content (`search_field` is `title` or `content`; `search_snippet`
     HTML, `search_parts` plain), with To-do's bounds (the `regex` package's timeout, one 0.2 s budget for the page,
-    only the matched field, at most 5,000 characters of it). A row past the budget is listed without a snippet.
+    only the matched field, at most 5,000 characters of it). **The cut is made by the database**: the flag query
+    returns each field as `Substr(field, 1, SNIPPET_SCAN_MAX)` (`_matched_texts`), so the cap bounds what is read, not
+    just what is scanned, and nothing depends on what the list query loaded. A row past the budget is listed without a snippet.
   - **`FilterParams`** (frozen; lenient `from_query` / `from_dict`, canonical `to_query` / `to_dict`, `to_pairs`,
     `condition(user)` for the counts): `q`, `mode` (`glob` / `regex`), `scope` (`active` default: not archived;
     `archived`; `all`: never the Trash), `tags` (the user's ids sorted, and `none` for untagged; **any of them**, an
     `Exists` on the through table so a note with two matching tags is one row), `shared` (`''`, `yes`, `no`),
-    `updated` (`any`, `today`, `last_7_days`, `last_30_days`, `custom` with `updated_from` / `updated_to`), `sort`
-    (`updated` default, `created`, `title`, `manual`: `lists.order_notes`, so a search is ordered like a list).
+    `updated` (`any`, `today`, `last_7_days`, `last_30_days`, `custom` with `updated_from` / `updated_to`; **a custom
+    range whose start is after its end is swapped when it is read**, so the canonical query, a saved filter and the
+    form all hold the earlier day first), `sort` (`updated` default, `created`, `title`, `manual`:
+    `lists.order_notes`, so a search is ordered like a list) and `dir` (`asc` / `desc`, **kept empty when it is the
+    sort's own default**, which `__post_init__` enforces so equal params compare equal: `updated` and `created` default
+    descending, `title` and `manual` ascending, `lists.DEFAULT_DIRECTIONS`; `FilterParams.direction` is the effective
+    one, read with the notes list's own `lists.sort_direction`, the one helper both use, so the list's `?dir=` and the
+    search agree on defaults and parsing; the search lower-cases `dir`, the list doesn't). `to_query` / `to_pairs` /
+    `to_dict` write `dir` only when it isn't the default, so a filter saved before it reads back (and stores)
+    identically; `QUERY_KEYS` has it, and `search_notes` / `filter_notes` order by it (the future API passes `dir`
+    through `FilterParams`). The search page's **Sort by** is a select plus a **Direction** select (Alpine: choosing a
+    sort sets the direction box to that sort's default before the request, like the list's sort bar asking for each
+    sort's default).
     `has_criteria` is text, tags, `shared` or an updated range: the scope and the sort alone select nothing. **`shared`
     follows the Share panel's meaning** (`links.shared_condition`, next to `share_flags`): the note has an **active**
     link (not revoked, not expired) **and** is not locked and not taken down, an `Exists` again (`no` is its
@@ -6139,16 +6152,21 @@ logged-in users only. Layout like To-do: `models/`, `services/`, `forms/`, `view
     (`local_datetime`), so a note edited late in the evening counts as that evening's day, and a custom range is
     inclusive with either end optional (dates without a range, and an unknown range, are read as in To-do).
     `describe_params` writes `@work · shared · last 7 days · "deploy*"` (`no tag`, `not shared`, `from ...` /
-    `until ...` / `a to b` in the active date wording, `archived only` / `including archived`, `by title`; nothing
-    selected is `all notes`).
+    `until ...` / `a to b` in the active date wording, `archived only` / `including archived`, `by title`, and a
+    non-default direction in brackets: `by updated (oldest first)`, `by title (Z to A)`; nothing selected is `all
+    notes`).
   - **Pages and URLs** (every view `@login_required`, another user's filter is a 404): `notes:search`
     `/notes/search/` (the page: the form and `#search-results`), `notes:search-list` `/notes/search/list/` (the htmx
     partial; `HX-Push-Url` is the canonical page URL, a direct GET redirects, a refusal is a 422 line retargeted to
     `#search-msg`), `notes:filters` `/notes/filters/` (the list; POST saves the posted search), `notes:filter`
     `/notes/filters/<uuid>/` (the search page with the filter's params; any filter key in the query string means
     "edited" and shows **Update filter**), and `filters/<uuid>/rename|update|delete/`, `filters/reorder/`,
-    `filters/counts/` (`notes:filter-counts`) and `filters/sidebar/` (`notes:filter-sidebar`, what the filters page
-    fetches after a drag so the sidebar shows the new order). The search page's form has the text, **Regex**, **Look
+    and `filters/counts/` (`notes:filter-counts`). **A drag on the filters page asks for nothing again**: the list
+    carries `data-sync-order-with="#sidebar-filters"` and `notes.js` reorders the sidebar's existing items (each
+    `<li data-filter-id>`) in the new order by id once the reorder POST has been saved, so the counts stay as they are
+    and a drag spends `NOTES_EDIT_USER` only, never `NOTES_SEARCH_USER` (the earlier `filters/sidebar/` fetch, with its
+    counts request, is gone; a filter dragged from beyond the first 20 into them shows in the sidebar after the next
+    page load). The search page's form has the text, **Regex**, **Look
     in** (the scope), **Sharing**, **Tags** (checkboxes and **No tag**), **Updated** (with two core date fields while
     Custom) and **Sort by**; **Save as filter** is a dialog posting the canonical params. Results are the lists'
     `note_row.html` (`view='search'`: tag chips, the share icon, an **Archived** pill, the row menu whose actions come
@@ -6174,7 +6192,12 @@ logged-in users only. Layout like To-do: `models/`, `services/`, `forms/`, `view
     say so (`dropped_tag_count`: "A tag this filter used has been deleted, so it no longer narrows the results", adding
     "this filter now selects every note in its scope" when nothing else is left; "Change the filter and choose
     "Update filter" to fix it."), and the notice goes when the filter is updated. A saved filter shown as saved always
-    runs, even when it now selects every note in its scope. `reorder_filters` refuses more than 50 ids.
+    runs, even when it now selects every note in its scope. `reorder_filters` refuses more than 50 ids. **The tags are
+    read once per request** on the search and filter pages (`views.search.UserTags` -- the list, the id set that
+    validates `tags` and the names a summary prints -- and `SearchState`, built by `search_state`: the user's tags, the
+    filter as saved, the params asked for, and whether the page runs a query); `stored_params(saved, valid_tag_ids=)`
+    and `dropped_tag_count(saved, user, stored=)` take what the view already has, so a saved filter's page makes one
+    read of `notes_tag` (pinned by a query-count test).
   - **Rate limits.** `NOTES_SEARCH_USER` (60/min, per user) is charged by the search page, its list partial and a
     filter's page, **before** the query and only when one runs (a refused pattern still spends it), and once per call
     by the counts endpoint; the pages themselves (the filters page, every other Notes page) spend nothing. Saving,
@@ -6182,7 +6205,7 @@ logged-in users only. Layout like To-do: `models/`, `services/`, `forms/`, `view
   - **Admin.** Read-only `SavedFilterAdmin` (name, user, position, the search text; search by name and the owner's
     email); `notes` was already in `CASCADE_WITH_USER_APP_LABELS`, so deleting a user takes their filters.
   - **Tests.** `apps/notes/tests/test_search.py` (the query language over titles and content, what is and isn't
-    searched, the scopes, the snippets and their bounds with SQLite's `REGEXP` swapped for linear-time answers, the
+    searched, the scopes, the sort direction and its defaults, the swapped custom range, the database-side snippet cut, the snippets and their bounds with SQLite's `REGEXP` swapped for linear-time answers, the
     PostgreSQL branch with the mocked connection, `FilterParams`, the tag / shared / updated filters across zones
     and the day boundaries, `describe_params`, the search views, paging, the rate limit) and `test_saved_filters.py`
     (the model, the services, the counts in one query and their timeout, the filters pages and endpoints, the sidebar

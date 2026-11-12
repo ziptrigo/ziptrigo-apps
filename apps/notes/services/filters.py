@@ -10,7 +10,12 @@ defaults left out, lists sorted) and applied by `filter_notes`. The canonical UR
 `updated` ranges are days in the **user's zone** (`user_today`, `local_datetime`) resolved on every
 run, so a saved "Last 7 days" stays relative: `today`, `last_7_days` (today and the six days
 before, like Receipts' presets), `last_30_days`, and `custom` with `updated_from` / `updated_to`
-(inclusive days, either may be missing).
+(inclusive days, either may be missing; a start after the end is read swapped).
+
+The sort has a direction, `dir` (`asc` or `desc`), with each sort's own default
+(`lists.DEFAULT_DIRECTIONS`: `updated` and `created` newest first, `title` and `manual` ascending);
+`lists.sort_direction` is the one reader both the lists and the search use. It is written (`to_query`,
+`to_dict`) only when it isn't the sort's default, so a filter saved before it reads back the same.
 """
 
 import uuid
@@ -29,7 +34,7 @@ from apps.core.datetime_format import DisplayFormats, format_date
 
 from ..models import Note, Tag
 from . import links
-from .lists import SORTS
+from .lists import DEFAULT_DIRECTIONS, DIRECTIONS, SORTS, sort_direction
 from .search import (
     MODES,
     SCOPE_DEFAULT,
@@ -73,6 +78,7 @@ QUERY_KEYS = (
     'updated_from',
     'updated_to',
     'sort',
+    'dir',
 )
 
 
@@ -118,6 +124,21 @@ class FilterParams:
     updated_from: date | None = None
     updated_to: date | None = None
     sort: str = SORT_DEFAULT
+    #: `asc` or `desc`, or empty for the sort's own default (`direction` is the effective one). Kept
+    #: empty whenever it equals the default, so two params that mean the same compare equal.
+    dir: str = ''
+
+    def __post_init__(self) -> None:
+        wanted = self.dir if self.dir in DIRECTIONS else ''
+        if wanted == DEFAULT_DIRECTIONS.get(self.sort):
+            wanted = ''
+        if wanted != self.dir:
+            object.__setattr__(self, 'dir', wanted)
+
+    @property
+    def direction(self) -> str:
+        """The direction the sort runs in: `dir`, or the sort's default."""
+        return sort_direction(self.sort, self.dir or None)
 
     # -- Reading ----------------------------------------------------------------------------
 
@@ -165,8 +186,13 @@ class FilterParams:
             updated_from = updated_to = None
         elif updated_from is None and updated_to is None:
             updated = UPDATED_ANY
+        elif updated_from is not None and updated_to is not None and updated_from > updated_to:
+            # A range typed backwards means the days between them, not nothing.
+            updated_from, updated_to = updated_to, updated_from
 
         sort = first('sort').strip()
+        if sort not in SORTS:
+            sort = SORT_DEFAULT
         return cls(
             q=q,
             mode='regex' if mode == 'regex' else 'glob',
@@ -176,7 +202,8 @@ class FilterParams:
             updated=updated,
             updated_from=updated_from,
             updated_to=updated_to,
-            sort=sort if sort in SORTS else SORT_DEFAULT,
+            sort=sort,
+            dir=first('dir').strip().lower(),
         )
 
     @classmethod
@@ -205,7 +232,7 @@ class FilterParams:
     def to_dict(self) -> dict[str, Any]:
         """The JSON-able dict a `SavedFilter` stores. Complete (defaults included), so what is
         stored doesn't depend on what the defaults are today."""
-        return {
+        data: dict[str, Any] = {
             'q': self.q,
             'mode': self.mode,
             'scope': self.scope,
@@ -216,6 +243,9 @@ class FilterParams:
             'updated_to': self.updated_to.isoformat() if self.updated_to else None,
             'sort': self.sort,
         }
+        if self.dir:  # only a changed direction: a filter saved before it reads back the same
+            data['dir'] = self.dir
+        return data
 
     def to_pairs(self, *, keep_sort: bool = False) -> list[tuple[str, str]]:
         """The query-string pairs, defaults left out (`keep_sort` writes the sort anyway)."""
@@ -237,6 +267,8 @@ class FilterParams:
             pairs.append(('updated_to', self.updated_to.isoformat()))
         if self.sort != SORT_DEFAULT or keep_sort:
             pairs.append(('sort', self.sort))
+        if self.dir:
+            pairs.append(('dir', self.dir))
         return pairs
 
     def to_query(self, *, keep_sort: bool = False, **extra: str | int | None) -> str:
@@ -342,7 +374,7 @@ def filter_notes(user: User, params: FilterParams, *, ordered: bool = True) -> Q
     else:
         queryset = scoped_notes(user, params.scope)
     queryset = params.narrow(queryset, user)
-    return order_results(queryset, params.sort) if ordered else queryset
+    return order_results(queryset, params.sort, params.dir or None) if ordered else queryset
 
 
 def filter_page(
@@ -360,6 +392,15 @@ def filter_page(
 
 
 # -- Describing ----------------------------------------------------------------------------------
+
+
+#: How a direction reads in a summary, where it isn't the sort's default.
+_DIRECTION_WORDS = {
+    ('updated', 'asc'): 'oldest first',
+    ('created', 'asc'): 'oldest first',
+    ('title', 'desc'): 'Z to A',
+    ('manual', 'desc'): 'reversed',
+}
 
 
 def describe_params(
@@ -405,8 +446,9 @@ def describe_params(
         parts.append('archived only')
     elif params.scope == 'all':
         parts.append('including archived')
-    if params.sort != SORT_DEFAULT:
-        parts.append(f'by {SORTS[params.sort].lower()}')
+    if params.sort != SORT_DEFAULT or params.dir:
+        word = _DIRECTION_WORDS.get((params.sort, params.direction))
+        parts.append(f'by {SORTS[params.sort].lower()}' + (f' ({word})' if word else ''))
     return ' · '.join(parts) or 'all notes'
 
 

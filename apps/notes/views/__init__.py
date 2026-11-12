@@ -6,7 +6,6 @@ from .filters import (
     filter_reorder,
     filter_update,
     filters_page,
-    sidebar_view,
 )
 from .history import history_list, history_restore, history_version
 from .links import share_create, share_edit, share_panel, share_revoke
@@ -82,7 +81,6 @@ __all__ = [
     'shared_page',
     'shared_preview',
     'shared_raw',
-    'sidebar_view',
     'tag_delete',
     'tag_edit',
     'tag_reorder',

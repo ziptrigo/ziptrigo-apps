@@ -431,7 +431,6 @@ class TestFiltersPage:
         assert client.post(reverse('notes:filters'), {'name': 'x'}).status_code == 302
         assert client.post(reverse('notes:filter-reorder')).status_code == 302
         assert client.get(reverse('notes:filter-counts')).status_code == 302
-        assert client.get(reverse('notes:filter-sidebar')).status_code == 302
 
     def test_empty(self, web):
         response = web.get(reverse('notes:filters'))
@@ -447,7 +446,9 @@ class TestFiltersPage:
         assert 'Rent' in html
         assert 'shared · "rent" · by title' in html
         assert 'data-sortable' in html and reverse('notes:filter-reorder') in html
-        assert reverse('notes:filter-sidebar') in html  # refreshed after a drag
+        # After a drag the sidebar's copy is reordered in place: nothing is fetched again.
+        assert 'data-sync-order-with="#sidebar-filters"' in html
+        assert 'data-after-reorder-url' not in html
         # The count is not computed with the page: an empty slot and a request for it.
         assert '1 note<' not in html
         assert f'id="page-count-{SavedFilter.objects.get().pk}"' in html
@@ -557,11 +558,59 @@ class TestFilterPage:
         assert 'Update filter' not in html
         assert 'aria-current="page"' in html
 
+    def test_the_tags_are_read_once_per_request(self, web, funded_user):
+        home = create_tag(funded_user, 'Home')
+        gone = create_tag(funded_user, 'Gone')
+        saved = save_filter(
+            funded_user, 'Tagged', FilterParams(q='pay', tags=(str(home.pk), str(gone.pk)))
+        )
+        gone.delete()
+        url = reverse('notes:filter', args=[saved.pk])
+
+        with CaptureQueriesContext(connection) as queries:
+            response = web.get(url)
+        tag_reads = [
+            q['sql']
+            for q in queries
+            if 'FROM "notes_tag"' in q['sql'] and 'notes_note_tags' not in q['sql']
+        ]
+
+        # The page lists the filter as saved, its summary and the dropped tag: one read of the tags.
+        assert response.status_code == 200 and '@Home' in text(response)
+        assert 'A tag this filter used has been deleted' in text(response)
+        assert len(tag_reads) == 1, tag_reads
+
+        with CaptureQueriesContext(connection) as queries:
+            web.get(reverse('notes:search-list'), {'filter': str(saved.pk), 'q': 'pay'}, **HTMX)
+        assert (
+            len(
+                [
+                    q
+                    for q in queries
+                    if 'FROM "notes_tag"' in q['sql'] and 'notes_note_tags' not in q['sql']
+                ]
+            )
+            == 1
+        )
+
     def test_the_form_is_filled_in_from_the_filter(self, web, saved):
         html = web.get(reverse('notes:filter', args=[saved.pk])).content.decode()
 
         assert 'value="pay"' in html
         assert f'name="filter" value="{saved.pk}"' in html
+
+    def test_the_saved_direction_is_kept_and_a_changed_one_is_an_edit(self, web, funded_user):
+        create_note(funded_user, title='Pay a')
+        create_note(funded_user, title='Pay b')
+        saved = save_filter(funded_user, 'Oldest', FilterParams(q='pay', dir='asc'))
+        url = reverse('notes:filter', args=[saved.pk])
+
+        as_saved = text(web.get(url))
+        edited = text(web.get(url, {'q': 'pay', 'sort': 'updated'}))  # the default direction
+
+        assert as_saved.index('Pay a') < as_saved.index('Pay b') and 'Update filter' not in as_saved
+        assert 'by updated (oldest first)' in as_saved
+        assert 'Update filter' in edited and edited.index('Pay b') < edited.index('Pay a')
 
     def test_edited_params_in_the_query_string_show_update_filter(self, web, saved):
         response = web.get(
@@ -759,17 +808,18 @@ class TestRenameUpdateDeleteReorderEndpoints:
             assert web.get(reverse(f'notes:filter-{name}', args=[saved.pk])).status_code == 405
         assert web.get(reverse('notes:filter-reorder')).status_code == 405
 
-    def test_the_sidebar_fragment(self, web, saved):
-        direct = web.get(reverse('notes:filter-sidebar'))
-        fragment = web.get(reverse('notes:filter-sidebar'), **HTMX)
+    def test_the_sidebar_items_carry_their_filter_id_for_the_client_side_reorder(
+        self, web, funded_user
+    ):
+        first = save_filter(funded_user, 'A', FilterParams())
+        second = save_filter(funded_user, 'B', FilterParams())
 
-        assert direct.status_code == 302 and direct['Location'] == reverse('notes:filters')
-        assert (
-            fragment.status_code == 200
-            and 'Old' in text(fragment)
-            and '<html' not in text(fragment)
-        )
-        assert reverse('notes:filter-counts') in text(fragment)  # asks for the counts again
+        html = text(web.get(reverse('notes:filters')))
+
+        assert f'data-filter-id="{first.pk}"' in html and f'data-filter-id="{second.pk}"' in html
+
+    def test_there_is_no_sidebar_endpoint_any_more(self, web):
+        assert web.get('/notes/filters/sidebar/', **HTMX).status_code == 404
 
 
 class TestOwnership:
@@ -1021,6 +1071,21 @@ class TestRateLimits:
         ):
             assert response.status_code == 429
         assert SavedFilter.objects.get(pk=saved.pk).name == 'B'
+
+    def test_a_reorder_spends_no_search_budget(self, web, funded_user):
+        first = save_filter(funded_user, 'A', FilterParams(q='a'))
+        second = save_filter(funded_user, 'B', FilterParams(q='b'))
+        ids = [str(second.pk), str(first.pk)]
+        for _ in range(2):  # the whole edit budget
+            assert (
+                web.post(reverse('notes:filter-reorder'), {'ids[]': ids}, **HTMX).status_code == 204
+            )
+
+        # Nothing was fetched, counted or searched for: the search budget is whole.
+        for _ in range(2):
+            assert web.get(reverse('notes:filter', args=[first.pk])).status_code == 200
+        assert web.get(reverse('notes:filter', args=[first.pk])).status_code == 429
+        assert [saved.name for saved in list_filters(funded_user)] == ['B', 'A']
 
     def test_a_filters_page_view_spends_the_search_budget(self, web, funded_user):
         saved = save_filter(funded_user, 'F', FilterParams(q='a'))

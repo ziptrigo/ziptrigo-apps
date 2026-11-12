@@ -34,12 +34,14 @@ from ..services import (
     filter_page,
     links,
     parse_filter_params,
+    save_filter,
     save_note,
     search_notes,
     trash,
 )
 from ..services import search as search_module
 from ..services.search import (
+    SNIPPET_SCAN_MAX,
     SNIPPET_TIME_BUDGET,
     TIMEOUT_MESSAGE,
     make_snippet,
@@ -50,6 +52,10 @@ from .factories import make_link, make_note, make_tag, make_user, utc
 pytestmark = pytest.mark.django_db
 
 HTMX = {'HTTP_HX_REQUEST': 'true'}
+
+
+def text(response) -> str:
+    return unescape(response.content.decode())
 
 
 def titles(page) -> list[str]:
@@ -257,6 +263,17 @@ class TestOrderingAndPaging:
         page = search_notes(user, q='rent', filters=FilterParams(sort='title'))
 
         assert titles(page) == ['rent a', 'rent b']
+
+    def test_the_direction_reverses_the_sort(self, user):
+        make_note(user, title='rent b', updated_at=utc(2026, 6, 1))
+        make_note(user, title='rent a', updated_at=utc(2026, 1, 1))
+
+        def run(**changes):
+            return titles(search_notes(user, q='rent', filters=FilterParams(**changes)))
+
+        assert run() == ['rent b', 'rent a'] and run(dir='asc') == ['rent a', 'rent b']
+        assert run(sort='title') == ['rent a', 'rent b']
+        assert run(sort='title', dir='desc') == ['rent b', 'rent a']
 
     def test_fifty_per_page(self, user):
         for n in range(55):
@@ -469,6 +486,16 @@ class TestSnippetBounds:
         assert timeouts == [pytest.approx(0.15), pytest.approx(0.08)]
         assert len(page.object_list) == 2
 
+    def test_the_cut_text_comes_from_the_query_not_the_loaded_rows(self, user):
+        note = make_note(user, title='zzz', content='rent ' + 'x' * 8000)
+        stale = Note.objects.only('title').get(pk=note.pk)  # content never loaded
+        with CaptureQueriesContext(connection) as queries:
+            matched = search_module._matched_texts([stale], 'rent')
+
+        assert matched is not None and len(matched[note.pk][0][1]) == SNIPPET_SCAN_MAX
+        assert matched[note.pk][0][1].startswith('rent ')
+        assert 'substr' in queries[-1]['sql'].lower()
+
     def test_only_the_fields_the_database_matched_are_scanned(self, user, monkeypatch):
         make_note(user, title='zzz title ' + 'q' * 100, content='a rent here')
         scanned = []
@@ -644,6 +671,78 @@ class TestFilterParams:
         params = FilterParams.from_query(query)
 
         assert params == FilterParams(q='hello')
+
+    def test_a_start_after_the_end_is_swapped(self):
+        params = FilterParams.from_query(
+            QueryDict('updated=custom&updated_from=2026-11-30&updated_to=2026-11-01')
+        )
+
+        assert params.updated_from == date(2026, 11, 1) and params.updated_to == date(2026, 11, 30)
+        assert 'updated_from=2026-11-01&updated_to=2026-11-30' in params.to_query()
+        assert params.to_dict()['updated_from'] == '2026-11-01'
+        stored = FilterParams.from_dict(
+            {'updated': 'custom', 'updated_from': '2026-12-31', 'updated_to': '2026-12-01'}
+        )
+        assert stored.updated_from == date(2026, 12, 1) and stored.updated_to == date(2026, 12, 31)
+        # Dates with no range (a hand-made link) are swapped too; one date alone and equal ones stay.
+        assert FilterParams.from_query(
+            QueryDict('updated_from=2026-11-30&updated_to=2026-11-01')
+        ).updated_from == date(2026, 11, 1)
+        same = FilterParams.from_query(QueryDict('updated_from=2026-11-05&updated_to=2026-11-05'))
+        assert same.updated_from == same.updated_to == date(2026, 11, 5)
+
+    def test_a_backwards_range_selects_the_days_between(self, user):
+        make_note(user, title='inside', updated_at=utc(2026, 11, 15, 12))
+        make_note(user, title='outside', updated_at=utc(2026, 12, 15, 12))
+        params = FilterParams.from_query(
+            QueryDict('updated=custom&updated_from=2026-11-30&updated_to=2026-11-01')
+        )
+
+        assert [n.title for n in filter_notes(user, params)] == ['inside']
+
+    def test_the_direction_defaults_follow_the_sort(self):
+        for sort, default in (
+            ('updated', 'desc'),
+            ('created', 'desc'),
+            ('title', 'asc'),
+            ('manual', 'asc'),
+        ):
+            params = FilterParams(sort=sort)
+            assert params.direction == default and params.dir == ''
+            assert FilterParams(sort=sort, dir=default) == params  # the default is no direction
+            opposite = 'asc' if default == 'desc' else 'desc'
+            assert FilterParams(sort=sort, dir=opposite).direction == opposite
+
+    def test_the_direction_is_written_only_when_it_is_not_the_default(self):
+        assert FilterParams(sort='title').to_query(keep_sort=True) == 'sort=title'
+        assert FilterParams(sort='title', dir='desc').to_query() == 'sort=title&dir=desc'
+        assert FilterParams(dir='asc').to_query() == 'dir=asc'
+        assert FilterParams(dir='desc').to_query() == ''
+        # A filter saved before the direction existed reads back, and stores, identically.
+        assert 'dir' not in FilterParams(sort='title', q='x').to_dict()
+        assert FilterParams(dir='asc').to_dict()['dir'] == 'asc'
+        legacy = FilterParams.from_dict(FilterParams(sort='title', q='x').to_dict())
+        assert legacy == FilterParams(sort='title', q='x') and legacy.to_dict() == {
+            key: value for key, value in FilterParams(sort='title', q='x').to_dict().items()
+        }
+
+    def test_the_direction_is_read_leniently(self):
+        assert FilterParams.from_query(QueryDict('dir=ASC')).dir == 'asc'
+        assert FilterParams.from_query(QueryDict('dir=up')).dir == ''
+        assert FilterParams.from_query(QueryDict('sort=title&dir=desc')).dir == 'desc'
+        assert FilterParams.from_query(QueryDict('sort=title&dir=asc')).dir == ''
+        assert FilterParams.from_dict({'sort': 'created', 'dir': 'asc'}).dir == 'asc'
+        assert FilterParams.from_dict({'dir': 7}) == FilterParams()
+
+    def test_it_agrees_with_the_lists_on_defaults_and_parsing(self):
+        from ..services.lists import DEFAULT_DIRECTIONS, sort_direction
+
+        for sort in DEFAULT_DIRECTIONS:
+            for raw in (None, '', 'asc', 'desc', 'ASC', 'sideways'):
+                params = FilterParams.from_query(QueryDict(f'sort={sort}&dir={raw or ""}'))
+                # The lists don't lower-case a direction; the search is the more lenient of the two.
+                expected = sort_direction(sort, raw.lower() if raw else raw)
+                assert params.direction == expected
 
     def test_the_trash_is_not_a_scope(self):
         assert FilterParams.from_query(QueryDict('scope=trash')).scope == 'active'
@@ -1069,6 +1168,33 @@ class TestSearchViews:
         assert 'Pay the rent' in html
         html = web.get(reverse('notes:search'), {'q': '/^walk/'}).content.decode()
         assert 'Walk the' in html
+
+    def test_the_sort_control_has_a_direction(self, web, seeded):
+        html = web.get(reverse('notes:search'), {'q': 'rent'}).content.decode()
+
+        assert 'id="search-dir"' in html and 'name="dir"' in html
+        assert '<option value="desc" selected>Descending</option>' in html
+        asc = web.get(reverse('notes:search'), {'q': 'rent', 'sort': 'title'}).content.decode()
+        assert '<option value="asc" selected>Ascending</option>' in asc
+
+    def test_the_direction_orders_the_results_and_is_canonical_in_the_url(self, web, funded_user):
+        create_note(funded_user, title='rent a')
+        create_note(funded_user, title='rent b')
+
+        newest = text(web.get(reverse('notes:search'), {'q': 'rent', 'dir': 'desc'}))
+        oldest = web.get(reverse('notes:search-list'), {'q': 'rent', 'dir': 'asc'}, **HTMX)
+
+        assert newest.index('rent b') < newest.index('rent a')
+        assert text(oldest).index('rent a') < text(oldest).index('rent b')
+        assert oldest['HX-Push-Url'].endswith('?q=rent&dir=asc')
+        default = web.get(reverse('notes:search-list'), {'q': 'rent', 'dir': 'desc'}, **HTMX)
+        assert default['HX-Push-Url'].endswith('?q=rent')
+
+    def test_a_saved_filter_keeps_the_direction(self, web, funded_user):
+        saved = save_filter(funded_user, 'F', FilterParams(q='rent', sort='title', dir='desc'))
+
+        assert saved.params['dir'] == 'desc'
+        assert 'by title (Z to A)' in text(web.get(reverse('notes:filter', args=[saved.pk])))
 
     def test_the_filter_bar(self, web, seeded):
         tag = seeded.notes_tags.get()
