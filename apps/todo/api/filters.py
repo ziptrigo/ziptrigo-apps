@@ -17,12 +17,13 @@ from ..models import SavedFilter
 from ..schemas import (
     FilterCreateSchema,
     FilterOrderSchema,
+    FilterParamsSchema,
     FilterSchema,
     FilterUpdateSchema,
     TaskListSchema,
 )
 from ..services import saved_filters
-from ..services.filters import FilterParams, filter_tasks, label_names
+from ..services.filters import filter_tasks, label_names
 from ..services.saved_filters import stored_params
 from ..services.search import search_guard
 from .common import (
@@ -44,32 +45,17 @@ def _owned(request, filter_id: UUID) -> SavedFilter:
     )
 
 
-def _with_stored_extras(saved: SavedFilter, params: dict) -> dict:
-    """`params` from an API body plus the criteria the API cannot express (states, the resolution
-    of closed tasks) that the filter was saved with on the website: replacing the params through the
-    API must not clear them."""
-    stored = FilterParams.from_dict(saved.params)
-    merged = dict(params)
-    if stored.states:
-        merged['states'] = list(stored.states)
-    if stored.resolution:
-        merged['resolution'] = stored.resolution
-    return merged
-
-
 def _data(saved: SavedFilter, user, names: dict[str, str]) -> dict:
-    """A saved filter as `FilterSchema`. A filter saved on the website can carry criteria the API
-    has no field for (states, the resolution of closed tasks: issue #272); `params` leaves them out,
-    as the schema is closed to them, and so does the summary, which describes only the criteria
-    the API knows (with its own wording)."""
+    """A saved filter as `FilterSchema`: what it selects (`states` and the resolution of closed
+    tasks included, whether it was saved here or on the website) and its summary in the public
+    wording."""
     params = stored_params(saved, user)
-    legacy = FilterParams.from_dict(params.to_legacy_dict())
     return {
         'id': saved.pk,
         'name': saved.name,
         'position': saved.position,
-        'params': legacy.to_dict(),
-        'summary': services.describe_params(legacy, names, PUBLIC, closed_wording=False),
+        'params': FilterParamsSchema.from_stored(params),
+        'summary': services.describe_params(params, names, PUBLIC),
         'created_at': saved.created_at,
     }
 
@@ -109,7 +95,7 @@ def reorder_filters(request, payload: FilterOrderSchema):
 
 @router.patch('/filters/{filter_id}', response=FilterSchema)
 def update_filter(request, filter_id: UUID, payload: FilterUpdateSchema):
-    """Rename a filter and/or replace its search (`params`, as a whole). Both are saved, or
+    """Rename a filter and/or replace its search (`params`, as a whole: criteria left out take their defaults, as on the website). Both are saved, or
     neither. Neither can be cleared: an explicit `null` is a 400 (to search for everything, send
     the default `params`). A body with nothing in it changes nothing and spends no budget; a value
     that can't be used is refused before the edit budget is spent."""
@@ -122,11 +108,7 @@ def update_filter(request, filter_id: UUID, payload: FilterUpdateSchema):
         with mapped_errors():
             if 'name' in changes:
                 saved_filters.clean_name(changes['name'])
-            new_params = (
-                _with_stored_extras(saved, payload.params.to_params())
-                if payload.params is not None
-                else None
-            )
+            new_params = payload.params.to_params() if payload.params is not None else None
             if new_params is not None:
                 saved_filters.clean_params(request.auth, new_params)
             charge(request, 'TODO_EDIT_USER')

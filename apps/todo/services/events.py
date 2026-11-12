@@ -49,11 +49,12 @@ gone; `services.event_text` writes the sentence):
 
 import logging
 from collections.abc import Iterable
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, NamedTuple
 from uuid import UUID
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.core.request_channel import channel, current_channel
@@ -152,3 +153,38 @@ def due_entry(
     if old_date == new_date and old_time == new_time:
         return None
     return entry(task, EventKind.DUE, due_data(old_date, old_time, new_date, new_time))
+
+
+# -- Reading a task's log ------------------------------------------------------------------------
+
+PAGE_SIZE = 20
+
+
+def cursor_of(event: TaskEvent) -> str:
+    """The keyset cursor that continues the log after `event`: its time and id (a total order, so
+    entries written meanwhile never repeat or skip one)."""
+    return f'{event.created_at.isoformat()}_{event.pk}'
+
+
+def parse_cursor(raw: str) -> tuple[datetime, UUID]:
+    """The `(time, id)` a cursor carries; anything else (or a time without a zone, which would be
+    compared in whatever zone is active) is a `ValueError`."""
+    when, _, pk = raw.rpartition('_')
+    moment = datetime.fromisoformat(when)
+    parsed = UUID(pk)
+    if moment.tzinfo is None:
+        raise ValueError('The cursor has no time zone.')
+    return moment, parsed
+
+
+def page(task: Task, *, limit: int = PAGE_SIZE, cursor: str = '') -> tuple[list[TaskEvent], str]:
+    """One page of `task`'s log, newest first: up to `limit` entries after `cursor` (the start of
+    the log without one) and the cursor of the next page (empty on the last). A malformed cursor is
+    a `ValueError`. One indexed query."""
+    queryset = TaskEvent.objects.filter(task=task)
+    if cursor:
+        when, pk = parse_cursor(cursor)
+        queryset = queryset.filter(Q(created_at__lt=when) | Q(created_at=when, id__lt=pk))
+    rows = list(queryset.order_by('-created_at', '-id')[: limit + 1])
+    shown = rows[:limit]
+    return shown, cursor_of(shown[-1]) if len(rows) > limit else ''

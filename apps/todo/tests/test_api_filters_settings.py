@@ -67,7 +67,20 @@ class TestFilters:
     def test_the_params_default_to_everything(self, client, auth):
         body = post(client, '/filters', auth, {'name': 'All open'}).json()
 
-        assert body['params'] == FilterParams().to_dict()
+        assert body['params'] == {
+            'q': '',
+            'mode': 'glob',
+            'include_closed': False,
+            'resolution': None,
+            'states': [],
+            'priorities': [],
+            'labels': [],
+            'date_range': 'any',
+            'date_from': None,
+            'date_to': None,
+            'sort': 'date',
+        }
+        assert body['summary'] == 'all open tasks'
 
     def test_a_label_that_is_not_yours_is_dropped(self, client, auth, other_user):
         theirs = make_label(other_user, 'Theirs')

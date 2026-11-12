@@ -334,11 +334,12 @@ def _check_add(current: Task, other: Task) -> bool:
     return True
 
 
-def check_add(task: Task, blocker: Task) -> None:
+def check_add(task: Task, blocker: Task) -> bool:
     """What `add_blocker` would refuse that can be told without writing anything (see
     `_check_add`), for a caller that wants to refuse before spending a rate-limit budget. It reads
-    the rows as the caller loaded them and takes no lock: `add_blocker` still decides for good."""
-    _check_add(task, blocker)
+    the rows as the caller loaded them and takes no lock: `add_blocker` still decides for good.
+    Returns whether a link would be made (False: it already exists, nothing to do)."""
+    return _check_add(task, blocker)
 
 
 def add_blocker(task: Task, blocker: Task) -> bool:

@@ -698,7 +698,7 @@ class TestChannels:
         assert response.status_code == 201
         task = Task.objects.get(title='Via API')
         patch(client, f'/tasks/{task.number}', auth, {'priority': 1})
-        post(client, f'/tasks/{task.number}/complete', auth)
+        post(client, f'/tasks/{task.number}/close', auth, {})
 
         assert [(e.kind, e.channel) for e in log(task)] == [
             ('created', 'api'),

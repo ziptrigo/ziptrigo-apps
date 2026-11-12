@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 1.0.1
+  version: 2.0.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -2092,6 +2092,59 @@ paths:
       - Short URLs
       security:
       - JWTAuth: []
+  /api/todo/tasks/{number}/activity:
+    get:
+      operationId: apps_todo_api_activity_task_activity
+      summary: Task Activity
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      - in: query
+        name: limit
+        schema:
+          default: 20
+          title: Limit
+          type: integer
+        required: false
+      - in: query
+        name: before
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Before
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityPageSchema'
+      description: 'The task''s activity log, **newest first**, also for a task in the Trash (another user''s task
+
+        is a 404).
+
+
+        `limit` (1-100, default 20) is the page size. `next` in the answer is the cursor of the next,
+
+        older page: send it as `before` to continue (`null` on the last page); the cursor is the time
+
+        and id of the last entry, so entries written while paging never repeat or skip one. A malformed
+
+        `before` is a 400. Each entry''s `text` is a sentence in the public wording (English, dates like
+
+        `Nov 5, 2026, 3:00 PM`, whatever the account''s date and time format); see `ActivityEventSchema`
+
+        for `kind` and `data`.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
   /api/todo/tasks/{number}/attachments:
     post:
       operationId: apps_todo_api_attachments_start_upload
@@ -2244,6 +2297,79 @@ paths:
         allowed for a task in the Trash and while storage is paused (it saves money). On an upload
 
         that was started and not completed it is the same as `POST /attachments/{id}/cancel`.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/tasks/{number}/blockers:
+    post:
+      operationId: apps_todo_api_blockers_add_blocker
+      summary: Add Blocker
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSchema'
+      description: 'Make the task numbered `number` (in the body) block this one, and answer this task.
+
+
+        Both tasks are the caller''s own and out of the Trash (a 400 `number: There is no task #N.` for
+
+        a number that doesn''t exist **or isn''t the caller''s**; `number: #N is in the trash. Restore it
+
+        first.`). A 400 too when a task is its own blocker, when the link would close a cycle (`#1200
+
+        is already blocked by #1234, directly or through other tasks.`) and when this task already has
+
+        20 blockers. Adding a link that already exists changes nothing. An open task given an open
+
+        blocker becomes `blocked`, from any open state; a closed blocker, or a closed task, only links.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlockerSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/tasks/{number}/blockers/{blocker_number}:
+    delete:
+      operationId: apps_todo_api_blockers_remove_blocker
+      summary: Remove Blocker
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      - in: path
+        name: blocker_number
+        schema:
+          title: Blocker Number
+          type: integer
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Take the task numbered `blocker_number` off this task''s blockers. Idempotent: 204 whether or
+
+        not the link was there (also for a number that doesn''t exist or isn''t the caller''s, so a number
+
+        can''t be probed), spending nothing when there was nothing to remove. A task left with no open
+
+        blocker that was `blocked` goes back to `todo`. A 400 for a task in the Trash.'
       tags:
       - To-do
       security:
@@ -2542,7 +2668,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilterSchema'
-      description: 'Rename a filter and/or replace its search (`params`, as a whole). Both are saved, or
+      description: 'Rename a filter and/or replace its search (`params`, as a whole: criteria left out take their defaults, as on the website). Both are saved, or
 
         neither. Neither can be cleared: an explicit `null` is a 400 (to search for everything, send
 
@@ -3012,11 +3138,27 @@ paths:
           type: string
         required: false
       - in: query
-        name: include_completed
+        name: include_closed
         schema:
           default: false
-          title: Include Completed
+          title: Include Closed
           type: boolean
+        required: false
+      - in: query
+        name: resolution
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resolution
+        required: false
+      - in: query
+        name: state
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
         required: false
       - in: query
         name: priority
@@ -3095,7 +3237,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListSchema'
-      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or overdue), `upcoming` (open, due in the next 14 days),\n  `all` (open; the default), `completed` or `trash`.\n- `parent`: a task number; lists its subtasks (completed ones too). With a `view`, only those\n  of the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_completed`: with `view=all`, completed tasks too (after the open ones).\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue`, `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`."
+      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`."
       tags:
       - To-do
       security:
@@ -3126,14 +3268,14 @@ paths:
         for (a top-up settles it). `source` is `api`.
 
 
-        See `TaskCreateSchema` for the body, `parse_title` and `reminders` in particular; `parsed` in
+        See `TaskCreateSchema` for the body, `parse_title`, `reminders`, `state` and `blocked_by` in
 
-        the answer says what `parse_title` did.
+        particular; `parsed` in the answer says what `parse_title` did.
 
 
         The request is checked first (the fields, the 409, the cap on open tasks, the balance, the
 
-        reminders; a title over 500 characters is a 422), and only then are `TODO_CREATE_USER` and, for
+        reminders, the state and the blockers; a title over 500 characters is a 422), and only then are `TODO_CREATE_USER` and, for
 
         `parse_title`, the date reader''s budget spent: a refused request costs neither and never calls
 
@@ -3166,7 +3308,9 @@ paths:
                 $ref: '#/components/schemas/CountSchema'
       description: 'Set the due date of every overdue open task to today, keeping the times. `count` is how many
 
-        changed.'
+        changed. A task that is On hold or Blocked is never overdue, so it is neither moved nor
+
+        counted.'
       tags:
       - To-do
       security:
@@ -3249,11 +3393,22 @@ paths:
         (an empty `rrule` stops repeating), and a new `due_date` moves the task''s reminders.
 
 
+        `state` sets an open task''s state (`todo`, `in_progress` or `on_hold`) and `blocked_by`
+
+        replaces the set of tasks that block it (see `TaskUpdateSchema`); the blockers decide the
+
+        `blocked` state, so a task with an open blocker is `blocked` after the call and one left with
+
+        none goes back to `todo`.
+
+
         The fields are checked before `TODO_EDIT_USER` is spent, so a bad value costs nothing. What
 
-        only the locked write can decide (the task was trashed or completed meanwhile, a task with
+        only the locked write can decide (the task was trashed or closed meanwhile, a task with
 
-        subtasks moved under a parent, a subtask given a repeat rule) is refused after it was spent.'
+        subtasks moved under a parent, a subtask given a repeat rule, a link another request made first
+
+        that now closes a cycle) is refused after it was spent.'
       tags:
       - To-do
       requestBody:
@@ -3284,10 +3439,10 @@ paths:
       - To-do
       security:
       - JWTAuth: []
-  /api/todo/tasks/{number}/complete:
+  /api/todo/tasks/{number}/close:
     post:
-      operationId: apps_todo_api_tasks_complete_task
-      summary: Complete Task
+      operationId: apps_todo_api_tasks_close_task
+      summary: Close Task
       parameters:
       - in: path
         name: number
@@ -3302,19 +3457,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskSchema'
-      description: 'Complete a task and its open subtasks. Completing a repeating task creates its next
+      description: 'Close a task as Done (the default) or as Won''t do (`resolution`), and deal with its open
 
-        occurrence (always: one the balance can''t cover is created unpaid, see `POST /tasks`).
+        subtasks (`subtasks`: closed as Done by default, closed as Won''t do, or left open). Every field is
 
-        Idempotent.'
+        optional, so `{}` closes the task and its open subtasks as Done. Closing a
+
+        repeating task creates its next occurrence **whichever the resolution** (Won''t do means "skip
+
+        this one"); one the balance can''t cover is created unpaid, see `POST /tasks`. A closed task
+
+        has no state: it goes back to `todo` and is `blocked` again only if it is reopened while a
+
+        blocker is open. What the task blocks is freed when this was its last open blocker.
+
+
+        `note` (only with `resolution=wont_do`, else a 400) is added as a comment: it spends
+
+        `TODO_COMMENT_USER` as well as `TODO_EDIT_USER`.
+
+
+        The API closes without asking about open blockers or subtasks that have some: the links are
+
+        kept. Closing a task that is already closed changes nothing (`resolution` is **not** applied:
+
+        use `POST /tasks/{number}/resolution`) except that a `note` is still added as a comment; either
+
+        way the answer is the task as it is. A task in the Trash is a 400.
+
+
+        Everything is checked before the budgets are spent, so a refusal costs nothing.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloseSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/tasks/{number}/reopen:
+    post:
+      operationId: apps_todo_api_tasks_reopen_task
+      summary: Reopen Task
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSchema'
+      description: 'Make a closed task open again, whichever way it was closed: `blocked` when one of its
+
+        blockers is still open, else `todo`; its resolution is cleared. The next occurrence of a
+
+        repeating task, if one was created, stays; the open tasks it blocks are told it is back and
+
+        keep their state. Reopening an open task changes nothing. A task in the Trash is a 400.'
       tags:
       - To-do
       security:
       - JWTAuth: []
-  /api/todo/tasks/{number}/uncomplete:
+  /api/todo/tasks/{number}/resolution:
     post:
-      operationId: apps_todo_api_tasks_uncomplete_task
-      summary: Uncomplete Task
+      operationId: apps_todo_api_tasks_set_resolution
+      summary: Set Resolution
       parameters:
       - in: path
         name: number
@@ -3329,11 +3544,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskSchema'
-      description: 'Make a completed task open again. The next occurrence of a repeating task, if one was
+      description: 'Change how a **closed** task was closed (`done` or `wont_do`). It creates no occurrence,
 
-        created, stays.'
+        touches no subtasks and keeps the time the task was closed at. A 400 for an open task (it has
+
+        no resolution; close it instead) and for a task in the Trash.'
       tags:
       - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolutionSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/todo/tasks/{number}/state:
+    post:
+      operationId: apps_todo_api_tasks_set_state
+      summary: Set State
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSchema'
+      description: 'Set an open task''s state: `todo`, `in_progress` or `on_hold`. Each task has its own state:
+
+        nothing propagates between a parent and its subtasks. A 400 for `blocked` (only blockers set
+
+        it; a Blocked task can still be given any of the three, which keeps its links), for a closed
+
+        task (reopen it first) and for a task in the Trash. Leaving On hold or Blocked delivers one
+
+        reminder for what was missed while it was muted.'
+      tags:
+      - To-do
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StateSchema'
+        required: true
       security:
       - JWTAuth: []
   /api/todo/tasks/{number}/restore:
@@ -3739,16 +3999,6 @@ components:
     QRCodeSchema:
       description: Schema for QR code response.
       properties:
-        image_url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Image Url
-        redirect_url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Redirect Url
         id:
           anyOf:
           - format: uuid
@@ -3845,6 +4095,16 @@ components:
           format: date-time
           title: Updated At
           type: string
+        image_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Image Url
+        redirect_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Redirect Url
       required:
       - qr_type
       - content
@@ -3856,16 +4116,6 @@ components:
     QRCodeCreateSchema:
       description: Schema for creating QR codes.
       properties:
-        url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Url
-        data:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Data
         name:
           default: Untitled QR Code
           description: Name of the QR code
@@ -3914,6 +4164,16 @@ components:
           description: Whether to use URL shortening
           title: Use Url Shortening
           type: boolean
+        url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Url
+        data:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Data
       required:
       - qr_type
       title: QRCodeCreateSchema
@@ -5724,6 +5984,145 @@ components:
       - filter_bots
       title: TotalsSchema
       type: object
+    ActivityEventSchema:
+      description: 'One entry of a task''s log: something that changed.
+
+
+        `text` is the entry written as a sentence (`Due date changed from Nov 5, 2026, 3:00 PM to Nov 7,
+
+        2026, 9:00 AM`; always the public wording, whatever the account''s date and time format, and in
+
+        English). `kind` and `data` are the same entry as data, for a client that wants to write its
+
+        own: `data` is a JSON object whose keys depend on the `kind` and which holds the values
+
+        themselves (old and new titles, task numbers and titles, label and file names), so the entry
+
+        still reads right after what it mentions is gone. `automatic` is true when nobody asked for the
+
+        change in that moment (a task unblocked by a blocker closing, the next occurrence of a repeating
+
+        task, what closing a parent does to its subtasks, a task made from an email). `channel` is the
+
+        entry point that made the change: `web`, `api`, `email`, `push` (a phone notification''s button)
+
+        or `system` (a job).
+
+
+        The `data` of each `kind`: `created` (`source`, `parent`, `previous`, `rrule`), `state` (`from`,
+
+        `to`), `closed` (`resolution`, `via`, `subtasks`, `subtasks_resolution`), `reopened` (`to`,
+
+        `resolution`), `resolution` (`from`, `to`), `title` and `priority` (`from`, `to`), `due`
+
+        (`from_date`, `from_time`, `to_date`, `to_time`), `labels` (`added`, `removed`), `repeat`
+
+        (`from`, `to`, `mode`, `reason`), `description` (nothing), `checklist` (`checked`, `text`),
+
+        `blocker_added` and `blocker_removed` (`number`, `title`), `blocked` (`from`, `blockers`),
+
+        `unblocked` (`blockers` with each `reason`), `subtask_added`, `subtask_removed` and
+
+        `subtask_closed` (`number`, `title`, ...), `moved` (`parent`), `attachment_added` and
+
+        `attachment_removed` (`filename`, `comment`), `trashed` and `restored` (`via`).'
+      properties:
+        id:
+          description: The entry's id.
+          format: uuid
+          title: Id
+          type: string
+        kind:
+          description: What happened.
+          enum:
+          - created
+          - state
+          - closed
+          - reopened
+          - resolution
+          - title
+          - description
+          - checklist
+          - priority
+          - due
+          - labels
+          - repeat
+          - blocker_added
+          - blocker_removed
+          - blocked
+          - unblocked
+          - subtask_added
+          - subtask_removed
+          - subtask_closed
+          - moved
+          - attachment_added
+          - attachment_removed
+          - trashed
+          - restored
+          title: Kind
+          type: string
+        text:
+          description: The entry as a sentence, in the public wording.
+          title: Text
+          type: string
+        data:
+          additionalProperties: true
+          description: The entry as data; its keys depend on `kind`.
+          title: Data
+          type: object
+        automatic:
+          description: Nobody asked for the change in that moment.
+          title: Automatic
+          type: boolean
+        channel:
+          description: The entry point that made the change.
+          enum:
+          - web
+          - api
+          - email
+          - push
+          - system
+          title: Channel
+          type: string
+        created_at:
+          description: When it happened.
+          format: date-time
+          title: Created At
+          type: string
+      required:
+      - id
+      - kind
+      - text
+      - data
+      - automatic
+      - channel
+      - created_at
+      title: ActivityEventSchema
+      type: object
+    ActivityPageSchema:
+      description: 'A page of a task''s log, **newest first**. `next` is the cursor of the following (older)
+
+        page, to send as `before`, or `null` on the last page. A cursor is an opaque keyset position
+
+        (the time and id of the last entry), so entries written while paging never repeat or skip.'
+      properties:
+        results:
+          description: The entries, newest first.
+          items:
+            $ref: '#/components/schemas/ActivityEventSchema'
+          title: Results
+          type: array
+        next:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: The cursor of the next, older page (send it as `before`); `null` on the last.
+          title: Next
+      required:
+      - results
+      - next
+      title: ActivityPageSchema
+      type: object
     AttachmentSchema:
       description: 'An uploaded attachment. `task` is its task''s number. `inline_type` is the type sniffed from
 
@@ -5761,241 +6160,6 @@ components:
       - inline_type
       - created_at
       title: AttachmentSchema
-      type: object
-    CommentSchema:
-      description: 'A comment. `body` is the Markdown and `body_html` the rendered, sanitised HTML (`#1234` and
-
-        task URLs linked). A deleted comment has `deleted_at` set and **no body** (`null`) unless
-
-        `?include_deleted_bodies=1` asked for it. `edited_at` is `null` until the first edit and
-
-        `revision_count` counts the edits.'
-      properties:
-        id:
-          format: uuid
-          title: Id
-          type: string
-        task:
-          title: Task
-          type: integer
-        body:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Body
-        body_html:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Body Html
-        created_at:
-          format: date-time
-          title: Created At
-          type: string
-        edited_at:
-          anyOf:
-          - format: date-time
-            type: string
-          - type: 'null'
-          title: Edited At
-        deleted_at:
-          anyOf:
-          - format: date-time
-            type: string
-          - type: 'null'
-          title: Deleted At
-        revision_count:
-          title: Revision Count
-          type: integer
-      required:
-      - id
-      - task
-      - body
-      - body_html
-      - created_at
-      - edited_at
-      - deleted_at
-      - revision_count
-      title: CommentSchema
-      type: object
-    CommentBodySchema:
-      additionalProperties: false
-      description: Body for adding or editing a comment (1 to 10,000 characters).
-      properties:
-        body:
-          title: Body
-          type: string
-      required:
-      - body
-      title: CommentBodySchema
-      type: object
-    RevisionSchema:
-      description: What a comment said before an edit replaced it, and when.
-      properties:
-        body:
-          title: Body
-          type: string
-        body_html:
-          title: Body Html
-          type: string
-        replaced_at:
-          format: date-time
-          title: Replaced At
-          type: string
-      required:
-      - body
-      - body_html
-      - replaced_at
-      title: RevisionSchema
-      type: object
-    FilterSchema:
-      description: 'A saved filter. `params` is the stored form (see `FilterParamsSchema`) and `summary` a short
-
-        description of it (`priority 1 · @home · next 7 days`).'
-      properties:
-        id:
-          format: uuid
-          title: Id
-          type: string
-        name:
-          title: Name
-          type: string
-        position:
-          title: Position
-          type: integer
-        params:
-          additionalProperties: true
-          title: Params
-          type: object
-        summary:
-          title: Summary
-          type: string
-        created_at:
-          format: date-time
-          title: Created At
-          type: string
-      required:
-      - id
-      - name
-      - position
-      - params
-      - summary
-      - created_at
-      title: FilterSchema
-      type: object
-    FilterCreateSchema:
-      additionalProperties: false
-      properties:
-        name:
-          title: Name
-          type: string
-        params:
-          allOf:
-          - $ref: '#/components/schemas/FilterParamsSchema'
-          default:
-            q: ''
-            mode: glob
-            include_completed: false
-            priorities: []
-            labels: []
-            date_range: any
-            date_from: null
-            date_to: null
-            sort: date
-      required:
-      - name
-      title: FilterCreateSchema
-      type: object
-    FilterParamsSchema:
-      additionalProperties: false
-      description: 'What a saved filter selects (the same as the query of `GET /tasks`): search text `q` in
-
-        `mode` `glob` or `regex`, `include_completed`, `priorities` (0 to 3), `labels` (label ids, and
-
-        `none` for tasks without one), a `date_range` (`any`, `overdue`, `today`, `next_7_days`,
-
-        `next_30_days`, `no_date` or `custom` with `date_from` / `date_to`) and a `sort`. A label id
-
-        that isn''t yours is dropped, as is one deleted later.'
-      properties:
-        q:
-          default: ''
-          title: Q
-          type: string
-        mode:
-          default: glob
-          title: Mode
-          type: string
-        include_completed:
-          default: false
-          title: Include Completed
-          type: boolean
-        priorities:
-          default: []
-          items:
-            type: integer
-          title: Priorities
-          type: array
-        labels:
-          default: []
-          items:
-            type: string
-          title: Labels
-          type: array
-        date_range:
-          default: any
-          title: Date Range
-          type: string
-        date_from:
-          anyOf:
-          - format: date
-            type: string
-          - type: 'null'
-          title: Date From
-        date_to:
-          anyOf:
-          - format: date
-            type: string
-          - type: 'null'
-          title: Date To
-        sort:
-          default: date
-          title: Sort
-          type: string
-      title: FilterParamsSchema
-      type: object
-    FilterOrderSchema:
-      description: 'Body for `POST /filters/reorder`: the filter ids in the new order (at most 50, the most saved
-
-        filters one user can have; a longer list is a 422).'
-      properties:
-        ids:
-          items:
-            format: uuid
-            type: string
-          maxItems: 50
-          title: Ids
-          type: array
-      required:
-      - ids
-      title: FilterOrderSchema
-      type: object
-    FilterUpdateSchema:
-      additionalProperties: false
-      description: 'Body for `PATCH /filters/{id}`: a new `name` and/or new `params` (replacing the old ones as
-
-        a whole). A field left out is unchanged.'
-      properties:
-        name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Name
-        params:
-          anyOf:
-          - $ref: '#/components/schemas/FilterParamsSchema'
-          - type: 'null'
-      title: FilterUpdateSchema
       type: object
     LabelRefSchema:
       description: 'A label as a task carries it: enough to show and to filter by.'
@@ -6096,28 +6260,37 @@ components:
       - snoozed_until
       title: ReminderSchema
       type: object
-    TaskListSchema:
+    TaskRefSchema:
+      description: 'A task another task is linked to (`blocked_by`, `blocks`). `open` says whether it is open:
+
+        not closed and not in the Trash, which is when it still blocks what it blocks; `trashed` says it
+
+        is in the Trash. A link is kept when either task closes or is trashed, so closed and trashed
+
+        tasks are listed too (`open: false`).'
       properties:
-        count:
-          title: Count
+        number:
+          description: The linked task's number.
+          title: Number
           type: integer
-        limit:
-          title: Limit
-          type: integer
-        offset:
-          title: Offset
-          type: integer
-        results:
-          items:
-            $ref: '#/components/schemas/TaskSchema'
-          title: Results
-          type: array
+        title:
+          description: The linked task's title.
+          title: Title
+          type: string
+        open:
+          description: 'Not closed and not in the Trash: it still blocks what it blocks.'
+          title: Open
+          type: boolean
+        trashed:
+          description: In the Trash.
+          title: Trashed
+          type: boolean
       required:
-      - count
-      - limit
-      - offset
-      - results
-      title: TaskListSchema
+      - number
+      - title
+      - open
+      - trashed
+      title: TaskRefSchema
       type: object
     TaskSchema:
       description: 'One task, as every task endpoint returns it.
@@ -6139,7 +6312,31 @@ components:
 
         Trash, `comment_count` the comments that aren''t deleted and `attachment_count` the uploaded
 
-        files.'
+        files.
+
+
+        **Open and closed.** A task is open while `closed_at` is `null` and closed from the moment it is
+
+        closed (as Done or as Won''t do), until it is reopened. `resolution` says how a closed task was
+
+        closed (`done` or `wont_do`; a closed task with none recorded reads as `done`) and is `null` for
+
+        an open one. `state` is what an *open* task is doing: `todo`, `in_progress`, `on_hold` (chosen
+
+        by the owner) or `blocked` (set automatically while a task in `blocked_by` is open; nobody
+
+        chooses it). `on_hold` and `blocked` are *muted*: such a task is never overdue and is not moved
+
+        by `POST /tasks/reschedule-overdue`, and its reminders wait until it leaves the state. A closed
+
+        task has no state to speak of: closing sets it back to `todo`, so read it only while the task is
+
+        open.
+
+
+        `blocked_by` lists the tasks that block this one and `blocks` the tasks it blocks, by number
+
+        (see `TaskRefSchema`); the links are kept when either task closes or is trashed.'
       properties:
         id:
           format: uuid
@@ -6178,12 +6375,31 @@ components:
             type: string
           - type: 'null'
           title: Due At
-        completed_at:
+        closed_at:
           anyOf:
           - format: date-time
             type: string
           - type: 'null'
-          title: Completed At
+          description: When the task was closed (as Done or as Won't do); `null` while it is open.
+          title: Closed At
+        state:
+          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers). A closed task reads `todo`: ignore it while `closed_at` is set.'
+          enum:
+          - todo
+          - in_progress
+          - blocked
+          - on_hold
+          title: State
+          type: string
+        resolution:
+          anyOf:
+          - enum:
+            - done
+            - wont_do
+            type: string
+          - type: 'null'
+          description: How a closed task was closed, `done` or `wont_do`; `null` while it is open.
+          title: Resolution
         deleted_at:
           anyOf:
           - format: date-time
@@ -6214,6 +6430,18 @@ components:
           items:
             $ref: '#/components/schemas/ReminderSchema'
           title: Reminders
+          type: array
+        blocked_by:
+          description: The tasks that block this one, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocked By
+          type: array
+        blocks:
+          description: The tasks this one blocks, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocks
           type: array
         subtask_count:
           title: Subtask Count
@@ -6251,7 +6479,9 @@ components:
       - due_date
       - due_time
       - due_at
-      - completed_at
+      - closed_at
+      - state
+      - resolution
       - deleted_at
       - position
       - source
@@ -6259,6 +6489,8 @@ components:
       - labels
       - recurrence
       - reminders
+      - blocked_by
+      - blocks
       - subtask_count
       - open_subtask_count
       - comment_count
@@ -6268,6 +6500,313 @@ components:
       - created_at
       - updated_at
       title: TaskSchema
+      type: object
+    BlockerSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tasks/{number}/blockers`: the number of the task that is to block it.'
+      properties:
+        number:
+          description: The number of the task that blocks this one.
+          title: Number
+          type: integer
+      required:
+      - number
+      title: BlockerSchema
+      type: object
+    CommentSchema:
+      description: 'A comment. `body` is the Markdown and `body_html` the rendered, sanitised HTML (`#1234` and
+
+        task URLs linked). A deleted comment has `deleted_at` set and **no body** (`null`) unless
+
+        `?include_deleted_bodies=1` asked for it. `edited_at` is `null` until the first edit and
+
+        `revision_count` counts the edits.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        task:
+          title: Task
+          type: integer
+        body:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Body
+        body_html:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Body Html
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        edited_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Edited At
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Deleted At
+        revision_count:
+          title: Revision Count
+          type: integer
+      required:
+      - id
+      - task
+      - body
+      - body_html
+      - created_at
+      - edited_at
+      - deleted_at
+      - revision_count
+      title: CommentSchema
+      type: object
+    CommentBodySchema:
+      additionalProperties: false
+      description: Body for adding or editing a comment (1 to 10,000 characters).
+      properties:
+        body:
+          title: Body
+          type: string
+      required:
+      - body
+      title: CommentBodySchema
+      type: object
+    RevisionSchema:
+      description: What a comment said before an edit replaced it, and when.
+      properties:
+        body:
+          title: Body
+          type: string
+        body_html:
+          title: Body Html
+          type: string
+        replaced_at:
+          format: date-time
+          title: Replaced At
+          type: string
+      required:
+      - body
+      - body_html
+      - replaced_at
+      title: RevisionSchema
+      type: object
+    FilterParamsSchema:
+      additionalProperties: false
+      description: 'What a saved filter selects (the same criteria as the query of `GET /tasks`, under the
+
+        names a saved filter has always used): search text `q` in `mode` `glob` or `regex`,
+
+        `include_closed` (closed tasks too), `resolution` (`done` or `wont_do`: which closed tasks
+
+        `include_closed` lists; `null` for both; only with `include_closed`, else a 422), `states`
+
+        (`todo`, `in_progress`, `blocked`, `on_hold`: an open task in any of them matches; closed tasks
+
+        are not narrowed by it), `priorities` (0 to 3), `labels` (label ids, and `none` for tasks
+
+        without one), a `date_range` (`any`, `overdue`, `today`, `next_7_days`, `next_30_days`,
+
+        `no_date` or `custom` with `date_from` / `date_to`) and a `sort`. A label id that isn''t yours is
+
+        dropped, as is one deleted later. `overdue` leaves out On hold and Blocked tasks, which are
+
+        never overdue.
+
+
+        A saved filter made on the website can carry `states` and `resolution` too; they are read and
+
+        written here like the rest.'
+      properties:
+        q:
+          default: ''
+          title: Q
+          type: string
+        mode:
+          default: glob
+          title: Mode
+          type: string
+        include_closed:
+          default: false
+          description: List closed tasks too.
+          title: Include Closed
+          type: boolean
+        resolution:
+          anyOf:
+          - enum:
+            - done
+            - wont_do
+            type: string
+          - type: 'null'
+          description: Only the closed tasks closed that way; needs `include_closed`.
+          title: Resolution
+        states:
+          default: []
+          description: An open task in any of these states matches.
+          items:
+            enum:
+            - todo
+            - in_progress
+            - blocked
+            - on_hold
+            type: string
+          title: States
+          type: array
+        priorities:
+          default: []
+          items:
+            type: integer
+          title: Priorities
+          type: array
+        labels:
+          default: []
+          items:
+            type: string
+          title: Labels
+          type: array
+        date_range:
+          default: any
+          title: Date Range
+          type: string
+        date_from:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Date From
+        date_to:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Date To
+        sort:
+          default: date
+          title: Sort
+          type: string
+      title: FilterParamsSchema
+      type: object
+    FilterSchema:
+      description: 'A saved filter. `params` is what it selects (see `FilterParamsSchema`) and `summary` a short
+
+        description of it in the public wording (`priority 1 · state on hold · @home · next 7 days`).'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        position:
+          title: Position
+          type: integer
+        params:
+          $ref: '#/components/schemas/FilterParamsSchema'
+        summary:
+          title: Summary
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+      required:
+      - id
+      - name
+      - position
+      - params
+      - summary
+      - created_at
+      title: FilterSchema
+      type: object
+    FilterCreateSchema:
+      additionalProperties: false
+      properties:
+        name:
+          title: Name
+          type: string
+        params:
+          allOf:
+          - $ref: '#/components/schemas/FilterParamsSchema'
+          default:
+            q: ''
+            mode: glob
+            include_closed: false
+            resolution: null
+            states: []
+            priorities: []
+            labels: []
+            date_range: any
+            date_from: null
+            date_to: null
+            sort: date
+      required:
+      - name
+      title: FilterCreateSchema
+      type: object
+    FilterOrderSchema:
+      description: 'Body for `POST /filters/reorder`: the filter ids in the new order (at most 50, the most saved
+
+        filters one user can have; a longer list is a 422).'
+      properties:
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 50
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: FilterOrderSchema
+      type: object
+    FilterUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /filters/{id}`: a new `name` and/or new `params` (replacing the old ones as
+
+        a whole). A field left out is unchanged.'
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        params:
+          anyOf:
+          - $ref: '#/components/schemas/FilterParamsSchema'
+          - type: 'null'
+      title: FilterUpdateSchema
+      type: object
+    TaskListSchema:
+      properties:
+        count:
+          title: Count
+          type: integer
+        limit:
+          title: Limit
+          type: integer
+        offset:
+          title: Offset
+          type: integer
+        results:
+          items:
+            $ref: '#/components/schemas/TaskSchema'
+          title: Results
+          type: array
+      required:
+      - count
+      - limit
+      - offset
+      - results
+      title: TaskListSchema
       type: object
     LabelSchema:
       description: 'One of the caller''s labels. `task_count` counts the tasks that have it, the Trash not
@@ -6723,12 +7262,31 @@ components:
             type: string
           - type: 'null'
           title: Due At
-        completed_at:
+        closed_at:
           anyOf:
           - format: date-time
             type: string
           - type: 'null'
-          title: Completed At
+          description: When the task was closed (as Done or as Won't do); `null` while it is open.
+          title: Closed At
+        state:
+          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers). A closed task reads `todo`: ignore it while `closed_at` is set.'
+          enum:
+          - todo
+          - in_progress
+          - blocked
+          - on_hold
+          title: State
+          type: string
+        resolution:
+          anyOf:
+          - enum:
+            - done
+            - wont_do
+            type: string
+          - type: 'null'
+          description: How a closed task was closed, `done` or `wont_do`; `null` while it is open.
+          title: Resolution
         deleted_at:
           anyOf:
           - format: date-time
@@ -6759,6 +7317,18 @@ components:
           items:
             $ref: '#/components/schemas/ReminderSchema'
           title: Reminders
+          type: array
+        blocked_by:
+          description: The tasks that block this one, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocked By
+          type: array
+        blocks:
+          description: The tasks this one blocks, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocks
           type: array
         subtask_count:
           title: Subtask Count
@@ -6800,7 +7370,9 @@ components:
       - due_date
       - due_time
       - due_at
-      - completed_at
+      - closed_at
+      - state
+      - resolution
       - deleted_at
       - position
       - source
@@ -6808,6 +7380,8 @@ components:
       - labels
       - recurrence
       - reminders
+      - blocked_by
+      - blocks
       - subtask_count
       - open_subtask_count
       - comment_count
@@ -6856,6 +7430,17 @@ components:
         words); an AI that is not configured, busy, over its limits or that finds nothing just creates
 
         the task as typed. `parsed` in the answer says which.
+
+
+        `state` is the state the task starts in: `todo` (the default), `in_progress` or `on_hold` (a 400
+
+        for anything else: `blocked` is set only by blockers). `blocked_by` lists the numbers of the
+
+        caller''s own tasks that block the new one (at most 20, none in the Trash; one that doesn''t exist,
+
+        or isn''t the caller''s, is a 400 `There is no task #N.`); when one of them is open the task starts
+
+        `blocked`, whatever `state` says.
 
 
         A key that is not one of these is refused with a 422.'
@@ -6915,6 +7500,23 @@ components:
           default: false
           title: Parse Title
           type: boolean
+        state:
+          default: todo
+          description: 'The starting state: `todo`, `in_progress` or `on_hold`.'
+          enum:
+          - todo
+          - in_progress
+          - on_hold
+          title: State
+          type: string
+        blocked_by:
+          default: []
+          description: Numbers of the caller's tasks that block the new one (at most 20).
+          items:
+            type: integer
+          maxItems: 20
+          title: Blocked By
+          type: array
       required:
       - title
       title: TaskCreateSchema
@@ -7019,12 +7621,31 @@ components:
             type: string
           - type: 'null'
           title: Due At
-        completed_at:
+        closed_at:
           anyOf:
           - format: date-time
             type: string
           - type: 'null'
-          title: Completed At
+          description: When the task was closed (as Done or as Won't do); `null` while it is open.
+          title: Closed At
+        state:
+          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers). A closed task reads `todo`: ignore it while `closed_at` is set.'
+          enum:
+          - todo
+          - in_progress
+          - blocked
+          - on_hold
+          title: State
+          type: string
+        resolution:
+          anyOf:
+          - enum:
+            - done
+            - wont_do
+            type: string
+          - type: 'null'
+          description: How a closed task was closed, `done` or `wont_do`; `null` while it is open.
+          title: Resolution
         deleted_at:
           anyOf:
           - format: date-time
@@ -7055,6 +7676,18 @@ components:
           items:
             $ref: '#/components/schemas/ReminderSchema'
           title: Reminders
+          type: array
+        blocked_by:
+          description: The tasks that block this one, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocked By
+          type: array
+        blocks:
+          description: The tasks this one blocks, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocks
           type: array
         subtask_count:
           title: Subtask Count
@@ -7102,7 +7735,9 @@ components:
       - due_date
       - due_time
       - due_at
-      - completed_at
+      - closed_at
+      - state
+      - resolution
       - deleted_at
       - position
       - source
@@ -7110,6 +7745,8 @@ components:
       - labels
       - recurrence
       - reminders
+      - blocked_by
+      - blocks
       - subtask_count
       - open_subtask_count
       - comment_count
@@ -7131,6 +7768,21 @@ components:
         `due_date` and `due_time`, `labels` to no labels, `parent` to a top-level task, `rrule` to
 
         stop repeating). A `title` cannot be empty, so `null` there is a 400.
+
+
+        `state` sets an open task''s state: `todo`, `in_progress` or `on_hold` (a 400 for anything else,
+
+        and for a closed task: reopen it first; it cannot be `null`). `blocked_by` **replaces** the set
+
+        of tasks that block this one with the numbers given (the difference is linked and unlinked, all
+
+        or nothing; `null` or `[]` removes every blocker): when one of them is open the task becomes
+
+        `blocked`, and when none is left a `blocked` task goes back to `todo`. A closed task can be given
+
+        blockers too (the links only). Where `state` and `blocked_by` are both sent, `state` is applied
+
+        first and the blockers after it.
 
 
         Clearing `due_date` clears the time with it. A key that is not one of these (a typo, `status`,
@@ -7188,7 +7840,103 @@ components:
           - type: string
           - type: 'null'
           title: Recurrence Mode
+        state:
+          anyOf:
+          - enum:
+            - todo
+            - in_progress
+            - on_hold
+            type: string
+          - type: 'null'
+          description: 'The open task''s new state: `todo`, `in_progress` or `on_hold`.'
+          title: State
+        blocked_by:
+          anyOf:
+          - items:
+              type: integer
+            maxItems: 20
+            type: array
+          - type: 'null'
+          description: Replaces the set of tasks that block this one (numbers, at most 20); `null` or `[]` removes them all.
+          title: Blocked By
       title: TaskUpdateSchema
+      type: object
+    CloseSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tasks/{number}/close`. `resolution` is `done` (the default) or `wont_do`.
+
+
+        `subtasks` says what happens to the open subtasks of the task being closed: `done` (the default)
+
+        or `wont_do` closes them with that resolution, `leave` leaves them open.
+
+
+        `note` (a Markdown text of up to 10,000 characters) is added to the task as a comment; it is
+
+        allowed only with `resolution=wont_do` (a 400 otherwise), where it says why.
+
+
+        A key that is not one of these is refused with a 422.'
+      properties:
+        resolution:
+          default: done
+          description: '`done` or `wont_do`.'
+          enum:
+          - done
+          - wont_do
+          title: Resolution
+          type: string
+        subtasks:
+          default: done
+          description: 'What happens to the open subtasks: closed as `done`, closed as `wont_do`, or left open (`leave`).'
+          enum:
+          - done
+          - wont_do
+          - leave
+          title: Subtasks
+          type: string
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: A comment explaining the close, up to 10,000 characters; only with `resolution=wont_do`.
+          title: Note
+      title: CloseSchema
+      type: object
+    ResolutionSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tasks/{number}/resolution`: how the closed task is now to be read, `done` or
+
+        `wont_do`.'
+      properties:
+        resolution:
+          description: '`done` or `wont_do`.'
+          enum:
+          - done
+          - wont_do
+          title: Resolution
+          type: string
+      required:
+      - resolution
+      title: ResolutionSchema
+      type: object
+    StateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tasks/{number}/state`: the open task''s new state, `todo`, `in_progress` or
+
+        `on_hold`. `blocked` is refused with a 400: only blockers set it.'
+      properties:
+        state:
+          description: '`todo`, `in_progress` or `on_hold`.'
+          enum:
+          - todo
+          - in_progress
+          - on_hold
+          title: State
+          type: string
+      required:
+      - state
+      title: StateSchema
       type: object
     PostponeSchema:
       additionalProperties: false
@@ -7253,4 +8001,4 @@ tags:
 - name: Short URLs
   description: Short links with editable destinations, their paid extras and click statistics.
 - name: To-do
-  description: Tasks, subtasks, labels, comments, reminders, attachments, saved filters and settings.
+  description: 'Tasks and subtasks with states (to do, in progress, on hold, blocked), resolutions (done, won''t do) and blockers, labels, comments, reminders, attachments, saved filters, settings and each task''s activity log. A task is addressed by its number, everything else by its id. Errors are `{"detail": ...}`: 400 a value refused (a service message, or a bad query parameter), 402 not enough credits or storage unpaid, 404 not yours or not there (never 403), 409 a conflict (creation blocked by an unpaid repeating task: also `unpaid_task_numbers`), 422 a malformed request, 429 rate limited (see `Retry-After`).'
