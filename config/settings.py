@@ -472,6 +472,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # expression, so it is the one read that costs real work; a person typing a search and
     # adjusting filters stays well below this. Saved-filter changes spend `TODO_EDIT_USER`.
     'TODO_SEARCH_USER': (60, 60),
+    # The "Blocked by" box's suggestions (issue #273), `GET /todo/<n>/blockers/suggest/`: one
+    # `LIKE '%...%'` over the user's open tasks per pause in typing, session-bound and cheap, so
+    # this is loose; it only bounds a script. Over it the box just offers nothing, never an error.
+    'TODO_BLOCKER_SUGGEST_USER': (120, 60),
     # Retiring the email address and issuing a new one (issue #186), per user.
     'TODO_REGENERATE_USER': (5, 60 * 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --

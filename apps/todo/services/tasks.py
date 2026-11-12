@@ -43,7 +43,7 @@ from ..models import (
 )
 from . import attachments, blockers, comments, dates, reminders
 from . import recurrence as recurrence_service
-from .accounts import allocate_number, get_account
+from .accounts import allocate_number, get_account, lock_account
 from .billing import cannot_afford, charge_task_creation
 from .dates import next_position, next_today_position
 from .limits import DESCRIPTION_MAX, TITLE_MAX
@@ -523,6 +523,7 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
     values, labels, new_parent, moves = _clean_changes(task, changes)
 
     with transaction.atomic():
+        lock_account(task.user_id)  # first: see `services.blockers`' note on locking
         # The task's row (and the new parent's, in pk order) is locked and re-read first: the
         # checks below read rows another request may be changing (a subtask being added to this
         # task, the new parent moving under something), and the description is compared with the
@@ -616,6 +617,7 @@ def toggle_checklist(task: Task, index: int, checked: bool) -> Task:
     two boxes ticked at once (two requests) both survive instead of the second overwriting the
     first. Returns the fresh task."""
     with transaction.atomic():
+        lock_account(task.user_id)  # before the task's row, as `update_task` (called below) does
         fresh = Task.objects.select_for_update().filter(pk=task.pk).first()
         if fresh is None:
             raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
@@ -654,6 +656,11 @@ def close_task(
         raise _error(NON_FIELD_ERRORS, 'Restore the task before completing it.')
     now = timezone.now()
     with transaction.atomic():
+        # Account, then the closing task, then its subtasks, then (in `blockers.ended`) what it
+        # blocks: `services.blockers`' note on locking. The account first also because the next
+        # occurrence (`recurrence.on_completed` -> `create_task`) takes it anyway.
+        lock_account(task.user_id)
+        lock_tasks(task.pk)
         won = Task.objects.filter(
             pk=task.pk, completed_at__isnull=True, deleted_at__isnull=True
         ).update(completed_at=now, resolution=resolution, state=TaskState.TODO, updated_at=now)
@@ -674,7 +681,10 @@ def close_task(
             open_subtasks = Task.objects.filter(
                 parent=task, completed_at__isnull=True, deleted_at__isnull=True
             )
-            ended += list(open_subtasks.values_list('pk', flat=True))
+            subtask_ids = list(open_subtasks.values_list('pk', flat=True))
+            if subtask_ids:
+                lock_tasks(*subtask_ids)
+            ended += subtask_ids
             open_subtasks.update(
                 completed_at=now, resolution=subtasks, state=TaskState.TODO, updated_at=now
             )
@@ -701,9 +711,11 @@ def set_resolution(task: Task, resolution: str) -> Task:
     if task.is_trashed:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     now = timezone.now()
-    changed = Task.objects.filter(
-        pk=task.pk, completed_at__isnull=False, deleted_at__isnull=True
-    ).update(resolution=resolution, updated_at=now)
+    with transaction.atomic():
+        lock_account(task.user_id)
+        changed = Task.objects.filter(
+            pk=task.pk, completed_at__isnull=False, deleted_at__isnull=True
+        ).update(resolution=resolution, updated_at=now)
     if not changed:
         if Task.objects.filter(pk=task.pk, deleted_at__isnull=False).exists():
             raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
@@ -721,11 +733,15 @@ def uncomplete_task(task: Task) -> Task:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     now = timezone.now()
     with transaction.atomic():
-        state = TaskState.BLOCKED if blockers.has_open_blocker(task.pk) else TaskState.TODO
-        reopened = Task.objects.filter(
-            pk=task.pk, completed_at__isnull=False, deleted_at__isnull=True
-        ).update(completed_at=None, resolution='', state=state, updated_at=now)
-        if reopened:
+        lock_account(task.user_id)
+        # The row is locked before the blockers are read: a blocker closing at the same moment has
+        # committed (and is read closed) or comes after this commit and finds the task open.
+        current = lock_tasks(task.pk).get(task.pk)
+        if current is not None and current.completed_at is not None and not current.is_trashed:
+            state = TaskState.BLOCKED if blockers.has_open_blocker(task.pk) else TaskState.TODO
+            Task.objects.filter(pk=task.pk).update(
+                completed_at=None, resolution='', state=state, updated_at=now
+            )
             blockers.reopened([task.pk])
     task.refresh_from_db()
     return task
@@ -744,6 +760,7 @@ def set_state(task: Task, state: str) -> Task:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     now = timezone.now()
     with transaction.atomic():
+        lock_account(task.user_id)
         current = lock_tasks(task.pk).get(task.pk)
         if current is None:
             raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
@@ -806,6 +823,7 @@ def reschedule_overdue(user: User) -> int:
     how many changed."""
     today = user_today(user)
     with transaction.atomic():
+        lock_account(user.pk)  # it writes many task rows in one statement: take turns with the rest
         overdue = dates.overdue_set(user)
         # Their reminders follow the new date, re-armed when it is ahead (the user asked for this):
         # loaded in one query before the move and rewritten in one `bulk_update` after it.
@@ -825,10 +843,14 @@ def trash_task(task: Task) -> Task:
         return task
     now = timezone.now()
     with transaction.atomic():
+        # Account, the task, its subtasks, then what it blocks (`blockers.ended`).
+        lock_account(task.user_id)
+        lock_tasks(task.pk)
+        subtask_ids = list(Task.objects.filter(parent=task).values_list('pk', flat=True))
+        if subtask_ids:
+            lock_tasks(*subtask_ids)
         # The blockers among them that are open stop blocking what they block (read before the write).
-        was_open = blockers.open_ids(
-            [task.pk, *Task.objects.filter(parent=task).values_list('pk', flat=True)]
-        )
+        was_open = blockers.open_ids([task.pk, *subtask_ids])
         won = Task.objects.filter(pk=task.pk, deleted_at__isnull=True).update(
             deleted_at=now, updated_at=now
         )
@@ -857,12 +879,17 @@ def restore_task(task: Task) -> Task:
     now = timezone.now()
     trashed_at = task.deleted_at
     with transaction.atomic():
+        lock_account(task.user_id)
+        lock_tasks(task.pk)
+        subtasks = Task.objects.filter(parent=task, deleted_at=trashed_at)
+        subtask_ids = list(subtasks.values_list('pk', flat=True))
+        if subtask_ids:
+            lock_tasks(*subtask_ids)
         won = Task.objects.filter(pk=task.pk, deleted_at=trashed_at).update(
             deleted_at=None, updated_at=now
         )
         if won:
-            subtasks = Task.objects.filter(parent=task, deleted_at=trashed_at)
-            restored = [task.pk, *subtasks.values_list('pk', flat=True)]
+            restored = [task.pk, *subtask_ids]
             subtasks.update(deleted_at=None, updated_at=now)
             # An open task that is back blocks again only in the sense of a notice: what it blocks
             # keeps its state (`services.blockers`).
@@ -901,10 +928,17 @@ def _delete_with_attachments(task_id: UUID) -> int:
     """Delete the task, its subtasks and all their attachments (objects first, then rows, with
     the storage billing kept in step). A storage error raises before anything is deleted from the
     database and leaves the task for the next try. Returns how many task rows were removed."""
+    user_id = Task.objects.filter(pk=task_id).values_list('user_id', flat=True).first()
+    if user_id is None:
+        return 0
     with transaction.atomic():
-        ids = list(
-            Task.objects.filter(Q(pk=task_id) | Q(parent_id=task_id)).values_list('pk', flat=True)
-        )
+        # Account, the task, its subtasks, then what it blocks (`blockers.released` below).
+        lock_account(user_id)
+        lock_tasks(task_id)
+        subtask_ids = list(Task.objects.filter(parent_id=task_id).values_list('pk', flat=True))
+        if subtask_ids:
+            lock_tasks(*subtask_ids)
+        ids = [task_id, *subtask_ids]
         attachments.delete_for_tasks(ids)
         # Normally in the Trash already (nothing left to release); one that is deleted while open
         # frees what it blocked. Its dependents are found before the links go with it.
@@ -969,5 +1003,6 @@ def reorder(user: User, *, scope: str, ids: list[UUID], parent: Task | None = No
             task.updated_at = now
             changed.append(task)
     with transaction.atomic():
+        lock_account(user.pk)  # many task rows in one write: take turns with the rest
         Task.objects.bulk_update(changed, [field, 'updated_at'])
     return len(changed)

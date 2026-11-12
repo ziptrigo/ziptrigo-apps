@@ -79,8 +79,11 @@ class TestChecklistLostUpdate:
 
         toggle_checklist(task, 0, True)
 
-        # Locked by the toggle, and again (the same transaction) by `update_task`.
-        assert locks and set(locks) == {'Task'}
+        # The account first (the order every graph write takes), then the task by the toggle and
+        # again (the same transaction) by `update_task`.
+        assert (
+            locks[0] == 'TodoAccount' and 'Task' in locks and set(locks) <= {'TodoAccount', 'Task'}
+        )
 
     def test_update_task_compares_and_saves_the_description_under_the_row_lock(
         self, user, config, locks
@@ -90,7 +93,7 @@ class TestChecklistLostUpdate:
 
         update_task(task, changes={'description': 'second'})
 
-        assert locks == ['Task']
+        assert locks == ['TodoAccount', 'Task']
 
     def test_the_description_is_compared_with_the_stored_one_for_the_references(self, user, config):
         target_a = make_task(user, number=2001)
@@ -292,7 +295,8 @@ class TestReparentRace:
 
         update_task(task, changes={'parent': parent})
 
-        assert locks == ['Task']  # one locking query for both rows, in pk order
+        # The account, then one locking query for both rows, in pk order.
+        assert locks == ['TodoAccount', 'Task']
         assert Task.objects.get(pk=task.pk).parent_id == parent.pk
 
     def test_a_subtask_added_meanwhile_stops_the_move(self, user, config, monkeypatch):

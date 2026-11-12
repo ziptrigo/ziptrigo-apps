@@ -18,9 +18,13 @@ from .dates import next_today_position
 
 
 def lock_tasks(*pks: UUID) -> dict[UUID, Task]:
-    """The tasks `pks`, re-read with their rows locked (in pk order, so two callers locking the same
-    rows can't deadlock) and their owner loaded. Call it inside a transaction; a task that is gone
-    is missing from the result."""
+    """The tasks `pks`, re-read with their rows locked (in pk order within this call) and their
+    owner loaded. Call it inside a transaction; a task that is gone is missing from the result.
+
+    The pk order only orders one call's rows: it does not stop two callers that lock rows in
+    different calls from deadlocking. What does is the rule in `services.blockers`' docstring: every
+    write that locks more than one task takes the user's `TodoAccount` row first
+    (`accounts.lock_account`), then the task acted on, then its subtasks, then its dependents."""
     rows: Iterable[Task] = (
         Task.objects.select_related('user')
         .select_for_update(of=('self',))

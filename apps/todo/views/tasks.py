@@ -344,9 +344,8 @@ def task_page(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     context = {**comments_context(request, task), **panel}
     context['title_task'] = task
     context.update(attachments_context(request, task))
-    context['task'] = panel[
-        'task'
-    ]  # the one loaded like a row: the attachments' context has its own
+    # The one loaded like a row: the attachments' context has its own.
+    context['task'] = panel['task']
     return render_page(
         request, 'todo/task.html', context, nav='trash' if task.is_trashed else 'all'
     )
@@ -446,6 +445,48 @@ def _open_subtask_numbers(request: AuthenticatedHttpRequest, number: int) -> lis
     )
 
 
+def _unconfirmed_blockers(task: Task, subtasks: str) -> list[str]:
+    """What closing `task` would leave blocked, as sentences: its own open blockers, and -- when the
+    close also closes its open subtasks -- those of the subtasks that are still blocked by something
+    that stays open (`blockers.subtasks_with_open_blockers`)."""
+
+    def names(tasks: list[Task]) -> str:
+        return ', '.join(f'#{other.number} {other.title}' for other in tasks)
+
+    sentences = []
+    if waiting := task.open_blockers:
+        sentences.append(f'This task is still blocked by {names(waiting)}.')
+    if subtasks != SUBTASKS_LEAVE:
+        sentences.extend(
+            f'#{sub.number} {sub.title} is still blocked by {names(its_blockers)}.'
+            for sub, its_blockers in blockers.subtasks_with_open_blockers(task)
+        )
+    return sentences
+
+
+def _close_controls(request: AuthenticatedHttpRequest, task: Task) -> bytes:
+    """Out of band, `task`'s row (from a list) or its Complete buttons (from the task page) as they
+    are now, so a page that was out of date gets controls that open the close dialog."""
+    fresh = row_task(request.user, task.pk)
+    if _is_page(request):
+        template = 'todo/partials/complete_button.html'
+        context = {
+            'task': fresh,
+            'open_subtasks': subtasks_of(fresh).filter(completed_at__isnull=True).count(),
+            'oob': True,
+        }
+    else:
+        template = 'todo/partials/task_row.html'
+        context = {
+            'task': fresh,
+            'view': _view_of(request),
+            'today': user_today(request.user),
+            'oob': True,
+            'sortable': request.POST.get('sortable') == '1',
+        }
+    return render_to_string(template, context, request=request).encode()
+
+
 def _close(
     request: AuthenticatedHttpRequest,
     task: Task,
@@ -462,14 +503,20 @@ def _close(
     they are removed along with it (out of band) instead of staying as open rows until a reload.
     (The task page re-renders its whole panel anyway.) A note becomes a comment, so the page's
     comments are refreshed."""
-    if not confirmed and (waiting := task.open_blockers):
-        names = ', '.join(f'#{blocker.number} {blocker.title}' for blocker in waiting)
-        return refuse(
-            request,
-            f'This task is still blocked by {names}. Confirm to close it anyway.',
-            retarget=_slot(request),
-            fallback=_task_url(task) if _is_page(request) else '',
-        )
+    if not confirmed:
+        sentences = _unconfirmed_blockers(task, subtasks)
+        if sentences:
+            response = refuse(
+                request,
+                ' '.join([*sentences, 'Confirm to close it anyway.']),
+                retarget=_slot(request),
+                fallback=_task_url(task) if _is_page(request) else '',
+            )
+            if is_htmx(request):
+                # The page that sent this was rendered before the blocker was added: refresh the
+                # row (or the Complete buttons) so the next click opens the dialog naming them.
+                response.content += _close_controls(request, task)
+            return response
     cascaded = [] if subtasks == SUBTASKS_LEAVE else _open_subtask_numbers(request, task.number)
     already_closed: list[bool] = []
 

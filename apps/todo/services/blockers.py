@@ -27,8 +27,22 @@ does *not* block its tasks again: they only get a notice, "#1200 was reopened an
 and keep their state.
 
 Closing a task that still has open blockers is allowed (after a confirmation on the web, which asks
-for the open blockers by name: `open_blockers`); the links stay. The next occurrence of a repeating
-task starts with none (`recurrence` creates it through `create_task`, which gets no blockers).
+for the open blockers by name: `open_blockers`); the links stay. When the close also closes the
+open subtasks, the confirmation names the ones that have open blockers of their own
+(`subtasks_with_open_blockers`). The next occurrence of a repeating task starts with none
+(`recurrence` creates it through `create_task`, which gets no blockers).
+
+**Locking.** Everything that writes the blocker graph -- closing, trashing, restoring, reopening and
+deleting a task, adding and removing a link, creating a task with blockers, and the other writes
+that lock more than one task (moving a task under a parent, a state change, `reorder`, rescheduling
+the overdue ones, settling unpaid tasks) -- runs in a transaction whose **first** lock is the
+user's `TodoAccount` row (`accounts.lock_account`), the one `accounts.allocate_number` takes too.
+So one user's graph writes take turns, and the rows they then lock can't be taken in conflicting
+orders (two tasks closing at once, a link added while its blocker closes: each pair of the four
+deadlocks the review of #278 found needed two such writers at once). After the account, the order
+is: the task acted on (the closing one), then its subtasks, then the tasks it blocks (the
+dependents, in pk order, `released`). Nothing else locks the account while holding a task. The
+same lock is what makes the no-cycle rule hold for any number of links added at once.
 """
 
 import logging
@@ -48,6 +62,7 @@ from apps.core.services import notifications
 
 from ..limits import MAX_BLOCKERS_PER_TASK
 from ..models import Task, TaskBlocker, TaskState
+from .accounts import lock_account
 from .task_state import lock_tasks, write_state
 
 logger = logging.getLogger(__name__)
@@ -121,6 +136,33 @@ def dependents_of(ids: Iterable[UUID]) -> list[UUID]:
     )
 
 
+def subtasks_with_open_blockers(task: Task) -> list[tuple[Task, list[Task]]]:
+    """The open, non-trashed subtasks of `task` that still have an open blocker of their own once
+    the close that closes them with `task` is done, each with those blockers (by number): what the
+    close dialog names when the person chose to close the subtasks. A blocker that closes in the
+    same cascade (`task` itself, a sibling subtask) is not "still" open and is left out."""
+    subtasks = list(
+        Task.objects.filter(
+            parent=task, completed_at__isnull=True, deleted_at__isnull=True
+        ).order_by('number')
+    )
+    closing = {task.pk, *(sub.pk for sub in subtasks)}
+    links = (
+        TaskBlocker.objects.filter(
+            blocked__in=subtasks,
+            blocker__completed_at__isnull=True,
+            blocker__deleted_at__isnull=True,
+        )
+        .exclude(blocker_id__in=closing)
+        .select_related('blocker')
+        .order_by('blocker__number')
+    )
+    by_subtask: dict[UUID, list[Task]] = {}
+    for link in links:
+        by_subtask.setdefault(link.blocked_id, []).append(link.blocker)
+    return [(sub, by_subtask[sub.pk]) for sub in subtasks if sub.pk in by_subtask]
+
+
 def parse_numbers(text: str, field: str = 'blocked_by') -> list[int]:
     """The task numbers in a "Blocked by" box (`1200, 1201` or `#1200 #1201`: commas, semicolons
     and spaces separate them), once each, in order. Anything else is a refusal."""
@@ -184,14 +226,32 @@ def find_blocker(user: User, text: str, task: Task) -> Task:
     raise _error('blocker', CHOOSE_MESSAGE)
 
 
+def dependents_closure(task_id: UUID) -> set[UUID]:
+    """Every task reachable from `task_id` through "Blocks": the tasks it blocks, those they block,
+    and so on. Making any of them block `task_id` would close a loop. Walked a level (one query) at
+    a time, like `_would_cycle`."""
+    seen: set[UUID] = set()
+    frontier = [task_id]
+    while frontier:
+        found = set(
+            TaskBlocker.objects.filter(blocker_id__in=frontier).values_list('blocked_id', flat=True)
+        )
+        frontier = [pk for pk in found if pk not in seen]
+        seen.update(frontier)
+    return seen
+
+
 def suggestions(user: User, task: Task, text: str) -> list[Task]:
     """The open tasks to offer as blockers of `task` for what has been typed: not itself, not one it
-    already has, whose number starts with the digits typed or whose title contains the words (all of
-    the open tasks, newest numbers last, when nothing is typed). At most `SUGGESTIONS`."""
+    already has, and not one that would be refused as a cycle (any task `task` blocks, directly or
+    through other tasks), whose number starts with the digits typed or whose title contains the
+    words (all of the open tasks, newest numbers last, when nothing is typed). At most
+    `SUGGESTIONS`."""
     queryset = (
         Task.objects.filter(user=user, completed_at__isnull=True, deleted_at__isnull=True)
         .exclude(pk=task.pk)
         .exclude(blocks_links__blocked=task)
+        .exclude(pk__in=dependents_closure(task.pk))
     )
     text = (text or '').strip()
     digits = text.lstrip('#')
@@ -269,8 +329,10 @@ def add_blocker(task: Task, blocker: Task) -> bool:
     Both are the same user's and out of the Trash, `blocker` is another task and no cycle comes of
     it (`'#1200 is already blocked by #1234, directly or through other tasks.'`); a task has at
     most `MAX_BLOCKERS_PER_TASK`. An open blocker sets an open `task` to Blocked, from any open
-    state; a closed blocker only links, and so does a closed `task`. Both rows are locked (in pk
-    order) while it is decided, so two links added at once can't close a loop between them.
+    state; a closed blocker only links, and so does a closed `task`. The user's account row is
+    locked first and both tasks after it (`lock_account`, see the module docstring), so links added
+    at once -- between the same two tasks or any others, three in a ring included -- take turns,
+    each seeing the others' committed links: no cycle of any length can be committed.
     """
     if blocker.user_id != task.user_id:
         raise _error('blocker', 'Unknown task.')
@@ -278,6 +340,7 @@ def add_blocker(task: Task, blocker: Task) -> bool:
         raise _error('blocker', SELF_MESSAGE)
     now = timezone.now()
     with transaction.atomic():
+        lock_account(task.user_id)
         locked = lock_tasks(task.pk, blocker.pk)
         current, other = locked.get(task.pk), locked.get(blocker.pk)
         if current is None:
@@ -302,9 +365,14 @@ def add_blocker(task: Task, blocker: Task) -> bool:
 def link_new_task(task: Task, blockers: Sequence[Task]) -> None:
     """Link a task `create_task` just made to its `blockers` (validated by `clean_new`) and set it
     Blocked when one of them is open (decided from the database, in the creating transaction). A new
-    task has nothing blocked by it, so no cycle is possible."""
+    task has nothing blocked by it, so no cycle is possible. Runs after the account lock
+    `create_task` took (`allocate_number`); the blockers' rows are locked first, so a blocker
+    closing at the same moment has committed (and is seen closed) or waits and then sees the new
+    link and releases the task. The new task is invisible to everyone else, so locking the blockers
+    after the account can't deadlock."""
     if not blockers:
         return
+    lock_tasks(*(other.pk for other in blockers))
     TaskBlocker.objects.bulk_create(
         [TaskBlocker(blocker=other, blocked=task) for other in blockers], ignore_conflicts=True
     )
@@ -318,6 +386,7 @@ def remove_blocker(task: Task, blocker: Task) -> bool:
     A Blocked `task` left with no open blocker goes back to To do, quietly (the user did it)."""
     now = timezone.now()
     with transaction.atomic():
+        lock_account(task.user_id)
         current = lock_tasks(task.pk).get(task.pk)
         if current is None:
             raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
@@ -362,14 +431,25 @@ def released(dependent_ids: Iterable[UUID], now: datetime | None = None) -> int:
     """The blockers of these tasks stopped being open (closed, trashed or deleted: `ended` finds the
     dependents, a delete finds them before the rows go): every one with no open blocker left that
     is open and not in the Trash is told, and a Blocked one goes back to To do. Returns how many
-    were told. Call it in the transaction that ended the blockers; rows are locked in pk order."""
+    were told. Call it in the transaction that ended the blockers, which holds the account lock
+    (`lock_account`): the dependents are locked here, in pk order, after the task that closed and its
+    subtasks. However many tasks the blocker blocks, which of them still have an open blocker is
+    one query over all the locked rows."""
     ids = list(dict.fromkeys(dependent_ids))
     if not ids:
         return 0
     now = now or timezone.now()
     told = 0
-    for dependent in lock_tasks(*ids).values():
-        if dependent.completed_at is not None or has_open_blocker(dependent.pk):
+    locked = lock_tasks(*ids)
+    still_blocked = set(
+        TaskBlocker.objects.filter(
+            blocked_id__in=list(locked),
+            blocker__completed_at__isnull=True,
+            blocker__deleted_at__isnull=True,
+        ).values_list('blocked_id', flat=True)
+    )
+    for dependent in locked.values():
+        if dependent.completed_at is not None or dependent.pk in still_blocked:
             continue
         if dependent.state == TaskState.BLOCKED:
             write_state(dependent, TaskState.TODO, now, release=not dependent.is_trashed)

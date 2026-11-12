@@ -50,6 +50,9 @@ through the API and CLI. Parent and subtask states are independent (nothing prop
   to **To do**, whatever it was before closing.
 - **Closing with open blockers** (either resolution) is allowed after a confirmation naming them; the
   links are kept.
+  When the close also closes the open subtasks (as Done or Won't do), the same confirmation names the
+  subtasks that have open blockers of their own ("#1205 Sub is still blocked by #1100 ...") and
+  covers them; their links are kept too.
 - **Subtasks**: closing a parent (Done or Won't do) with open subtasks shows them and asks: close
   them as Done, as Won't do, or leave them open. This replaces today's "complete the open subtasks
   too" question. Where nobody can be asked (the phone notification's Complete button, an API call

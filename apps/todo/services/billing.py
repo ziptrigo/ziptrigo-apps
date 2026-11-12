@@ -30,6 +30,7 @@ from apps.core.services.queue import enqueue_after_commit
 
 from ..models import Task, TodoAccount, TodoSettings
 from . import metering
+from .accounts import lock_account
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,7 @@ def settle(user_id: str) -> int:
     ):
         try:
             with transaction.atomic():
+                lock_account(user.pk)  # first, like every write that locks a task and more
                 unpaid = (
                     Task.objects.select_for_update()
                     .filter(pk=task_id, unpaid_at__isnull=False)

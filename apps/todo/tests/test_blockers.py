@@ -1319,7 +1319,10 @@ class TestClosingAsks:
 
         response = web.get(reverse('todo:open-blockers', args=[task.number]))
 
-        assert response.json() == {'blockers': [{'number': blocker.number, 'title': 'Get permit'}]}
+        assert response.json() == {
+            'blockers': [{'number': blocker.number, 'title': 'Get permit'}],
+            'subtasks': [],
+        }
         assert 'no-store' in response['Cache-Control']
 
     def test_the_json_is_private(self, web, other_user):

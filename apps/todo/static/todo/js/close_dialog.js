@@ -6,8 +6,8 @@
  * The markup is `todo/partials/close_dialog.html`, once per page, in the layout. A button opens it with
  * `todoOpenCloseDialog(button)`, reading `data-url`, `data-mode` (`done` or `wont_do`), `data-ctx`
  * (`row` or `page`), `data-title`, `data-count` (the open subtasks), `data-blockers` (the open blockers,
- * issue #273) and `data-blockers-url` (JSON with their names) from it. With open blockers the form lists
- * them and posts `confirm_blockers=1`: closing is allowed after that confirmation, the links are kept. The form is a plain POST
+ * issue #273) and `data-blockers-url` (JSON with their names, and the open subtasks that have blockers of their own) from it. With open blockers the form lists
+ * them and posts `confirm_blockers=1`: closing is allowed after that confirmation, the links are kept. Closing subtasks (as Done or Won't do) that have open blockers of their own names them in the same confirmation. The form is a plain POST
  * (like the shared confirmation modal): the views answer it with a redirect back.
  *
  * Loaded as a classic script (not deferred) so its `alpine:init` listener exists before Alpine starts.
@@ -26,8 +26,12 @@
                 count: 0,
                 blockers: 0,
                 blockerList: [],
+                subtaskList: [],
                 subtasks: 'done',
                 trigger: null,
+                get needsConfirm() {
+                    return this.blockers > 0 || (this.subtasks !== 'leave' && this.subtaskList.length > 0);
+                },
                 get heading() {
                     return this.mode === 'wont_do' ? "Close as won't do" : 'Complete task';
                 },
@@ -44,14 +48,15 @@
                     this.count = parseInt(detail.count || '0', 10) || 0;
                     this.blockers = parseInt(detail.blockers || '0', 10) || 0;
                     this.blockerList = [];
+                    this.subtaskList = [];
                     this.subtasks = 'done';
                     this.trigger = detail.trigger || null;
                     this.open = true;
                     var self = this;
-                    if (this.blockers > 0 && detail.blockersUrl) {
+                    if ((this.blockers > 0 || this.count > 0) && detail.blockersUrl) {
                         fetch(detail.blockersUrl, {credentials: 'same-origin', headers: {Accept: 'application/json'}})
-                            .then(function (response) { return response.ok ? response.json() : {blockers: []}; })
-                            .then(function (data) { if (self.url === detail.url) self.blockerList = data.blockers || []; })
+                            .then(function (response) { return response.ok ? response.json() : {blockers: [], subtasks: []}; })
+                            .then(function (data) { if (self.url === detail.url) { self.blockerList = data.blockers || []; self.subtaskList = data.subtasks || []; } })
                             .catch(function () {});
                     }
                     // Not once it has closed again: a quick Escape can come before this runs.

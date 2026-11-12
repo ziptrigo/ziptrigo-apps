@@ -3974,7 +3974,9 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   Unpaid column says "Unpaid" only for an owed task (a red cross for the normal state read as an alarm).
 - **Rate limits** (`RATELIMIT_RULES`): `TODO_CREATE_USER` (60 per minute: task and subtask
   creation, web and later the API) and `TODO_EDIT_USER` (240 per minute: every other mutation), plus `TODO_COMMENT_USER` (60 per
-  minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`).
+  minute: adding and editing a comment; deleting and restoring one spend `TODO_EDIT_USER`) and
+  `TODO_BLOCKER_SUGGEST_USER` (120 per minute: the "Blocked by" box's suggestions; over it the box offers
+  nothing, never an error; issue #273).
   A form is validated first and the limit charged after, so a refused form spends nothing; over the
   limit `ratelimit.web_response` (retargeted to the control's message slot).
 - **Admin**: `TodoSettingsAdmin` (singleton, superusers), and read-only `TaskAdmin` (search title,
@@ -4258,7 +4260,8 @@ one through it gives Blocked when a blocker is open.
   Blocked task's menu offers the three others and picking one keeps the links; adding another open
   blocker makes it Blocked again.
 - **What sets it** (`services/blockers.py`; module docstring is the long version). `add_blocker(task,
-  blocker)` (both rows locked in pk order, so two links added at once can't close a loop): both the user's
+  blocker)` (the user's account row locked first, then both tasks, so links added at once take turns and
+  **no cycle of any length** can be committed, three in a ring included): both the user's
   own and out of the Trash, not the same task (`'A task cannot block itself.'`), at most 20 (`'A task can
   have at most 20 blockers.'`), no cycle (`'#1200 is already blocked by #1234, directly or through other
   tasks.'`: a walk of the "blocked by" links, a query per level, over closed and trashed tasks too since
@@ -4281,7 +4284,9 @@ one through it gives Blocked when a blocker is open.
   when it was trashed and sends nothing twice): `blockers.open_ids` reads which of them were open
   blockers *before* the write, so only a blocker that stops being open triggers it). `released` locks
   the dependents (pk order, so two blockers closing at once: the last to commit sees all), skips the closed
-  ones, and for each with **no open, non-trashed blocker left**: a task in the **Blocked state goes to To
+  ones -- which of them still have an open blocker is **one query over all the locked rows**, however many
+  tasks the blocker blocks (there is no cap on the Blocks side; what is left per dependent is the state
+  write, the held reminders and the notice, a test pins that the blocker reads don't grow) --, and for each with **no open, non-trashed blocker left**: a task in the **Blocked state goes to To
   do** (`write_state`, which releases the held reminders as leaving On hold does), and **every such task
   that is open and not in the Trash, whatever its state, gets one in-app notice** (a task the user put In
   progress or On hold by hand keeps its state, still told). A **trashed** dependent only has its state
@@ -4299,18 +4304,27 @@ one through it gives Blocked when a blocker is open.
   as `delete_for_key` then `notify`, so there is one per task, the latest.
 - **Closing with open blockers** asks on the web, either resolution: `CloseForm.confirm_blockers`,
   `views.tasks._close` refuses without it (a 422 / flash: "This task is still blocked by #1200 Title.
-  Confirm to close it anyway.") and the **close dialog** (`close_dialog.html`, `close_dialog.js`) lists them
+  Confirm to close it anyway."; **from a page that was out of date** the refusal also sends the row, or the
+  task page's Complete buttons, out of band, so the next click opens the dialog that names the blockers) and
+  **when the close also closes the open subtasks** (Done or Won't do, not "leave them open") the confirmation
+  covers the subtasks that have open blockers of their own, named in the same refusal ("#1205 Sub is still
+  blocked by #1100 Title."; `blockers.subtasks_with_open_blockers`: a blocker that closes in the same cascade,
+  the parent or a sibling, is not "still" open and is not named). The **close dialog** (`close_dialog.html`, `close_dialog.js`) lists them
   (`data-blockers` is the count, set from the row's prefetched open blockers, `data-blockers-url`
-  `GET /todo/<n>/blockers/open/` -> `{"blockers": [{number, title}]}`, `no-store`, 404 for another user's
-  task, fetched when it opens and rendered with `x-text`) and posts `confirm_blockers=1`. The links are kept.
+  `GET /todo/<n>/blockers/open/` -> `{"blockers": [{number, title}], "subtasks": [{number, title,
+  blockers: [...]}]}`, `no-store`, 404 for another user's task, fetched when it opens and rendered with
+  `x-text`; the subtasks are listed while the radio is not "leave them open") and posts
+  `confirm_blockers=1`. The links are kept.
   A row's circle and the page's Complete button open it for a task with open blockers (as for open
   subtasks). **Push Complete and the API close without asking.**
 - **Task page** (`partials/blockers.html`, in the panel after Subtasks): **Blocked by** lists every blocker
   (closed and trashed ones too, a `Done` / `Won't do` / `In the trash` marker from `{% blocker_marker %}`,
   struck through) with a Remove button each and the add box; **Blocks** is the read-only list of the tasks it
   blocks, each linking to its page. The add box is a text input with a `<datalist>` fed by
-  `GET /todo/<n>/blockers/suggest/?blocker=` (htmx, `blocker_options.html`: the user's open tasks, not the
-  task, not one it already has, by number or title words, at most 10, the value `#1200`, the label the
+  `GET /todo/<n>/blockers/suggest/?blocker=` (**`TODO_BLOCKER_SUGGEST_USER`, 120 per minute per user**, a loose
+  bound on a script: over it the box offers nothing, never an error; htmx, `blocker_options.html`: the user's open tasks, not the
+  task, not one it already has, **not one that would be refused as a cycle** (every task reachable from it
+  through "Blocks", `blockers.dependents_closure`), by number or title words, at most 10, the value `#1200`, the label the
   title). It takes a number (`1200`, `#1200`, `#1200 anything`) or words from a title: the one open task
   whose title is exactly these words, or that contains them and no other does, else "Choose a task from the
   suggestions, or type its number." (`blockers.find_blocker`). `POST /todo/<n>/blockers/` and
@@ -4333,13 +4347,28 @@ one through it gives Blocked when a blocker is open.
 - **Layout note.** `services/task_state.py` holds `lock_tasks` and `write_state`, shared by `tasks` and
   `blockers` (`tasks` closes tasks and calls `blockers`; `blockers` changes states). `next_position` and
   `next_today_position` moved to `dates.py` (re-imported by `tasks`).
-- **Race notes, accepted.** Everything that decides under the row locks does so in pk order; adding a link
-  locks the two tasks, closing a blocker locks its dependents, so an add racing the close of the very same
-  pair can in theory deadlock (Postgres aborts one; a duplicate add is checked unlocked first). SQLite
-  can't show it.
+- **Lock order** (`services.blockers`' module docstring, the way Receipts' vendor lock order is written).
+  Every write that touches the blocker graph, or locks more than one task, runs in a transaction whose
+  **first** lock is the user's `TodoAccount` row (`accounts.lock_account`; `allocate_number` takes the same
+  row, a repeat by the same transaction doesn't block): `close_task`, `trash_task`, `restore_task`,
+  `uncomplete_task`, `_delete_with_attachments` (delete forever, the Trash purge), `add_blocker`,
+  `remove_blocker`, `create_task` (through `allocate_number`), `set_state`, `set_resolution`, `update_task`
+  (moving a task under a parent locks two), `toggle_checklist`, `reorder`, `reschedule_overdue` and the
+  unpaid-task settling. After the account: **the task acted on (the closing one), then its subtasks, then
+  its dependents** (`released`, pk order within the call). So one user's graph writes take turns, which is
+  what closes the four deadlocks of the review of #278 (a duplicate add or a refused cycle racing the close
+  of the blocker, a parent and a subtask that blocks it closed at once, two blockers with a common dependent)
+  and makes the no-cycle rule hold however many links are added at once. A new task's blockers are locked
+  after the account (`link_new_task`; the task is invisible to others, so it can't deadlock) and read
+  after, so a blocker that closed meanwhile is seen; `uncomplete_task` locks the task's row before reading
+  its blockers. The cost is that one user's own writes queue behind each other. SQLite has no row locks, so
+  `test_blocker_locking.py::TestLockOrder` records the order `select_for_update` is asked for (Receipts'
+  `TestLockOrder` style) and the two read-after-lock races are simulated by closing the blocker from the
+  lock's hook.
 - **Tests.** `apps/todo/tests/test_blockers.py` (links, caps, cycles, every close path, notices, reopen and
   restore, the dialog's POSTs and JSON, the page, quick add, rows and their query count, search, admin, the
-  API unchanged), the Playwright `tests_e2e/test_todo_blockers.py`; the AI plan has TODO-49 to TODO-55,
+  API unchanged), `test_blocker_locking.py` (the lock order, the races it closes, the stale-page refusal,
+  closing blocked subtasks, many dependents, the suggestions and their rate limit), the Playwright `tests_e2e/test_todo_blockers.py`; the AI plan has TODO-49 to TODO-55,
   `notifications.md` NOTIF-25 and NOTIF-26 and `admin.md` ADM-56.
 
 #### Comments and references

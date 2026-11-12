@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.http import AuthenticatedHttpRequest
+from apps.core import ratelimit
 from apps.core.htmx import is_htmx
 
 from ..forms import BlockerForm
@@ -71,27 +72,40 @@ def blocker_remove(
 @require_GET
 def blocker_suggest(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """The `<option>`s of the add box's list for what has been typed (`blocker`): the user's open
-    tasks, not the task itself nor one that already blocks it. Opened directly it goes back to the
+    tasks, not the task itself, nor one that already blocks it, nor one that would be a cycle. Opened directly it goes back to the
     task."""
     task = owned_task(request, number, trashed=None)
     if not is_htmx(request):
         return redirect(_task_url(task))
-    found = blockers.suggestions(request.user, task, request.GET.get('blocker', ''))
+    if not ratelimit.hit_user(request.user, 'TODO_BLOCKER_SUGGEST_USER').allowed:
+        found = []  # over the loose limit: offer nothing, never an error in the box
+    else:
+        found = blockers.suggestions(request.user, task, request.GET.get('blocker', ''))
     return render(request, 'todo/partials/blocker_options.html', {'suggestions': found})
 
 
 @login_required
 @require_GET
 def open_blockers(request: AuthenticatedHttpRequest, number: int) -> JsonResponse:
-    """The task's open, non-trashed blockers as JSON (`{"blockers": [{"number", "title"}]}`): what
-    the close dialog names before it asks to confirm."""
+    """The task's open, non-trashed blockers as JSON (`{"blockers": [{"number", "title"}],
+    "subtasks": [{"number", "title", "blockers": [...]}]}`): what the close dialog names before it
+    asks to confirm. `subtasks` are the open subtasks that have open blockers of their own (the
+    dialog shows them when the person chose to close the subtasks)."""
     task = owned_task(request, number, trashed=None)
     response = JsonResponse(
         {
             'blockers': [
                 {'number': blocker.number, 'title': blocker.title}
                 for blocker in blockers.open_blockers(task)
-            ]
+            ],
+            'subtasks': [
+                {
+                    'number': sub.number,
+                    'title': sub.title,
+                    'blockers': [{'number': b.number, 'title': b.title} for b in waiting],
+                }
+                for sub, waiting in blockers.subtasks_with_open_blockers(task)
+            ],
         }
     )
     response['Cache-Control'] = 'no-store'
