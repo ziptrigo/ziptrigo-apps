@@ -41,7 +41,8 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 - access control: logged-out visitors, another user's task numbers, attachments and filters.
 
 Not covered here: inbound email itself (SES drops mail in S3 under `todo/inbound/`; the "Recent emails" list
-therefore stays empty here, and the parser is unit-tested), the JWT API and the `inv todo` CLI (unit tests), the
+therefore stays empty here, and the parser is unit-tested), the JWT API beyond the state, blocker and activity calls of
+TODO-55 and TODO-59, and the `inv todo` CLI (unit tests), the
 daily trash purge and the real daily storage metering (unit tests; TODO-31 freezes the storage with a shell step
 instead), a real AI model.
 
@@ -1096,17 +1097,20 @@ its blockers (issue #273).
 | 4 | As `qa.admin`: `/admin/todo/taskblocker/`. | A read-only list "Blocker", "Blocked", "User", "Created at", searchable by title and number; there is no Add button and a row cannot be deleted. |
 | 5 | Open `Block main` at `/admin/todo/task/`. | Two read-only inlines: **Blocked by** (its blockers) and **Blocks**. |
 
-### TODO-55 Blockers: nothing changed for the API
+### TODO-55 Blockers and states over the API (version 2)
 
-**Purpose:** the JWT API looks as it did, while the rules above apply to what it does (issue #273).
-**Preconditions:** TODO-49 done; a JWT for `qa.user@example.com` (`POST /api/auth/login`).
+**Purpose:** the JWT API reports the state, the resolution and the blockers, and the rules above apply to what it does (issues #273, #275).
+**Preconditions:** TODO-49 done; a JWT for `qa.user@example.com` (`POST /api/auth/login`), sent as `Authorization: Bearer <token>` on every call below.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | `GET /api/todo/tasks/<B_MAIN>` for a Blocked task. | The same keys as before (no `state`, no blocker fields). `PATCH` with `{"state": "blocked"}` or `{"blocked_by": [1000]}`, and `POST /api/todo/tasks` with `blocked_by`: 422 (unknown key). |
-| 2 | `POST /api/todo/tasks/<B_ONE>/complete`. | 200 as before; `Block main` is freed in the website (chip To do, the notice in the bell). `POST .../uncomplete` on a task with an open blocker puts it Blocked on the website. |
-| 3 | `GET /api/todo/tasks?view=all&date_range=overdue` with a Blocked overdue task. | It is not listed (muted tasks are not overdue for the API either). |
-| 4 | `POST /api/todo/tasks/<B_MAIN>/complete` for a task with open blockers. | Closes without any question (the API never asks); the links are kept on the website. |
+| 1 | `GET /api/todo/tasks/<B_MAIN>` for a Blocked task. | The keys include `closed_at`, `state` (`blocked`), `resolution` (`null`), `blocked_by` (a list of `{number, title, open, trashed}`) and `blocks`; there is no `completed_at`. |
+| 2 | `PATCH /api/todo/tasks/<B_MAIN>` with `{"state": "blocked"}`; then `POST /api/todo/tasks/<B_MAIN>/state` with `{"state": "blocked"}`; then `POST /api/todo/tasks` with `{"title": "x", "state": "blocked"}`. | Each is a 400 `state: Choose To do, In progress or On hold.`; nothing is created or changed. `{"state": "on_hold"}` on the state endpoint is 200 and the website shows the chip On hold. |
+| 3 | `POST /api/todo/tasks/<B_ONE>/close` with `{}`. | 200, `resolution` `done`; `Block main` is freed in the website (chip To do, the notice in the bell). `POST .../reopen` on a task with an open blocker answers `state` `blocked`. |
+| 4 | `POST /api/todo/tasks/<B_MAIN>/close` with `{"resolution": "wont_do", "note": "not needed"}` for a task with open blockers. | Closes without any question (the API never asks): 200, `resolution` `wont_do`; the note is a comment on its page; the links are kept on the website. The same call with `"resolution": "done"` and a note is a 400 `note: A note can only be added when closing as Won't do.` |
+| 5 | `POST /api/todo/tasks` with `{"title": "Api blocked", "blocked_by": [<B_MAIN>]}`, then `PATCH` it with `{"blocked_by": []}`. | 201 with `state` `blocked` and `blocked_by` listing `<B_MAIN>` (`open` false after step 4); then 200, `blocked_by` `[]`. An unknown number in `blocked_by` is a 400 `blocked_by: There is no task #N.` and creates nothing. |
+| 6 | `POST /api/todo/tasks/<B_ONE>/blockers` with `{"number": <B_TWO>}`, the same again, then `DELETE /api/todo/tasks/<B_ONE>/blockers/<B_TWO>` twice. | 200 and 200 (the second changes nothing), 204 and 204. Making `<B_TWO>` block a task it is blocked by (a cycle) is a 400 `... directly or through other tasks.` |
+| 7 | `GET /api/todo/tasks?view=all&date_range=overdue` with a Blocked overdue task; then `GET /api/todo/tasks?state=blocked` and `?view=closed&resolution=wont_do`. | The Blocked task is not in the overdue list (muted tasks are never overdue); the state filter lists Blocked tasks; the closed view lists the Won't do ones only. `?view=completed` is a 400. |
 
 ### TODO-56 Activity log: hidden until History is pressed
 
@@ -1158,6 +1162,18 @@ account's formats (issue #274).
 
 ---
 
+### TODO-59 The activity log over the API
+
+**Purpose:** `GET /api/todo/tasks/<n>/activity` returns the log in the public wording, newest first, with a cursor (issue #275).
+**Preconditions:** TODO-56 done (the task `Log main`, with at least 25 entries; make them with the title field, or reuse its history); the JWT of TODO-55; Session A's date format is `dd/mm/yyyy` with the 24-hour clock (Account > Appearance).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/todo/tasks/<L_MAIN>/activity`. | `{"results": [...], "next": "<cursor>"}`: 20 entries, newest first, each with `id`, `kind`, `text`, `data`, `automatic`, `channel`, `created_at`. A due date entry reads like `Due date changed from Nov 5, 2026, 3:00 PM to ...` (month name first, 12-hour clock) although the account uses `dd/mm/yyyy` and 24-hour times. |
+| 2 | `GET /api/todo/tasks/<L_MAIN>/activity?before=<cursor>`. | The older entries, none repeated; `next` is `null` on the last page. `?limit=3` returns 3; `?limit=500` returns at most 100. `?before=junk` is a 400 `before: Not a valid cursor.` |
+| 3 | `PATCH /api/todo/tasks/<L_MAIN>` with `{"priority": 1}`, then read the first entry. | `kind` `priority`, `channel` `api`, `automatic` false. |
+| 4 | Move `Log main` to the Trash and read the log; then read another user's task number. | The log is still returned (`trashed` is the newest entry); another user's number is a 404. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it
@@ -1172,10 +1188,10 @@ account's formats (issue #274).
   the shell steps (the scheduler does not run on this server).
 - **A reminder email to an unconfirmed address** ("not sent: your email address is not confirmed"): reaching it
   needs an email change through the JWT API, which is out of scope here; unit-tested.
-- **Rate limits** (switched off on this server), the JWT API `/api/todo/` and the `inv todo` CLI (unit tests). The
-  activity log's entries made through the API, the email intake (automatic, with the files), the phone's Complete
+- **Rate limits** (switched off on this server), the rest of the JWT API `/api/todo/` and the `inv todo` CLI (unit tests). The
+  activity log's entries made through the email intake (automatic, with the files), the phone's Complete
   button and the daily purge, and the channel each is recorded under, are unit-tested (`test_activity_log.py`); the
-  log is not in the API yet (#275).
+  API's own endpoints are exercised only by TODO-55 and TODO-59 (every status code is unit-tested).
 - **A reminder reaching a real phone** and the notification the phone shows after a tap ("Snoozed until ..."): that
   needs a phone and HTTPS; TODO-40 posts the same answer with `curl`. That a due in-app reminder is pushed, with
   which buttons, and that a snoozed reminder is left alone by a time-zone change and replaced by a new due date, are

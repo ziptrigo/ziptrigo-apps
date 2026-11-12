@@ -98,9 +98,16 @@ task; nothing is searchable; reminders and comments are not logged (comments kee
 ## 7. API and CLI
 
 A **breaking** change, cut in one release: `completed_at` becomes `closed_at`, `view=completed`
-becomes `view=closed`, new `state`, `resolution` and blocker fields and a close endpoint taking a
-resolution. The API's major version is bumped and the Android app is updated and released in step.
-The CLI gets `--state`, `--blocked-by`, `close --wont-do` and the new list filters.
+becomes `view=closed` (and `include_completed` `include_closed`), new `state`, `resolution` and
+blocker fields (`blocked_by`, `blocks`) and a close endpoint taking a resolution and the optional
+note; `complete` and `uncomplete` are gone for `close` and `reopen`. There are endpoints for the
+state, for changing the resolution of a closed task and for adding and removing blockers, `state`
+and `blocked_by` on create and `PATCH`, the list filters `state`, `include_closed` and `resolution`,
+and the activity log (`GET /tasks/{number}/activity`, newest first, with a cursor and the sentence
+of each entry in the public wording). Saved filters expose `states` and `resolution`. The API's
+major version is bumped (2.0.0) and the Android app is updated and released in step. The CLI gets
+`--state`, `--blocked-by`, `close --wont-do`, `reopen`, `resolution`, `state`, `block`, `unblock`,
+`history` and the new list filters. Built in #275 (CLAUDE.md, "To-do" > "API and CLI").
 
 ## 8. Delivery
 
