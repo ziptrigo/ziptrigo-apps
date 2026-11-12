@@ -8,6 +8,7 @@ spend `TODO_EDIT_USER` (and nothing when the comment is already in the state ask
 
 from uuid import UUID
 
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 
 from .. import services
@@ -89,6 +90,8 @@ def add_comment(request, number: int, payload: CommentBodySchema):
     task. A refused body or file list spends no budget."""
     task = owned_task(request, number)
     with mapped_errors():
+        if task.is_trashed:  # refused by the service too, but only after the charge
+            raise ValidationError('Restore the task before commenting on it.')
         services.comments.clean_comment_body(payload.body)  # a refusal here spends no budget
         attachments.check_comment_files(task, payload.attachment_ids)
         charge(request, 'TODO_COMMENT_USER')
@@ -108,6 +111,8 @@ def edit_comment(request, number: int, comment_id: UUID, payload: CommentEditSch
     task = owned_task(request, number)
     comment = _owned_comment(task, comment_id)
     with mapped_errors():
+        if comment.is_deleted:  # refused by the service too, but only after the charge
+            raise ValidationError(services.comments.DELETED_MESSAGE)
         services.comments.clean_comment_body(payload.body)  # a refusal here spends no budget
         attachments.check_comment_files(task, payload.attachment_ids, comment)
         charge(request, 'TODO_COMMENT_USER')

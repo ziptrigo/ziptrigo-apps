@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.1.0
+  version: 2.2.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -2418,7 +2418,9 @@ paths:
 
         match the start of the number, anything else the words of the title (ignoring case and
 
-        accents); empty lists the first open tasks. Works for a task in the Trash too (it only reads).
+        accents); empty lists the first open tasks. A task in the Trash, or one that already has 20 blockers, gets an empty list
+
+        (`add` would refuse them all).
 
 
         Spends `TODO_BLOCKER_SUGGEST_USER`, a loose per-user limit; **over it the answer is an empty
@@ -3382,7 +3384,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListSchema'
-      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own\n  default when left out (`date`, `priority` and `title` ascending, `created` newest first), the\n  exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open\n  ones. Without `sort`, `dir` means `sort=date`.\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.\n\n**Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`\nand `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found\nby the website's bounded pass (a 0.2 s budget for the page, only the field the database said\nmatched, at most 5,000 characters of it; rows past the budget are listed without a snippet).\nWithout `q` all four are `null`."
+      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own\n  default when left out (`date`, `priority` and `title` ascending, `created` newest first), the\n  exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open\n  ones. Without `sort`, `dir` means `sort=date` for `view=all` and `upcoming` (date-sorted by\n  default); for `view=today`, `closed`, `trash` and `parent=`, whose own order is not a sort,\n  it is a 400 `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.\n\n**Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`\nand `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found\nby the website's bounded pass (a 0.2 s budget for the page, only the field the database said\nmatched, at most 5,000 characters of it; rows past the budget are listed without a snippet).\nWithout `q` all four are `null`."
       tags:
       - To-do
       security:
@@ -6556,11 +6558,11 @@ components:
 
         (`source` is `email`), who it came from (the From address as the sender wrote it) and whether
 
-        the mail system authenticated that sender; both are `null` for every other task. `subtask_count` and `open_subtask_count` count the subtasks that aren''t in the
+        the mail system authenticated that sender; both are `null` for every other task.
 
-        Trash, `comment_count` the comments that aren''t deleted and `attachment_count` the uploaded
+        `subtask_count` and `open_subtask_count` count the subtasks that aren''t in the Trash,
 
-        files.
+        `comment_count` the comments that aren''t deleted and `attachment_count` the uploaded files.
 
 
         **Open and closed.** A task is open while `closed_at` is `null` and closed from the moment it is

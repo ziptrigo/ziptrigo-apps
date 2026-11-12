@@ -10,6 +10,7 @@ import hashlib
 import json
 
 import pytest
+import requests
 from typer.testing import CliRunner
 
 from admin import todo
@@ -184,6 +185,8 @@ class Api:
                 raise AssertionError(f'unexpected {method.upper()} {path}') from None
             if isinstance(response, list):
                 return response.pop(0)
+            if isinstance(response, Exception):
+                raise response
             return response
 
         return handle
@@ -1290,6 +1293,25 @@ def test_comment_refused_by_the_server_discards_the_uploaded_files(api, tmp_path
     result = invoke('comment', 'local', '1234', 'text', '--file', str(path))
 
     assert result.exit_code == 1 and 'Restore the task' in flat(result)
+    assert len(api.requests('post', f'/todo/attachments/{ATTACHMENT_ID}/discard')) == 1
+
+
+def test_comment_network_error_after_the_uploads_discards_the_drafts(api, tmp_path):
+    path = tmp_path / 'a.pdf'
+    path.write_bytes(b'%PDF-1.4 a')
+    api.on('post', '/todo/tasks/1234/attachments', ticket())
+    api.on('put', 'https://fake-s3.test/key?put', FakeResponse(200))
+    api.on(
+        'post',
+        f'/todo/tasks/1234/attachments/{ATTACHMENT_ID}/complete',
+        FakeResponse(200, DETAIL['attachments'][0]),
+    )
+    api.on('post', '/todo/tasks/1234/comments', requests.exceptions.ConnectionError('reset'))
+    api.on('post', f'/todo/attachments/{ATTACHMENT_ID}/discard', FakeResponse(204))
+
+    result = invoke('comment', 'local', '1234', 'text', '--file', str(path))
+
+    assert result.exit_code == 1 and 'reset' in flat(result)
     assert len(api.requests('post', f'/todo/attachments/{ATTACHMENT_ID}/discard')) == 1
 
 

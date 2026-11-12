@@ -1194,7 +1194,12 @@ def todo_comment(
     payload: dict = {'body': ' '.join(text)}
     if uploaded:
         payload['attachment_ids'] = uploaded
-    response = _request('post', f'/tasks/{number}/comments', json=payload)
+    try:
+        response = _request('post', f'/tasks/{number}/comments', json=payload, exit_on_error=False)
+    except NetworkError as e:
+        for attachment_id in uploaded:  # best effort: if the comment did commit, the server refuses
+            _discard_draft(attachment_id)
+        raise _fail(f'{e}. The comment may not have been added.') from e
     if not response.ok:
         for attachment_id in uploaded:
             _discard_draft(attachment_id)

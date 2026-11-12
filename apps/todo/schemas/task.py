@@ -77,9 +77,9 @@ class TaskSchema(Schema):
     task cost to create and `unpaid` says that price is still owed (see the 409 of `POST
     /tasks`). `email_from` and `email_from_authenticated` say, for a task created from an email
     (`source` is `email`), who it came from (the From address as the sender wrote it) and whether
-    the mail system authenticated that sender; both are `null` for every other task. `subtask_count` and `open_subtask_count` count the subtasks that aren't in the
-    Trash, `comment_count` the comments that aren't deleted and `attachment_count` the uploaded
-    files.
+    the mail system authenticated that sender; both are `null` for every other task.
+    `subtask_count` and `open_subtask_count` count the subtasks that aren't in the Trash,
+    `comment_count` the comments that aren't deleted and `attachment_count` the uploaded files.
 
     **Open and closed.** A task is open while `closed_at` is `null` and closed from the moment it is
     closed (as Done or as Won't do), until it is reopened. `resolution` says how a closed task was

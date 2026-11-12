@@ -7,6 +7,7 @@ import base64
 import hashlib
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
@@ -113,6 +114,29 @@ class TestDirection:
 
         assert asc == [first.number, third.number, second.number]
         assert desc == [third.number, first.number, second.number]
+
+    @pytest.mark.parametrize('query', [{'view': 'today'}, {'view': 'closed'}, {'view': 'trash'}])
+    def test_dir_alone_is_a_400_where_the_views_order_is_not_a_sort(
+        self, client, auth, tasks, query
+    ):
+        for direction in ('asc', 'desc'):
+            response = get(client, '/tasks', auth, dir=direction, **query)
+
+            assert response.status_code == 400
+            assert response.json()['detail'] == 'dir: Choose a sort to reverse.'
+
+    def test_dir_alone_is_a_400_for_a_parents_subtasks(self, client, auth, tasks):
+        parent = tasks[0]
+
+        response = get(client, '/tasks', auth, parent=parent.number, dir='desc')
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'dir: Choose a sort to reverse.'
+
+    def test_dir_with_a_sort_is_fine_on_any_view(self, client, auth, tasks):
+        for view in ('today', 'closed', 'trash'):
+            assert get(client, '/tasks', auth, view=view, sort='date', dir='asc').status_code == 200
+        assert get(client, '/tasks', auth, view='upcoming', dir='desc').status_code == 200
 
     def test_an_unknown_direction_is_a_400(self, client, auth, tasks):
         response = get(client, '/tasks', auth, dir='sideways')
@@ -330,6 +354,37 @@ class TestCommentFiles:
         assert empty.status_code == 400 and empty.json()['detail'] == 'body: Write a comment.'
         assert ok.status_code == 200 and ok.json()['body'] == 'new'
 
+    def test_a_deleted_comment_edit_is_refused_before_the_budget(
+        self, client, auth, task, settings
+    ):
+        comment = post(client, f'/tasks/{task.number}/comments', auth, {'body': 'text'}).json()
+        path = f'/tasks/{task.number}/comments/{comment["id"]}'
+        assert delete(client, path, auth).status_code == 204
+        limit_rule(settings, 'TODO_COMMENT_USER')
+
+        for _ in range(3):
+            refused = patch(client, path, auth, {'body': 'new'})
+            assert refused.status_code == 400
+            assert refused.json()['detail'] == 'This comment was deleted.'
+        assert (
+            post(client, f'/tasks/{task.number}/comments', auth, {'body': 'ok'}).status_code == 201
+        )
+
+    def test_a_comment_on_a_trashed_task_is_refused_before_the_budget(
+        self, client, auth, task, funded_user, settings
+    ):
+        other = make_task(funded_user, number=9300)
+        trash_task(other)
+        limit_rule(settings, 'TODO_COMMENT_USER')
+
+        for _ in range(3):
+            refused = post(client, f'/tasks/{other.number}/comments', auth, {'body': 'nope'})
+            assert refused.status_code == 400
+            assert refused.json()['detail'] == 'Restore the task before commenting on it.'
+        assert (
+            post(client, f'/tasks/{task.number}/comments', auth, {'body': 'ok'}).status_code == 201
+        )
+
     def test_too_many_ids_is_a_422(self, client, auth, task):
         response = post(
             client,
@@ -443,6 +498,62 @@ class TestDiscard:
         assert post(client, f'/attachments/{first}/discard', auth).status_code == 204
         assert post(client, f'/attachments/{second}/discard', auth).status_code == 429
 
+    def test_a_file_saved_since_it_was_read_is_not_deleted(
+        self, client, auth, task, funded_user, fake_storage, monkeypatch
+    ):
+        # The race: the row was read as an unsaved draft, then a comment took it before the delete.
+        from ..services import attachments
+
+        attachment_id = upload_draft(client, auth, task, fake_storage)
+        stale = Attachment.objects.get(pk=attachment_id)
+        add_comment(task, funded_user, 'kept', [attachment_id])
+        assert stale.comment_id is None  # the caller's copy still says "draft"
+
+        with pytest.raises(ValidationError, match='This file is attached.'):
+            attachments.discard_draft(stale)
+
+        assert Attachment.objects.filter(pk=attachment_id).exists()
+        assert fake_storage.object_exists(attachment_key(funded_user.pk, attachment_id))
+
+    def test_the_row_is_re_read_under_a_lock(self, client, auth, task, fake_storage, monkeypatch):
+        from django.db.models.query import QuerySet
+
+        from ..services import attachments
+
+        attachment_id = upload_draft(client, auth, task, fake_storage)
+        locked = []
+        original = QuerySet.select_for_update
+
+        def spy(self, *args, **kwargs):
+            locked.append(self.model)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(QuerySet, 'select_for_update', spy)
+
+        attachments.discard_draft(Attachment.objects.get(pk=attachment_id))
+
+        assert locked.count(Attachment) >= 2  # the discard's own re-read, then the delete's
+
+    def test_the_endpoint_answers_400_when_the_race_was_lost(
+        self, client, auth, task, funded_user, fake_storage, monkeypatch
+    ):
+        from ..services import attachments
+
+        attachment_id = upload_draft(client, auth, task, fake_storage)
+        real = attachments.discard_draft
+
+        def late(attachment):  # a comment saves the file between the endpoint's read and the lock
+            add_comment(task, funded_user, 'kept', [attachment_id])
+            real(attachment)
+
+        monkeypatch.setattr(attachments, 'discard_draft', late)
+
+        response = post(client, f'/attachments/{attachment_id}/discard', auth)
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'This file is attached.'
+        assert Attachment.objects.filter(pk=attachment_id).exists()
+
     def test_a_storage_failure_is_a_503_and_keeps_the_row(
         self, client, auth, task, fake_storage, monkeypatch
     ):
@@ -459,6 +570,15 @@ class TestDiscard:
 
         assert response.status_code == 503
         assert Attachment.objects.filter(pk=attachment_id).exists()
+
+
+def test_the_recent_email_status_literal_matches_the_model():
+    from typing import get_args
+
+    from ..models import InboundEmailStatus
+    from ..schemas.settings import InboundStatus
+
+    assert set(get_args(InboundStatus)) == set(InboundEmailStatus.values)
 
 
 # -- 3. email intake -----------------------------------------------------------------------------
@@ -703,14 +823,24 @@ class TestBlockerSuggestions:
         assert get(client, self.path(main), auth, q='secret').json() == []
         assert get(client, self.path(main), other_auth).status_code == 404
 
-    def test_a_trashed_task_can_still_be_asked_about(self, client, auth, funded_user):
+    def test_a_trashed_task_gets_no_suggestions(self, client, auth, funded_user):
         main = create_task(funded_user, title='Main')
-        other = create_task(funded_user, title='Other')
+        create_task(funded_user, title='Other')
         trash_task(main)
 
-        assert [item['number'] for item in get(client, self.path(main), auth).json()] == [
-            other.number
-        ]
+        response = get(client, self.path(main), auth)
+
+        assert response.status_code == 200 and response.json() == []  # `add` refuses a trashed task
+
+    def test_a_task_with_the_most_blockers_gets_no_suggestions(self, client, auth, funded_user):
+        from ..limits import MAX_BLOCKERS_PER_TASK
+
+        main = create_task(funded_user, title='Main')
+        for index in range(MAX_BLOCKERS_PER_TASK):
+            add_blocker(main, create_task(funded_user, title=f'B{index}'))
+        create_task(funded_user, title='Free')
+
+        assert get(client, self.path(main), auth).json() == []
 
     def test_over_the_limit_is_an_empty_list_not_an_error(
         self, client, auth, funded_user, settings

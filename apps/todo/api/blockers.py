@@ -54,7 +54,8 @@ def suggest_blockers(request, number: int, q: Annotated[str, Field(max_length=20
     accept -- not this task, not one that already blocks it and not one it blocks, directly or
     through other tasks (that would be a cycle). `q` narrows them: digits (with or without `#`)
     match the start of the number, anything else the words of the title (ignoring case and
-    accents); empty lists the first open tasks. Works for a task in the Trash too (it only reads).
+    accents); empty lists the first open tasks. A task in the Trash, or one that already has 20 blockers, gets an empty list
+    (`add` would refuse them all).
 
     Spends `TODO_BLOCKER_SUGGEST_USER`, a loose per-user limit; **over it the answer is an empty
     list**, never an error, so a typing box just shows nothing."""

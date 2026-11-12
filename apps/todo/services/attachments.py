@@ -473,7 +473,15 @@ def discard_draft(attachment: Attachment) -> None:
     leaves it as it was (`abandon_comment_files` retries)."""
     if not attachment.for_comment or attachment.comment_id is not None:
         raise ValidationError('This file is attached.')
-    delete_attachment(attachment)
+    with transaction.atomic():
+        # Re-read under the row lock (`link_to_comment` takes the same one): a comment saved since
+        # the caller read the row has made it a saved file, which must not be deleted.
+        current = Attachment.objects.select_for_update().filter(pk=attachment.pk).first()
+        if current is None:
+            return
+        if not current.for_comment or current.comment_id is not None:
+            raise ValidationError('This file is attached.')
+        delete_attachment(current)
 
 
 NOT_READY_MESSAGE = 'A file is not ready to be attached. Wait for uploads to finish.'

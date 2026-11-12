@@ -207,7 +207,9 @@ def list_tasks(
     - `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own
       default when left out (`date`, `priority` and `title` ascending, `created` newest first), the
       exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open
-      ones. Without `sort`, `dir` means `sort=date`.
+      ones. Without `sort`, `dir` means `sort=date` for `view=all` and `upcoming` (date-sorted by
+      default); for `view=today`, `closed`, `trash` and `parent=`, whose own order is not a sort,
+      it is a 400 `dir: Choose a sort to reverse.`
     - `limit` (1-100, default 50) and `offset` page the result; `count` is the total.
 
     A search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.
@@ -229,7 +231,11 @@ def list_tasks(
         choice('sort', sort, SORTS)
     if direction is not None:
         choice('dir', direction, DIRECTIONS)
-        sort = sort or SORT_DEFAULT  # a direction means a sort: the default one
+        if sort is None:
+            if view in ('today', 'closed', 'trash') or (view is None and parent is not None):
+                # These views' own order is not a sort: a bare `dir` would silently replace it.
+                raise HttpError(400, 'dir: Choose a sort to reverse.')
+            sort = SORT_DEFAULT  # All and Upcoming are date-sorted: a direction reverses that
     if date_range is not None:
         choice('date_range', date_range, DATE_RANGES)
     parent_task = owned_task(request, parent) if parent is not None else None

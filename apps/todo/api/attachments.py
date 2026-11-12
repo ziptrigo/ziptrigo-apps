@@ -18,6 +18,7 @@ never the S3 key. While the account's storage is paused (unpaid) uploads and dow
 import logging
 from uuid import UUID
 
+from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
@@ -145,6 +146,8 @@ def discard_attachment(request, attachment_id: UUID):
     charge(request, 'TODO_EDIT_USER')
     try:
         attachments.discard_draft(attachment)
+    except ValidationError as exc:  # linked to a comment since it was read
+        raise HttpError(400, 'This file is attached.') from exc
     except attachments.STORAGE_ERRORS as exc:
         logger.exception('Could not delete the unused comment file %s', attachment.pk)
         raise HttpError(503, 'The file could not be removed right now. Try again later.') from exc
