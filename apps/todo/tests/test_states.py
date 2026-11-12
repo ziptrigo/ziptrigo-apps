@@ -51,7 +51,7 @@ from ..services import (
 from ..services.accounts import set_muted_overdue
 from .api_support import auth, get, patch, post  # noqa: F401 -- `auth` is a fixture
 from .factories import make_task, utc
-from .test_api_tasks import TASK_KEYS
+from .test_api_tasks import LIST_KEYS
 from .test_push_reminders import configured, phone, webpush  # noqa: F401 -- fixtures
 
 pytestmark = pytest.mark.django_db
@@ -1452,7 +1452,7 @@ class TestTheApi:
 
         listed = get(client, '/tasks', auth).json()['results'][0]
 
-        assert set(listed) == TASK_KEYS
+        assert set(listed) == LIST_KEYS
         assert listed['state'] == 'on_hold' and listed['resolution'] is None
         assert 'completed_at' not in listed
 

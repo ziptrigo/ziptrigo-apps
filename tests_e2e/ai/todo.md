@@ -42,7 +42,7 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
 
 Not covered here: inbound email itself (SES drops mail in S3 under `todo/inbound/`; the "Recent emails" list
 therefore stays empty here, and the parser is unit-tested), the JWT API beyond the state, blocker and activity calls of
-TODO-55 and TODO-59, and the `inv todo` CLI (unit tests), the
+TODO-55, TODO-59 and TODO-60, and the `inv todo` CLI (unit tests), the
 daily trash purge and the real daily storage metering (unit tests; TODO-31 freezes the storage with a shell step
 instead), a real AI model.
 
@@ -1177,6 +1177,28 @@ account's formats (issue #274).
 | 3 | `PATCH /api/todo/tasks/<L_MAIN>` with `{"priority": 1}`, then read the first entry. | `kind` `priority`, `channel` `api`, `automatic` false. |
 | 4 | Move `Log main` to the Trash and read the log; then read another user's task number. | The log is still returned (`trashed` is the newest entry); another user's number is a 404. |
 
+### TODO-60 API 2.1: sort direction, comment files, filter counts, suggestions and snippets
+
+**Purpose:** the additions the Android app needs, over the JWT API (issue #284, `docs/openapi.yml` 2.1.0).
+**Preconditions:** TODO-55's JWT for `qa.user@example.com`; at least four open tasks with different due dates, titles
+and priorities (`Api one` ... `Api four`), one containing the word `landlord` in its description and another with it
+in a comment; two saved filters (one with search text `landlord`, one with priority 1); `Api two` blocked by `Api
+one`; a second user (Session B) with a task.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/todo/tasks?sort=title`, then `?sort=title&dir=desc`, `?sort=created`, `?sort=created&dir=asc`, `?dir=desc`, `?dir=sideways`. | Each `dir=` is the exact reverse of the same sort without it (`title` ascending and `created` newest first by default; `dir` alone is the date sort); the last is a 400 `dir must be one of: asc, desc.` With `include_closed=true&dir=desc` the closed tasks are still after the open ones. |
+| 2 | `POST /api/todo/tasks/<n>/attachments` with `"for_comment": true` (and a valid `size`, `checksum_sha256`) on a **completed** task, then without `for_comment`, then on a task in the Trash. `PUT` the bytes and `POST .../complete` for the first. | 201 for the draft; the second is a 400 `Files cannot be attached to a completed task.`; the third a 400 `Files cannot be attached to a task in the trash.` |
+| 3 | `POST /api/todo/tasks/<n>/comments` with `{"body": "See the file", "attachment_ids": ["<draft id>"]}`. Then `GET .../comments` and the task's page in the website. | 201; the comment has `attachments` with `{id, filename, size_bytes, inline_type, inline}`; the website shows the file under the comment (Download, and Open for an image or PDF) and the task's own Attachments list and `attachment_count` do not include it. |
+| 4 | Post a comment with `"attachment_ids": ["not-a-uuid"]`, then with an id of a draft that is still uploading, then with the id of a file that is already on a comment. | Each a 400 `attachment_ids: A file is not ready to be attached. Wait for uploads to finish.`; no comment is created. |
+| 5 | `PATCH .../comments/<id>` with the same text and `"remove_attachment_ids": ["<file id>"]`. | 200; the file is gone from the comment and from the website; `revision_count` is unchanged (no "(edited)"). |
+| 6 | Upload another draft; `POST /api/todo/attachments/<id>/discard` twice; then on a file that is on a comment or on a task. | 204 and 204 (the draft is gone from the bucket); the saved file is a 400 `This file is attached.` and still there. |
+| 7 | `GET /api/todo/inbox`. | `address`, `sender_allowlist` and `recent_emails` (empty here: nothing delivers mail, see Out of scope; with a row made by `todo_ingest_eml`, `{from_address, subject, status, note, task, ...}` newest first, at most 20). A task made that way has `email_from` and `email_from_authenticated`; every other task has them `null`. |
+| 8 | `GET /api/todo/filters/counts`; then reload the website's Filters page. | An object keyed by the filters' ids with the same numbers the sidebar shows; a filter whose label was deleted counts every open task, like the website. |
+| 9 | `GET /api/todo/tasks/<Api two>/blockers/suggest`, `?q=api`, `?q=#<number>` and `?q=` words of a closed task's title. | Up to 10 `{number, title}`, open tasks only, never `Api two` itself, `Api one` (its blocker) or a task that `Api two` blocks directly or through others; `?q=#<n>` finds that task alone; the closed task is not offered. Another user's task number is a 404. |
+| 10 | `GET /api/todo/tasks?q=landlord`. | Each result has `search_field` (`description` / `comment`), `search_snippet` (plain text: no `<mark>`, no HTML, lower case) and `match_start` / `match_end` that frame `landlord` inside it; the same snippet text the website's Search page shows. Without `q` all four fields are `null`. `GET /api/todo/filters/<filter with search text>/tasks` carries them too. |
+| 11 | `GET /api/todo/settings`. | `credits_balance` equals the number the website shows next to the account's credits. |
+
 ## Out of scope
 
 - **Tasks added by email.** Mail to the `todo+<code>@` address reaches the site only through SES, which drops it
@@ -1194,7 +1216,7 @@ account's formats (issue #274).
 - **Rate limits** (switched off on this server), the rest of the JWT API `/api/todo/` and the `inv todo` CLI (unit tests). The
   activity log's entries made through the email intake (automatic, with the files), the phone's Complete
   button and the daily purge, and the channel each is recorded under, are unit-tested (`test_activity_log.py`); the
-  API's own endpoints are exercised only by TODO-55 and TODO-59 (every status code is unit-tested).
+  API's own endpoints are exercised only by TODO-55, TODO-59 and TODO-60 (every status code is unit-tested).
 - **A reminder reaching a real phone** and the notification the phone shows after a tap ("Snoozed until ..."): that
   needs a phone and HTTPS; TODO-40 posts the same answer with `curl`. That a due in-app reminder is pushed, with
   which buttons, and that a snoozed reminder is left alone by a time-zone change and replaced by a new due date, are

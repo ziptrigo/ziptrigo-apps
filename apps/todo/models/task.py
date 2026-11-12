@@ -115,6 +115,8 @@ class Task(models.Model):
     # (`title`, `description`, `comment`, or `''`) and a highlighted snippet of the normalised text.
     search_field: str
     search_snippet: SafeString
+    #: The same snippet as plain text `(before, hit, after)`, for the API; `None` without one.
+    search_parts: tuple[str, str, str] | None
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = cast(

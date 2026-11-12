@@ -473,7 +473,56 @@ def discard_draft(attachment: Attachment) -> None:
     leaves it as it was (`abandon_comment_files` retries)."""
     if not attachment.for_comment or attachment.comment_id is not None:
         raise ValidationError('This file is attached.')
-    delete_attachment(attachment)
+    with transaction.atomic():
+        # Re-read under the row lock (`link_to_comment` takes the same one): a comment saved since
+        # the caller read the row has made it a saved file, which must not be deleted.
+        current = Attachment.objects.select_for_update().filter(pk=attachment.pk).first()
+        if current is None:
+            return
+        if not current.for_comment or current.comment_id is not None:
+            raise ValidationError('This file is attached.')
+        delete_attachment(current)
+
+
+NOT_READY_MESSAGE = 'A file is not ready to be attached. Wait for uploads to finish.'
+
+
+def _ready_drafts(
+    ids: list[str], *, task_id: object, user_id: object, comment_id: object, lock: bool
+) -> list[Attachment]:
+    """The uploaded comment files among `ids` that `comment_id` (a comment of `task_id`, or `None`
+    for a comment about to be created) may take: each must be an uploaded comment file of that task
+    and owner, unlinked or already on that comment. Raises `ValidationError` (keyed
+    `attachment_ids`) when one is not, or is still uploading. `lock` takes the rows' locks (the
+    caller is in the comment's transaction)."""
+    try:  # building the filter is what refuses an id that is not a UUID
+        queryset = Attachment.objects.filter(
+            pk__in=ids, task_id=task_id, user_id=user_id, for_comment=True
+        )
+        rows = list(queryset.select_for_update() if lock else queryset)
+    except ValidationError, ValueError:  # not UUIDs
+        rows = []
+    ready = [row for row in rows if row.uploaded and row.comment_id in (None, comment_id)]
+    if len(ready) != len(ids):
+        raise ValidationError({'attachment_ids': NOT_READY_MESSAGE})
+    return ready
+
+
+def check_comment_files(
+    task: Task, attachment_ids: Iterable[object], comment: Comment | None = None
+) -> None:
+    """What `link_to_comment` would refuse for the comment files `attachment_ids`, told without
+    locking or writing (the API checks before it spends its rate-limit budget). `comment` is the
+    comment being edited, `None` for one about to be added."""
+    ids = list(dict.fromkeys(str(item) for item in attachment_ids))
+    if ids:
+        _ready_drafts(
+            ids,
+            task_id=task.pk,
+            user_id=task.user_id,
+            comment_id=comment.pk if comment is not None else None,
+            lock=False,
+        )
 
 
 def link_to_comment(comment: Comment, attachment_ids: Iterable[object]) -> list[Attachment]:
@@ -484,19 +533,13 @@ def link_to_comment(comment: Comment, attachment_ids: Iterable[object]) -> list[
     ids = list(dict.fromkeys(str(item) for item in attachment_ids))
     if not ids:
         return []
-    try:
-        rows = list(
-            Attachment.objects.select_for_update().filter(
-                pk__in=ids, task_id=comment.task_id, user_id=comment.user_id, for_comment=True
-            )
-        )
-    except ValidationError, ValueError:  # not UUIDs
-        rows = []
-    ready = [row for row in rows if row.uploaded and row.comment_id in (None, comment.pk)]
-    if len(ready) != len(ids):
-        raise ValidationError(
-            {'attachment_ids': 'A file is not ready to be attached. Wait for uploads to finish.'}
-        )
+    ready = _ready_drafts(
+        ids,
+        task_id=comment.task_id,
+        user_id=comment.user_id,
+        comment_id=comment.pk,
+        lock=True,
+    )
     linked: list[events.Entry] = []
     for row in ready:
         if row.comment_id is None:
@@ -515,15 +558,18 @@ def link_to_comment(comment: Comment, attachment_ids: Iterable[object]) -> list[
 
 
 def remove_from_comment(comment: Comment, attachment_ids: Iterable[object]) -> int:
-    """Delete the files of `comment` among `attachment_ids` (others are ignored). Storage errors
-    raise `ValidationError`, after deleting what it could. Returns how many were removed."""
-    ids = list(dict.fromkeys(str(item) for item in attachment_ids))
+    """Delete the files of `comment` among `attachment_ids` (others, and anything that is not an
+    id, are ignored). Storage errors raise `ValidationError`, after deleting what it could. Returns
+    how many were removed."""
+    ids: list[str] = []
+    for item in dict.fromkeys(str(item) for item in attachment_ids):
+        try:
+            ids.append(str(UUID(item)))
+        except ValueError:
+            continue  # not an id: one stray value must not keep the others from going
     if not ids:
         return 0
-    try:
-        rows = list(Attachment.objects.filter(pk__in=ids, comment=comment))
-    except ValidationError, ValueError:  # not UUIDs
-        return 0
+    rows = list(Attachment.objects.filter(pk__in=ids, comment=comment))
     removed = 0
     failed = False
     for row in rows:

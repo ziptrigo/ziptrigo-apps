@@ -264,7 +264,10 @@ def suggestions(user: User, task: Task, text: str) -> list[Task]:
     already has, and not one that would be refused as a cycle (any task `task` blocks, directly or
     through other tasks), whose number starts with the digits typed or whose title contains the
     words (all of the open tasks, newest numbers last, when nothing is typed). At most
-    `SUGGESTIONS`."""
+    `SUGGESTIONS`. Nothing for a task in the Trash or one that already has the most blockers
+    (`add` would refuse every one)."""
+    if task.is_trashed or TaskBlocker.objects.filter(blocked=task).count() >= MAX_BLOCKERS_PER_TASK:
+        return []
     queryset = (
         Task.objects.filter(user=user, completed_at__isnull=True, deleted_at__isnull=True)
         .exclude(pk=task.pk)

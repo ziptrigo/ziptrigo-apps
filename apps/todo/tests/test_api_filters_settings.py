@@ -256,6 +256,7 @@ class TestSettings:
             'stored_bytes': 0,
             'storage_credits_per_day': '0.0000',
             'storage_frozen': False,
+            'credits_balance': 100,
         }
 
     def test_usage_and_storage_figures(self, client, auth, funded_user, fake_storage):
@@ -380,7 +381,11 @@ class TestInbox:
         body = get(client, '/inbox', auth).json()
 
         code = InboxCode.objects.get(account__user=funded_user, active=True).code
-        assert body == {'address': f'todo+{code}@ziptrigo.com', 'sender_allowlist': []}
+        assert body == {
+            'address': f'todo+{code}@ziptrigo.com',
+            'sender_allowlist': [],
+            'recent_emails': [],
+        }
         assert get(client, '/inbox', auth).json() == body  # stable
 
     def test_it_shows_the_allowlist(self, client, auth):

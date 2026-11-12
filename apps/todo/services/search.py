@@ -83,6 +83,7 @@ from apps.core.search import (
     normalize_glob,
     prepare_query,
     search_guard,
+    snippet_parts,
     snippet_regex,
     to_postgres,
 )
@@ -120,6 +121,7 @@ __all__ = [
     'search_guard',
     'search_queryset',
     'search_tasks',
+    'snippet_parts',
     'snippet_regex',
     'to_postgres',
 ]
@@ -165,14 +167,21 @@ def search_queryset(
     return queryset.filter(search_condition(query.db_pattern, query.number))
 
 
-def order_results(queryset: QuerySet, sort: str = SORT_DEFAULT) -> QuerySet:
-    """`queryset` in the foundation's `sort` order, completed tasks after open ones."""
-    ordered = order_tasks(queryset, sort)
+def order_results(
+    queryset: QuerySet, sort: str = SORT_DEFAULT, direction: str | None = None
+) -> QuerySet:
+    """`queryset` in the foundation's `sort` order (`direction`: see `dates.order_tasks`), completed
+    tasks after open ones."""
+    ordered = order_tasks(queryset, sort, direction)
     open_first = Case(
         When(completed_at__isnull=False, then=Value(1)),
         default=Value(0),
         output_field=IntegerField(),
     )
+    if not ordered.query.standard_ordering:
+        # A reversed query flips every term when it is compiled, the open-first one too: ask for
+        # it descending so it comes out ascending, and only the rest runs backwards.
+        return ordered.order_by(open_first.desc(), *ordered.query.order_by)
     return ordered.order_by(open_first, *ordered.query.order_by)
 
 
@@ -231,7 +240,8 @@ def _matched_texts(
 
 
 def attach_matches(tasks: list[Task], query: PreparedQuery | None) -> None:
-    """Set `search_field` and `search_snippet` on each task: where `query` matches (title, then
+    """Set `search_field`, `search_snippet` (HTML) and `search_parts` (the same snippet as plain
+    text, `(before, hit, after)`, for the API) on each task: where `query` matches (title, then
     description, then the first non-deleted comment that does), computed in Python on the
     normalised text. Both are empty without a query, for a row the budget didn't reach, and when
     Python finds nothing (the engines differ at the edges).
@@ -244,6 +254,7 @@ def attach_matches(tasks: list[Task], query: PreparedQuery | None) -> None:
     for task in tasks:
         task.search_field = ''
         task.search_snippet = SafeString('')
+        task.search_parts = None
     if query is None or not tasks:
         return
     compiled = snippet_regex(query.pattern)
@@ -265,6 +276,7 @@ def attach_matches(tasks: list[Task], query: PreparedQuery | None) -> None:
             if match is not None:
                 task.search_field = field
                 task.search_snippet = make_snippet(text, match)
+                task.search_parts = snippet_parts(text, match)
                 break
 
 

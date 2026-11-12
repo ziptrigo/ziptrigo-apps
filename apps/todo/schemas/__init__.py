@@ -3,11 +3,12 @@
 from .activity import ActivityEventSchema, ActivityPageSchema
 from .attachment import (
     AttachmentSchema,
+    CommentAttachmentSchema,
     FileUrlSchema,
     UploadStartSchema,
     UploadTicketSchema,
 )
-from .comment import CommentBodySchema, CommentSchema, RevisionSchema
+from .comment import CommentBodySchema, CommentEditSchema, CommentSchema, RevisionSchema
 from .filter import (
     FilterCreateSchema,
     FilterOrderSchema,
@@ -30,9 +31,10 @@ from .reminder import (
     ReminderSchema,
     ReminderUpdateSchema,
 )
-from .settings import InboxSchema, SettingsSchema, SettingsUpdateSchema
+from .settings import InboxSchema, RecentEmailSchema, SettingsSchema, SettingsUpdateSchema
 from .task import (
     BlockerSchema,
+    BlockerSuggestionSchema,
     ChecklistSchema,
     CloseSchema,
     CountSchema,
@@ -47,6 +49,7 @@ from .task import (
     TaskCreatedSchema,
     TaskCreateSchema,
     TaskDetailSchema,
+    TaskListItemSchema,
     TaskListSchema,
     TaskRefSchema,
     TaskSchema,
@@ -59,9 +62,12 @@ __all__ = [
     'ActivityPageSchema',
     'AttachmentSchema',
     'BlockerSchema',
+    'BlockerSuggestionSchema',
     'ChecklistSchema',
     'CloseSchema',
+    'CommentAttachmentSchema',
     'CommentBodySchema',
+    'CommentEditSchema',
     'CommentSchema',
     'CountSchema',
     'DeliveryListSchema',
@@ -87,6 +93,7 @@ __all__ = [
     'ReminderCreateSchema',
     'ReminderSchema',
     'ReminderUpdateSchema',
+    'RecentEmailSchema',
     'ReorderSchema',
     'ResolutionSchema',
     'RevisionSchema',
@@ -97,6 +104,7 @@ __all__ = [
     'TaskCreatedSchema',
     'ErrorSchema',
     'TaskDetailSchema',
+    'TaskListItemSchema',
     'TaskListSchema',
     'TaskRefSchema',
     'TaskSchema',

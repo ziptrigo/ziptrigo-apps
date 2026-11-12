@@ -1858,23 +1858,26 @@ adding no rule of its own. A task is addressed by its **number** (`/tasks/{numbe
 else by its UUID. **Version 2 of the API (issue #275, `docs/openapi.yml` 2.0.0) is a breaking
 change** of this router: `completed_at` is `closed_at`, `view=completed` is `view=closed`,
 `include_completed` is `include_closed` (the old name is a 400), and `complete` / `uncomplete` are gone
-for `close` / `reopen` (the two old routes stay only to answer **410**; see "To-do" > "API and CLI"). Endpoints, relative to the mount: `GET /tasks` (`view`, `q`,
+for `close` / `reopen` (the two old routes stay only to answer **410**; see "To-do" > "API and CLI").
+**Version 2.1 (issue #284, 2.1.0) is additive** (the Android app's parity with the website: `dir`, comment
+files, recent emails, filter counts, blocker suggestions, search snippets, the credit balance; see "To-do" >
+"API and CLI"). Endpoints, relative to the mount: `GET /tasks` (`view`, `q`,
 `mode`, `include_closed`, `resolution`, `state`, `priority`, `label`, `date_range`/`date_from`/
-`date_to`, `sort`, `parent`, `limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`),
+`date_to`, `sort`, `dir`, `parent`, `limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`),
 `POST /tasks` (201),
 `GET|PATCH|DELETE /tasks/{number}` (`DELETE` moves to the Trash, 204, idempotent; `GET` also returns
 a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tasks/{number}/` with
 `close`, `reopen`, `resolution`, `state`, `restore`, `delete-forever`, `postpone`, `checklist`,
-`recurrence/stop`, `POST|DELETE /tasks/{number}/blockers[/{blocker_number}]`,
+`recurrence/stop`, `POST|DELETE /tasks/{number}/blockers[/{blocker_number}]`, `GET /tasks/{number}/blockers/suggest`,
 `GET /tasks/{number}/activity`,
 `POST /tasks/reschedule-overdue` and `POST /tasks/reorder` (both `{count}`), labels (`GET|POST
 /labels`, `PATCH|DELETE /labels/{id}`, `POST /labels/reorder`), comments
 (`GET|POST /tasks/{number}/comments`, `PATCH|DELETE .../comments/{id}`, `POST .../restore`, `GET
 .../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
 `GET /reminders/history`), attachments (`POST /tasks/{number}/attachments`, `POST
-.../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `GET /attachments/{id}/url`,
+.../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `POST /attachments/{id}/discard`, `GET /attachments/{id}/url`,
 `DELETE /attachments/{id}`), saved
-filters (`GET|POST /filters`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
+filters (`GET|POST /filters`, `GET /filters/counts`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
 /filters/{id}/tasks`), `GET|PATCH /settings`, `GET /inbox`, `POST /inbox/regenerate` and `POST
 /parse`. Status codes (`api/common.py`): **400** a service `ValidationError` (`field: message`, a
 message that belongs to no field plain) or a hand-read query parameter (`view`, `mode`, `sort`,
@@ -5620,7 +5623,69 @@ budgets are listed under "API" above; this is how they are built and what the CL
   the same for every client; the user's own date order only goes to the model, as a hint for reading the
   title (`ParseRequest.formats`, not `wording`). Tests: `apps/todo/tests/test_date_time_formats.py`.
 - **Not in v1**: an `expected_cost` / quote for task creation (the price is the setting's and the
-  answer reports `charged_credits`), search snippets in the API.
+  answer reports `charged_credits`).
+- **Version 2.1** (#284, `docs/openapi.yml` 2.1.0; additive, nothing removed or changed; each calls the
+  service its web twin does, adds no rule, and keeps the web's messages and budgets; a refusal spends
+  nothing). Tests: `apps/todo/tests/test_api_parity.py`, `admin/tests/test_todo.py`, AI case TODO-60.
+  - **`dir=asc|desc` on `GET /tasks`** (`order_tasks(..., direction)`, `order_results(..., direction)`):
+    each sort's own default direction when left out (`date`, `priority`, `title` ascending, `created`
+    newest first), the exact reverse for the other one, closed tasks still after the open (a reversed
+    queryset flips every term, `open_first` included, so `order_results` asks for it descending then);
+    another value is a 400 `dir must be one of: asc, desc.`; `dir` without `sort` means `sort=date`.
+  - **Comment files.** `POST /tasks/{number}/attachments` takes `for_comment: true` (a draft:
+    `start_upload(for_comment=True)`: fine on a completed task, a 400 on a trashed one, counted toward
+    the per-task cap); `POST /tasks/{number}/comments` takes `attachment_ids` and `PATCH
+    .../comments/{id}` `attachment_ids` and `remove_attachment_ids` (each at most 100 strings, read as
+    strings on purpose so a malformed id gets the web's 400 `attachment_ids: A file is not ready to be
+    attached. Wait for uploads to finish.` instead of a 422), all or nothing through
+    `services.comments` (`link_to_comment` / `remove_from_comment`). A refused list is told **before the
+    budget is charged** by `attachments.check_comment_files` (the same query as `link_to_comment`, via
+    `_ready_drafts`, without the locks); the text is still required on an edit, and changing only the files
+    leaves no revision. `remove_from_comment` now skips a value that is not a UUID instead of ignoring the
+    whole list. `POST /attachments/{id}/discard` (`attachments.discard_draft`, `TODO_EDIT_USER`): 204 for a
+    draft (the object and the row, also a pending one), 204 and nothing spent for an id that is gone **or isn't
+    the caller's** (as `cancel`: nothing says whose it is), 400 `This file is attached.` for a file that is on a
+    comment or isn't a comment file (checked before the charge), 503 when the object could not be deleted.
+    `CommentSchema.attachments` is `[{id, filename, size_bytes, inline_type, inline}]` (`inline`: the sniffed
+    type is one a browser may show), read for a whole list with one query (`api/comments._files`); a deleted
+    comment lists none unless `include_deleted_bodies` asks, like its body. The task's own `attachments` and
+    `attachment_count` still leave comment files out.
+  - **Email intake.** `GET /inbox` (and `POST /inbox/regenerate`) add `recent_emails`: the 20 latest
+    (`services.recent_emails`, moved out of `views.inbox`, which the Settings page still uses) as `{id,
+    from_address, sender_authenticated, subject, received_at, status, note, task}` (`task` the number, `null`
+    for none or a deleted task; `status` is the `InboundEmailStatus` value), one query with the task joined.
+    `TaskSchema` adds `email_from` and `email_from_authenticated`, set only when `source` is `email` (`null`
+    otherwise, `Task.is_from_email`).
+  - **`GET /filters/counts`** -> `{filter id: count | null}` for every saved filter
+    (`saved_filters.filter_counts`: one conditional `Count` per filter in one query, under one
+    `search_guard`), spending **one** `TODO_SEARCH_USER` hit however many filters; `null` for a filter whose
+    search can't run, **every** count `null` on a timeout or once the budget is spent (never an error), `{}` and
+    nothing spent for a user with none. Registered before the `{filter_id}` routes (a path is matched in the
+    order added).
+  - **`GET /tasks/{number}/blockers/suggest?q=`** (`blockers.suggestions`) -> up to 10 `{number, title}` of
+    the caller's open tasks that `add` would accept (not itself, not a current blocker, not a transitive
+    dependent), `q` being digits (with or without `#`) for the start of a number or words of the title (at most
+    200 characters, a 422 over); `TODO_BLOCKER_SUGGEST_USER` is charged after the task is found and **over it
+    the answer is `[]`**. Works for a task in the Trash; another user's is a 404. Registered before the
+    `{blocker_number}` route.
+  - **Search snippets.** With `q` each task of `GET /tasks` and `GET /filters/{id}/tasks` (a filter with search
+    text) carries `search_field` (`title|description|comment`, `""` when no snippet could be made, `null` when
+    there was no search), `search_snippet` (**plain text**, `…` where the text goes on) and `match_start` /
+    `match_end` (a half-open range in Unicode code points, not UTF-16 units); `null` without a search or a
+    snippet. They come from the web's bounded pass (`search.attach_matches`: `SNIPPET_TIME_BUDGET` 0.2 s for the
+    page, only the field the database said matched, `SNIPPET_SCAN_MAX` 5,000 characters, the `regex` package's
+    timeout, two queries per page); `core.search.snippet_parts` is the plain `(before, hit, after)` that
+    `make_snippet` HTML-escapes, and `attach_matches` stores it as `task.search_parts`. The text is the
+    **normalised** one (lower case, no accents, punctuation or formatting), as on the website. The list items
+    are `TaskListItemSchema` (`TaskSchema` plus those four).
+  - **`GET /settings` adds `credits_balance`** (`apps.billing.services.get_balance`: the shared balance).
+  - **CLI**: `list --dir asc|desc` and, for a search, a "Where it matched" block under the table with the
+    match in bold; `comment <n> text... --file PATH` (repeatable: each is uploaded as a draft first, the comment
+    is posted with their ids, and if any step fails the drafts already uploaded are discarded and nothing is
+    commented); `comments` and `get` list a comment's files and `get` says who an emailed task came from;
+    `filters` adds an "Open" count column (blank dash when it can't be told, and the list still shows against
+    a server without the endpoint); `inbox` adds a "Recent emails" table; `settings` shows the credit balance;
+    new `block-suggest <n> [--q text]`.
 - **Judgement calls** where the issue left room: `GET /tasks/{number}` also returns the task's
   uploaded `attachments` and `referenced_by` (the CLI's `get` needs them and no list endpoint was
   specified); `POST /tasks` answers an extra `parsed`; `POST /tasks/reorder` answers `{count}` (the

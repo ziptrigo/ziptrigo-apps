@@ -20,36 +20,11 @@ from apps.core.field_errors import message_lines
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import InboxSettingsForm
-from ..models import InboundEmail, InboundEmailStatus
 from ..services import get_account, inbox_address_for, regenerate_inbox_code, update_inbox_settings
+from ..services.recent_emails import recent_emails
 from .common import form_error_lines, limited, message_response
 
-RECENT_EMAILS = 20
 SLOT = '#inbox-settings-msg'
-
-_OUTCOMES = {
-    InboundEmailStatus.REJECTED_SENDER: 'sender not allowed',
-    InboundEmailStatus.REJECTED_SPAM: 'flagged as spam',
-    InboundEmailStatus.REJECTED_VIRUS: 'flagged as a virus',
-    InboundEmailStatus.REJECTED_CREDITS: 'not enough credits',
-    InboundEmailStatus.REJECTED_TOO_LARGE: 'too large',
-    InboundEmailStatus.REJECTED_TASK_LIMIT: 'too many open tasks',
-    InboundEmailStatus.NO_CONTENT: 'nothing to add',
-}
-
-
-def recent_emails(user) -> list[InboundEmail]:
-    """The user's latest `RECENT_EMAILS` inbound emails, each with `accepted` and `outcome`
-    (the words for a rejection) for the template."""
-    emails = list(
-        InboundEmail.objects.filter(user=user)
-        .select_related('task')
-        .order_by('-created_at')[:RECENT_EMAILS]
-    )
-    for email in emails:
-        email.accepted = email.status == InboundEmailStatus.ACCEPTED
-        email.outcome = _OUTCOMES.get(email.status, '')
-    return emails
 
 
 def senders_form_context(user, form: InboxSettingsForm | None = None, *, saved: bool = False):

@@ -75,9 +75,11 @@ class TaskSchema(Schema):
     is the UTC instant they mean (a date-only task is due at the account's default due time).
     `parent` is the parent's number (`null` for a top-level task). `charged_credits` is what the
     task cost to create and `unpaid` says that price is still owed (see the 409 of `POST
-    /tasks`). `subtask_count` and `open_subtask_count` count the subtasks that aren't in the
-    Trash, `comment_count` the comments that aren't deleted and `attachment_count` the uploaded
-    files.
+    /tasks`). `email_from` and `email_from_authenticated` say, for a task created from an email
+    (`source` is `email`), who it came from (the From address as the sender wrote it) and whether
+    the mail system authenticated that sender; both are `null` for every other task.
+    `subtask_count` and `open_subtask_count` count the subtasks that aren't in the Trash,
+    `comment_count` the comments that aren't deleted and `attachment_count` the uploaded files.
 
     **Open and closed.** A task is open while `closed_at` is `null` and closed from the moment it is
     closed (as Done or as Won't do), until it is reopened. `resolution` says how a closed task was
@@ -117,6 +119,13 @@ class TaskSchema(Schema):
     deleted_at: datetime | None
     position: int
     source: str
+    email_from: str | None = Field(
+        description='For a task made from an email: its From address; `null` otherwise.'
+    )
+    email_from_authenticated: bool | None = Field(
+        description='For a task made from an email: whether the sender was authenticated '
+        '(DMARC, DKIM or SPF); `null` otherwise.'
+    )
     parent: int | None
     labels: list[LabelRefSchema]
     recurrence: RecurrenceSchema | None
@@ -173,11 +182,41 @@ class TaskCreatedSchema(TaskSchema):
     parsed: ParsedInfoSchema | None
 
 
+class TaskListItemSchema(TaskSchema):
+    """A task in a list (`GET /tasks`, `GET /filters/{id}/tasks`). When the list was searched
+    (`q`, or a filter with search text) each task also says where the text matched:
+
+    - `search_field` is `title`, `description` or `comment` (the first comment that matches), or
+      `""` when no snippet could be made (the budget ran out before this row, or the engines
+      disagree at the edges; the task still matches). `null` when there was no search text.
+    - `search_snippet` is **plain text** around the match (about 60 characters either side, with
+      an ellipsis `…` where the text goes on), `match_start` and `match_end` the half-open range of
+      the matched text inside it, in Unicode code points (not UTF-16 units). Searches run on
+      normalised text, so the snippet is lower-case with accents, punctuation and Markdown
+      formatting gone, and a match longer than 100 characters is cut to its first 100. All three
+      are `null` when `search_field` is `""` or null.
+    """
+
+    search_field: Literal['title', 'description', 'comment', ''] | None = Field(
+        default=None,
+        description='Where the search text matched; `null` when the list was not searched.',
+    )
+    search_snippet: str | None = Field(
+        default=None, description='Plain text around the match; `null` without one.'
+    )
+    match_start: int | None = Field(
+        default=None, description='Start of the match in `search_snippet` (code points).'
+    )
+    match_end: int | None = Field(
+        default=None, description='End (exclusive) of the match in `search_snippet`.'
+    )
+
+
 class TaskListSchema(Schema):
     count: int
     limit: int
     offset: int
-    results: list[TaskSchema]
+    results: list[TaskListItemSchema]
 
 
 class UnpaidBlockSchema(Schema):
@@ -317,6 +356,13 @@ class StateSchema(Schema):
     model_config = ConfigDict(extra='forbid')
 
     state: SettableState = Field(description='`todo`, `in_progress` or `on_hold`.')
+
+
+class BlockerSuggestionSchema(Schema):
+    """An open task that may be offered as a blocker of another."""
+
+    number: int = Field(description="The task's number.")
+    title: str = Field(description="The task's title.")
 
 
 class BlockerSchema(Schema):

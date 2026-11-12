@@ -10,6 +10,7 @@ import hashlib
 import json
 
 import pytest
+import requests
 from typer.testing import CliRunner
 
 from admin import todo
@@ -184,6 +185,8 @@ class Api:
                 raise AssertionError(f'unexpected {method.upper()} {path}') from None
             if isinstance(response, list):
                 return response.pop(0)
+            if isinstance(response, Exception):
+                raise response
             return response
 
         return handle
@@ -389,6 +392,36 @@ def test_list_sends_every_filter(api):
         'limit': 10,
         'offset': 20,
     }
+
+
+def test_list_sends_the_direction(api):
+    api.on('get', '/todo/tasks', FakeResponse(200, page()))
+
+    result = invoke('list', 'local', '--sort', 'title', '--dir', 'DESC')
+
+    assert result.exit_code == 0
+    assert api.requests('get', '/tasks')[-1]['params']['dir'] == 'desc'
+    assert invoke('list', 'local', '--dir', 'sideways').exit_code == 2
+    assert len(api.requests('get', '/tasks')) == 1  # refused before calling
+
+
+def test_list_shows_where_a_search_matched(api):
+    hit = {
+        **TASK,
+        'search_field': 'description',
+        'search_snippet': '…send it to the landlord today',
+        'match_start': 17,
+        'match_end': 25,
+    }
+    plain = {**TASK, 'number': 1235, 'search_field': '', 'search_snippet': None}
+    api.on('get', '/todo/tasks', FakeResponse(200, page(hit, plain)))
+
+    result = invoke('list', 'local', '--q', 'landlord')
+
+    assert result.exit_code == 0
+    assert '#1234 description: …send it to the landlord today' in result.output
+    assert '1235' in result.output
+    assert result.output.count('description:') == 1  # no line for the one with no snippet
 
 
 def test_list_closed_view_and_the_old_names(api):
@@ -1177,6 +1210,170 @@ def test_comment_joins_the_words(api):
     assert COMMENT_ID in result.output
 
 
+def test_comment_with_files_uploads_them_as_drafts_first(api, tmp_path):
+    first, second = tmp_path / 'a.pdf', tmp_path / 'b.png'
+    first.write_bytes(b'%PDF-1.4 a')
+    second.write_bytes(b'png-bytes')
+    second_id = '99999999-9999-9999-9999-999999999999'
+    api.on(
+        'post',
+        '/todo/tasks/1234/attachments',
+        [ticket(), ticket(second_id, 'key2')],
+    )
+    api.on('put', 'https://fake-s3.test/key?put', FakeResponse(200))
+    api.on('put', 'https://fake-s3.test/key2?put', FakeResponse(200))
+    api.on(
+        'post',
+        f'/todo/tasks/1234/attachments/{ATTACHMENT_ID}/complete',
+        FakeResponse(200, {**DETAIL['attachments'][0], 'id': ATTACHMENT_ID}),
+    )
+    api.on(
+        'post',
+        f'/todo/tasks/1234/attachments/{second_id}/complete',
+        FakeResponse(200, {**DETAIL['attachments'][0], 'id': second_id}),
+    )
+    api.on('post', '/todo/tasks/1234/comments', FakeResponse(201, COMMENT))
+
+    result = invoke(
+        'comment', 'local', '1234', 'signed', 'copy', '--file', str(first), '--file', str(second)
+    )
+
+    assert result.exit_code == 0 and 'with 2 files' in result.output
+    starts = api.requests('post', '/todo/tasks/1234/attachments')
+    assert [call['json']['for_comment'] for call in starts] == [True, True]
+    comment = api.requests('post', '/todo/tasks/1234/comments')[0]
+    assert comment['json'] == {
+        'body': 'signed copy',
+        'attachment_ids': [ATTACHMENT_ID, second_id],
+    }
+
+
+def test_comment_with_a_failing_file_comments_nothing_and_discards_the_rest(api, tmp_path):
+    first, second = tmp_path / 'a.pdf', tmp_path / 'b.png'
+    first.write_bytes(b'%PDF-1.4 a')
+    second.write_bytes(b'png-bytes')
+    api.on(
+        'post',
+        '/todo/tasks/1234/attachments',
+        [ticket(), FakeResponse(400, {'detail': 'The file is too large (max 50 MB).'})],
+    )
+    api.on('put', 'https://fake-s3.test/key?put', FakeResponse(200))
+    api.on(
+        'post',
+        f'/todo/tasks/1234/attachments/{ATTACHMENT_ID}/complete',
+        FakeResponse(200, DETAIL['attachments'][0]),
+    )
+    api.on('post', f'/todo/attachments/{ATTACHMENT_ID}/discard', FakeResponse(204))
+
+    result = invoke('comment', 'local', '1234', 'text', '--file', str(first), '--file', str(second))
+
+    assert result.exit_code == 1
+    assert 'too large' in flat(result) and 'Nothing was commented' in flat(result)
+    assert api.requests('post', '/todo/tasks/1234/comments') == []
+    assert len(api.requests('post', f'/todo/attachments/{ATTACHMENT_ID}/discard')) == 1
+
+
+def test_comment_refused_by_the_server_discards_the_uploaded_files(api, tmp_path):
+    path = tmp_path / 'a.pdf'
+    path.write_bytes(b'%PDF-1.4 a')
+    api.on('post', '/todo/tasks/1234/attachments', ticket())
+    api.on('put', 'https://fake-s3.test/key?put', FakeResponse(200))
+    api.on(
+        'post',
+        f'/todo/tasks/1234/attachments/{ATTACHMENT_ID}/complete',
+        FakeResponse(200, DETAIL['attachments'][0]),
+    )
+    api.on(
+        'post',
+        '/todo/tasks/1234/comments',
+        FakeResponse(400, {'detail': 'Restore the task before commenting on it.'}),
+    )
+    api.on('post', f'/todo/attachments/{ATTACHMENT_ID}/discard', FakeResponse(204))
+
+    result = invoke('comment', 'local', '1234', 'text', '--file', str(path))
+
+    assert result.exit_code == 1 and 'Restore the task' in flat(result)
+    assert len(api.requests('post', f'/todo/attachments/{ATTACHMENT_ID}/discard')) == 1
+
+
+def test_comment_network_error_after_the_uploads_discards_the_drafts(api, tmp_path):
+    path = tmp_path / 'a.pdf'
+    path.write_bytes(b'%PDF-1.4 a')
+    api.on('post', '/todo/tasks/1234/attachments', ticket())
+    api.on('put', 'https://fake-s3.test/key?put', FakeResponse(200))
+    api.on(
+        'post',
+        f'/todo/tasks/1234/attachments/{ATTACHMENT_ID}/complete',
+        FakeResponse(200, DETAIL['attachments'][0]),
+    )
+    api.on('post', '/todo/tasks/1234/comments', requests.exceptions.ConnectionError('reset'))
+    api.on('post', f'/todo/attachments/{ATTACHMENT_ID}/discard', FakeResponse(204))
+
+    result = invoke('comment', 'local', '1234', 'text', '--file', str(path))
+
+    assert result.exit_code == 1 and 'reset' in flat(result)
+    assert len(api.requests('post', f'/todo/attachments/{ATTACHMENT_ID}/discard')) == 1
+
+
+def test_comment_files_are_checked_before_anything_is_uploaded(api, tmp_path):
+    empty = tmp_path / 'empty.txt'
+    empty.write_bytes(b'')
+
+    missing = invoke('comment', 'local', '1234', 'text', '--file', str(tmp_path / 'nope'))
+    blank = invoke('comment', 'local', '1234', 'text', '--file', str(empty))
+
+    assert missing.exit_code == 1 and 'Not found' in missing.output
+    assert blank.exit_code == 1 and 'Empty file' in blank.output
+    assert api.calls == []
+
+
+def test_comments_lists_their_files(api):
+    api.on(
+        'get',
+        '/todo/tasks/1234/comments',
+        FakeResponse(
+            200,
+            [
+                {
+                    **COMMENT,
+                    'attachments': [
+                        {
+                            'id': ATTACHMENT_ID,
+                            'filename': 'contract.pdf',
+                            'size_bytes': 2048,
+                            'inline_type': 'application/pdf',
+                            'inline': True,
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+
+    out = invoke('comments', 'local', '1234').output
+
+    assert f'file {ATTACHMENT_ID}' in out and 'contract.pdf (2,048 bytes)' in out
+
+
+def test_block_suggest(api):
+    api.on(
+        'get',
+        '/todo/tasks/1234/blockers/suggest',
+        FakeResponse(200, [{'number': 1250, 'title': 'Pay rent'}]),
+    )
+
+    result = invoke('block-suggest', 'local', '1234', '--q', 'rent')
+
+    assert result.exit_code == 0 and '#1250 Pay rent' in result.output
+    assert api.calls[0]['params'] == {'q': 'rent'}
+
+
+def test_block_suggest_with_nothing(api):
+    api.on('get', '/todo/tasks/1234/blockers/suggest', FakeResponse(200, []))
+
+    assert 'No tasks to suggest.' in invoke('block-suggest', 'local', '1234').output
+
+
 def test_comments_lists_them(api):
     api.on(
         'get',
@@ -1644,12 +1841,25 @@ def test_filters_table(api):
         '/todo/filters',
         FakeResponse(200, [SAVED, {**SAVED, 'id': 'b', 'name': 'All', 'summary': ''}]),
     )
+    api.on('get', '/todo/filters/counts', FakeResponse(200, {FILTER_ID: 7, 'b': None}))
 
     result = invoke('filters', 'local')
 
     assert result.exit_code == 0
     assert 'Urgent home' in result.output and 'priority 1' in result.output
     assert FILTER_ID in result.output and 'all open tasks' in result.output
+    rows = [line for line in result.output.splitlines() if 'Urgent home' in line or 'All' in line]
+    assert any(' 7 ' in line for line in rows)  # the count, and a dash where it can't be told
+    assert any(' - ' in line for line in rows)
+
+
+def test_filters_without_counts_still_lists_them(api):
+    api.on('get', '/todo/filters', FakeResponse(200, [SAVED]))
+    api.on('get', '/todo/filters/counts', FakeResponse(405, {'detail': 'Method not allowed'}))
+
+    result = invoke('filters', 'local')
+
+    assert result.exit_code == 0 and 'Urgent home' in result.output
 
 
 def test_filters_when_there_are_none(api):
@@ -1697,6 +1907,7 @@ SETTINGS = {
     'stored_bytes': 2048,
     'storage_credits_per_day': '0.0001',
     'storage_frozen': False,
+    'credits_balance': 1250,
 }
 
 
@@ -1710,6 +1921,7 @@ def test_settings_shows_them(api):
     assert 'Default due time' in out and '09:00' in out
     assert '5 minutes before (in_app)' in out and 'me@example.com' in out
     assert '4 (10 free, then 10 credits each)' in out and '2,048 bytes' in out
+    assert 'Credits' in out and '1,250' in out
 
 
 def test_settings_warns_about_a_block_and_a_frozen_storage(api):
@@ -1813,6 +2025,48 @@ def test_inbox(api):
 
     assert 'Email tasks to: todo+abc12345@ziptrigo.com' in result.output
     assert 'Accepted senders: anyone' in result.output
+
+
+def test_inbox_lists_the_recent_emails(api):
+    api.on(
+        'get',
+        '/todo/inbox',
+        FakeResponse(
+            200,
+            {
+                'address': 'todo+abc12345@ziptrigo.com',
+                'sender_allowlist': [],
+                'recent_emails': [
+                    {
+                        'id': 'a',
+                        'from_address': 'boss@work.test',
+                        'sender_authenticated': True,
+                        'subject': 'Pay rent',
+                        'received_at': '2026-11-01T09:00:00Z',
+                        'status': 'accepted',
+                        'note': '1 of 2 files skipped: too large',
+                        'task': 1500,
+                    },
+                    {
+                        'id': 'b',
+                        'from_address': 'spam@x.test',
+                        'sender_authenticated': False,
+                        'subject': 'Win [bold]now[/bold]',
+                        'received_at': None,
+                        'status': 'rejected_sender',
+                        'note': '',
+                        'task': None,
+                    },
+                ],
+            },
+        ),
+    )
+
+    out = invoke('inbox', 'local').output
+
+    assert 'Recent emails' in out and 'boss@work.test' in out and '#1500' in out
+    assert 'accepted' in out and 'rejected sender' in out
+    assert 'Win [bold]now[/bold]' in out  # markup in a subject is shown as typed
 
 
 def test_regenerate_asks_first(api):

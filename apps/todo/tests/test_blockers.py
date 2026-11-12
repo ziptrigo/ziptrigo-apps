@@ -1193,6 +1193,22 @@ class TestTaskPage:
         assert 'Paid already' not in body  # closed
         assert 'Call dentist' not in body and f'#{task.number}"' not in body
 
+    def test_no_suggestions_for_a_trashed_task_or_one_with_the_most_blockers(
+        self, web, funded_user
+    ):
+        from ..services import trash_task
+
+        trashed = make_task(funded_user, number=8001, title='Gone')
+        full = make_task(funded_user, number=8002, title='Full')
+        for index in range(MAX_BLOCKERS_PER_TASK):
+            add_blocker(full, make_task(funded_user, number=8100 + index, title=f'B{index}'))
+        make_task(funded_user, number=8003, title='Free')
+        trash_task(trashed)
+
+        for task in (trashed, full):
+            response = web.get(reverse('todo:blocker-suggest', args=[task.number]), **HTMX)
+            assert response.status_code == 200 and text(response).count('<option') == 0
+
     def test_suggestions_by_number_and_the_cap(self, web, funded_user):
         task = make(funded_user, 'Main')
         for index in range(15):

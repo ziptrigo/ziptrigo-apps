@@ -18,6 +18,7 @@ never the S3 key. While the account's storage is paused (unpaid) uploads and dow
 import logging
 from uuid import UUID
 
+from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
@@ -45,7 +46,9 @@ def _owned_attachment(request, attachment_id: UUID, *, uploaded: bool | None = T
 def start_upload(request, number: int, payload: UploadStartSchema):
     """Start attaching one file to an open task. 402 while storage is paused; 400 for an empty or
     too large file (`max_attachment_bytes`, 50 MB by default), a task that already has its
-    `max_attachments_per_task` (20), a malformed checksum, or a task in the Trash or completed."""
+    `max_attachments_per_task` (20), a malformed checksum, or a task in the Trash or completed.
+    With `for_comment: true` the file is a draft for a comment: a completed task takes it (a task
+    in the Trash still does not), and it counts toward the same per-task limit."""
     charge(request, 'TODO_UPLOAD_USER')
     task = owned_task(request, number)
     with mapped_errors():
@@ -55,6 +58,7 @@ def start_upload(request, number: int, payload: UploadStartSchema):
             size=payload.size,
             declared_type=payload.content_type,
             checksum_sha256=payload.checksum_sha256,
+            for_comment=payload.for_comment,
         )
     return 201, {
         'attachment_id': ticket.attachment.pk,
@@ -123,6 +127,30 @@ def cancel_upload(request, attachment_id: UUID):
         return 204, None
     with mapped_errors():
         attachments.cancel_upload(attachment)
+    return 204, None
+
+
+@router.post('/attachments/{attachment_id}/discard', response={204: None})
+def discard_attachment(request, attachment_id: UUID):
+    """Delete a comment file that was uploaded as a draft (`for_comment`) and not saved with a
+    comment (the user took it out of the comment they were writing): the object and the row, and
+    its bytes stop being billed. Idempotent: 204 for one that is already gone (or never yours,
+    spending nothing). A file that is attached to a task or to a comment, or is not a comment
+    file, is a 400: remove it with `DELETE /attachments/{id}` (or edit the comment). 503 when the
+    object could not be deleted (try again). Spends `TODO_EDIT_USER`, after the 400."""
+    attachment = Attachment.objects.filter(pk=attachment_id, user=request.auth).first()
+    if attachment is None:
+        return 204, None
+    if not attachment.for_comment or attachment.comment_id is not None:
+        raise HttpError(400, 'This file is attached.')
+    charge(request, 'TODO_EDIT_USER')
+    try:
+        attachments.discard_draft(attachment)
+    except ValidationError as exc:  # linked to a comment since it was read
+        raise HttpError(400, 'This file is attached.') from exc
+    except attachments.STORAGE_ERRORS as exc:
+        logger.exception('Could not delete the unused comment file %s', attachment.pk)
+        raise HttpError(503, 'The file could not be removed right now. Try again later.') from exc
     return 204, None
 
 
