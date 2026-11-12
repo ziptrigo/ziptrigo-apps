@@ -513,6 +513,11 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # report is tried and hit only once one was created.
     'NOTES_REPORT_IP': (5, 60 * 60),
     'NOTES_REPORT_NOTE': (20, 60 * 60),
+    # The Notes search endpoints (issue #260, PR 5: the search page, its list and a saved filter's
+    # page), per user, charged *before* the query, as `TODO_SEARCH_USER` is and for the same reason:
+    # a search scans the user's text columns with a regular expression, the one read that costs
+    # real work. Saved-filter changes spend `NOTES_EDIT_USER`.
+    'NOTES_SEARCH_USER': (60, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),

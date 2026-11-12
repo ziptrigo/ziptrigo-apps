@@ -2,11 +2,12 @@
 
 ## Scope
 
-The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3, sharing: PR 4): Markdown
-notes with a live-preview editor, tags, versions, free slots, creation billing and renewals, archive and Trash, share
-links and the public pages:
+The Notes product's web UI (`apps/notes`, issue #260, foundation: PR 2 of 6, renewals: PR 3, sharing: PR 4, search and
+saved filters: PR 5): Markdown notes with a live-preview editor, tags, versions, free slots, creation billing and
+renewals, archive and Trash, share links and the public pages, search and saved filters:
 
-- the sidebar (a **New note** button, then Notes, Archived, Trash, Tags; a row of scrolling links on phones);
+- the sidebar (a **New note** button, a "Search notes" box, then Notes, Archived, Trash, Tags, then the saved
+  **Filters** with their counts; a row of scrolling links on phones);
 - the lists **Notes** `/notes/` (manual drag-and-drop order, the sort bar, the tag filter, 50 per page),
   **Archived** `/notes/archived/` and **Trash** `/notes/trash/` (days left, Restore, Delete forever);
 - the note page `/notes/<id>/`: title, tag chips with the "Edit tags" popover, the rendered content (coloured code
@@ -25,9 +26,12 @@ links and the public pages:
   a QR code, revoking), the public pages `/n/<code>` (the note, **Raw**, **Download**, **QR code**, **Duplicate** for a
   signed-in visitor, the neutral page every dead link shows), editing through an editable link (content only, the
   conflict panel, who is recorded), reporting a note, and an admin's takedown as the owner sees it;
+- search and saved filters (NOTES-27, NOTES-28): `/notes/search/` (glob and regular expressions over titles and
+  content, the scope, tags, sharing and updated filters, snippets), **Save as filter**, the sidebar's **Filters** with
+  their counts and `/notes/filters/` (rename, reorder, delete, the deleted-tag notice);
 - access control: logged-out visitors and another user's notes, tags and versions.
 
-Not covered here (later sub-issues of #260): search and saved filters, the JWT API and the `inv notes` CLI. The staff side
+Not covered here (later sub-issues of #260): the JWT API and the `inv notes` CLI. The staff side
 of reports and takedown is in `admin.md` (ADM-60, ADM-61) and the owner's edit notice in `notifications.md` (NOTIF-30). The
 renewal cases use shell steps: the scheduler does not run on the test server, so the daily job is run by hand. The two
 emails and three notices they cause are checked in full in `emails.md` (MAIL-24, MAIL-25) and `notifications.md`
@@ -86,9 +90,9 @@ signed in in Context A; Visitor has no session.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visitor: open `/notes/`, `/notes/new/`, `/notes/archived/`, `/notes/trash/`, `/notes/tags/`. | Each redirects to `/account/login/?next=...`. |
+| 1 | Visitor: open `/notes/`, `/notes/new/`, `/notes/archived/`, `/notes/trash/`, `/notes/tags/`, `/notes/search/?q=a` and `/notes/filters/`. | Each redirects to `/account/login/?next=...`. |
 | 2 | Context A: open `/`. | The header has a **Notes** link (icon `fa-note-sticky`) and the home page a **Notes** card, "Markdown notes with code blocks, tags and share links.", opening `/notes/`. |
-| 3 | Open `/notes/`. | Tab title `Notes - ZipTrigo`; heading **Notes**; the sidebar has a primary **New note** button and the entries Notes (current, highlighted, `aria-current="page"`), Archived, Trash, Tags. The list shows the empty state **No notes yet** / "Write your first note." with a **New note** button. The sort bar says **Sort by** Manual (active), Updated, Created, Title. |
+| 3 | Open `/notes/`. | Tab title `Notes - ZipTrigo`; heading **Notes**; the sidebar has a primary **New note** button, a "Search notes" box (a `?` help button, **Regex** and **Include archived** checkboxes), the entries Notes (current, highlighted, `aria-current="page"`), Archived, Trash, Tags, and below them a **Filters** heading (a link to `/notes/filters/`) with "No saved filters". The list shows the empty state **No notes yet** / "Write your first note." with a **New note** button. The sort bar says **Sort by** Manual (active), Updated, Created, Title. |
 | 4 | Open `/notes/archived/` and `/notes/trash/`. | **Nothing archived** with a hint; **The Trash is empty**. The Trash page says "Notes are deleted for good 30 days after being trashed. Credits spent on them are not refunded." The Archived sort bar has **Updated, Created, Title** but no **Manual**. |
 | 5 | Open `/notes/tags/`. | Heading **Tags**; the list says "No tags yet. Add your first below." and a **New tag** form. |
 
@@ -523,7 +527,69 @@ credits (NOTES-08 step 6).
 | 12 | Owner: **Move to trash**, then **Restore**, then **Move to trash** and **Delete forever**. | All work; after the restore the note is still taken down. The owner has no email and no notification about the takedown. |
 | 13 | Run `<RENEW>` for a paid taken-down note due for renewal (as NOTES-16). | It is renewed like any note (a taken-down note keeps renewing until it is deleted). |
 
+### NOTES-27 Search
+
+**Purpose:** search finds notes by title and content, ignoring case, accents, punctuation and Markdown formatting; `*` and
+`?` are wildcards, `/.../` or the Regex box is a regular expression; the scope, tags, sharing and updated filters narrow it.
+**Preconditions:** Context A as `qa.user@example.com` with these notes (the creation cost is confirmed in the editor; more
+than 5 notes cost 1 credit): `Deploy plan` (content `Ship the release on Friday`, tag `Work`), `Release notes` (content
+`The **deploy** steps are in the [wiki](https://example.com/secret-path)`), `Cão walk` (content `Take the big leash`),
+`Old plan` (content `deploy checklist`, **archived**, tag `Work`), `Gone note` (content `deploy`, in the **Trash**), and
+`Shared plan` (content `deploy now`) with an active **Read-only** link (NOTES-21).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look at the sidebar of `/notes/`. | Below **New note** a "Search notes" box with a `?` button, a **Regex** and an **Include archived** checkbox; below the menu a **Filters** heading. On a 375 px wide screen the box sits at the top of the page. |
+| 2 | Type `deploy` in the box and press Enter. | `/notes/search/?q=deploy`: heading "Search", the form with `deploy` in it, "3 results" (`Deploy plan`, `Release notes`, `Shared plan`; not `Old plan` -- archived --, not `Gone note` -- in the Trash), each row with "Title: **deploy** plan" or "Content: the **deploy** steps are in the wiki" with the match highlighted, and the note "matches shown without accents or formatting". A row has the tag chips, "Updated <time>", the share icon on `Shared plan` and the same row menu as the list (Edit, Duplicate, Archive, Move to trash). |
+| 3 | Change **Look in** to **Notes and archived**. | The list refreshes without a reload and the address becomes `...?q=deploy&scope=all`: 4 results, `Old plan` carries an **Archived** pill. **Archived** alone: only `Old plan`. `Gone note` is in none of them. |
+| 4 | Search `secret-path`, then `wiki`. | `secret-path` finds nothing (a link's address is not text) and the list says "Nothing matches. Archived notes are left out unless you choose to look in them too."; `wiki` finds `Release notes` ("Content: ... in the **wiki**"). |
+| 5 | Search `CAO WALK`, then `cão walk!`. | Both find `Cão walk` (case, accents and punctuation are ignored). `leash` finds it with "Content: take the big **leash**". |
+| 6 | Search `ship*friday`, then `shi?`, then `sh.p`. | `ship*friday` finds `Deploy plan`; `shi?` finds it ("ship"); `sh.p` finds nothing (a dot is not a wildcard). |
+| 7 | Search `/^deploy/`, then type `^deploy` with the **Regex** box ticked, then `/^Deploy/` (a capital). | Each finds the same 2 results: `Deploy plan` (its title starts with `deploy`) and `Shared plan` (its content does); `Release notes` is not found (its content only contains the word). The slashes alone make it a regular expression, and the capital version works because letters you type are lower-cased for you. |
+| 8 | Search `/(/`. | A red line "Invalid regular expression." above the results. Try `/(a)\1/`, `/a(?=b)/`, `/(?>a+)b/`, `/a++b/` and `/(?P<x>a)b/`: the same message. Clear the box and press Search: "Type something to search for." |
+| 9 | Type 201 characters. | The browser stops at 200 characters in the box. |
+| 10 | Open the `?` help. | A popover says titles and content are searched and the Trash is not; lists `*`, `?`, `/.../` or the Regex box (matched against the normalised text, letters lower-cased for you), the shared regular-expression syntax, "Case, accents, punctuation and Markdown formatting are ignored." and "Earlier versions of a note are not searched." Escape closes it. |
+| 11 | Edit `Deploy plan`'s content to `Ship the build on Friday`, then search `release`. | `Deploy plan` is no longer found by `release` (the earlier text is not searched: also not through **History**); `build` finds it. Restore the earlier version from **History**: `release` finds it again. |
+| 12 | Filter bar, text box empty: tick the tag **Work** (under **Tags**). | `Deploy plan` only (`Old plan` is archived). With **No tag**: the untagged active notes. With both checked: either. No text is needed when a filter is chosen. |
+| 13 | **Sharing > Shared**. | Only `Shared plan` (a note with an active link that works). **Not shared**: all the others. Revoke the link (NOTES-21) and reload: `Shared plan` is "Not shared". Lock a shared note (NOTES-17): it is "Not shared" too, because its link doesn't work. |
+| 14 | **Updated > Today**, then **Last 7 days**, then **Last 30 days**. | Every note you just made. After `<age>` (shell: `Note.objects.filter(title='Cão walk').update(updated_at=<20 days ago>)`) `Cão walk` leaves **Last 7 days** and stays in **Last 30 days**. **Custom** shows two date fields (text boxes with calendar buttons, disabled until Custom is chosen); a date in each, the day itself included, searches when the box is left; one date alone is open-ended. |
+| 15 | Set the account's time zone (Account page) to `Pacific/Auckland` and shell `updated_at` to 23:30 UTC on yesterday for one note. | **Today** follows the account's zone: the note counts as today in Auckland, not in UTC. |
+| 16 | Combine `deploy` with the tag `Work` and **Sharing > Not shared**; change **Sort by** to Title. | Only the notes that satisfy all of them; the order follows the title. **Manual** orders by your drag order. |
+| 16a | Beside **Sort by** there is a direction box (Ascending / Descending). With Title it reads Ascending; set it to Descending. Then choose Updated, then Created, then Manual. | Descending writes `sort=title&dir=desc` in the address and reverses the order. Each sort puts the box back to its own default (Updated and Created: Descending, newest first; Title and Manual: Ascending) and the address has no `dir` while it is the default (`dir=asc` appears only for Updated or Created reversed). The notes list's own **Sort by** bar agrees: Updated and Created start newest first, Title and Manual ascending, a second click on the active sort reverses it. |
+| 17 | Create 51 notes named `bulk N` (shell, `expected_cost=None`), search `bulk` and open page 2 from the pager. | Page 2 loads in place with the rest, the address bar shows `&page=2`, a reload shows the same page. |
+| 18 | In the results use a row's menu: **Archive**, then **Move to trash**. | Each returns to the same search; the row leaves the results (it is no longer active / in the Trash). |
+| 19 | Log in as `qa.broke@example.com` and search `deploy`. | None of `qa.user`'s notes appear. |
+| 20 | Open `/notes/search/list/?q=deploy` directly (not by htmx). | A redirect to `/notes/search/?q=deploy`. |
+| 20a | Choose **Updated > Custom** with a start date **after** the end date (for example 30 Nov to 1 Nov) and search. | The two dates are swapped: the fields now read the earlier date first, the address has `updated_from=<earlier>&updated_to=<later>` and the notes of the days between them are listed (not an empty result). |
+| 21 | With rate limiting on (skip on this server: it is off; the unit tests cover it), run 61 searches in a minute. | The 61st is a 429. |
+
+### NOTES-28 Saved filters
+
+**Purpose:** a search can be saved under a name, listed in the sidebar with a count, run, updated, renamed, reordered and
+deleted; a deleted tag drops out of a filter and says so.
+**Preconditions:** Context A as `qa.user@example.com` with the notes of NOTES-27.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Search `deploy` with **Look in: Notes and archived** and click **Save as filter**. | A dialog "Save as filter" with a Name box focused. |
+| 2 | Click **Save** with the name empty. | The browser asks to fill in the field; nothing is saved. |
+| 3 | Name it `Deploys` and press Enter. | The page goes to `/notes/filters/<id>/` headed "Deploys", with a green "Saved the filter Deploys." and the summary `"deploy" · including archived`; the same results as the search. The sidebar's **Filters** lists `Deploys` highlighted with a count of its notes (4; the count appears a moment after the page, not with it). |
+| 4 | Save the same search again as `deploys` (another case). | The dialog shows "Name: You already have a filter with this name." and stays open. Cancel closes it. |
+| 5 | On the filter's page tick the tag **Work**. | The results refresh, the address becomes `/notes/filters/<id>/?q=deploy&scope=all&tags=<id>&sort=updated` (`&dir=...` only when the direction isn't the sort's default) and an **Update filter** button appears beside **Save as filter**. Untick it: the button goes away. |
+| 6 | Tick **Work** again and click **Update filter**. | The page reloads at `/notes/filters/<id>/` with "Updated the filter Deploys."; the summary now starts `@Work ·`; the sidebar count changed. |
+| 7 | Save `Open plans` for **Sharing: Not shared** with an empty text box. | Saved; its page lists every active note that is not shared. Each filter counts the notes **its own scope** selects (never the Trash): `Deploys` counts archived ones, `Open plans` doesn't. |
+| 8 | Open **Filters** (the sidebar heading) `/notes/filters/`. | A list: name (a link), "N notes" (filled in just after the page shows), the summary line, a drag handle, a pencil and a trash can. |
+| 9 | Click the pencil on `Open plans`, change the name to `Deploys` and save; then to `Not shared`. | The first is refused with "Name: You already have a filter with this name." (nothing changes); the second renames it in place and in the sidebar. Escape cancels the edit. |
+| 10 | Drag `Not shared` above `Deploys`, then reload; also try the arrow keys on a focused handle. | The new order sticks, also in the sidebar, which is reordered in place right after the drop with no new request and its counts unchanged (the network panel shows only the POST to `filters/reorder/`: no counts, no sidebar, so a drag spends none of the search budget). `Not shared moved to position 1 of 2.` is announced; at the ends "already first/last". |
+| 11 | Delete the tag `Work` (Tags page), then open `Deploys`. | The filter still runs; `@Work` is gone from its summary and an amber notice says "A tag this filter used has been deleted, so it no longer narrows the results" and "Change the filter and choose "Update filter" to fix it." (adding "this filter now selects every note in its scope" if the tag was its only criterion). On `/notes/filters/` its row says "A tag this filter used was deleted and is ignored." After **Update filter** the notices are gone. |
+| 12 | Click the trash can on a filter. | A confirmation "Delete filter" ("Your notes are not affected."); Cancel closes it; Delete removes it and shows "Deleted the filter ...". The notes are untouched. |
+| 13 | Create 21 filters (`F01`..`F21`). | The sidebar lists the first 20 and "and N more" linking to the filters page, which lists all of them. The 51st is refused with "You can have up to 50 saved filters." |
+| 14 | A saved "Last 7 days" filter, a week later (or shell the notes' `updated_at`). | It stays relative: the count follows today, not the day it was saved. |
+| 15 | Open `/notes/filters/<id of another user's filter>/` (log in as `qa.broke@example.com` with an id from `qa.user`), and POST to its `rename`, `update` and `delete`. | A 404 each; the filter is unchanged. |
+| 16 | In dark mode and at 375 px wide, open the search page, the filters page and the save dialog. | Every surface has a dark twin; the highlighted match is readable; nothing scrolls horizontally; the dialog fits. |
+| 17 | (Admin) open `/admin/notes/savedfilter/`. | A read-only list (name, user, position, search text, created); search by user email; no Add, no Save, no Delete; deleting a user who has filters is not blocked. |
+
 ## Out of scope
 
-- Search and saved filters, the JWT API and the CLI (later sub-issues).
+- The JWT API and the CLI (a later sub-issue).
 - The scheduler actually running `notes.purge_trash` and `notes.renew` on this server (NOTES-10 step 8 and NOTES-16 to NOTES-20 run the jobs from a shell).

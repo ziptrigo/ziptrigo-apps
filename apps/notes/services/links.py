@@ -139,6 +139,16 @@ def share_flags(note: Note, has_active: bool) -> dict[str, bool]:
     }
 
 
+def shared_condition(now: datetime | None = None) -> Q:
+    """The `Q` of a note that is **shared**: it has an active link *and* the note is readable
+    through it (not locked, not taken down; search leaves the Trash out anyway). The same meaning
+    as `share_flags`' `links_work` (the "Shared" chip), for the `shared` filter of a search. An
+    `Exists`, not a join, so a note with several links is one row and a list's counts aren't
+    multiplied."""
+    active = ShareLink.objects.filter(active_condition(now), note=OuterRef('pk')).only('pk')
+    return Q(Exists(active)) & Q(locked_at__isnull=True, taken_down_at__isnull=True)
+
+
 def with_active_link_flag(queryset: QuerySet) -> QuerySet:
     """Annotate each note with `has_active_link` (one subquery, no query per row), which the list
     rows use for their share icon."""
@@ -385,6 +395,7 @@ __all__ = [
     'require_shareable',
     'revoke_link',
     'share_flags',
+    'shared_condition',
     'state',
     'update_link',
     'with_active_link_flag',

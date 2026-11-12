@@ -1,0 +1,118 @@
+{% extends 'notes/layout.html' %}
+
+{% block title %}{{ heading }} - Notes - ZipTrigo{% endblock %}
+
+{% comment %} The search page, and a saved filter's page (`saved`): the form and the filter bar above `#search-results`.
+   Every change re-fetches `search-list` into the results (htmx); without it the form is an ordinary GET. {% endcomment %}
+{% block notes_content %}
+<h1 class="mb-1 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ heading }}</h1>
+{% if saved %}
+<p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Saved filter: {{ filter_summary }}</p>
+{% if dropped_tags %}
+<p id="filter-dropped-tags" class="mb-4 rounded-lg border border-amber-600/40 dark:border-amber-400/40 bg-amber-50 dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+    <i class="fas fa-triangle-exclamation mr-1 text-amber-600 dark:text-amber-400" aria-hidden="true"></i>
+    {% if dropped_tags == 1 %}A tag{% else %}{{ dropped_tags }} tags{% endif %} this filter used {% if dropped_tags == 1 %}has{% else %}have{% endif %} been deleted, so {% if dropped_tags == 1 %}it no longer narrows{% else %}they no longer narrow{% endif %} the results{% if not params.has_criteria %}: this filter now selects every note in its scope{% endif %}. Change the filter and choose "Update filter" to fix it.
+</p>
+{% endif %}
+{% else %}
+<p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Search the titles and the content of your notes.</p>
+{% endif %}
+
+<div id="search-msg" class="mb-4 text-sm" aria-live="polite">{% if error_lines %}{% include 'notes/partials/messages.html' with messages_list=error_lines %}{% endif %}</div>
+
+<form id="search-form" role="search" method="get" action="{{ page_url }}"
+      hx-get="{{ list_url }}" hx-trigger="submit, change" hx-sync="this:replace" hx-target="#search-results" hx-swap="innerHTML"
+      hx-disabled-elt="find button[type='submit']"
+      x-data="{ range: '{{ params.updated }}', dir: '{{ params.direction }}', defaults: { {% for key, direction in default_directions.items %}{{ key }}: '{{ direction }}'{% if not forloop.last %}, {% endif %}{% endfor %} } }"
+      class="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
+    {% if saved %}<input type="hidden" name="filter" value="{{ saved.pk }}">{% endif %}
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div class="flex min-w-0 flex-1 items-center gap-1">
+            <label for="search-q" class="sr-only">Search text</label>
+            <input id="search-q" type="search" name="q" value="{{ params.q }}" maxlength="{{ max_query_chars }}" autocomplete="off"
+                   placeholder="Search notes, e.g. deploy*prod"
+                   class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+            {% include 'notes/partials/search_help.html' with help_id='page' %}
+        </div>
+        <button type="submit"
+                class="btn inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">
+            <i class="fas fa-magnifying-glass mr-2" aria-hidden="true"></i>Search
+        </button>
+    </div>
+    <div class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-700 dark:text-gray-300">
+        <label class="inline-flex items-center gap-2"><input type="checkbox" name="mode" value="regex"{% if params.mode == 'regex' %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> Regex</label>
+    </div>
+
+    <fieldset class="mt-3 grid gap-3 border-t border-gray-200 dark:border-gray-700 pt-3 text-sm sm:grid-cols-2">
+        <legend class="sr-only">Filters</legend>
+        <div>
+            <label for="search-scope" class="mb-1 block font-medium">Look in</label>
+            <select id="search-scope" name="scope"
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                {% for key, label in scopes.items %}
+                <option value="{{ key }}"{% if params.scope == key %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="search-shared" class="mb-1 block font-medium">Sharing</label>
+            <select id="search-shared" name="shared"
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                {% for value, label in shared_choices %}
+                <option value="{{ value }}"{% if params.shared == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <span class="mb-1 block font-medium">Tags</span>
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+                {% for tag in tags %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="tags" value="{{ tag.pk }}"{% if tag.pk|stringformat:'s' in selected_tags %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> @{{ tag.name }}</label>
+                {% endfor %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="tags" value="none"{% if 'none' in selected_tags %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> No tag</label>
+            </div>
+        </div>
+        <div>
+            <label for="search-updated" class="mb-1 block font-medium">Updated</label>
+            <div class="flex flex-wrap items-center gap-2">
+                <select id="search-updated" name="updated" x-model="range"
+                        class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                    {% for key, label in updated_ranges.items %}
+                    <option value="{{ key }}"{% if params.updated == key %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <span x-show="range === 'custom'" {% if params.updated != 'custom' %}style="display: none"{% endif %} class="inline-flex flex-wrap items-center gap-2">
+                    <label class="sr-only" for="search-updated-from">From</label>
+                    {% include 'core/components/date_picker.html' with name='updated_from' id='search-updated-from' value=params.updated_from|date:'Y-m-d' disabled_expr="range !== 'custom'" root_class='w-36' compact=True %}
+                    <span aria-hidden="true">to</span>
+                    <label class="sr-only" for="search-updated-to">To</label>
+                    {% include 'core/components/date_picker.html' with name='updated_to' id='search-updated-to' value=params.updated_to|date:'Y-m-d' disabled_expr="range !== 'custom'" root_class='w-36' compact=True %}
+                </span>
+            </div>
+        </div>
+        <div>
+            <label for="search-sort" class="mb-1 block font-medium">Sort by</label>
+            <div class="flex flex-wrap items-center gap-2">
+                {% comment %} Choosing a sort puts the direction back to that sort's own default (the lists' sort bar does the same), set on the select itself so the request that follows reads it. {% endcomment %}
+                <select id="search-sort" name="sort" @change="dir = defaults[$event.target.value]; $refs.dir.value = dir"
+                        class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                    {% for key, label in sorts.items %}
+                    <option value="{{ key }}"{% if params.sort == key %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <label for="search-dir" class="sr-only">Direction</label>
+                <select id="search-dir" name="dir" x-ref="dir" x-model="dir"
+                        class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                    {% for value, label in directions %}
+                    <option value="{{ value }}"{% if params.direction == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </fieldset>
+</form>
+
+<div id="search-results" data-list>
+    {% include 'notes/partials/search_results.html' %}
+</div>
+{% endblock %}

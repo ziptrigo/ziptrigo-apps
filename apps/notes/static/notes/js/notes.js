@@ -7,7 +7,10 @@
  *    sortable with core's `initSortableList` (core/js/sortable_list.js: SortableJS by its
  *    `.drag-handle`, arrow keys on the focused handle, announcements); the new order of the rows'
  *    `data-sort-id`s is posted to `data-reorder-url` as `ids[]`. A refusal's message goes to
- *    `data-msg`.
+ *    `data-msg`. A list may also name `data-sync-order-with`, a selector: once the order is saved
+ *    the items of that container that carry a `data-filter-id` are put in the same order, in
+ *    place, by id (the filters page and the sidebar's copy of the saved filters). Nothing is fetched,
+ *    so a drag spends no search budget and the counts the sidebar shows stay as they are.
  *  - `notesCancelEdit(form, slot)`: Cancel / Escape on an inline editor throws away what was typed.
  */
 (function () {
@@ -24,10 +27,30 @@
         if (slot) slot.innerHTML = html;
     }
 
+    // Put the items of `container` that have a `data-filter-id` in the order of `ids`, ahead of any
+    // item without one ("and N more", "No saved filters"). Ids the container doesn't have are skipped.
+    function syncOrder(container, ids) {
+        const items = new Map();
+        container.querySelectorAll('[data-filter-id]').forEach(function (item) {
+            items.set(item.dataset.filterId, item);
+        });
+        if (!items.size) return;
+        const parent = items.values().next().value.parentElement;
+        const tail = Array.from(parent.children).find(function (child) {
+            return !child.hasAttribute('data-filter-id');
+        }) || null;
+        ids.forEach(function (id) {
+            const item = items.get(id);
+            if (item) parent.insertBefore(item, tail);
+        });
+    }
+
     function postOrder(list) {
         const body = new URLSearchParams();
+        const ids = [];
         list.querySelectorAll(':scope > [data-sort-id]').forEach(function (row) {
             body.append('ids[]', row.dataset.sortId);
+            ids.push(row.dataset.sortId);
         });
         // `HX-Request` makes the views answer a refusal with their message partial.
         fetch(list.dataset.reorderUrl, {
@@ -42,6 +65,9 @@
         }).then(function (response) {
             if (!response.ok) return response.text().then(function (html) { showProblem(list, html); });
             showProblem(list, '');
+            // The saved filters list reorders the sidebar's copy in place once the order is saved.
+            const target = list.dataset.syncOrderWith ? document.querySelector(list.dataset.syncOrderWith) : null;
+            if (target) syncOrder(target, ids);
         }).catch(function () {
             showProblem(list, '<p class="text-red-600 dark:text-red-400" role="alert">Could not save the new order.</p>');
         });

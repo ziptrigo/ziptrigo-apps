@@ -7,6 +7,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.safestring import SafeString
 
 from apps.accounts.models import User
 from apps.core.markdown import normalize_for_search, search_text
@@ -52,6 +53,12 @@ class Note(models.Model):
     user_id: uuid.UUID
     # Set by `views.lists` on the notes a list shows (not stored).
     excerpt: str
+    # Set by `services.search` on the notes a search shows (not stored): which field matched
+    # (`title`, `content`, or `''`) and a highlighted snippet of the normalised text.
+    search_field: str
+    search_snippet: SafeString
+    #: The same snippet as plain text `(before, hit, after)`, for the API; `None` without one.
+    search_parts: tuple[str, str, str] | None
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = cast(

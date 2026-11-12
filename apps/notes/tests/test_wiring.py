@@ -147,7 +147,7 @@ class TestAdmin:
     def test_the_changelists_load_and_search(self, admin_client, user, config):
         tag = create_tag(user, 'Work')
         note = create_note(user, title='Findable note', tags=[tag.pk])
-        for model in ('note', 'tag', 'notesaccount'):
+        for model in ('note', 'tag', 'notesaccount', 'savedfilter'):
             assert admin_client.get(reverse(f'admin:notes_{model}_changelist')).status_code == 200
         found = admin_client.get(reverse('admin:notes_note_changelist'), {'q': 'Findable'})
         assert 'Findable note' in found.content.decode()

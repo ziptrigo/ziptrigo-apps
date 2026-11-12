@@ -8,6 +8,7 @@ from .link import (
     ShareLink,
 )
 from .note import EditorKind, Note, NoteVersion
+from .saved_filter import SavedFilter
 from .settings import NotesSettings
 from .tag import DEFAULT_TAG_COLOR, Tag
 
@@ -23,6 +24,7 @@ __all__ = [
     'NotesSettings',
     'ReportReason',
     'ReportStatus',
+    'SavedFilter',
     'ShareLink',
     'Tag',
 ]

@@ -1,5 +1,5 @@
 """Admin registrations for the Notes app: the settings singleton (superusers only) and read-only
-`ModelAdmin`s for support -- notes, tags, accounts, share links -- and the abuse tooling (PR 4,
+`ModelAdmin`s for support -- notes, tags, accounts, saved filters, share links -- and the abuse tooling (PR 4,
 modelled on Short URLs'): a report list with **Dismiss** and **Take down the reported note(s)**, and
 **Take down** on the note list. A note is changed through the services (the user's own pages),
 never here: editing a row directly would skip the versions, the free slots and the billing.
@@ -38,6 +38,7 @@ from .models import (
     NotesSettings,
     NoteVersion,
     ReportStatus,
+    SavedFilter,
     ShareLink,
     Tag,
 )
@@ -264,6 +265,21 @@ class TagAdmin(ReadOnlyModelAdmin):
         return obj._note_count  # ty: ignore[missing-attribute]
 
 
+class SavedFilterAdmin(ReadOnlyModelAdmin):
+    """Saved filters (PR 5), for support: the name, the owner and the stored params."""
+
+    list_display = ['name', 'user', 'position', 'summary', 'created_at']
+    search_fields = ['name', 'user__email']
+    list_select_related = ['user']
+    ordering = ['user__email', 'position']
+    fields = ['user', 'name', 'position', 'params', 'created_at']
+    readonly_fields = fields
+
+    @admin.display(description='Search text')
+    def summary(self, obj: SavedFilter) -> str:
+        return str(obj.params.get('q') or '')
+
+
 class NotesAccountAdmin(ReadOnlyModelAdmin):
     list_display = ['user', 'renewal_warned_at', 'created_at']
     search_fields = ['user__email']
@@ -371,5 +387,6 @@ custom_admin_site.register(NotesSettings, NotesSettingsAdmin)
 custom_admin_site.register(Note, NoteAdmin)
 custom_admin_site.register(Tag, TagAdmin)
 custom_admin_site.register(NotesAccount, NotesAccountAdmin)
+custom_admin_site.register(SavedFilter, SavedFilterAdmin)
 custom_admin_site.register(ShareLink, ShareLinkAdmin)
 custom_admin_site.register(NoteReport, NoteReportAdmin)

@@ -1,4 +1,17 @@
-from . import billing, links, lists, notes, reports, tags, takedown, versions
+from ..limits import MAX_SAVED_FILTERS
+from . import (
+    billing,
+    filters,
+    links,
+    lists,
+    notes,
+    reports,
+    saved_filters,
+    search,
+    tags,
+    takedown,
+    versions,
+)
 from .accounts import get_account, lock_account
 from .errors import (
     CostChangedError,
@@ -6,6 +19,7 @@ from .errors import (
     NoteConflictError,
     ReportUnavailableError,
 )
+from .filters import FilterParams, describe_params, filter_notes, filter_page, parse_filter_params
 from .lists import (
     DEFAULT_DIRECTIONS,
     DIRECTIONS,
@@ -44,6 +58,16 @@ from .notes import (
     trash,
     unarchive,
 )
+from .saved_filters import (
+    delete_filter,
+    list_filters,
+    rename_filter,
+    reorder_filters,
+    save_filter,
+    sidebar_filters,
+    update_filter_params,
+)
+from .search import search_notes
 from .tags import create_tag, delete_tag, list_tags, reorder_tags, update_tag
 from .takedown import take_down_note
 from .versions import Editor, list_versions
@@ -58,13 +82,18 @@ __all__ = [
     'sort_direction',
     'sort_for',
     'trashed_notes',
+    'MAX_SAVED_FILTERS',
     'billing',
+    'filters',
     'links',
     'lists',
     'reports',
+    'saved_filters',
+    'search',
     'takedown',
     'CostChangedError',
     'Editor',
+    'FilterParams',
     'LinkUnavailableError',
     'ReportUnavailableError',
     'NoteConflictError',
@@ -78,31 +107,43 @@ __all__ = [
     'create_note',
     'create_tag',
     'delete_forever',
+    'delete_filter',
     'delete_tag',
+    'describe_params',
     'duplicate',
+    'filter_notes',
+    'filter_page',
     'free_slot_open',
     'free_slots_used',
     'get_account',
+    'list_filters',
     'list_tags',
     'list_versions',
     'lock_account',
+    'parse_filter_params',
     'notes',
     'purge_trash',
     'quote_create',
     'quote_restore',
+    'rename_filter',
     'reorder',
+    'reorder_filters',
     'reorder_tags',
     'require_writable',
     'restore',
     'restore_cost_for',
     'restore_version',
+    'save_filter',
     'save_note',
+    'search_notes',
     'take_down_note',
     'set_tags',
+    'sidebar_filters',
     'tags',
     'toggle_checklist',
     'trash',
     'unarchive',
+    'update_filter_params',
     'update_tag',
     'versions',
 ]

@@ -107,6 +107,12 @@ def sort_links(view: str, sort: str, direction: str, tag: str) -> list[dict]:
     return links
 
 
+def decorate(queryset: QuerySet) -> QuerySet:
+    """What a list's rows need loaded: the share flag (one subquery) and the tags (one query for
+    the page). Search applies it to its page of results too."""
+    return links.with_active_link_flag(queryset).prefetch_related('tags')
+
+
 def _queryset(view: str, user) -> QuerySet:
     return {'notes': active_notes, 'archived': archived_notes, 'trash': trashed_notes}[view](user)
 
@@ -128,7 +134,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
         queryset = queryset.order_by('-deleted_at', 'pk')
     else:
         queryset = order_notes(queryset, sort, direction)
-    queryset = links.with_active_link_flag(queryset).prefetch_related('tags')
+    queryset = decorate(queryset)
     page_obj = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get('page'))
     notes = list(page_obj.object_list)
     for note in notes:
@@ -231,9 +237,14 @@ def note_list(request: AuthenticatedHttpRequest) -> HttpResponse:
         sort = request.GET.get('sort', '')
         direction = request.GET.get('dir', '')
         page = request.GET.get('page', '')
+        # The same rule as the list itself and the search: a direction is written only when it isn't
+        # the sort's default.
+        effective = sort_for(view, sort)
         query = _query(
             sort=sort if sort in SORTS else '',
-            dir=direction if direction in DIRECTIONS else '',
+            dir=direction
+            if direction in DIRECTIONS and direction != DEFAULT_DIRECTIONS[effective]
+            else '',
             tag=_uuid_or_empty(request.GET.get('tag', '')),
             page=str(int(page)) if page.isascii() and page.isdigit() else '',
         )

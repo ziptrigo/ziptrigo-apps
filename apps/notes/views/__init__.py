@@ -1,3 +1,12 @@
+from .filters import (
+    filter_counts_view,
+    filter_delete,
+    filter_page,
+    filter_rename,
+    filter_reorder,
+    filter_update,
+    filters_page,
+)
 from .history import history_list, history_restore, history_version
 from .links import share_create, share_edit, share_panel, share_revoke
 from .lists import archived_page, note_list, notes_page, trash_page
@@ -27,10 +36,18 @@ from .public import (
     shared_preview,
     shared_raw,
 )
+from .search import search_list, search_page
 from .tags import tag_delete, tag_edit, tag_reorder, tags_page
 
 __all__ = [
     'archived_page',
+    'filter_counts_view',
+    'filter_delete',
+    'filter_page',
+    'filter_rename',
+    'filter_reorder',
+    'filter_update',
+    'filters_page',
     'history_list',
     'history_restore',
     'history_version',
@@ -51,6 +68,8 @@ __all__ = [
     'note_unarchive',
     'notes_page',
     'report_note',
+    'search_list',
+    'search_page',
     'share_create',
     'share_edit',
     'share_panel',
