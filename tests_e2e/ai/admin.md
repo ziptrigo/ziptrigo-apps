@@ -961,6 +961,17 @@ push configured (NOTIF-20's preconditions).
 | 1 | `/admin/accounts/user/`, open `qa.user@example.com`. | Under **Status**, after the email confirmation fields: **Terms version** `2026-11-09` and **Terms accepted at** (`-` for the seeded accounts, which were marked accepted without a date; a date and time for an account registered during the run, see ACC-49). Neither is an input. |
 | 2 | Change **Name**, save, reopen. | Saved; the two terms values are unchanged. Restore the name. |
 
+### ADM-56 Blockers: the links
+
+**Purpose:** staff can see which tasks block which, read-only (issue #273).
+**Preconditions:** Session A (`qa.admin`); `todo.md` TODO-49 done (`Block main` is blocked by `Block one` and `Block two`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/todo/taskblocker/` (the "Task blockers" entry under To-do). | A list with **Blocker**, **Blocked**, **User**, **Created at** (`#<n> <title>`); a search box finds by a title or a number; no "Add" button. |
+| 2 | Open a row. | All fields read-only, no Save and no Delete (a row cannot be deleted from here). |
+| 3 | `/admin/todo/task/`, open `Block main`. | Inlines **Blocked by** (its blockers) and **Blocks** are read-only. Filter the list by **State** = Blocked: `Block main` is there. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

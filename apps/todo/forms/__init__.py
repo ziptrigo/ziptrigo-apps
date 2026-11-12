@@ -4,6 +4,7 @@ from .reminder import ReminderForm
 from .settings import InboxSettingsForm, SettingsForm
 from .task import (
     PARTS,
+    BlockerForm,
     ChecklistForm,
     CloseForm,
     PostponeForm,
@@ -15,6 +16,7 @@ from .task import (
 
 __all__ = [
     'PARTS',
+    'BlockerForm',
     'ChecklistForm',
     'CloseForm',
     'CommentForm',

@@ -1,6 +1,7 @@
 {% comment %} The panel's close actions. Needs `task` and `open_subtasks`. An open task: Complete (close as Done) and "Close as won't do";
    a closed one: Reopen and the other resolution ("Mark as won't do" / "Mark as done": no occurrence, no subtasks touched). A parent
-   with open subtasks asks what to do with them in the close dialog (close_dialog.html) instead of posting straight away.
+   with open subtasks, or a task with open blockers, asks in the close dialog (close_dialog.html) instead of posting straight away:
+   what to do with the subtasks, and to confirm closing while the blockers (named there) are open.
    With `oob` it is sent out of band, so completing or reopening a subtask in the list refreshes the parent's buttons: the dialog's
    question ("has N open subtasks") would otherwise stay as rendered with the page. {% endcomment %}
 <span id="complete-action" class="contents"{% if oob %} hx-swap-oob="true"{% endif %}>
@@ -21,10 +22,10 @@
 </button>
 {% endif %}
 {% else %}
-{% if open_subtasks %}
+{% if open_subtasks or task.open_blocker_links %}
 <button type="button" @click="todoOpenCloseDialog($el)"
         data-url="{% url 'todo:complete' task.number %}" data-mode="done" data-ctx="page"
-        data-title="{{ task.title }}" data-count="{{ open_subtasks }}"
+        data-title="{{ task.title }}" data-count="{{ open_subtasks|default:0 }}" data-blockers="{{ task.open_blocker_links|length }}" data-blockers-url="{% url 'todo:open-blockers' task.number %}"
         class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
     <i class="fas fa-check mr-2" aria-hidden="true"></i>Complete
 </button>
@@ -36,7 +37,7 @@
 {% endif %}
 <button type="button" @click="todoOpenCloseDialog($el)"
         data-url="{% url 'todo:wont-do' task.number %}" data-mode="wont_do" data-ctx="page"
-        data-title="{{ task.title }}" data-count="{{ open_subtasks|default:0 }}"
+        data-title="{{ task.title }}" data-count="{{ open_subtasks|default:0 }}" data-blockers="{{ task.open_blocker_links|length }}" data-blockers-url="{% url 'todo:open-blockers' task.number %}"
         class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
     <i class="fas fa-circle-xmark mr-2" aria-hidden="true"></i>Close as won't do
 </button>

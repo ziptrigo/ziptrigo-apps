@@ -14,14 +14,14 @@ Done", which is what the circle, the Complete button, the push notification and 
 
 import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from typing import Any
 from uuid import UUID
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -30,7 +30,7 @@ from apps.billing.services import InsufficientCreditsError
 from apps.core.markdown import toggle_checklist_item
 
 from ..models import (
-    MUTED_STATES,
+    SELECTABLE_STATES,
     Label,
     Priority,
     Recurrence,
@@ -41,12 +41,14 @@ from ..models import (
     TaskState,
     TodoSettings,
 )
-from . import attachments, comments, dates, reminders
+from . import attachments, blockers, comments, dates, reminders
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account
 from .billing import cannot_afford, charge_task_creation
+from .dates import next_position, next_today_position
 from .limits import DESCRIPTION_MAX, TITLE_MAX
 from .references import sync_references
+from .task_state import lock_tasks, write_state
 
 logger = logging.getLogger(__name__)
 
@@ -167,9 +169,10 @@ def clean_labels(user: User, labels: Iterable[Label | str | UUID]) -> list[Label
 
 
 def clean_state(state: object) -> str:
-    """`state` as one of the open states, else a refusal."""
+    """`state` as one of the states a person can choose, else a refusal. Blocked is not one: only a
+    blocker sets it (`services.blockers`)."""
     value = str(state or TaskState.TODO)
-    if value not in TaskState.values:
+    if value not in SELECTABLE_STATES:
         raise _error('state', STATE_MESSAGE)
     return value
 
@@ -199,18 +202,9 @@ def clean_note(note: object) -> str:
     return cleaned
 
 
-def _lock_tasks(*pks: UUID) -> dict[UUID, Task]:
-    """The tasks `pks`, re-read with their rows locked (in pk order, so two callers locking the same
-    rows can't deadlock). Call it inside a transaction; a task that is gone is missing from the
-    result."""
-    return {
-        task.pk: task for task in Task.objects.select_for_update().filter(pk__in=pks).order_by('pk')
-    }
-
-
 def _locked_parent(parent: Task) -> Task:
     """`parent` re-read under its row lock (inside a transaction), or a refusal if it is gone."""
-    locked = _lock_tasks(parent.pk).get(parent.pk)
+    locked = lock_tasks(parent.pk).get(parent.pk)
     if locked is None:
         raise _error('parent', 'Unknown parent task.')
     return locked
@@ -227,31 +221,6 @@ def clean_parent(user: User, parent: Task | None) -> Task | None:
     if not parent.is_open:
         raise _error('parent', 'Choose an open task as the parent.')
     return parent
-
-
-def _after_the_others(queryset, field: str) -> int:
-    """`max(field) + 1` over `queryset` when it has a manual order (any value above 0), else 0 (the
-    default sort applies). `queryset` is the very set the list orders (`dates.has_manual_order`)."""
-    top = queryset.aggregate(top=Max(field))['top'] or 0
-    return top + 1 if top > 0 else 0
-
-
-def next_position(parent: Task | None) -> int:
-    """`Task.position` of a task that joins `parent`'s subtasks: after the others when they have a
-    manual order, else 0. Only subtasks have a manual order in `position`; a top-level task is
-    ordered in Today by `today_position` (`next_today_position`) and keeps 0 here."""
-    if parent is None:
-        return 0
-    return _after_the_others(dates.subtasks_of(parent), 'position')
-
-
-def next_today_position(user: User, due_date: date | None) -> int:
-    """`Task.today_position` of a new task: after the others only when it lands in the Today list
-    (it is due today) and *that list* already has a manual order; else 0, so a task created for
-    another day, or in a list nobody reordered, never changes how Today sorts."""
-    if due_date is None or due_date != user_today(user):
-        return 0
-    return _after_the_others(dates.todays_tasks(user), 'today_position')
 
 
 # -- Create and update ---------------------------------------------------------------------------
@@ -271,6 +240,7 @@ class _CleanedTask:
     rule: str
     mode: str
     state: str = TaskState.TODO
+    blockers: list[Task] = field(default_factory=list)
 
 
 def _clean_new_task(
@@ -287,6 +257,7 @@ def _clean_new_task(
     recurrence_mode: str,
     recurrence: Recurrence | None,
     state: str = TaskState.TODO,
+    blocked_by: Iterable[int] = (),
 ) -> _CleanedTask:
     """Validate the fields of a new task (no writes, no locks): what `create_task` and
     `check_new_task` share."""
@@ -299,6 +270,7 @@ def _clean_new_task(
     cleaned_rule = recurrence_service.clean_rule(rrule, user_today(user)) if rrule else ''
     cleaned_mode = recurrence_service.clean_mode(recurrence_mode)
     cleaned_state = clean_state(state)
+    cleaned_blockers = blockers.clean_new(user, blocked_by)
     if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
         raise _error('rrule', 'A subtask cannot repeat.')
     if recurrence is not None and (cleaned_rule or recurrence.user_id != user.pk):
@@ -316,6 +288,7 @@ def _clean_new_task(
         rule=cleaned_rule,
         mode=cleaned_mode,
         state=cleaned_state,
+        blockers=cleaned_blockers,
     )
 
 
@@ -332,6 +305,7 @@ def check_new_task(
     rrule: str = '',
     recurrence_mode: str = RecurrenceMode.FIXED,
     state: str = TaskState.TODO,
+    blocked_by: Iterable[int] = (),
 ) -> date | None:
     """Everything `create_task` would refuse that can be told without writing anything, in the same
     order: the fields (`ValidationError`), a creation blocked by an unpaid repeating task
@@ -356,6 +330,7 @@ def check_new_task(
         recurrence_mode=recurrence_mode,
         recurrence=None,
         state=state,
+        blocked_by=blocked_by,
     )
     settings = TodoSettings.load()
     account = get_account(user)
@@ -382,6 +357,7 @@ def create_task(
     recurrence_mode: str = RecurrenceMode.FIXED,
     recurrence: Recurrence | None = None,
     state: str = TaskState.TODO,
+    blocked_by: Iterable[int] = (),
     source: str = TaskSource.WEB,
     email_from: str = '',
     email_from_authenticated: bool = False,
@@ -402,7 +378,9 @@ def create_task(
     Only a top-level task can repeat.
 
     Every new task is To do unless the caller says otherwise (`state`: the quick-add box offers it);
-    the next occurrence of a repeating task is always To do.
+    the next occurrence of a repeating task is always To do, with no blockers. `blocked_by` (task
+    numbers, the quick-add box's "Blocked by") links the new task to those of the user's tasks and
+    makes it Blocked when one of them is open (`services.blockers`).
 
     `email_from` and `email_from_authenticated` (a task made from an email, issue #186) are stored
     on the task so its page needs no lookup of the email: the From address and whether SES
@@ -421,6 +399,7 @@ def create_task(
         recurrence_mode=recurrence_mode,
         recurrence=recurrence,
         state=state,
+        blocked_by=blocked_by,
     )
     cleaned_title, cleaned_description = cleaned.title, cleaned.description
     cleaned_priority, cleaned_time = cleaned.priority, cleaned.due_time
@@ -471,6 +450,7 @@ def create_task(
             task.labels.set(cleaned_labels)
         if cleaned_description:
             sync_references(task)
+        blockers.link_new_task(task, cleaned.blockers)
         reminders.apply_defaults(task, account)
     return task
 
@@ -548,7 +528,7 @@ def update_task(task: Task, *, changes: Mapping[str, Any]) -> Task:
         # task, the new parent moving under something), and the description is compared with the
         # text stored *now*, so the references written always match the text that was saved.
         new_parent_pk = new_parent.pk if moves and new_parent is not None else None
-        locked = _lock_tasks(*(pk for pk in (task.pk, new_parent_pk) if pk is not None))
+        locked = lock_tasks(*(pk for pk in (task.pk, new_parent_pk) if pk is not None))
         current = locked.get(task.pk)
         if current is None:
             raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
@@ -689,12 +669,19 @@ def close_task(
             task.already_closed = True
             return task
         recurrence_service.on_completed(task)
+        ended = [task.pk]
         if subtasks != SUBTASKS_LEAVE:
-            Task.objects.filter(
+            open_subtasks = Task.objects.filter(
                 parent=task, completed_at__isnull=True, deleted_at__isnull=True
-            ).update(completed_at=now, resolution=subtasks, state=TaskState.TODO, updated_at=now)
+            )
+            ended += list(open_subtasks.values_list('pk', flat=True))
+            open_subtasks.update(
+                completed_at=now, resolution=subtasks, state=TaskState.TODO, updated_at=now
+            )
         if note:
             comments.add_comment(task, task.user, note)
+        # What they blocked is free of them now (an open blocker that closes with its parent too).
+        blockers.ended(ended, now)
     task.completed_at = now
     task.resolution = resolution
     task.state = TaskState.TODO
@@ -727,21 +714,27 @@ def set_resolution(task: Task, resolution: str) -> Task:
 
 
 def uncomplete_task(task: Task) -> Task:
-    """Reopen a closed task: it is To do again, whatever its resolution was. Its parent, if it has
-    one, stays as it is."""
+    """Reopen a closed task, whatever its resolution was: Blocked when one of its blockers is still
+    open, else To do (`services.blockers`). Its parent, if it has one, stays as it is. The open tasks
+    it blocks get a notice that it is back (they are not blocked again)."""
     if task.is_trashed:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     now = timezone.now()
-    Task.objects.filter(pk=task.pk, completed_at__isnull=False).update(
-        completed_at=None, resolution='', state=TaskState.TODO, updated_at=now
-    )
+    with transaction.atomic():
+        state = TaskState.BLOCKED if blockers.has_open_blocker(task.pk) else TaskState.TODO
+        reopened = Task.objects.filter(
+            pk=task.pk, completed_at__isnull=False, deleted_at__isnull=True
+        ).update(completed_at=None, resolution='', state=state, updated_at=now)
+        if reopened:
+            blockers.reopened([task.pk])
     task.refresh_from_db()
     return task
 
 
 def set_state(task: Task, state: str) -> Task:
-    """Set an open task's state (To do, In progress, On hold). Each task has its own: nothing
-    propagates between a parent and its subtasks. A closed or trashed task has none to change.
+    """Set an open task's state (To do, In progress, On hold; Blocked is not chosen, only blockers
+    set it). Each task has its own: nothing propagates between a parent and its subtasks. A closed or
+    trashed task has none to change. A Blocked task can be given any of the three: its links stay.
 
     Leaving a muted state releases the reminders held meanwhile
     (`services.reminders.release_held`: one reminder, on the channels they used). A task due today
@@ -751,25 +744,16 @@ def set_state(task: Task, state: str) -> Task:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     now = timezone.now()
     with transaction.atomic():
-        current = _lock_tasks(task.pk).get(task.pk)
+        current = lock_tasks(task.pk).get(task.pk)
         if current is None:
             raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
         if current.is_trashed:
             raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
         if current.completed_at is not None:
             raise _error(NON_FIELD_ERRORS, NOT_OPEN_MESSAGE)
-        changed = current.state != state
+        changed = write_state(current, state, now)
         if changed:
-            current.user = task.user  # already loaded: the zone and the reminders need it
-            was_muted = current.state in MUTED_STATES
-            fields: dict[str, Any] = {'state': state, 'updated_at': now}
-            if current.due_date is not None and current.due_date == user_today(task.user):
-                fields['today_position'] = next_today_position(task.user, current.due_date)
-            Task.objects.filter(pk=current.pk).update(**fields)
-            current.state = state
-            if was_muted and state not in MUTED_STATES:
-                reminders.release_held(current, now)
-            task.today_position = fields.get('today_position', task.today_position)
+            task.today_position = current.today_position
     task.state = state
     if changed:
         task.updated_at = now
@@ -841,6 +825,10 @@ def trash_task(task: Task) -> Task:
         return task
     now = timezone.now()
     with transaction.atomic():
+        # The blockers among them that are open stop blocking what they block (read before the write).
+        was_open = blockers.open_ids(
+            [task.pk, *Task.objects.filter(parent=task).values_list('pk', flat=True)]
+        )
         won = Task.objects.filter(pk=task.pk, deleted_at__isnull=True).update(
             deleted_at=now, updated_at=now
         )
@@ -850,6 +838,7 @@ def trash_task(task: Task) -> Task:
         Task.objects.filter(parent=task, deleted_at__isnull=True).update(
             deleted_at=now, updated_at=now
         )
+        blockers.ended(was_open, now)
     task.deleted_at = now
     task.updated_at = now
     return task
@@ -872,8 +861,15 @@ def restore_task(task: Task) -> Task:
             deleted_at=None, updated_at=now
         )
         if won:
-            Task.objects.filter(parent=task, deleted_at=trashed_at).update(
-                deleted_at=None, updated_at=now
+            subtasks = Task.objects.filter(parent=task, deleted_at=trashed_at)
+            restored = [task.pk, *subtasks.values_list('pk', flat=True)]
+            subtasks.update(deleted_at=None, updated_at=now)
+            # An open task that is back blocks again only in the sense of a notice: what it blocks
+            # keeps its state (`services.blockers`).
+            blockers.reopened(
+                Task.objects.filter(pk__in=restored, completed_at__isnull=True).values_list(
+                    'pk', flat=True
+                )
             )
     task.refresh_from_db()
     return task
@@ -910,8 +906,13 @@ def _delete_with_attachments(task_id: UUID) -> int:
             Task.objects.filter(Q(pk=task_id) | Q(parent_id=task_id)).values_list('pk', flat=True)
         )
         attachments.delete_for_tasks(ids)
+        # Normally in the Trash already (nothing left to release); one that is deleted while open
+        # frees what it blocked. Its dependents are found before the links go with it.
+        dependents = blockers.dependents_of(blockers.open_ids(ids))
         # A parent's delete takes its subtasks too, so this counts the rows it removed.
-        return Task.objects.filter(pk=task_id).delete()[0]
+        deleted = Task.objects.filter(pk=task_id).delete()[0]
+        blockers.released(set(dependents) - set(ids))
+        return deleted
 
 
 def purge_trash() -> int:

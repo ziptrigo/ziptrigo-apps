@@ -3764,8 +3764,9 @@ references (#180, "Comments and references" below), search with saved filters (#
 saved filters" below), attachments (#184, "Attachments and storage billing" below), reminders
 (#182, "Reminders" below), AI date parsing in the title (#183, "AI date parsing" below) and tasks
 added by email (#186, "Email intake" below), the JWT API with the `inv todo` CLI (#187, "API and
-CLI" below) and task states and resolutions (#272, part 1 of 4 of #271, "States and resolutions"
-below; blockers, the activity log and the API/CLI/Android change are #273 to #275).
+CLI" below), task states and resolutions (#272, part 1 of 4 of #271, "States and resolutions"
+below) and blockers (#273, part 2 of 4, "Blockers" below; the activity log and the API/CLI/Android
+change are #274 and #275).
 Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
 `templates/todo/`, `static/todo/`, `jobs.py`, `admin.py`, `checks.py`, `urls.py` (mounted at
 `/todo/`, `app_name = 'todo'`).
@@ -3849,7 +3850,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   so on a Monday it means in 7 days), `next_weekend` (the next Saturday after today, on a Saturday
   in 7 days), `date` (today or later), "today" being the owner's, keeping the time; a task without a
   date gets one. `reschedule_overdue(user)` sets `due_date` to today on every open overdue task that is not
-  muted (On hold).
+  muted (On hold, Blocked).
   `trash_task` stamps the task and its not-yet-trashed subtasks with **one** `deleted_at`;
   `restore_task` clears it on the task and the subtasks with that same value (a subtask trashed on
   its own stays trashed) and refuses a subtask whose parent is still trashed; `delete_forever`
@@ -4098,10 +4099,10 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
 #### States and resolutions
 
 Issue #272 (part 1 of 4 of #271; spec `docs/todo-task-states.md`; migration `0011_task_states`).
-Blockers (#273, which adds the fourth, muted *Blocked* state), the activity log (#274) and the
+The fourth, muted *Blocked* state is #273 ("Blockers" below); the activity log (#274) and the
 API/CLI/Android change (#275) are not here.
 
-- **Model.** `Task.state` (`TaskState`: `todo`, `in_progress`, `on_hold`; default `todo`, `db_default`
+- **Model.** `Task.state` (`TaskState`: `todo`, `in_progress`, `blocked` (#273), `on_hold`; default `todo`, `db_default`
   too: the #102 lesson, the old container keeps inserting while `0011` runs) is what an *open* task is
   doing. `Task.resolution` (`Resolution`: `done`, `wont_do`; `''` while open, `db_default` too) is how a
   *closed* one was closed. **`completed_at` keeps meaning "closed at" for both**, so the API and every
@@ -4110,8 +4111,9 @@ API/CLI/Android change (#275) are not here.
   writes `completed_at` alone, so a closed task with no resolution **reads as Done** (`is_wont_do` is
   the only test, `dates.closed_set(user, 'done')` excludes `wont_do` rather than matching `done`).
   `0011` marks every already completed task Done (`mark_completed_as_done`, reversible as a no-op; the
-  rows' state is To do through the column default). `models.MUTED_STATES` (`{on_hold}`) is the one place
-  that says which states are muted; #273 adds `blocked` to it. `Task.is_muted`, `Task.state_group`
+  rows' state is To do through the column default). `models.MUTED_STATES` (`{on_hold, blocked}`) is the one place
+  that says which states are muted (`SELECTABLE_STATES`, without `blocked`, are the ones a person can
+  choose). `Task.is_muted`, `Task.state_group`
   (`in_progress`, `todo`, `muted`: how Today and Upcoming group a day, and what a drag stays inside) and
   `Task.is_overdue` (false for a muted task) read it. `TodoAccount.muted_overdue` (`MutedOverdue`:
   `dimmed` default, `hidden`, `section`; `db_default` too) is the To-do setting below.
@@ -4130,27 +4132,27 @@ API/CLI/Android change (#275) are not here.
   task was already closed."; a task trashed meanwhile is refused as before. `complete_task(task, *, subtasks='done')` is
   `close_task(task, DONE, ...)`. `set_resolution(task, resolution)` changes how a *closed* task was closed
   ("Only a closed task has a resolution to change." for an open one; the conditional `UPDATE` also requires the task out of the Trash, else "Restore the
-  task before changing it."): no occurrence, no subtasks touched, `completed_at` kept. `uncomplete_task` clears the resolution and sets To do. `set_state(task, state)`
+  task before changing it."): no occurrence, no subtasks touched, `completed_at` kept. `uncomplete_task` clears the resolution and sets Blocked when one of the task's blockers is
+  still open, else To do (#273). `set_state(task, state)`
   is for an open, non-trashed task (a closed one: "Reopen the task before changing its state."; an
-  unknown state: "Choose To do, In progress or On hold."), under the row lock, a no-op for the same state;
+  unknown state, **Blocked included**, which only blockers set: "Choose To do, In progress or On hold."), under the row lock, a no-op for the same state;
   parent and subtask states are independent (nothing propagates). A task due today that changes state
-  goes to the end of Today's manual order (`next_today_position`). `create_task(state=...)` (To do by
+  goes to the end of Today's manual order (`dates.next_today_position`; `services.task_state.write_state` is the one state write, shared with the blockers). `create_task(state=...)` (To do by
   default, whatever the source; the quick-add box's State select posts it, `TaskForm.requested_state()`,
   which `changes()` leaves out because `update_task` doesn't take it).
 - **Muted tasks.** A muted task is dimmed (grey title, not struck), never shown overdue (no red badge,
   `due_badge` reads `is_overdue`) and never moved by "Reschedule overdue to today"
   (`dates.overdue_set` leaves them out; `dates.muted_overdue_set` is the other half). **Where a muted
-  *overdue* task shows on Today is `TodoAccount.muted_overdue`** (settings page, "On hold tasks on Today";
+  *overdue* task shows on Today is `TodoAccount.muted_overdue`** (settings page, "On hold and blocked tasks on Today";
   `set_muted_overdue`): `dimmed` (the bottom of Overdue, after the movable ones, which the reschedule
-  button and its question count alone), `hidden` (not on Today), `section` (an "On hold section":
-  a collapsed `<details>` "On hold (N)" at the bottom of Today; the spec's "On hold & blocked (N)"
-  comes with #273, which adds Blocked). A muted task due
+  button and its question count alone), `hidden` (not on Today), `section` (an "On hold & blocked
+  section": a collapsed `<details>` "On hold & blocked (N)" at the bottom of Today). A muted task due
   *today* stays in Today's list in its group whatever the setting. `dates.today_count(user, account)`
   (the number beside Today; replaces `today_set(...).count()` in the views) leaves muted overdue tasks
   out unless they are shown dimmed. The search "overdue" date range leaves them out too.
 - **Held reminders** (`services/reminders.py`; see its module docstring). `deliver_due` skips a muted
   task's reminders (they stay unsent, due) and `sweep_stale` does not sweep them while the task is open
-  and muted. Leaving a muted state (`set_state`, in its transaction) calls `reminders.release_held(task)`:
+  and muted. Leaving a muted state (`set_state`, or an automatic unblock: `task_state.write_state`, in its transaction) calls `reminders.release_held(task)`:
   **one** reminder for the task, on the union of the channels the held (unsent, already due) reminders
   used (`in_app`, `email` or `both`; in-app brings its push), delivered through `_deliver` with a channel
   override as a delivery of the earliest held one (email dedupes on a fresh `fire_token`), and **every**
@@ -4166,14 +4168,14 @@ API/CLI/Android change (#275) are not here.
   sortable list whose rows carry `data-group`; core's `initSortableList` gained a `canMove(item, other)`
   option (SortableJS `onMove` and the arrow keys, announcing "already first/last in its group") that
   `tasks.js` sets for `data-scope="today"`, so a drag never moves a row into another group; changing a
-  state re-renders the whole list (`HX-Retarget: #task-list`) so the row lands in its group. `order_today`
+  state re-renders the whole list (`HX-Retarget: #task-list`) so the row lands in its group. A Blocked row is in the muted group. `order_today`
   and `order_tasks` are untouched (the API uses them); All, filters and search are unchanged.
 - **Web.** `partials/state_menu.html` is the state chip (`{% state_pill task %}`: To do / In progress /
-  On hold, with `todo_ui._STATE_STYLE`) and its Alpine menu (`role="menu"`, `menuitemradio`), on every
+  Blocked / On hold, with `todo_ui._STATE_STYLE`; the menu lists only the three a person can choose) and its Alpine menu (`role="menu"`, `menuitemradio`), on every
   open row and on the task page; it posts `todo:set-state` (`POST /todo/<n>/state/`, `StateForm`, a
   `ctx=row` answer is the row, or the whole list on Today and Upcoming; `ctx=page` the panel; 422 for an
   unknown state or a closed task; `TODO_EDIT_USER` charged after validation; 404 for another user's task). The task page's muted note
-  ("This task is on hold: ... its reminders wait.") adds "Set it to To do or In progress to get one
+  ("This task is on hold: ... its reminders wait."; for Blocked, "This task is blocked: ...") adds "Set it to To do or In progress to get one
   reminder for what you missed." only when the task has a held reminder (`reminders.has_held`, one
   query in `panel_context`, never per list row). **Keyboard**: the menu follows the `menu` pattern
   (opening focuses the checked item; Up/Down move, wrapping, Home/End jump, Escape closes and returns
@@ -4232,6 +4234,113 @@ API/CLI/Android change (#275) are not here.
   "Done"/"Reopen" instead of "Completed"/"Uncomplete", a parent's row opens the close dialog
   (`data-count`) instead of the confirm modal text, and the summary of `include_completed` is "including
   closed".
+
+#### Blockers
+
+Issue #273 (part 2 of 4 of #271; spec `docs/todo-task-states.md` section 4; migration
+`0012_task_blockers`: the `TaskBlocker` table, the `blocked` choice of `Task.state` and the wording of
+`MutedOverdue.section`). The activity log (#274) and the API/CLI/Android change (#275) are not here:
+**the JWT API and the CLI look and behave exactly as before** (`docs/openapi.yml` did not change, no
+response gained a field, the API cannot set a state or a blocker), but the rules below apply to what it
+does through the services: a task closed or trashed by an API call frees what it blocked, and reopening
+one through it gives Blocked when a blocker is open.
+
+- **Model** (`models/blocker.py`). `TaskBlocker` (UUID, `blocker` and `blocked` FKs to `Task`, both
+  `CASCADE`, so deleting a task for good, or its user, removes its links; `blocks_links` /
+  `blocked_by_links` on `Task`; `created_at`): one row says `blocker` blocks `blocked`. A unique
+  constraint on the pair and a check constraint that the two differ. The owner is implied by the tasks;
+  `services.blockers` is the only writer and refuses a pair of two users. `MAX_BLOCKERS_PER_TASK` (20, in
+  `limits.py`) per blocked task. **Links are kept** when either task closes or goes to the Trash.
+- **The Blocked state.** `TaskState.BLOCKED` is in `MUTED_STATES` (dimmed, never overdue, never moved by
+  "Reschedule overdue", reminders held, grouped with On hold on Today, the Today setting applies) but not
+  in `SELECTABLE_STATES`: **nobody chooses it** (`set_state`, `create_task(state=)`, `StateForm`, the
+  quick-add select and the state menu refuse or omit it: "Choose To do, In progress or On hold."). A
+  Blocked task's menu offers the three others and picking one keeps the links; adding another open
+  blocker makes it Blocked again.
+- **What sets it** (`services/blockers.py`; module docstring is the long version). `add_blocker(task,
+  blocker)` (both rows locked in pk order, so two links added at once can't close a loop): both the user's
+  own and out of the Trash, not the same task (`'A task cannot block itself.'`), at most 20 (`'A task can
+  have at most 20 blockers.'`), no cycle (`'#1200 is already blocked by #1234, directly or through other
+  tasks.'`: a walk of the "blocked by" links, a query per level, over closed and trashed tasks too since
+  the links are kept), an existing link is a no-op (`False`). **An open blocker (open and not in the Trash)
+  sets an open task Blocked, from any open state**; a closed blocker, or a closed task, only links.
+  `check_add` is the same checks without writes or locks (the view uses it so a refusal spends no budget).
+  `remove_blocker(task, blocker)`: a Blocked task left with no open blocker goes to To do, **without** a
+  notice (the user did it); an On hold task keeps its state. `create_task(blocked_by=[numbers])` (the
+  quick-add box; `check_new_task` too) links the new task and sets it Blocked when one is open, **over** the
+  state asked for; the numbers are the user's own, not in the Trash, at most 20 (`blocked_by` errors:
+  "There is no task #N." for a foreign or unknown number, so a number can't be probed; "#N is in the trash.
+  Restore it first."). `parse_numbers` reads `1200, 1201` / `#1200 #1201`. The next occurrence of a
+  repeating task is created through `create_task` with none (**no links are copied**) and starts To do.
+- **Reopening** (`uncomplete_task`): Blocked when any blocker is open and not trashed, else To do (a
+  trashed blocker does not count). **Restoring from the Trash keeps the state** (a task restored Blocked
+  stays Blocked; an unblock that happened while it was trashed corrected its state silently, below).
+- **Auto-unblock** (`blockers.ended(ids)` -> `released(dependents)`, called in the transaction of
+  `close_task` (the task *and* the open subtasks closed with it), `trash_task` (the task and its
+  subtasks), and `_delete_with_attachments` (an open task deleted for good; one already trashed was handled
+  when it was trashed and sends nothing twice): `blockers.open_ids` reads which of them were open
+  blockers *before* the write, so only a blocker that stops being open triggers it). `released` locks
+  the dependents (pk order, so two blockers closing at once: the last to commit sees all), skips the closed
+  ones, and for each with **no open, non-trashed blocker left**: a task in the **Blocked state goes to To
+  do** (`write_state`, which releases the held reminders as leaving On hold does), and **every such task
+  that is open and not in the Trash, whatever its state, gets one in-app notice** (a task the user put In
+  progress or On hold by hand keeps its state, still told). A **trashed** dependent only has its state
+  corrected, silently and without delivering reminders. Every close path therefore works: the web, the
+  phone's Complete button (`reminders.answer_push`), `POST /api/todo/tasks/{n}/complete`, a repeating
+  task, a parent closing its subtasks.
+- **A blocker coming back** (`blockers.reopened(ids)`: `uncomplete_task`, and `restore_task` for the
+  restored tasks that are open -- the task and the subtasks restored with it): the **open** tasks it blocks
+  get a notice and **keep their state** (a reopened blocker does not block them again).
+- **Notifications** (in-app only, `notifications.notify`, source `todo`, url the task's page, each in its own
+  savepoint, logged and never raised so a notice can't undo the close): `todo_unblocked:<task id>` --
+  "#1234 Pay rent is no longer blocked" (the title cut to 60 characters in the notice's title), body
+  "Everything that was blocking it is closed." -- and `todo_blocker_reopened:<task id>` -- "#1200 was
+  reopened and blocks #1234", body naming both and saying the blocked task keeps its state. Each is written
+  as `delete_for_key` then `notify`, so there is one per task, the latest.
+- **Closing with open blockers** asks on the web, either resolution: `CloseForm.confirm_blockers`,
+  `views.tasks._close` refuses without it (a 422 / flash: "This task is still blocked by #1200 Title.
+  Confirm to close it anyway.") and the **close dialog** (`close_dialog.html`, `close_dialog.js`) lists them
+  (`data-blockers` is the count, set from the row's prefetched open blockers, `data-blockers-url`
+  `GET /todo/<n>/blockers/open/` -> `{"blockers": [{number, title}]}`, `no-store`, 404 for another user's
+  task, fetched when it opens and rendered with `x-text`) and posts `confirm_blockers=1`. The links are kept.
+  A row's circle and the page's Complete button open it for a task with open blockers (as for open
+  subtasks). **Push Complete and the API close without asking.**
+- **Task page** (`partials/blockers.html`, in the panel after Subtasks): **Blocked by** lists every blocker
+  (closed and trashed ones too, a `Done` / `Won't do` / `In the trash` marker from `{% blocker_marker %}`,
+  struck through) with a Remove button each and the add box; **Blocks** is the read-only list of the tasks it
+  blocks, each linking to its page. The add box is a text input with a `<datalist>` fed by
+  `GET /todo/<n>/blockers/suggest/?blocker=` (htmx, `blocker_options.html`: the user's open tasks, not the
+  task, not one it already has, by number or title words, at most 10, the value `#1200`, the label the
+  title). It takes a number (`1200`, `#1200`, `#1200 anything`) or words from a title: the one open task
+  whose title is exactly these words, or that contains them and no other does, else "Choose a task from the
+  suggestions, or type its number." (`blockers.find_blocker`). `POST /todo/<n>/blockers/` and
+  `POST /todo/<n>/blockers/<number>/remove/` (`views/blockers.py`, 422 into `#blocker-msg`, **`TODO_EDIT_USER`
+  charged after the checks pass**, 404 for another user's or a trashed task; the answer is the re-rendered
+  panel). A trashed task's lists are read-only. `views.tasks.task_page` puts the decorated task back in the
+  context after the attachments' context (which has its own `task`).
+- **Quick add** has a "Blocked by" text box next to State (`TaskForm.blocked_by`, `requested_blockers()`,
+  only without a `part`; a refusal is a 422 in `#quick-add-msg` and creates nothing).
+- **Rows.** `views.lists.decorate` prefetches the open blockers (`open_blocker_links`, a `Prefetch` with
+  `to_attr`, one more query for the whole list, never one per row; a test pins it on All, Today and the
+  task page): `Task.open_blockers` reads them. The Blocked chip's tooltip names them (`Blocked by #1200 Pay
+  rent, #1201 ...`, five then "and N more", `todo_ui.blockers_text`). The Today setting's section is titled
+  "On hold & blocked (N)" and its option "On hold & blocked section".
+- **Search and filters.** Blocked is a state in the search's multi-select (`FilterParams.states` accepts it;
+  `describe_params`: `state blocked, on hold`); the "overdue" range leaves a Blocked task out. The API's
+  saved filters are untouched (see "States and resolutions").
+- **Admin.** Read-only `TaskBlockerAdmin` (blocker, blocked, user; search by title and number) and two
+  read-only inlines on `TaskAdmin` ("Blocked by", "Blocks").
+- **Layout note.** `services/task_state.py` holds `lock_tasks` and `write_state`, shared by `tasks` and
+  `blockers` (`tasks` closes tasks and calls `blockers`; `blockers` changes states). `next_position` and
+  `next_today_position` moved to `dates.py` (re-imported by `tasks`).
+- **Race notes, accepted.** Everything that decides under the row locks does so in pk order; adding a link
+  locks the two tasks, closing a blocker locks its dependents, so an add racing the close of the very same
+  pair can in theory deadlock (Postgres aborts one; a duplicate add is checked unlocked first). SQLite
+  can't show it.
+- **Tests.** `apps/todo/tests/test_blockers.py` (links, caps, cycles, every close path, notices, reopen and
+  restore, the dialog's POSTs and JSON, the page, quick add, rows and their query count, search, admin, the
+  API unchanged), the Playwright `tests_e2e/test_todo_blockers.py`; the AI plan has TODO-49 to TODO-55,
+  `notifications.md` NOTIF-25 and NOTIF-26 and `admin.md` ADM-56.
 
 #### Comments and references
 

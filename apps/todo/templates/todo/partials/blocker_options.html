@@ -1,0 +1,3 @@
+{% comment %} The <option>s of the "Blocked by" box's list (`todo:blocker-suggest`): open tasks to offer as a blocker. The value is
+   the number (what the form reads), the label the title. {% endcomment %}
+{% for suggestion in suggestions %}<option value="#{{ suggestion.number }}" label="{{ suggestion.title }}">{{ suggestion.title }}</option>{% endfor %}

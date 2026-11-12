@@ -5,7 +5,9 @@
  *
  * The markup is `todo/partials/close_dialog.html`, once per page, in the layout. A button opens it with
  * `todoOpenCloseDialog(button)`, reading `data-url`, `data-mode` (`done` or `wont_do`), `data-ctx`
- * (`row` or `page`), `data-title` and `data-count` (the open subtasks) from it. The form is a plain POST
+ * (`row` or `page`), `data-title`, `data-count` (the open subtasks), `data-blockers` (the open blockers,
+ * issue #273) and `data-blockers-url` (JSON with their names) from it. With open blockers the form lists
+ * them and posts `confirm_blockers=1`: closing is allowed after that confirmation, the links are kept. The form is a plain POST
  * (like the shared confirmation modal): the views answer it with a redirect back.
  *
  * Loaded as a classic script (not deferred) so its `alpine:init` listener exists before Alpine starts.
@@ -22,6 +24,8 @@
                 ctx: 'row',
                 title: '',
                 count: 0,
+                blockers: 0,
+                blockerList: [],
                 subtasks: 'done',
                 trigger: null,
                 get heading() {
@@ -38,10 +42,18 @@
                     this.ctx = detail.ctx === 'page' ? 'page' : 'row';
                     this.title = detail.title || '';
                     this.count = parseInt(detail.count || '0', 10) || 0;
+                    this.blockers = parseInt(detail.blockers || '0', 10) || 0;
+                    this.blockerList = [];
                     this.subtasks = 'done';
                     this.trigger = detail.trigger || null;
                     this.open = true;
                     var self = this;
+                    if (this.blockers > 0 && detail.blockersUrl) {
+                        fetch(detail.blockersUrl, {credentials: 'same-origin', headers: {Accept: 'application/json'}})
+                            .then(function (response) { return response.ok ? response.json() : {blockers: []}; })
+                            .then(function (data) { if (self.url === detail.url) self.blockerList = data.blockers || []; })
+                            .catch(function () {});
+                    }
                     // Not once it has closed again: a quick Escape can come before this runs.
                     this.$nextTick(function () {
                         if (!self.open) return;
@@ -66,6 +78,8 @@
                 ctx: button.dataset.ctx,
                 title: button.dataset.title,
                 count: button.dataset.count,
+                blockers: button.dataset.blockers,
+                blockersUrl: button.dataset.blockersUrl,
                 trigger: button,
             },
         }));

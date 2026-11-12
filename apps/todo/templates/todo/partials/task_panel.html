@@ -99,7 +99,7 @@
     {% endif %}
     {% if task.is_muted %}
     <p id="muted-note" class="-mt-6 mb-8 text-sm text-gray-500 dark:text-gray-400">
-        This task is on hold: it is shown dimmed, never as overdue, and its reminders wait.{% if has_held_reminders %} Set it to To do or In progress to get one reminder for what you missed.{% endif %}
+        {% if task.state == 'blocked' %}This task is blocked: it is shown dimmed, never as overdue, and its reminders wait. It goes back to To do when everything blocking it is closed.{% else %}This task is on hold: it is shown dimmed, never as overdue, and its reminders wait.{% endif %}{% if has_held_reminders %} Set it to To do or In progress to get one reminder for what you missed.{% endif %}
     </p>
     {% endif %}
 
@@ -133,6 +133,8 @@
     {% if not task.parent_id %}
         {% include 'todo/partials/subtasks.html' %}
     {% endif %}
+
+    {% include 'todo/partials/blockers.html' %}
 
     {% include 'todo/partials/referenced_by.html' %}
 </div>

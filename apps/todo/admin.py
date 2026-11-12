@@ -26,6 +26,7 @@ from .models import (
     ReminderDelivery,
     SavedFilter,
     Task,
+    TaskBlocker,
     TodoAccount,
     TodoSettings,
 )
@@ -80,6 +81,37 @@ class TrashedFilter(admin.SimpleListFilter):
         return queryset
 
 
+class BlockedByInline(admin.TabularInline):
+    """The tasks that block this one (`TaskBlocker.blocker`). Read-only."""
+
+    model = TaskBlocker
+    fk_name = 'blocked'
+    extra = 0
+    fields = ['blocker', 'created_at']
+    readonly_fields = fields
+    verbose_name = 'blocker'
+    verbose_name_plural = 'Blocked by'
+
+    def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+class BlocksInline(BlockedByInline):
+    """The tasks this one blocks (`TaskBlocker.blocked`). Read-only."""
+
+    fk_name = 'blocker'
+    fields = ['blocked', 'created_at']
+    readonly_fields = fields
+    verbose_name = 'blocked task'
+    verbose_name_plural = 'Blocks'
+
+
 class TaskAdmin(ReadOnlyModelAdmin):
     list_display = [
         'user',
@@ -108,11 +140,39 @@ class TaskAdmin(ReadOnlyModelAdmin):
     search_fields = ['title', 'number', 'user__email']
     list_select_related = ['user', 'recurrence']
     date_hierarchy = 'created_at'
+    inlines = [BlockedByInline, BlocksInline]
 
     @admin.display(description='Unpaid', ordering='unpaid_at')
     def unpaid(self, obj: Task) -> str:
         """Text for the exception only: a red cross for the normal state read as an alarm."""
         return 'Unpaid' if obj.is_unpaid else ''  # an empty value shows as the admin's dash
+
+
+class TaskBlockerAdmin(ReadOnlyModelAdmin):
+    """The "Blocked by" links (issue #273): who blocks whom, with the numbers and titles."""
+
+    list_display = ['blocker_task', 'blocked_task', 'user', 'created_at']
+    search_fields = [
+        'blocker__title',
+        'blocker__number',
+        'blocked__title',
+        'blocked__number',
+        'blocker__user__email',
+    ]
+    list_select_related = ['blocker', 'blocked', 'blocker__user']
+    date_hierarchy = 'created_at'
+
+    @admin.display(description='Blocker', ordering='blocker__number')
+    def blocker_task(self, obj: TaskBlocker) -> str:
+        return str(obj.blocker)
+
+    @admin.display(description='Blocked', ordering='blocked__number')
+    def blocked_task(self, obj: TaskBlocker) -> str:
+        return str(obj.blocked)
+
+    @admin.display(description='User', ordering='blocker__user__email')
+    def user(self, obj: TaskBlocker) -> str:
+        return str(obj.blocker.user)
 
 
 class RecurrenceAdmin(ReadOnlyModelAdmin):
@@ -384,6 +444,7 @@ class InboundEmailAdmin(ReadOnlyModelAdmin):
 
 custom_admin_site.register(TodoSettings, TodoSettingsAdmin)
 custom_admin_site.register(Task, TaskAdmin)
+custom_admin_site.register(TaskBlocker, TaskBlockerAdmin)
 custom_admin_site.register(Recurrence, RecurrenceAdmin)
 custom_admin_site.register(TodoAccount, TodoAccountAdmin)
 custom_admin_site.register(Label, LabelAdmin)

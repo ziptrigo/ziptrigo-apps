@@ -1,6 +1,7 @@
 from . import (
     attachments,
     billing,
+    blockers,
     comments,
     dates,
     filters,
@@ -42,6 +43,13 @@ from .billing import (
     month_usage,
     on_credits_added,
     settle_unpaid_tasks,
+)
+from .blockers import (
+    add_blocker,
+    open_blockers,
+    parse_numbers,
+    remove_blocker,
+    tasks_by_numbers,
 )
 from .comments import (
     COMMENT_MAX,
@@ -99,6 +107,7 @@ from .limits import (
     FIRST_TASK_NUMBER,
     LABEL_DESCRIPTION_MAX,
     LABEL_NAME_MAX,
+    MAX_BLOCKERS_PER_TASK,
     MAX_SAVED_FILTERS,
     SAVED_FILTER_NAME_MAX,
     TITLE_MAX,
@@ -152,6 +161,13 @@ from .tasks import (
 )
 
 __all__ = [
+    'MAX_BLOCKERS_PER_TASK',
+    'add_blocker',
+    'blockers',
+    'open_blockers',
+    'parse_numbers',
+    'remove_blocker',
+    'tasks_by_numbers',
     'SUBTASK_ACTIONS',
     'SUBTASKS_DONE',
     'SUBTASKS_LEAVE',

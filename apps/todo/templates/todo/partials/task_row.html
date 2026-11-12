@@ -29,11 +29,12 @@
             class="is-done btn mt-0.5 flex-shrink-0 rounded-full text-sage-400">
         <svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M6 10.3l2.6 2.6L14 7.6"/></svg>
     </button>
-    {% elif task.subtask_open %}
-    {% comment %}A parent with open subtasks asks what to do with them (the close dialog, close_dialog.html): close them as Done or as Won't do, or leave them open.{% endcomment %}
+    {% elif task.subtask_open or task.open_blocker_links %}
+    {% comment %}A parent with open subtasks asks what to do with them, and a task with open blockers asks to confirm (the close dialog,
+       close_dialog.html): close the subtasks as Done or as Won't do, or leave them open; the blockers are named and the links stay.{% endcomment %}
     <button type="button" @click="todoOpenCloseDialog($el)"
             data-url="{% url 'todo:complete' task.number %}" data-mode="done" data-ctx="row"
-            data-title="{{ task.title }}" data-count="{{ task.subtask_open }}"
+            data-title="{{ task.title }}" data-count="{{ task.subtask_open }}" data-blockers="{{ task.open_blocker_links|length }}" data-blockers-url="{% url 'todo:open-blockers' task.number %}"
             aria-label="Complete {{ task.title }}" title="Complete"
             class="btn mt-0.5 flex-shrink-0 rounded-full text-gray-400 hover:text-sage-400 dark:text-gray-500 dark:hover:text-sage-300"><svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M6 10.3l2.6 2.6L14 7.6"/></svg></button>
     {% else %}

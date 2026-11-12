@@ -58,6 +58,14 @@ urlpatterns = [
     path('<int:number>/recurrence/stop/', views.recurrence_stop, name='recurrence-stop'),
     path('<int:number>/checklist/', views.task_checklist, name='checklist'),
     path('<int:number>/subtasks/', views.subtask_add, name='subtask-add'),
+    path('<int:number>/blockers/', views.blocker_add, name='blocker-add'),
+    path('<int:number>/blockers/suggest/', views.blocker_suggest, name='blocker-suggest'),
+    path('<int:number>/blockers/open/', views.open_blockers, name='open-blockers'),
+    path(
+        '<int:number>/blockers/<int:blocker_number>/remove/',
+        views.blocker_remove,
+        name='blocker-remove',
+    ),
     path('<int:number>/reminders/', views.reminder_add, name='reminder-add'),
     path(
         '<int:number>/reminders/<uuid:reminder_id>/edit/',

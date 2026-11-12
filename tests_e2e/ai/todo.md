@@ -5,7 +5,7 @@
 The To-do product's web UI (`apps/todo`, issue #161 and its sub-issues): tasks (#178), repeating tasks (#179),
 comments and task references (#180), search and saved filters (#181), reminders (#182), AI date parsing (#183),
 attachments and storage billing (#184), the "Add tasks by email" settings (#186), task states and resolutions
-(#272) and the polish of the E2E run (#224):
+(#272), blockers (#273) and the polish of the E2E run (#224):
 
 - the sidebar (a search box, then Today with a count, Upcoming, All, Closed, Labels, Trash, Settings, then
   a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
@@ -18,8 +18,10 @@ attachments and storage billing (#184), the "Add tasks by email" settings (#186)
   links), Complete, Close as won't do, the state chip, Postpone, Move to trash, Restore, Delete forever, then the details (the "Or type a date" box, due
   date, time, priority, labels, repeat), reminders, subtasks (add, complete, reorder), "Referenced by", then,
   outside the panel, **Attachments** and **Comments** (with their own files);
-- task states (To do, In progress, On hold: the chip on rows and the page, quick add, Today and Upcoming grouping and
-  drag order, muted tasks and where they show on Today, held reminders) and resolutions (Done, Won't do with an
+- task states (To do, In progress, Blocked, On hold: the chip on rows and the page, quick add, Today and Upcoming grouping and
+  drag order, muted tasks and where they show on Today, held reminders), blockers ("Blocked by" and "Blocks" on the task
+  page and in quick add, the Blocked state, automatic unblocking and its notifications, a blocker coming back, the
+  close question) and resolutions (Done, Won't do with an
   optional note, the close dialog for a parent with open subtasks, changing a resolution, reopening);
 - repeating tasks (every rule the Repeat popover builds, fixed schedule and from completion, stop repeating, an
   owed next occurrence that blocks creation until a top-up settles it, the open-task cap's notice);
@@ -900,10 +902,10 @@ decides where it shows on Today.
 | 1 | Add `Late todo` and `Late hold` with yesterday's date; set `Late hold` to **On hold** from its chip. Open **Today**. | An **Overdue** section: `Late todo` (red date, "(overdue)" for screen readers) first, then `Late hold` at the bottom, dimmed with a **grey** date (not red, no "(overdue)"). The sidebar count beside Today counts both. |
 | 2 | Click **Reschedule overdue to today**. | The dialog says "Move the date of 1 overdue task to today? Their times stay. Tasks that are on hold stay where they are." Confirm: `Late todo` moves to Today; `Late hold` stays in Overdue with yesterday's date (also open it: its date is unchanged). |
 | 3 | Complete `Late todo` (so only `Late hold` is overdue). Open Today. | The Overdue section lists only `Late hold` and has **no** Reschedule button (nothing it could move). |
-| 4 | **Settings > On hold tasks on Today** shows "When an On hold task is overdue" with "Today, dimmed" (selected), "Hidden from Today", "On hold section". Choose **Hidden from Today** and **Save**. | "Saved." Open Today: `Late hold` is not on the page and the sidebar count no longer counts it; it is still on **All** with a grey date. |
-| 5 | Choose **On hold section**, Save, open Today. | At the bottom of Today a collapsed section "On hold (1)"; expanding it (click, Enter or Space on the summary) lists `Late hold`. The Overdue section is gone. The sidebar count excludes it. |
+| 4 | **Settings > On hold and blocked tasks on Today** shows "When an On hold or Blocked task is overdue" with "Today, dimmed" (selected), "Hidden from Today", "On hold & blocked section". Choose **Hidden from Today** and **Save**. | "Saved." Open Today: `Late hold` is not on the page and the sidebar count no longer counts it; it is still on **All** with a grey date. |
+| 5 | Choose **On hold & blocked section**, Save, open Today. | At the bottom of Today a collapsed section "On hold & blocked (1)"; expanding it (click, Enter or Space on the summary) lists `Late hold`. The Overdue section is gone. The sidebar count excludes it. |
 | 6 | Set `Late hold`'s date to today (Details > Save). Open Today with each of the three settings. | It is in Today's list, in the On hold group (at the bottom of the day), in every setting. |
-| 7 | Send `POST /todo/settings/` with `default_due_time=09:00&muted_overdue=nowhere` (console, as TODO-42 step 9). | `422` and the message "On hold and overdue: Choose Today (dimmed), Hidden from Today or On hold section." Nothing saved. Restore "Today, dimmed". |
+| 7 | Send `POST /todo/settings/` with `default_due_time=09:00&muted_overdue=nowhere` (console, as TODO-42 step 9). | `422` and the message "On hold or blocked, and overdue: Choose Today (dimmed), Hidden from Today or On hold & blocked section." Nothing saved. Restore "Today, dimmed". |
 | 8 | **Search** `/todo/search/`, choose **Due date > Overdue**. | `Late hold` is not listed (a muted task is never overdue). |
 | 9 | In dark mode and at 375 px wide check the pills, the dimmed rows and the collapsed section. | Readable text (the dimmed title is grey-500 on white), no horizontal scroll. |
 
@@ -986,13 +988,124 @@ reopen them) and no comments; a task `Plain` (no subtasks).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `/todo/search/`. | The filter bar has a **State** group (To do, In progress, On hold) next to Priority and Labels, and **Include closed** (renamed) in the switches row. The "Closed as" select is hidden. |
+| 1 | Open `/todo/search/`. | The filter bar has a **State** group (To do, In progress, Blocked, On hold) next to Priority and Labels, and **Include closed** (renamed) in the switches row. The "Closed as" select is hidden. |
 | 2 | Tick **On hold**. | The list refreshes; the address bar gets `states=on_hold`; only On hold tasks. Tick **In progress** too: both (any of them). Nothing else selected is not required for results (a state alone is a criterion). |
 | 3 | Tick **Include closed**. | A "Closed as" select appears (All, Done, Won't do). The results add every closed task (a state filter does not narrow closed tasks). Choose **Won't do**: only won't do closed tasks are added (the open ones are still the selected states); the URL has `include_completed=1&resolution=wont_do`. Untick **Include closed**: the select hides and `resolution` leaves the URL. |
 | 4 | With **On hold** and **Include closed** > **Won't do** ticked, click **Save as filter**, name it `Paused or skipped`. | The filter's page summary reads `state on hold · including won't do`; the sidebar lists it with a count of its **open** tasks. |
 | 5 | Open the filter, change the state to **To do**, click **Update filter**. | Saved; the summary changes. Reopening from the sidebar shows the saved criteria in the form. |
 | 6 | Search for a term that matches nothing (`zzzz`). | "Nothing matches. Closed tasks are left out unless you tick Include closed." |
 | 7 | The sidebar search box. | Its checkbox reads **Include closed**. |
+
+
+### TODO-49 Blockers: adding and removing on the task page
+
+**Purpose:** a task can be blocked by other tasks of the same user; the links show on both tasks, an open blocker
+makes the task Blocked, and every refusal says why (issue #273).
+**Preconditions:** logged in as `qa.user@example.com` on `/todo/`; no overdue tasks. Add `Block main`, `Block one`,
+`Block two` and a subtask `Block sub` under `Block two` (note the numbers `B_MAIN`, `B_ONE`, `B_TWO`, `B_SUB`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/todo/<B_MAIN>/`. Under the subtasks there is a section **Blocked by** with an input "Add a blocker" (placeholder "A task number or title") and an **Add** button, and no **Blocks** list. | The chip next to the actions reads "To do". |
+| 2 | Click into the box and type `Block o`. | A native suggestion list offers `#<B_ONE> Block one` (and nothing that is closed, itself or already a blocker). Typing digits (`<B_ONE>` or its first figures) filters by number. |
+| 3 | Type `<B_ONE>` and click **Add**. | The panel re-renders without a reload: the list shows `#<B_ONE> Block one` with a small x (Remove) and no marker (it is open); the chip reads **Blocked** (grey, a ban icon) and the page note says "This task is blocked: it is shown dimmed, never as overdue, and its reminders wait. It goes back to To do when everything blocking it is closed." Hovering the chip shows "Blocked by #<B_ONE> Block one". |
+| 4 | Add `#<B_TWO>` (with the hash) and `block sub` (a title) one after the other. | Both are added (the title matches exactly one open task). The list is ordered by number. |
+| 5 | Open `/todo/<B_ONE>/`. | Under **Blocks**: `#<B_MAIN> Block main` as a link, read-only (no Remove button). The chip of `Block one` is still "To do". |
+| 6 | Back on `<B_MAIN>`, add each of these in turn and read the message in red above the box: `<B_MAIN>`; `999999`; `abc!`; `call` after creating two tasks `Call Ann` and `Call Bob`; an empty box; a task in the trash (trash `Block trashed` first, then use its number); one of another account's numbers (ask for one from `qa.broke@example.com`'s page). | In order: "Blocker: A task cannot block itself." / "Blocker: There is no task #999999." / "Blocker: Choose a task from the suggestions, or type its number." (for `abc!` and for the ambiguous `call`) / "Blocker: Enter the number of a task." / "Blocker: #<n> is in the trash. Restore it first." / "Blocker: There is no task #<n>." (the same words as an unknown number: a number can't be probed). Nothing is added; the box keeps the focus under its message. |
+| 7 | Open `/todo/<B_ONE>/` and add `<B_MAIN>` (the other way round: `Block main` is already blocked by `Block one`). | "Blocker: #<B_MAIN> is already blocked by #<B_ONE>, directly or through other tasks." Nothing is added. |
+| 8 | A loop through other tasks: add tasks `Loop a`, `Loop b`, `Loop c`; on `Loop b` add `Loop c` as a blocker, on `Loop a` add `Loop b`; then on `Loop c` add `Loop a`. A diamond is fine: on a new `Loop d` add both `Loop a` and `Loop b` (two paths to the same task). | The last add on `Loop c` is refused with "Blocker: #<A> is already blocked by #<C>, directly or through other tasks." The diamond is accepted. A subtask is an ordinary task here: on `/todo/<B_SUB>/` add its parent `<B_TWO>` as a blocker (works), then on `/todo/<B_TWO>/` try to add `<B_SUB>` (the cycle message). |
+| 9 | Add the same blocker twice. | Nothing changes (no error, no duplicate). |
+| 10 | On a task with 20 blockers (add 20 tasks as blockers of `Block cap`, quick add makes this fast: `Block cap` with Blocked by `<n1>, <n2>, ...`) try a 21st. | "Blocker: A task can have at most 20 blockers." In quick add (TODO-50) more than 20 numbers is refused with "Blocked by: A task can have at most 20 blockers." |
+| 11 | Click the x of one blocker. | The row disappears, the panel re-renders; if it was the last **open** blocker and the task was Blocked the chip reads "To do" again, with **no** notification in the bell. A task you had set to **On hold** by hand keeps On hold when its blockers go. |
+| 12 | Set `Block main` (Blocked) to **In progress** from the chip menu; the menu lists To do, In progress and On hold only (no Blocked, none ticked while blocked). Then add one more open blocker. | After the choice the chip reads "In progress" and the links stay; adding the open blocker makes it **Blocked** again. |
+| 13 | Move `Block main` to the trash and open its page; open the page of one of its blockers. | A trashed task's lists are read-only: no box, no Remove buttons. The blocker's page lists `Block main` under **Blocks** with an "In the trash" marker, struck through. Restore it: the box is back. |
+| 14 | As `qa.broke@example.com` request `/todo/<B_MAIN>/blockers/` (POST) and `/todo/<B_MAIN>/blockers/open/`. | 404 for both. |
+
+### TODO-50 Blockers: quick add, rows and Today
+
+**Purpose:** the quick-add box takes blockers, a Blocked task is muted everywhere, and the Today setting's section is
+named after both states (issue #273).
+**Preconditions:** TODO-49 done; Today is `<today>`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In the quick-add box look at the fields after **State**. | A **Blocked by** text box ("e.g. 1200, 1201"); the State select still lists only To do, In progress, On hold. |
+| 2 | Add `Quick blocked` with Blocked by `<B_ONE>, #<B_TWO>`. | Added; its row shows the **Blocked** chip (tooltip "Blocked by #<B_ONE> Block one, #<B_TWO> Block two"), a grey dimmed title (not struck), and its page lists both blockers. Choosing State "In progress" together with open blockers still gives Blocked. |
+| 3 | Add `Bad blocked` with Blocked by `abc`, then with `999999`. | 422 in the quick-add message line: "Blocked by: Enter task numbers, like 1200, 1201." / "Blocked by: There is no task #999999."; nothing is created and no credit is spent. |
+| 4 | Add `Closed blocker ok` with Blocked by a task you completed earlier. | The task is created **To do** (a closed blocker only links). |
+| 5 | Give `Quick blocked` yesterday's date and open **Today** (Settings: "Today, dimmed"). | It is dimmed at the bottom of Overdue with a grey date, no "(overdue)"; "Reschedule overdue to today" does not move it. |
+| 6 | **Settings > On hold and blocked tasks on Today**: choose **On hold & blocked section**, Save, open Today. | A collapsed section "On hold & blocked (N)" at the bottom of Today lists the Blocked (and On hold) overdue tasks; the sidebar count leaves them out. Restore "Today, dimmed". |
+| 7 | Hover and read the Blocked chip of a row whose blocker is closed afterwards (TODO-51), at 375 px wide and in dark mode. | The chip and the dimmed row are readable (grey text on the card, contrast 4.5:1), no horizontal scroll. |
+
+### TODO-51 Blockers: closing the blocker frees the task, and the notices
+
+**Purpose:** when the last open blocker ends (closed with either resolution, trashed, deleted), a Blocked task goes
+back to To do and the owner is told in-app; a task set by hand keeps its state but is still told (issue #273).
+**Preconditions:** TODO-49 done: `Block main` Blocked by `Block one` and `Block two`; the bell is empty (dismiss).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Complete `Block one` (its circle). | `Block main` is still Blocked (one open blocker left) and nothing is added to the bell. |
+| 2 | Close `Block two` as **won't do** (task page). | `Block main`'s chip reads **To do**. The bell has one new notification `#<B_MAIN> Block main is no longer blocked` (body "Everything that was blocking it is closed."); clicking it opens `/todo/<B_MAIN>/`. Its **Blocked by** list still shows both blockers with "Done" and "Won't do" markers, struck through (the links are kept). |
+| 3 | Add `Block three` as an open blocker of `Block main`, set `Block main` to **On hold** from its chip, then complete `Block three`. | `Block main` is still **On hold**; the bell has a notification for it again (the previous one was replaced, not piled up: still one `... is no longer blocked` entry). |
+| 4 | Make `Block four` a blocker of `Block main` (it is Blocked) and move `Block four` to the **trash**. | `Block main` goes back to To do and is told. Restore `Block four`: `Block main` stays To do (a restored blocker does not block again), and the bell gets `#<B_FOUR> was reopened and blocks #<B_MAIN>`. |
+| 5 | Trash `Block main`; complete the (open) blocker `Block four` meanwhile; restore `Block main`. | While trashed it was corrected to To do silently (no notification); after the restore it is To do with no notice. |
+| 6 | Delete a blocker forever: trash `Block five` (an open blocker of Blocked `Block six`) and then in the Trash **Delete forever**. | `Block six` went to To do when `Block five` was trashed, and the delete says nothing more (one notice only). |
+| 7 | A parent with an open subtask that blocks another task: `Block sub` blocks `Block main`; close `Block two` (its parent) with "Close them as Done". | `Block sub` is closed with it and `Block main` is freed and told. With "Leave them open" it stays Blocked. |
+| 8 | A repeating task: `Block repeat` (every day) blocks `Block main`; complete it. | `Block main` is freed; the next occurrence of `Block repeat` blocks nothing and has no blockers (its page has no **Blocked by** entries). |
+| 9 | With a phone reminder (TODO-40's curl answer) complete a blocker through the push action. | The same unblocking happens (the notice appears in the bell). |
+
+### TODO-52 Blockers: a blocker coming back, and reopening a task
+
+**Purpose:** a reopened or restored blocker only tells what it blocks; reopening a task decides Blocked or To do from
+its blockers (issue #273).
+**Preconditions:** TODO-51 done; the bell is empty.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `Block main` (open, To do) has the closed blocker `Block one`. Reopen `Block one`. | `Block main` stays To do. The bell: `#<B_ONE> was reopened and blocks #<B_MAIN>` (body names both and says `Block main` keeps its state). Reopening again replaces the notice. |
+| 2 | Complete `Block main`, then reopen `Block one` again. | No notice for the completed `Block main` (only open tasks are told). |
+| 3 | `Block main` is closed and has the **open** blocker `Block one`. Reopen `Block main`. | It comes back **Blocked** (an open blocker). Close `Block one` first and reopen `Block main`: it comes back **To do**. A trashed blocker does not count. |
+| 4 | Restore a task from the trash that blocks an open task. | That task gets the "was reopened and blocks" notice and keeps its state. Restoring a closed task from the trash does not notify. |
+
+### TODO-53 Blockers: closing a task that still has open blockers
+
+**Purpose:** closing with open blockers asks first and names them; the links stay (issue #273).
+**Preconditions:** TODO-49 done: `Block main` is Blocked by `Block one` and `Block two`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On **All**, click the circle of `Block main`. | The close dialog opens (not the old instant close): "Complete task", and an amber box "2 open tasks are still blocking it:" listing `#<B_ONE> Block one` and `#<B_TWO> Block two` (loaded as the dialog opens) and "Closing it keeps the links.". Cancel and Escape close it and return the focus to the circle; nothing changes. |
+| 2 | Click the circle again and **Complete**. | `Block main` closes as Done and leaves the list; open its page: **Blocked by** still lists both. |
+| 3 | Reopen it (back to Blocked, TODO-52 step 3) and on its page click **Complete**, then **Close as won't do**. | The same box in both dialogs (the won't-do one also has the note box); confirming closes it. A task with open subtasks **and** blockers shows both questions. |
+| 4 | Remove the dialog's protection by hand: in the console `fetch('/todo/<B_MAIN>/complete/', {method: 'POST', headers: {'X-CSRFToken': ..., 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded'}, body: 'ctx=page'})` for a Blocked task. | 422 "This task is still blocked by #<B_ONE> Block one, #<B_TWO> Block two. Confirm to close it anyway."; nothing closes. With `confirm_blockers=1` added it closes. |
+| 5 | A task whose only blocker is closed or trashed: click its circle. | It closes at once, no question. |
+| 6 | The phone's **Complete** button (TODO-40) on a task with open blockers. | It completes without asking (links kept). |
+
+### TODO-54 Blockers: search, saved filters and the admin
+
+**Purpose:** Blocked is a searchable state, and the links are visible to staff (issue #273).
+**Preconditions:** TODO-49 done (at least one Blocked task and one On hold task); a staff session (`qa.admin`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/todo/search/`: the **State** group now lists To do, In progress, **Blocked**, On hold. Tick **Blocked**. | Only Blocked tasks; the address bar has `states=blocked`. Tick **On hold** too: both. The rows show the chip with the blockers' tooltip. |
+| 2 | **Save as filter** `Stuck`. | Summary `state blocked, on hold` (also `state blocked` alone). The sidebar count is the open tasks of the filter. |
+| 3 | **Due date > Overdue** with a Blocked task dated yesterday. | It is not listed (muted tasks are never overdue). |
+| 4 | As `qa.admin`: `/admin/todo/taskblocker/`. | A read-only list "Blocker", "Blocked", "User", "Created at", searchable by title and number; there is no Add button and a row cannot be deleted. |
+| 5 | Open `Block main` at `/admin/todo/task/`. | Two read-only inlines: **Blocked by** (its blockers) and **Blocks**. |
+
+### TODO-55 Blockers: nothing changed for the API
+
+**Purpose:** the JWT API looks as it did, while the rules above apply to what it does (issue #273).
+**Preconditions:** TODO-49 done; a JWT for `qa.user@example.com` (`POST /api/auth/login`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/todo/tasks/<B_MAIN>` for a Blocked task. | The same keys as before (no `state`, no blocker fields). `PATCH` with `{"state": "blocked"}` or `{"blocked_by": [1000]}`, and `POST /api/todo/tasks` with `blocked_by`: 422 (unknown key). |
+| 2 | `POST /api/todo/tasks/<B_ONE>/complete`. | 200 as before; `Block main` is freed in the website (chip To do, the notice in the bell). `POST .../uncomplete` on a task with an open blocker puts it Blocked on the website. |
+| 3 | `GET /api/todo/tasks?view=all&date_range=overdue` with a Blocked overdue task. | It is not listed (muted tasks are not overdue for the API either). |
+| 4 | `POST /api/todo/tasks/<B_MAIN>/complete` for a task with open blockers. | Closes without any question (the API never asks); the links are kept on the website. |
 
 ---
 

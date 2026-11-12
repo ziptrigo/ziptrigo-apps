@@ -1,5 +1,6 @@
 from .account import MutedOverdue, TodoAccount
 from .attachment import Attachment
+from .blocker import TaskBlocker
 from .comment import Comment, CommentRevision
 from .inbox import (
     InboundEmail,
@@ -20,7 +21,15 @@ from .reminder import (
 )
 from .saved_filter import SavedFilter
 from .settings import TodoSettings
-from .task import MUTED_STATES, Priority, Resolution, Task, TaskSource, TaskState
+from .task import (
+    MUTED_STATES,
+    SELECTABLE_STATES,
+    Priority,
+    Resolution,
+    Task,
+    TaskSource,
+    TaskState,
+)
 
 __all__ = [
     'Comment',
@@ -40,12 +49,14 @@ __all__ = [
     'Recurrence',
     'RecurrenceMode',
     'Resolution',
+    'SELECTABLE_STATES',
     'Reminder',
     'ReminderChannel',
     'ReminderDelivery',
     'SavedFilter',
     'SnoozeChoice',
     'Task',
+    'TaskBlocker',
     'TaskReference',
     'TaskSource',
     'TaskState',

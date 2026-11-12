@@ -29,6 +29,11 @@
         {% for option in state_options %}<option value="{{ option.value }}"{% if option.value == 'todo' %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
     </select>
 </div>
+<div>
+    <label for="blocked-by-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Blocked by</label>
+    <input id="blocked-by-{{ uid }}" name="blocked_by" type="text" maxlength="200" autocomplete="off" placeholder="e.g. 1200, 1201"
+           class="w-36 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
+</div>
 {% endif %}
 <div class="relative" x-data="{ open: false }" @click.outside="open = false"
      @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">

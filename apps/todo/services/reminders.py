@@ -35,9 +35,9 @@ A completed or trashed task keeps its reminders, but the job skips them (leaving
 does it for an inactive user: restoring or uncompleting a task whose time is still ahead (or within
 the window) makes them live again; the sweep marks the older ones sent.
 
-**Held while muted** (issue #272). A task in a muted state (`MUTED_STATES`: On hold) is skipped by
+**Held while muted** (issues #272, #273). A task in a muted state (`MUTED_STATES`: On hold, Blocked) is skipped by
 `deliver_due` and left alone by `sweep_stale`, so its reminders stay unsent however long it stays
-muted. When it leaves the state (`release_held`, called by `tasks.set_state`) **one** reminder is
+muted. When it leaves the state (`release_held`, called by `task_state.write_state`: `tasks.set_state` and the blockers' automatic changes) **one** reminder is
 sent for the task, on the channels the held reminders used between them (each once: in-app, with
 its push, and/or email), the history recording that one delivery; every held reminder is marked sent
 (the delivered one as such, the others skipped). Held reminders of a task that is closed (closing resets the state) or trashed follow the
