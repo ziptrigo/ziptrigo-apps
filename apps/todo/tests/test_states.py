@@ -49,7 +49,7 @@ from ..services import (
     uncomplete_task,
 )
 from ..services.accounts import set_muted_overdue
-from .api_support import auth, get, post  # noqa: F401 -- `auth` is a fixture
+from .api_support import auth, get, patch, post  # noqa: F401 -- `auth` is a fixture
 from .factories import make_task, utc
 from .test_api_tasks import TASK_KEYS
 from .test_push_reminders import configured, phone, webpush  # noqa: F401 -- fixtures
@@ -292,6 +292,36 @@ class TestClose:
 
         assert not Comment.objects.exists()
 
+    def test_a_note_is_kept_when_the_task_was_closed_meanwhile(self, funded_user):
+        task = create_task(funded_user, title='T')
+        stale = reload(task)
+        complete_task(task)  # another tab got there first
+
+        closed = close_task(stale, Resolution.WONT_DO, note='Because')
+
+        assert Comment.objects.get(task=task).body == 'Because'
+        assert closed.already_closed
+        assert reload(task).resolution == 'done'  # the winner's resolution stands
+
+    def test_a_lost_race_to_the_trash_still_refuses(self, funded_user):
+        task = create_task(funded_user, title='T')
+        stale = reload(task)
+        trash_task(task)
+
+        with pytest.raises(ValidationError, match='Restore the task'):
+            close_task(stale, Resolution.WONT_DO, note='Because')
+        assert not Comment.objects.exists()
+
+    def test_set_resolution_refuses_a_task_trashed_meanwhile(self, funded_user):
+        task = create_task(funded_user, title='T')
+        complete_task(task)
+        stale = reload(task)
+        trash_task(task)
+
+        with pytest.raises(ValidationError, match='Restore the task'):
+            set_resolution(stale, Resolution.WONT_DO)
+        assert reload(task).resolution == 'done'
+
     def test_a_too_long_note_is_refused_before_anything_is_written(self, funded_user):
         task = create_task(funded_user, title='T')
 
@@ -300,7 +330,7 @@ class TestClose:
 
         assert reload(task).completed_at is None and not Comment.objects.exists()
 
-    def test_closing_a_closed_task_changes_nothing(self, funded_user):
+    def test_closing_a_closed_task_changes_nothing_but_keeps_the_note(self, funded_user):
         task = create_task(funded_user, title='T')
         close_task(task, Resolution.DONE)
         closed_at = reload(task).completed_at
@@ -309,7 +339,7 @@ class TestClose:
 
         task = reload(task)
         assert task.resolution == 'done' and task.completed_at == closed_at
-        assert not Comment.objects.exists()
+        assert Comment.objects.get(task=task).body == 'late'  # the typed note is not lost
 
     def test_a_trashed_task_cannot_be_closed(self, funded_user):
         task = create_task(funded_user, title='T')
@@ -404,7 +434,7 @@ class TestMutedOverdue:
         body = text(web.get(reverse('todo:today')))
 
         assert body.index('Late todo') < body.index('Late hold') < body.index('Today todo')
-        assert 'On hold &amp; blocked' not in body and 'On hold & blocked' not in body
+        assert 'On hold (' not in body
         assert 'id="overdue-title"' in body
 
     def test_the_badge_of_a_muted_task_is_not_red_or_overdue(self, web, funded_user, wednesday):
@@ -436,7 +466,7 @@ class TestMutedOverdue:
         body = text(web.get(reverse('todo:today')))
 
         assert 'Late hold' not in body and 'Late todo' in body
-        assert 'On hold & blocked' not in body
+        assert 'On hold (' not in body
 
     def test_own_section(self, web, funded_user, wednesday):
         self.make(funded_user, wednesday)
@@ -444,11 +474,9 @@ class TestMutedOverdue:
 
         body = text(web.get(reverse('todo:today')))
 
-        assert 'On hold & blocked (1)' in body
+        assert 'On hold (1)' in body
         assert '<details' in body and '<details open' not in body  # collapsed
-        assert (
-            body.index('Today todo') < body.index('On hold & blocked (1)') < body.index('Late hold')
-        )
+        assert body.index('Today todo') < body.index('On hold (1)') < body.index('Late hold')
 
     def test_a_muted_task_due_today_stays_in_the_today_list_in_every_setting(
         self, web, funded_user, wednesday
@@ -590,6 +618,23 @@ class TestHeldReminders:
         reminder = Reminder.objects.get(task=task)
         assert reminder.sent_at is None and not reminder.skipped
 
+    def test_the_task_page_promises_a_reminder_only_when_one_is_held(
+        self, web, funded_user, wednesday, freeze_now
+    ):
+        task = self.hold(funded_user)  # its reminder (14:26) is still ahead of 12:00
+        url = reverse('todo:task', args=[task.number])
+
+        early = text(web.get(url))
+
+        assert 'id="muted-note"' in early and 'its reminders wait.' in early
+        assert 'one reminder for what you missed' not in early
+
+        freeze_now(2026, 10, 28, 15, 0)  # the reminder's time has passed while it is on hold
+
+        late = text(web.get(url))
+
+        assert 'one reminder for what you missed' in late
+
     def test_leaving_the_state_sends_one_reminder(
         self, funded_user, wednesday, freeze_now, django_capture_on_commit_callbacks
     ):
@@ -604,7 +649,21 @@ class TestHeldReminders:
         assert ReminderDelivery.objects.filter(task=task).count() == 1
         held = Reminder.objects.filter(task=task)
         assert held.count() == 2
-        assert all(r.sent_at is not None and r.skipped for r in held)
+        assert all(r.sent_at is not None for r in held)
+        # the earliest stands for the rest: it was delivered, the other was folded into it
+        assert [r.skipped for r in held.order_by('fire_at')] == [False, True]
+
+    def test_the_released_reminder_shows_sent_on_the_task_page(
+        self, web, funded_user, wednesday, freeze_now, django_capture_on_commit_callbacks
+    ):
+        task = self.hold(funded_user)
+        freeze_now(2026, 10, 28, 15, 0)
+        with django_capture_on_commit_callbacks(execute=True):
+            set_state(task, 'todo')
+
+        body = text(web.get(reverse('todo:task', args=[task.number])))
+
+        assert 'Sent' in body and 'Skipped' not in body
 
     def test_the_union_of_the_channels_each_once(
         self, funded_user, wednesday, freeze_now, sent, django_capture_on_commit_callbacks
@@ -668,7 +727,8 @@ class TestHeldReminders:
 
         ahead = Reminder.objects.get(task=task, minutes_before=0)
         assert ahead.sent_at is None and not ahead.skipped
-        assert Reminder.objects.get(task=task, minutes_before=5).skipped
+        released = Reminder.objects.get(task=task, minutes_before=5)
+        assert released.sent_at is not None and not released.skipped
 
     def test_nothing_held_nothing_sent(self, funded_user, wednesday, freeze_now):
         task = self.hold(funded_user)  # 14:26 is still ahead of 12:00
@@ -1008,6 +1068,40 @@ class TestCloseEndpoints:
         assert self.post(web, 'todo:wont-do', first, ctx='page').status_code == 200
         assert self.post(web, 'todo:wont-do', second, ctx='page').status_code == 429
 
+    def test_a_note_also_spends_the_comment_budget(
+        self, web, funded_user, settings, ratelimit_clock
+    ):
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {
+            **settings.RATELIMIT_RULES,
+            'TODO_EDIT_USER': (2, 60),
+            'TODO_COMMENT_USER': (1, 60),
+        }
+        first = create_task(funded_user, title='A')
+        second = create_task(funded_user, title='B')
+
+        assert self.post(web, 'todo:wont-do', first, note='why', ctx='page').status_code == 200
+        refused = self.post(web, 'todo:wont-do', second, note='why', ctx='page')
+
+        assert refused.status_code == 429 and reload(second).completed_at is None
+        # the refusal spent nothing: without a note the second close still has an edit left
+        assert self.post(web, 'todo:wont-do', second, ctx='page').status_code == 200
+
+    def test_losing_a_race_says_so_and_keeps_the_note(self, web, funded_user, monkeypatch):
+        task = create_task(funded_user, title='T')
+        stale = reload(task)
+        complete_task(task)
+        monkeypatch.setattr('apps.todo.views.tasks.owned_task', lambda *a, **k: stale)
+
+        response = web.post(
+            reverse('todo:wont-do', args=[task.number]), {'ctx': 'page', 'note': 'Because'}
+        )
+
+        assert response.status_code == 302
+        assert Comment.objects.get(task=task).body == 'Because'
+        page = text(web.get(response['Location']))
+        assert 'This task was already closed.' in page
+
     def test_the_task_page_of_a_closed_task(self, web, funded_user):
         done = create_task(funded_user, title='Done one')
         complete_task(done)
@@ -1157,13 +1251,13 @@ class TestSettingsPage:
         )
 
         assert response.status_code == 422
-        assert 'Choose Today (dimmed), Hidden from Today or Own section.' in text(response)
+        assert 'Choose Today (dimmed), Hidden from Today or On hold section.' in text(response)
         assert get_account(funded_user).muted_overdue == 'dimmed'
 
     def test_the_page_lists_the_three_choices(self, web):
         body = text(web.get(reverse('todo:settings')))
 
-        for label in ('Today, dimmed', 'Hidden from Today', 'Own section'):
+        for label in ('Today, dimmed', 'Hidden from Today', 'On hold section'):
             assert label in body
 
 
@@ -1414,7 +1508,44 @@ class TestTheApiIsUnchanged:
 
         assert body['id'] == str(saved.pk)
         assert set(body['params']) == set(FilterParams().to_dict())
-        assert body['summary'] == 'state on hold · "x" · including won\'t do'
+        assert body['summary'] == '"x" · including completed'  # never the new criteria
+
+    def test_patching_params_through_the_api_keeps_the_states_and_resolution(
+        self, client, auth, funded_user
+    ):
+        saved = save_filter(
+            funded_user,
+            'Paused',
+            FilterParams(q='x', states=('on_hold',), include_completed=True, resolution='wont_do'),
+        )
+
+        response = patch(
+            client,
+            f'/filters/{saved.pk}',
+            auth,
+            {'params': {'q': 'y', 'include_completed': True}},
+        )
+
+        assert response.status_code == 200
+        assert response.json()['params']['q'] == 'y'
+        stored = FilterParams.from_dict(SavedFilter.objects.get(pk=saved.pk).params)
+        assert stored.q == 'y'
+        assert stored.states == ('on_hold',) and stored.resolution == 'wont_do'
+
+    def test_renaming_through_the_api_keeps_the_states_and_resolution(
+        self, client, auth, funded_user
+    ):
+        saved = save_filter(
+            funded_user,
+            'Paused',
+            FilterParams(states=('on_hold',), include_completed=True, resolution='wont_do'),
+        )
+
+        response = patch(client, f'/filters/{saved.pk}', auth, {'name': 'Renamed'})
+
+        assert response.status_code == 200
+        stored = FilterParams.from_dict(SavedFilter.objects.get(pk=saved.pk).params)
+        assert stored.states == ('on_hold',) and stored.resolution == 'wont_do'
 
     def test_the_summary_keeps_its_old_wording(self, client, auth, funded_user):
         save_filter(funded_user, 'Everything', FilterParams(q='x', include_completed=True))

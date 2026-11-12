@@ -679,6 +679,14 @@ def close_task(
         ).update(completed_at=now, resolution=resolution, state=TaskState.TODO, updated_at=now)
         if not won:
             task.refresh_from_db()
+            if task.is_trashed:
+                raise _error(NON_FIELD_ERRORS, 'Restore the task before completing it.')
+            if note and task.is_completed:
+                # Lost a race with another close: the task is closed as someone else chose, but
+                # what the user typed is not thrown away.
+                comments.add_comment(task, task.user, note)
+            # A transient flag for the caller (the view tells the user); never stored.
+            task.already_closed = True
             return task
         recurrence_service.on_completed(task)
         if subtasks != SUBTASKS_LEAVE:
@@ -706,10 +714,12 @@ def set_resolution(task: Task, resolution: str) -> Task:
     if task.is_trashed:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     now = timezone.now()
-    changed = Task.objects.filter(pk=task.pk, completed_at__isnull=False).update(
-        resolution=resolution, updated_at=now
-    )
+    changed = Task.objects.filter(
+        pk=task.pk, completed_at__isnull=False, deleted_at__isnull=True
+    ).update(resolution=resolution, updated_at=now)
     if not changed:
+        if Task.objects.filter(pk=task.pk, deleted_at__isnull=False).exists():
+            raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
         raise _error(NON_FIELD_ERRORS, NOT_CLOSED_MESSAGE)
     task.resolution = resolution
     task.updated_at = now

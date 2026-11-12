@@ -52,10 +52,10 @@
         </div>
     </section>
     {% if muted_section %}
-    {% comment %}The account's "Own section" choice: overdue tasks that are On hold, collapsed at the bottom of Today.{% endcomment %}
+    {% comment %}The account's "On hold section" choice: overdue tasks that are On hold, collapsed at the bottom of Today.{% endcomment %}
     <details class="mt-8 group" data-vanish-when-empty>
         <summary class="btn mb-2 inline-flex cursor-pointer list-none items-center gap-2 rounded-md text-lg font-semibold text-gray-600 dark:text-gray-300">
-            <i class="fas fa-chevron-right text-xs transition-transform group-open:rotate-90" aria-hidden="true"></i>On hold &amp; blocked ({{ muted_section|length }})
+            <i class="fas fa-chevron-right text-xs transition-transform group-open:rotate-90" aria-hidden="true"></i>On hold ({{ muted_section|length }})
         </summary>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
             <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>

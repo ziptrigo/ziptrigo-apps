@@ -24,7 +24,7 @@ There is no "Waiting" state and On hold has no "until" date.
 - Shown dimmed, never shown as overdue (no red badge), never moved by "Reschedule overdue to today".
 - Where a muted overdue task appears on Today is a **To-do setting**: "Today, dimmed" (default, at
   the bottom of Overdue), "Hidden from Today", or "Own section" (a collapsed "On hold & blocked (N)"
-  section at the bottom).
+  section at the bottom; until #273 adds Blocked it reads "On hold (N)").
 - **Reminders are held**: a reminder whose time passes while the task is muted is not delivered.
   When the task becomes To do or In progress again, **one** reminder is sent for the task, on the
   channels the held reminders used (each channel once: in-app, email and/or push); the held

@@ -19,7 +19,7 @@ class MutedOverdue(models.TextChoices):
 
     DIMMED = 'dimmed', 'Today, dimmed'
     HIDDEN = 'hidden', 'Hidden from Today'
-    SECTION = 'section', 'Own section'
+    SECTION = 'section', 'On hold section'
 
 
 class TodoAccount(models.Model):

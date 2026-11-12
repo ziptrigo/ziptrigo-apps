@@ -224,6 +224,10 @@ class Task(models.Model):
     def is_open(self) -> bool:
         return self.completed_at is None and self.deleted_at is None
 
+    #: Set (never stored) by `services.close_task` on an instance whose close lost a race with another
+    #: one, so the caller can say the task was already closed.
+    already_closed: bool = False
+
     @property
     def is_completed(self) -> bool:
         return self.completed_at is not None

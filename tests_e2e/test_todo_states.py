@@ -55,10 +55,16 @@ def _titles(page: Page) -> list[str]:
 
 
 def test_the_state_chip_moves_the_row_to_its_group(page: Page, receipts_server: ReceiptsServer):
+    # The first page after a sign-in saves the browser's time zone, which decides what "today" is
+    # (the seed uses the account's): let that settle before seeding, or the tasks can land on the
+    # wrong day around midnight UTC.
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/')
+    page.wait_for_load_state('networkidle')
     receipts_server.shell(SEED_TODAY)
     try:
-        receipts_server.login(page)
         page.goto(f'{receipts_server.url}/todo/')
+        expect(page.locator('#task-list li.task-row', has_text='St held')).to_be_visible()
         assert _titles(page) == ['St doing', 'St plain a', 'St plain b', 'St held']
 
         row = page.locator('#task-list li.task-row', has_text='St plain b').first
@@ -83,6 +89,49 @@ def test_the_state_chip_moves_the_row_to_its_group(page: Page, receipts_server: 
         page.keyboard.press('Escape')
         expect(row.get_by_role('menu')).to_be_hidden()
         expect(chip).to_be_focused()
+    finally:
+        receipts_server.shell(CLEANUP)
+
+
+def test_the_state_menu_works_from_the_keyboard(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.shell(SEED_TODAY)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/todo/')
+        row = page.locator('#task-list li.task-row', has_text='St plain b').first
+        chip = row.get_by_role('button', name=re.compile('State of St plain b'))
+        menu = row.get_by_role('menu')
+        todo = menu.get_by_role('menuitemradio', name='To do')
+        doing = menu.get_by_role('menuitemradio', name='In progress')
+        hold = menu.get_by_role('menuitemradio', name='On hold')
+
+        # Opening focuses the checked item; the arrows move (wrapping), Home and End jump.
+        chip.focus()
+        page.keyboard.press('ArrowDown')
+        expect(menu).to_be_visible()
+        expect(todo).to_be_focused()
+        page.keyboard.press('ArrowDown')
+        expect(doing).to_be_focused()
+        page.keyboard.press('ArrowDown')
+        expect(hold).to_be_focused()
+        page.keyboard.press('ArrowDown')
+        expect(todo).to_be_focused()
+        page.keyboard.press('ArrowUp')
+        expect(hold).to_be_focused()
+        page.keyboard.press('Home')
+        expect(todo).to_be_focused()
+        page.keyboard.press('End')
+        expect(hold).to_be_focused()
+
+        # Escape closes it and returns the focus to the chip; Enter on an item chooses it.
+        page.keyboard.press('Escape')
+        expect(menu).to_be_hidden()
+        expect(chip).to_be_focused()
+        page.keyboard.press('Enter')
+        expect(todo).to_be_focused()
+        page.keyboard.press('ArrowDown')
+        page.keyboard.press('Enter')
+        expect(page.locator('#task-list li.task-row[data-group="in_progress"]')).to_have_count(2)
     finally:
         receipts_server.shell(CLEANUP)
 

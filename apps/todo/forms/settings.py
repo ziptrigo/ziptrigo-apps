@@ -57,7 +57,7 @@ class SettingsForm(forms.Form):
         required=False,
         choices=MutedOverdue.choices,
         error_messages={
-            'invalid_choice': 'Choose Today (dimmed), Hidden from Today or Own section.'
+            'invalid_choice': 'Choose Today (dimmed), Hidden from Today or On hold section.'
         },
     )
 

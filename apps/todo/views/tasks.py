@@ -23,6 +23,7 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today
 from apps.billing.services import InsufficientCreditsError
+from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
 
 from ..forms import (
@@ -122,6 +123,7 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
     return {
         'reminders': reminders.task_reminders(task),
         'reminder_history': reminders.task_history(task),
+        'has_held_reminders': task.is_muted and reminders.has_held(task),
         'reminder_presets': REMINDER_PRESETS,
         'reminder_units': REMINDER_UNITS,
         'reminder_channels': ReminderChannel.choices,
@@ -389,11 +391,20 @@ def _act(
     trashed: bool | None = False,
     task: Task | None = None,
     refresh_comments: bool = False,
+    also_limit: str | None = None,
 ):
     """Look up the task (unless the caller already has it), charge the edit budget, run
-    `action(task)` and answer (`refresh_comments`: see `panel_response`)."""
+    `action(task)` and answer (`refresh_comments`: see `panel_response`). `also_limit` names a
+    second rule the action spends (a note that becomes a comment spends `TODO_COMMENT_USER`): both
+    are peeked first, so a refusal spends neither, then both are charged."""
     if task is None:
         task = owned_task(request, number, trashed=trashed)
+    if also_limit:
+        for rule in ('TODO_EDIT_USER', also_limit):
+            result = ratelimit.peek(str(request.user.pk), rule)
+            if not result.allowed:
+                return ratelimit.web_response(request, result, retarget=_slot(request))
+        ratelimit.hit_user(request.user, also_limit)
     if (response := limited(request, 'TODO_EDIT_USER', retarget=_slot(request))) is not None:
         return response
     try:
@@ -429,13 +440,22 @@ def _close(
     (The task page re-renders its whole panel anyway.) A note becomes a comment, so the page's
     comments are refreshed."""
     cascaded = [] if subtasks == SUBTASKS_LEAVE else _open_subtask_numbers(request, task.number)
+    already_closed: list[bool] = []
+
+    def action(found: Task) -> None:
+        closed = close_task(found, resolution, subtasks=subtasks, note=note)
+        already_closed.append(closed.already_closed)
+
     response = _act(
         request,
         task.number,
-        lambda found: close_task(found, resolution, subtasks=subtasks, note=note),
+        action,
         task=task,
         refresh_comments=bool(note.strip()),
+        also_limit='TODO_COMMENT_USER' if note.strip() else None,
     )
+    if already_closed and already_closed[0]:
+        messages.info(request, 'This task was already closed.')
     if response.status_code == 200 and is_htmx(request):
         if cascaded and not _is_page(request):
             response.content += _rows_removed(cascaded)

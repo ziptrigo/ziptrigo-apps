@@ -167,7 +167,7 @@ def set_muted_overdue(account: TodoAccount, value: str) -> TodoAccount:
     """Choose where an overdue task that is On hold shows on Today (`MutedOverdue`)."""
     if value not in MutedOverdue.values:
         raise ValidationError(
-            {'muted_overdue': 'Choose Today (dimmed), Hidden from Today or Own section.'}
+            {'muted_overdue': 'Choose Today (dimmed), Hidden from Today or On hold section.'}
         )
     account.muted_overdue = value
     account.save(update_fields=['muted_overdue'])

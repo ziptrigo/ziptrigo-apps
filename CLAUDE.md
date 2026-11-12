@@ -4124,11 +4124,13 @@ API/CLI/Android change (#275) are not here.
   `leave`; `SUBTASK_ACTIONS`; nothing said is `done`, which is what the circle, the push notification's
   Complete button and `POST /api/todo/tasks/{n}/complete` do, so where nobody can be asked Done closes
   them as Done) and, for a non-empty `note`, `comments.add_comment` (its rules; the length is checked
-  up front by `clean_note`, so a refusal writes nothing, and the note is dropped when the task was
-  already closed). A closed task is left as it is. `complete_task(task, *, subtasks='done')` is
+  up front by `clean_note`, so a refusal writes nothing). A task already closed (another tab won the
+  conditional `UPDATE`) is left as it is, **but a typed note is still added as a comment** and the
+  returned task carries a transient `already_closed` flag, which the view turns into the flash "This
+  task was already closed."; a task trashed meanwhile is refused as before. `complete_task(task, *, subtasks='done')` is
   `close_task(task, DONE, ...)`. `set_resolution(task, resolution)` changes how a *closed* task was closed
-  ("Only a closed task has a resolution to change." for an open one): no occurrence, no subtasks touched,
-  `completed_at` kept. `uncomplete_task` clears the resolution and sets To do. `set_state(task, state)`
+  ("Only a closed task has a resolution to change." for an open one; the conditional `UPDATE` also requires the task out of the Trash, else "Restore the
+  task before changing it."): no occurrence, no subtasks touched, `completed_at` kept. `uncomplete_task` clears the resolution and sets To do. `set_state(task, state)`
   is for an open, non-trashed task (a closed one: "Reopen the task before changing its state."; an
   unknown state: "Choose To do, In progress or On hold."), under the row lock, a no-op for the same state;
   parent and subtask states are independent (nothing propagates). A task due today that changes state
@@ -4140,8 +4142,9 @@ API/CLI/Android change (#275) are not here.
   (`dates.overdue_set` leaves them out; `dates.muted_overdue_set` is the other half). **Where a muted
   *overdue* task shows on Today is `TodoAccount.muted_overdue`** (settings page, "On hold tasks on Today";
   `set_muted_overdue`): `dimmed` (the bottom of Overdue, after the movable ones, which the reschedule
-  button and its question count alone), `hidden` (not on Today), `section` (a collapsed `<details>`
-  "On hold & blocked (N)" at the bottom of Today, the spec's wording, with #273 in mind). A muted task due
+  button and its question count alone), `hidden` (not on Today), `section` (an "On hold section":
+  a collapsed `<details>` "On hold (N)" at the bottom of Today; the spec's "On hold & blocked (N)"
+  comes with #273, which adds Blocked). A muted task due
   *today* stays in Today's list in its group whatever the setting. `dates.today_count(user, account)`
   (the number beside Today; replaces `today_set(...).count()` in the views) leaves muted overdue tasks
   out unless they are shown dimmed. The search "overdue" date range leaves them out too.
@@ -4151,7 +4154,8 @@ API/CLI/Android change (#275) are not here.
   **one** reminder for the task, on the union of the channels the held (unsent, already due) reminders
   used (`in_app`, `email` or `both`; in-app brings its push), delivered through `_deliver` with a channel
   override as a delivery of the earliest held one (email dedupes on a fresh `fire_token`), and **every**
-  held reminder marked sent and `skipped`; reminders still ahead stay armed. A delivery that raises is
+  held reminder marked sent -- the one delivered (the earliest) as a normal "Sent", the others
+  `skipped` ("Skipped" on the task page: folded into it); reminders still ahead stay armed. A delivery that raises is
   rolled back in its own savepoint and logged: the state change stands and the reminders stay unsent for
   the job. A task that is *closed* (closing resets the state) or *trashed* while muted follows the
   ordinary rules (the job skips it, the sweep ends the old reminders). Nothing is released by closing.
@@ -4168,12 +4172,20 @@ API/CLI/Android change (#275) are not here.
   On hold, with `todo_ui._STATE_STYLE`) and its Alpine menu (`role="menu"`, `menuitemradio`), on every
   open row and on the task page; it posts `todo:set-state` (`POST /todo/<n>/state/`, `StateForm`, a
   `ctx=row` answer is the row, or the whole list on Today and Upcoming; `ctx=page` the panel; 422 for an
-  unknown state or a closed task; `TODO_EDIT_USER` charged after validation; 404 for another user's task).
+  unknown state or a closed task; `TODO_EDIT_USER` charged after validation; 404 for another user's task). The task page's muted note
+  ("This task is on hold: ... its reminders wait.") adds "Set it to To do or In progress to get one
+  reminder for what you missed." only when the task has a held reminder (`reminders.has_held`, one
+  query in `panel_context`, never per list row). **Keyboard**: the menu follows the `menu` pattern
+  (opening focuses the checked item; Up/Down move, wrapping, Home/End jump, Escape closes and returns
+  focus to the chip, Tab closes), in the template's Alpine, no new script.
   **Closing.** `POST /todo/<n>/complete/` takes an optional `subtasks`; `POST /todo/<n>/wont-do/`
   ("Close as won't do", **the task page only**: no row button, no push button) takes `note` and
   `subtasks`; `POST /todo/<n>/resolution/` (`resolution=done|wont_do`) is "Mark as done" / "Mark as won't
   do" on a closed task's page; `uncomplete` is "Reopen". All share `CloseForm` / `ResolutionForm` and
   `views.tasks._close`, charge `TODO_EDIT_USER`, and remove the closed subtasks' rows out of band.
+  **A Won't do note also spends `TODO_COMMENT_USER`** (it becomes a comment): `_act(also_limit=...)`
+  peeks both rules first (over either: the usual 429, nothing spent), then charges both; a close with
+  no note spends the edit budget only.
   **The close dialog** (`partials/close_dialog.html`, `static/todo/js/close_dialog.js`, one per page in the
   layout; opened by `todoOpenCloseDialog(button)` reading `data-url`, `data-mode`, `data-ctx`, `data-title`,
   `data-count`) replaced the `confirmModal` question for a parent with open subtasks (the row circle and
@@ -4199,13 +4211,18 @@ API/CLI/Android change (#275) are not here.
   form of everything else did not change; `describe_params` says `state in progress, on hold` and
   `including closed` / `including won't do`. **The API is untouched by them**: `FilterParamsSchema`
   stays closed to the new keys, a saved filter's `params` in the API leaves them out
-  (`FilterParams.to_legacy_dict()`), its `summary` keeps the old wording (`describe_params(...,
-  closed_wording=False)` says "including completed") and running one (`GET /filters/{id}/tasks`) honours
+  (`FilterParams.to_legacy_dict()`), its `summary` describes only those legacy params (never states or the resolution; `closed_wording=False`
+  says "including completed"), `PATCH /filters/{id}` carrying new `params` **keeps the states and
+  resolution the filter was saved with** on the website (the API can't express them, so it must not
+  clear them; website updates replace them as before) and running one (`GET /filters/{id}/tasks`) honours
   its states as saved. `docs/openapi.yml` did not change.
 - **The API behaves as before** (the hard constraint of this issue): a Won't do task is reported as
   completed (it has `completed_at`), `view=completed` and `include_completed` list both resolutions,
   `POST .../complete` is Done (open subtasks closed as Done), `uncomplete` reopens (To do), no field was
-  added (a test pins `TASK_KEYS`) and `view=today` is still `today_set` / `order_today`. #275 changes it.
+  added (a test pins `TASK_KEYS`) and `view=today` is still `today_set` / `order_today`, so it still
+  lists an On hold task. **A muted (On hold) task is not overdue** for the API either, per the spec:
+  `date_range=overdue` leaves it out, and `POST /tasks/reschedule-overdue` neither moves it nor counts
+  it. #275 changes the API.
 - **Admin.** `TaskAdmin` lists and filters `state` and `resolution`; the "completed" filter is titled
   "closed".
 - **Tests.** `apps/todo/tests/test_states.py` (model and migration function, every service rule, held

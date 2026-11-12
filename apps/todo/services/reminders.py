@@ -40,7 +40,7 @@ the window) makes them live again; the sweep marks the older ones sent.
 muted. When it leaves the state (`release_held`, called by `tasks.set_state`) **one** reminder is
 sent for the task, on the channels the held reminders used between them (each once: in-app, with
 its push, and/or email), the history recording that one delivery; every held reminder is marked sent
-and skipped. Held reminders of a task that is closed (closing resets the state) or trashed follow the
+(the delivered one as such, the others skipped). Held reminders of a task that is closed (closing resets the state) or trashed follow the
 ordinary rules above: the job skips them and the sweep ends the old ones.
 
 **Push.** An in-app reminder (channel `in_app` or `both`) is also pushed to the owner's devices
@@ -806,11 +806,21 @@ def deliver_due(now: datetime | None = None) -> int:
             return delivered
 
 
+def has_held(task: Task, now: datetime | None = None) -> bool:
+    """Whether the task has reminders waiting for it to leave a muted state (unsent and already
+    due): what the task page's note about "one reminder for what you missed" depends on. One query,
+    for the page only (a list row doesn't ask)."""
+    return Reminder.objects.filter(
+        task=task, sent_at__isnull=True, fire_at__lte=now or timezone.now()
+    ).exists()
+
+
 def release_held(task: Task, now: datetime | None = None) -> int:
     """Send the reminders a muted task held, now that it is To do or In progress again: **one**
     reminder for the task, on the union of the channels the held reminders used (each channel once:
     in-app with its push, and email), recorded as a delivery of the earliest held one. Every held
-    reminder -- the unsent ones whose time has passed -- is marked sent and skipped. `task` has its
+    reminder -- the unsent ones whose time has passed -- is marked sent, and skipped except the one that
+    was delivered. `task` has its
     user loaded and is no longer muted; call it in the transaction that changed the state. A
     delivery that raises is rolled back (its own savepoint) and logged: the state change stands and
     the reminders stay unsent, for the job to deliver or sweep as it would any other. Returns how
@@ -838,10 +848,14 @@ def release_held(task: Task, now: datetime | None = None) -> int:
         fire_token = uuid4()
         try:
             with transaction.atomic():
-                Reminder.objects.filter(pk__in=[r.pk for r in held], sent_at__isnull=True).update(
-                    sent_at=now, skipped=True, snoozed_until=None
+                # The one that stands for the rest was delivered (it shows "Sent"); the others
+                # were folded into it and show "Skipped".
+                Reminder.objects.filter(
+                    pk__in=[r.pk for r in held if r.pk != representative.pk], sent_at__isnull=True
+                ).update(sent_at=now, skipped=True, snoozed_until=None)
+                Reminder.objects.filter(pk=representative.pk).update(
+                    sent_at=now, skipped=False, snoozed_until=None, fire_token=fire_token
                 )
-                Reminder.objects.filter(pk=representative.pk).update(fire_token=fire_token)
                 representative.task = task
                 representative.fire_token = fire_token
                 _deliver(representative, now, fire_token, channel)

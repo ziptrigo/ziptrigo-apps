@@ -55,7 +55,7 @@ class Migration(migrations.Migration):
                 choices=[
                     ('dimmed', 'Today, dimmed'),
                     ('hidden', 'Hidden from Today'),
-                    ('section', 'Own section'),
+                    ('section', 'On hold section'),
                 ],
                 db_default='dimmed',
                 default='dimmed',
