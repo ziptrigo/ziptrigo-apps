@@ -6,6 +6,8 @@ from datetime import date, time
 from typing import Any
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from ..models import InboxCode, SavedFilter, TodoAccount
 from ..services import complete_task, create_task, get_account, save_filter
@@ -25,7 +27,7 @@ from .factories import make_label
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
-FILTER_KEYS = {'id', 'name', 'position', 'params', 'summary', 'created_at'}
+FILTER_KEYS = {'id', 'name', 'position', 'params', 'summary', 'created_at', 'dropped_labels'}
 
 
 def numbers(response) -> list[int]:
@@ -63,6 +65,45 @@ class TestFilters:
         )
         assert 'next 7 days' in body['summary'] and '@Home' in body['summary']
         assert get(client, '/filters', auth).json() == [body]
+
+    def test_dropped_labels_counts_deleted_labels_until_params_are_updated(
+        self, client, auth, funded_user
+    ):
+        keep, gone = make_label(funded_user, 'Keep'), make_label(funded_user, 'Gone')
+        created = post(
+            client,
+            '/filters',
+            auth,
+            {'name': 'Labels', 'params': {'labels': [str(keep.pk), str(gone.pk)]}},
+        ).json()
+        assert created['dropped_labels'] == 0
+        gone.delete()
+
+        listed = get(client, '/filters', auth).json()[0]
+        assert listed['dropped_labels'] == 1 and listed['params']['labels'] == [str(keep.pk)]
+        renamed = patch(client, f'/filters/{created["id"]}', auth, {'name': 'Renamed'}).json()
+        assert renamed['dropped_labels'] == 1
+
+        updated = patch(
+            client, f'/filters/{created["id"]}', auth, {'params': {'labels': [str(keep.pk)]}}
+        ).json()
+        assert updated['dropped_labels'] == 0
+        assert get(client, '/filters', auth).json()[0]['dropped_labels'] == 0
+
+    def test_listing_filters_costs_the_same_queries_whatever_their_number(
+        self, client, auth, funded_user, django_assert_num_queries
+    ):
+        label = make_label(funded_user, 'L')
+        save_filter(funded_user, 'one', FilterParams(labels=(str(label.pk),)))
+        counted = CaptureQueriesContext(connection)
+        with counted:
+            assert len(get(client, '/filters', auth).json()) == 1
+        for i in range(4):
+            save_filter(funded_user, f'more {i}', FilterParams(labels=(str(label.pk),)))
+        label.delete()
+        with django_assert_num_queries(len(counted)):
+            body = get(client, '/filters', auth).json()
+        assert len(body) == 5 and all(row['dropped_labels'] == 1 for row in body)
 
     def test_the_params_default_to_everything(self, client, auth):
         body = post(client, '/filters', auth, {'name': 'All open'}).json()
