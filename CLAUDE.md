@@ -5586,9 +5586,13 @@ search box there is nothing yet (no dead buttons).
   editing.`) when `base_version != note.version`, else writes, bumps `version`, sets `updated_at` and records
   a version. `Editor(kind, user, link)` (`versions.py`; `Editor.for_user(note, user)`: `owner` for the
   note's owner, `user` for another signed-in user, `anonymous` otherwise). **`versions.record`**: when the
-  newest version has the same editor kind and editor and its `updated_at` is within `VERSION_COALESCE`, it is
-  **overwritten in place**; otherwise a row is inserted with the next number and the oldest rows beyond
-  `max_versions_per_note` are deleted. A burst of saves or ticked boxes therefore doesn't use up the cap,
+  newest version has the same editor kind and editor, its `updated_at` is within `VERSION_COALESCE` **and
+  it still holds exactly the title and content the note had right before this save** (`before=`; without
+  it nothing coalesces), it is **overwritten in place**; otherwise a row is inserted with the next number
+  and the oldest rows beyond `max_versions_per_note` are deleted. **"Save mine anyway"** posts `overwrite=1`
+  and the view passes `coalesce=False`, so the text it overwrote (tab A's, for the owner in two tabs) stays
+  in the history. **Known follow-up (PR 4):** coalescing must also compare `link_id` once `NoteVersion.link`
+  exists (a `# PR 4:` comment in `versions.record`), or two anonymous editors on different links would merge. A burst of saves or ticked boxes therefore doesn't use up the cap,
   while the state before another person's session always survives. `NoteVersion.number` counts inserted
   rows, so it is not `Note.version` (which counts every save). `toggle_checklist(note, index, checked, *,
   editor, link=None)` toggles on the content as it is now under the row lock (no `base_version`: two boxes
@@ -5607,7 +5611,11 @@ search box there is nothing yet (no dead buttons).
   `purge_trash()` (notes trashed more than `trash_days` ago, batches of 200, per-row `try/except` +
   `logger.exception`, re-checked under the lock so a note restored meanwhile stays),
   `reorder(user, ids)` (of the ids that are the user's non-trashed notes, take their current positions, sort
-  them and hand them out in the order sent; ties are made strictly increasing; other ids are ignored).
+  them and hand them out in the order sent; other ids are ignored; if the listed notes share a position,
+  all the user's notes are renumbered 0, 1, 2... first, in their current order, so nothing lands on a
+  position a note outside the request holds). The manual order is `position, -created_at, pk`. Tag writes
+  (`create_tag`, `update_tag`, `delete_tag`) take the `NotesAccount` lock first, like `set_tags`, so the cap
+  can't be passed twice and a tag can't vanish between a note write's lookup and its link.
 - **Pages and URLs** (`urls.py`, `views/`; every view `@login_required`, another user's note, tag or version
   is a **404**, never a 403): `notes:list` `/notes/`, `archived`, `trash`, `list-partial` `/notes/list/` (the
   htmx partial; `HX-Push-Url` is the page URL, a direct GET redirects), `new`, `note` `/notes/<uuid>/`,
@@ -5662,7 +5670,7 @@ search box there is nothing yet (no dead buttons).
   `Duplicate for N credits`, `Restore for N credits`); a post without the confirmed amount is refused with a
   flash (`Duplicating this note costs N credits. Confirm it from the Duplicate button to continue.`,
   `Restoring this note costs ...`), and a cost that changed in between says `... now costs N credits...`.
-  The row of the Trash list and the note page quote the restore cost (`quote_restore`) in the dialog.
+  The row of the Trash list and the note page quote the restore cost (`quote_restore`; the Trash list loads the settings and the free-slot count once and uses `restore_cost_for(note, config, slot_open)` per row, so it makes no query per row) in the dialog.
 - **The conflict panel.** `NoteConflictError` is a 422 that re-renders the editor over itself
   (`HX-Retarget: #editor-form`, `HX-Reswap: outerHTML`) with the person's own text kept in the textarea, a
   read-only block **Current version** (with the title when it differs) and **Copy current version**, and two
@@ -5677,7 +5685,9 @@ search box there is nothing yet (no dead buttons).
   `#tag-msg`, drag to reorder, inline edit with `notesCancelEdit`, delete through the confirmation modal:
   `Deleted the tag X. Its notes keep their other tags.`), independent of To-do's labels.
 - **Rate limits** (`RATELIMIT_RULES`, validated first and charged after, so a refused form spends
-  nothing): `NOTES_CREATE_USER` (60/min: creating, duplicating, and restoring when it costs credits),
+  nothing -- including the checklist tick, the tag popover, archive/unarchive and reorder, which run
+  lock-free pre-checks `check_toggle`, `check_tags`, `require_writable` and the `ids[]` parse before
+  `hit_user`; the service decides again under the lock): `NOTES_CREATE_USER` (60/min: creating, duplicating, and restoring when it costs credits),
   `NOTES_EDIT_USER` (240/min: every other change, tags page writes and reorder included),
   `NOTES_PREVIEW_USER` (120/min; 204 over it).
 - **Admin** (`admin.py`): the settings singleton (superusers), and read-only `NoteAdmin` (search title and

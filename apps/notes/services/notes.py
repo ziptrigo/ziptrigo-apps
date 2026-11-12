@@ -18,7 +18,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.billing.services import spend_credits
-from apps.core.markdown import toggle_checklist_item
+from apps.core.markdown import count_checklist_items, toggle_checklist_item
 
 from ..limits import CONTENT_MAX, TITLE_MAX
 from ..models import Note, NotesSettings, NoteVersion, Tag
@@ -79,6 +79,26 @@ def require_writable(note: Note) -> None:
         raise _error(NON_FIELD_ERRORS, IN_TRASH_MESSAGE)
     if note.is_locked:
         raise _error(NON_FIELD_ERRORS, LOCKED_MESSAGE)
+
+
+def check_tags(note: Note, tag_ids: Iterable[UUID | str]) -> None:
+    """The refusals `set_tags` would make for the note's state and the tag ids, without locking or
+    writing anything: the web checks them before it charges the rate limit. (`set_tags` decides
+    again under the lock.)"""
+    require_writable(note)
+    _own_tags(note.user, tag_ids)
+
+
+def check_toggle(note: Note, index: int) -> None:
+    """The refusals `toggle_checklist` would make (read-only note, no such item), without locking
+    or writing anything."""
+    require_writable(note)
+    try:
+        count = count_checklist_items(note.content, profile='extended')
+    except ValueError:
+        count = 0
+    if not 0 <= index < count:
+        raise _error('index', 'That checklist item no longer exists.')
 
 
 def _locked_note(note: Note) -> Note:
@@ -218,7 +238,8 @@ def save_note(
     link editors. `base_version` is the `Note.version` the editor opened; a different stored one is
     a `NoteConflictError` (nothing written). Nothing changed is not a save: the note is returned
     as it is. Returns the saved note (re-read under the lock). `coalesce=False` always records a new
-    version (see `versions.record`).
+    version (see `versions.record`); the web passes it for "Save mine anyway", so the text it
+    overwrote stays in the history.
 
     Raises:
         ValidationError: the note is read-only, or a field is invalid.
@@ -243,12 +264,13 @@ def save_note(
                 current_title=locked.title,
                 current_content=locked.content,
             )
+        before = (locked.title, locked.content)
         locked.title = next_title
         locked.content = next_content
         locked.version += 1
         locked.updated_at = timezone.now()
         locked.save(update_fields=['title', 'content', 'version', 'updated_at'])
-        versions.record(locked, editor, coalesce=coalesce)
+        versions.record(locked, editor, coalesce=coalesce, before=before)
     return locked
 
 
@@ -271,11 +293,12 @@ def toggle_checklist(
             raise _error('index', 'That checklist item no longer exists.') from None
         if content == locked.content:
             return locked
+        before = (locked.title, locked.content)
         locked.content = content
         locked.version += 1
         locked.updated_at = timezone.now()
         locked.save(update_fields=['content', 'version', 'updated_at'])
-        versions.record(locked, editor)
+        versions.record(locked, editor, before=before)
     return locked
 
 
@@ -343,13 +366,18 @@ def trash(note: Note) -> Note:
     return locked
 
 
-def _restore_plan(note: Note, config: NotesSettings) -> tuple[int, bool, bool]:
+def _restore_plan(
+    note: Note, config: NotesSettings, slot_open: bool | None = None
+) -> tuple[int, bool, bool]:
     """`(cost, becomes_paid, renews)` of restoring `note` now: a free note with no free slot open
     becomes paid and costs the creation price; a paid note whose renewal date has passed is renewed
-    for the renewal price; else it costs nothing."""
+    for the renewal price; else it costs nothing. `slot_open` (whether the owner has a free slot
+    open) is looked up when not given; a list of many notes passes it once."""
     now = timezone.now()
     if note.is_free:
-        if _slot_open(note.user, config):
+        if slot_open is None:
+            slot_open = _slot_open(note.user, config)
+        if slot_open:
             return 0, False, False
         return config.creation_price, True, False
     if note.paid_through is not None and note.paid_through <= now:
@@ -360,6 +388,17 @@ def _restore_plan(note: Note, config: NotesSettings) -> tuple[int, bool, bool]:
 def quote_restore(note: Note) -> int:
     """What restoring the trashed `note` would cost now (see `_restore_plan`)."""
     return _restore_plan(note, NotesSettings.load())[0]
+
+
+def free_slot_open(user: User, config: NotesSettings) -> bool:
+    """Whether the user has a free slot open (one query)."""
+    return _slot_open(user, config)
+
+
+def restore_cost_for(note: Note, config: NotesSettings, slot_open: bool) -> int:
+    """What restoring the trashed `note` costs, given the settings and whether its owner has a free
+    slot open (`free_slot_open`): `quote_restore` without its queries, for a list of notes."""
+    return _restore_plan(note, config, slot_open)[0]
 
 
 def restore(note: Note, expected_cost: int | None = None) -> Note:
@@ -447,24 +486,44 @@ def purge_trash() -> int:
 # -- Manual order --------------------------------------------------------------------------------
 
 
+def _renumber(user: User) -> None:
+    """Give all the user's notes (the Trash's too: a restored note keeps its place) the distinct
+    positions 0, 1, 2, ... in their current manual order. Called inside the lock when notes share a
+    position, which would make a dragged order impossible to write."""
+    notes = list(Note.objects.filter(user=user).order_by('position', '-created_at', 'pk'))
+    changed = []
+    for index, note in enumerate(notes):
+        if note.position != index:
+            note.position = index
+            changed.append(note)
+    Note.objects.bulk_update(changed, ['position'], batch_size=500)
+
+
 def reorder(user: User, ids: Sequence[UUID]) -> int:
     """Put the user's notes with these ids in the order given: of the ids that are the user's
-    non-trashed notes, take their current positions, sort them and hand them out in the order sent.
-    Other ids are ignored (the notes not listed keep their places). Returns how many were
+    non-trashed notes, take their current positions, sort them and hand them out in the order sent
+    (so they never move onto a position a note outside the request holds). Other ids are ignored
+    (the notes not listed keep their places). If the listed notes share a position, all the user's
+    notes are renumbered first (same order, distinct positions). Returns how many were
     positioned."""
     wanted = list(dict.fromkeys(ids))
     get_account(user)
     with transaction.atomic():
         lock_account(user.pk)
-        own = {
-            note.pk: note
-            for note in Note.objects.filter(user=user, pk__in=wanted, deleted_at__isnull=True)
-        }
-        ordered = [own[pk] for pk in wanted if pk in own]
+
+        def load() -> list[Note]:
+            own = {
+                note.pk: note
+                for note in Note.objects.filter(user=user, pk__in=wanted, deleted_at__isnull=True)
+            }
+            return [own[pk] for pk in wanted if pk in own]
+
+        ordered = load()
         positions = sorted(note.position for note in ordered)
-        # Equal positions would make the new order invisible: keep them strictly increasing.
-        for index in range(1, len(positions)):
-            positions[index] = max(positions[index], positions[index - 1] + 1)
+        if len(set(positions)) != len(positions):
+            _renumber(user)
+            ordered = load()
+            positions = sorted(note.position for note in ordered)
         changed = []
         for note, position in zip(ordered, positions, strict=True):
             if note.position != position:

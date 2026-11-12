@@ -40,12 +40,15 @@ from ..services import (
     NoteConflictError,
     archive,
     check_can_create,
+    check_tags,
+    check_toggle,
     create_note,
     delete_forever,
     duplicate,
     quote_create,
     quote_restore,
     reorder,
+    require_writable,
     restore,
     save_note,
     set_tags,
@@ -308,6 +311,8 @@ def note_edit(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
             title=form.cleaned_data['title'],
             content=form.cleaned_data['content'],
             base_version=base_version,
+            # "Save mine anyway" overwrites someone's newer text: that text stays in the history.
+            coalesce=request.POST.get('overwrite') != '1',
         )
     except NoteConflictError as exc:
         return _conflict_response(request, note, exc, values)
@@ -340,6 +345,10 @@ def note_checklist(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResp
     form = ChecklistForm(request.POST)
     if not form.is_valid():
         return refuse(request, form_error_lines(form), retarget=NOTE_MSG, fallback=note_url(note))
+    try:  # validated first, charged after: a refused request spends no budget
+        check_toggle(note, form.cleaned_data['index'])
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), retarget=NOTE_MSG, fallback=note_url(note))
     if (response := limited(request, 'NOTES_EDIT_USER', retarget=NOTE_MSG)) is not None:
         return response
     try:
@@ -363,10 +372,15 @@ def note_checklist(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResp
 def note_tags(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
     """Replace the note's tags with the ticked ones; answers the re-rendered tag chips."""
     note = owned_note(request, note_id, trashed=False)
+    tag_ids = request.POST.getlist('tags')
+    try:  # validated first, charged after: a refused request spends no budget
+        check_tags(note, tag_ids)
+    except ValidationError as exc:
+        return refuse(request, validation_lines(exc), retarget=NOTE_MSG, fallback=note_url(note))
     if (response := limited(request, 'NOTES_EDIT_USER', retarget=NOTE_MSG)) is not None:
         return response
     try:
-        note = set_tags(note, request.POST.getlist('tags'))
+        note = set_tags(note, tag_ids)
     except ValidationError as exc:
         return refuse(request, validation_lines(exc), retarget=NOTE_MSG, fallback=note_url(note))
     if not is_htmx(request):
@@ -377,10 +391,25 @@ def note_tags(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
 # -- Actions ---------------------------------------------------------------------------------------
 
 
-def _act(request: AuthenticatedHttpRequest, note_id: UUID, action, done: str, *, trashed=False):
-    """Look the note up, charge the edit budget, run `action(note)` and flash `done` (a refusal is
-    flashed instead). Redirects back to where the request came from."""
+def _act(
+    request: AuthenticatedHttpRequest,
+    note_id: UUID,
+    action,
+    done: str,
+    *,
+    trashed=False,
+    check=None,
+):
+    """Look the note up, run the lock-free `check(note)` (if any), charge the edit budget, run
+    `action(note)` and flash `done` (a refusal is flashed instead, and a request refused by the
+    check spends no budget). Redirects back to where the request came from."""
     note = owned_note(request, note_id, trashed=trashed)
+    if check is not None:
+        try:
+            check(note)
+        except ValidationError as exc:
+            messages.error(request, ' '.join(exc.messages))
+            return redirect_back(request, note_url(note))
     if (response := limited(request, 'NOTES_EDIT_USER')) is not None:
         return response
     try:
@@ -395,13 +424,20 @@ def _act(request: AuthenticatedHttpRequest, note_id: UUID, action, done: str, *,
 @login_required
 @require_POST
 def note_archive(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
-    return _act(request, note_id, archive, 'Note archived.', trashed=False)
+    return _act(request, note_id, archive, 'Note archived.', trashed=False, check=require_writable)
 
 
 @login_required
 @require_POST
 def note_unarchive(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResponse:
-    return _act(request, note_id, unarchive, 'Note moved back to your notes.', trashed=False)
+    return _act(
+        request,
+        note_id,
+        unarchive,
+        'Note moved back to your notes.',
+        trashed=False,
+        check=require_writable,
+    )
 
 
 @login_required
@@ -507,8 +543,6 @@ def note_duplicate(request: AuthenticatedHttpRequest, note_id: UUID) -> HttpResp
 def note_reorder(request: AuthenticatedHttpRequest) -> HttpResponse:
     """Write the manual order SortableJS posts (`ids[]`). Answers 204; nothing on the page
     changes."""
-    if (response := limited(request, 'NOTES_EDIT_USER', retarget='#notes-msg')) is not None:
-        return response
     ids: list[UUID] = []
     for raw in request.POST.getlist('ids[]'):
         try:
@@ -517,5 +551,7 @@ def note_reorder(request: AuthenticatedHttpRequest) -> HttpResponse:
             return refuse(request, 'Could not read the new order.')
     if len(ids) > MAX_REORDER_IDS:
         return refuse(request, 'Could not read the new order.')
+    if (response := limited(request, 'NOTES_EDIT_USER', retarget='#notes-msg')) is not None:
+        return response
     reorder(request.user, ids)
     return HttpResponse(status=204)

@@ -32,10 +32,11 @@ from ..services import (
     SORTS,
     active_notes,
     archived_notes,
+    free_slot_open,
     get_account,
     order_notes,
     quote_create,
-    quote_restore,
+    restore_cost_for,
     sort_direction,
     sort_for,
     trashed_notes,
@@ -148,12 +149,15 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     }
     if view == 'trash':
         now = timezone.now()
-        trash_days = NotesSettings.load().trash_days
+        # Settings and the free-slot count once for the whole page, not once per row.
+        config = NotesSettings.load()
+        trash_days = config.trash_days
+        slot_open = free_slot_open(user, config)
         for note in notes:
             assert note.deleted_at is not None  # filtered above
             purge_at = note.deleted_at + timedelta(days=trash_days)
             note.days_left = max(ceil((purge_at - now).total_seconds() / 86400), 0)
-            note.restore_cost = quote_restore(note)
+            note.restore_cost = restore_cost_for(note, config, slot_open)
         context['trash_days'] = trash_days
     tag_id = str(tag.pk) if tag is not None else ''
     # `dir` is only written when it is not the sort's own default, so the plain URLs stay as they were.

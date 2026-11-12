@@ -362,6 +362,18 @@ class TestReorder:
         ordered = list(Note.objects.filter(user=user).order_by('position'))
         assert [n.title for n in ordered] == ['c', 'a', 'b']
 
+    def test_ties_are_renumbered_without_landing_on_a_note_outside_the_request(self, user, config):
+        a = make_note(user, title='a', position=0)
+        b = make_note(user, title='b', position=0)
+        outside = make_note(user, title='outside', position=1)
+        reorder(user, [b.pk, a.pk])
+        positions = [n.position for n in Note.objects.filter(user=user)]
+        assert len(set(positions)) == len(positions)
+        ordered = Note.objects.filter(user=user).order_by('position')
+        listed = [n.title for n in ordered if n.pk != outside.pk]
+        assert listed == ['b', 'a']
+        assert Note.objects.get(pk=outside.pk).position > min(positions)
+
     def test_a_partial_list_permutes_among_itself(self, user, config):
         a = create_note(user, title='A')
         create_note(user, title='B')

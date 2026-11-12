@@ -156,6 +156,22 @@ class TestLists:
         text = content(web.get(url('trash')))
         assert 'data-cost="3"' in text and 'Restore for 3 credits' in text
 
+    def test_the_trash_page_needs_no_queries_per_row(self, web, user, config):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def trash_queries() -> int:
+            with CaptureQueriesContext(connection) as captured:
+                assert web.get(url('trash')).status_code == 200
+            return len(captured)
+
+        make_note(user, title='One', deleted_at=timezone.now())
+        web.get(url('trash'))  # the account, sessions and the like exist now
+        few = trash_queries()
+        for number in range(19):
+            make_note(user, title=f'More {number}', deleted_at=timezone.now(), is_free=number % 2)
+        assert trash_queries() == few
+
     def test_empty_states(self, web):
         assert 'No notes yet' in content(web.get(url('list')))
         assert 'Nothing archived' in content(web.get(url('archived')))
@@ -505,13 +521,14 @@ class TestConflictPanel:
         assert 'Save mine anyway' in text and 'Discard my changes' in text
         # The form now carries the current version, so "Save mine anyway" is a plain re-post.
         assert 'name="base_version" value="2"' in text
+        assert 'name="overwrite" value="1"' in text
         assert Note.objects.get(pk=note.pk).content == 'theirs'
 
     def test_save_mine_anyway_wins(self, web, user):
         note, _ = self._conflict(web, user)
         response = web.post(
             url('edit', note.pk),
-            {'title': 'Shared', 'content': 'my version', 'base_version': '2'},
+            {'title': 'Shared', 'content': 'my version', 'base_version': '2', 'overwrite': '1'},
             **HTMX,
         )
         assert response.status_code == 200 and 'HX-Redirect' in response
@@ -871,6 +888,35 @@ class TestRateLimits:
         web.post(url('archive', note.pk))
         web.post(url('unarchive', note.pk))
         assert web.post(url('archive', note.pk)).status_code == 429
+
+    def test_a_refused_checklist_tick_spends_nothing(self, web, user):
+        note = create_note(user, title='A', content='- [ ] one\n')
+        for _ in range(5):
+            bad = web.post(url('checklist', note.pk), {'index': 9, 'checked': 'true'}, **HTMX)
+            assert bad.status_code == 422
+        ok = web.post(url('checklist', note.pk), {'index': 0, 'checked': 'true'}, **HTMX)
+        assert ok.status_code == 200
+
+    def test_a_refused_tag_change_spends_nothing(self, web, user, other_user):
+        theirs = make_tag(other_user, 'Theirs')
+        note = create_note(user, title='A')
+        for _ in range(5):
+            bad = web.post(url('tags-set', note.pk), {'tags': [str(theirs.pk)]}, **HTMX)
+            assert bad.status_code == 422
+        assert web.post(url('tags-set', note.pk), {}, **HTMX).status_code == 200
+
+    def test_a_refused_archive_spends_nothing(self, web, user):
+        locked = make_note(user, title='L', locked_at=timezone.now(), is_free=False)
+        for _ in range(5):
+            assert web.post(url('archive', locked.pk)).status_code == 302
+        note = create_note(user, title='A')
+        assert web.post(url('archive', note.pk)).status_code == 302
+        assert Note.objects.get(pk=note.pk).archived_at is not None
+
+    def test_an_unreadable_reorder_spends_nothing(self, web, user):
+        for _ in range(5):
+            assert web.post(url('reorder'), {'ids[]': ['nope']}, **HTMX).status_code == 422
+        assert web.post(url('reorder'), {'ids[]': []}, **HTMX).status_code == 204
 
     def test_reorder_and_tags_are_limited(self, web, user):
         for _ in range(2):

@@ -122,3 +122,23 @@ def test_tags_are_separate_from_todo_labels(user, config):
     create_label(user, 'Work')
     create_tag(user, 'Work')  # no clash: a different set
     assert Tag.objects.filter(user=user).count() == 1
+
+
+def test_tag_writes_take_the_account_lock_first(user, config, monkeypatch):
+    from ..services import accounts
+    from ..services import tags as tags_service
+
+    calls = []
+    real = accounts.lock_account
+    monkeypatch.setattr(tags_service, 'lock_account', lambda uid: (calls.append(uid), real(uid)))
+    tag = create_tag(user, 'One')
+    update_tag(tag, name='Two')
+    delete_tag(tag)
+    assert calls == [user.pk, user.pk, user.pk]
+
+
+def test_updating_a_tag_deleted_meanwhile_is_refused(user, config):
+    tag = create_tag(user, 'One')
+    type(tag).objects.filter(pk=tag.pk).delete()
+    with pytest.raises(ValidationError):
+        update_tag(tag, name='Two')

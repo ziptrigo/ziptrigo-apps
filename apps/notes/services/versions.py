@@ -29,7 +29,13 @@ class Editor:
         return cls(kind, user, link)
 
 
-def record(note: Note, editor: Editor, *, coalesce: bool = True) -> NoteVersion:
+def record(
+    note: Note,
+    editor: Editor,
+    *,
+    coalesce: bool = True,
+    before: tuple[str, str] | None = None,
+) -> NoteVersion:
     """Record the state `note` is in now (the caller has just saved it, at `note.version`) as a
     version made by `editor`.
 
@@ -38,13 +44,23 @@ def record(note: Note, editor: Editor, *, coalesce: bool = True) -> NoteVersion:
     or ticked boxes doesn't use up the cap, while the state before another person's editing
     session always survives. Otherwise a row is inserted with the next number and the oldest rows
     beyond `max_versions_per_note` are deleted. `coalesce=False` always inserts (a restore of an earlier
-    version must keep the state it replaced). Call inside the note's transaction."""
+    version, or "Save mine anyway" over someone's newer text, must keep the state it replaced).
+
+    `before` is the `(title, content)` the note held right before this write. A version is
+    overwritten **only if it still holds exactly that**: then nothing but this editor's own last
+    save is lost. If the newest row differs (the note changed some other way) the state it holds
+    must survive, so a row is inserted; without `before` nothing is coalesced. Call inside the
+    note's transaction."""
     now = timezone.now()
     editor_id = editor.user.pk if editor.user is not None else None
     newest = NoteVersion.objects.filter(note=note).order_by('-number').first()
+    # PR 4: once `NoteVersion.link` exists, coalescing must also require `newest.link_id` to equal
+    # the editor's link id, or two anonymous editors on different share links would merge into one.
     if (
         coalesce
+        and before is not None
         and newest is not None
+        and (newest.title, newest.content) == before
         and newest.editor_kind == editor.kind
         and newest.editor_id == editor_id
         and now - newest.updated_at <= VERSION_COALESCE

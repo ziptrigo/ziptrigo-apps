@@ -90,6 +90,51 @@ class TestCoalescing:
         assert note.versions.count() == 3
 
 
+class TestSaveMineAnyway:
+    def test_the_text_a_same_owner_tab_overwrote_stays_in_the_history(self, user, config):
+        note = create_note(user, title='A', content='base')
+        owner = Editor.for_user(note, user)
+        # Tab A saves (it coalesces into the owner's newest version) ...
+        save_note(note, editor=owner, content='tab A text', base_version=1)
+        # ... tab B, opened on version 1, is refused and then presses "Save mine anyway".
+        with pytest.raises(NoteConflictError) as exc:
+            save_note(note, editor=owner, content='tab B text', base_version=1)
+        save_note(
+            note,
+            editor=owner,
+            content='tab B text',
+            base_version=exc.value.current_version,
+            coalesce=False,
+        )
+        assert list(note.versions.order_by('number').values_list('number', 'content')) == [
+            (1, 'tab A text'),
+            (2, 'tab B text'),
+        ]
+
+    def test_the_view_does_not_coalesce_an_overwrite(self, user, config):
+        from django.test import Client
+        from django.urls import reverse
+
+        client = Client()
+        client.force_login(user)
+        note = create_note(user, title='A', content='base')
+        save_note(note, editor=Editor.for_user(note, user), content='tab A text', base_version=1)
+        post = {'title': 'A', 'content': 'tab B text', 'base_version': '2', 'overwrite': '1'}
+        client.post(reverse('notes:edit', args=[note.pk]), post, HTTP_HX_REQUEST='true')
+        contents = list(note.versions.order_by('number').values_list('content', flat=True))
+        assert contents == ['tab A text', 'tab B text']
+
+    def test_a_row_that_is_not_the_state_before_the_save_is_never_overwritten(self, user, config):
+        note = create_note(user, title='A', content='base')
+        # The note changed in a way the newest version doesn't hold.
+        type(note).objects.filter(pk=note.pk).update(content='changed elsewhere')
+        save(note, Editor.for_user(note, user), 'next')
+        assert list(note.versions.order_by('number').values_list('content', flat=True)) == [
+            'base',
+            'next',
+        ]
+
+
 class TestCap:
     def test_the_oldest_versions_beyond_the_cap_are_deleted(self, user, config):
         from ..models import NotesSettings

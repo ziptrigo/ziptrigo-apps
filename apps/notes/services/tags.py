@@ -12,10 +12,12 @@ from apps.accounts.models import User
 
 from ..limits import TAG_DESCRIPTION_MAX, TAG_NAME_MAX
 from ..models import DEFAULT_TAG_COLOR, NotesSettings, Tag
+from .accounts import get_account, lock_account
 
 _COLOR = re.compile(r'^#[0-9a-f]{6}$')
 DUPLICATE_MESSAGE = 'You already have a tag with this name.'
 TOO_MANY_MESSAGE = 'You have too many tags.'
+GONE_MESSAGE = 'This tag no longer exists.'
 
 
 def _error(field: str, message: str) -> ValidationError:
@@ -71,8 +73,12 @@ def create_tag(user: User, name: str, color: str = '', description: str = '') ->
     cleaned_name = clean_name(name)
     cleaned_color = clean_color(color)
     cleaned_description = clean_description(description)
-    cap = NotesSettings.load().max_tags_per_user
+    get_account(user)
     with transaction.atomic():
+        # The account lock first, like every write that counts or links tags: two creations can't
+        # both pass the cap, and a tag can't vanish between a note write's lookup and its link.
+        lock_account(user.pk)
+        cap = NotesSettings.load().max_tags_per_user
         existing = Tag.objects.filter(user=user)
         if existing.count() >= cap:
             raise _error('__all__', TOO_MANY_MESSAGE)
@@ -100,28 +106,39 @@ def update_tag(
 ) -> Tag:
     """Change what is given (`None` leaves a field as it is; an empty description clears it)."""
     fields = []
-    if name is not None:
-        tag.name = clean_name(name)
-        _check_unique(tag.user, tag.name, exclude=tag)
-        fields.append('name')
-    if color is not None:
-        tag.color = clean_color(color)
-        fields.append('color')
-    if description is not None:
-        tag.description = clean_description(description)
-        fields.append('description')
-    if fields:
-        try:
-            with transaction.atomic():
-                tag.save(update_fields=fields)
-        except IntegrityError:
-            raise _error('name', DUPLICATE_MESSAGE) from None
+    new_name = clean_name(name) if name is not None else None
+    new_color = clean_color(color) if color is not None else None
+    new_description = clean_description(description) if description is not None else None
+    get_account(tag.user)
+    with transaction.atomic():
+        lock_account(tag.user_id)
+        if not Tag.objects.filter(pk=tag.pk).exists():  # deleted meanwhile
+            raise _error('__all__', GONE_MESSAGE)
+        if new_name is not None:
+            _check_unique(tag.user, new_name, exclude=tag)
+            tag.name = new_name
+            fields.append('name')
+        if new_color is not None:
+            tag.color = new_color
+            fields.append('color')
+        if new_description is not None:
+            tag.description = new_description
+            fields.append('description')
+        if fields:
+            try:
+                with transaction.atomic():
+                    tag.save(update_fields=fields)
+            except IntegrityError:
+                raise _error('name', DUPLICATE_MESSAGE) from None
     return tag
 
 
 def delete_tag(tag: Tag) -> None:
     """Delete the tag; the notes that had it keep their other tags."""
-    tag.delete()
+    get_account(tag.user)
+    with transaction.atomic():
+        lock_account(tag.user_id)
+        tag.delete()
 
 
 def reorder_tags(user: User, ids: Sequence[UUID]) -> int:

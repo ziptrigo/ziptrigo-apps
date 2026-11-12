@@ -48,10 +48,10 @@ def sort_direction(sort: str, requested: str | None = None) -> str:
 
 
 def order_notes(queryset: QuerySet, sort: str, direction: str | None = None) -> QuerySet:
-    """`queryset` in `sort` order: `manual` (by position, then newest), `updated`, `created` or
+    """`queryset` in `sort` order: `manual` (by position, then newest, then id), `updated`, `created` or
     `title`. The opposite of a sort's default direction is its exact reverse, ties included."""
     if sort == 'manual':
-        ordered = queryset.order_by('position', '-created_at')
+        ordered = queryset.order_by('position', '-created_at', 'pk')
     elif sort == 'created':
         ordered = queryset.order_by('-created_at', 'pk')
     elif sort == 'title':
