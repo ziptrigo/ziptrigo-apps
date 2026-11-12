@@ -8,7 +8,7 @@ import unicodedata
 
 from .inline_text import inline_text
 from .limits import check_length
-from .parser import get_parser
+from .parser import check_profile, get_parser
 
 #: Block tokens that end a line of text (a paragraph, a list item); others only separate by a space.
 _LINE_ENDS = frozenset({'paragraph_close', 'list_item_close'})
@@ -23,8 +23,16 @@ _SEPARATORS = frozenset(
         'ordered_list_open',
         'ordered_list_close',
         'hr',
+        'table_open',
+        'table_close',
+        'thead_open',
+        'thead_close',
+        'tbody_open',
+        'tbody_close',
     }
 )
+#: Table cells are separated by a space and rows end in a newline (the `extended` profile).
+_CELL_ENDS = frozenset({'th_close', 'td_close'})
 
 
 class _Writer:
@@ -47,24 +55,29 @@ class _Writer:
         self.parts.append(text)
 
 
-def to_plain_text(markdown: str) -> str:
+def to_plain_text(markdown: str, *, profile: str = 'basic') -> str:
     """The text of `markdown` without its markup.
 
     Keeps the text of paragraphs, headings, code, link text (a bare URL is its own text), image alt
     text and `#1234` references; drops emphasis and heading marks, checklist boxes, link
     destinations and fence markers. Paragraphs and list items end in a newline, other blocks are
     separated by a single space. Raises `ValueError('Document too long')` over
-    `MAX_MARKDOWN_CHARS`, like `render`.
+    `MAX_MARKDOWN_CHARS`, like `render`. `profile='extended'` also reads tables.
     """
+    check_profile(profile)
     check_length(markdown)
     writer = _Writer()
-    for token in get_parser().parse(markdown):
+    for token in get_parser(profile).parse(markdown):
         if token.type == 'inline':
             writer.write(inline_text(token.children or []).strip())
         elif token.type in ('fence', 'code_block'):
             writer.separate(' ')
             writer.write(token.content.strip('\n'))
             writer.separate(' ')
+        elif token.type in _CELL_ENDS:
+            writer.separate(' ')
+        elif token.type == 'tr_close':
+            writer.separate('\n')
         elif token.type in _LINE_ENDS:
             writer.separate('\n')
         elif token.type in _SEPARATORS:
@@ -89,9 +102,9 @@ def normalize_for_search(text: str) -> str:
     return ' '.join(words.split())
 
 
-def search_text(markdown: str) -> str:
+def search_text(markdown: str, *, profile: str = 'basic') -> str:
     """What the TODO app stores for searching: `normalize_for_search(to_plain_text(markdown))`.
 
     Raises `ValueError('Document too long')` over `MAX_MARKDOWN_CHARS`.
     """
-    return normalize_for_search(to_plain_text(markdown))
+    return normalize_for_search(to_plain_text(markdown, profile=profile))

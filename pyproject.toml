@@ -39,6 +39,9 @@ dependencies = [
     'pillow-heif>=1.0,<2.0',
     'psycopg[binary]>=3.3,<4.0',
     'pydantic[email]>=2.12,<3.0',
+    # Syntax colouring of fenced code in the `extended` Markdown profile (`apps.core.markdown`,
+    # Notes, issue #260); `./manage.py build_highlight_css` writes the matching stylesheet.
+    'pygments>=2.19,<3.0',
     # PDF text extraction (`pypdf`) and page rendering for scanned PDFs (`pypdfium2`) for receipts.
     'pypdf>=6.20,<7.0',
     'pypdfium2>=5.0,<6.0',

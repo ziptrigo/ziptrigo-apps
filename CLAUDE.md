@@ -1412,6 +1412,35 @@ image labels), `limits.py` (the length guard), and the public `render.py`, `plai
   filter never raises**: a value over the limit (a `ValueError` from `render`) comes out
   unrendered, HTML-escaped with line breaks kept, in one `<p>` (and a warning with its length,
   never its content, is logged), so a page showing an over-long field is not a 500.
+- **Profiles** (issue #260). `render`, `to_plain_text`, `search_text`, `extract_references`,
+  `count_checklist_items` and `toggle_checklist_item` take `profile='basic'` (the default, everything
+  described here, which To-do keeps using) or `'extended'` (Notes): `basic` plus **tables** (`table`
+  rule; alignment is a class, `text-left|center|right`, never a `style`; wrapped in `<div
+  class="md-table">` for horizontal scroll) and **Pygments syntax colouring** of a fenced block whose
+  language tag is on an **allow-list** (`apps/core/markdown/highlight.py`, `HIGHLIGHT_LANGUAGES`: fence
+  tag -> Pygments alias, ~65 tags for python, ts/js/jsx/tsx, shells, json/yaml/toml/ini/xml/html/css/scss,
+  sql, the common compiled and scripting languages, dockerfile, makefile, nginx, diff, markdown, graphql,
+  hcl/terraform, text). Pygments' lexers are backtracking regexes with a history of ReDoS advisories and
+  the tag is the author's choice on pages anonymous visitors can reload, so a tag off the list, a real
+  Pygments language included (`brainfuck`), renders as `basic` does. Each lexer class is resolved once at
+  import (a test checks every alias; no `get_lexer_by_name` at render time), instantiated per call, with
+  one module-level `HtmlFormatter(nowrap=True, classprefix='hl-')`. Bounds: a fence over
+  `MAX_HIGHLIGHT_CHARS` (20,000) stays plain, and a document gets at most
+  `MAX_HIGHLIGHT_CHARS_PER_DOCUMENT` (40,000) characters of colouring in total (counted in the render
+  `env`; a fence that would pass it stays plain). Output is `<pre class="hl"><code
+  class="language-<tag>">` with `hl-`-prefixed spans; no tag, no allow-listed tag, the caps, a Pygments
+  error and indented blocks all render as `basic` does. An unknown profile is a `ValueError`.
+  `parser.get_parser(profile)` keeps one parser per thread **per profile**; the `extended` sanitiser
+  allow-list adds `table thead tbody tr th td span div` and `class` on `th td span div pre`; plain text
+  separates table cells by a space and ends rows in a newline. The stylesheet is generated:
+  `./manage.py build_highlight_css` writes `core/css/highlight.css` (Pygments `xcode` scoped to `pre.hl`,
+  `github-dark` to `.dark pre.hl`, plus the `.md-table` rules; loaded by `core/base.html` after
+  `site.css`) from `apps/core/markdown/highlight_css.py`. The block background is
+  `rgb(var(--c-gray-50))` / `rgb(var(--c-gray-900))` (follows the colour scheme and high contrast, no
+  hex), and the generator raises any token colour under 4.5:1 on the Sage gray-50 / gray-900 (a few dark
+  tokens; `xcode` needs none). `apps/core/tests/test_highlight_css.py` fails while the committed file
+  differs (re-run the command after a Pygments upgrade too) and asserts every emitted colour is >= 4.5:1.
+  `pygments` is a runtime dependency.
 - **Supported syntax, exactly:** paragraphs, `*italic*`/`_italic_`, `**bold**`/`__bold__`,
   `` `code` ``, fenced and indented code blocks, headings `#` to `######` (no `id`, no anchors),
   ordered and unordered (nested) lists, checklists, block quotes, horizontal rules, links, bare
@@ -5072,6 +5101,13 @@ shared in `core`.
 Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters.py`,
 `models/saved_filter.py`, `views/search.py`, `views/filters.py`, migration `0006_saved_filters`).
 
+- **Shared machinery** (issue #260): the model-agnostic parts of this section -- the query language
+  (`prepare_query`, `PreparedQuery`, `glob_to_regex`, `normalize_glob`, the unsupported-syntax check,
+  `lower_literals`, `to_postgres`), `search_guard`, `make_snippet`, `snippet_regex`, the limits and the
+  four messages -- live in `apps.core.search` (tests: `apps/core/tests/test_search.py`).
+  `apps/todo/services/search.py` imports and re-exports the same names, so nothing in To-do changed;
+  what names `Task`, `Comment` or `User` (the queryset, `attach_matches`, paging, `Narrowing`) stays
+  there. A test that patches the PostgreSQL branch patches `apps.core.search.connection`.
 - **What is searched.** Three stored, normalised copies (`apps.core.markdown.normalize_for_search`: NFKD,
   accents stripped, case folded, punctuation turned into spaces, formatting gone): `Task.title_text`,
   `Task.description_text` and `Comment.body_text` (empty for a deleted comment, rebuilt on an edit or a
@@ -5945,7 +5981,7 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
 ### GitHub issues
 
 Label every issue with the app(s) it applies to: `Users` (accounts), `Billing`, `Core`, `QR Code`,
-`File Transfer`, `Url` (short_url), `Todo`. Work that happens in the separate `infra` repository is tracked here under
+`File Transfer`, `Url` (short_url), `Todo`, `Notes` (notes). Work that happens in the separate `infra` repository is tracked here under
 `Infra`. An issue that touches several apps gets several labels.
 
 ### Adding an app

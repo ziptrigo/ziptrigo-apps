@@ -15,6 +15,8 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
+from apps.core import search as core_search
+
 from ..models import SavedFilter
 from ..services import (
     MAX_SAVED_FILTERS,
@@ -30,7 +32,6 @@ from ..services import (
     sidebar_filters,
     update_filter_params,
 )
-from ..services import search as search_module
 from ..services.saved_filters import (
     SIDEBAR_LIMIT,
     filter_counts,
@@ -348,7 +349,7 @@ class TestCounts:
         fake.vendor = 'postgresql'
         cursor = MagicMock()
         fake.cursor.return_value.__enter__.return_value = cursor
-        monkeypatch.setattr(search_module, 'connection', fake)
+        monkeypatch.setattr(core_search, 'connection', fake)
         return cursor
 
     @pytest.mark.parametrize(
@@ -859,7 +860,7 @@ class TestCountsEndpoint:
             None,
             OperationalError('canceling statement due to statement timeout'),
         ]
-        monkeypatch.setattr(search_module, 'connection', fake)
+        monkeypatch.setattr(core_search, 'connection', fake)
 
         response = web.get(self.url, {'scope': 'all'}, **HTMX)
 

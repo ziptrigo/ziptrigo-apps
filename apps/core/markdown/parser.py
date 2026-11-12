@@ -1,9 +1,11 @@
 """The one Markdown parser behind rendering, plain text and checklist editing.
 
 CommonMark with the `tasklists` plugin, bare-URL linkify (only `http://`, `https://`, `www.` and
-e-mail addresses: scheme-less `manage.py` or `README.md` stay text) and `breaks`, without tables,
-strikethrough or raw HTML (`html=False`: HTML in the source is escaped, never rendered). Sharing it
-is what keeps `render`, `to_plain_text` and `toggle_checklist_item` agreeing on what the text means.
+e-mail addresses: scheme-less `manage.py` or `README.md` stay text) and `breaks`, without
+strikethrough or raw HTML (`html=False`: HTML in the source is escaped, never rendered). The
+`basic` profile has no tables; `extended` adds them (and Pygments colouring, in the renderer).
+Sharing it is what keeps `render`, `to_plain_text` and `toggle_checklist_item` agreeing on what the
+text means.
 """
 
 import threading
@@ -14,7 +16,7 @@ from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
 from .references import install_references
-from .renderer import install_renderer
+from .renderer import install_extended_renderer, install_renderer
 from .tasklist import install_checkbox_numbering
 
 #: The prefix of a `www.` link, which linkify-it only knows as one kind of its "fuzzy" links.
@@ -58,7 +60,21 @@ class _Parser(MarkdownIt):
         return True
 
 
-def build_parser() -> MarkdownIt:
+#: The profiles a document can be read with. `basic` is the original subset (To-do's descriptions
+#: and comments); `extended` adds tables and syntax colouring of fenced code (Notes).
+BASIC = 'basic'
+EXTENDED = 'extended'
+PROFILES = (BASIC, EXTENDED)
+
+
+def check_profile(profile: str) -> str:
+    if profile not in PROFILES:
+        raise ValueError(f'Unknown Markdown profile {profile!r}')
+    return profile
+
+
+def build_parser(profile: str = BASIC) -> MarkdownIt:
+    check_profile(profile)
     md = _Parser(
         'commonmark', {'html': False, 'linkify': True, 'typographer': False, 'breaks': True}
     )
@@ -72,15 +88,23 @@ def build_parser() -> MarkdownIt:
     install_references(md)
     install_checkbox_numbering(md)
     install_renderer(md)
+    if profile == EXTENDED:
+        # GFM tables (the commonmark preset leaves the rule off); strikethrough stays off.
+        md.enable('table')
+        install_extended_renderer(md)
     return md
 
 
 _local = threading.local()
 
 
-def get_parser() -> MarkdownIt:
-    """This thread's parser. `linkify-it-py` keeps match state on the instance, so not shared."""
-    md = getattr(_local, 'md', None)
+def get_parser(profile: str = BASIC) -> MarkdownIt:
+    """This thread's parser for `profile`. `linkify-it-py` keeps match state on the instance, so
+    parsers are not shared between threads; each thread has one per profile."""
+    parsers = getattr(_local, 'parsers', None)
+    if parsers is None:
+        parsers = _local.parsers = {}
+    md = parsers.get(profile)
     if md is None:
-        md = _local.md = build_parser()
+        md = parsers[profile] = build_parser(profile)
     return md

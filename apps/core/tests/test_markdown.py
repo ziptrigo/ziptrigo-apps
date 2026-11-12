@@ -982,3 +982,207 @@ def test_extract_references_has_the_size_guard_and_checks_the_pattern():
         extract_references('x' * (MAX_MARKDOWN_CHARS + 1))
     with pytest.raises(ValueError, match='number'):
         extract_references('x', task_url_path=re.compile(r'^/todo/([0-9]+)/?$'))
+
+
+# -- The `extended` profile (issue #260): tables and syntax colouring ---------------------------
+
+TABLE = '| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n'
+
+
+def extended(source: str, **kwargs):
+    return render(source, profile='extended', **kwargs)
+
+
+def test_an_unknown_profile_is_refused_everywhere():
+    for call in (
+        lambda: render('x', profile='nope'),
+        lambda: to_plain_text('x', profile='nope'),
+        lambda: search_text('x', profile='nope'),
+        lambda: extract_references('x', profile='nope'),
+        lambda: count_checklist_items('x', profile='nope'),
+        lambda: toggle_checklist_item('- [ ] x', 0, True, profile='nope'),
+    ):
+        with pytest.raises(ValueError, match='profile'):
+            call()
+
+
+def test_basic_output_is_unchanged_for_a_table_and_a_fenced_block():
+    source = f'{TABLE}\n```python\nx = 1\n```\n'
+
+    assert render(source) == render(source, profile='basic')
+    assert render(source) == (
+        '<p>| a | b | c |<br>\n|:--|:-:|--:|<br>\n| 1 | 2 | 3 |</p>\n'
+        '<pre><code class="language-python">x = 1\n</code></pre>\n'
+    )
+
+
+def test_tables_render_with_alignment_classes_in_a_scroll_wrapper():
+    html = extended(TABLE)
+
+    assert html.startswith('<div class="md-table"><table>')
+    assert html.rstrip().endswith('</table></div>')
+    for tag in ('th', 'td'):
+        assert f'<{tag} class="text-left">' in html
+        assert f'<{tag} class="text-center">' in html
+        assert f'<{tag} class="text-right">' in html
+    assert 'style=' not in html
+
+
+def test_a_table_without_alignment_has_plain_cells():
+    html = extended('| a |\n|---|\n| 1 |\n')
+
+    assert '<th>a</th>' in html and '<td>1</td>' in html
+
+
+def test_html_in_a_table_cell_is_escaped():
+    html = extended('| a |\n|---|\n| <script>alert(1)</script> |\n')
+
+    assert '<script>' not in html and '&lt;script&gt;' in html
+
+
+@pytest.mark.parametrize(
+    'language', ['python', 'py', 'typescript', 'ts', 'javascript', 'js', 'sh', 'bash', 'shell']
+)
+def test_these_languages_are_coloured(language):
+    html = extended(f'```{language}\nx = 1\n```')
+
+    assert f'<pre class="hl"><code class="language-{language}">' in html
+    assert '<span class="hl-' in html
+
+
+def test_coloured_code_is_still_escaped():
+    html = extended('```html\n<script>alert(1)</script>\n```')
+
+    assert '<script>' not in html
+
+
+def test_an_unknown_language_a_missing_one_and_indented_code_stay_plain():
+    assert extended('```nosuchlanguage\nx\n```') == render('```nosuchlanguage\nx\n```')
+    assert extended('```\nx = 1\n```') == render('```\nx = 1\n```')
+    assert extended('    x = 1\n') == render('    x = 1\n')
+    assert 'class="hl"' not in extended('```nosuchlanguage\nx\n```')
+
+
+def test_every_allow_listed_tag_resolves_to_a_lexer_and_is_coloured():
+    from apps.core.markdown.highlight import _LEXERS, HIGHLIGHT_LANGUAGES
+
+    assert set(_LEXERS) == set(HIGHLIGHT_LANGUAGES)
+    for tag in HIGHLIGHT_LANGUAGES:
+        assert f'<code class="language-{tag}">' in extended(f'```{tag}\nx = 1\n```'), tag
+
+
+def test_the_required_languages_are_on_the_allow_list():
+    from apps.core.markdown.highlight import HIGHLIGHT_LANGUAGES
+
+    required = 'python py typescript ts javascript js sh bash shell json yaml sql html css'.split()
+    assert set(required) <= set(HIGHLIGHT_LANGUAGES)
+
+
+def test_a_real_pygments_language_off_the_allow_list_stays_plain():
+    from pygments.lexers import get_lexer_by_name
+
+    get_lexer_by_name('brainfuck')  # Pygments does know it
+
+    assert extended('```brainfuck\n+++\n```') == render('```brainfuck\n+++\n```')
+    assert 'class="hl"' not in extended('```brainfuck\n+++\n```')
+
+
+def test_the_lexer_is_not_looked_up_by_name_at_render_time(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError('looked up at render time')
+
+    monkeypatch.setattr('pygments.lexers.get_lexer_by_name', boom)
+    monkeypatch.setattr('pygments.lexers.find_lexer_class_by_name', boom)
+
+    assert 'class="hl"' in extended('```python\nx = 1\n```')
+
+
+def test_a_document_has_a_highlight_budget_and_later_fences_stay_plain():
+    from apps.core.markdown.highlight import MAX_HIGHLIGHT_CHARS_PER_DOCUMENT
+
+    block = 'x' * 7_999
+    fits = MAX_HIGHLIGHT_CHARS_PER_DOCUMENT // len(block)
+    source = '\n\n'.join(f'```python\n{block}\n```' for _ in range(fits + 1))
+    html = extended(source)
+
+    assert html.count('<pre class="hl">') == fits
+    assert html.count('<pre><code class="language-python">') == 1
+    assert fits == 5
+
+
+def test_the_budget_is_per_render():
+    block = 'x' * 19_000
+    source = '\n\n'.join(f'```python\n{block}\n```' for _ in range(2))
+
+    assert extended(source).count('<pre class="hl">') == 2
+    assert extended(source).count('<pre class="hl">') == 2
+
+
+def test_code_over_the_highlight_cap_stays_plain():
+    from apps.core.markdown.highlight import MAX_HIGHLIGHT_CHARS
+
+    at_cap = 'x' * (MAX_HIGHLIGHT_CHARS - 1)
+    over = 'x' * (MAX_HIGHLIGHT_CHARS + 1)
+
+    assert '<pre class="hl">' in extended(f'```python\n{at_cap}\n```')
+    assert '<pre class="hl">' not in extended(f'```python\n{over}\n```')
+
+
+def test_a_pygments_failure_falls_back_to_plain(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError('lexer blew up')
+
+    monkeypatch.setattr('apps.core.markdown.highlight.pygments.highlight', boom)
+
+    assert extended('```python\nx = 1\n```') == render('```python\nx = 1\n```')
+
+
+def test_the_extended_sanitiser_keeps_table_and_span_classes_only():
+    from apps.core.markdown.render import EXTENDED_ATTRIBUTES, EXTENDED_TAGS
+
+    assert {'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'div'} <= EXTENDED_TAGS
+    assert EXTENDED_ATTRIBUTES['td'] == {'class'} and EXTENDED_ATTRIBUTES['pre'] == {'class'}
+    # raw HTML never gets this far, but a style attribute would not survive anyway
+    assert 'style' not in extended('| a |\n|---|\n| 1 |\n')
+
+
+def test_parsers_are_kept_per_thread_and_profile():
+    from apps.core.markdown.parser import get_parser
+
+    seen: list[object] = []
+    thread = threading.Thread(target=lambda: seen.append(get_parser('extended')))
+    thread.start()
+    thread.join()
+
+    assert get_parser('extended') is get_parser('extended')
+    assert get_parser('extended') is not get_parser('basic')
+    assert seen[0] is not get_parser('extended')
+
+
+def test_plain_text_separates_cells_by_a_space_and_ends_rows_in_a_newline():
+    source = 'Before\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\nAfter'
+
+    assert to_plain_text(source, profile='extended') == 'Before\na b\n1 2\n3 4\nAfter'
+    assert search_text(source, profile='extended') == 'before a b 1 2 3 4 after'
+
+
+def test_a_table_is_a_paragraph_for_the_basic_plain_text():
+    assert to_plain_text('| a |\n|---|\n| 1 |') == '| a |\n|---|\n| 1 |'
+
+
+def test_checklist_indexes_agree_across_a_table():
+    source = '- [ ] one\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [x] two\n- [ ] three\n'
+    html = extended(source)
+
+    assert re.findall(r'data-index="(\d+)"', html) == ['0', '1', '2']
+    assert count_checklist_items(source, profile='extended') == 3
+    toggled = toggle_checklist_item(source, 2, True, profile='extended')
+    assert toggled == source.replace('- [ ] three', '- [x] three')
+    assert toggle_checklist_item(source, 0, True, profile='extended').startswith('- [x] one')
+    with pytest.raises(IndexError):
+        toggle_checklist_item(source, 3, True, profile='extended')
+
+
+def test_extended_references_are_found_in_a_table_cell():
+    assert extract_references('| a |\n|---|\n| #1234 |', profile='extended') == [1234]
+    assert extract_references('| a |\n|---|\n| #1234 |') == [1234]

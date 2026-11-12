@@ -8,7 +8,7 @@ from django.utils.safestring import SafeString, mark_safe
 
 from .limits import MAX_MARKDOWN_CHARS, check_length
 from .links import check_task_url_path
-from .parser import get_parser
+from .parser import EXTENDED, check_profile, get_parser
 from .references import TASK_URL_PATH, referenced_numbers
 from .renderer import TASK_URLS
 
@@ -26,6 +26,15 @@ ALLOWED_ATTRIBUTES = {
     'ol': {'start'},
     'li': {'class'},
 }
+EXTENDED_TAGS = ALLOWED_TAGS | frozenset('table thead tbody tr th td span div'.split())
+EXTENDED_ATTRIBUTES = {
+    **ALLOWED_ATTRIBUTES,
+    'th': {'class'},
+    'td': {'class'},
+    'span': {'class'},
+    'div': {'class'},
+    'pre': {'class'},
+}
 ALLOWED_URL_SCHEMES = {'http', 'https', 'mailto'}
 
 
@@ -37,6 +46,7 @@ def render(
     *,
     reference_resolver: ReferenceResolver | None = None,
     task_url_path: re.Pattern[str] | None = None,
+    profile: str = 'basic',
 ) -> SafeString:
     """The HTML for `markdown`, safe to put in a page.
 
@@ -48,22 +58,27 @@ def render(
     `^/todo/(?P<number>[0-9]{1,9})/?$`); a link to that path, relative or absolute on the host of
     `settings.BASE_URL`, counts as a mention of that task. Without it URLs are never task
     references. `ValueError` also for a pattern with no `number` group.
+
+    `profile` is `'basic'` (the default: To-do's subset) or `'extended'`, which adds tables and
+    syntax colouring of fenced code with a known language.
     """
+    check_profile(profile)
     check_length(markdown)
     env: dict = {}
     if task_url_path is not None:
         check_task_url_path(task_url_path)
         env[TASK_URL_PATH] = task_url_path
-    md = get_parser()
+    md = get_parser(profile)
     tokens = md.parse(markdown, env)
     if reference_resolver is not None and (numbers := referenced_numbers(tokens)):
         resolved = reference_resolver(numbers)
         env[TASK_URLS] = {number: url for number, url in resolved.items() if number in numbers}
     html = md.renderer.render(tokens, md.options, env)
+    extended = profile == EXTENDED
     cleaned = nh3.clean(
         html,
-        tags=set(ALLOWED_TAGS),
-        attributes=ALLOWED_ATTRIBUTES,
+        tags=set(EXTENDED_TAGS if extended else ALLOWED_TAGS),
+        attributes=EXTENDED_ATTRIBUTES if extended else ALLOWED_ATTRIBUTES,
         url_schemes=ALLOWED_URL_SCHEMES,
         link_rel=None,
     )

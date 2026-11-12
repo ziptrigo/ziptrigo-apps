@@ -4,11 +4,13 @@ import re
 
 from .limits import check_length
 from .links import check_task_url_path
-from .parser import get_parser
+from .parser import check_profile, get_parser
 from .references import TASK_URL_PATH, referenced_numbers
 
 
-def extract_references(markdown: str, *, task_url_path: re.Pattern[str] | None = None) -> list[int]:
+def extract_references(
+    markdown: str, *, task_url_path: re.Pattern[str] | None = None, profile: str = 'basic'
+) -> list[int]:
     """The task numbers `markdown` mentions, once each, in order of appearance.
 
     The very traversal `render` does to find what to hand its resolver: `#` plus 4 to 9 digits
@@ -18,9 +20,10 @@ def extract_references(markdown: str, *, task_url_path: re.Pattern[str] | None =
     are never task references. Raises `ValueError('Document too long')` over
     `MAX_MARKDOWN_CHARS`, and for a pattern with no `number` group.
     """
+    check_profile(profile)
     check_length(markdown)
     env: dict = {}
     if task_url_path is not None:
         check_task_url_path(task_url_path)
         env[TASK_URL_PATH] = task_url_path
-    return referenced_numbers(get_parser().parse(markdown, env))
+    return referenced_numbers(get_parser(profile).parse(markdown, env))
