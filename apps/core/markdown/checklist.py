@@ -8,7 +8,7 @@ the three characters of its marker change.
 import re
 
 from .inline_text import inline_text
-from .parser import get_parser
+from .parser import check_profile, get_parser
 from .tasklist import checklist_inlines
 
 _MARKER = re.compile(r'\[[ xX]\]')
@@ -16,28 +16,30 @@ _MARKER = re.compile(r'\[[ xX]\]')
 _LINES = re.compile(r'[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+')
 
 
-def count_checklist_items(markdown: str) -> int:
+def count_checklist_items(markdown: str, *, profile: str = 'basic') -> int:
     """How many `- [ ]` / `- [x]` items the document has, nested and quoted ones included."""
-    return len(checklist_inlines(get_parser().parse(markdown)))
+    return len(checklist_inlines(get_parser(check_profile(profile)).parse(markdown)))
 
 
-def checklist_item_text(markdown: str, index: int) -> str:
+def checklist_item_text(markdown: str, index: int, *, profile: str = 'basic') -> str:
     """The text of the `index`th checklist item as plain text (no box, no list marker, no emphasis
     marks, whitespace collapsed; the same numbering as `toggle_checklist_item`). Raises
     `IndexError` when there is no such item."""
-    items = checklist_inlines(get_parser().parse(markdown))
+    items = checklist_inlines(get_parser(check_profile(profile)).parse(markdown))
     if not 0 <= index < len(items):
         raise IndexError(f'No checklist item {index} (the document has {len(items)})')
     return ' '.join(inline_text(items[index].children or []).split())
 
 
-def toggle_checklist_item(markdown: str, index: int, checked: bool) -> str:
+def toggle_checklist_item(
+    markdown: str, index: int, checked: bool, *, profile: str = 'basic'
+) -> str:
     """`markdown` with the `index`th checklist item (from 0, in document order) checked or not.
 
     Only its `[ ]` / `[x]` changes; whitespace, the rest of the line and the line endings stay
     byte for byte. Raises `IndexError` when there is no such item.
     """
-    items = checklist_inlines(get_parser().parse(markdown))
+    items = checklist_inlines(get_parser(check_profile(profile)).parse(markdown))
     if not 0 <= index < len(items):
         raise IndexError(f'No checklist item {index} (the document has {len(items)})')
     line_map = items[index].map

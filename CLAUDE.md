@@ -1412,6 +1412,21 @@ image labels), `limits.py` (the length guard), and the public `render.py`, `plai
   filter never raises**: a value over the limit (a `ValueError` from `render`) comes out
   unrendered, HTML-escaped with line breaks kept, in one `<p>` (and a warning with its length,
   never its content, is logged), so a page showing an over-long field is not a 500.
+- **Profiles** (issue #260). `render`, `to_plain_text`, `search_text`, `extract_references`,
+  `count_checklist_items` and `toggle_checklist_item` take `profile='basic'` (the default, everything
+  described here, which To-do keeps using) or `'extended'` (Notes): `basic` plus **tables** (`table`
+  rule; alignment is a class, `text-left|center|right`, never a `style`; wrapped in `<div
+  class="md-table">` for horizontal scroll) and **Pygments syntax colouring** of a fenced block whose
+  language tag Pygments knows (`<pre class="hl"><code class="language-<tag>">` with `hl-`-prefixed
+  spans; no tag, an unknown one, over `MAX_HIGHLIGHT_CHARS` (20,000), a Pygments error and indented
+  blocks all render as `basic` does). An unknown profile is a `ValueError`. `parser.get_parser(profile)`
+  keeps one parser per thread **per profile**; the `extended` sanitiser allow-list adds `table thead
+  tbody tr th td span div` and `class` on `th td span div pre`; plain text separates table cells by a
+  space and ends rows in a newline. The stylesheet is generated: `./manage.py build_highlight_css`
+  writes `core/css/highlight.css` (Pygments `friendly` scoped to `pre.hl`, `github-dark` to `.dark
+  pre.hl`, plus the `.md-table` rules; loaded by `core/base.html` after `site.css`) from
+  `apps/core/markdown/highlight_css.py`, and `apps/core/tests/test_highlight_css.py` fails while the
+  committed file differs. `pygments` is a runtime dependency.
 - **Supported syntax, exactly:** paragraphs, `*italic*`/`_italic_`, `**bold**`/`__bold__`,
   `` `code` ``, fenced and indented code blocks, headings `#` to `######` (no `id`, no anchors),
   ordered and unordered (nested) lists, checklists, block quotes, horizontal rules, links, bare
@@ -5072,6 +5087,13 @@ shared in `core`.
 Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters.py`,
 `models/saved_filter.py`, `views/search.py`, `views/filters.py`, migration `0006_saved_filters`).
 
+- **Shared machinery** (issue #260): the model-agnostic parts of this section -- the query language
+  (`prepare_query`, `PreparedQuery`, `glob_to_regex`, `normalize_glob`, the unsupported-syntax check,
+  `lower_literals`, `to_postgres`), `search_guard`, `make_snippet`, `snippet_regex`, the limits and the
+  four messages -- live in `apps.core.search` (tests: `apps/core/tests/test_search.py`).
+  `apps/todo/services/search.py` imports and re-exports the same names, so nothing in To-do changed;
+  what names `Task`, `Comment` or `User` (the queryset, `attach_matches`, paging, `Narrowing`) stays
+  there. A test that patches the PostgreSQL branch patches `apps.core.search.connection`.
 - **What is searched.** Three stored, normalised copies (`apps.core.markdown.normalize_for_search`: NFKD,
   accents stripped, case folded, punctuation turned into spaces, formatting gone): `Task.title_text`,
   `Task.description_text` and `Comment.body_text` (empty for a deleted comment, rebuilt on an edit or a
@@ -5945,7 +5967,7 @@ admin-redirect-vs-403 expectation, an unconfirmed-email test fixture) got to gre
 ### GitHub issues
 
 Label every issue with the app(s) it applies to: `Users` (accounts), `Billing`, `Core`, `QR Code`,
-`File Transfer`, `Url` (short_url), `Todo`. Work that happens in the separate `infra` repository is tracked here under
+`File Transfer`, `Url` (short_url), `Todo`, `Notes` (notes). Work that happens in the separate `infra` repository is tracked here under
 `Infra`. An issue that touches several apps gets several labels.
 
 ### Adding an app

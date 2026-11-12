@@ -8,11 +8,14 @@ references and checklist boxes. `render.render` sanitises whatever they write.
 import re
 from collections.abc import Sequence
 
+import pygments
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
 from markdown_it.utils import EnvType, OptionsDict
+from pygments.formatters.html import HtmlFormatter
+from pygments.lexers import get_lexer_by_name
 
 from .inline_text import inline_text
 from .links import LinkKind, classify_href
@@ -25,6 +28,11 @@ _OPEN_LINKS = 'open_links'
 
 _LANGUAGE_CHARS = re.compile(r'[^a-z0-9+\-]')
 _MAX_LANGUAGE_LENGTH = 20
+#: A fenced block longer than this (characters) is never coloured (the `extended` profile).
+MAX_HIGHLIGHT_CHARS = 20_000
+#: Pygments' class prefix; `build_highlight_css` writes the matching stylesheet.
+HIGHLIGHT_PREFIX = 'hl-'
+_ALIGNMENT = re.compile(r'text-align:\s*(left|center|right)')
 
 
 def _task_url(number: object, env: EnvType) -> str | None:
@@ -86,17 +94,19 @@ def image(
     return f'{opening}{label}</a>' if opening else label
 
 
+def _language(token: Token) -> str:
+    """The usable language tag of a fence: what is left of the first word of the info string after
+    lower-casing it and dropping everything but `a-z`, `0-9`, `-` and `+`, cut to 20 characters."""
+    words = token.info.split(maxsplit=1)
+    return _LANGUAGE_CHARS.sub('', words[0].lower())[:_MAX_LANGUAGE_LENGTH] if words else ''
+
+
 def fence(
     self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
 ) -> str:
-    """A fenced block; its language tag becomes `class="language-<tag>"` when it has a usable one.
-
-    Usable means what is left of the first word of the info string after lower-casing it and
-    dropping everything but `a-z`, `0-9`, `-` and `+`, cut to 20 characters.
-    """
+    """A fenced block; its language tag becomes `class="language-<tag>"` when it has a usable one."""
     token = tokens[idx]
-    words = token.info.split(maxsplit=1)
-    language = _LANGUAGE_CHARS.sub('', words[0].lower())[:_MAX_LANGUAGE_LENGTH] if words else ''
+    language = _language(token)
     css = f' class="language-{language}"' if language else ''
     return f'<pre><code{css}>{escapeHtml(token.content)}</code></pre>\n'
 
@@ -124,4 +134,66 @@ def task_checkbox(
 
 def install_renderer(md: MarkdownIt) -> None:
     for rule in (link_open, link_close, image, fence, task_reference, task_checkbox):
+        md.add_render_rule(rule.__name__, rule)
+
+
+def highlighted(code: str, language: str) -> str | None:
+    """`code` as Pygments spans (no wrapper), or None when it should stay plain: no language, too
+    long, a language Pygments doesn't know, or any Pygments error."""
+    if not language or len(code) > MAX_HIGHLIGHT_CHARS:
+        return None
+    try:
+        lexer = get_lexer_by_name(language)
+        return pygments.highlight(
+            code, lexer, HtmlFormatter(nowrap=True, classprefix=HIGHLIGHT_PREFIX)
+        )
+    except Exception:
+        return None
+
+
+def fence_extended(
+    self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
+) -> str:
+    """`fence` with Pygments colouring when the block has a language Pygments knows."""
+    token = tokens[idx]
+    language = _language(token)
+    body = highlighted(token.content, language)
+    if body is None:
+        return fence(self, tokens, idx, options, env)
+    return f'<pre class="hl"><code class="language-{language}">{body}</code></pre>\n'
+
+
+def _cell_open(tag: str, token: Token) -> str:
+    match = _ALIGNMENT.search(str(token.attrGet('style') or ''))
+    css = f' class="text-{match.group(1)}"' if match else ''
+    return f'<{tag}{css}>'
+
+
+def th_open(
+    self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
+) -> str:
+    return _cell_open('th', tokens[idx])
+
+
+def td_open(
+    self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
+) -> str:
+    return _cell_open('td', tokens[idx])
+
+
+def table_open(
+    self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
+) -> str:
+    return '<div class="md-table"><table>\n'
+
+
+def table_close(
+    self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
+) -> str:
+    return '</table></div>\n'
+
+
+def install_extended_renderer(md: MarkdownIt) -> None:
+    md.add_render_rule('fence', fence_extended)
+    for rule in (th_open, td_open, table_open, table_close):
         md.add_render_rule(rule.__name__, rule)
