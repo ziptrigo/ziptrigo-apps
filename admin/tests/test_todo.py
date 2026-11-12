@@ -46,7 +46,9 @@ TASK: dict = {
     'due_date': '2026-11-01',
     'due_time': '09:30:00',
     'due_at': '2026-11-01T09:30:00Z',
-    'completed_at': None,
+    'closed_at': None,
+    'state': 'todo',
+    'resolution': None,
     'deleted_at': None,
     'position': 0,
     'source': 'api',
@@ -59,6 +61,8 @@ TASK: dict = {
         'anchor_date': '2026-11-01',
         'ended_at': None,
     },
+    'blocked_by': [],
+    'blocks': [],
     'reminders': [
         {
             'id': REMINDER_ID,
@@ -283,7 +287,13 @@ def test_a_token_is_per_cli_and_environment(token_file, token_dir, api):
 
 
 def test_list_shows_a_table(api):
-    done = {**TASK, 'number': 1235, 'title': 'Old [bold]one[/bold]', 'completed_at': 'x'}
+    done = {
+        **TASK,
+        'number': 1235,
+        'title': 'Old [bold]one[/bold]',
+        'closed_at': 'x',
+        'resolution': 'wont_do',
+    }
     done.update(priority=0, due_date=None, due_time=None, recurrence=None, reminders=[], labels=[])
     api.on('get', '/todo/tasks', FakeResponse(200, page(TASK, done)))
 
@@ -298,6 +308,22 @@ def test_list_shows_a_table(api):
     second = next(line for line in lines if 'Old' in line)
     assert '1235' in second and 'Old [bold]one[/bold]' in second  # no markup is interpreted
     assert todo.REPEAT not in second and todo.BELL not in second
+    assert "Won't do" in second and "Won't do" not in first  # the resolution; To do is blank
+
+
+def test_list_shows_the_state_of_open_tasks(api):
+    held = {**TASK, 'number': 1236, 'title': 'Later', 'state': 'on_hold'}
+    blocked = {**TASK, 'number': 1237, 'title': 'Waiting', 'state': 'blocked'}
+    done = {**TASK, 'number': 1238, 'title': 'Finished', 'closed_at': 'x', 'resolution': 'done'}
+    api.on('get', '/todo/tasks', FakeResponse(200, page(held, blocked, done)))
+
+    out = invoke('list', 'local').output
+
+    row = {
+        name: next(line for line in out.splitlines() if name in line)
+        for name in ('Later', 'Waiting', 'Finished')
+    }
+    assert 'On hold' in row['Later'] and 'Blocked' in row['Waiting'] and 'Done' in row['Finished']
 
 
 def test_list_with_nothing_found(api):
@@ -321,7 +347,13 @@ def test_list_sends_every_filter(api):
         '--q',
         'rent*',
         '--regex',
-        '--include-completed',
+        '--include-closed',
+        '--resolution',
+        'wont-do',
+        '--state',
+        'in-progress',
+        '--state',
+        'blocked',
         '--priority',
         '1,2',
         '--label',
@@ -345,7 +377,9 @@ def test_list_sends_every_filter(api):
         'view': 'upcoming',
         'q': 'rent*',
         'mode': 'regex',
-        'include_completed': 'true',
+        'include_closed': 'true',
+        'resolution': 'wont_do',
+        'state': 'in_progress,blocked',
         'label': f'{HOME_ID},none',
         'priority': '1,2',
         'date_from': '2026-11-01',
@@ -354,6 +388,26 @@ def test_list_sends_every_filter(api):
         'limit': 10,
         'offset': 20,
     }
+
+
+def test_list_closed_view_and_the_old_names(api):
+    api.on('get', '/todo/tasks', FakeResponse(200, page()))
+
+    invoke('list', 'local', '--view', 'completed', '--include-completed')
+
+    assert api.calls[0]['params'] == {
+        'view': 'closed',
+        'include_closed': 'true',
+        'limit': 50,
+        'offset': 0,
+    }
+
+
+@pytest.mark.parametrize('args', [['--resolution', 'maybe'], ['--state', 'sleeping']])
+def test_list_refuses_an_unknown_state_or_resolution_before_calling(api, args):
+    result = invoke('list', 'local', *args)
+
+    assert result.exit_code == 2 and api.calls == []
 
 
 def test_list_says_how_to_see_more(api):
@@ -438,6 +492,14 @@ def test_add_sends_every_option(api, tmp_path):
         WORK_ID,
         '--parent',
         '1200',
+        '--state',
+        'on-hold',
+        '--blocked-by',
+        '1100',
+        '--blocked-by',
+        '1101',
+        '--blocked-by',
+        '1100',
         '--repeat',
         'FREQ=WEEKLY;BYDAY=MO',
         '--mode',
@@ -457,10 +519,28 @@ def test_add_sends_every_option(api, tmp_path):
         'priority': 2,
         'labels': [HOME_ID, WORK_ID],
         'parent': 1200,
+        'state': 'on_hold',
+        'blocked_by': [1100, 1101],
         'rrule': 'FREQ=WEEKLY;BYDAY=MO',
         'recurrence_mode': 'from_completion',
     }
     assert 'Charged 10 credits.' in result.output
+
+
+def test_add_refuses_an_unknown_or_blocked_state_before_calling(api):
+    for state in ('sleeping', 'blocked'):
+        result = invoke('add', 'local', 'x', '--state', state)
+
+        assert result.exit_code == 2 and api.calls == []
+
+
+def test_add_says_when_the_task_starts_blocked(api):
+    blocked = {**TASK, 'state': 'blocked', 'parsed': None}
+    api.on('post', '/todo/tasks', FakeResponse(201, blocked))
+
+    result = invoke('add', 'local', 'x', '--blocked-by', '1100')
+
+    assert result.exit_code == 0 and '[Blocked]' in result.output
 
 
 @pytest.mark.parametrize(
@@ -575,6 +655,109 @@ def test_get_shows_everything(api):
     assert 'asked the landlord' in out and '(deleted)' in out
     assert 'second thoughts' in out and '(edited)' in out
     assert '#1300 Budget' in out and '#1301 Taxes (in a comment)' in out
+    assert 'State: To do' in out
+    assert 'Blocked by' not in out and 'History' not in out  # nothing to show, nothing asked
+
+
+LINKS = {
+    **DETAIL,
+    'state': 'blocked',
+    'blocked_by': [
+        {'number': 1200, 'title': 'Open one', 'open': True, 'trashed': False},
+        {'number': 1201, 'title': 'Finished', 'open': False, 'trashed': False},
+        {'number': 1202, 'title': 'Gone', 'open': False, 'trashed': True},
+    ],
+    'blocks': [{'number': 1300, 'title': '[bold]Waiting[/bold]', 'open': True, 'trashed': False}],
+}
+
+
+def test_get_shows_the_state_and_both_lists_of_links(api):
+    api.on('get', '/todo/tasks/1234', FakeResponse(200, LINKS))
+    api.on('get', '/todo/tasks/1234/comments', FakeResponse(200, []))
+
+    out = invoke('get', 'local', '1234').output
+
+    assert 'Status: open' in out and 'State: Blocked' in out
+    assert '#1200 Open one' in out and '#1201 Finished (closed)' in out
+    assert '#1202 Gone (in the trash)' in out
+    assert 'Blocks' in out and '#1300 [bold]Waiting[/bold]' in out  # markup is not interpreted
+
+
+@pytest.mark.parametrize(
+    ('resolution', 'status'), [('done', 'Status: done'), ('wont_do', "Status: won't do")]
+)
+def test_get_of_a_closed_task_says_how_it_was_closed(api, resolution, status):
+    closed = {**DETAIL, 'closed_at': '2026-10-12T09:00:00Z', 'resolution': resolution}
+    api.on('get', '/todo/tasks/1234', FakeResponse(200, closed))
+    api.on('get', '/todo/tasks/1234/comments', FakeResponse(200, []))
+
+    out = invoke('get', 'local', '1234').output
+
+    assert status in out and 'Closed: 2026-10-12T09:00:00Z' in out and 'State:' not in out
+
+
+ACTIVITY = {
+    'results': [
+        {
+            'id': 'a',
+            'kind': 'unblocked',
+            'text': 'Unblocked: #1200 Open one was closed',
+            'data': {},
+            'automatic': True,
+            'channel': 'api',
+            'created_at': '2026-10-12T09:00:00Z',
+        },
+        {
+            'id': 'b',
+            'kind': 'created',
+            'text': 'Created',
+            'data': {},
+            'automatic': False,
+            'channel': 'web',
+            'created_at': '2026-10-10T09:00:00Z',
+        },
+    ],
+    'next': 'CURSOR-1',
+}
+
+
+def test_get_with_history_prints_the_log(api):
+    api.on('get', '/todo/tasks/1234', FakeResponse(200, DETAIL))
+    api.on('get', '/todo/tasks/1234/comments', FakeResponse(200, []))
+    api.on('get', '/todo/tasks/1234/activity', FakeResponse(200, ACTIVITY))
+
+    result = invoke('get', 'local', '1234', '--history')
+
+    assert result.exit_code == 0
+    out = flat(result)
+    assert 'History' in out
+    assert '2026-10-12T09:00:00Z Unblocked: #1200 Open one was closed (automatic) [api]' in out
+    assert '2026-10-10T09:00:00Z Created [web]' in out
+    assert api.requests('get', '/activity')[0]['params'] == {'limit': 20}
+    assert '--before CURSOR-1' in out  # how to get the older page
+
+
+def test_history_pages_with_limit_and_before(api):
+    api.on('get', '/todo/tasks/1234/activity', FakeResponse(200, {**ACTIVITY, 'next': None}))
+
+    result = invoke('history', 'local', '1234', '--limit', '100', '--before', 'CURSOR-0')
+
+    assert result.exit_code == 0 and 'More:' not in result.output
+    assert api.calls[0]['params'] == {'limit': 100, 'before': 'CURSOR-0'}
+
+
+def test_history_of_nothing(api):
+    api.on('get', '/todo/tasks/1234/activity', FakeResponse(200, {'results': [], 'next': None}))
+
+    assert 'Nothing recorded.' in invoke('history', 'local', '1234').output
+
+
+def test_history_of_a_task_that_is_not_there(api):
+    api.on('get', '/todo/tasks/9999/activity', FakeResponse(404, {'detail': 'Not Found'}))
+
+    result = invoke('history', 'local', '9999')
+
+    assert result.exit_code == 1 and '404: Not Found' in result.output
 
 
 def test_get_of_a_task_that_is_not_there(api):
@@ -685,13 +868,41 @@ def test_edit_due_and_clear_due_conflict(api):
     assert result.exit_code == 2 and api.calls == []
 
 
-# -- done, undone, postpone, trash, restore --
+def test_edit_state_and_blockers(api):
+    api.on('patch', '/todo/tasks/1234', FakeResponse(200, TASK))
+
+    invoke('edit', 'local', '1234', '--state', 'in-progress')
+    invoke('edit', 'local', '1234', '--blocked-by', '1200', '--blocked-by', '1201')
+    invoke('edit', 'local', '1234', '--clear-blocked-by', '--state', 'on_hold')
+
+    assert [c['json'] for c in api.requests('patch')] == [
+        {'state': 'in_progress'},
+        {'blocked_by': [1200, 1201]},
+        {'state': 'on_hold', 'blocked_by': []},
+    ]
 
 
-def test_done_completes_each_task_and_fails_if_any_does(api):
-    api.on('post', '/todo/tasks/1234/complete', FakeResponse(200, TASK))
-    api.on('post', '/todo/tasks/1235/complete', FakeResponse(404, {'detail': 'Not Found'}))
-    api.on('post', '/todo/tasks/1236/complete', FakeResponse(200, {**TASK, 'title': 'Other'}))
+@pytest.mark.parametrize(
+    'args',
+    [
+        ['--state', 'blocked'],  # only blockers set it
+        ['--state', 'sleeping'],
+        ['--blocked-by', '1200', '--clear-blocked-by'],
+    ],
+)
+def test_edit_refuses_a_bad_state_or_conflicting_blockers_before_calling(api, args):
+    result = invoke('edit', 'local', '1234', *args)
+
+    assert result.exit_code == 2 and api.calls == []
+
+
+# -- done, close, reopen, resolution, state, block, unblock, postpone, trash, restore --
+
+
+def test_done_closes_each_task_as_done_and_fails_if_any_does(api):
+    api.on('post', '/todo/tasks/1234/close', FakeResponse(200, TASK))
+    api.on('post', '/todo/tasks/1235/close', FakeResponse(404, {'detail': 'Not Found'}))
+    api.on('post', '/todo/tasks/1236/close', FakeResponse(200, {**TASK, 'title': 'Other'}))
 
     result = invoke('done', 'local', '1234', '1235', '1236')
 
@@ -699,14 +910,173 @@ def test_done_completes_each_task_and_fails_if_any_does(api):
     assert 'Completed #1234 "Pay rent"' in result.output
     assert '#1235: 404: Not Found' in result.output
     assert 'Completed #1236 "Other"' in result.output  # the rest are not skipped
+    assert all(call['json'] == {} for call in api.requests('post'))  # the API's defaults
 
 
-def test_undone(api):
-    api.on('post', '/todo/tasks/1234/uncomplete', FakeResponse(200, TASK))
+def test_close_as_done_by_default(api):
+    api.on('post', '/todo/tasks/1234/close', FakeResponse(200, TASK))
 
-    result = invoke('undone', 'local', '1234')
+    result = invoke('close', 'local', '1234')
 
-    assert result.exit_code == 0 and 'Reopened #1234' in result.output
+    assert result.exit_code == 0 and 'Closed as done #1234 "Pay rent"' in result.output
+    assert api.calls[0]['json'] == {'resolution': 'done', 'subtasks': 'done'}
+
+
+def test_close_as_wont_do_with_a_note_and_the_subtasks_left_open(api):
+    api.on('post', '/todo/tasks/1234/close', FakeResponse(200, TASK))
+    api.on('post', '/todo/tasks/1235/close', FakeResponse(200, {**TASK, 'number': 1235}))
+
+    result = invoke(
+        'close', 'local', '1234', '1235', '--wont-do', '--note', 'not needed', '--subtasks', 'leave'
+    )
+
+    assert result.exit_code == 0 and "Closed as won't do #1234" in result.output
+    assert [call['json'] for call in api.requests('post')] == [
+        {'resolution': 'wont_do', 'subtasks': 'leave', 'note': 'not needed'}
+    ] * 2
+
+
+def test_close_with_the_subtasks_as_wont_do(api):
+    api.on('post', '/todo/tasks/1234/close', FakeResponse(200, TASK))
+
+    invoke('close', 'local', '1234', '--subtasks', 'wont-do')
+
+    assert api.calls[0]['json']['subtasks'] == 'wont_do'
+
+
+@pytest.mark.parametrize('args', [['--note', 'why'], ['--subtasks', 'maybe']])
+def test_close_refuses_a_note_without_wont_do_and_a_bad_choice_before_calling(api, args):
+    result = invoke('close', 'local', '1234', *args)
+
+    assert result.exit_code == 2 and api.calls == []
+
+
+def test_close_carries_on_past_a_failure(api):
+    api.on(
+        'post',
+        '/todo/tasks/1234/close',
+        FakeResponse(400, {'detail': 'Restore the task before completing it.'}),
+    )
+    api.on('post', '/todo/tasks/1235/close', FakeResponse(200, {**TASK, 'number': 1235}))
+
+    result = invoke('close', 'local', '1234', '1235')
+
+    assert result.exit_code == 1
+    assert (
+        '#1234: 400: Restore the task' in flat(result) and 'Closed as done #1235' in result.output
+    )
+
+
+def test_reopen_and_its_old_name(api):
+    api.on('post', '/todo/tasks/1234/reopen', FakeResponse(200, TASK))
+
+    reopen = invoke('reopen', 'local', '1234')
+    undone = invoke('undone', 'local', '1234')
+
+    assert reopen.exit_code == 0 and 'Reopened #1234' in reopen.output
+    assert undone.exit_code == 0 and 'Reopened #1234' in undone.output
+    assert 'undone' not in invoke('--help').output  # hidden
+
+
+def test_resolution(api):
+    api.on('post', '/todo/tasks/1234/resolution', FakeResponse(200, TASK))
+
+    result = invoke('resolution', 'local', '1234', 'wont-do')
+
+    assert result.exit_code == 0 and "closed as won't do" in result.output
+    assert api.calls[0]['json'] == {'resolution': 'wont_do'}
+
+
+def test_resolution_of_an_open_task_is_refused_by_the_api(api):
+    api.on(
+        'post',
+        '/todo/tasks/1234/resolution',
+        FakeResponse(400, {'detail': 'Only a closed task has a resolution to change.'}),
+    )
+
+    result = invoke('resolution', 'local', '1234', 'done')
+
+    assert result.exit_code == 1 and 'Only a closed task' in flat(result)
+
+
+def test_resolution_refuses_an_unknown_value_before_calling(api):
+    assert invoke('resolution', 'local', '1234', 'maybe').exit_code == 2
+    assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    ('typed', 'sent', 'label'),
+    [
+        ('todo', 'todo', 'To do'),
+        ('in-progress', 'in_progress', 'In progress'),
+        ('on_hold', 'on_hold', 'On hold'),
+        ('ON-HOLD', 'on_hold', 'On hold'),
+    ],
+)
+def test_state(api, typed, sent, label):
+    api.on('post', '/todo/tasks/1234/state', FakeResponse(200, {**TASK, 'state': sent}))
+
+    result = invoke('state', 'local', '1234', typed)
+
+    assert result.exit_code == 0 and f'is now {label}.' in result.output
+    assert api.calls[0]['json'] == {'state': sent}
+
+
+def test_state_refuses_blocked_and_unknown_before_calling(api):
+    assert invoke('state', 'local', '1234', 'blocked').exit_code == 2
+    assert invoke('state', 'local', '1234', 'sleeping').exit_code == 2
+    assert api.calls == []
+
+
+def test_block_adds_each_blocker_and_fails_if_any_is_refused(api):
+    api.on(
+        'post',
+        '/todo/tasks/1234/blockers',
+        [
+            FakeResponse(200, {**TASK, 'state': 'blocked'}),
+            FakeResponse(
+                400,
+                {'detail': '#1100 is already blocked by #1234, directly or through other tasks.'},
+            ),
+            FakeResponse(200, {**TASK, 'state': 'blocked'}),
+        ],
+    )
+
+    result = invoke('block', 'local', '1234', '1200', '1100', '1201')
+
+    out = flat(result)
+    assert result.exit_code == 1
+    assert [call['json'] for call in api.requests('post')] == [
+        {'number': 1200},
+        {'number': 1100},
+        {'number': 1201},
+    ]
+    assert '#1200 blocks #1234 "Pay rent"' in out and '[Blocked]' in out
+    assert '#1100: 400: #1100 is already blocked by #1234' in out
+    assert '#1201 blocks #1234' in out  # the rest are not skipped
+
+
+def test_unblock_removes_each(api):
+    api.on('delete', '/todo/tasks/1234/blockers/1200', FakeResponse(204))
+    api.on('delete', '/todo/tasks/1234/blockers/1201', FakeResponse(204))
+
+    result = invoke('unblock', 'local', '1234', '1200', '1201')
+
+    assert result.exit_code == 0
+    assert '#1200 no longer blocks #1234.' in result.output
+    assert '#1201 no longer blocks #1234.' in result.output
+
+
+def test_unblock_a_task_in_the_trash_fails(api):
+    api.on(
+        'delete',
+        '/todo/tasks/1234/blockers/1200',
+        FakeResponse(400, {'detail': 'Restore the task before changing it.'}),
+    )
+
+    result = invoke('unblock', 'local', '1234', '1200')
+
+    assert result.exit_code == 1 and 'Restore the task' in flat(result)
 
 
 @pytest.mark.parametrize(

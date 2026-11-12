@@ -4,9 +4,11 @@ To-do CLI
 
 Command line interface for the To-do JWT API (`/api/todo/`, issue #187), on the model of
 `admin/receipts.py` and `admin/shorturl.py`: log in, add tasks (a date in the title is read for
-you: "pay rent every month on the 1st"), list and search them, read and edit one, complete,
-postpone, trash and restore, comment, manage labels and reminders, attach and download files, run
-saved filters, and see or change the settings and the address tasks can be emailed to.
+you: "pay rent every month on the 1st"), list and search them, read and edit one, change its state
+(to do, in progress, on hold; blocked is set by blockers), close it as done or won't do and reopen
+it, block it by other tasks, read its history, postpone, trash and restore, comment, manage labels
+and reminders, attach and download files, run saved filters, and see or change the settings and the
+address tasks can be emailed to.
 
 A task is addressed by its number (the `1234` of `#1234`). The first 10 tasks of a month are free,
 then each costs credits; commands that create tasks say what they charged.
@@ -64,6 +66,18 @@ BELL = '\N{BELL}'
 YesAnnotation = Annotated[bool, typer.Option('--yes', help='Do not ask before going ahead.')]
 NumberAnnotation = Annotated[int, typer.Argument(help='The task number (1234 for #1234).')]
 
+#: The states a person can choose, as typed (`in-progress`) and as the API names them. Blocked is
+#: set only by blockers.
+STATES = {'todo': 'todo', 'in-progress': 'in_progress', 'on-hold': 'on_hold'}
+RESOLUTIONS = {'done': 'done', 'wont-do': 'wont_do'}
+SUBTASK_CHOICES = {'done': 'done', 'wont-do': 'wont_do', 'leave': 'leave'}
+STATE_LABELS = {
+    'todo': 'To do',
+    'in_progress': 'In progress',
+    'blocked': 'Blocked',
+    'on_hold': 'On hold',
+}
+RESOLUTION_LABELS = {'done': 'Done', 'wont_do': "Won't do"}
 POSTPONE_PRESETS = {
     'tomorrow': 'tomorrow',
     'next-week': 'next_week',
@@ -151,6 +165,24 @@ def _priority(task: dict) -> str:
     return f'!{task["priority"]}' if task['priority'] else ''
 
 
+def _choice(value: str, allowed: dict[str, str], option: str) -> str:
+    """The API's name for `value`, typed with hyphens or underscores in any case; else a usage
+    error naming the choices."""
+    key = value.strip().lower().replace('_', '-')
+    if key not in allowed:
+        raise typer.BadParameter(f'{option}: use one of {", ".join(allowed)}.')
+    return allowed[key]
+
+
+def _status(task: dict) -> str:
+    """What the task is: `Done`, `Won't do`, `In the trash` or, while open, its state."""
+    if task['deleted_at']:
+        return 'In the trash'
+    if task['closed_at']:
+        return RESOLUTION_LABELS.get(task['resolution'] or 'done', 'Done')
+    return STATE_LABELS.get(task['state'], task['state'])
+
+
 def _flags(task: dict) -> str:
     repeats = task['recurrence'] is not None and task['recurrence']['ended_at'] is None
     return ' '.join(
@@ -167,16 +199,19 @@ def _task_table(tasks: list[dict], title: str) -> Table:
     table.add_column('#', style='cyan', no_wrap=True, justify='right')
     table.add_column('Due', no_wrap=True)
     table.add_column('Pri', style='red', no_wrap=True)
+    table.add_column('State', no_wrap=True)
     table.add_column('Title', overflow='fold')
     table.add_column('Labels', style='blue')
     table.add_column('', no_wrap=True)
     for task in tasks:
-        marker = '\N{CHECK MARK} ' if task['completed_at'] else ''
+        # To do is the ordinary state: only the others (and a closed task's resolution) are shown.
+        status = '' if task['state'] == 'todo' and not task['closed_at'] else _status(task)
         table.add_row(
             str(task['number']),
             _due(task),
             _priority(task),
-            Text(marker + task['title']),
+            status,
+            Text(task['title']),
             Text(', '.join(label['name'] for label in task['labels'])),
             _flags(task),
         )
@@ -208,6 +243,8 @@ def _task_line(task: dict) -> str:
         parts.append(f'due {_due(task)}')
     if task['priority']:
         parts.append(_priority(task))
+    if not task['closed_at'] and task['state'] != 'todo':
+        parts.append(f'[{_status(task)}]')
     if task['recurrence'] is not None and task['recurrence']['ended_at'] is None:
         parts.append(f'{REPEAT} {task["recurrence"]["rrule_text"]}')
     return ' '.join(parts)
@@ -338,14 +375,28 @@ def todo_login(
 def todo_list(
     environment: EnvironmentAnnotation,
     view: str = typer.Option(
-        'all', '--view', help='today, upcoming, all (open tasks), completed or trash.'
+        'all', '--view', help='today, upcoming, all (open tasks), closed or trash.'
     ),
     q: str = typer.Option(
         '', '--q', help='Search titles, descriptions and comments (* and ? are wildcards).'
     ),
     regex: bool = typer.Option(False, '--regex', help='Read --q as a regular expression.'),
+    include_closed: bool = typer.Option(
+        False, '--include-closed', help="With --view all, closed tasks too (done and won't do)."
+    ),
     include_completed: bool = typer.Option(
-        False, '--include-completed', help='With --view all, completed tasks too.'
+        False, '--include-completed', hidden=True, help='The old name of --include-closed.'
+    ),
+    resolution: str | None = typer.Option(
+        None,
+        '--resolution',
+        help='Only closed tasks closed as done or wont-do (with --view closed or --include-closed).',
+    ),
+    state: list[str] | None = typer.Option(
+        None,
+        '--state',
+        help='Only open tasks in this state: todo, in-progress, blocked or on-hold; '
+        'repeat for several.',
     ),
     priority: str | None = typer.Option(
         None, '--priority', help='Priorities 0 (none) to 3, comma-separated.'
@@ -360,23 +411,33 @@ def todo_list(
     offset: int = typer.Option(0, '--offset', help='Number of tasks to skip.'),
 ):
     """
-    List your tasks (a number, the due date and time, the priority, the title, the labels, a
-    repeat mark and a bell for reminders).
+    List your tasks (a number, the due date and time, the priority, the state, the title, the
+    labels, a repeat mark and a bell for reminders). The state column is blank for To do, and says
+    Done or Won't do for a closed task. On hold and Blocked tasks are never overdue.
 
     Example:
         todo list local
         todo list local --view today
-        todo list local --q "rent*" --include-completed
+        todo list local --q "rent*" --include-closed
+        todo list local --view closed --resolution wont-do
+        todo list local --state in-progress --state blocked
         todo list local --priority 1,2 --label home --from 2026-11-01 --to 2026-11-30
     """
     select_environment(environment)
+    view = 'closed' if view == 'completed' else view  # the name this view had before version 2
     params: dict = {'view': view, 'limit': limit, 'offset': offset}
     if q:
         params['q'] = q
         if regex:
             params['mode'] = 'regex'
-    if include_completed:
-        params['include_completed'] = 'true'
+    if include_closed or include_completed:
+        params['include_closed'] = 'true'
+    if resolution:
+        params['resolution'] = _choice(resolution, RESOLUTIONS, '--resolution')
+    if state:
+        params['state'] = ','.join(
+            _choice(item, {**STATES, 'blocked': 'blocked'}, '--state') for item in state
+        )
     if label:
         params['label'] = ','.join(_label_ids(label, allow_none=True))
     for name, value in (
@@ -404,6 +465,15 @@ def todo_add(
     parent: int | None = typer.Option(
         None, '--parent', help='Make it a subtask of this task number.'
     ),
+    state: str | None = typer.Option(
+        None, '--state', help='todo (default), in-progress or on-hold. Blocked is set by blockers.'
+    ),
+    blocked_by: list[int] | None = typer.Option(
+        None,
+        '--blocked-by',
+        help='The number of a task that blocks this one; repeat for several (at most 20). '
+        'The task starts Blocked while one of them is open.',
+    ),
     repeat: str | None = typer.Option(
         None, '--repeat', help='An RFC 5545 rule, like FREQ=MONTHLY;BYMONTHDAY=1.'
     ),
@@ -427,6 +497,8 @@ def todo_add(
         todo add local "pay rent every month on the 1st"
         todo add local call the dentist --due 2026-11-05T15:00 --priority 2 --label health
         todo add local "write report" --parent 1234 --no-parse
+        todo add local "send invoice" --blocked-by 1200 --blocked-by 1201
+        todo add local "think about it" --state on-hold
     """
     select_environment(environment)
     payload: dict = {'title': ' '.join(title), 'parse_title': not no_parse}
@@ -443,6 +515,10 @@ def todo_add(
         payload['labels'] = _label_ids(label)
     if parent is not None:
         payload['parent'] = parent
+    if state is not None:
+        payload['state'] = _choice(state, STATES, '--state')
+    if blocked_by:
+        payload['blocked_by'] = list(dict.fromkeys(blocked_by))
     if repeat:
         payload['rrule'] = repeat
     if mode:
@@ -456,14 +532,47 @@ def todo_add(
     _spent(task)
 
 
+def _link_line(ref: dict) -> str:
+    """`#1200 Title`, with a note for a task that no longer blocks (closed) or is in the Trash."""
+    note = ' (in the trash)' if ref['trashed'] else '' if ref['open'] else ' (closed)'
+    return f'#{ref["number"]} {ref["title"]}{note}'
+
+
+def _print_history(number: int, limit: int, before: str | None) -> None:
+    """A page of the task's activity log, newest first, and how to get the next one."""
+    params: dict = {'limit': limit}
+    if before:
+        params['before'] = before
+    body = _call('get', f'/tasks/{number}/activity', params=params)
+    console = _console()
+    console.print(Text('\nHistory', style='cyan'))
+    if not body['results']:
+        console.print(Text('Nothing recorded.'))
+    for entry in body['results']:
+        auto = ' (automatic)' if entry['automatic'] else ''
+        console.print(Text(f'{entry["created_at"]}  {entry["text"]}{auto}  [{entry["channel"]}]'))
+    if body['next']:
+        console.print(
+            Text(f'More: todo history <environment> {number} --before {body["next"]}', style='dim')
+        )
+
+
 @app.command(name='get')
-def todo_get(environment: EnvironmentAnnotation, number: NumberAnnotation):
+def todo_get(
+    environment: EnvironmentAnnotation,
+    number: NumberAnnotation,
+    history: bool = typer.Option(
+        False, '--history', help='Also print the latest entries of the activity log.'
+    ),
+):
     """
-    Show everything about one task: its details, the description (as Markdown), the comments, the
-    reminders, the files and the tasks that mention it.
+    Show everything about one task: its details (the state, how it was closed), the description (as
+    Markdown), what blocks it and what it blocks, the comments, the reminders, the files and the
+    tasks that mention it. With `--history`, the latest changes made to it too.
 
     Example:
         todo get local 1234
+        todo get local 1234 --history
     """
     select_environment(environment)
     task = _call('get', f'/tasks/{number}')
@@ -476,8 +585,14 @@ def todo_get(environment: EnvironmentAnnotation, number: NumberAnnotation):
             console.print(Text.assemble((f'{label}: ', 'cyan'), value))
 
     console.print(Text(f'#{task["number"]} {task["title"]}', style='bold'))
-    status = 'in the trash' if task['deleted_at'] else 'done' if task['completed_at'] else 'open'
+    if task['deleted_at']:
+        status = 'in the trash'
+    elif task['closed_at']:
+        status = RESOLUTION_LABELS.get(task['resolution'] or 'done', 'Done').lower()
+    else:
+        status = 'open'
     row('Status', status)
+    row('State', '' if task['closed_at'] else STATE_LABELS.get(task['state'], task['state']))
     row('Priority', _priority(task))
     row('Due', _due(task))
     recurrence = task['recurrence']
@@ -496,7 +611,7 @@ def todo_get(environment: EnvironmentAnnotation, number: NumberAnnotation):
     row('Source', task['source'])
     row('Created', task['created_at'])
     row('Updated', task['updated_at'])
-    row('Completed', task['completed_at'] or '')
+    row('Closed', task['closed_at'] or '')
     row('In the trash since', task['deleted_at'] or '')
     row(
         'Cost',
@@ -508,6 +623,14 @@ def todo_get(environment: EnvironmentAnnotation, number: NumberAnnotation):
     if task['description']:
         console.print(Text('\nDescription', style='cyan'))
         console.print(Text(task['description']))
+    if task['blocked_by']:
+        console.print(Text('\nBlocked by', style='cyan'))
+        for ref in task['blocked_by']:
+            console.print(Text(_link_line(ref)))
+    if task['blocks']:
+        console.print(Text('\nBlocks', style='cyan'))
+        for ref in task['blocks']:
+            console.print(Text(_link_line(ref)))
     if task['reminders']:
         console.print(Text('\nReminders', style='cyan'))
         for reminder in task['reminders']:
@@ -540,6 +663,30 @@ def todo_get(environment: EnvironmentAnnotation, number: NumberAnnotation):
         for source in task['referenced_by']:
             where = ' (in a comment)' if source['comment'] else ''
             console.print(Text(f'#{source["number"]} {source["title"]}{where}'))
+    if history:
+        _print_history(number, 20, None)
+
+
+@app.command(name='history')
+def todo_history(
+    environment: EnvironmentAnnotation,
+    number: NumberAnnotation,
+    limit: int = typer.Option(20, '--limit', help='How many entries to show (1-100).'),
+    before: str | None = typer.Option(
+        None, '--before', help='The cursor printed under the previous page: show older entries.'
+    ),
+):
+    """
+    Show a task's activity log, newest first: every change made to it, who or what made it
+    (automatic ones are marked) and through which entry point. Works for a task in the Trash.
+
+    Example:
+        todo history local 1234
+        todo history local 1234 --limit 100
+        todo history local 1234 --before 2026-10-10T09:00:00+00:00_5f0c...
+    """
+    select_environment(environment)
+    _print_history(number, limit, before)
 
 
 @app.command(name='edit')
@@ -567,6 +714,19 @@ def todo_edit(
     remove_label: list[str] | None = typer.Option(
         None, '--remove-label', help='Take a label off; repeat for several.'
     ),
+    state: str | None = typer.Option(
+        None,
+        '--state',
+        help='todo, in-progress or on-hold (an open task; blocked is set by blockers).',
+    ),
+    blocked_by: list[int] | None = typer.Option(
+        None,
+        '--blocked-by',
+        help='REPLACES the tasks that block this one with these numbers; repeat for several.',
+    ),
+    clear_blocked_by: bool = typer.Option(
+        False, '--clear-blocked-by', help='Remove every blocker.'
+    ),
 ):
     """
     Change a task: only what you pass is changed.
@@ -577,8 +737,13 @@ def todo_edit(
         todo edit local 1234 --due 2026-11-06          (moves the day, keeps its time)
         todo edit local 1234 --due 2026-11-06 --clear-time
         todo edit local 1234 --clear-due
+        todo edit local 1234 --state in-progress
+        todo edit local 1234 --blocked-by 1200 --blocked-by 1201   (replaces the blockers)
+        todo edit local 1234 --clear-blocked-by
     """
     select_environment(environment)
+    if blocked_by and clear_blocked_by:
+        raise typer.BadParameter('--blocked-by and --clear-blocked-by cannot be used together.')
     if due and clear_due:
         raise typer.BadParameter('--due and --clear-due cannot be used together.')
     if clear_time and clear_due:
@@ -609,11 +774,31 @@ def todo_edit(
             *(item for item in current if item not in removed),
             *(item for item in added if item not in current and item not in removed),
         ]
+    if state is not None:
+        payload['state'] = _choice(state, STATES, '--state')
+    if blocked_by:
+        payload['blocked_by'] = list(dict.fromkeys(blocked_by))
+    elif clear_blocked_by:
+        payload['blocked_by'] = []
     if not payload:
         raise _fail('Nothing to change: pass at least one option.')
 
     task = _call('patch', f'/tasks/{number}', json=payload)
     _say(f'Updated {_task_line(task)}')
+
+
+def _close_each(numbers: list[int], payload: dict, verb: str) -> None:
+    """Close each task with `payload`, carrying on past a failure (exit 1 if any failed)."""
+    failed = 0
+    for number in numbers:
+        response = _request('post', f'/tasks/{number}/close', json=payload)
+        if not response.ok:
+            failed += 1
+            logger.error(escape(f'#{number}: {_error_message(response)}'))
+            continue
+        _say(f'{verb} #{number} "{response.json()["title"]}"')
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command(name='done')
@@ -622,35 +807,167 @@ def todo_done(
     numbers: list[int] = typer.Argument(..., help='The task numbers.'),
 ):
     """
-    Complete tasks (and their open subtasks). A repeating task creates its next occurrence.
+    Close tasks as Done (shorthand for `close`), and their open subtasks as Done too. A repeating
+    task creates its next occurrence.
 
     Example:
         todo done local 1234 1235
     """
     select_environment(environment)
-    failed = 0
-    for number in numbers:
-        response = _request('post', f'/tasks/{number}/complete')
-        if not response.ok:
-            failed += 1
-            logger.error(escape(f'#{number}: {_error_message(response)}'))
-            continue
-        _say(f'Completed #{number} "{response.json()["title"]}"')
-    if failed:
-        raise typer.Exit(1)
+    _close_each(numbers, {}, 'Completed')
 
 
-@app.command(name='undone')
+@app.command(name='close')
+def todo_close(
+    environment: EnvironmentAnnotation,
+    numbers: list[int] = typer.Argument(..., help='The task numbers.'),
+    wont_do: bool = typer.Option(
+        False, '--wont-do', help="Close as won't do (skipped) instead of done."
+    ),
+    note: str | None = typer.Option(
+        None, '--note', help='Why, as a comment on the task; only with --wont-do.'
+    ),
+    subtasks: str = typer.Option(
+        'done',
+        '--subtasks',
+        help='What happens to the open subtasks: done (default), wont-do or leave.',
+    ),
+):
+    """
+    Close tasks as Done (the default) or, with `--wont-do`, as Won't do, and say what happens to
+    their open subtasks. A repeating task creates its next occurrence either way. Closing a task
+    that has open blockers is allowed (the links are kept) and frees the tasks it blocked.
+
+    Example:
+        todo close local 1234
+        todo close local 1234 --wont-do --note "not needed any more"
+        todo close local 1234 --subtasks leave
+    """
+    select_environment(environment)
+    if note and not wont_do:
+        raise typer.BadParameter('--note only goes with --wont-do.')
+    payload: dict = {
+        'resolution': 'wont_do' if wont_do else 'done',
+        'subtasks': _choice(subtasks, SUBTASK_CHOICES, '--subtasks'),
+    }
+    if note:
+        payload['note'] = note
+    _close_each(numbers, payload, "Closed as won't do" if wont_do else 'Closed as done')
+
+
+@app.command(name='reopen')
+def todo_reopen(environment: EnvironmentAnnotation, number: NumberAnnotation):
+    """
+    Make a closed task open again (To do, or Blocked while one of its blockers is open).
+
+    Example:
+        todo reopen local 1234
+    """
+    select_environment(environment)
+    task = _call('post', f'/tasks/{number}/reopen')
+    _say(f'Reopened {_task_line(task)}')
+
+
+@app.command(name='undone', hidden=True)
 def todo_undone(environment: EnvironmentAnnotation, number: NumberAnnotation):
     """
-    Make a completed task open again.
+    The old name of `reopen`.
 
     Example:
         todo undone local 1234
     """
     select_environment(environment)
-    task = _call('post', f'/tasks/{number}/uncomplete')
+    task = _call('post', f'/tasks/{number}/reopen')
     _say(f'Reopened {_task_line(task)}')
+
+
+@app.command(name='resolution')
+def todo_resolution(
+    environment: EnvironmentAnnotation,
+    number: NumberAnnotation,
+    resolution: str = typer.Argument(..., help='done or wont-do.'),
+):
+    """
+    Change how a closed task was closed (done or wont-do). Nothing else happens: no new occurrence,
+    no subtasks touched, and it keeps the time it was closed at.
+
+    Example:
+        todo resolution local 1234 wont-do
+    """
+    select_environment(environment)
+    value = _choice(resolution, RESOLUTIONS, 'RESOLUTION')
+    task = _call('post', f'/tasks/{number}/resolution', json={'resolution': value})
+    _say(f'#{number} "{task["title"]}" is now closed as {RESOLUTION_LABELS[value].lower()}.')
+
+
+@app.command(name='state')
+def todo_state(
+    environment: EnvironmentAnnotation,
+    number: NumberAnnotation,
+    state: str = typer.Argument(..., help='todo, in-progress or on-hold.'),
+):
+    """
+    Set an open task's state. Blocked is not one you can set: it comes from `block`.
+
+    Example:
+        todo state local 1234 in-progress
+        todo state local 1234 on-hold
+    """
+    select_environment(environment)
+    value = _choice(state, STATES, 'STATE')
+    task = _call('post', f'/tasks/{number}/state', json={'state': value})
+    _say(f'#{number} "{task["title"]}" is now {STATE_LABELS[task["state"]]}.')
+
+
+@app.command(name='block')
+def todo_block(
+    environment: EnvironmentAnnotation,
+    number: NumberAnnotation,
+    blockers: list[int] = typer.Argument(..., help='The numbers of the tasks that block it.'),
+):
+    """
+    Make tasks block this one: while one of them is open this task is Blocked, and it goes back to
+    To do when the last one closes. A task cannot block itself and the links cannot form a cycle.
+
+    Example:
+        todo block local 1234 1200 1201
+    """
+    select_environment(environment)
+    failed = 0
+    for blocker in blockers:
+        response = _request('post', f'/tasks/{number}/blockers', json={'number': blocker})
+        if not response.ok:
+            failed += 1
+            logger.error(escape(f'#{blocker}: {_error_message(response)}'))
+            continue
+        _say(f'#{blocker} blocks {_task_line(response.json())}')
+    if failed:
+        raise typer.Exit(1)
+
+
+@app.command(name='unblock')
+def todo_unblock(
+    environment: EnvironmentAnnotation,
+    number: NumberAnnotation,
+    blockers: list[int] = typer.Argument(..., help='The numbers of the tasks to take off.'),
+):
+    """
+    Take tasks off this task's blockers. A Blocked task left with no open blocker goes back to To do.
+
+    Example:
+        todo unblock local 1234 1200
+    """
+    select_environment(environment)
+    failed = 0
+    for blocker in blockers:
+        response = _request('delete', f'/tasks/{number}/blockers/{blocker}')
+        if not response.ok:
+            failed += 1
+            logger.error(escape(f'#{blocker}: {_error_message(response)}'))
+            continue
+        _say(f'#{blocker} no longer blocks #{number}.')
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command(name='postpone')
@@ -683,7 +1000,8 @@ def todo_postpone(
 @app.command(name='overdue-to-today')
 def todo_overdue_to_today(environment: EnvironmentAnnotation):
     """
-    Reschedule every overdue task to today, keeping their times.
+    Reschedule every overdue task to today, keeping their times. A task that is On hold or Blocked
+    is never overdue, so it is not moved.
 
     Example:
         todo overdue-to-today local
