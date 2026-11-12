@@ -2,7 +2,7 @@
 
 **Effective date:** {{ effective_date }}
 
-This Privacy Policy explains what personal information ZipTrigo ("**ZipTrigo**", "**we**", "**us**") collects when you use the website and services at `ziptrigo.com` and its subdomains, and the ZipTrigo mobile app (together, the "**Service**"), why we collect it, and the choices you have. The Service includes QR codes, file transfer, receipts, short links and to-do lists.
+This Privacy Policy explains what personal information ZipTrigo ("**ZipTrigo**", "**we**", "**us**") collects when you use the website and services at `ziptrigo.com` and its subdomains, and the ZipTrigo mobile app (together, the "**Service**"), why we collect it, and the choices you have. The Service includes QR codes, file transfer, receipts, short links, to-do lists and notes.
 
 ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ operator_country }}. It is not operated by a company. For any privacy question or request, write to {{ contact_email }}.
 
@@ -16,6 +16,7 @@ ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ o
 - **Receipts:** the receipts and invoices you upload or send by email, the details read from them (vendor, amount, date, category and, where present, the last 4 digits of a payment method), and your notes. For receipts sent by email we also keep the sender's address, the subject, and a copy of the message with its attachments removed.
 - **Short links:** the destination address, title, tags and settings of each link, and an optional password (stored as a hash).
 - **To-do:** your tasks, descriptions, comments (including earlier versions of a comment you edited), labels, reminders, saved filters, and the files you attach. For tasks added by email we keep the sender's address and the subject.
+- **Notes:** the title and Markdown content of your notes, their tags, and the earlier versions that edits of a note keep (a limited number per note).
 - **Feedback and reports:** messages you send through the Feedback page, and abuse reports about a transfer or a short link, which include the reason, any details you write and, optionally, your email address.
 
 ### 1.2 Information from Google and Microsoft
@@ -82,7 +83,7 @@ We share personal information only:
 - **Account information:** for as long as your account exists.
 - **Transferred files:** deleted when the transfer ends, whether it expires, reaches its download limit, or is disabled or deleted by you, or by us after an abuse takedown. If a transfer is suspended because the account ran out of credits, its files are deleted after the grace period shown in the Service (7 days) unless credits are added. Unfinished uploads are deleted after about 24 hours.
 - **Transfer records:** the record of a transfer (file names, sizes, recipients, download history) is kept with your account after its files are deleted, so you can see your history. IP addresses are removed from download records after 90 days.
-- **Receipts and to-do items:** kept until you delete them. Items in the Trash are deleted for good after the period shown in the Service (30 days unless stated otherwise). Emails you send to your Receipts or To-do address are deleted from our intake storage once processed.
+- **Receipts, to-do items and notes:** kept until you delete them. Items in the Trash are deleted for good after the period shown in the Service (30 days unless stated otherwise). Emails you send to your Receipts or To-do address are deleted from our intake storage once processed.
 - **Short links:** kept until you delete them. The address of a deleted link is retired and never reused. Individual click records are deleted after about 90 days; daily totals without any visitor identifier are kept with the link.
 - **Notifications:** deleted after 90 days.
 - **Email confirmation codes:** deleted after about 30 days.
@@ -110,7 +111,7 @@ We protect your information with encryption in transit (HTTPS), hashed passwords
 Depending on where you live, you may have the right to access, correct, delete or export your personal information, to object to or restrict certain processing, and to withdraw consent at any time. You can:
 
 - update your name, time zone and preferences on the **Account** page;
-- delete your transfers, receipts, short links, tasks and files in the Service at any time;
+- delete your transfers, receipts, short links, tasks, notes and files in the Service at any time;
 - request a copy of your data, or the deletion of your account and its data, by writing to {{ contact_email }} from the email address of your account. We act on a deletion request within 30 days.
 
 If you are in the EEA or the UK, you can also lodge a complaint with your local data protection authority.

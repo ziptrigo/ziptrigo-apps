@@ -39,6 +39,7 @@ them in this order:
 | Receipts | `Receipts` | `/receipts/` | "Email or snap your receipts and invoices; we file and categorize them." | `fa-receipt` |
 | Short URLs | `Short URLs` | `/links/` | "Shorten a link, track it, and share it as a QR code." | `fa-link` |
 | To-do | `To-do` | `/todo/` | "Tasks with due dates, labels and reminders, repeating when you need them." | `fa-check-square` |
+| Notes | `Notes` | `/notes/` | "Markdown notes with code blocks, tags and share links." | `fa-note-sticky` |
 
 ---
 
@@ -51,7 +52,7 @@ them in this order:
 |---|---|---|
 | 1 | Go to `/`. | HTTP 200. The browser tab title is exactly `ZipTrigo`. The tab shows the ZipTrigo favicon (`/static/core/images/logo_32x32.png`, declared with `<link rel="icon">`), not a generic globe. |
 | 2 | Look at the main content. | A centred 128 x 128 logo image (alt text `ZipTrigo logo`) that loads (not a broken-image icon); under it the heading **Welcome to ZipTrigo** (H1) and the line "A set of small tools under one account." The logo, heading, line and cards rise into place one after the other once (no motion with reduced-motion on). |
-| 3 | Look at the product cards. | Exactly five cards, in the order of the reference table, each with its icon, title and description exactly as listed. At this width they sit in a two-column grid (the fifth card alone on the third row, left column). |
+| 3 | Look at the product cards. | Exactly six cards, in the order of the reference table, each with its icon, title and description exactly as listed. At this width they sit in a two-column grid (the fifth card alone on the third row, left column). |
 | 4 | Hover each card. | The card lifts slightly, the border colour changes and a shadow appears (hover state); the cursor is a pointer. |
 | 5 | Check the page for leftovers. | No raw template syntax (`{{`, `{%`), no `None`, no empty cards, no text overlapping. |
 
@@ -62,7 +63,7 @@ them in this order:
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the header (top bar). | Left: a small logo plus the text **ZipTrigo**, then the links **QR Codes**, **File Transfer**, **Receipts**, **Short URLs**, **To-do**, each with its icon (from 768 px wide the names show next to the icons; each link also has the name as its accessible name and tooltip). Right: a **Login** link (no theme button: the theme is chosen on the account page). There is no bell and no person icon / account menu. |
+| 1 | Look at the header (top bar). | Left: a small logo plus the text **ZipTrigo**, then the links **QR Codes**, **File Transfer**, **Receipts**, **Short URLs**, **To-do**, **Notes**, each with its icon (from 768 px wide the names show next to the icons; each link also has the name as its accessible name and tooltip). Right: a **Login** link (no theme button: the theme is chosen on the account page). There is no bell and no person icon / account menu. |
 | 2 | Look for a credit balance in the header. | None is shown (the base template has no balance in the header; the balance is on the account page, see CORE-08). |
 | 3 | Look at the footer. | A **Feedback** link in the middle (no FAQ link: there is no FAQ page); on the right, in small grey text, `© <current year> Joao Coelho. Licensed under MIT.` (the year is the current one, e.g. `© 2026`). The footer sits at the bottom of the window even though the page content is short (no gap below it). |
 | 4 | Click **ZipTrigo** in the header. | Stays on / reloads `/`. |
@@ -131,9 +132,9 @@ parameter, and signing in returns them to the product.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Go to `/`. | Same content as CORE-01 (heading, five cards); no personal greeting is expected. |
-| 2 | Click each card in turn (use Back between them). | **QR Codes** opens `/qr/` (heading **QR codes**), **File Transfer** opens `/transfer/` (heading **Your transfers**), **Receipts** opens `/receipts/` (heading **Receipts**), **Short URLs** opens `/links/` (heading **Short URLs**), **To-do** opens `/todo/` (heading **Today**). No login page in between. |
-| 3 | On each product page, click the header links **QR Codes**, **File Transfer**, **Receipts**, **Short URLs**, **To-do** and **ZipTrigo**. | Each goes to its page directly (`/qr/`, `/transfer/`, `/receipts/`, `/links/`, `/todo/`, `/`); the header (logo, links, bell, person icon) and footer look the same on every page. The link of the product you are in is highlighted (a light sage background) and carries `aria-current="true"`; the others do not. |
+| 1 | Go to `/`. | Same content as CORE-01 (heading, six cards); no personal greeting is expected. |
+| 2 | Click each card in turn (use Back between them). | **QR Codes** opens `/qr/` (heading **QR codes**), **File Transfer** opens `/transfer/` (heading **Your transfers**), **Receipts** opens `/receipts/` (heading **Receipts**), **Short URLs** opens `/links/` (heading **Short URLs**), **To-do** opens `/todo/` (heading **Today**), **Notes** opens `/notes/` (heading **Notes**). No login page in between. |
+| 3 | On each product page, click the header links **QR Codes**, **File Transfer**, **Receipts**, **Short URLs**, **To-do**, **Notes** and **ZipTrigo**. | Each goes to its page directly (`/qr/`, `/transfer/`, `/receipts/`, `/links/`, `/todo/`, `/notes/`, `/`); the header (logo, links, bell, person icon) and footer look the same on every page. The link of the product you are in is highlighted (a light sage background) and carries `aria-current="true"`; the others do not. |
 
 ### CORE-08 Where the credit balance is shown
 
@@ -211,7 +212,7 @@ dark mode is readable. There is no toggle in the header.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Press `Tab` repeatedly. | Focus moves in order: the **Skip to content** link (it appears while focused), **ZipTrigo**, **QR Codes**, **File Transfer**, **Receipts**, **Short URLs**, **To-do**, the notification bell, the account icon, then into the page (the product cards), then the footer links. Every focused element shows a visible focus indicator. |
+| 1 | Press `Tab` repeatedly. | Focus moves in order: the **Skip to content** link (it appears while focused), **ZipTrigo**, **QR Codes**, **File Transfer**, **Receipts**, **Short URLs**, **To-do**, **Notes**, the notification bell, the account icon, then into the page (the product cards), then the footer links. Every focused element shows a visible focus indicator. |
 | 2 | With the account icon focused press `Enter`. | The menu opens; its `aria-expanded` becomes `true`. |
 | 3 | Press `Tab`. | Focus moves to **Settings**, then **Logout**. |
 | 4 | Press `Escape`. | The menu closes, `aria-expanded` is `false`, focus is back on the account icon. |
@@ -225,7 +226,7 @@ dark mode is readable. There is no toggle in the header.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Look at the whole page, then try to scroll horizontally. | No horizontal scrolling: the page is not wider than the viewport (`document.documentElement.scrollWidth` <= 375). Nothing is cut off at the right edge. |
-| 2 | Look at the header. | One line: the logo and **ZipTrigo**, the five product links as icons only (QR Codes, File Transfer, Receipts, Short URLs, To-do; each name is its tooltip and accessible name), and **Login** at the right. Nothing overlaps, wraps or is clipped. Take a screenshot. (The product names appear next to the icons from 768 px wide.) |
+| 2 | Look at the header. | One line: the logo and **ZipTrigo**, the six product links as icons only (QR Codes, File Transfer, Receipts, Short URLs, To-do, Notes; each name is its tooltip and accessible name), and **Login** at the right. Nothing overlaps, wraps or is clipped. Take a screenshot. (The product names appear next to the icons from 768 px wide.) |
 | 3 | Look at the product cards. | One column, full width with side padding; text wraps inside the cards. |
 | 4 | Look at the footer. | **Feedback** and the copyright line fit within the width (stacked on a phone; check the copyright isn't pushed off-screen). |
 | 5 | Tap **Login**. | The login form fits the width; the inputs are full width. |
@@ -241,7 +242,7 @@ dark mode is readable. There is no toggle in the header.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the header. | Still one line: the five product icons, the notification bell and the person icon (no icon pushed onto a second line). It stays one line at 320 px too, where **ZipTrigo** next to the logo is hidden. |
+| 1 | Look at the header. | Still one line: the six product icons, the notification bell and the person icon (no icon pushed onto a second line). It stays one line at 320 px too, where **ZipTrigo** next to the logo is hidden. |
 | 2 | On `/`, tap the person icon. | The dropdown opens fully inside the viewport (nothing cut off at the right or left edge); **QA User**, **Settings**, **Logout** are readable and tappable. |
 | 3 | Tap outside it. | It closes. |
 | 4 | Open `/qr/`, `/transfer/`, `/receipts/`, `/account/`, `/links/`, `/todo/`, `/billing/credits/` and `/feedback/` in turn. | Each page has no horizontal page scroll (a wide table may scroll inside its own box, but the page itself must not; the credits history becomes cards with no scrolling box). Headings and primary buttons are visible without zooming. |
@@ -254,8 +255,8 @@ dark mode is readable. There is no toggle in the header.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Visit each page and read the tab title. | Titles at the time of writing: `/` `ZipTrigo`; `/qr/` `QR codes - ZipTrigo`; `/transfer/` `File Transfer - ZipTrigo`; `/transfer/send/` `Send files - ZipTrigo`; `/receipts/` `Receipts - ZipTrigo`; `/receipts/upload/` `Upload receipts - ZipTrigo`; `/links/` `Short URLs - ZipTrigo`; `/todo/` `Today - To-do - ZipTrigo`; `/todo/settings/` `Settings - To-do - ZipTrigo`; `/account/` `Account Settings - ZipTrigo`; `/billing/credits/` `Credits History - ZipTrigo`; `/notifications/` `Notifications - ZipTrigo`; `/feedback/` `Send feedback - ZipTrigo`; `/account/login/` `Login - ZipTrigo`; `/account/register/` `Register - ZipTrigo`; `/api/docs` `ZipTrigo API`. None is empty, `None` or a raw template tag. |
-| 2 | Compare them. | Every page of the site ends in ` - ZipTrigo` (the API docs, `ZipTrigo API`, and `/`, plain `ZipTrigo`, are the exceptions) and To-do pages carry their section (`... - To-do - ZipTrigo`). A page without the suffix is a regression. |
+| 1 | Visit each page and read the tab title. | Titles at the time of writing: `/` `ZipTrigo`; `/qr/` `QR codes - ZipTrigo`; `/transfer/` `File Transfer - ZipTrigo`; `/transfer/send/` `Send files - ZipTrigo`; `/receipts/` `Receipts - ZipTrigo`; `/receipts/upload/` `Upload receipts - ZipTrigo`; `/links/` `Short URLs - ZipTrigo`; `/todo/` `Today - To-do - ZipTrigo`; `/todo/settings/` `Settings - To-do - ZipTrigo`; `/notes/` `Notes - ZipTrigo`; `/notes/trash/` `Trash - Notes - ZipTrigo`; `/account/` `Account Settings - ZipTrigo`; `/billing/credits/` `Credits History - ZipTrigo`; `/notifications/` `Notifications - ZipTrigo`; `/feedback/` `Send feedback - ZipTrigo`; `/account/login/` `Login - ZipTrigo`; `/account/register/` `Register - ZipTrigo`; `/api/docs` `ZipTrigo API`. None is empty, `None` or a raw template tag. |
+| 2 | Compare them. | Every page of the site ends in ` - ZipTrigo` (the API docs, `ZipTrigo API`, and `/`, plain `ZipTrigo`, are the exceptions) and To-do and Notes pages carry their section (`... - To-do - ZipTrigo`, `... - Notes - ZipTrigo`). A page without the suffix is a regression. |
 
 ### CORE-17 Console errors and broken assets
 

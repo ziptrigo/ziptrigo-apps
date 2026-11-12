@@ -1,0 +1,34 @@
+{% extends 'notes/layout.html' %}
+{% load local_time notes_ui %}
+
+{% block title %}History of {{ note.title }} - Notes - ZipTrigo{% endblock %}
+
+{% block notes_content %}
+<h1 class="mb-2 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">History</h1>
+<p class="mb-6 text-sm text-gray-500 dark:text-gray-400"><a href="{% url 'notes:note' note.pk %}" class="text-sage-600 dark:text-sage-300 hover:underline">{{ note.title }}</a>.
+    Every save keeps the version before it, up to a limit; restoring one saves it as a new version.</p>
+
+<div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+        {% for version in versions %}
+        <li class="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Version {{ version.number }}
+                    {% if version.number == newest_number %}<span class="ml-2 inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-400/10 dark:text-green-300">Current</span>{% endif %}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{% local_time version.updated_at %} by {% version_author version %}</p>
+            </div>
+            <a href="{% url 'notes:history-version' note.pk version.pk %}"
+               class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">View</a>
+            {% if can_restore and version.number != newest_number %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'notes:history-restore' note.pk version.pk %}" data-tone="primary" data-label="Restore"
+                    data-title="Restore version {{ version.number }}?"
+                    data-body="The note's title and content become what they were in version {{ version.number }}. The current version stays in the history."
+                    class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore</button>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}

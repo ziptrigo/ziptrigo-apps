@@ -16,7 +16,7 @@ pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 def test_installed_products_are_registered_in_installed_apps_order():
     labels = [product.label for product in get_products()]
 
-    assert labels == ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo']
+    assert labels == ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo', 'notes']
 
 
 def test_every_product_url_resolves():
@@ -74,7 +74,7 @@ def test_short_url_is_registered_as_a_product():
 
 # --- a user's own order and switched-off apps (issue #246) ---
 
-ALL = ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo']
+ALL = ['qr_code', 'file_transfer', 'receipts', 'short_url', 'todo', 'notes']
 
 
 def _user(**attrs):
@@ -113,8 +113,14 @@ def test_products_for_follows_the_users_order_and_hidden_apps():
         ('qr_code', True),
         ('file_transfer', True),
         ('short_url', False),
+        ('notes', True),
     ]
-    assert [p.label for p in visible_products(user)] == ['todo', 'qr_code', 'file_transfer']
+    assert [p.label for p in visible_products(user)] == [
+        'todo',
+        'qr_code',
+        'file_transfer',
+        'notes',
+    ]
 
 
 def test_products_for_skips_unknown_labels_and_repeats():
@@ -126,6 +132,7 @@ def test_products_for_skips_unknown_labels_and_repeats():
         ('file_transfer', True),
         ('receipts', False),
         ('short_url', True),
+        ('notes', True),
     ]
 
 
@@ -139,6 +146,7 @@ def test_a_product_missing_from_the_saved_order_goes_last_and_is_visible():
         'file_transfer',
         'receipts',
         'short_url',
+        'notes',
     ]
     assert all(visible for _, visible in _labels(products_for(user)))
 
@@ -160,6 +168,7 @@ def test_the_context_processor_returns_only_the_visible_products():
         'todo',
         'file_transfer',
         'short_url',
+        'notes',
     ]
 
 

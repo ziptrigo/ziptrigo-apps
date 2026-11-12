@@ -1,0 +1,66 @@
+{% comment %} The list of the current view, what the tag chips, sort links and pager swap into #note-list. Needs `view`,
+   `notes`, `page_obj`, `sort`, `sort_links`, `tags`, `tag`, `list_url`, `page_url`; `sortable` adds the drag handles
+   (the active list in manual order, no tag filter). {% endcomment %}
+{% url 'notes:new' as new_url %}
+{% if tags and view != 'trash' %}
+<nav aria-label="Filter by tag" class="mb-3 flex flex-wrap items-center gap-2 text-sm">
+    <span class="text-gray-500 dark:text-gray-400">Tag</span>
+    <a href="{{ page_url }}{% if all_tags_query %}?{{ all_tags_query }}{% endif %}"
+       hx-get="{{ list_url }}?view={{ view }}{% if all_tags_query %}&{{ all_tags_query }}{% endif %}" hx-target="#note-list" hx-swap="innerHTML"
+       {% if not tag %}aria-current="true"{% endif %}
+       class="rounded-full border px-3 py-0.5 text-xs font-medium {% if not tag %}border-brand-primary bg-sage-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100{% else %}border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800{% endif %}">All</a>
+    {% for candidate in tags %}
+    <a href="{{ page_url }}?{{ candidate.list_query }}"
+       hx-get="{{ list_url }}?view={{ view }}&{{ candidate.list_query }}" hx-target="#note-list" hx-swap="innerHTML"
+       {% if tag and tag.pk == candidate.pk %}aria-current="true"{% endif %}
+       class="rounded-full border px-3 py-0.5 text-xs font-medium {% if tag and tag.pk == candidate.pk %}border-brand-primary bg-sage-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100{% else %}border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800{% endif %}">{{ candidate.name }}</a>
+    {% endfor %}
+</nav>
+{% endif %}
+
+{% if view != 'trash' %}
+<div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+    <span class="text-gray-500 dark:text-gray-400">Sort by</span>
+    {% for link in sort_links %}
+    <a href="{{ page_url }}{% if link.query %}?{{ link.query }}{% endif %}"
+       hx-get="{{ list_url }}?view={{ view }}{% if link.query %}&{{ link.query }}{% endif %}" hx-target="#note-list" hx-swap="innerHTML"
+       {% if link.active %}aria-current="true" title="Click to sort {% if link.direction == 'asc' %}descending{% else %}ascending{% endif %}"{% endif %}
+       class="rounded-md {% if link.active %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ link.label }}{% if link.active %}<i class="fas fa-arrow-{% if link.direction == 'asc' %}up{% else %}down{% endif %} ml-1 text-xs" aria-hidden="true"></i><span class="sr-only">, sorted {% if link.direction == 'asc' %}ascending{% else %}descending{% endif %}</span>{% endif %}</a>
+    {% endfor %}
+</div>
+{% else %}
+<p class="mb-3 text-sm text-gray-500 dark:text-gray-400">
+    Notes are deleted for good {{ trash_days }} days after being trashed. Credits spent on them are not refunded.
+</p>
+{% endif %}
+
+<div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+    <ul class="divide-y divide-gray-200 dark:divide-gray-700"
+        {% if sortable %}data-sortable data-reorder-url="{{ reorder_url }}" data-msg="#notes-msg"{% endif %}>
+        {% for note in notes %}{% include 'notes/partials/note_row.html' %}
+        {% empty %}
+        <li>
+            {% if tag %}{% include 'core/partials/empty_state.html' with icon='fas fa-tag' title='No notes with this tag' text='Pick another tag, or tag some notes from their pages.' %}
+            {% elif view == 'archived' %}{% include 'core/partials/empty_state.html' with icon='fas fa-box-archive' title='Nothing archived' text='Archive a note to hide it from your list without deleting it.' %}
+            {% elif view == 'trash' %}{% include 'core/partials/empty_state.html' with icon='fas fa-trash' title='The Trash is empty' %}
+            {% else %}{% include 'core/partials/empty_state.html' with icon='fas fa-note-sticky' title='No notes yet' text='Write your first note.' action_url=new_url action_label='New note' %}{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="mt-6 flex items-center justify-between text-sm">
+    <div class="text-gray-600 dark:text-gray-300">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="flex gap-4">
+        {% if page_obj.has_previous %}
+        <a href="{{ page_url }}?{{ prev_query }}" hx-get="{{ list_url }}?view={{ view }}&{{ prev_query }}" hx-target="#note-list" hx-swap="innerHTML"
+           class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-chevron-left mr-1 text-xs" aria-hidden="true"></i>Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a href="{{ page_url }}?{{ next_query }}" hx-get="{{ list_url }}?view={{ view }}&{{ next_query }}" hx-target="#note-list" hx-swap="innerHTML"
+           class="text-sage-600 dark:text-sage-300 hover:underline">Next<i class="fas fa-chevron-right ml-1 text-xs" aria-hidden="true"></i></a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

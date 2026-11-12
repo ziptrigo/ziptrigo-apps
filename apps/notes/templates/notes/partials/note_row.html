@@ -1,0 +1,60 @@
+{% load local_time notes_ui %}
+{% comment %} One note in a list. Needs `note` (loaded like a list loads its rows: tags prefetched, `excerpt` set), `view`
+   (notes, archived or trash), `sortable` for a drag handle, `list_next` (where an action comes back to) and
+   `duplicate_cost`. {% endcomment %}
+<li id="note-{{ note.pk }}" data-sort-id="{{ note.pk }}"
+    class="note-row flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
+    {% if sortable %}
+    {% comment %}A span with role=button, not a <button>: Firefox will not start a drag from a button inside the draggable row.
+       The arrow keys move the row (notes.js), so ordering doesn't need a mouse.{% endcomment %}
+    <span class="drag-handle mt-0.5 cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
+          data-name="{{ note.title }}" aria-label="Reorder {{ note.title }}: use the up and down arrow keys" title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+    {% endif %}
+
+    <div class="min-w-0 flex-1">
+        <div class="flex items-baseline gap-2">
+            <a href="{% url 'notes:note' note.pk %}"
+               class="min-w-0 truncate text-sm font-medium {% if note.is_trashed %}text-gray-500 dark:text-gray-400{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline rounded-md">{{ note.title }}</a>
+            {% if note.is_locked %}<span class="flex-shrink-0 text-xs text-amber-600 dark:text-amber-400" title="Locked until its renewal is paid"><i class="fas fa-lock" aria-hidden="true"></i><span class="sr-only">Locked</span></span>{% endif %}
+        </div>
+        {% if note.excerpt %}<p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{{ note.excerpt }}</p>{% endif %}
+        <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {% for tag in note.tags.all %}{% tag_chip tag %}{% endfor %}
+            <span class="text-xs text-gray-500 dark:text-gray-400">{% if view == 'trash' %}{% if note.days_left %}deleted in {{ note.days_left }} day{{ note.days_left|pluralize }}{% else %}deleted soon{% endif %}{% else %}Updated {% local_time note.updated_at 'short' %}{% endif %}</span>
+        </div>
+    </div>
+
+    <div class="flex flex-shrink-0 items-center">
+        {% if view == 'trash' %}
+        {% if note.restore_cost %}
+        <button type="button" @click="show($el)"
+                data-url="{% url 'notes:restore' note.pk %}?next={{ list_next|urlencode:'' }}" data-tone="primary" data-label="Restore for {{ note.restore_cost }} credit{{ note.restore_cost|pluralize }}"
+                data-cost="{{ note.restore_cost }}" data-title="Restore this note?"
+                data-body="{% if note.is_free %}Your free notes are all in use, so restoring this one makes it a paid note: it costs {{ note.restore_cost }} credit{{ note.restore_cost|pluralize }}.{% else %}Its renewal fell due while it was in the Trash, so restoring it costs {{ note.restore_cost }} credit{{ note.restore_cost|pluralize }}.{% endif %}"
+                class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore
+        </button>
+        {% else %}
+        <form method="post" action="{% url 'notes:restore' note.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ list_next }}">
+            <button type="submit"
+                    class="btn inline-flex items-center px-3 py-1 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <i class="fas fa-rotate-left mr-2" aria-hidden="true"></i>Restore
+            </button>
+        </form>
+        {% endif %}
+        <button type="button" @click="show($el)"
+                data-url="{% url 'notes:delete' note.pk %}?next={{ list_next|urlencode:'' }}"
+                data-title="Delete forever"
+                data-body="Are you sure you want to delete {{ note.title }} forever? This can't be undone."
+                data-label="Delete forever"
+                class="btn p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                aria-label="Delete {{ note.title }} forever" title="Delete forever">
+            <i class="fas fa-trash" aria-hidden="true"></i>
+        </button>
+        {% else %}
+        {% include 'notes/partials/note_actions_menu.html' %}
+        {% endif %}
+    </div>
+</li>

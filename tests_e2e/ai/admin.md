@@ -23,7 +23,7 @@ The custom Django admin site at `/admin/` (`apps/core/admin_site.py`, themed wit
   code, validation, read-only fields once claimed, delete only while unredeemed, Duplicate, Export
   CSV, Create many with a prefix and the campaign CSV, the state filter, the redemptions inline and
   list);
-- the six singleton settings pages (Core, Billing, File transfer, Receipts, Short URL, To-do) with
+- the seven singleton settings pages (Core, Billing, File transfer, Receipts, Short URL, To-do, Notes) with
   their validation;
 - file transfer moderation: transfers (read-only plus the take down / release hold / block sender
   actions), abuse reports (dismiss, take down, block sender with "also take down" and "also
@@ -138,7 +138,7 @@ browser in this run would be locked out of sending.
 | 1 | Log in as `qa.admin@example.com` / `QaE2e-Passw0rd!`. | Lands on `/admin/`. Tab title "Dashboard \| ZipTrigo Admin". The navbar shows "Site" and "Admin Tools" links and a user icon menu; the left sidebar shows "ZipTrigo" and `qa.admin@example.com`. |
 | 2 | Read the main area. | Groups and models, each with links: **Accounts**: Users (Add, Change). **Billing**: Billing settings (Change), Credit accounts (View), Credit transactions (View), Promo codes (Add, Change), Promo redemptions (View), Welcome credits (View). **Core**: Core settings (Change), Email verifications (View), Notifications (View), Rate limit counters (View), Scheduled jobs (View). **Feedback**: Feedback (Change). **File transfer**: Abuse reports (View), Blocked senders (Add, Change), Download events (View), File transfer settings (Change), Transfers (View). **QR codes**: QR Codes (Add, Change). **Receipts**: Inbound emails (View), Inbound messages (View), Receipts (View), Receipts accounts (View), Receipts settings (Change), Vendors (View). **Short URLs**: Blocked domains (Add, Change), Daily link stats (View), Link reports (View), Short links (View), Short URL settings (Change). **To-do**: Attachments, Comments, Inbound emails, Inbound messages, Labels, Recurrences, Reminder deliveries, Reminders, Saved filters, Tasks, To-do accounts (all View) and To-do settings (Change). |
 | 3 | Check the group headings' wording. | Each heading is readable ("File transfer", "QR codes", "Short URLs", "To-do"). Record as a UX issue any heading that shows a raw app label such as "File_Transfer" or "Qr_Code". |
-| 4 | Check the "Core settings", "Billing settings", "File transfer settings", "Receipts settings", "Short URL settings" and "To-do settings" rows. | Each offers only "Change", never "Add", even on a fresh server where the row does not exist yet (opening the page creates it): the pages are singletons (see ADM-17 to ADM-20). |
+| 4 | Check the "Core settings", "Billing settings", "File transfer settings", "Receipts settings", "Short URL settings", "To-do settings" and "Notes settings" rows. | Each offers only "Change", never "Add", even on a fresh server where the row does not exist yet (opening the page creates it): the pages are singletons (see ADM-17 to ADM-20). |
 | 5 | Find the "Admin Tools" box below the models. | Shown to a superuser only: heading "Admin Tools", a button "Open Admin Tools" and the help text "Access utilities such as sending test emails or viewing masked environment variables." |
 | 6 | Check the sidebar. | The same apps and models as the main area, expanded; clicking "Users" opens `/admin/accounts/user/`. Go back to `/admin/`. |
 
@@ -572,7 +572,7 @@ the welcome credit rows; before it some lists are empty.
 | 2 | `/admin/billing/welcomecredit/`. | Read-only list: **User** (the email, not an id), status, reason, credits, created, decided; filters status and reason. Opening a granted row shows "Ledger line" as a link reading like `+1000 Welcome credits, 2026-11-01 12:00 UTC` to the ledger row, not a raw id. |
 | 3 | `/admin/billing/promocode/`, then **Add promo code**. | A list with usage columns and a state filter (live, scheduled, expired, fully redeemed, inactive); the add form leaves **Code** blank to generate one. A **Create many** tool exists at `.../promocode/bulk/`. Do not create codes unless a case needs one. |
 | 4 | `/admin/short_url/shortlink/`, `/admin/short_url/linkreport/`, `/admin/short_url/blockeddomain/`. | Short links and link reports are read-only lists (no "Add"); the report list's first column is the reported link's code and the report opens from its **Reason**; blocked domains are plain CRUD. Their takedown / block / deactivate actions show the card-style confirmation pages described in SU-19 and SU-20. |
-| 5 | `/admin/short_url/shorturlsettings/`, `/admin/todo/todosettings/`. | Straight to the one form (no list, no Add, no Delete). Short URL settings has an **Allowances (per user)** tab. |
+| 5 | `/admin/short_url/shorturlsettings/`, `/admin/todo/todosettings/`, `/admin/notes/notessettings/`. | Straight to the one form (no list, no Add, no Delete). Short URL settings has an **Allowances (per user)** tab. |
 | 6 | `/admin/todo/task/`. | Read-only task list (search by title, number or the user's email; filters priority, source, completed, trash, unpaid). The **Unpaid** column shows "Unpaid" only for an owed task (nothing, not a red cross, for the normal state). No Add. |
 | 7 | `/admin/todo/reminderdelivery/`. | The list and the dashboard call it "Reminder deliveries" (plural), read-only. |
 | 8 | On a billing or Short URL settings form, save without changing anything. | Billing settings says "Billing settings saved."; the others use Django's "... was changed successfully." wording. |
@@ -983,6 +983,35 @@ push configured (NOTIF-20's preconditions).
 | 2 | Filter by **Automatic** = Yes, then by **Channel** = Web, then by a **Kind**; search for a task's number and for `qa.user@example.com`. | Each narrows the list as named; the unblocked and "Created as the next occurrence" entries are the Automatic ones. |
 | 3 | Open a row. | Every field is read-only, there is no Save and no Delete (an entry goes only with its task). |
 | 4 | Delete a task forever on the website (TODO-58 step 4) and reload the list. | Its entries are gone. |
+
+### ADM-58 Notes admins and settings
+
+**Purpose:** every Notes admin is read-only and shows the user's data; the Notes settings singleton validates (issue #260).
+**Preconditions:** Session A (`qa.admin`); `notes.md` NOTES-02 to NOTES-10 done as `qa.user@example.com` (notes, a tag, versions, a note in the Trash).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/`, find the **Notes** group. | **Notes settings** (Change only, never Add), **Notes** (View), **Tags** (View), **Notes accounts** (View). |
+| 2 | `/admin/notes/note/`. | A list with **Title**, **User**, **Version**, **Free**, **Paid through**, **Archived**, **In the Trash**, **Locked**, **Charged credits**, **Updated at** (the three flags as green ticks / red crosses); no **Add** button; a search box finds a title and `qa.user@example.com`; filters **Is free**, **Archived**, **In the trash**, **Locked** and **Created at** each narrow the list as named (the Trash filter finds the trashed note, **Locked** finds nothing). |
+| 3 | Open a note. | Every field is read-only, there is no **Save** and no **Delete**, and a **Versions** inline lists its versions (number, editor kind, editor, created, updated, title), newest first. `/admin/notes/note/add/` and `/admin/notes/note/<id>/delete/` are 403. |
+| 4 | `/admin/notes/tag/`, `/admin/notes/notesaccount/`. | Tags with name, user, colour, description and the number of notes outside the Trash; accounts with the renewal-warning column empty. Both read-only (no Add, no Delete). |
+| 5 | `/admin/notes/notessettings/`. | Straight to the form: Free notes 5, Creation price (credits) 1, Renewal price (credits) 5, Renewal days 365, Renewal warning days 7, Trash days 30, Max notes per user 2000, Max tags per user 200, Max links per note 10, Max versions per note 50, each with a plain-language help text. |
+| 6 | Set Renewal days `0`, Trash days `0` and Creation price `-1`; **Save**. | `Ensure this value is greater than or equal to 1.` under the first two and `Ensure this value is greater than or equal to 0.` under the price. Restore the defaults; Save: the settings are saved ("Notes settings" changed successfully). |
+| 7 | Set **Max versions per note** to `2`, save; as `qa.user` save a note's content three times with different editors or after ten minutes. | Only two versions remain on the note's History (the oldest was dropped). Restore 50. |
+| 8 | As a **staff** user without permissions (ADM-51's user), open `/admin/notes/notessettings/`. | 403 / not shown (singletons are superuser-only). |
+| 9 | `/admin/core/scheduledjob/`. | A job `notes.purge_trash` once the scheduler ran it; its page describes it: "Permanently deletes notes that have been in the Trash longer than the Trash period in the Notes settings." |
+
+### ADM-59 Delete a user who has Notes
+
+**Purpose:** deleting a user removes their notes, versions, tags and Notes account (the read-only admins don't block it).
+**Preconditions:** Session A; a throwaway user with notes (create one through the register page and add two notes, one in the Trash, a tag and a few versions).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the user's change form > **Delete**. | The confirmation page lists the related objects: the Notes account, the notes, their versions and the tag; no "Cannot delete" message. |
+| 2 | Confirm. | "The user ... was deleted successfully." |
+| 3 | Search the user's email in `/admin/notes/note/`, `/admin/notes/tag/` and `/admin/notes/notesaccount/`. | No rows. |
+
 
 ## Out of scope
 
