@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.3.0
+  version: 2.4.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -3129,6 +3129,14 @@ paths:
           title: Offset
           type: integer
         required: false
+      - in: query
+        name: task
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Task
+        required: false
       responses:
         '200':
           description: OK
@@ -3138,7 +3146,11 @@ paths:
                 $ref: '#/components/schemas/DeliveryListSchema'
       description: 'Every reminder delivered to you, newest first. `limit` (1-100, default 50) and `offset`
 
-        page the result; `count` is the total.'
+        page the result; `count` is the total. `task` (a task number) keeps only that task''s deliveries,
+
+        matched by the number copied at delivery, so it also works once the task is deleted for good;
+
+        a number that is not yours matches nothing.'
       tags:
       - To-do
       security:
@@ -7528,7 +7540,11 @@ components:
 
         `snoozed_until` is set while it waits for a snooze (the Snooze button of a pushed reminder):
 
-        `fire_at` is then that instant.'
+        `fire_at` is then that instant. `skipped` is true when it was marked sent without a delivery
+
+        (it was more than an hour overdue, or already past when it was created): `sent_at` is then
+
+        when it was swept, not when anything was delivered.'
       properties:
         id:
           format: uuid
@@ -7556,6 +7572,9 @@ components:
             type: string
           - type: 'null'
           title: Snoozed Until
+        skipped:
+          title: Skipped
+          type: boolean
       required:
       - id
       - minutes_before
@@ -7563,6 +7582,7 @@ components:
       - fire_at
       - sent_at
       - snoozed_until
+      - skipped
       title: ReminderSchema
       type: object
     TaskRefSchema:

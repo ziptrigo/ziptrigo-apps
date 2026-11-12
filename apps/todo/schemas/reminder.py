@@ -12,7 +12,9 @@ class ReminderSchema(Schema):
     """A reminder of a task: `minutes_before` its due time, `channel` `in_app`, `email` or `both`,
     `fire_at` the instant it is due and `sent_at` when it was delivered (or swept), else `null`.
     `snoozed_until` is set while it waits for a snooze (the Snooze button of a pushed reminder):
-    `fire_at` is then that instant."""
+    `fire_at` is then that instant. `skipped` is true when it was marked sent without a delivery
+    (it was more than an hour overdue, or already past when it was created): `sent_at` is then
+    when it was swept, not when anything was delivered."""
 
     id: UUID
     minutes_before: int
@@ -20,6 +22,7 @@ class ReminderSchema(Schema):
     fire_at: datetime
     sent_at: datetime | None
     snoozed_until: datetime | None
+    skipped: bool
 
 
 class ReminderCreateSchema(Schema):

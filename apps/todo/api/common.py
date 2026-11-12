@@ -214,6 +214,7 @@ def reminder_data(reminder: Reminder) -> dict[str, Any]:
         'fire_at': reminder.fire_at,
         'sent_at': reminder.sent_at,
         'snoozed_until': reminder.snoozed_until,
+        'skipped': reminder.skipped,
     }
 
 

@@ -1898,7 +1898,7 @@ a trashed task, with its uploaded `attachments` and `referenced_by`), `POST /tas
 /labels`, `PATCH|DELETE /labels/{id}`, `POST /labels/reorder`), comments
 (`GET|POST /tasks/{number}/comments`, `PATCH|DELETE .../comments/{id}`, `POST .../restore`, `GET
 .../history`), reminders (`POST /tasks/{number}/reminders`, `PATCH|DELETE .../reminders/{id}`,
-`GET /reminders/history`), attachments (`POST /tasks/{number}/attachments`, `POST
+`GET /reminders/history`, optionally `?task=<number>` for one task's deliveries), attachments (`POST /tasks/{number}/attachments`, `POST
 .../attachments/{id}/complete`, `POST /attachments/{id}/cancel`, `POST /attachments/{id}/discard`, `GET /attachments/{id}/url`,
 `DELETE /attachments/{id}`), saved
 filters (`GET|POST /filters`, `GET /filters/counts`, `PATCH|DELETE /filters/{id}`, `POST /filters/reorder`, `GET
@@ -4964,7 +4964,9 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
     the snooze when the due moment itself changes (`rearm`: a new date or time, postpone,
     reschedule overdue). Editing the reminder's time drops it too, and so does delivering it (the
     claim clears `snoozed_until`). The task panel says "Snoozed until ..." for one, and the API's
-    reminder has `snoozed_until`.
+    reminder has `snoozed_until`, and `skipped` (marked sent without a delivery: `sent_at` is then
+    when it was swept). `GET /api/todo/reminders/history?task=<number>` keeps one task's deliveries
+    (by the number copied at delivery, so it works after the task is purged).
   - **Snooze for** (`TodoAccount.snooze_minutes`, `SnoozeChoice`: 15, 60, 480 or 1440 minutes,
     default 15, `db_default` too) is set on the settings page ("Reminders on your phone", the
     settings form's `snooze_minutes`; a post without it leaves it), `GET|PATCH /api/todo/settings`

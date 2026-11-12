@@ -77,11 +77,15 @@ def delete_reminder(request, number: int, reminder_id: UUID):
 
 
 @router.get('/reminders/history', response=DeliveryListSchema)
-def reminder_history(request, limit: int = DEFAULT_LIMIT, offset: int = 0):
+def reminder_history(request, limit: int = DEFAULT_LIMIT, offset: int = 0, task: int | None = None):
     """Every reminder delivered to you, newest first. `limit` (1-100, default 50) and `offset`
-    page the result; `count` is the total."""
+    page the result; `count` is the total. `task` (a task number) keeps only that task's deliveries,
+    matched by the number copied at delivery, so it also works once the task is deleted for good;
+    a number that is not yours matches nothing."""
     limit, offset = clamp_page(limit, offset)
     queryset = ReminderDelivery.objects.filter(user=request.auth).order_by('-sent_at', 'pk')
+    if task is not None:
+        queryset = queryset.filter(task_number=task)
     rows = list(queryset[offset : offset + limit])
     return {
         'count': queryset.count(),
