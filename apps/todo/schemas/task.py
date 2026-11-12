@@ -43,13 +43,17 @@ class RecurrenceSchema(Schema):
     """The repeat rule of a task: `rrule` (an RFC 5545 `RRULE` value without the prefix),
     `rrule_text` the same in words, `mode` `fixed` or `from_completion`, `anchor_date` the date
     the current occurrence was scheduled for by the rule (postponing never moves it) and
-    `ended_at` when the repeat was stopped or ran out (`null` while it is running)."""
+    `ended_at` when the repeat was stopped or ran out (`null` while it is running), and
+    `open_occurrences` the number of open, non-trashed tasks that share this rule (the task itself
+    included while it is open). With more than one, trashing an older occurrence with "also stop
+    repeating" would end the rule for the newer open one too."""
 
     rrule: str
     rrule_text: str
     mode: str
     anchor_date: date
     ended_at: datetime | None
+    open_occurrences: int
 
 
 class TaskRefSchema(Schema):
@@ -129,6 +133,14 @@ class TaskSchema(Schema):
     parent: int | None
     labels: list[LabelRefSchema]
     recurrence: RecurrenceSchema | None
+    offers_stop_repeating: bool = Field(
+        description='Whether trashing this task should offer "Also stop repeating": it is open, '
+        'not in the Trash, its repeat is running and it is the only open occurrence of the rule '
+        '(`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or '
+        'non-repeating task too. Trashing an older occurrence with stop repeating while a newer one '
+        'is open would end the rule for that one as well, so a client offers the choice only '
+        'when this is true.'
+    )
     reminders: list[ReminderSchema]
     blocked_by: list[TaskRefSchema] = Field(
         description='The tasks that block this one, by number (closed and trashed ones too).'

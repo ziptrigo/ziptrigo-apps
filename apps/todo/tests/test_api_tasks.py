@@ -56,6 +56,7 @@ TASK_KEYS = {
     'reminders',
     'blocked_by',
     'has_open_blocker',
+    'offers_stop_repeating',
     'blocks',
     'subtask_count',
     'open_subtask_count',

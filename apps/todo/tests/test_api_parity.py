@@ -5,13 +5,14 @@ its web twin does, so these tests pin the contract (shapes, statuses, budgets, q
 
 import base64
 import hashlib
+from datetime import date
 
 import pytest
 from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-from ..models import Attachment, Comment, InboundEmail, InboundMessage
+from ..models import Attachment, Comment, InboundEmail, InboundMessage, Task
 from ..services import (
     add_blocker,
     add_comment,
@@ -20,6 +21,7 @@ from ..services import (
     delete_comment,
     save_filter,
     trash_task,
+    update_task,
 )
 from ..services import search as search_service
 from ..services.filters import FilterParams
@@ -1042,3 +1044,69 @@ class TestCredits:
 
         assert body['credits_balance'] == 100
         assert refused.status_code == 422
+
+
+# -- offers_stop_repeating and recurrence.open_occurrences ---------------------------------------
+class TestOffersStopRepeating:
+    @pytest.fixture(autouse=True)
+    def free(self, config):
+        config.task_price = 0
+        config.save()
+
+    def repeating(self, user, title='Rent'):
+        return create_task(user, title=title, due_date=date(2026, 12, 1), rrule='FREQ=DAILY')
+
+    def shown(self, client, auth, task):
+        return get(client, f'/tasks/{task.number}', auth).json()
+
+    def test_the_only_open_occurrence_offers_it(self, client, auth, funded_user):
+        task = self.repeating(funded_user)
+
+        body = self.shown(client, auth, task)
+
+        assert body['offers_stop_repeating'] is True
+        assert body['recurrence']['open_occurrences'] == 1
+
+    def test_two_open_occurrences_offer_it_for_neither(self, client, auth, funded_user):
+        first = self.repeating(funded_user)
+        complete_task(first)
+        second = Task.objects.get(recurrence=first.recurrence, completed_at__isnull=True)
+        # An older occurrence reopened next to the newer one.
+        first.refresh_from_db()
+        first.completed_at = None
+        first.save()
+
+        for task in (first, second):
+            body = self.shown(client, auth, task)
+            assert body['offers_stop_repeating'] is False
+            assert body['recurrence']['open_occurrences'] == 2
+
+    def test_closed_trashed_and_plain_tasks_do_not(self, client, auth, funded_user):
+        closed = self.repeating(funded_user, 'Closed')
+        complete_task(closed)
+        trashed = self.repeating(funded_user, 'Trashed')
+        trash_task(trashed)
+        plain = create_task(funded_user, title='Plain')
+
+        for task in (closed, trashed, plain):
+            assert self.shown(client, auth, task)['offers_stop_repeating'] is False
+        assert self.shown(client, auth, plain)['recurrence'] is None
+
+    def test_a_stopped_repeat_does_not(self, client, auth, funded_user):
+        task = self.repeating(funded_user)
+        update_task(task, changes={'rrule': ''})
+
+        assert self.shown(client, auth, task)['offers_stop_repeating'] is False
+
+    def test_the_list_carries_it_without_a_query_per_task(
+        self, client, auth, funded_user, django_assert_max_num_queries
+    ):
+        for n in range(8):
+            self.repeating(funded_user, f'Repeating {n}')
+        with CaptureQueriesContext(connection) as one:
+            get(client, '/tasks', auth, limit=1)
+        with CaptureQueriesContext(connection) as many:
+            response = get(client, '/tasks', auth, limit=100)
+
+        assert len(many) == len(one)
+        assert all(row['offers_stop_repeating'] for row in response.json()['results'])

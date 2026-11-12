@@ -6433,7 +6433,13 @@ components:
 
         the current occurrence was scheduled for by the rule (postponing never moves it) and
 
-        `ended_at` when the repeat was stopped or ran out (`null` while it is running).'
+        `ended_at` when the repeat was stopped or ran out (`null` while it is running), and
+
+        `open_occurrences` the number of open, non-trashed tasks that share this rule (the task itself
+
+        included while it is open). With more than one, trashing an older occurrence with "also stop
+
+        repeating" would end the rule for the newer open one too.'
       properties:
         rrule:
           title: Rrule
@@ -6454,12 +6460,16 @@ components:
             type: string
           - type: 'null'
           title: Ended At
+        open_occurrences:
+          title: Open Occurrences
+          type: integer
       required:
       - rrule
       - rrule_text
       - mode
       - anchor_date
       - ended_at
+      - open_occurrences
       title: RecurrenceSchema
       type: object
     ReminderSchema:
@@ -6694,6 +6704,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
+        offers_stop_repeating:
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          title: Offers Stop Repeating
+          type: boolean
         reminders:
           items:
             $ref: '#/components/schemas/ReminderSchema'
@@ -6762,6 +6776,7 @@ components:
       - parent
       - labels
       - recurrence
+      - offers_stop_repeating
       - reminders
       - blocked_by
       - has_open_blocker
@@ -7276,6 +7291,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
+        offers_stop_repeating:
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          title: Offers Stop Repeating
+          type: boolean
         reminders:
           items:
             $ref: '#/components/schemas/ReminderSchema'
@@ -7373,6 +7392,7 @@ components:
       - parent
       - labels
       - recurrence
+      - offers_stop_repeating
       - reminders
       - blocked_by
       - has_open_blocker
@@ -8032,6 +8052,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
+        offers_stop_repeating:
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          title: Offers Stop Repeating
+          type: boolean
         reminders:
           items:
             $ref: '#/components/schemas/ReminderSchema'
@@ -8104,6 +8128,7 @@ components:
       - parent
       - labels
       - recurrence
+      - offers_stop_repeating
       - reminders
       - blocked_by
       - has_open_blocker
@@ -8412,6 +8437,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/RecurrenceSchema'
           - type: 'null'
+        offers_stop_repeating:
+          description: 'Whether trashing this task should offer "Also stop repeating": it is open, not in the Trash, its repeat is running and it is the only open occurrence of the rule (`recurrence.open_occurrences` is 1). `false` otherwise, for a closed, trashed or non-repeating task too. Trashing an older occurrence with stop repeating while a newer one is open would end the rule for that one as well, so a client offers the choice only when this is true.'
+          title: Offers Stop Repeating
+          type: boolean
         reminders:
           items:
             $ref: '#/components/schemas/ReminderSchema'
@@ -8490,6 +8519,7 @@ components:
       - parent
       - labels
       - recurrence
+      - offers_stop_repeating
       - reminders
       - blocked_by
       - has_open_blocker

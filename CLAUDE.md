@@ -1861,7 +1861,10 @@ change** of this router: `completed_at` is `closed_at`, `view=completed` is `vie
 `include_completed` is `include_closed` (the old name is a 400), and `complete` / `uncomplete` are gone
 for `close` / `reopen` (the two old routes stay only to answer **410**; see "To-do" > "API and CLI").
 **Version 2.1 (issue #284, 2.1.0) is additive** (the Android app's parity with the website: `dir`, comment
-files, recent emails, filter counts, blocker suggestions, search snippets, the credit balance; see "To-do" >
+files, recent emails, filter counts, blocker suggestions, search snippets, the credit balance, and a task's
+`offers_stop_repeating` plus `recurrence.open_occurrences`: the web's `Task.offers_stop_repeating` read from
+the same `open_occurrences` annotation that `decorated` adds, `false` for a closed, trashed or
+non-repeating task; 2.1.0 is not released, so these joined it; see "To-do" >
 "API and CLI"). Endpoints, relative to the mount: `GET /tasks` (`view`, `q`,
 `mode`, `include_closed`, `resolution`, `state`, `priority`, `label`, `date_range`/`date_from`/
 `date_to`, `sort`, `dir`, `parent`, `limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`),
