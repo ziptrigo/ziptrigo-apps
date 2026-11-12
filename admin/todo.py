@@ -229,11 +229,34 @@ def _show_page(body: dict, noun: str = 'tasks') -> None:
         )
 
 
+def _snippet_line(task: dict) -> Text | None:
+    """`#1234 title: ...the match...` for a task a search found text in (the match in bold), or
+    `None` for one with no snippet (not searched, or found by its number alone)."""
+    snippet = task.get('search_snippet')
+    if not snippet:
+        return None
+    start, end = task.get('match_start'), task.get('match_end')
+    line = Text(f'  #{task["number"]} {task["search_field"]}: ', style='cyan')
+    if start is None or end is None:
+        line.append(snippet)
+    else:
+        line.append(snippet[:start])
+        line.append(snippet[start:end], style='bold')
+        line.append(snippet[end:])
+    return line
+
+
 def _print_tasks(body: dict, title: str) -> None:
     if not body['results']:
         _say('No tasks found.')
         return
-    _console().print(_task_table(body['results'], title))
+    console = _console()
+    console.print(_task_table(body['results'], title))
+    lines = [line for task in body['results'] if (line := _snippet_line(task)) is not None]
+    if lines:
+        console.print(Text('Where it matched (shown without accents or formatting):', style='dim'))
+        for line in lines:
+            console.print(line)
     _show_page(body)
 
 
@@ -416,6 +439,11 @@ def todo_list(
     date_from: str | None = typer.Option(None, '--from', help='Earliest due date, YYYY-MM-DD.'),
     date_to: str | None = typer.Option(None, '--to', help='Latest due date, YYYY-MM-DD.'),
     sort: str | None = typer.Option(None, '--sort', help='date, priority, created or title.'),
+    direction: str | None = typer.Option(
+        None,
+        '--dir',
+        help="asc or desc: the sort's direction (each sort's own default when left out).",
+    ),
     limit: int = typer.Option(50, '--limit', help='Max tasks to show (1-100).'),
     offset: int = typer.Option(0, '--offset', help='Number of tasks to skip.'),
 ):
@@ -431,6 +459,7 @@ def todo_list(
         todo list local --view closed --resolution wont-do
         todo list local --state in-progress --state blocked
         todo list local --priority 1,2 --label home --from 2026-11-01 --to 2026-11-30
+        todo list local --sort title --dir desc
     """
     select_environment(environment)
     view = 'closed' if view == 'completed' else view  # the name this view had before version 2
@@ -449,6 +478,8 @@ def todo_list(
         )
     if label:
         params['label'] = ','.join(_label_ids(label, allow_none=True))
+    if direction:
+        params['dir'] = _choice(direction, {'asc': 'asc', 'desc': 'desc'}, '--dir')
     for name, value in (
         ('priority', priority),
         ('date_from', date_from),
@@ -618,6 +649,9 @@ def todo_get(
         else '',
     )
     row('Source', task['source'])
+    if task.get('email_from'):
+        proven = 'authenticated' if task.get('email_from_authenticated') else 'not authenticated'
+        row('Email from', f'{task["email_from"]} ({proven})')
     row('Created', task['created_at'])
     row('Updated', task['updated_at'])
     row('Closed', task['closed_at'] or '')
@@ -667,6 +701,7 @@ def todo_get(
             edited = ' (edited)' if comment['edited_at'] else ''
             console.print(Text(f'{comment["created_at"]}{edited}  {comment["id"]}'))
             console.print(Text(comment['body'] or '', style='default'))
+            _print_comment_files(comment)
     if task['referenced_by']:
         console.print(Text('\nReferenced by', style='cyan'))
         for source in task['referenced_by']:
@@ -971,6 +1006,28 @@ def todo_block(
         raise typer.Exit(1)
 
 
+@app.command(name='block-suggest')
+def todo_block_suggest(
+    environment: EnvironmentAnnotation,
+    number: NumberAnnotation,
+    q: str = typer.Option('', '--q', help='Digits (a number) or words of the title.'),
+):
+    """
+    Suggest tasks that could block this one: up to 10 of your open tasks that `block` would
+    accept (not itself, not one that already blocks it, not one it blocks, directly or not).
+
+    Example:
+        todo block-suggest local 1234 --q rent
+    """
+    select_environment(environment)
+    found = _call('get', f'/tasks/{number}/blockers/suggest', params={'q': q} if q else None)
+    if not found:
+        _say('No tasks to suggest.')
+        return
+    for task in found:
+        _say(f'#{task["number"]} {task["title"]}')
+
+
 @app.command(name='unblock')
 def todo_unblock(
     environment: EnvironmentAnnotation,
@@ -1066,21 +1123,85 @@ def todo_restore(environment: EnvironmentAnnotation, number: NumberAnnotation):
 # -- Commands: comments --------------------------------------------------------------------------
 
 
+def _print_comment_files(comment: dict) -> None:
+    for attachment in comment.get('attachments') or []:
+        console = _console()
+        console.print(
+            Text(
+                f'  file {attachment["id"]}  {attachment["filename"]} '
+                f'({attachment["size_bytes"]:,} bytes)',
+                style='cyan',
+            )
+        )
+
+
+def _discard_draft(attachment_id: str) -> None:
+    """Best effort: delete a comment file that was uploaded but will not be attached (the API
+    removes an unattached one after a day anyway)."""
+    try:
+        response = api_request(
+            'post',
+            api_url(f'/todo/attachments/{attachment_id}/discard'),
+            headers=get_headers(CLI),
+            exit_on_error=False,
+        )
+    except NetworkError as e:
+        logger.warning(escape(f'Could not discard the file {attachment_id}: {e}'))
+        return
+    if not response.ok:
+        logger.warning(
+            escape(f'Could not discard the file {attachment_id}: {_error_message(response)}')
+        )
+
+
 @app.command(name='comment')
 def todo_comment(
     environment: EnvironmentAnnotation,
     number: NumberAnnotation,
     text: list[str] = typer.Argument(..., help='The comment (Markdown).'),
+    files: list[Path] | None = typer.Option(
+        None, '--file', help='A file to attach to the comment; repeat for several.'
+    ),
 ):
     """
-    Add a comment to a task.
+    Add a comment to a task, with files if you like. The files are uploaded first; if one fails
+    nothing is commented and the ones already uploaded are removed.
 
     Example:
         todo comment local 1234 asked the landlord, see #1250
+        todo comment local 1234 the signed copy --file contract.pdf --file photo.jpg
     """
     select_environment(environment)
-    comment = _call('post', f'/tasks/{number}/comments', json={'body': ' '.join(text)})
-    _say(f'Commented on #{number} ({comment["id"]}).')
+    paths = files or []
+    for path in paths:  # check them all before uploading any
+        if not path.exists():
+            raise _fail(f'Not found: {path}')
+        if not path.is_file():
+            raise _fail(f'Not a file: {path}')
+        if path.stat().st_size == 0:
+            raise _fail(f'Empty file: {path}')
+    get_headers(CLI)  # not logged in: say so before reading any file
+
+    uploaded: list[str] = []
+    for path in paths:
+        try:
+            attachment = _upload_file(number, path, for_comment=True)
+        except (UploadFailed, NetworkError) as e:
+            for attachment_id in uploaded:
+                _discard_draft(attachment_id)
+            raise _fail(f'{path.name}: {e}. Nothing was commented.') from e
+        uploaded.append(attachment['id'])
+    payload: dict = {'body': ' '.join(text)}
+    if uploaded:
+        payload['attachment_ids'] = uploaded
+    response = _request('post', f'/tasks/{number}/comments', json=payload)
+    if not response.ok:
+        for attachment_id in uploaded:
+            _discard_draft(attachment_id)
+        raise _fail(_error_message(response))
+    comment = response.json()
+    attached = f' with {len(uploaded)} file{"" if len(uploaded) == 1 else "s"}' if uploaded else ''
+    _say(f'Commented on #{number}{attached} ({comment["id"]}).')
 
 
 @app.command(name='comments')
@@ -1104,6 +1225,7 @@ def todo_comments(environment: EnvironmentAnnotation, number: NumberAnnotation):
         edited = ' (edited)' if comment['edited_at'] else ''
         console.print(Text(f'{comment["created_at"]}{edited}  {comment["id"]}', style='cyan'))
         console.print(Text(comment['body'] or ''))
+        _print_comment_files(comment)
         console.print()
 
 
@@ -1283,9 +1405,10 @@ def _cancel_upload(attachment_id: str) -> None:
         )
 
 
-def _upload_file(number: int, path: Path) -> dict:
+def _upload_file(number: int, path: Path, *, for_comment: bool = False) -> dict:
     """Attach one file: `POST .../attachments` for a presigned URL, `PUT` the bytes to it with the
-    headers the API returned, then `POST .../complete`. Returns the attachment.
+    headers the API returned, then `POST .../complete`. Returns the attachment. With `for_comment`
+    the file is a draft for a comment (attached by sending its id with the comment).
 
     Raises:
         UploadFailed: the API refused the file (with its message), or the `PUT` failed.
@@ -1300,6 +1423,7 @@ def _upload_file(number: int, path: Path) -> dict:
             'size': path.stat().st_size,
             'content_type': content_type,
             'checksum_sha256': _sha256_base64_file(path),
+            **({'for_comment': True} if for_comment else {}),
         },
         headers=headers,
         exit_on_error=False,
@@ -1453,10 +1577,24 @@ def _resolve_filter(ref: str) -> dict:
     raise _fail(f'No saved filter called "{ref}". See `filters`.')
 
 
+def _filter_counts() -> dict[str, int | None]:
+    """How many open tasks each saved filter selects (`GET /filters/counts`), `{}` when they
+    can't be had (an older server, or an error): the list is shown without them."""
+    try:
+        response = _request('get', '/filters/counts', exit_on_error=False)
+    except NetworkError:
+        return {}
+    if not response.ok:
+        return {}
+    body = response.json()
+    return body if isinstance(body, dict) else {}
+
+
 @app.command(name='filters')
 def todo_filters(environment: EnvironmentAnnotation):
     """
-    List your saved filters.
+    List your saved filters, with how many open tasks each selects ("-" when that can't be told
+    now).
 
     Example:
         todo filters local
@@ -1466,12 +1604,20 @@ def todo_filters(environment: EnvironmentAnnotation):
     if not filters:
         _say('No saved filters. Save one from the Search page of the website.')
         return
+    counts = _filter_counts()
     table = Table(title='Your saved filters')
     table.add_column('Name', no_wrap=True)
     table.add_column('Selects', overflow='fold')
+    table.add_column('Open', justify='right', no_wrap=True)
     table.add_column('ID', style='cyan', no_wrap=True)
     for saved in filters:
-        table.add_row(Text(saved['name']), Text(saved['summary'] or 'all open tasks'), saved['id'])
+        count = counts.get(saved['id'])
+        table.add_row(
+            Text(saved['name']),
+            Text(saved['summary'] or 'all open tasks'),
+            '-' if count is None else str(count),
+            saved['id'],
+        )
     _console().print(table)
 
 
@@ -1521,6 +1667,7 @@ def _print_settings(settings: dict) -> None:
             f'{settings["tasks_created_this_month"]} '
             f'({settings["free_tasks_per_month"]} free, then {settings["task_price"]} credits each)',
         ),
+        ('Credits', f'{settings["credits_balance"]:,}' if 'credits_balance' in settings else '-'),
         ('Files stored', f'{settings["stored_bytes"]:,} bytes'),
         ('Storage cost', f'{settings["storage_credits_per_day"]} credits a day'),
     ]
@@ -1623,6 +1770,25 @@ def todo_inbox(environment: EnvironmentAnnotation):
     _say(f'Email tasks to: {inbox["address"]}')
     senders = inbox['sender_allowlist']
     _say(f'Accepted senders: {", ".join(senders) if senders else "anyone"}')
+    emails = inbox.get('recent_emails') or []
+    if not emails:
+        return
+    table = Table(title='Recent emails')
+    table.add_column('Received', no_wrap=True)
+    table.add_column('From', overflow='fold')
+    table.add_column('Subject', overflow='fold')
+    table.add_column('Outcome', no_wrap=True)
+    table.add_column('Task', style='cyan', no_wrap=True, justify='right')
+    for email in emails:
+        outcome = email['status'].replace('_', ' ')
+        table.add_row(
+            email['received_at'] or '',
+            Text(email['from_address']),
+            Text(email['subject']),
+            outcome + (f' ({email["note"]})' if email['note'] else ''),
+            f'#{email["task"]}' if email['task'] else '',
+        )
+    _console().print(table)
 
 
 @app.command(name='regenerate')

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.0.0
+  version: 2.1.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -2169,7 +2169,11 @@ paths:
 
         too large file (`max_attachment_bytes`, 50 MB by default), a task that already has its
 
-        `max_attachments_per_task` (20), a malformed checksum, or a task in the Trash or completed.'
+        `max_attachments_per_task` (20), a malformed checksum, or a task in the Trash or completed.
+
+        With `for_comment: true` the file is a draft for a comment: a completed task takes it (a task
+
+        in the Trash still does not), and it counts toward the same per-task limit.'
       tags:
       - To-do
       requestBody:
@@ -2279,6 +2283,36 @@ paths:
       - To-do
       security:
       - JWTAuth: []
+  /api/todo/attachments/{attachment_id}/discard:
+    post:
+      operationId: apps_todo_api_attachments_discard_attachment
+      summary: Discard Attachment
+      parameters:
+      - in: path
+        name: attachment_id
+        schema:
+          format: uuid
+          title: Attachment Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete a comment file that was uploaded as a draft (`for_comment`) and not saved with a
+
+        comment (the user took it out of the comment they were writing): the object and the row, and
+
+        its bytes stop being billed. Idempotent: 204 for one that is already gone (or never yours,
+
+        spending nothing). A file that is attached to a task or to a comment, or is not a comment
+
+        file, is a 400: remove it with `DELETE /attachments/{id}` (or edit the comment). 503 when the
+
+        object could not be deleted (try again). Spends `TODO_EDIT_USER`, after the 400.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
   /api/todo/attachments/{attachment_id}:
     delete:
       operationId: apps_todo_api_attachments_delete_attachment
@@ -2343,6 +2377,55 @@ paths:
             schema:
               $ref: '#/components/schemas/BlockerSchema'
         required: true
+      security:
+      - JWTAuth: []
+  /api/todo/tasks/{number}/blockers/suggest:
+    get:
+      operationId: apps_todo_api_blockers_suggest_blockers
+      summary: Suggest Blockers
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      - in: query
+        name: q
+        schema:
+          default: ''
+          maxLength: 200
+          title: Q
+          type: string
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/BlockerSuggestionSchema'
+                title: Response
+                type: array
+      description: 'Open tasks that could be offered as blockers of this one (what the website''s "Blocked by"
+
+        box suggests): up to 10 of the caller''s own open tasks, in number order, that `add` would
+
+        accept -- not this task, not one that already blocks it and not one it blocks, directly or
+
+        through other tasks (that would be a cycle). `q` narrows them: digits (with or without `#`)
+
+        match the start of the number, anything else the words of the title (ignoring case and
+
+        accents); empty lists the first open tasks. Works for a task in the Trash too (it only reads).
+
+
+        Spends `TODO_BLOCKER_SUGGEST_USER`, a loose per-user limit; **over it the answer is an empty
+
+        list**, never an error, so a typing box just shows nothing.'
+      tags:
+      - To-do
       security:
       - JWTAuth: []
   /api/todo/tasks/{number}/blockers/{blocker_number}:
@@ -2434,7 +2517,11 @@ paths:
 
         and the tasks mentioned list this one under "referenced by". A task in the Trash takes none
 
-        (400).'
+        (400). `attachment_ids` attach comment files uploaded before (see `UploadStartSchema`): all or
+
+        none, a 400 keyed `attachment_ids` if one is not an uploaded, unattached comment file of this
+
+        task. A refused body or file list spends no budget.'
       tags:
       - To-do
       requestBody:
@@ -2472,14 +2559,20 @@ paths:
                 $ref: '#/components/schemas/CommentSchema'
       description: 'Replace a comment''s text. The text it replaces is kept in its history
 
-        (`.../history`); the same text changes nothing; a deleted comment cannot be edited (400).'
+        (`.../history`); the same text changes nothing; a deleted comment cannot be edited (400).
+
+        `attachment_ids` add uploaded comment files (all or none, as when adding) and
+
+        `remove_attachment_ids` delete files of this comment; changing only the files leaves no
+
+        revision. A refused body or file list spends no budget.'
       tags:
       - To-do
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CommentBodySchema'
+              $ref: '#/components/schemas/CommentEditSchema'
         required: true
       security:
       - JWTAuth: []
@@ -2623,6 +2716,36 @@ paths:
         required: true
       security:
       - JWTAuth: []
+  /api/todo/filters/counts:
+    get:
+      operationId: apps_todo_api_filters_filter_open_counts
+      summary: Filter Open Counts
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: 'null'
+                title: Response
+                type: object
+      description: 'How many open tasks each of the caller''s saved filters selects, as `{filter id: count}`, for
+
+        all of them in **one** query and one hit of the `TODO_SEARCH_USER` budget (what the website''s
+
+        sidebar fetches). A count is `null` when the filter''s search can''t be run (an invalid
+
+        pattern); when the query takes too long, or the budget is spent, **every** count is `null`:
+
+        never an error. A user with no filters gets `{}` and spends nothing.'
+      tags:
+      - To-do
+      security:
+      - JWTAuth: []
   /api/todo/filters/reorder:
     post:
       operationId: apps_todo_api_filters_reorder_filters
@@ -2742,7 +2865,9 @@ paths:
 
         `GET /tasks` lists them. `limit` (1-100, default 50) and `offset` page the result; `count` is
 
-        the total. Spends `TODO_SEARCH_USER`.'
+        the total. Spends `TODO_SEARCH_USER`. When the filter has search text each task carries the
+
+        snippet fields of `GET /tasks`; without it they are `null`.'
       tags:
       - To-do
       security:
@@ -3028,7 +3153,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SettingsSchema'
-      description: The account's settings and, read-only, its usage this month and its storage.
+      description: 'The account''s settings and, read-only, its usage this month, its storage and the credit
+
+        balance (`credits_balance`).'
       tags:
       - To-do
       security:
@@ -3092,7 +3219,11 @@ paths:
 
         body the description and the attachments the task''s attachments) and who may send to it (an
 
-        empty list accepts anyone; change it with `PATCH /settings`).'
+        empty list accepts anyone; change it with `PATCH /settings`) and, as `recent_emails`, the 20
+
+        emails that reached it most recently (accepted or rejected, newest first), as the website''s
+
+        Settings page lists them.'
       tags:
       - To-do
       security:
@@ -3215,6 +3346,14 @@ paths:
           title: Sort
         required: false
       - in: query
+        name: dir
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Dir
+        required: false
+      - in: query
         name: parent
         schema:
           anyOf:
@@ -3243,7 +3382,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListSchema'
-      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`."
+      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own\n  default when left out (`date`, `priority` and `title` ascending, `created` newest first), the\n  exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open\n  ones. Without `sort`, `dir` means `sort=date`.\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.\n\n**Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`\nand `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found\nby the website's bounded pass (a 0.2 s budget for the page, only the field the database said\nmatched, at most 5,000 characters of it; rows past the budget are listed without a snippet).\nWithout `q` all four are `null`."
       tags:
       - To-do
       security:
@@ -4778,7 +4917,9 @@ components:
     InboxSchema:
       description: 'The address tasks can be emailed to (subject: title, body: description, attachments:
 
-        attachments) and who may send to it.'
+        attachments), who may send to it and the 20 emails that reached it most recently
+
+        (`recent_emails`, newest first; what `GET /inbox` shows, as the Settings page does).'
       properties:
         address:
           title: Address
@@ -4788,9 +4929,16 @@ components:
             type: string
           title: Sender Allowlist
           type: array
+        recent_emails:
+          description: The latest 20 emails received, accepted or not, newest first.
+          items:
+            $ref: '#/components/schemas/RecentEmailSchema'
+          title: Recent Emails
+          type: array
       required:
       - address
       - sender_allowlist
+      - recent_emails
       title: InboxSchema
       type: object
     InboxUpdateSchema:
@@ -5160,7 +5308,18 @@ components:
 
         SHA-256 digest; it is bound into the presigned URL''s signature, so S3 refuses a body that
 
-        differs.'
+        differs.
+
+
+        `for_comment` makes the file a **draft for a comment**: it is uploaded and completed the same
+
+        way, shown with the comment (never in the task''s own attachment list) once its id is sent in
+
+        `attachment_ids` when the comment is added or edited, and allowed on a completed task (but not
+
+        on one in the Trash). A draft nobody attaches is removed after a day; remove one yourself with
+
+        `POST /attachments/{id}/discard`.'
       properties:
         filename:
           title: Filename
@@ -5175,6 +5334,11 @@ components:
         checksum_sha256:
           title: Checksum Sha256
           type: string
+        for_comment:
+          default: false
+          description: Upload the file as a draft for a comment (see above).
+          title: For Comment
+          type: boolean
       required:
       - filename
       - size
@@ -6388,7 +6552,11 @@ components:
 
         task cost to create and `unpaid` says that price is still owed (see the 409 of `POST
 
-        /tasks`). `subtask_count` and `open_subtask_count` count the subtasks that aren''t in the
+        /tasks`). `email_from` and `email_from_authenticated` say, for a task created from an email
+
+        (`source` is `email`), who it came from (the From address as the sender wrote it) and whether
+
+        the mail system authenticated that sender; both are `null` for every other task. `subtask_count` and `open_subtask_count` count the subtasks that aren''t in the
 
         Trash, `comment_count` the comments that aren''t deleted and `attachment_count` the uploaded
 
@@ -6498,6 +6666,18 @@ components:
         source:
           title: Source
           type: string
+        email_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'For a task made from an email: its From address; `null` otherwise.'
+          title: Email From
+        email_from_authenticated:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: 'For a task made from an email: whether the sender was authenticated (DMARC, DKIM or SPF); `null` otherwise.'
+          title: Email From Authenticated
         parent:
           anyOf:
           - type: integer
@@ -6575,6 +6755,8 @@ components:
       - deleted_at
       - position
       - source
+      - email_from
+      - email_from_authenticated
       - parent
       - labels
       - recurrence
@@ -6604,6 +6786,58 @@ components:
       - number
       title: BlockerSchema
       type: object
+    BlockerSuggestionSchema:
+      description: An open task that may be offered as a blocker of another.
+      properties:
+        number:
+          description: The task's number.
+          title: Number
+          type: integer
+        title:
+          description: The task's title.
+          title: Title
+          type: string
+      required:
+      - number
+      - title
+      title: BlockerSuggestionSchema
+      type: object
+    CommentAttachmentSchema:
+      description: 'A file attached to a comment. `inline` says whether it may be shown in a browser (a PDF or
+
+        an image, by what the bytes are: `inline_type` is the sniffed type, empty otherwise);
+
+        download it with `GET /attachments/{id}/url`.'
+      properties:
+        id:
+          description: The attachment id (`GET /attachments/{id}/url`).
+          format: uuid
+          title: Id
+          type: string
+        filename:
+          description: The file name as uploaded (cleaned).
+          title: Filename
+          type: string
+        size_bytes:
+          description: The size in bytes.
+          title: Size Bytes
+          type: integer
+        inline_type:
+          description: The type sniffed from the bytes when a browser may show the file inline (PDF, JPEG, PNG, GIF, WebP), else empty.
+          title: Inline Type
+          type: string
+        inline:
+          description: Whether `GET /attachments/{id}/url?disposition=inline` works.
+          title: Inline
+          type: boolean
+      required:
+      - id
+      - filename
+      - size_bytes
+      - inline_type
+      - inline
+      title: CommentAttachmentSchema
+      type: object
     CommentSchema:
       description: 'A comment. `body` is the Markdown and `body_html` the rendered, sanitised HTML (`#1234` and
 
@@ -6611,7 +6845,9 @@ components:
 
         `?include_deleted_bodies=1` asked for it. `edited_at` is `null` until the first edit and
 
-        `revision_count` counts the edits.'
+        `revision_count` counts the edits. `attachments` are the comment''s files (a deleted comment
+
+        lists none unless `?include_deleted_bodies=1` asked for it).'
       properties:
         id:
           format: uuid
@@ -6649,6 +6885,12 @@ components:
         revision_count:
           title: Revision Count
           type: integer
+        attachments:
+          description: The comment's files, oldest first.
+          items:
+            $ref: '#/components/schemas/CommentAttachmentSchema'
+          title: Attachments
+          type: array
       required:
       - id
       - task
@@ -6658,18 +6900,69 @@ components:
       - edited_at
       - deleted_at
       - revision_count
+      - attachments
       title: CommentSchema
       type: object
     CommentBodySchema:
       additionalProperties: false
-      description: Body for adding or editing a comment (1 to 10,000 characters).
+      description: 'Body for adding a comment (1 to 10,000 characters), with the files it carries.
+
+
+        `attachment_ids` are comment files already uploaded (`POST /tasks/{number}/attachments` with
+
+        `for_comment: true`, then `complete`) for this task: all of them are attached, or the comment
+
+        is refused with a 400 keyed `attachment_ids` (one that is not an uploaded, unattached comment
+
+        file of this task, or is still uploading).'
       properties:
         body:
           title: Body
           type: string
+        attachment_ids:
+          default: []
+          description: Uploaded comment files to attach (all or none).
+          items:
+            type: string
+          maxItems: 100
+          title: Attachment Ids
+          type: array
       required:
       - body
       title: CommentBodySchema
+      type: object
+    CommentEditSchema:
+      additionalProperties: false
+      description: 'Body for editing a comment: the text (required: a comment still needs text; the same text
+
+        changes nothing and leaves no revision), `attachment_ids` to add (as when adding) and
+
+        `remove_attachment_ids`, files of this comment to delete (ids that are not its files are
+
+        ignored). Changing only the files is not an edit of the text: no revision, no `edited_at`.'
+      properties:
+        body:
+          title: Body
+          type: string
+        attachment_ids:
+          default: []
+          description: Uploaded comment files to attach (all or none).
+          items:
+            type: string
+          maxItems: 100
+          title: Attachment Ids
+          type: array
+        remove_attachment_ids:
+          default: []
+          description: Ids of this comment's files to delete.
+          items:
+            type: string
+          maxItems: 100
+          title: Remove Attachment Ids
+          type: array
+      required:
+      - body
+      title: CommentEditSchema
       type: object
     RevisionSchema:
       description: What a comment said before an edit replaced it, and when.
@@ -6876,6 +7169,222 @@ components:
           - type: 'null'
       title: FilterUpdateSchema
       type: object
+    TaskListItemSchema:
+      description: "A task in a list (`GET /tasks`, `GET /filters/{id}/tasks`). When the list was searched\n(`q`, or a filter with search text) each task also says where the text matched:\n\n- `search_field` is `title`, `description` or `comment` (the first comment that matches), or\n  `\"\"` when no snippet could be made (the budget ran out before this row, or the engines\n  disagree at the edges; the task still matches). `null` when there was no search text.\n- `search_snippet` is **plain text** around the match (about 60 characters either side, with\n  an ellipsis `…` where the text goes on), `match_start` and `match_end` the half-open range of\n  the matched text inside it, in Unicode code points (not UTF-16 units). Searches run on\n  normalised text, so the snippet is lower-case with accents, punctuation and Markdown\n  formatting gone, and a match longer than 100 characters is cut to its first 100. All three\n  are `null` when `search_field` is `\"\"` or null."
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        number:
+          title: Number
+          type: integer
+        title:
+          title: Title
+          type: string
+        description:
+          title: Description
+          type: string
+        description_html:
+          title: Description Html
+          type: string
+        priority:
+          title: Priority
+          type: integer
+        due_date:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Due Date
+        due_time:
+          anyOf:
+          - format: time
+            type: string
+          - type: 'null'
+          title: Due Time
+        due_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Due At
+        closed_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          description: When the task was closed (as Done or as Won't do); `null` while it is open.
+          title: Closed At
+        state:
+          anyOf:
+          - enum:
+            - todo
+            - in_progress
+            - blocked
+            - on_hold
+            type: string
+          - type: 'null'
+          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers); `null` while the task is closed (`closed_at` is set).'
+          title: State
+        resolution:
+          anyOf:
+          - enum:
+            - done
+            - wont_do
+            type: string
+          - type: 'null'
+          description: How a closed task was closed, `done` or `wont_do`; `null` while it is open.
+          title: Resolution
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Deleted At
+        position:
+          title: Position
+          type: integer
+        source:
+          title: Source
+          type: string
+        email_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'For a task made from an email: its From address; `null` otherwise.'
+          title: Email From
+        email_from_authenticated:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: 'For a task made from an email: whether the sender was authenticated (DMARC, DKIM or SPF); `null` otherwise.'
+          title: Email From Authenticated
+        parent:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Parent
+        labels:
+          items:
+            $ref: '#/components/schemas/LabelRefSchema'
+          title: Labels
+          type: array
+        recurrence:
+          anyOf:
+          - $ref: '#/components/schemas/RecurrenceSchema'
+          - type: 'null'
+        reminders:
+          items:
+            $ref: '#/components/schemas/ReminderSchema'
+          title: Reminders
+          type: array
+        blocked_by:
+          description: The tasks that block this one, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocked By
+          type: array
+        has_open_blocker:
+          description: 'Whether any task in `blocked_by` is open (`open: true`).'
+          title: Has Open Blocker
+          type: boolean
+        blocks:
+          description: The tasks this one blocks, by number (closed and trashed ones too).
+          items:
+            $ref: '#/components/schemas/TaskRefSchema'
+          title: Blocks
+          type: array
+        subtask_count:
+          title: Subtask Count
+          type: integer
+        open_subtask_count:
+          title: Open Subtask Count
+          type: integer
+        comment_count:
+          title: Comment Count
+          type: integer
+        attachment_count:
+          title: Attachment Count
+          type: integer
+        charged_credits:
+          title: Charged Credits
+          type: integer
+        unpaid:
+          title: Unpaid
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+        search_field:
+          anyOf:
+          - enum:
+            - title
+            - description
+            - comment
+            - ''
+            type: string
+          - type: 'null'
+          description: Where the search text matched; `null` when the list was not searched.
+          title: Search Field
+        search_snippet:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Plain text around the match; `null` without one.
+          title: Search Snippet
+        match_start:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: Start of the match in `search_snippet` (code points).
+          title: Match Start
+        match_end:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: End (exclusive) of the match in `search_snippet`.
+          title: Match End
+      required:
+      - id
+      - number
+      - title
+      - description
+      - description_html
+      - priority
+      - due_date
+      - due_time
+      - due_at
+      - closed_at
+      - state
+      - resolution
+      - deleted_at
+      - position
+      - source
+      - email_from
+      - email_from_authenticated
+      - parent
+      - labels
+      - recurrence
+      - reminders
+      - blocked_by
+      - has_open_blocker
+      - blocks
+      - subtask_count
+      - open_subtask_count
+      - comment_count
+      - attachment_count
+      - charged_credits
+      - unpaid
+      - created_at
+      - updated_at
+      title: TaskListItemSchema
+      type: object
     TaskListSchema:
       properties:
         count:
@@ -6889,7 +7398,7 @@ components:
           type: integer
         results:
           items:
-            $ref: '#/components/schemas/TaskSchema'
+            $ref: '#/components/schemas/TaskListItemSchema'
           title: Results
           type: array
       required:
@@ -7195,7 +7704,11 @@ components:
 
         `storage_credits_per_day` (what storing them costs a day, a decimal string) and
 
-        `storage_frozen` (storage could not be paid for: uploads and downloads are refused).'
+        `storage_frozen` (storage could not be paid for: uploads and downloads are refused) and
+
+        `credits_balance`, the user''s credit balance (the shared balance, not only To-do''s: what a new
+
+        task beyond the free ones is paid from).'
       properties:
         default_due_time:
           format: time
@@ -7245,6 +7758,10 @@ components:
         storage_frozen:
           title: Storage Frozen
           type: boolean
+        credits_balance:
+          description: The user's current credit balance.
+          title: Credits Balance
+          type: integer
       required:
       - default_due_time
       - default_reminder_minutes
@@ -7259,6 +7776,7 @@ components:
       - stored_bytes
       - storage_credits_per_day
       - storage_frozen
+      - credits_balance
       title: SettingsSchema
       type: object
     SettingsUpdateSchema:
@@ -7307,6 +7825,79 @@ components:
           - type: 'null'
           title: Sender Allowlist
       title: SettingsUpdateSchema
+      type: object
+    RecentEmailSchema:
+      description: 'One email that reached the address. `status` is `accepted` (it created `task`) or why it did
+
+        not: `rejected_sender` (not on the accepted-senders list, or not authenticated as one of
+
+        them), `rejected_spam`, `rejected_virus`, `rejected_credits` (not enough credits for a task),
+
+        `rejected_too_large` (every file over the size limit), `rejected_task_limit` (too many open
+
+        tasks) or `no_content` (nothing to add). `note` is a short remark (for instance `1 of 3 files
+
+        skipped: too large`), often empty. `task` is the number of the task it created, `null` when it
+
+        created none or the task has been deleted.'
+      properties:
+        id:
+          description: The email row id.
+          format: uuid
+          title: Id
+          type: string
+        from_address:
+          description: The From address, as the sender wrote it.
+          title: From Address
+          type: string
+        sender_authenticated:
+          description: Whether the mail system authenticated the From address.
+          title: Sender Authenticated
+          type: boolean
+        subject:
+          description: The subject, as received (cut to 500 characters).
+          title: Subject
+          type: string
+        received_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          description: When the mail system received it.
+          title: Received At
+        status:
+          description: The outcome, see above.
+          enum:
+          - accepted
+          - rejected_sender
+          - rejected_spam
+          - rejected_virus
+          - rejected_credits
+          - rejected_too_large
+          - rejected_task_limit
+          - no_content
+          title: Status
+          type: string
+        note:
+          description: A short remark about what was done; often empty.
+          title: Note
+          type: string
+        task:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: The number of the task it created, or `null`.
+          title: Task
+      required:
+      - id
+      - from_address
+      - sender_authenticated
+      - subject
+      - received_at
+      - status
+      - note
+      - task
+      title: RecentEmailSchema
       type: object
     ParsedInfoSchema:
       description: 'What `parse_title` did when a task was created: `applied` says whether the date, time and
@@ -7413,6 +8004,18 @@ components:
         source:
           title: Source
           type: string
+        email_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'For a task made from an email: its From address; `null` otherwise.'
+          title: Email From
+        email_from_authenticated:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: 'For a task made from an email: whether the sender was authenticated (DMARC, DKIM or SPF); `null` otherwise.'
+          title: Email From Authenticated
         parent:
           anyOf:
           - type: integer
@@ -7494,6 +8097,8 @@ components:
       - deleted_at
       - position
       - source
+      - email_from
+      - email_from_authenticated
       - parent
       - labels
       - recurrence
@@ -7779,6 +8384,18 @@ components:
         source:
           title: Source
           type: string
+        email_from:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'For a task made from an email: its From address; `null` otherwise.'
+          title: Email From
+        email_from_authenticated:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: 'For a task made from an email: whether the sender was authenticated (DMARC, DKIM or SPF); `null` otherwise.'
+          title: Email From Authenticated
         parent:
           anyOf:
           - type: integer
@@ -7866,6 +8483,8 @@ components:
       - deleted_at
       - position
       - source
+      - email_from
+      - email_from_authenticated
       - parent
       - labels
       - recurrence

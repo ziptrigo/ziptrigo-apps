@@ -291,23 +291,27 @@ def search_guard() -> Generator[None]:
 # -- Snippets ----------------------------------------------------------------------------
 
 
-def make_snippet(text: str, match: SpanMatch) -> SafeString:
-    """`SNIPPET_CONTEXT` characters of `text` either side of `match`, the match in `<mark>`
-    (HTML-escaped; ellipses where the text goes on). A long match highlights its first
-    `SNIPPET_MARK_MAX` characters."""
+def snippet_parts(text: str, match: SpanMatch) -> tuple[str, str, str]:
+    """The snippet as plain text in three pieces `(before, hit, after)`: `SNIPPET_CONTEXT`
+    characters of `text` either side of `match`, with an ellipsis where the text goes on. A long
+    match keeps its first `SNIPPET_MARK_MAX` characters as the hit; `hit` is empty for an empty
+    match. `make_snippet` is the HTML form of the same thing."""
     start, end = match.span()
     end = min(end, start + SNIPPET_MARK_MAX)
     left = max(0, start - SNIPPET_CONTEXT)
     right = min(len(text), end + SNIPPET_CONTEXT)
-    hit = f'<mark>{escape(text[start:end])}</mark>' if end > start else ''
-    html = (
-        ('…' if left > 0 else '')
-        + escape(text[left:start])
-        + hit
-        + escape(text[end:right])
-        + ('…' if right < len(text) else '')
-    )
-    return mark_safe(html)  # every piece of the text is escaped above
+    before = ('…' if left > 0 else '') + text[left:start]
+    after = text[end:right] + ('…' if right < len(text) else '')
+    return before, text[start:end], after
+
+
+def make_snippet(text: str, match: SpanMatch) -> SafeString:
+    """`SNIPPET_CONTEXT` characters of `text` either side of `match`, the match in `<mark>`
+    (HTML-escaped; ellipses where the text goes on). A long match highlights its first
+    `SNIPPET_MARK_MAX` characters."""
+    before, hit, after = snippet_parts(text, match)
+    mark = f'<mark>{escape(hit)}</mark>' if hit else ''
+    return mark_safe(f'{escape(before)}{mark}{escape(after)}')  # every piece is escaped above
 
 
 def snippet_regex(pattern: str) -> BoundedPattern | None:

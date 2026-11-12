@@ -1,10 +1,11 @@
 """Schemas for the settings, inbox and parse endpoints (`/api/todo/settings`, `/inbox`, `/parse`)."""
 
-from datetime import time
+from datetime import datetime, time
 from typing import Literal
+from uuid import UUID
 
 from ninja import Schema
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 
 class SettingsSchema(Schema):
@@ -23,7 +24,9 @@ class SettingsSchema(Schema):
     `free_tasks_per_month`, `task_price` (credits per task beyond the free ones),
     `creation_blocked` (a repeating task is waiting to be paid for), `stored_bytes` of attachments,
     `storage_credits_per_day` (what storing them costs a day, a decimal string) and
-    `storage_frozen` (storage could not be paid for: uploads and downloads are refused).
+    `storage_frozen` (storage could not be paid for: uploads and downloads are refused) and
+    `credits_balance`, the user's credit balance (the shared balance, not only To-do's: what a new
+    task beyond the free ones is paid from).
     """
 
     default_due_time: time
@@ -39,6 +42,7 @@ class SettingsSchema(Schema):
     stored_bytes: int
     storage_credits_per_day: str
     storage_frozen: bool
+    credits_balance: int = Field(description="The user's current credit balance.")
 
 
 class SettingsUpdateSchema(Schema):
@@ -58,9 +62,46 @@ class SettingsUpdateSchema(Schema):
     sender_allowlist: list[str] | None = None
 
 
+InboundStatus = Literal[
+    'accepted',
+    'rejected_sender',
+    'rejected_spam',
+    'rejected_virus',
+    'rejected_credits',
+    'rejected_too_large',
+    'rejected_task_limit',
+    'no_content',
+]
+
+
+class RecentEmailSchema(Schema):
+    """One email that reached the address. `status` is `accepted` (it created `task`) or why it did
+    not: `rejected_sender` (not on the accepted-senders list, or not authenticated as one of
+    them), `rejected_spam`, `rejected_virus`, `rejected_credits` (not enough credits for a task),
+    `rejected_too_large` (every file over the size limit), `rejected_task_limit` (too many open
+    tasks) or `no_content` (nothing to add). `note` is a short remark (for instance `1 of 3 files
+    skipped: too large`), often empty. `task` is the number of the task it created, `null` when it
+    created none or the task has been deleted."""
+
+    id: UUID = Field(description='The email row id.')
+    from_address: str = Field(description='The From address, as the sender wrote it.')
+    sender_authenticated: bool = Field(
+        description='Whether the mail system authenticated the From address.'
+    )
+    subject: str = Field(description='The subject, as received (cut to 500 characters).')
+    received_at: datetime | None = Field(description='When the mail system received it.')
+    status: InboundStatus = Field(description='The outcome, see above.')
+    note: str = Field(description='A short remark about what was done; often empty.')
+    task: int | None = Field(description='The number of the task it created, or `null`.')
+
+
 class InboxSchema(Schema):
     """The address tasks can be emailed to (subject: title, body: description, attachments:
-    attachments) and who may send to it."""
+    attachments), who may send to it and the 20 emails that reached it most recently
+    (`recent_emails`, newest first; what `GET /inbox` shows, as the Settings page does)."""
 
     address: str
     sender_allowlist: list[str]
+    recent_emails: list[RecentEmailSchema] = Field(
+        description='The latest 20 emails received, accepted or not, newest first.'
+    )

@@ -48,6 +48,8 @@ TASK_KEYS = {
     'deleted_at',
     'position',
     'source',
+    'email_from',
+    'email_from_authenticated',
     'parent',
     'labels',
     'recurrence',
@@ -64,6 +66,9 @@ TASK_KEYS = {
     'created_at',
     'updated_at',
 }
+
+#: A task in a list also has the search fields (null unless the list was searched).
+LIST_KEYS = TASK_KEYS | {'search_field', 'search_snippet', 'match_start', 'match_end'}
 
 
 def numbers(response) -> list[int]:
@@ -416,7 +421,7 @@ class TestList:
         body = response.json()
         assert set(body) == {'count', 'limit', 'offset', 'results'}
         assert body['limit'] == 50 and body['offset'] == 0 and body['count'] == 5
-        assert set(body['results'][0]) == TASK_KEYS
+        assert set(body['results'][0]) == LIST_KEYS
         assert numbers(response) == [
             tasks[key].number for key in ('overdue', 'today', 'soon', 'later', 'nodate')
         ]

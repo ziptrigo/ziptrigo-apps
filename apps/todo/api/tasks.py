@@ -8,12 +8,13 @@ validation, billing and ordering rules apply either way. A task is addressed by 
 """
 
 from contextlib import nullcontext
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
+from ninja import Query
 from ninja.errors import HttpError
 
 from apps.accounts.services.timezones import user_today
@@ -56,8 +57,9 @@ from ..services import (
     trash_set,
     upcoming_set,
 )
+from ..services.dates import DIRECTIONS
 from ..services.filters import DATE_RANGES, NO_LABEL, PRIORITIES, RESOLUTIONS, STATES
-from ..services.search import MODES, order_results, search_guard
+from ..services.search import MODES, attach_matches, order_results, prepare_query, search_guard
 from ..services.tasks import NOT_OPEN_MESSAGE
 from .common import (
     DEFAULT_LIMIT,
@@ -70,6 +72,7 @@ from .common import (
     owned_task,
     parse_date,
     resolution_of,
+    search_fields,
     task_data,
     task_detail,
     task_from_body,
@@ -125,15 +128,22 @@ def _view_queryset(user, view: str, include_closed: bool, resolution: str = '') 
 
 
 def _ordered(
-    queryset: QuerySet, user, *, view: str | None, parent, sort: str | None, include_closed: bool
+    queryset: QuerySet,
+    user,
+    *,
+    view: str | None,
+    parent,
+    sort: str | None,
+    direction: str | None,
+    include_closed: bool,
 ) -> QuerySet:
     """`queryset` in the order the web shows it: `sort` when asked for, else Today's (overdue
     first, then today's in the order the user gave it), a parent's subtasks (the user's order when
     they gave one), the Closed page's (latest first) and the Trash's, else by date."""
     if view == 'all' and include_closed:
-        return order_results(queryset, sort or SORT_DEFAULT)  # closed ones after the open
+        return order_results(queryset, sort or SORT_DEFAULT, direction)  # closed after the open
     if sort is not None:
-        return order_tasks(queryset, sort)
+        return order_tasks(queryset, sort, direction)
     if view == 'today':
         manual = has_manual_order(todays_tasks(user), 'today_position')
         return order_today(queryset, user_today(user), manual=manual)
@@ -162,6 +172,9 @@ def list_tasks(
     date_from: str | None = None,
     date_to: str | None = None,
     sort: str | None = None,
+    # `dir` is a Python builtin, so the parameter is `direction`, read from `?dir=`. `ty` cannot see
+    # that ninja's `Query` is callable.
+    direction: Annotated[str | None, Query(alias='dir')] = None,  # ty: ignore[call-non-callable]
     parent: int | None = None,
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
@@ -191,9 +204,19 @@ def list_tasks(
       `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;
       dates alone mean `custom`). Relative ranges are the caller's own today.
     - `sort`: `date` (the default), `priority`, `created` or `title`.
+    - `dir`: `asc` or `desc`, the direction of the sort (as the All page's arrow): each sort's own
+      default when left out (`date`, `priority` and `title` ascending, `created` newest first), the
+      exact reverse for the other one; a 400 for any other value. Closed tasks stay after the open
+      ones. Without `sort`, `dir` means `sort=date`.
     - `limit` (1-100, default 50) and `offset` page the result; `count` is the total.
 
     A search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`.
+
+    **Snippets.** With `q`, each task also carries `search_field`, `search_snippet`, `match_start`
+    and `match_end` (see `TaskListItemSchema`): plain text around the match and its offsets, found
+    by the website's bounded pass (a 0.2 s budget for the page, only the field the database said
+    matched, at most 5,000 characters of it; rows past the budget are listed without a snippet).
+    Without `q` all four are `null`.
     """
     user = request.auth
     if 'include_completed' in request.GET:  # the name before version 2: fail loudly, not silently
@@ -204,6 +227,9 @@ def list_tasks(
     mode = choice('mode', mode, MODES)
     if sort is not None:
         choice('sort', sort, SORTS)
+    if direction is not None:
+        choice('dir', direction, DIRECTIONS)
+        sort = sort or SORT_DEFAULT  # a direction means a sort: the default one
     if date_range is not None:
         choice('date_range', date_range, DATE_RANGES)
     parent_task = owned_task(request, parent) if parent is not None else None
@@ -256,16 +282,22 @@ def list_tasks(
                         view=view,
                         parent=parent_task,
                         sort=sort,
+                        direction=direction,
                         include_closed=include_closed,
                     )
                 )[offset : offset + limit]
             )
+        if params.q.strip():
+            attach_matches(rows, prepare_query(params.q, params.mode))
     context = context_for(request)
     return {
         'count': count,
         'limit': limit,
         'offset': offset,
-        'results': [task_data(task, context) for task in rows],
+        'results': [
+            {**task_data(task, context), **(search_fields(task) if params.q.strip() else {})}
+            for task in rows
+        ],
     }
 
 

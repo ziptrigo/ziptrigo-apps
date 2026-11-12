@@ -29,6 +29,7 @@ COMMENT_KEYS = {
     'edited_at',
     'deleted_at',
     'revision_count',
+    'attachments',
 }
 
 

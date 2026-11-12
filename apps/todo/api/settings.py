@@ -8,12 +8,14 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.accounts.models import User
+from apps.billing.services import get_balance
 
 from .. import services
 from ..models import TodoAccount, TodoSettings
 from ..schemas import InboxSchema, SettingsSchema, SettingsUpdateSchema
 from ..services import reminders
 from ..services.accounts import clean_muted_overdue, set_muted_overdue
+from ..services.recent_emails import recent_emails
 from .common import charge, mapped_errors
 from .router import router
 
@@ -36,6 +38,7 @@ def _settings(user: User) -> dict:
         'stored_bytes': account.stored_bytes,
         'storage_credits_per_day': f'{services.daily_storage_rate(account.stored_bytes):f}',
         'storage_frozen': account.is_frozen,
+        'credits_balance': get_balance(user),
     }
 
 
@@ -82,7 +85,8 @@ def _check(changes: dict) -> None:
 
 @router.get('/settings', response=SettingsSchema)
 def get_settings(request):
-    """The account's settings and, read-only, its usage this month and its storage."""
+    """The account's settings and, read-only, its usage this month, its storage and the credit
+    balance (`credits_balance`)."""
     return _settings(request.auth)
 
 
@@ -114,6 +118,19 @@ def _inbox(user: User) -> dict:
     return {
         'address': services.inbox_address(services.active_inbox_code(account).code),
         'sender_allowlist': list(account.sender_allowlist),
+        'recent_emails': [
+            {
+                'id': email.pk,
+                'from_address': email.from_address,
+                'sender_authenticated': email.sender_authenticated,
+                'subject': email.subject,
+                'received_at': email.received_at,
+                'status': email.status,
+                'note': email.note,
+                'task': email.task.number if email.task is not None else None,
+            }
+            for email in recent_emails(user)
+        ],
     }
 
 
@@ -121,7 +138,9 @@ def _inbox(user: User) -> dict:
 def get_inbox(request):
     """The address tasks can be emailed to (`todo+<code>@...`: the subject becomes the title, the
     body the description and the attachments the task's attachments) and who may send to it (an
-    empty list accepts anyone; change it with `PATCH /settings`)."""
+    empty list accepts anyone; change it with `PATCH /settings`) and, as `recent_emails`, the 20
+    emails that reached it most recently (accepted or rejected, newest first), as the website's
+    Settings page lists them."""
     return _inbox(request.auth)
 
 

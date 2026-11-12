@@ -262,6 +262,8 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
         'deleted_at': task.deleted_at,
         'position': task.position,
         'source': task.source,
+        'email_from': task.email_from if task.is_from_email else None,
+        'email_from_authenticated': task.email_from_authenticated if task.is_from_email else None,
         'parent': task.parent.number if task.parent is not None else None,
         'labels': [
             {'id': label.pk, 'name': label.name, 'color': label.color}
@@ -305,6 +307,39 @@ def attachment_data(attachment: Attachment, number: int) -> dict[str, Any]:
         'declared_type': attachment.declared_type,
         'inline_type': attachment.inline_type,
         'created_at': attachment.created_at,
+    }
+
+
+def comment_attachment_data(attachment: Attachment) -> dict[str, Any]:
+    return {
+        'id': attachment.pk,
+        'filename': attachment.filename,
+        'size_bytes': attachment.size_bytes,
+        'inline_type': attachment.inline_type,
+        'inline': attachment.is_inline,
+    }
+
+
+def search_fields(task: Task) -> dict[str, Any]:
+    """The `TaskListItemSchema` search fields of a task of a searched list, after
+    `services.search.attach_matches` has read it: where it matched and the snippet as plain text
+    with the match's offsets; `search_field` is `''` and the rest `None` when there is no snippet.
+    (A list that was not searched leaves all four `None`: don't call this for it.)"""
+    parts = getattr(task, 'search_parts', None)
+    field = getattr(task, 'search_field', '')
+    if parts is None or not field:
+        return {
+            'search_field': '',
+            'search_snippet': None,
+            'match_start': None,
+            'match_end': None,
+        }
+    before, hit, after = parts
+    return {
+        'search_field': field,
+        'search_snippet': before + hit + after,
+        'match_start': len(before),
+        'match_end': len(before) + len(hit),
     }
 
 

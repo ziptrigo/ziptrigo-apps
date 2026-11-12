@@ -10,6 +10,7 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from ninja.errors import HttpError
 
+from apps.core import ratelimit
 from apps.core.datetime_format import PUBLIC
 
 from .. import services
@@ -24,8 +25,8 @@ from ..schemas import (
 )
 from ..services import saved_filters
 from ..services.filters import filter_tasks, label_names
-from ..services.saved_filters import stored_params
-from ..services.search import search_guard
+from ..services.saved_filters import filter_counts, stored_params
+from ..services.search import attach_matches, prepare_query, search_guard
 from .common import (
     DEFAULT_LIMIT,
     charge,
@@ -33,6 +34,7 @@ from .common import (
     context_for,
     decorated,
     mapped_errors,
+    search_fields,
     task_data,
 )
 from .router import router
@@ -66,6 +68,23 @@ def list_filters(request):
     from its `params`."""
     names = label_names(request.auth)
     return [_data(saved, request.auth, names) for saved in services.list_filters(request.auth)]
+
+
+# Registered before the `{filter_id}` routes, like `reorder`: a path is matched in the order added.
+@router.get('/filters/counts', response=dict[str, int | None])
+def filter_open_counts(request):
+    """How many open tasks each of the caller's saved filters selects, as `{filter id: count}`, for
+    all of them in **one** query and one hit of the `TODO_SEARCH_USER` budget (what the website's
+    sidebar fetches). A count is `null` when the filter's search can't be run (an invalid
+    pattern); when the query takes too long, or the budget is spent, **every** count is `null`:
+    never an error. A user with no filters gets `{}` and spends nothing."""
+    filters = list(services.list_filters(request.auth))
+    if not filters:
+        return {}
+    if not ratelimit.hit_user(request.auth, 'TODO_SEARCH_USER').allowed:
+        return {str(saved.pk): None for saved in filters}
+    counts = filter_counts(request.auth, filters)
+    return {str(saved.pk): counts.get(saved.pk) for saved in filters}
 
 
 @router.post('/filters', response={201: FilterSchema})
@@ -132,7 +151,8 @@ def delete_filter(request, filter_id: UUID):
 def run_filter(request, filter_id: UUID, limit: int = DEFAULT_LIMIT, offset: int = 0):
     """Run a saved filter: the tasks it selects, in its sort order (completed ones last), as
     `GET /tasks` lists them. `limit` (1-100, default 50) and `offset` page the result; `count` is
-    the total. Spends `TODO_SEARCH_USER`."""
+    the total. Spends `TODO_SEARCH_USER`. When the filter has search text each task carries the
+    snippet fields of `GET /tasks`; without it they are `null`."""
     saved = _owned(request, filter_id)
     user = request.auth
     limit, offset = clamp_page(limit, offset)
@@ -143,10 +163,16 @@ def run_filter(request, filter_id: UUID, limit: int = DEFAULT_LIMIT, offset: int
         with search_guard() if params.q.strip() else nullcontext():
             count = queryset.count()
             rows = list(decorated(queryset)[offset : offset + limit])
+        searched = bool(params.q.strip())
+        if searched:
+            attach_matches(rows, prepare_query(params.q, params.mode))
     context = context_for(request)
     return {
         'count': count,
         'limit': limit,
         'offset': offset,
-        'results': [task_data(task, context) for task in rows],
+        'results': [
+            {**task_data(task, context), **(search_fields(task) if searched else {})}
+            for task in rows
+        ],
     }
