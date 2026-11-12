@@ -32,6 +32,13 @@ SubtaskChoice = Annotated[str, Field(json_schema_extra={'enum': ['done', 'wont_d
 Title = Annotated[str, Field(max_length=TITLE_MAX)]
 
 
+class ErrorSchema(Schema):
+    """An error answer that carries only a `detail` sentence (the 409 of `POST /close` on a task that
+    is already closed, the 410 of the removed endpoints)."""
+
+    detail: str
+
+
 class RecurrenceSchema(Schema):
     """The repeat rule of a task: `rrule` (an RFC 5545 `RRULE` value without the prefix),
     `rrule_text` the same in words, `mode` `fixed` or `from_completion`, `anchor_date` the date
@@ -79,8 +86,10 @@ class TaskSchema(Schema):
     by the owner) or `blocked` (set automatically while a task in `blocked_by` is open; nobody
     chooses it). `on_hold` and `blocked` are *muted*: such a task is never overdue and is not moved
     by `POST /tasks/reschedule-overdue`, and its reminders wait until it leaves the state. A closed
-    task has no state to speak of: closing sets it back to `todo`, so read it only while the task is
-    open.
+    task has no state: `state` is `null` while `closed_at` is set (reopening gives it `todo`, or
+    `blocked` while a blocker is open). `has_open_blocker` is true when any task in `blocked_by` is
+    open (`open: true`), whatever `state` says: an open task the owner moved to `in_progress` while
+    a blocker was open still has one.
 
     `blocked_by` lists the tasks that block this one and `blocks` the tasks it blocks, by number
     (see `TaskRefSchema`); the links are kept when either task closes or is trashed.
@@ -98,9 +107,9 @@ class TaskSchema(Schema):
     closed_at: datetime | None = Field(
         description="When the task was closed (as Done or as Won't do); `null` while it is open."
     )
-    state: StateName = Field(
+    state: StateName | None = Field(
         description='What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` '
-        '(set only by blockers). A closed task reads `todo`: ignore it while `closed_at` is set.'
+        '(set only by blockers); `null` while the task is closed (`closed_at` is set).'
     )
     resolution: ResolutionName | None = Field(
         description='How a closed task was closed, `done` or `wont_do`; `null` while it is open.'
@@ -114,6 +123,9 @@ class TaskSchema(Schema):
     reminders: list[ReminderSchema]
     blocked_by: list[TaskRefSchema] = Field(
         description='The tasks that block this one, by number (closed and trashed ones too).'
+    )
+    has_open_blocker: bool = Field(
+        description='Whether any task in `blocked_by` is open (`open: true`).'
     )
     blocks: list[TaskRefSchema] = Field(
         description='The tasks this one blocks, by number (closed and trashed ones too).'
@@ -229,8 +241,13 @@ class TaskUpdateSchema(Schema):
     of tasks that block this one with the numbers given (the difference is linked and unlinked, all
     or nothing; `null` or `[]` removes every blocker): when one of them is open the task becomes
     `blocked`, and when none is left a `blocked` task goes back to `todo`. A closed task can be given
-    blockers too (the links only). Where `state` and `blocked_by` are both sent, `state` is applied
-    first and the blockers after it.
+    blockers too (the links only).
+
+    **`state` together with `blocked_by`:** the links are written first and then the task is
+    `blocked` if any of its blockers is open (whatever `state` says), else it gets `state`. A
+    `state` equal to the task's current state is a no-op, so a client may send back the state it
+    read (`blocked` included); `blocked` as a change is a 400. A request that changes nothing (the
+    same `blocked_by`, the same `state`, no other field) spends no budget.
 
     Clearing `due_date` clears the time with it. A key that is not one of these (a typo, `status`,
     `reminders`, ...) is refused with a 422 rather than ignored.

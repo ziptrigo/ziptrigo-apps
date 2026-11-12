@@ -105,7 +105,14 @@ state, for changing the resolution of a closed task and for adding and removing 
 and `blocked_by` on create and `PATCH`, the list filters `state`, `include_closed` and `resolution`,
 and the activity log (`GET /tasks/{number}/activity`, newest first, with a cursor and the sentence
 of each entry in the public wording). Saved filters expose `states` and `resolution`. The API's
-major version is bumped (2.0.0) and the Android app is updated and released in step. The CLI gets
+major version is bumped (2.0.0) and the Android app is updated and released in step; `complete` and
+`uncomplete` stay as routes that answer 410 ("update the app") for the installed old versions.
+Contract details settled in review: `state` is `null` for a closed task and `has_open_blocker` says
+whether any `blocked_by` entry is open; `PATCH` with both `state` and `blocked_by` leaves the task
+`blocked` if any of its blockers is open, else in the requested state, and a `state` equal to the
+current one is a no-op (as is a repeated `blocked_by`, `reopen` on an open task and an unchanged
+resolution: none spends budget); `POST /close` on a closed task is a 409; blocker errors are keyed by
+the field the caller used (`number`, `blocked_by`); the activity cursor is base64url. The CLI gets
 `--state`, `--blocked-by`, `close --wont-do`, `reopen`, `resolution`, `state`, `block`, `unblock`,
 `history` and the new list filters. Built in #275 (CLAUDE.md, "To-do" > "API and CLI").
 

@@ -49,6 +49,7 @@ TASK: dict = {
     'closed_at': None,
     'state': 'todo',
     'resolution': None,
+    'has_open_blocker': False,
     'deleted_at': None,
     'position': 0,
     'source': 'api',
@@ -965,6 +966,35 @@ def test_close_carries_on_past_a_failure(api):
     assert (
         '#1234: 400: Restore the task' in flat(result) and 'Closed as done #1235' in result.output
     )
+
+
+@pytest.mark.parametrize('command', [['done'], ['close', '--wont-do', '--note', 'late']])
+def test_closing_an_already_closed_task_says_so_and_carries_on(api, command):
+    api.on(
+        'post',
+        '/todo/tasks/1234/close',
+        FakeResponse(409, {'detail': "This task is already closed as Won't do."}),
+    )
+    api.on('post', '/todo/tasks/1235/close', FakeResponse(200, {**TASK, 'number': 1235}))
+
+    result = invoke(*command[:1], 'local', '1234', '1235', *command[1:])
+
+    assert result.exit_code == 1  # one of them failed, as for any failure
+    assert "#1234 was already closed as Won't do; use `inv todo resolution` to change it" in flat(
+        result
+    )
+    output = flat(result)
+    assert '#1235 "Pay rent"' in output  # the next one was still closed
+    assert "Closed as won't do #1234" not in output and 'Completed #1234' not in output
+
+
+def test_a_closed_task_without_a_state_lists_and_prints(api):
+    closed = {**TASK, 'state': None, 'closed_at': '2026-11-02T10:00:00Z', 'resolution': 'wont_do'}
+    api.on('get', '/todo/tasks', FakeResponse(200, page(closed)))
+
+    result = invoke('list', 'local', '--view', 'closed')
+
+    assert result.exit_code == 0 and "Won't do" in flat(result)
 
 
 def test_reopen_and_its_old_name(api):

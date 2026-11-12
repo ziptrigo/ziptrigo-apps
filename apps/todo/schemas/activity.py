@@ -52,7 +52,8 @@ class ActivityEventSchema(Schema):
 class ActivityPageSchema(Schema):
     """A page of a task's log, **newest first**. `next` is the cursor of the following (older)
     page, to send as `before`, or `null` on the last page. A cursor is an opaque keyset position
-    (the time and id of the last entry), so entries written while paging never repeat or skip."""
+    (the time and id of the last entry), so entries written while paging never repeat or skip. It
+    is base64url text (`A-Z a-z 0-9 - _`, no padding), safe in a query string as it is."""
 
     results: list[ActivityEventSchema] = Field(description='The entries, newest first.')
     next: str | None = Field(

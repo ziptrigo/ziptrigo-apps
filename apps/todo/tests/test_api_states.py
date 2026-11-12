@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from ..models import Comment, Resolution, Task, TaskBlocker, TaskState
+from ..models import Comment, Resolution, Task, TaskBlocker, TaskEvent, TaskState
 from ..services import (
     add_blocker,
     close_task,
@@ -68,7 +68,7 @@ class TestFields:
         body = get(client, f'/tasks/{task.number}', auth).json()
 
         assert body['closed_at'] is not None and body['resolution'] == expected
-        assert body['state'] == 'todo'  # closing resets it
+        assert body['state'] is None  # a closed task has no state
 
     def test_a_closed_task_with_no_resolution_recorded_reads_as_done(
         self, client, auth, funded_user
@@ -156,8 +156,9 @@ class TestListFilters:
 
     def test_the_old_names_are_a_400_or_ignored(self, client, auth, zoo):
         assert get(client, '/tasks', auth, view='completed').status_code == 400
-        # `include_completed` is not a parameter any more: it is ignored, and nothing is included
-        assert zoo['done'].number not in numbers(get(client, '/tasks', auth, include_completed='1'))
+        response = get(client, '/tasks', auth, include_completed='1')
+        assert response.status_code == 400
+        assert response.json() == {'detail': 'include_completed: Use include_closed.'}
 
     def test_the_state_filter(self, client, auth, zoo):
         assert numbers(get(client, '/tasks', auth, state='on_hold')) == [zoo['held'].number]
@@ -270,7 +271,7 @@ class TestClose:
 
         body = post(client, f'/tasks/{task.number}/close', auth, {'resolution': 'wont_do'}).json()
 
-        assert body['resolution'] == 'wont_do' and body['state'] == 'todo'
+        assert body['resolution'] == 'wont_do' and body['state'] is None
 
     @pytest.mark.parametrize(
         ('choice', 'expected'), [('done', 'done'), ('wont_do', 'wont_do'), ('leave', '')]
@@ -369,18 +370,37 @@ class TestClose:
         nxt = Task.objects.get(title='Rent', completed_at__isnull=True)
         assert nxt.due_date == date(2026, 10, 29) and nxt.state == TaskState.TODO
 
-    def test_closing_a_closed_task_changes_nothing_but_adds_the_note(
-        self, client, auth, funded_user
+    @pytest.mark.parametrize(
+        ('resolution', 'label'), [(Resolution.DONE, 'Done'), (Resolution.WONT_DO, "Won't do")]
+    )
+    def test_closing_a_closed_task_is_a_409_that_writes_and_spends_nothing(
+        self, client, auth, funded_user, settings, ratelimit_clock, resolution, label
     ):
-        task = complete_task(make(funded_user))
+        task = close_task(make(funded_user), resolution)
+        limit_rule(settings, 'TODO_EDIT_USER', 1)
+        limit_rule(settings, 'TODO_COMMENT_USER', 1)
+        before = TaskEvent.objects.filter(task=task).count()
 
-        response = post(
-            client, f'/tasks/{task.number}/close', auth, {'resolution': 'wont_do', 'note': 'late'}
+        for body in ({'resolution': 'wont_do', 'note': 'late'}, {}):
+            response = post(client, f'/tasks/{task.number}/close', auth, body)
+            assert response.status_code == 409
+            assert response.json() == {'detail': f'This task is already closed as {label}.'}
+
+        assert not Comment.objects.filter(task=task).exists()
+        assert TaskEvent.objects.filter(task=task).count() == before
+        assert reload(task).resolution == resolution
+        # neither budget was spent: both still have their one hit
+        other = make(funded_user, 'Other')
+        assert (
+            post(client, f'/tasks/{other.number}/state', auth, {'state': 'on_hold'}).status_code
+            == 200
         )
-
-        assert response.status_code == 200
-        assert response.json()['resolution'] == 'done'  # not applied: use `resolution`
-        assert Comment.objects.filter(task=task, body='late').exists()
+        assert (
+            post(
+                client, f'/tasks/{other.number}/close', auth, {'resolution': 'wont_do', 'note': 'n'}
+            ).status_code
+            == 429
+        )
 
     def test_the_edit_budget_is_spent_and_a_refusal_spends_nothing(
         self, client, auth, funded_user, settings, ratelimit_clock
@@ -789,7 +809,7 @@ class TestCreateAndPatch:
 
         body = patch(client, f'/tasks/{task.number}', auth, {'blocked_by': [blocker.number]}).json()
 
-        assert body['state'] == 'todo' and len(body['blocked_by']) == 1  # a link only
+        assert body['state'] is None and len(body['blocked_by']) == 1  # a link only
         assert body['closed_at'] is not None
 
     def test_the_other_users_get_404s(self, client, auth, other_user):
@@ -992,3 +1012,291 @@ def test_every_field_of_the_close_body_is_optional(client, auth, funded_user):
     task = make(funded_user)
 
     assert post(client, f'/tasks/{task.number}/close', auth, {}).json()['resolution'] == 'done'
+
+
+class TestReviewFollowUps:
+    """The contract details the review of #281 pinned down: the cap on a replaced set, `state` with
+    `blocked_by`, the error keys, no-ops that spend nothing, `state` null for a closed task and
+    `has_open_blocker`, the removed endpoints."""
+
+    # -- The cap judged on the final set ---------------------------------------------------------
+
+    def test_a_blocker_can_be_swapped_on_a_task_that_has_twenty(
+        self, client, auth, funded_user, config
+    ):
+        config.task_price = 0
+        config.save()
+        task = make(funded_user)
+        old = [make(funded_user, f'B{n}') for n in range(20)]
+        for other in old:
+            add_blocker(task, other)
+        new = make(funded_user, 'New')
+
+        response = patch(
+            client,
+            f'/tasks/{task.number}',
+            auth,
+            {'blocked_by': [other.number for other in old[1:]] + [new.number]},
+        )
+
+        assert response.status_code == 200
+        numbers_ = [ref['number'] for ref in response.json()['blocked_by']]
+        assert len(numbers_) == 20 and new.number in numbers_ and old[0].number not in numbers_
+
+    def test_adding_to_a_full_set_is_still_refused_under_the_blocked_by_key(
+        self, client, auth, funded_user, config
+    ):
+        config.task_price = 0
+        config.save()
+        task = make(funded_user)
+        old = [make(funded_user, f'B{n}') for n in range(20)]
+        for other in old:
+            add_blocker(task, other)
+
+        response = patch(
+            client,
+            f'/tasks/{task.number}',
+            auth,
+            {'blocked_by': [other.number for other in old] + [make(funded_user).number]},
+        )
+
+        assert response.status_code == 422  # 21 numbers: the schema's own cap
+
+    # -- state together with blocked_by ----------------------------------------------------------
+
+    def blocked_task(self, user, *, state=None):
+        task, blocker = make(user, 'Task'), make(user, 'Blocker')
+        add_blocker(task, blocker)
+        if state:
+            set_state(task, state)
+        return task, blocker
+
+    def test_an_existing_open_blocker_wins_over_a_state_that_changes(
+        self, client, auth, funded_user
+    ):
+        task, blocker = self.blocked_task(funded_user, state=TaskState.IN_PROGRESS)
+
+        body = patch(
+            client, f'/tasks/{task.number}', auth, {'state': 'todo', 'blocked_by': [blocker.number]}
+        ).json()
+
+        assert body['state'] == 'blocked' and body['has_open_blocker'] is True
+
+    def test_echoing_the_current_state_with_the_same_blockers_is_a_no_op(
+        self, client, auth, funded_user, settings, ratelimit_clock
+    ):
+        task, blocker = self.blocked_task(funded_user, state=TaskState.IN_PROGRESS)
+        limit_rule(settings, 'TODO_EDIT_USER')
+        body = {'state': 'in_progress', 'blocked_by': [blocker.number]}
+
+        for _ in range(3):
+            response = patch(client, f'/tasks/{task.number}', auth, body)
+            assert response.status_code == 200 and response.json()['state'] == 'in_progress'
+
+        assert patch(client, f'/tasks/{task.number}', auth, {'title': 'Real'}).status_code == 200
+
+    def test_a_new_open_blocker_makes_the_task_blocked_whatever_the_state(
+        self, client, auth, funded_user
+    ):
+        task, blocker = make(funded_user), make(funded_user, 'Blocker')
+
+        body = patch(
+            client,
+            f'/tasks/{task.number}',
+            auth,
+            {'state': 'on_hold', 'blocked_by': [blocker.number]},
+        ).json()
+
+        assert body['state'] == 'blocked'
+
+    def test_with_every_blocker_closed_the_requested_state_applies(self, client, auth, funded_user):
+        task, blocker = make(funded_user), make(funded_user, 'Blocker')
+        add_blocker(task, blocker)
+        complete_task(blocker)  # the link stays, nothing is open any more
+
+        body = patch(
+            client,
+            f'/tasks/{task.number}',
+            auth,
+            {'state': 'on_hold', 'blocked_by': [blocker.number]},
+        ).json()
+
+        assert body['state'] == 'on_hold' and body['has_open_blocker'] is False
+
+    def test_removing_the_last_open_blocker_applies_the_requested_state(
+        self, client, auth, funded_user
+    ):
+        task, _ = self.blocked_task(funded_user)
+
+        body = patch(
+            client, f'/tasks/{task.number}', auth, {'state': 'in_progress', 'blocked_by': []}
+        ).json()
+
+        assert body['state'] == 'in_progress' and body['blocked_by'] == []
+
+    def test_the_state_alone_keeps_the_links(self, client, auth, funded_user):
+        task, _ = self.blocked_task(funded_user)
+
+        body = patch(client, f'/tasks/{task.number}', auth, {'state': 'on_hold'}).json()
+
+        assert body['state'] == 'on_hold' and len(body['blocked_by']) == 1
+
+    def test_blocked_echoed_equal_to_the_current_state_is_accepted_as_a_no_op(
+        self, client, auth, funded_user, settings, ratelimit_clock
+    ):
+        task, blocker = self.blocked_task(funded_user)
+        limit_rule(settings, 'TODO_EDIT_USER')
+
+        for body in ({'state': 'blocked'}, {'state': 'blocked', 'blocked_by': [blocker.number]}):
+            response = patch(client, f'/tasks/{task.number}', auth, body)
+            assert response.status_code == 200 and response.json()['state'] == 'blocked'
+
+        assert patch(client, f'/tasks/{task.number}', auth, {'title': 'Real'}).status_code == 200
+
+    def test_blocked_as_a_change_is_still_a_400(self, client, auth, funded_user):
+        task = make(funded_user)
+
+        response = patch(client, f'/tasks/{task.number}', auth, {'state': 'blocked'})
+
+        assert response.status_code == 400
+        assert reload(task).state == TaskState.TODO
+
+    # -- Error keys ------------------------------------------------------------------------------
+
+    def test_post_blockers_keys_every_refusal_by_number(self, client, auth, funded_user, config):
+        config.task_price = 0
+        config.save()
+        task, a, gone = make(funded_user), make(funded_user, 'A'), make(funded_user, 'Gone')
+        trash_task(gone)
+        add_blocker(a, task)  # a is blocked by task: task blocked by a would be a cycle
+        full = make(funded_user, 'Full')
+        for n in range(20):
+            add_blocker(full, make(funded_user, f'F{n}'))
+        path = '/tasks/{}/blockers'
+
+        def detail(number, body):
+            response = post(client, path.format(number), auth, {'number': body})
+            assert response.status_code == 400
+            return response.json()['detail']
+
+        assert detail(task.number, task.number) == 'number: A task cannot block itself.'
+        assert detail(task.number, gone.number).startswith(
+            f'number: #{gone.number} is in the trash'
+        )
+        assert detail(task.number, a.number).startswith(
+            f'number: #{a.number} is already blocked by'
+        )
+        assert detail(full.number, make(funded_user, 'Extra').number) == (
+            'number: A task can have at most 20 blockers.'
+        )
+
+    def test_patch_keys_every_blocker_refusal_by_blocked_by(
+        self, client, auth, funded_user, config
+    ):
+        task, a, gone = make(funded_user), make(funded_user, 'A'), make(funded_user, 'Gone')
+        trash_task(gone)
+        add_blocker(a, task)
+
+        def detail(blocked_by):
+            response = patch(client, f'/tasks/{task.number}', auth, {'blocked_by': blocked_by})
+            assert response.status_code == 400
+            return response.json()['detail']
+
+        assert detail([task.number]) == 'blocked_by: A task cannot block itself.'
+        assert detail([gone.number]).startswith(f'blocked_by: #{gone.number} is in the trash')
+        assert detail([a.number]).startswith(f'blocked_by: #{a.number} is already blocked by')
+        assert detail([999999]) == 'blocked_by: There is no task #999999.'
+
+    def test_create_keys_its_blocker_refusals_by_blocked_by(self, client, auth, funded_user):
+        gone = trash_task(make(funded_user, 'Gone'))
+
+        response = post(client, '/tasks', auth, {'title': 'X', 'blocked_by': [gone.number]})
+
+        assert response.status_code == 400
+        assert response.json()['detail'].startswith(f'blocked_by: #{gone.number} is in the trash')
+
+    # -- No-ops spend nothing --------------------------------------------------------------------
+
+    def test_no_ops_spend_no_budget(self, client, auth, funded_user, settings, ratelimit_clock):
+        task, blocker = self.blocked_task(funded_user, state=TaskState.ON_HOLD)
+        closed = complete_task(make(funded_user, 'Closed'))
+        limit_rule(settings, 'TODO_EDIT_USER')
+        base = f'/tasks/{task.number}'
+
+        for _ in range(2):
+            assert patch(client, base, auth, {'blocked_by': [blocker.number]}).status_code == 200
+            assert patch(client, base, auth, {'state': 'on_hold'}).status_code == 200
+            assert post(client, f'{base}/state', auth, {'state': 'on_hold'}).status_code == 200
+            assert post(client, f'{base}/reopen', auth).status_code == 200  # it is open
+            assert (
+                post(
+                    client, f'/tasks/{closed.number}/resolution', auth, {'resolution': 'done'}
+                ).status_code
+                == 200
+            )
+
+        assert post(client, f'{base}/state', auth, {'state': 'todo'}).status_code == 200
+        assert post(client, f'{base}/state', auth, {'state': 'on_hold'}).status_code == 429
+
+    def test_a_no_op_changes_nothing_in_the_log(self, client, auth, funded_user):
+        task, blocker = self.blocked_task(funded_user)
+        before = TaskEvent.objects.filter(task=task).count()
+        updated = reload(task).updated_at
+
+        patch(client, f'/tasks/{task.number}', auth, {'blocked_by': [blocker.number]})
+        post(client, f'/tasks/{task.number}/reopen', auth)
+
+        assert TaskEvent.objects.filter(task=task).count() == before
+        assert reload(task).updated_at == updated
+
+    # -- state null, has_open_blocker -------------------------------------------------------------
+
+    def test_a_closed_task_has_no_state_in_the_task_and_the_list(self, client, auth, funded_user):
+        task = complete_task(make(funded_user, 'Closed'))
+
+        single = get(client, f'/tasks/{task.number}', auth).json()
+        listed = get(client, '/tasks', auth, view='closed').json()['results'][0]
+
+        assert single['state'] is None and listed['state'] is None
+        assert listed['resolution'] == 'done'
+
+    def test_has_open_blocker_follows_the_blockers_not_the_state(self, client, auth, funded_user):
+        task, blocker = self.blocked_task(funded_user, state=TaskState.IN_PROGRESS)
+        url = f'/tasks/{task.number}'
+
+        body = get(client, url, auth).json()
+        assert body['state'] == 'in_progress' and body['has_open_blocker'] is True
+
+        complete_task(blocker)
+        assert get(client, url, auth).json()['has_open_blocker'] is False
+
+        trashed = trash_task(make(funded_user, 'Trashed blocker'))
+        add_blocker(task, make(funded_user, 'Open'))
+        assert get(client, url, auth).json()['has_open_blocker'] is True
+        assert get(client, f'/tasks/{trashed.number}', auth).json()['has_open_blocker'] is False
+
+    # -- Old names -------------------------------------------------------------------------------
+
+    def test_the_removed_endpoints_answer_410_and_spend_nothing(
+        self, client, auth, funded_user, settings, ratelimit_clock
+    ):
+        task = make(funded_user)
+        limit_rule(settings, 'TODO_EDIT_USER')
+
+        for name in ('complete', 'uncomplete') * 2:
+            response = post(client, f'/tasks/{task.number}/{name}', auth)
+            assert response.status_code == 410
+            assert response.json() == {
+                'detail': 'This app is out of date. Update it to keep using To-do.'
+            }
+
+        assert reload(task).is_open
+        assert (
+            post(client, f'/tasks/{task.number}/state', auth, {'state': 'on_hold'}).status_code
+            == 200
+        )
+
+    def test_the_removed_endpoints_still_need_a_token(self, client, funded_user):
+        task = make(funded_user)
+
+        assert client.post(f'/api/todo/tasks/{task.number}/complete').status_code == 401

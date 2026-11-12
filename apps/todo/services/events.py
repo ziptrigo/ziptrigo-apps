@@ -47,6 +47,8 @@ gone; `services.event_text` writes the sentence):
 - `trashed`, `restored`: `via` (the parent that did it to its subtask).
 """
 
+import base64
+import binascii
 import logging
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
@@ -162,14 +164,20 @@ PAGE_SIZE = 20
 
 def cursor_of(event: TaskEvent) -> str:
     """The keyset cursor that continues the log after `event`: its time and id (a total order, so
-    entries written meanwhile never repeat or skip one)."""
-    return f'{event.created_at.isoformat()}_{event.pk}'
+    entries written meanwhile never repeat or skip one), as base64url without padding, which is
+    safe in a query string as it is (`A-Z a-z 0-9 - _` only)."""
+    raw = f'{event.created_at.isoformat()}_{event.pk}'
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip('=')
 
 
 def parse_cursor(raw: str) -> tuple[datetime, UUID]:
-    """The `(time, id)` a cursor carries; anything else (or a time without a zone, which would be
-    compared in whatever zone is active) is a `ValueError`."""
-    when, _, pk = raw.rpartition('_')
+    """The `(time, id)` a cursor carries; anything else (not base64url, the old `time_id` text, or a
+    time without a zone, which would be compared in whatever zone is active) is a `ValueError`."""
+    try:
+        text = base64.b64decode(raw + '=' * (-len(raw) % 4), altchars=b'-_', validate=True).decode()
+    except binascii.Error, UnicodeDecodeError:
+        raise ValueError('The cursor is not valid.') from None
+    when, _, pk = text.rpartition('_')
     moment = datetime.fromisoformat(when)
     parsed = UUID(pk)
     if moment.tzinfo is None:

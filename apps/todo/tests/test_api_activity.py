@@ -2,18 +2,25 @@
 shape, paging with a cursor, the public wording of every sentence whatever the account's date and
 time format, trashed and foreign tasks, and the channel the API's own changes are recorded under."""
 
+import base64
+import re
 from datetime import date, time
 
 import pytest
 
 from ..models import Task, TaskEvent
 from ..services import complete_task, create_task, trash_task, update_task
-from .api_support import auth, get, patch, post  # noqa: F401 -- `auth` is a fixture
+from .api_support import BASE, auth, get, patch, post  # noqa: F401 -- `auth` is a fixture
 from .factories import make_task
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
 PATH = '/tasks/{}/activity'
+
+
+def encoded(raw: str) -> str:
+    """A cursor payload as base64url without padding, the format the API issues."""
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip('=')
 
 
 def make(user, title='T', **fields) -> Task:
@@ -89,20 +96,50 @@ class TestPage:
         assert len(zero['results']) == 1  # at least one
         assert len(huge['results']) == 25 and huge['next'] is None
 
-    @pytest.mark.parametrize('cursor', ['junk', '2026-01-01T00:00:00_x', '2026-01-01T00:00:00_'])
+    @pytest.mark.parametrize(
+        'cursor',
+        [
+            'junk',
+            '!!!',
+            encoded('2026-01-01T00:00:00+00:00_x'),
+            encoded('2026-01-01T00:00:00+00:00_'),
+            encoded('not a time_00000000-0000-0000-0000-000000000000'),
+            # the format before the cursor was URL-safe, with its `+` read as a space
+            '2026-01-01T00:00:00 00:00_00000000-0000-0000-0000-000000000000',
+            '2026-01-01T00:00:00+00:00_00000000-0000-0000-0000-000000000000',
+        ],
+    )
     def test_a_malformed_cursor_is_a_400(self, client, auth, funded_user, cursor):
         task = make(funded_user)
 
         response = get(client, PATH.format(task.number), auth, before=cursor)
 
-        assert response.status_code == 400 and response.json()['detail'].startswith('before')
+        assert response.status_code == 400
+        assert response.json() == {'detail': 'before: Not a valid cursor.'}
+
+    def test_the_cursor_is_url_safe_and_works_unescaped_in_the_query_string(
+        self, client, auth, funded_user
+    ):
+        task = make(funded_user)
+        many_edits(task, 5)
+        path = PATH.format(task.number)
+        first = get(client, path, auth, limit=2).json()
+
+        assert re.fullmatch(r'[A-Za-z0-9_-]+', first['next'])  # no `+`, `:`, `=` or `/`
+        # put into the URL exactly as received, without percent-encoding
+        second = client.get(f'{BASE}{path}?limit=2&before={first["next"]}', **auth)
+        assert second.status_code == 200
+        assert second.json()['results'][0]['id'] != first['results'][0]['id']
 
     def test_a_cursor_without_a_time_zone_is_a_400(self, client, auth, funded_user):
         task = make(funded_user)
         event = TaskEvent.objects.get(task=task)
 
         response = get(
-            client, PATH.format(task.number), auth, before=f'2026-01-01T00:00:00_{event.pk}'
+            client,
+            PATH.format(task.number),
+            auth,
+            before=encoded(f'2026-01-01T00:00:00_{event.pk}'),
         )
 
         assert response.status_code == 400

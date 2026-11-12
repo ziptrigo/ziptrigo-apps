@@ -59,6 +59,9 @@ from ..services import (
     with_subtask_counts,
 )
 
+#: The columns of a linked task that `task_ref` reads.
+LINK_FIELDS = ('number', 'title', 'completed_at', 'deleted_at')
+
 #: Page size bounds of the list endpoints (clamped, not rejected).
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
@@ -166,13 +169,22 @@ def context_for(request) -> TaskContext:
     return context
 
 
+def linked_tasks(side: str) -> QuerySet:
+    """The `TaskBlocker` rows with the task on `side` (`blocker` or `blocked`) loaded for `task_ref`
+    only (number, title, closed, trashed): not the description, a page of 100 tasks with 20 links
+    each would load 2,000 of them whole."""
+    return TaskBlocker.objects.select_related(side).only(
+        'id', 'blocker', 'blocked', *(f'{side}__{name}' for name in LINK_FIELDS)
+    )
+
+
 def decorated(queryset: QuerySet) -> QuerySet:
     """What a task's JSON needs, loaded without a query per task: the subtask, comment and
     attachment counts, the parent, the repeat rule, the labels, the reminders and the tasks it is
     linked to (`blocked_by` and `blocks`: one query each for the whole page)."""
     reminders = Reminder.objects.order_by('-minutes_before', 'created_at')
-    blocked_by = TaskBlocker.objects.select_related('blocker').order_by('blocker__number')
-    blocks = TaskBlocker.objects.select_related('blocked').order_by('blocked__number')
+    blocked_by = linked_tasks('blocker').order_by('blocker__number')
+    blocks = linked_tasks('blocked').order_by('blocked__number')
     return (
         with_attachment_counts(with_comment_counts(with_subtask_counts(queryset)))
         .select_related('parent', 'recurrence')
@@ -227,18 +239,11 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
         reminders = list(task.reminders.order_by('-minutes_before', 'created_at'))
     blocked_by = getattr(task, 'api_blocked_by', None)
     if blocked_by is None:
-        blocked_by = list(
-            TaskBlocker.objects.filter(blocked=task)
-            .select_related('blocker')
-            .order_by('blocker__number')
-        )
+        blocked_by = list(linked_tasks('blocker').filter(blocked=task).order_by('blocker__number'))
     blocks = getattr(task, 'api_blocks', None)
     if blocks is None:
-        blocks = list(
-            TaskBlocker.objects.filter(blocker=task)
-            .select_related('blocked')
-            .order_by('blocked__number')
-        )
+        blocks = list(linked_tasks('blocked').filter(blocker=task).order_by('blocked__number'))
+    blocked_by_refs = [task_ref(link.blocker) for link in blocked_by]
     return {
         'id': task.pk,
         'number': task.number,
@@ -252,7 +257,7 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
         'due_time': task.due_time,
         'due_at': dates.due_at(task, context.account),
         'closed_at': task.completed_at,
-        'state': task.state,
+        'state': task.state if task.completed_at is None else None,
         'resolution': resolution_of(task),
         'deleted_at': task.deleted_at,
         'position': task.position,
@@ -272,7 +277,8 @@ def task_data(task: Task, context: TaskContext) -> dict[str, Any]:
             'ended_at': active.ended_at,
         },
         'reminders': [reminder_data(reminder) for reminder in reminders],
-        'blocked_by': [task_ref(link.blocker) for link in blocked_by],
+        'blocked_by': blocked_by_refs,
+        'has_open_blocker': any(ref['open'] for ref in blocked_by_refs),
         'blocks': [task_ref(link.blocked) for link in blocks],
         'subtask_count': task.subtask_total,
         'open_subtask_count': task.subtask_open,

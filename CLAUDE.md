@@ -1824,8 +1824,8 @@ schemas in `apps/todo/schemas/`) and calls the exact same `apps.todo.services` t
 adding no rule of its own. A task is addressed by its **number** (`/tasks/{number}`), everything
 else by its UUID. **Version 2 of the API (issue #275, `docs/openapi.yml` 2.0.0) is a breaking
 change** of this router: `completed_at` is `closed_at`, `view=completed` is `view=closed`,
-`include_completed` is `include_closed`, and `complete` / `uncomplete` are gone for `close` /
-`reopen` (see "To-do" > "API and CLI"). Endpoints, relative to the mount: `GET /tasks` (`view`, `q`,
+`include_completed` is `include_closed` (the old name is a 400), and `complete` / `uncomplete` are gone
+for `close` / `reopen` (the two old routes stay only to answer **410**; see "To-do" > "API and CLI"). Endpoints, relative to the mount: `GET /tasks` (`view`, `q`,
 `mode`, `include_closed`, `resolution`, `state`, `priority`, `label`, `date_range`/`date_from`/
 `date_to`, `sort`, `parent`, `limit` 1-100 default 50, `offset`; `{count, limit, offset, results}`),
 `POST /tasks` (201),
@@ -4465,8 +4465,9 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
   checklist, blockers, subtask add, comment add/edit, the attachments list refresh) send `HX-Trigger:
   taskChanged` on a successful htmx answer, which `activity.js` listens for (no list of swap targets). The first page is
   the latest `PAGE_SIZE` (20) entries newest first (sentence, an "Automatic" pill, the time as
-  `{% local_time %}`); "Show more" is a keyset cursor `?before=<time>_<id>` (so entries written meanwhile
-  never repeat or skip one; a malformed cursor, or one without a time zone, is a 404) that appends rows to `#task-activity-list` and
+  `{% local_time %}`); "Show more" is a keyset cursor `?before=<cursor>` (the time and id of the last entry as
+  base64url without padding, URL-safe as it is; so entries written meanwhile
+  never repeat or skip one; a malformed cursor, the earlier `time_id` text or one without a time zone is a 404) that appends rows to `#task-activity-list` and
   replaces `#task-activity-more` out of band, and focus moves to the first new row
   (`data-activity-new`). It only reads, so a task in the Trash works too; another user's task is a 404;
   `@login_required`. **No rate-limit rule**, like the notification endpoints: session-bound and one
@@ -5391,7 +5392,8 @@ budgets are listed under "API" above; this is how they are built and what the CL
   comment and attachment counts (`services.with_attachment_counts`, new, a subquery like
   `with_comment_counts`), the parent, the repeat rule, the labels, the reminders and the tasks it is
   linked to (`blocked_by` and `blocks`: two more queries for the whole page, `TaskBlocker` rows with the
-  other task `select_related`); a test pins the number of queries of a 100-task page with blockers. Routes that are not a task number (`/tasks/reorder`,
+  other task `select_related` and loaded with `.only(number, title, completed_at, deleted_at)` -- not
+  its description -- by `common.linked_tasks`, the per-task fallback too); a test pins the number of queries of a 100-task page with blockers. Routes that are not a task number (`/tasks/reorder`,
   `/labels/reorder`, ...) are registered before the `{number}` / `{id}` ones: a router tries paths
   in the order they were added.
 - **`GET /tasks`** is the Today / Upcoming / All / Closed (both resolutions) / Trash pages and the search page in
@@ -5409,11 +5411,13 @@ budgets are listed under "API" above; this is how they are built and what the CL
   `view=closed` with a `resolution`.
 - **States, resolutions and the list filters** (#275). A task has `closed_at` (was `completed_at`: when it was
   closed, either resolution; `null` while open), `state` (`todo`, `in_progress`, `on_hold`, `blocked`;
-  what an *open* task is doing; a closed task reads `todo`, since closing resets it, so a client reads it
-  only while `closed_at` is null) and `resolution` (`done` / `wont_do` for a closed task, `done` also for
+  what an *open* task is doing; **`null` while the task is closed**) and `has_open_blocker` (any
+  `blocked_by` entry has `open: true`, computed from the prefetch; true also for an open task the owner
+  moved to `in_progress` while a blocker is open) and `resolution` (`done` / `wont_do` for a closed task, `done` also for
   one with none recorded; `null` while open: `api/common.resolution_of`). The query parameters:
   `view` is `today|upcoming|all|closed|trash` (**`completed` is a 400**, like any unknown view),
-  `include_closed` (was `include_completed`; with `view=all`), `resolution` (`done|wont_do`; a 400 unless
+  `include_closed` (was `include_completed`, which is now a 400 `include_completed: Use include_closed.`,
+  read from `request.GET` so it is not in the spec; with `view=all`), `resolution` (`done|wont_do`; a 400 unless
   `view=closed` or `include_closed` with `view=all`; the Closed view narrows through `closed_set`, the
   other through `FilterParams.resolution`, which is why the endpoint applies the condition whenever a
   resolution is given: `has_criteria` does not count it) and `state` (comma list of the four states, a
@@ -5434,39 +5438,55 @@ budgets are listed under "API" above; this is how they are built and what the CL
   `wont_do`** (a 400 `note: A note can only be added when closing as Won't do.`), and spends
   `TODO_COMMENT_USER` as well as `TODO_EDIT_USER`: both are peeked first (`ratelimit.peek_value`), so a
   refusal spends neither, then both are charged. Everything is checked before any budget is spent (the
-  resolution, the subtask choice, the note's length, the Trash). Closing an already closed task changes
-  nothing (`resolution` is **not** applied: that is `/resolution`) except that a note is still added as a
-  comment (`close_task`'s `already_closed` flag is not exposed); the answer is the task. `POST
-  /tasks/{n}/reopen` (`uncomplete_task`: Blocked while a blocker is open, else To do; idempotent on an
-  open task; the Trash is a 400 checked before the budget), `POST /tasks/{n}/resolution`
+  resolution, the subtask choice, the note's length, the Trash). Closing a task that is **already
+  closed is a 409** `{"detail": "This task is already closed as Done."}` (`... as Won't do.`), checked
+  after the 400s and before any budget: nothing is written, no note is added, nothing is spent
+  (`resolution` is never applied to a closed task: that is `/resolution`). The web's behaviour is
+  unchanged (the note is kept when the close loses a real race). `POST
+  /tasks/{n}/reopen` (`uncomplete_task`: Blocked while a blocker is open, else To do; on an
+  open task it answers the task and **spends nothing**; the Trash is a 400 checked before the budget), `POST /tasks/{n}/resolution`
   (`{resolution}`, `set_resolution`: 400 for an open task, `Only a closed task has a resolution to
-  change.`) and `POST /tasks/{n}/state` (`{state: todo|in_progress|on_hold}`, `set_state`: 400 for
-  `blocked`, for a closed task `Reopen the task before changing its state.` and the Trash). All spend
-  `TODO_EDIT_USER`, after the checks. **`complete` and `uncomplete` no longer exist** (404/405).
+  change.`; the resolution it already has is answered and spends nothing) and `POST /tasks/{n}/state` (`{state:
+  todo|in_progress|on_hold}`, `set_state`: 400 for `blocked`, for a closed task `Reopen the task before
+  changing its state.` and the Trash; the state it already has is answered and spends nothing). The others spend
+  `TODO_EDIT_USER`, after the checks, and each looks the task up once (`_run`). **`complete` and
+  `uncomplete` are removed** but stay as `deprecated` routes answering **410** `{"detail": "This app is
+  out of date. Update it to keep using To-do."}` (the router's JWT only, no budget, so an installed
+  version 1 app says so instead of failing with a 404); `GET /tasks?view=completed` stays a 400.
 - **State and blockers on create and `PATCH`.** `POST /tasks` takes `state` (default `todo`) and
   `blocked_by` (task numbers, at most 20 in the schema, a 422 over it) through `check_new_task` and
   `create_task`; an open blocker makes the task Blocked over the state asked for; a number that isn't the
   caller's or doesn't exist is `blocked_by: There is no task #N.`. `PATCH` takes `state` (never `null`: a
   400; refused for a closed task) and `blocked_by`, which **replaces** the set (`null` and `[]` both
   remove every blocker): `_plan_blockers` computes the difference and does every check that needs no
-  write (`tasks_by_numbers`, the cap, `blockers.check_add` for each addition, a Trash task) before
-  `TODO_EDIT_USER` is spent; then **one `transaction.atomic()`** runs `update_task`, `set_state`, the
-  removals and the additions (in that order: removals before additions so the cap holds, and the blockers
-  after the state so an open blocker wins, as on create), so a late refusal rolls the whole `PATCH` back.
+  write (`tasks_by_numbers`, the cap judged on the **final set** -- `len(numbers)`, and
+  `check_add(..., count_links=False)` -- so swapping one of 20 blockers works since the removals run
+  first, a Trash task) before
+  `TODO_EDIT_USER` is spent; then **one `transaction.atomic()`** runs `update_task`, the
+  removals, the additions and last the state, so a late refusal rolls the whole `PATCH` back. **The rule
+  for `state` with `blocked_by`** (same words in the endpoint docstring and `TaskUpdateSchema`): when both
+  are sent, after the links are written the task is `blocked` if any of its blockers is open (whatever
+  `state` says), else it has the requested state (`tasks.settle_state`); `state` alone keeps the links
+  (`set_state`). A `state` equal to the task's current one is a no-op, so `state: "blocked"` echoed
+  back is accepted when the task is blocked (as a change it is the 400). **A no-op spends nothing**: the
+  same `blocked_by`, the same `state` and no other key is answered without `TODO_EDIT_USER`.
 - **Blockers** (`api/blockers.py`). `POST /tasks/{n}/blockers` `{number}` makes that task block this one
   and answers this task (200; an existing link is a 200 that spends nothing); `DELETE
   /tasks/{n}/blockers/{blocker_number}` is a 204, idempotent, also for a number that doesn't exist or
   isn't the caller's (so it can't be probed) and spending nothing when there is no link. The refusals are
   `services.blockers`' messages as 400s (`number: There is no task #N.` for an unknown or foreign number,
-  never a 404, `blocker: A task cannot block itself.`, the cycle, the cap of 20, a task in the Trash
-  either side); the task in the path that isn't the caller's is the usual 404. `TODO_EDIT_USER` after
+  never a 404, `number: A task cannot block itself.`, the cycle, the cap of 20, a task in the Trash
+  either side: **every refusal is keyed by the input the caller used** -- `number` here, `blocked_by`
+  on `POST /tasks` and `PATCH` -- through the `field` argument of `check_add` / `add_blocker`, which
+  defaults to the task page's `blocker`); the task in the path that isn't the caller's is the usual 404. `TODO_EDIT_USER` after
   the checks. `TaskRefSchema` (`{number, title, open, trashed}`; `open` is not closed and not trashed)
   lists `blocked_by` (every blocker, closed and trashed ones too) and `blocks` on every task.
 - **Activity log** (`api/activity.py`). `GET /tasks/{number}/activity?limit=20&before=<cursor>` answers
   `{results: [{id, kind, text, data, automatic, channel, created_at}], next}` newest first: `limit` is
   clamped to 1-100, `next` is the cursor of the following page (`events.cursor_of`, the time and id of the
-  last entry; `null` on the last page) to send as `before`, a malformed one is a 400 `before: Not a valid
-  cursor.`. `text` is `event_text.describe` under `override(PUBLIC)`, so it is the public wording whatever
+  last entry as **base64url without padding**, only `A-Z a-z 0-9 - _`, so it needs no percent-encoding;
+  `null` on the last page) to send as `before`, a malformed one (the earlier `time_id` text included) is a
+  400 `before: Not a valid cursor.`. `text` is `event_text.describe` under `override(PUBLIC)`, so it is the public wording whatever
   the account's formats (and English); `kind` / `channel` are enums in the spec, `data` the raw snapshot.
   A task in the Trash works, another user's is a 404. **No rate-limit rule** (documented in the
   endpoint), like the web page.

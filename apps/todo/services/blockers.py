@@ -309,54 +309,65 @@ def _would_cycle(task_id: UUID, blocker_id: UUID) -> bool:
     return False
 
 
-def _check_add(current: Task, other: Task) -> bool:
+def _check_add(
+    current: Task, other: Task, field: str = 'blocker', *, count_links: bool = True
+) -> bool:
     """What adding "`other` blocks `current`" would refuse, on the rows as given: a task of another
     user, itself, a task in the Trash (either), too many blockers, a cycle. Returns False when the
-    link already exists (nothing to do), else True. No writes."""
+    link already exists (nothing to do), else True. No writes.
+
+    Every refusal that belongs to the blocker is keyed by `field`, the name of the input the caller
+    used (`blocker` on the task page; `number` for `POST /blockers`, `blocked_by` for `PATCH`).
+    `count_links=False` skips the cap on links (a caller that replaces the whole set, and so checked
+    the size of the final set itself, as `PATCH` does)."""
     if other.user_id != current.user_id:
-        raise _error('blocker', 'Unknown task.')
+        raise _error(field, 'Unknown task.')
     if other.pk == current.pk:
-        raise _error('blocker', SELF_MESSAGE)
+        raise _error(field, SELF_MESSAGE)
     if current.is_trashed:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     if other.is_trashed:
-        raise _error('blocker', f'#{other.number} is in the trash. Restore it first.')
+        raise _error(field, f'#{other.number} is in the trash. Restore it first.')
     if TaskBlocker.objects.filter(blocked=current, blocker=other).exists():
         return False
-    if TaskBlocker.objects.filter(blocked=current).count() >= MAX_BLOCKERS_PER_TASK:
-        raise _error('blocker', TOO_MANY_MESSAGE)
+    if count_links and TaskBlocker.objects.filter(blocked=current).count() >= MAX_BLOCKERS_PER_TASK:
+        raise _error(field, TOO_MANY_MESSAGE)
     if _would_cycle(current.pk, other.pk):
         raise _error(
-            'blocker',
+            field,
             f'#{other.number} is already blocked by #{current.number}, '
             'directly or through other tasks.',
         )
     return True
 
 
-def check_add(task: Task, blocker: Task) -> bool:
+def check_add(
+    task: Task, blocker: Task, field: str = 'blocker', *, count_links: bool = True
+) -> bool:
     """What `add_blocker` would refuse that can be told without writing anything (see
-    `_check_add`), for a caller that wants to refuse before spending a rate-limit budget. It reads
-    the rows as the caller loaded them and takes no lock: `add_blocker` still decides for good.
-    Returns whether a link would be made (False: it already exists, nothing to do)."""
-    return _check_add(task, blocker)
+    `_check_add`, which also says what `field` and `count_links` are), for a caller that wants to
+    refuse before spending a rate-limit budget. It reads the rows as the caller loaded them and
+    takes no lock: `add_blocker` still decides for good. Returns whether a link would be made
+    (False: it already exists, nothing to do)."""
+    return _check_add(task, blocker, field, count_links=count_links)
 
 
-def add_blocker(task: Task, blocker: Task) -> bool:
+def add_blocker(task: Task, blocker: Task, field: str = 'blocker') -> bool:
     """Make `blocker` block `task`. Returns whether a link was made (False: it already was).
 
     Both are the same user's and out of the Trash, `blocker` is another task and no cycle comes of
     it (`'#1200 is already blocked by #1234, directly or through other tasks.'`); a task has at
-    most `MAX_BLOCKERS_PER_TASK`. An open blocker sets an open `task` to Blocked, from any open
+    most `MAX_BLOCKERS_PER_TASK`. A refusal about the blocker is keyed by `field`, the input the
+    caller used (`blocker` by default; the API passes `number` or `blocked_by`). An open blocker sets an open `task` to Blocked, from any open
     state; a closed blocker only links, and so does a closed `task`. The user's account row is
     locked first and both tasks after it (`lock_account`, see the module docstring), so links added
     at once -- between the same two tasks or any others, three in a ring included -- take turns,
     each seeing the others' committed links: no cycle of any length can be committed.
     """
     if blocker.user_id != task.user_id:
-        raise _error('blocker', 'Unknown task.')
+        raise _error(field, 'Unknown task.')
     if blocker.pk == task.pk:
-        raise _error('blocker', SELF_MESSAGE)
+        raise _error(field, SELF_MESSAGE)
     now = timezone.now()
     with transaction.atomic():
         lock_account(task.user_id)
@@ -365,8 +376,8 @@ def add_blocker(task: Task, blocker: Task) -> bool:
         if current is None:
             raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
         if other is None:
-            raise _error('blocker', 'Unknown task.')
-        if not _check_add(current, other):
+            raise _error(field, 'Unknown task.')
+        if not _check_add(current, other, field):
             return False
         try:
             with transaction.atomic():
@@ -377,7 +388,7 @@ def add_blocker(task: Task, blocker: Task) -> bool:
         if current.completed_at is None and other.completed_at is None:
             previous = current.state
             if write_state(current, TaskState.BLOCKED, now):
-                entries.append(_blocked_entry(current, previous, [other]))
+                entries.append(blocked_entry(current, previous, [other]))
         events.record_many(entries)
     task.state = current.state
     task.today_position = current.today_position
@@ -385,7 +396,7 @@ def add_blocker(task: Task, blocker: Task) -> bool:
     return True
 
 
-def _blocked_entry(task: Task, previous: str, blockers: Sequence[Task]) -> events.Entry:
+def blocked_entry(task: Task, previous: str, blockers: Sequence[Task]) -> events.Entry:
     """The automatic entry of a task that became Blocked."""
     return events.entry(
         task,
@@ -418,7 +429,7 @@ def link_new_task(task: Task, blockers: Sequence[Task]) -> None:
         task.state = TaskState.BLOCKED
         Task.objects.filter(pk=task.pk).update(state=TaskState.BLOCKED)
         open_ones = [other for other in blockers if other.pk in open_ids]
-        entries.append(_blocked_entry(task, previous, open_ones))
+        entries.append(blocked_entry(task, previous, open_ones))
     events.record_many(entries)
 
 

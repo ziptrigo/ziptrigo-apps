@@ -53,6 +53,7 @@ TASK_KEYS = {
     'recurrence',
     'reminders',
     'blocked_by',
+    'has_open_blocker',
     'blocks',
     'subtask_count',
     'open_subtask_count',
@@ -822,7 +823,8 @@ class TestStateChanges:
         again = post(client, f'/tasks/{task.number}/close', auth, {})
         reopened = post(client, f'/tasks/{task.number}/reopen', auth).json()
 
-        assert done['closed_at'] is not None and again.status_code == 200
+        assert done['closed_at'] is not None and again.status_code == 409
+        assert again.json() == {'detail': 'This task is already closed as Done.'}
         assert done['resolution'] == 'done'
         child.refresh_from_db()
         assert child.completed_at is not None  # its open subtasks went with it

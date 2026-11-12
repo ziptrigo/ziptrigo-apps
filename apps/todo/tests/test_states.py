@@ -1477,8 +1477,12 @@ class TestTheApi:
         task = create_task(funded_user, title='T')
 
         assert get(client, '/tasks', auth, view='completed').status_code == 400
-        assert post(client, f'/tasks/{task.number}/complete', auth).status_code in (404, 405)
-        assert post(client, f'/tasks/{task.number}/uncomplete', auth).status_code in (404, 405)
+        for name in ('complete', 'uncomplete'):  # a clear 410, not a 404
+            response = post(client, f'/tasks/{task.number}/{name}', auth)
+            assert response.status_code == 410
+            assert response.json() == {
+                'detail': 'This app is out of date. Update it to keep using To-do.'
+            }
 
     def test_close_means_done_and_closes_the_open_subtasks_as_done(self, client, auth, funded_user):
         parent = create_task(funded_user, title='P')

@@ -24,18 +24,20 @@ def add_blocker(request, number: int, payload: BlockerSchema):
 
     Both tasks are the caller's own and out of the Trash (a 400 `number: There is no task #N.` for
     a number that doesn't exist **or isn't the caller's**; `number: #N is in the trash. Restore it
-    first.`). A 400 too when a task is its own blocker, when the link would close a cycle (`#1200
-    is already blocked by #1234, directly or through other tasks.`) and when this task already has
-    20 blockers. Adding a link that already exists changes nothing. An open task given an open
+    first.`). A 400 too, keyed `number` as well, when a task is its own blocker, when the link
+    would close a cycle (`number: #1200 is already blocked by #1234, directly or through other
+    tasks.`) and when this task already has 20 blockers. Adding a link that already exists changes nothing. An open task given an open
     blocker becomes `blocked`, from any open state; a closed blocker, or a closed task, only links.
     """
     task = owned_task(request, number)
     with mapped_errors():
         (other,) = blockers.tasks_by_numbers(request.auth, [payload.number], 'number')
-        if not blockers.check_add(task, other):  # already linked: nothing to do, nothing to spend
+        if not blockers.check_add(
+            task, other, 'number'
+        ):  # already linked: nothing to do, nothing to spend
             return task_response(request, task)
         charge(request, 'TODO_EDIT_USER')
-        blockers.add_blocker(task, other)
+        blockers.add_blocker(task, other, 'number')
     return task_response(request, task)
 
 

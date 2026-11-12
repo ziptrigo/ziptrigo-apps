@@ -26,8 +26,9 @@ def task_activity(request, number: int, limit: int = DEFAULT_PAGE, before: str |
 
     `limit` (1-100, default 20) is the page size. `next` in the answer is the cursor of the next,
     older page: send it as `before` to continue (`null` on the last page); the cursor is the time
-    and id of the last entry, so entries written while paging never repeat or skip one. A malformed
-    `before` is a 400. Each entry's `text` is a sentence in the public wording (English, dates like
+    and id of the last entry, so entries written while paging never repeat or skip one. It is
+    URL-safe (base64url, `A-Z a-z 0-9 - _` only): put it in the query string as it is. A malformed
+    `before` is a 400 `before: Not a valid cursor.`. Each entry's `text` is a sentence in the public wording (English, dates like
     `Nov 5, 2026, 3:00 PM`, whatever the account's date and time format); see `ActivityEventSchema`
     for `kind` and `data`.
     """

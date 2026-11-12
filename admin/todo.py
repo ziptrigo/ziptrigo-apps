@@ -17,6 +17,7 @@ then each costs credits; commands that create tasks say what they charged.
 import base64
 import hashlib
 import mimetypes
+import re
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -787,6 +788,23 @@ def todo_edit(
     _say(f'Updated {_task_line(task)}')
 
 
+def _close_failure(number: int, response) -> str:
+    """Why closing `number` failed. A 409 is the API saying it was already closed (nothing was
+    changed, no note added): say how, and where to change it."""
+    if response.status_code == 409:
+        try:
+            detail = str(response.json().get('detail', ''))
+        except ValueError, AttributeError:
+            detail = ''
+        match = re.search(r'already closed as (.+?)\.?$', detail)
+        if match:
+            return (
+                f'#{number} was already closed as {match.group(1)}; '
+                'use `inv todo resolution` to change it'
+            )
+    return f'#{number}: {_error_message(response)}'
+
+
 def _close_each(numbers: list[int], payload: dict, verb: str) -> None:
     """Close each task with `payload`, carrying on past a failure (exit 1 if any failed)."""
     failed = 0
@@ -794,7 +812,7 @@ def _close_each(numbers: list[int], payload: dict, verb: str) -> None:
         response = _request('post', f'/tasks/{number}/close', json=payload)
         if not response.ok:
             failed += 1
-            logger.error(escape(f'#{number}: {_error_message(response)}'))
+            logger.error(escape(_close_failure(number, response)))
             continue
         _say(f'{verb} #{number} "{response.json()["title"]}"')
     if failed:

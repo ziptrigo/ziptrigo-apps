@@ -2134,9 +2134,11 @@ paths:
 
         older page: send it as `before` to continue (`null` on the last page); the cursor is the time
 
-        and id of the last entry, so entries written while paging never repeat or skip one. A malformed
+        and id of the last entry, so entries written while paging never repeat or skip one. It is
 
-        `before` is a 400. Each entry''s `text` is a sentence in the public wording (English, dates like
+        URL-safe (base64url, `A-Z a-z 0-9 - _` only): put it in the query string as it is. A malformed
+
+        `before` is a 400 `before: Not a valid cursor.`. Each entry''s `text` is a sentence in the public wording (English, dates like
 
         `Nov 5, 2026, 3:00 PM`, whatever the account''s date and time format); see `ActivityEventSchema`
 
@@ -2326,11 +2328,11 @@ paths:
 
         a number that doesn''t exist **or isn''t the caller''s**; `number: #N is in the trash. Restore it
 
-        first.`). A 400 too when a task is its own blocker, when the link would close a cycle (`#1200
+        first.`). A 400 too, keyed `number` as well, when a task is its own blocker, when the link
 
-        is already blocked by #1234, directly or through other tasks.`) and when this task already has
+        would close a cycle (`number: #1200 is already blocked by #1234, directly or through other
 
-        20 blockers. Adding a link that already exists changes nothing. An open task given an open
+        tasks.`) and when this task already has 20 blockers. Adding a link that already exists changes nothing. An open task given an open
 
         blocker becomes `blocked`, from any open state; a closed blocker, or a closed task, only links.'
       tags:
@@ -2668,9 +2670,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilterSchema'
-      description: 'Rename a filter and/or replace its search (`params`, as a whole: criteria left out take their defaults, as on the website). Both are saved, or
+      description: 'Rename a filter and/or replace its search (`params`, as a whole: criteria left out take
 
-        neither. Neither can be cleared: an explicit `null` is a 400 (to search for everything, send
+        their defaults, as on the website). Both are saved, or neither. Neither can be cleared: an explicit `null` is a 400 (to search for everything, send
 
         the default `params`). A body with nothing in it changes nothing and spends no budget; a value
 
@@ -3237,7 +3239,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskListSchema'
-      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`."
+      description: "List the caller's tasks, subtasks included.\n\n- `view`: `today` (open, due today or earlier: the overdue ones, and the On hold and Blocked\n  ones due today or earlier too, which are listed but never *overdue*), `upcoming` (open, due in\n  the next 14 days), `all` (open; the default), `closed` (closed as Done or as Won't do, latest\n  first) or `trash`. (`completed`, this parameter's value before version 2 of the API, is a 400.)\n- `parent`: a task number; lists its subtasks (closed ones too). With a `view`, only those of\n  the subtasks that are in the view.\n- `q`: search the titles, descriptions and comments, ignoring case, accents and punctuation:\n  `*` and `?` are wildcards (`mode=glob`, the default) or a regular expression\n  (`mode=regex`, or `/.../`). 200 characters at most; a 400 for an empty, invalid or too slow\n  pattern. Deleted comments and edit history are not searched.\n- `include_closed`: with `view=all`, closed tasks too (after the open ones).\n  (`include_completed`, this parameter's name before version 2, is a 400.)\n- `resolution`: `done` or `wont_do`: only the closed tasks closed that way. Allowed with\n  `view=closed`, or with `include_closed` (and `view=all`); a 400 otherwise.\n- `state`: comma-separated states, any of `todo`, `in_progress`, `blocked`, `on_hold`; an open\n  task in any of them. Closed tasks are not narrowed by it.\n- `priority`: comma-separated priorities, 0 (none) to 3; any of them.\n- `label`: comma-separated label ids, and `none` for tasks without a label; any of them.\n- `date_range`: `any`, `overdue` (open and due before today, **not** On hold or Blocked tasks:\n  a muted task is never overdue), `today`, `next_7_days`, `next_30_days`, `no_date` or\n  `custom` with `date_from` / `date_to` (`YYYY-MM-DD`, inclusive, either may be left out;\n  dates alone mean `custom`). Relative ranges are the caller's own today.\n- `sort`: `date` (the default), `priority`, `created` or `title`.\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `state`, `priority`, `label` and `date_range`, spends `TODO_SEARCH_USER`."
       tags:
       - To-do
       security:
@@ -3395,11 +3397,17 @@ paths:
 
         `state` sets an open task''s state (`todo`, `in_progress` or `on_hold`) and `blocked_by`
 
-        replaces the set of tasks that block it (see `TaskUpdateSchema`); the blockers decide the
+        replaces the set of tasks that block it (see `TaskUpdateSchema`). **Sent together**, the links
 
-        `blocked` state, so a task with an open blocker is `blocked` after the call and one left with
+        are written first and then the task is `blocked` if any of its blockers is open (whatever
 
-        none goes back to `todo`.
+        `state` says), else it gets `state`. Sent alone, `state` keeps the links. A `state` equal to the
+
+        task''s current one is a no-op (so a client may send back the state it read, `blocked`
+
+        included; `blocked` as a change is a 400), and a request that changes nothing -- the same
+
+        `blocked_by`, the same `state`, no other field -- spends no budget.
 
 
         The fields are checked before `TODO_EDIT_USER` is spent, so a bad value costs nothing. What
@@ -3457,6 +3465,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TaskSchema'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSchema'
       description: 'Close a task as Done (the default) or as Won''t do (`resolution`), and deal with its open
 
         subtasks (`subtasks`: closed as Done by default, closed as Won''t do, or left open). Every field is
@@ -3479,11 +3493,13 @@ paths:
 
         The API closes without asking about open blockers or subtasks that have some: the links are
 
-        kept. Closing a task that is already closed changes nothing (`resolution` is **not** applied:
+        kept. A task that is **already closed** is a **409** `{"detail": "This task is already closed
 
-        use `POST /tasks/{number}/resolution`) except that a `note` is still added as a comment; either
+        as Done."}` (or `... as Won''t do.`): nothing is written, no note is added and no budget is
 
-        way the answer is the task as it is. A task in the Trash is a 400.
+        spent; to change how it was closed use `POST /tasks/{number}/resolution`. A task in the Trash
+
+        is a 400.
 
 
         Everything is checked before the budgets are spent, so a refusal costs nothing.'
@@ -3521,7 +3537,9 @@ paths:
 
         repeating task, if one was created, stays; the open tasks it blocks are told it is back and
 
-        keep their state. Reopening an open task changes nothing. A task in the Trash is a 400.'
+        keep their state. Reopening an open task changes nothing and spends nothing (the answer is the
+
+        task). A task in the Trash is a 400.'
       tags:
       - To-do
       security:
@@ -3548,7 +3566,9 @@ paths:
 
         touches no subtasks and keeps the time the task was closed at. A 400 for an open task (it has
 
-        no resolution; close it instead) and for a task in the Trash.'
+        no resolution; close it instead) and for a task in the Trash. Setting the resolution the task
+
+        already has changes nothing and spends nothing (the answer is the task).'
       tags:
       - To-do
       requestBody:
@@ -3585,7 +3605,9 @@ paths:
 
         task (reopen it first) and for a task in the Trash. Leaving On hold or Blocked delivers one
 
-        reminder for what was missed while it was muted.'
+        reminder for what was missed while it was muted. Setting the state the task already has changes
+
+        nothing and spends nothing (the answer is the task).'
       tags:
       - To-do
       requestBody:
@@ -3729,6 +3751,58 @@ paths:
       description: 'Stop repeating: the rule ends and the task stays. Idempotent.'
       tags:
       - To-do
+      security:
+      - JWTAuth: []
+  /api/todo/tasks/{number}/complete:
+    post:
+      operationId: apps_todo_api_tasks_complete_removed
+      summary: Removed
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      responses:
+        '410':
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSchema'
+      description: '**Removed in version 2.0.0** of the API: always a 410. Use `POST /tasks/{number}/close`.
+
+        Spends nothing and does nothing.'
+      tags:
+      - To-do
+      deprecated: true
+      security:
+      - JWTAuth: []
+  /api/todo/tasks/{number}/uncomplete:
+    post:
+      operationId: apps_todo_api_tasks_uncomplete_removed
+      summary: Removed
+      parameters:
+      - in: path
+        name: number
+        schema:
+          title: Number
+          type: integer
+        required: true
+      responses:
+        '410':
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSchema'
+      description: '**Removed in version 2.0.0** of the API: always a 410. Use `POST /tasks/{number}/reopen`.
+
+        Spends nothing and does nothing.'
+      tags:
+      - To-do
+      deprecated: true
       security:
       - JWTAuth: []
 components:
@@ -6104,7 +6178,9 @@ components:
 
         page, to send as `before`, or `null` on the last page. A cursor is an opaque keyset position
 
-        (the time and id of the last entry), so entries written while paging never repeat or skip.'
+        (the time and id of the last entry), so entries written while paging never repeat or skip. It
+
+        is base64url text (`A-Z a-z 0-9 - _`, no padding), safe in a query string as it is.'
       properties:
         results:
           description: The entries, newest first.
@@ -6329,9 +6405,13 @@ components:
 
         by `POST /tasks/reschedule-overdue`, and its reminders wait until it leaves the state. A closed
 
-        task has no state to speak of: closing sets it back to `todo`, so read it only while the task is
+        task has no state: `state` is `null` while `closed_at` is set (reopening gives it `todo`, or
 
-        open.
+        `blocked` while a blocker is open). `has_open_blocker` is true when any task in `blocked_by` is
+
+        open (`open: true`), whatever `state` says: an open task the owner moved to `in_progress` while
+
+        a blocker was open still has one.
 
 
         `blocked_by` lists the tasks that block this one and `blocks` the tasks it blocks, by number
@@ -6383,14 +6463,16 @@ components:
           description: When the task was closed (as Done or as Won't do); `null` while it is open.
           title: Closed At
         state:
-          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers). A closed task reads `todo`: ignore it while `closed_at` is set.'
-          enum:
-          - todo
-          - in_progress
-          - blocked
-          - on_hold
+          anyOf:
+          - enum:
+            - todo
+            - in_progress
+            - blocked
+            - on_hold
+            type: string
+          - type: 'null'
+          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers); `null` while the task is closed (`closed_at` is set).'
           title: State
-          type: string
         resolution:
           anyOf:
           - enum:
@@ -6437,6 +6519,10 @@ components:
             $ref: '#/components/schemas/TaskRefSchema'
           title: Blocked By
           type: array
+        has_open_blocker:
+          description: 'Whether any task in `blocked_by` is open (`open: true`).'
+          title: Has Open Blocker
+          type: boolean
         blocks:
           description: The tasks this one blocks, by number (closed and trashed ones too).
           items:
@@ -6490,6 +6576,7 @@ components:
       - recurrence
       - reminders
       - blocked_by
+      - has_open_blocker
       - blocks
       - subtask_count
       - open_subtask_count
@@ -7270,14 +7357,16 @@ components:
           description: When the task was closed (as Done or as Won't do); `null` while it is open.
           title: Closed At
         state:
-          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers). A closed task reads `todo`: ignore it while `closed_at` is set.'
-          enum:
-          - todo
-          - in_progress
-          - blocked
-          - on_hold
+          anyOf:
+          - enum:
+            - todo
+            - in_progress
+            - blocked
+            - on_hold
+            type: string
+          - type: 'null'
+          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers); `null` while the task is closed (`closed_at` is set).'
           title: State
-          type: string
         resolution:
           anyOf:
           - enum:
@@ -7324,6 +7413,10 @@ components:
             $ref: '#/components/schemas/TaskRefSchema'
           title: Blocked By
           type: array
+        has_open_blocker:
+          description: 'Whether any task in `blocked_by` is open (`open: true`).'
+          title: Has Open Blocker
+          type: boolean
         blocks:
           description: The tasks this one blocks, by number (closed and trashed ones too).
           items:
@@ -7381,6 +7474,7 @@ components:
       - recurrence
       - reminders
       - blocked_by
+      - has_open_blocker
       - blocks
       - subtask_count
       - open_subtask_count
@@ -7629,14 +7723,16 @@ components:
           description: When the task was closed (as Done or as Won't do); `null` while it is open.
           title: Closed At
         state:
-          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers). A closed task reads `todo`: ignore it while `closed_at` is set.'
-          enum:
-          - todo
-          - in_progress
-          - blocked
-          - on_hold
+          anyOf:
+          - enum:
+            - todo
+            - in_progress
+            - blocked
+            - on_hold
+            type: string
+          - type: 'null'
+          description: 'What an open task is doing: `todo`, `in_progress`, `on_hold` or `blocked` (set only by blockers); `null` while the task is closed (`closed_at` is set).'
           title: State
-          type: string
         resolution:
           anyOf:
           - enum:
@@ -7683,6 +7779,10 @@ components:
             $ref: '#/components/schemas/TaskRefSchema'
           title: Blocked By
           type: array
+        has_open_blocker:
+          description: 'Whether any task in `blocked_by` is open (`open: true`).'
+          title: Has Open Blocker
+          type: boolean
         blocks:
           description: The tasks this one blocks, by number (closed and trashed ones too).
           items:
@@ -7746,6 +7846,7 @@ components:
       - recurrence
       - reminders
       - blocked_by
+      - has_open_blocker
       - blocks
       - subtask_count
       - open_subtask_count
@@ -7780,9 +7881,18 @@ components:
 
         `blocked`, and when none is left a `blocked` task goes back to `todo`. A closed task can be given
 
-        blockers too (the links only). Where `state` and `blocked_by` are both sent, `state` is applied
+        blockers too (the links only).
 
-        first and the blockers after it.
+
+        **`state` together with `blocked_by`:** the links are written first and then the task is
+
+        `blocked` if any of its blockers is open (whatever `state` says), else it gets `state`. A
+
+        `state` equal to the task''s current state is a no-op, so a client may send back the state it
+
+        read (`blocked` included); `blocked` as a change is a 400. A request that changes nothing (the
+
+        same `blocked_by`, the same `state`, no other field) spends no budget.
 
 
         Clearing `due_date` clears the time with it. A key that is not one of these (a typo, `status`,
@@ -7860,6 +7970,18 @@ components:
           description: Replaces the set of tasks that block this one (numbers, at most 20); `null` or `[]` removes them all.
           title: Blocked By
       title: TaskUpdateSchema
+      type: object
+    ErrorSchema:
+      description: 'An error answer that carries only a `detail` sentence (the 409 of `POST /close` on a task that
+
+        is already closed, the 410 of the removed endpoints).'
+      properties:
+        detail:
+          title: Detail
+          type: string
+      required:
+      - detail
+      title: ErrorSchema
       type: object
     CloseSchema:
       additionalProperties: false

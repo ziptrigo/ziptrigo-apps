@@ -95,8 +95,8 @@ def reorder_filters(request, payload: FilterOrderSchema):
 
 @router.patch('/filters/{filter_id}', response=FilterSchema)
 def update_filter(request, filter_id: UUID, payload: FilterUpdateSchema):
-    """Rename a filter and/or replace its search (`params`, as a whole: criteria left out take their defaults, as on the website). Both are saved, or
-    neither. Neither can be cleared: an explicit `null` is a 400 (to search for everything, send
+    """Rename a filter and/or replace its search (`params`, as a whole: criteria left out take
+    their defaults, as on the website). Both are saved, or neither. Neither can be cleared: an explicit `null` is a 400 (to search for everything, send
     the default `params`). A body with nothing in it changes nothing and spends no budget; a value
     that can't be used is refused before the edit budget is spent."""
     saved = _owned(request, filter_id)
