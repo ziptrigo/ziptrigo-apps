@@ -45,13 +45,16 @@ def _owned(request, filter_id: UUID) -> SavedFilter:
 
 
 def _data(saved: SavedFilter, user, names: dict[str, str]) -> dict:
+    """A saved filter as `FilterSchema`. A filter saved on the website can carry criteria the API
+    has no field for (states, the resolution of closed tasks: issue #272); `params` leaves them out,
+    as the schema is closed to them, and the summary keeps the API's own wording."""
     params = stored_params(saved, user)
     return {
         'id': saved.pk,
         'name': saved.name,
         'position': saved.position,
-        'params': params.to_dict(),
-        'summary': services.describe_params(params, names, PUBLIC),
+        'params': params.to_legacy_dict(),
+        'summary': services.describe_params(params, names, PUBLIC, closed_wording=False),
         'created_at': saved.created_at,
     }
 

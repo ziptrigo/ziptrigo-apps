@@ -35,6 +35,14 @@ A completed or trashed task keeps its reminders, but the job skips them (leaving
 does it for an inactive user: restoring or uncompleting a task whose time is still ahead (or within
 the window) makes them live again; the sweep marks the older ones sent.
 
+**Held while muted** (issue #272). A task in a muted state (`MUTED_STATES`: On hold) is skipped by
+`deliver_due` and left alone by `sweep_stale`, so its reminders stay unsent however long it stays
+muted. When it leaves the state (`release_held`, called by `tasks.set_state`) **one** reminder is
+sent for the task, on the channels the held reminders used between them (each once: in-app, with
+its push, and/or email), the history recording that one delivery; every held reminder is marked sent
+and skipped. Held reminders of a task that is closed (closing resets the state) or trashed follow the
+ordinary rules above: the job skips them and the sweep ends the old ones.
+
 **Push.** An in-app reminder (channel `in_app` or `both`) is also pushed to the owner's devices
 that have push on (`apps.core.services.push`, queued on commit), with two buttons: **Complete**
 and **Snooze** (Chrome shows two at most; an iPhone shows none, and a tap on the notification
@@ -68,6 +76,7 @@ from apps.core.services.email import send_email
 
 from ..limits import MAX_REMINDER_MINUTES, MAX_REMINDERS_PER_TASK
 from ..models import (
+    MUTED_STATES,
     DeliveryChannel,
     Reminder,
     ReminderChannel,
@@ -633,11 +642,15 @@ def _queue_email(reminder: Reminder, fire_token: UUID, now: datetime) -> None:
     transaction.on_commit(_enqueue)
 
 
-def _deliver(reminder: Reminder, now: datetime, fire_token: UUID) -> None:
-    """Deliver one claimed reminder through its channel(s). In-app is written here, in the
-    caller's transaction; an email is queued on commit (`send_reminder_email` records it)."""
+def _deliver(
+    reminder: Reminder, now: datetime, fire_token: UUID, channel: str | None = None
+) -> None:
+    """Deliver one claimed reminder through its channel(s) (`channel` overrides the reminder's own:
+    the one reminder that stands for several held ones). In-app is written here, in the caller's
+    transaction; an email is queued on commit (`send_reminder_email` records it)."""
     task_row = reminder.task
-    if reminder.channel in (ReminderChannel.IN_APP, ReminderChannel.BOTH):
+    channel = channel or reminder.channel
+    if channel in (ReminderChannel.IN_APP, ReminderChannel.BOTH):
         notification = notifications.notify(
             task_row.user,
             source='todo',
@@ -653,7 +666,7 @@ def _deliver(reminder: Reminder, now: datetime, fire_token: UUID) -> None:
             fire_token=fire_token,
         )
         _queue_push(reminder, now, fire_token)
-    if reminder.channel in (ReminderChannel.EMAIL, ReminderChannel.BOTH):
+    if channel in (ReminderChannel.EMAIL, ReminderChannel.BOTH):
         _queue_email(reminder, fire_token, now)
 
 
@@ -703,6 +716,12 @@ def sweep_stale(now: datetime) -> int:
         with transaction.atomic():
             batch = list(
                 Reminder.objects.filter(sent_at__isnull=True, fire_at__lt=cutoff)
+                # A muted open task holds its reminders however old they get (`release_held`).
+                .exclude(
+                    task__state__in=MUTED_STATES,
+                    task__completed_at__isnull=True,
+                    task__deleted_at__isnull=True,
+                )
                 .select_related('task', 'task__user')
                 .select_for_update(skip_locked=True, of=('self',))
                 .order_by('fire_at')[:BATCH]
@@ -761,6 +780,7 @@ def deliver_due(now: datetime | None = None) -> int:
                     task__user__is_active=True,
                     task__user__status=User.STATUS_ACTIVE,
                 )
+                .exclude(task__state__in=MUTED_STATES)  # held until the task is unmuted
                 .exclude(pk__in=failed)
                 .select_related('task', 'task__user')
                 .select_for_update(skip_locked=True, of=('self',))
@@ -784,6 +804,51 @@ def deliver_due(now: datetime | None = None) -> int:
                     _note_failure(reminder, exc)
         if not batch:
             return delivered
+
+
+def release_held(task: Task, now: datetime | None = None) -> int:
+    """Send the reminders a muted task held, now that it is To do or In progress again: **one**
+    reminder for the task, on the union of the channels the held reminders used (each channel once:
+    in-app with its push, and email), recorded as a delivery of the earliest held one. Every held
+    reminder -- the unsent ones whose time has passed -- is marked sent and skipped. `task` has its
+    user loaded and is no longer muted; call it in the transaction that changed the state. A
+    delivery that raises is rolled back (its own savepoint) and logged: the state change stands and
+    the reminders stay unsent, for the job to deliver or sweep as it would any other. Returns how
+    many reminders were held."""
+    now = now or timezone.now()
+    with transaction.atomic():
+        held = list(
+            Reminder.objects.select_for_update()
+            .filter(task=task, sent_at__isnull=True, fire_at__lte=now)
+            .order_by('fire_at', 'minutes_before')
+        )
+        if not held:
+            return 0
+        channels = {reminder.channel for reminder in held}
+        in_app = bool(channels & {ReminderChannel.IN_APP, ReminderChannel.BOTH})
+        email = bool(channels & {ReminderChannel.EMAIL, ReminderChannel.BOTH})
+        channel = (
+            ReminderChannel.BOTH
+            if in_app and email
+            else ReminderChannel.IN_APP
+            if in_app
+            else ReminderChannel.EMAIL
+        )
+        representative = held[0]
+        fire_token = uuid4()
+        try:
+            with transaction.atomic():
+                Reminder.objects.filter(pk__in=[r.pk for r in held], sent_at__isnull=True).update(
+                    sent_at=now, skipped=True, snoozed_until=None
+                )
+                Reminder.objects.filter(pk=representative.pk).update(fire_token=fire_token)
+                representative.task = task
+                representative.fire_token = fire_token
+                _deliver(representative, now, fire_token, channel)
+        except Exception:
+            logger.exception('Could not release the held reminders of task %s', task.pk)
+            return 0
+        return len(held)
 
 
 # -- The email -----------------------------------------------------------------------------------

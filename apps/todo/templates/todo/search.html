@@ -23,7 +23,7 @@
 <form id="search-form" role="search" method="get" action="{{ page_url }}"
       hx-get="{{ list_url }}" hx-trigger="submit, change" hx-sync="this:replace" hx-target="#search-results" hx-swap="innerHTML"
       hx-disabled-elt="find button[type='submit']"
-      x-data="{ range: '{{ params.date_range }}' }"
+      x-data="{ range: '{{ params.date_range }}', closed: {% if params.include_completed %}true{% else %}false{% endif %} }"
       class="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
     {% if saved %}<input type="hidden" name="filter" value="{{ saved.pk }}">{% endif %}
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -41,7 +41,16 @@
     </div>
     <div class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-700 dark:text-gray-300">
         <label class="inline-flex items-center gap-2"><input type="checkbox" name="mode" value="regex"{% if params.mode == 'regex' %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> Regex</label>
-        <label class="inline-flex items-center gap-2"><input type="checkbox" name="include_completed" value="1"{% if params.include_completed %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> Include completed</label>
+        <label class="inline-flex items-center gap-2"><input type="checkbox" name="include_completed" value="1" x-model="closed"{% if params.include_completed %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> Include closed</label>
+        <span x-show="closed" {% if not params.include_completed %}style="display: none"{% endif %} class="inline-flex items-center gap-2">
+            <label for="search-resolution">Closed as</label>
+            <select id="search-resolution" name="resolution" :disabled="!closed"
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1">
+                {% for value, label in resolution_choices %}
+                <option value="{{ value }}"{% if params.resolution == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </span>
     </div>
 
     <fieldset class="mt-3 grid gap-3 border-t border-gray-200 dark:border-gray-700 pt-3 text-sm sm:grid-cols-2">
@@ -61,6 +70,14 @@
                 <label class="inline-flex items-center gap-1"><input type="checkbox" name="labels" value="{{ label.pk }}"{% if label.pk|stringformat:'s' in selected_labels %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> @{{ label.name }}</label>
                 {% endfor %}
                 <label class="inline-flex items-center gap-1"><input type="checkbox" name="labels" value="none"{% if 'none' in selected_labels %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> No label</label>
+            </div>
+        </div>
+        <div>
+            <span class="mb-1 block font-medium">State</span>
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+                {% for value, label in state_choices %}
+                <label class="inline-flex items-center gap-1"><input type="checkbox" name="states" value="{{ value }}"{% if value in selected_states %} checked{% endif %} class="rounded border-gray-300 dark:border-gray-600 accent-sage-500"> {{ label }}</label>
+                {% endfor %}
             </div>
         </div>
         <div>

@@ -1,4 +1,4 @@
-from .account import TodoAccount
+from .account import MutedOverdue, TodoAccount
 from .attachment import Attachment
 from .comment import Comment, CommentRevision
 from .inbox import (
@@ -20,7 +20,7 @@ from .reminder import (
 )
 from .saved_filter import SavedFilter
 from .settings import TodoSettings
-from .task import Priority, Task, TaskSource
+from .task import MUTED_STATES, Priority, Resolution, Task, TaskSource, TaskState
 
 __all__ = [
     'Comment',
@@ -33,10 +33,13 @@ __all__ = [
     'InboundMessage',
     'InboundMessageStatus',
     'InboxCode',
+    'MUTED_STATES',
+    'MutedOverdue',
     'Label',
     'Priority',
     'Recurrence',
     'RecurrenceMode',
+    'Resolution',
     'Reminder',
     'ReminderChannel',
     'ReminderDelivery',
@@ -45,6 +48,7 @@ __all__ = [
     'Task',
     'TaskReference',
     'TaskSource',
+    'TaskState',
     'TodoAccount',
     'TodoSettings',
 ]

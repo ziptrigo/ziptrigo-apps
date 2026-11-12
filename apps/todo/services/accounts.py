@@ -14,7 +14,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.core.services.mail.addresses import parse_allowlist
 
-from ..models import InboxCode, TodoAccount
+from ..models import InboxCode, MutedOverdue, TodoAccount
 
 
 def get_account(user: User) -> TodoAccount:
@@ -161,3 +161,14 @@ def update_inbox_settings(user: User, *, sender_allowlist: str | Iterable[str]) 
     account.sender_allowlist = allowlist
     account.save(update_fields=['sender_allowlist'])
     return allowlist
+
+
+def set_muted_overdue(account: TodoAccount, value: str) -> TodoAccount:
+    """Choose where an overdue task that is On hold shows on Today (`MutedOverdue`)."""
+    if value not in MutedOverdue.values:
+        raise ValidationError(
+            {'muted_overdue': 'Choose Today (dimmed), Hidden from Today or Own section.'}
+        )
+    account.muted_overdue = value
+    account.save(update_fields=['muted_overdue'])
+    return account

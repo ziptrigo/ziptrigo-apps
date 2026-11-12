@@ -15,6 +15,8 @@
  *    ordering does not need a mouse. A list with
  *    `data-after-reorder-url` fetches that URL into `data-after-reorder-target` once the order is
  *    saved (the filters page refreshes the sidebar's copy of the list).
+ *  - On Today a row is dragged only inside its own state group (`data-group` on the rows: in_progress,
+ *    todo, muted), whose order the server keeps; changing a task's state re-renders the list.
  *  - Empty lists. A row action removes the row without re-rendering its list, so a list marked
  *    `data-empty-list` shows its `<template data-empty-state>` when the last row has left (or hides
  *    the section marked `data-vanish-when-empty`) and takes it away when a row is back.
@@ -23,8 +25,8 @@
  *    scroll to (`data-more-right`, which the layout's CSS turns into a fade).
  *  - Checklist boxes get an accessible name from their item's text.
  *
- * The completion confirmation for a parent with open subtasks and the Postpone menu need no code
- * here: they use the shared `confirmModal` component and Alpine in the templates.
+ * The close dialog for a parent with open subtasks (`close_dialog.js`), the state menus and the Postpone
+ * menu need no code here: they are Alpine in the templates.
  */
 (function () {
     'use strict';
@@ -114,6 +116,12 @@
             item: '[data-task-id]',
             label: function (handle) { return handle.dataset.name || 'Item'; },
             onReorder: postOrder,
+            // Today is sorted by state group (In progress, To do, On hold) and its manual order only
+            // exists inside a group: a row is never dragged past a row of another group. (A parent's
+            // subtasks are one list whatever their states.)
+            canMove: list.dataset.scope === 'today'
+                ? function (item, other) { return item.dataset.group === other.dataset.group; }
+                : undefined,
         });
     }
 

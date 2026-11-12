@@ -35,7 +35,7 @@
         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
             {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
             {% empty %}
-            <li class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">Nothing matches.{% if not params.include_completed %} Completed tasks are left out unless you tick Include completed.{% endif %}</li>
+            <li class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">Nothing matches.{% if not params.include_completed %} Closed tasks are left out unless you tick Include closed.{% endif %}</li>
             {% endfor %}
         </ul>
     </div>

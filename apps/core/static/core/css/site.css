@@ -201,6 +201,9 @@ input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outlin
 .done .check-svg circle, .is-done .check-svg circle { fill: rgb(var(--c-brand-300)); stroke: rgb(var(--c-brand-400)); }
 .done .check-svg path { animation: draw 220ms var(--ease-out) 60ms forwards; }
 .is-done .check-svg path { stroke-dashoffset: 0; }
+/* A task closed as "won't do": the same circle with a cross, grey instead of the brand fill. */
+.is-wont-do .check-svg circle { fill: none; stroke: rgb(var(--c-gray-500)); }
+.is-wont-do .check-svg path { stroke: rgb(var(--c-gray-500)); stroke-dasharray: none; stroke-dashoffset: 0; }
 /* The strike draws left to right as a background line (not text-decoration, which would hide hover:underline). */
 .task-title {
   background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0 1px;

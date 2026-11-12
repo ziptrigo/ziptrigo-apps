@@ -1,9 +1,15 @@
-"""Creating, changing, completing, postponing, trashing and ordering tasks (issue #178).
+"""Creating, changing, closing, postponing, trashing and ordering tasks (issue #178).
 
 Every rule lives here, so the web views (and later the API) enforce the same ones; a refusal is a
 `django.core.exceptions.ValidationError` keyed by field (`'__all__'` for one that belongs to no
 field), and `InsufficientCreditsError` (`apps.billing.services`) for a task the balance can't
-cover. Trashing, completing and the like never refund what a task cost.
+cover. Trashing, closing and the like never refund what a task cost.
+
+**States and resolutions** (issue #272). An open task has a `state` (To do, In progress, On hold:
+`set_state`); a closed one a `resolution` (Done, Won't do: `close_task`, `set_resolution`), with
+`completed_at` meaning "closed at" for both. Closing resets the state to To do (a closed task has no
+state to keep) and reopening (`uncomplete_task`) clears the resolution. `complete_task` is "close as
+Done", which is what the circle, the Complete button, the push notification and the API all do.
 """
 
 import logging
@@ -23,8 +29,19 @@ from apps.accounts.services.timezones import user_today
 from apps.billing.services import InsufficientCreditsError
 from apps.core.markdown import toggle_checklist_item
 
-from ..models import Label, Priority, Recurrence, RecurrenceMode, Task, TaskSource, TodoSettings
-from . import attachments, dates, reminders
+from ..models import (
+    MUTED_STATES,
+    Label,
+    Priority,
+    Recurrence,
+    RecurrenceMode,
+    Resolution,
+    Task,
+    TaskSource,
+    TaskState,
+    TodoSettings,
+)
+from . import attachments, comments, dates, reminders
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account
 from .billing import cannot_afford, charge_task_creation
@@ -48,6 +65,13 @@ UPDATABLE = frozenset(
     }
 )
 
+#: What to do with a parent's open subtasks when it is closed: close them as Done or as Won't do,
+#: or leave them open. Where nobody can be asked (the push notification, the API) it is Done.
+SUBTASKS_DONE = 'done'
+SUBTASKS_WONT_DO = 'wont_do'
+SUBTASKS_LEAVE = 'leave'
+SUBTASK_ACTIONS = (SUBTASKS_DONE, SUBTASKS_WONT_DO, SUBTASKS_LEAVE)
+
 POSTPONE_PRESETS = ('tomorrow', 'next_week', 'next_weekend', 'date')
 REORDER_SCOPES = ('today', 'subtasks')
 
@@ -58,6 +82,11 @@ UNPAID_MESSAGE = (
 FILES_NOT_DELETED_MESSAGE = "The task's files could not be deleted right now. Try again later."
 BLOCKED_MESSAGE = 'Top up your credits to add tasks: a repeating task is waiting to be paid.'
 TOO_MANY_MESSAGE = 'Too many open tasks. Complete or delete some to add more.'
+STATE_MESSAGE = 'Choose To do, In progress or On hold.'
+RESOLUTION_MESSAGE = "Choose Done or Won't do."
+SUBTASKS_MESSAGE = "Choose whether to close the subtasks as Done, as Won't do, or leave them open."
+NOT_CLOSED_MESSAGE = 'Only a closed task has a resolution to change.'
+NOT_OPEN_MESSAGE = 'Reopen the task before changing its state.'
 
 
 def _error(field: str, message: str) -> ValidationError:
@@ -137,6 +166,39 @@ def clean_labels(user: User, labels: Iterable[Label | str | UUID]) -> list[Label
     return found
 
 
+def clean_state(state: object) -> str:
+    """`state` as one of the open states, else a refusal."""
+    value = str(state or TaskState.TODO)
+    if value not in TaskState.values:
+        raise _error('state', STATE_MESSAGE)
+    return value
+
+
+def clean_resolution(resolution: object) -> str:
+    value = str(resolution or '')
+    if value not in Resolution.values:
+        raise _error('resolution', RESOLUTION_MESSAGE)
+    return value
+
+
+def clean_subtask_action(action: object) -> str:
+    """What to do with the open subtasks of a parent being closed; nothing said means Done (as the
+    circle, the push notification and the API have always done)."""
+    value = str(action or SUBTASKS_DONE)
+    if value not in SUBTASK_ACTIONS:
+        raise _error('subtasks', SUBTASKS_MESSAGE)
+    return value
+
+
+def clean_note(note: object) -> str:
+    """The optional note of "Close as won't do": stripped, `\\r\\n` normalised, at most a comment's
+    length (it becomes a comment); empty means none."""
+    cleaned = str(note or '').replace('\r\n', '\n').replace('\r', '\n').strip()
+    if len(cleaned) > comments.COMMENT_MAX:
+        raise _error('note', f'Note is too long (at most {comments.COMMENT_MAX:,} characters).')
+    return cleaned
+
+
 def _lock_tasks(*pks: UUID) -> dict[UUID, Task]:
     """The tasks `pks`, re-read with their rows locked (in pk order, so two callers locking the same
     rows can't deadlock). Call it inside a transaction; a task that is gone is missing from the
@@ -208,6 +270,7 @@ class _CleanedTask:
     parent: Task | None
     rule: str
     mode: str
+    state: str = TaskState.TODO
 
 
 def _clean_new_task(
@@ -223,6 +286,7 @@ def _clean_new_task(
     rrule: str,
     recurrence_mode: str,
     recurrence: Recurrence | None,
+    state: str = TaskState.TODO,
 ) -> _CleanedTask:
     """Validate the fields of a new task (no writes, no locks): what `create_task` and
     `check_new_task` share."""
@@ -234,6 +298,7 @@ def _clean_new_task(
     cleaned_parent = clean_parent(user, parent)
     cleaned_rule = recurrence_service.clean_rule(rrule, user_today(user)) if rrule else ''
     cleaned_mode = recurrence_service.clean_mode(recurrence_mode)
+    cleaned_state = clean_state(state)
     if (cleaned_rule or recurrence is not None) and cleaned_parent is not None:
         raise _error('rrule', 'A subtask cannot repeat.')
     if recurrence is not None and (cleaned_rule or recurrence.user_id != user.pk):
@@ -250,6 +315,7 @@ def _clean_new_task(
         parent=cleaned_parent,
         rule=cleaned_rule,
         mode=cleaned_mode,
+        state=cleaned_state,
     )
 
 
@@ -265,6 +331,7 @@ def check_new_task(
     labels: Iterable[Label | str | UUID] = (),
     rrule: str = '',
     recurrence_mode: str = RecurrenceMode.FIXED,
+    state: str = TaskState.TODO,
 ) -> date | None:
     """Everything `create_task` would refuse that can be told without writing anything, in the same
     order: the fields (`ValidationError`), a creation blocked by an unpaid repeating task
@@ -288,6 +355,7 @@ def check_new_task(
         rrule=rrule,
         recurrence_mode=recurrence_mode,
         recurrence=None,
+        state=state,
     )
     settings = TodoSettings.load()
     account = get_account(user)
@@ -313,6 +381,7 @@ def create_task(
     rrule: str = '',
     recurrence_mode: str = RecurrenceMode.FIXED,
     recurrence: Recurrence | None = None,
+    state: str = TaskState.TODO,
     source: str = TaskSource.WEB,
     email_from: str = '',
     email_from_authenticated: bool = False,
@@ -332,6 +401,9 @@ def create_task(
     `recurrence` joins the task to an existing one (the next occurrence, `services.recurrence`).
     Only a top-level task can repeat.
 
+    Every new task is To do unless the caller says otherwise (`state`: the quick-add box offers it);
+    the next occurrence of a repeating task is always To do.
+
     `email_from` and `email_from_authenticated` (a task made from an email, issue #186) are stored
     on the task so its page needs no lookup of the email: the From address and whether SES
     authenticated the sender.
@@ -348,6 +420,7 @@ def create_task(
         rrule=rrule,
         recurrence_mode=recurrence_mode,
         recurrence=recurrence,
+        state=state,
     )
     cleaned_title, cleaned_description = cleaned.title, cleaned.description
     cleaned_priority, cleaned_time = cleaned.priority, cleaned.due_time
@@ -384,6 +457,7 @@ def create_task(
             due_time=cleaned_time,
             recurrence=recurrence,
             recurrence_anchor=cleaned_date if recurrence is not None else None,
+            state=cleaned.state,
             source=source,
             email_from=email_from[:320],
             email_from_authenticated=email_from_authenticated,
@@ -572,41 +646,123 @@ def toggle_checklist(task: Task, index: int, checked: bool) -> Task:
         return update_task(fresh, changes={'description': description})
 
 
-# -- Completing ----------------------------------------------------------------------------------
+# -- Closing and states --------------------------------------------------------------------------
 
 
-def complete_task(task: Task) -> Task:
-    """Complete the task, and its open subtasks in the same transaction. A completed task is left
-    as it is. A repeating task creates its next occurrence in the same transaction, before the open
-    subtasks are completed (they are copied to it: `services.recurrence.on_completed`)."""
+def close_task(
+    task: Task,
+    resolution: str = Resolution.DONE,
+    *,
+    subtasks: str = SUBTASKS_DONE,
+    note: str = '',
+) -> Task:
+    """Close the task as Done or Won't do, in one transaction. A task that is already closed is left
+    as it is (`set_resolution` changes how it was closed).
+
+    The state goes back to To do (a closed task has no state), `completed_at` is "closed at", and a
+    repeating task creates its next occurrence **whatever the resolution** -- Won't do means "skip
+    this one" -- before the open subtasks are dealt with, so they are copied to it
+    (`services.recurrence.on_completed`). `subtasks` says what happens to the open, non-trashed
+    subtasks: closed as Done (the default: what the circle, the push notification and the API do),
+    closed as Won't do, or left open. A non-empty `note` becomes a comment on the task (its length
+    rules; refused up front, before anything is written).
+    """
+    resolution = clean_resolution(resolution)
+    subtasks = clean_subtask_action(subtasks)
+    note = clean_note(note)
     if task.is_trashed:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before completing it.')
     now = timezone.now()
     with transaction.atomic():
-        won = Task.objects.filter(pk=task.pk, completed_at__isnull=True).update(
-            completed_at=now, updated_at=now
-        )
+        won = Task.objects.filter(
+            pk=task.pk, completed_at__isnull=True, deleted_at__isnull=True
+        ).update(completed_at=now, resolution=resolution, state=TaskState.TODO, updated_at=now)
         if not won:
             task.refresh_from_db()
             return task
         recurrence_service.on_completed(task)
-        Task.objects.filter(parent=task, completed_at__isnull=True, deleted_at__isnull=True).update(
-            completed_at=now, updated_at=now
-        )
+        if subtasks != SUBTASKS_LEAVE:
+            Task.objects.filter(
+                parent=task, completed_at__isnull=True, deleted_at__isnull=True
+            ).update(completed_at=now, resolution=subtasks, state=TaskState.TODO, updated_at=now)
+        if note:
+            comments.add_comment(task, task.user, note)
     task.completed_at = now
+    task.resolution = resolution
+    task.state = TaskState.TODO
+    task.updated_at = now
+    return task
+
+
+def complete_task(task: Task, *, subtasks: str = SUBTASKS_DONE) -> Task:
+    """Close the task as Done (see `close_task`): what Complete does everywhere."""
+    return close_task(task, Resolution.DONE, subtasks=subtasks)
+
+
+def set_resolution(task: Task, resolution: str) -> Task:
+    """Change how a closed task was closed ("Mark as done" / "Mark as won't do"). It creates no
+    occurrence, touches no subtasks and keeps the time it was closed at."""
+    resolution = clean_resolution(resolution)
+    if task.is_trashed:
+        raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
+    now = timezone.now()
+    changed = Task.objects.filter(pk=task.pk, completed_at__isnull=False).update(
+        resolution=resolution, updated_at=now
+    )
+    if not changed:
+        raise _error(NON_FIELD_ERRORS, NOT_CLOSED_MESSAGE)
+    task.resolution = resolution
     task.updated_at = now
     return task
 
 
 def uncomplete_task(task: Task) -> Task:
-    """Make a completed task open again. Its parent, if it has one, stays as it is."""
+    """Reopen a closed task: it is To do again, whatever its resolution was. Its parent, if it has
+    one, stays as it is."""
     if task.is_trashed:
         raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
     now = timezone.now()
     Task.objects.filter(pk=task.pk, completed_at__isnull=False).update(
-        completed_at=None, updated_at=now
+        completed_at=None, resolution='', state=TaskState.TODO, updated_at=now
     )
     task.refresh_from_db()
+    return task
+
+
+def set_state(task: Task, state: str) -> Task:
+    """Set an open task's state (To do, In progress, On hold). Each task has its own: nothing
+    propagates between a parent and its subtasks. A closed or trashed task has none to change.
+
+    Leaving a muted state releases the reminders held meanwhile
+    (`services.reminders.release_held`: one reminder, on the channels they used). A task due today
+    that moves to another group goes to the end of it when Today has a manual order."""
+    state = clean_state(state)
+    if task.is_trashed:
+        raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
+    now = timezone.now()
+    with transaction.atomic():
+        current = _lock_tasks(task.pk).get(task.pk)
+        if current is None:
+            raise _error(NON_FIELD_ERRORS, 'This task no longer exists.')
+        if current.is_trashed:
+            raise _error(NON_FIELD_ERRORS, 'Restore the task before changing it.')
+        if current.completed_at is not None:
+            raise _error(NON_FIELD_ERRORS, NOT_OPEN_MESSAGE)
+        changed = current.state != state
+        if changed:
+            current.user = task.user  # already loaded: the zone and the reminders need it
+            was_muted = current.state in MUTED_STATES
+            fields: dict[str, Any] = {'state': state, 'updated_at': now}
+            if current.due_date is not None and current.due_date == user_today(task.user):
+                fields['today_position'] = next_today_position(task.user, current.due_date)
+            Task.objects.filter(pk=current.pk).update(**fields)
+            current.state = state
+            if was_muted and state not in MUTED_STATES:
+                reminders.release_held(current, now)
+            task.today_position = fields.get('today_position', task.today_position)
+    task.state = state
+    if changed:
+        task.updated_at = now
     return task
 
 

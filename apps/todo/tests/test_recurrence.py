@@ -1104,7 +1104,7 @@ class TestPages:
         complete_task(task)
 
         page = web.get(reverse('todo:task', args=[task.number])).content.decode()
-        completed = web.get(reverse('todo:completed')).content.decode()
+        completed = web.get(reverse('todo:closed')).content.decode()
 
         assert 'keeps the next occurrence' in page
         assert f'id="task-{task.number}"' in completed  # the completed one is its own row

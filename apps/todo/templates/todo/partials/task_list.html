@@ -16,14 +16,16 @@
     <section class="mb-8" aria-labelledby="overdue-title" data-vanish-when-empty>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
             <h2 id="overdue-title" class="text-lg font-semibold text-red-600 dark:text-red-400">Overdue</h2>
+            {% if overdue_movable %}{% comment %}Only the tasks that are not On hold move: a muted task is never overdue and is left where it is.{% endcomment %}
             <button type="button" @click="show($el)"
                     data-url="{% url 'todo:reschedule-overdue' %}"
                     data-title="Reschedule overdue tasks"
-                    data-body="Move the date of {{ overdue|length }} overdue task{{ overdue|length|pluralize }} to today? Their times stay."
+                    data-body="Move the date of {{ overdue_movable }} overdue task{{ overdue_movable|pluralize }} to today? Their times stay.{% if overdue_movable != overdue|length %} Tasks that are on hold stay where they are.{% endif %}"
                     data-label="Reschedule" data-tone="primary"
                     class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
                 <i class="fas fa-calendar-check mr-2" aria-hidden="true"></i>Reschedule overdue to today
             </button>
+            {% endif %}
         </div>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
             <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
@@ -35,6 +37,7 @@
     <section aria-labelledby="today-title">
         <h2 id="today-title" class="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">Today <span class="text-sm font-normal text-gray-500 dark:text-gray-400">{{ today|fdate:'heading' }}</span></h2>
         <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+            {% comment %}One list, ordered by state group (In progress, To do, On hold); a drag stays inside the row's own group (`data-group`, tasks.js).{% endcomment %}
             <ul class="divide-y divide-gray-200 dark:divide-gray-700"
                 data-sortable data-empty-list data-reorder-url="{% url 'todo:reorder' %}" data-scope="today">
                 {% for task in tasks %}{% include 'todo/partials/task_row.html' with sortable=True oob_nav=False %}
@@ -48,6 +51,19 @@
             </ul>
         </div>
     </section>
+    {% if muted_section %}
+    {% comment %}The account's "Own section" choice: overdue tasks that are On hold, collapsed at the bottom of Today.{% endcomment %}
+    <details class="mt-8 group" data-vanish-when-empty>
+        <summary class="btn mb-2 inline-flex cursor-pointer list-none items-center gap-2 rounded-md text-lg font-semibold text-gray-600 dark:text-gray-300">
+            <i class="fas fa-chevron-right text-xs transition-transform group-open:rotate-90" aria-hidden="true"></i>On hold &amp; blocked ({{ muted_section|length }})
+        </summary>
+        <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
+            <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
+                {% for task in muted_section %}{% include 'todo/partials/task_row.html' with oob_nav=False %}{% endfor %}
+            </ul>
+        </div>
+    </details>
+    {% endif %}
 
 {% elif view == 'upcoming' %}
     {% for day, day_tasks in days %}
@@ -77,6 +93,15 @@
            class="rounded-md {% if link.active %}font-semibold text-gray-900 dark:text-gray-100{% else %}text-sage-600 dark:text-sage-300 hover:underline{% endif %}">{{ link.label }}{% if link.active %}<i class="fas fa-arrow-{% if link.direction == 'asc' %}up{% else %}down{% endif %} ml-1 text-xs" aria-hidden="true"></i><span class="sr-only">, sorted {% if link.direction == 'asc' %}ascending{% else %}descending{% endif %}</span>{% endif %}</a>
         {% endfor %}
     </div>
+    {% elif view == 'closed' %}
+    <nav data-tabs aria-label="Closed tasks" class="mb-4 flex flex-wrap gap-x-1 border-b border-gray-200 dark:border-gray-700">
+        {% for key, label in resolution_tabs %}
+        <a href="{{ page_url }}{% if key %}?resolution={{ key }}{% endif %}"
+           hx-get="{{ list_url }}?view=closed{% if key %}&resolution={{ key }}{% endif %}" hx-target="#task-list" hx-swap="innerHTML"
+           {% if resolution == key %}aria-current="page"{% endif %}
+           class="-mb-px inline-flex items-center border-b-2 px-3 py-2 text-sm font-medium {% if resolution == key %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">{{ label }}</a>
+        {% endfor %}
+    </nav>
     {% elif view == 'trash' %}
     <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">
         Tasks are deleted forever {{ trash_days }} days after being trashed. Credits spent on them are not refunded.
@@ -87,10 +112,10 @@
             {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
             {% empty %}
             <li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">
-                {% if view == 'completed' %}No completed tasks yet.{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}
+                {% if view == 'closed' %}{% if resolution == 'done' %}No tasks closed as done yet.{% elif resolution == 'wont_do' %}No tasks closed as won't do yet.{% else %}No closed tasks yet.{% endif %}{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}
             </li>
             {% endfor %}
-            <template data-empty-state><li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">{% if view == 'completed' %}No completed tasks yet.{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}</li></template>
+            <template data-empty-state><li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">{% if view == 'closed' %}{% if resolution == 'done' %}No tasks closed as done yet.{% elif resolution == 'wont_do' %}No tasks closed as won't do yet.{% else %}No closed tasks yet.{% endif %}{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}</li></template>
         </ul>
     </div>
 

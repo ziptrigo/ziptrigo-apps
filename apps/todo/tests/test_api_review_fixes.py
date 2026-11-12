@@ -502,12 +502,12 @@ class TestSharedQuerysets:
         from ..views import lists
 
         seen: list[str] = []
-        for name in ('upcoming_set', 'completed_set', 'trash_set'):
+        for name in ('upcoming_set', 'closed_set', 'trash_set'):
             real = getattr(dates, name)
 
-            def spy(user, _real=real, _name=name):
+            def spy(user, *args, _real=real, _name=name):
                 seen.append(_name)
-                return _real(user)
+                return _real(user, *args)
 
             monkeypatch.setattr(lists, name, spy)
         done = create_task(funded_user, title='done')
@@ -515,10 +515,10 @@ class TestSharedQuerysets:
         client = Client()
         client.force_login(funded_user)
 
-        for page in ('upcoming', 'completed', 'trash'):
+        for page in ('upcoming', 'closed', 'trash'):
             assert client.get(f'/todo/{page}/').status_code == 200
 
-        assert seen == ['upcoming_set', 'completed_set', 'trash_set']
+        assert seen == ['upcoming_set', 'closed_set', 'trash_set']
 
     def test_the_sets_are_what_the_pages_list(self, funded_user, wednesday):
         soon = create_task(

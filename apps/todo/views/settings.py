@@ -1,4 +1,5 @@
-"""`/todo/settings/`: the default due time, the default reminder, the free-tasks line and the price,
+"""`/todo/settings/`: the default due time, the default reminder, where an overdue On hold task shows on
+Today, the free-tasks line and the price,
 the storage line and the email address tasks can be sent to (`views.inbox`).
 """
 
@@ -17,7 +18,7 @@ from apps.core.htmx import is_htmx
 
 from ..forms import SettingsForm
 from ..forms.reminder import UNITS as REMINDER_UNITS
-from ..models import ReminderChannel, SnoozeChoice, TodoSettings
+from ..models import MutedOverdue, ReminderChannel, SnoozeChoice, TodoSettings
 from ..services import (
     daily_storage_rate,
     describe_daily_rate,
@@ -25,6 +26,7 @@ from ..services import (
     reminders,
     update_default_due_time,
 )
+from ..services.accounts import set_muted_overdue
 from ..services.reminders import split_offset
 from .common import (
     form_error_lines,
@@ -59,6 +61,7 @@ def _form_context(request: AuthenticatedHttpRequest, *, saved: bool = False) -> 
         'reminder_units': REMINDER_UNITS,
         'reminder_channels': ReminderChannel.choices,
         'snooze_choices': SnoozeChoice.choices,
+        'muted_overdue_choices': MutedOverdue.choices,
     }
 
 
@@ -91,6 +94,8 @@ def _save(request: AuthenticatedHttpRequest) -> HttpResponse:
                 )
             if form.cleaned_data.get('snooze_minutes') is not None:
                 reminders.set_snooze(account, form.cleaned_data['snooze_minutes'])
+            if form.cleaned_data.get('muted_overdue'):
+                set_muted_overdue(account, form.cleaned_data['muted_overdue'])
     except ValidationError as exc:
         return refuse(request, validation_lines(exc), retarget=SLOT, fallback=fallback)
     if not is_htmx(request):

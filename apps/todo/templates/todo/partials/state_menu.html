@@ -1,0 +1,26 @@
+{% load todo_ui %}
+{% comment %} The state chip of an open task and the menu that changes it (To do, In progress, On hold). Needs `task`. Used in a row
+   (`ctx=row` and `view` come from the <li>) and on the task page (inside a wrapper that targets #task-panel). Choosing a state posts
+   `todo:set-state`; on Today and Upcoming the answer is the whole list, since the row moves to the group of its new state. {% endcomment %}
+<div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false"
+     @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
+    <button type="button" x-ref="trigger" @click="open = !open" :aria-expanded="open" aria-haspopup="menu"
+            aria-label="State of {{ task.title }}: {{ task.get_state_display }}. Change it"
+            class="btn inline-flex items-center gap-1 rounded-full">
+        {% state_pill task %}<i class="fas fa-chevron-down text-[9px] text-gray-500 dark:text-gray-400" aria-hidden="true"></i>
+    </button>
+    <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" style="display: none"
+         role="menu" aria-label="State of {{ task.title }}"
+         class="absolute left-0 top-full mt-1 w-48 z-50 origin-top-left rounded-xl shadow-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-1">
+        {% state_choices as choices %}
+        {% for choice in choices %}
+        <button type="button" role="menuitemradio" aria-checked="{% if task.state == choice.value %}true{% else %}false{% endif %}"
+                hx-post="{% url 'todo:set-state' task.number %}" hx-vals='{"state": "{{ choice.value }}"}'
+                @click="open = false"
+                class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded-lg">
+            <i class="{{ choice.icon }} w-4 text-center text-xs text-gray-500 dark:text-gray-400" aria-hidden="true"></i>{{ choice.label }}
+            {% if task.state == choice.value %}<i class="fas fa-check ml-auto text-xs text-sage-600 dark:text-sage-300" aria-hidden="true"></i>{% endif %}
+        </button>
+        {% endfor %}
+    </div>
+</div>

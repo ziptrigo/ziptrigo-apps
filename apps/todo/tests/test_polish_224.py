@@ -159,7 +159,7 @@ class TestRowsLeaveWithTheirParent:
 class TestEmptyStates:
     """TODO-F8: the lists carry what to show when their last row leaves."""
 
-    @pytest.mark.parametrize('name', ['todo:completed', 'todo:trash', 'todo:all'])
+    @pytest.mark.parametrize('name', ['todo:closed', 'todo:trash', 'todo:all'])
     def test_the_main_lists(self, web, funded_user, name):
         make_task(funded_user, title='Plain')
         trash_task(make_task(funded_user, title='Gone'))

@@ -6,10 +6,17 @@ from django.core.exceptions import ValidationError
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 
-from ..models import Label, Priority, RecurrenceMode
+from ..models import Label, Priority, RecurrenceMode, Resolution, TaskState
 from ..services.limits import TITLE_MAX
 from ..services.recurrence import parse_rule
-from ..services.tasks import POSTPONE_PRESETS, clean_description
+from ..services.tasks import (
+    POSTPONE_PRESETS,
+    RESOLUTION_MESSAGE,
+    STATE_MESSAGE,
+    SUBTASK_ACTIONS,
+    SUBTASKS_MESSAGE,
+    clean_description,
+)
 
 #: The parts of the task page that save on their own (`part` in the POST): which fields each one
 #: sends. Without a `part` the form is the whole task form (the quick-add box).
@@ -52,6 +59,15 @@ class TaskForm(forms.Form):
         required=False,
         choices=RecurrenceMode.choices,
         error_messages={'invalid_choice': 'Choose a fixed schedule or from completion.'},
+    )
+
+    # Only the quick-add box has it: an existing task's state changes through `StateForm`. It is
+    # not one of `changes()`, which `update_task` takes; read it with `requested_state()`.
+    state = forms.ChoiceField(
+        label='State',
+        required=False,
+        choices=TaskState.choices,
+        error_messages={'invalid_choice': STATE_MESSAGE},
     )
 
     def __init__(self, *args, user: User, part: str = '', **kwargs):
@@ -103,10 +119,15 @@ class TaskForm(forms.Form):
             # A request without the Repeat controls leaves the repeat rule alone (an empty `rrule`
             # would stop it).
             and (name not in ('rrule', 'recurrence_mode') or name in self.data)
+            and name != 'state'
         }
         if 'labels' in values:
             values['labels'] = list(values['labels'])
         return values
+
+    def requested_state(self) -> str:
+        """The state the quick-add box asked for (To do when it didn't)."""
+        return self.cleaned_data.get('state') or TaskState.TODO
 
 
 class SubtaskForm(forms.Form):
@@ -129,3 +150,33 @@ class PostponeForm(forms.Form):
 class ChecklistForm(forms.Form):
     index = forms.IntegerField(label='Item', min_value=0, max_value=100_000)
     checked = forms.BooleanField(label='Checked', required=False)
+
+
+class CloseForm(forms.Form):
+    """Closing a task: what to do with its open subtasks (nothing said means Done, as the circle
+    and the API always did) and, for "Close as won't do", an optional note that becomes a comment.
+    The note's length is the service's rule (`tasks.clean_note`)."""
+
+    subtasks = forms.ChoiceField(
+        label='Subtasks',
+        required=False,
+        choices=[(action, action) for action in SUBTASK_ACTIONS],
+        error_messages={'invalid_choice': SUBTASKS_MESSAGE},
+    )
+    note = forms.CharField(label='Note', required=False, strip=False)
+
+
+class StateForm(forms.Form):
+    state = forms.ChoiceField(
+        label='State',
+        choices=TaskState.choices,
+        error_messages={'required': STATE_MESSAGE, 'invalid_choice': STATE_MESSAGE},
+    )
+
+
+class ResolutionForm(forms.Form):
+    resolution = forms.ChoiceField(
+        label='Resolution',
+        choices=Resolution.choices,
+        error_messages={'required': RESOLUTION_MESSAGE, 'invalid_choice': RESOLUTION_MESSAGE},
+    )

@@ -1,5 +1,5 @@
 """Template helpers for the To-do pages: the rendered description, the due badge, the priority
-flag and the label chip.
+flag, the state and resolution pills and the label chip.
 
 Load with `{% load todo_ui %}`.
 """
@@ -21,7 +21,7 @@ from apps.core.datetime_format import DisplayFormats, format_date, format_time
 from apps.core.markdown import render
 from apps.core.templatetags.core_ui import pill_html
 
-from ..models import Label, Task
+from ..models import Label, Resolution, Task, TaskState
 from ..services.recurrence import MONTH_NAMES, WEEKDAY_NAMES, describe, mode_label
 from ..services.references import TASK_URL_PATH, resolver_for_request
 
@@ -86,6 +86,46 @@ def due_badge(context, task: Task) -> SafeString:
         title=f'Due {title}',
         sr_only=' (overdue)' if overdue else '',
     )
+
+
+#: State -> (pill tone, icon) of the state chip: To do is the plain one, In progress stands out,
+#: On hold (muted) is grey like the dimmed row.
+_STATE_STYLE = {
+    TaskState.TODO: ('gray', 'far fa-circle'),
+    TaskState.IN_PROGRESS: ('sky', 'fas fa-circle-half-stroke'),
+    TaskState.ON_HOLD: ('gray', 'fas fa-pause'),
+}
+
+
+@register.simple_tag
+def state_pill(task: Task) -> SafeString:
+    """The state of an open task as a pill (`To do`, `In progress`, `On hold`)."""
+    tone, icon = _STATE_STYLE.get(task.state, _STATE_STYLE[TaskState.TODO])
+    label = TaskState(task.state).label if task.state in TaskState.values else 'To do'
+    return pill_html(tone, label, icon=icon, title='State')
+
+
+@register.simple_tag
+def state_choices() -> list[dict]:
+    """The states a person can pick, with the icon each has in its pill: what the state menus
+    list (a muted state is marked, since it holds reminders)."""
+    return [
+        {'value': value, 'label': label, 'icon': _STATE_STYLE[TaskState(value)][1]}
+        for value, label in TaskState.choices
+    ]
+
+
+@register.simple_tag
+def resolution_pill(task: Task, always: bool = False) -> SafeString:
+    """How a closed task was closed: a `Won't do` pill, and a `Done` one when `always` (a Done row
+    already has its tick). Nothing for an open task."""
+    if task.completed_at is None:
+        return SafeString('')
+    if task.resolution == Resolution.WONT_DO:
+        return pill_html('gray', "Won't do", icon='fas fa-circle-xmark', title="Closed as won't do")
+    if always:
+        return pill_html('green', 'Done', icon='fas fa-check', title='Closed as done')
+    return SafeString('')
 
 
 @register.simple_tag

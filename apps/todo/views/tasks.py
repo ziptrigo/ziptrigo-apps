@@ -25,12 +25,22 @@ from apps.accounts.services.timezones import user_today
 from apps.billing.services import InsufficientCreditsError
 from apps.core.htmx import hx_redirect, is_htmx
 
-from ..forms import ChecklistForm, PostponeForm, SubtaskForm, TaskForm
+from ..forms import (
+    ChecklistForm,
+    CloseForm,
+    PostponeForm,
+    ResolutionForm,
+    StateForm,
+    SubtaskForm,
+    TaskForm,
+)
 from ..forms.reminder import PRESETS as REMINDER_PRESETS
 from ..forms.reminder import UNITS as REMINDER_UNITS
-from ..models import Label, ReminderChannel, Task, TodoSettings
+from ..models import Label, ReminderChannel, Resolution, Task, TodoSettings
 from ..services import (
-    complete_task,
+    SUBTASKS_DONE,
+    SUBTASKS_LEAVE,
+    close_task,
     create_task,
     delete_forever,
     get_account,
@@ -44,8 +54,10 @@ from ..services import (
     reorder,
     reschedule_overdue,
     restore_task,
+    set_resolution,
+    set_state,
     subtasks_of,
-    today_set,
+    today_count,
     toggle_checklist,
     trash_task,
     uncomplete_task,
@@ -63,7 +75,7 @@ from .common import (
     render_page,
     validation_lines,
 )
-from .lists import VIEWS, belongs, decorate, list_context, page_url, row_task
+from .lists import VIEW_ALIASES, VIEWS, belongs, decorate, list_context, page_url, row_task
 
 PANEL_MSG = '#task-msg'
 CREDITS_LINE = 'You do not have enough credits to add this task.'
@@ -74,7 +86,7 @@ CLEAR_PAGE_MSG = (
 
 
 def _view_of(request: AuthenticatedHttpRequest) -> str:
-    view = request.POST.get('view', '')
+    view = VIEW_ALIASES.get(request.POST.get('view', ''), request.POST.get('view', ''))
     return view if view in (*VIEWS, 'subtask', 'search') else 'all'
 
 
@@ -164,7 +176,7 @@ def after_action(
         'view': view,
         'today': today,
         'oob_nav': True,
-        'today_count': today_set(request.user).count(),
+        'today_count': today_count(request.user),
         'sortable': request.POST.get('sortable') == '1',
     }
     template = (
@@ -251,7 +263,7 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
     if (response := limited(request, 'TODO_CREATE_USER', retarget='#quick-add-msg')) is not None:
         return response
     try:
-        create_task(request.user, **form.changes())
+        create_task(request.user, state=form.requested_state(), **form.changes())
     except InsufficientCreditsError:
         return refuse(request, CREDITS_LINE, retarget='#quick-add-msg', top_up=True)
     except ValidationError as exc:
@@ -276,7 +288,7 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
             'free_used': used,
             'free_total': free,
             'oob_nav': True,
-            'today_count': today_set(request.user).count(),
+            'today_count': today_count(request.user),
         }
     )
     return render(request, 'todo/partials/task_list.html', context)
@@ -391,13 +403,9 @@ def _act(
     return after_action(request, task, refresh_comments=refresh_comments)
 
 
-@login_required
-@require_POST
-def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
-    # Completing a parent completes its open subtasks too. On a list, their rows are on the same
-    # page as the parent's, so they are removed along with it (out of band) instead of staying as
-    # open rows until a reload. (The task page re-renders its whole panel anyway.)
-    cascaded = list(
+def _open_subtask_numbers(request: AuthenticatedHttpRequest, number: int) -> list[int]:
+    """The numbers of the open, non-trashed subtasks of the task numbered `number`."""
+    return list(
         Task.objects.filter(
             user=request.user,
             parent__number=number,
@@ -405,11 +413,132 @@ def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpRespons
             deleted_at__isnull=True,
         ).values_list('number', flat=True)
     )
-    response = _act(request, number, complete_task)
+
+
+def _close(
+    request: AuthenticatedHttpRequest,
+    task: Task,
+    resolution: str,
+    *,
+    subtasks: str,
+    note: str = '',
+) -> HttpResponse:
+    """Close `task` (`services.close_task`) and answer. Closing a parent closes its open subtasks
+    too unless told to leave them: on a list their rows are on the same page as the parent's, so
+    they are removed along with it (out of band) instead of staying as open rows until a reload.
+    (The task page re-renders its whole panel anyway.) A note becomes a comment, so the page's
+    comments are refreshed."""
+    cascaded = [] if subtasks == SUBTASKS_LEAVE else _open_subtask_numbers(request, task.number)
+    response = _act(
+        request,
+        task.number,
+        lambda found: close_task(found, resolution, subtasks=subtasks, note=note),
+        task=task,
+        refresh_comments=bool(note.strip()),
+    )
     if response.status_code == 200 and is_htmx(request):
         if cascaded and not _is_page(request):
             response.content += _rows_removed(cascaded)
         response.content += _blocked_banner(request)
+    return response
+
+
+@login_required
+@require_POST
+def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
+    """Complete (close as Done). `subtasks` (`done`, `wont_do` or `leave`) says what happens to the
+    open subtasks of a parent; without it they are completed too, as the API's complete does."""
+    task = owned_task(request, number)
+    form = CloseForm(request.POST)
+    if not form.is_valid():
+        return refuse(
+            request, form_error_lines(form), retarget=_slot(request), fallback=_task_url(task)
+        )
+    return _close(
+        request, task, Resolution.DONE, subtasks=form.cleaned_data['subtasks'] or SUBTASKS_DONE
+    )
+
+
+@login_required
+@require_POST
+def task_wont_do(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
+    """Close as Won't do, with an optional `note` (added as a comment) and what to do with the open
+    subtasks (`subtasks`). The task page's dialog posts it; there is no row or push button."""
+    task = owned_task(request, number)
+    form = CloseForm(request.POST)
+    if not form.is_valid():
+        return refuse(
+            request, form_error_lines(form), retarget=_slot(request), fallback=_task_url(task)
+        )
+    return _close(
+        request,
+        task,
+        Resolution.WONT_DO,
+        subtasks=form.cleaned_data['subtasks'] or SUBTASKS_DONE,
+        note=form.cleaned_data['note'],
+    )
+
+
+@login_required
+@require_POST
+def task_resolution(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
+    """Change how a closed task was closed ("Mark as done" / "Mark as won't do"): no occurrence,
+    no subtasks touched."""
+    task = owned_task(request, number)
+    form = ResolutionForm(request.POST)
+    if not form.is_valid():
+        return refuse(
+            request, form_error_lines(form), retarget=_slot(request), fallback=_task_url(task)
+        )
+    return _act(
+        request,
+        number,
+        lambda found: set_resolution(found, form.cleaned_data['resolution']),
+        task=task,
+    )
+
+
+@login_required
+@require_POST
+def task_state(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
+    """Set an open task's state. On Today and Upcoming the whole list is re-rendered, since the row
+    moves to the group of its new state (In progress, To do, muted) -- and may leave the page
+    (an overdue task put On hold with the account hiding those)."""
+    task = owned_task(request, number)
+    form = StateForm(request.POST)
+    if not form.is_valid():
+        return refuse(
+            request, form_error_lines(form), retarget=_slot(request), fallback=_task_url(task)
+        )
+    view = _view_of(request)
+    response = _act(
+        request, number, lambda found: set_state(found, form.cleaned_data['state']), task=task
+    )
+    if (
+        response.status_code == 200
+        and is_htmx(request)
+        and not _is_page(request)
+        and view in ('today', 'upcoming')
+    ):
+        return _list_response(request, view)
+    return response
+
+
+def _list_response(request: AuthenticatedHttpRequest, view: str) -> HttpResponse:
+    """The list of `view` re-rendered into `#task-list`, whatever the request's own target was."""
+    context = list_context(request, view)
+    context.update(
+        {
+            'list_url': reverse('todo:list'),
+            'page_url': page_url(view),
+            'oob_nav': True,
+            'today_count': today_count(request.user),
+        }
+    )
+    response = render(request, 'todo/partials/task_list.html', context)
+    response['HX-Retarget'] = '#task-list'
+    response['HX-Reswap'] = 'innerHTML'
+    response.content += CLEAR_PAGE_MSG
     return response
 
 
@@ -512,7 +641,7 @@ def task_delete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
         response = render(
             request,
             'todo/partials/row_gone.html',
-            {'oob_nav': True, 'today_count': today_set(request.user).count(), 'task': task},
+            {'oob_nav': True, 'today_count': today_count(request.user), 'task': task},
         )
         response.content += _rows_removed(cascaded) + CLEAR_PAGE_MSG
         return response

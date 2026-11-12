@@ -21,7 +21,7 @@ from apps.core.field_errors import validation_lines as core_validation_lines
 from apps.core.htmx import is_htmx
 
 from ..models import Task, TodoSettings
-from ..services import get_account, month_usage, sidebar_filters, today_set
+from ..services import get_account, month_usage, sidebar_filters, today_count
 
 FIELD_LABELS = {
     'title': 'Title',
@@ -43,6 +43,11 @@ FIELD_LABELS = {
     'minutes_before': 'Reminder',
     'channel': 'Channel',
     'params': 'Filter',
+    'state': 'State',
+    'resolution': 'Resolution',
+    'subtasks': 'Subtasks',
+    'note': 'Note',
+    'muted_overdue': 'On hold and overdue',
 }
 
 
@@ -52,7 +57,7 @@ def nav_items() -> list[tuple[str, str, str, str]]:
         ('today', 'Today', 'fas fa-calendar-day', 'todo:today'),
         ('upcoming', 'Upcoming', 'fas fa-calendar-days', 'todo:upcoming'),
         ('all', 'All', 'fas fa-list', 'todo:all'),
-        ('completed', 'Completed', 'fas fa-circle-check', 'todo:completed'),
+        ('closed', 'Closed', 'fas fa-circle-check', 'todo:closed'),
         ('labels', 'Labels', 'fas fa-tag', 'todo:labels'),
         ('trash', 'Trash', 'fas fa-trash', 'todo:trash'),
         ('settings', 'Settings', 'fas fa-gear', 'todo:settings'),
@@ -92,7 +97,7 @@ def render_page(
         'task_price': config.task_price,
         'nav': nav,
         'nav_items': nav_items(),
-        'today_count': today_set(request.user).count(),
+        'today_count': today_count(request.user, account),
         'sidebar_filters': saved_filters,
         'sidebar_more': more_filters,
         'show_sidebar_search': True,
