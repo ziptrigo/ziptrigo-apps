@@ -467,6 +467,7 @@ so the delivery job is run by hand.
 | 6 | HTML source. | The title as `Call &lt;b&gt;the&lt;/b&gt; bank &amp; co` (twice); the description rendered: `<strong>Bring</strong>` as a real tag and `&lt;script&gt;alert(1)&lt;/script&gt;` escaped; `<a href="<BASE>/todo/<T_MAIL>/">Open the task</a>` and a "To-do settings" link to `<BASE>/todo/settings/`. A raw `<script>` or `<b>the</b>` is a **FAIL**. |
 | 7 | Click "Open the task", then the settings link. | `/todo/<T_MAIL>/`, whose **History** lists the delivery with "Email"; then `/todo/settings/`. |
 | 8 | (shell step) Run `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"` again; wait a minute. | No second reminder email (a reminder is delivered once). |
+| 9 | (Held reminders, `todo.md` TODO-44) Set the task On hold before step 3, run step 3, then set it back to To do. | No email while it is on hold; after leaving the state **one** email with the same subject and body (a held reminder is sent once, on release). |
 
 ## Cross-checks
 

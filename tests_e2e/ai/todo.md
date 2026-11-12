@@ -4,19 +4,23 @@
 
 The To-do product's web UI (`apps/todo`, issue #161 and its sub-issues): tasks (#178), repeating tasks (#179),
 comments and task references (#180), search and saved filters (#181), reminders (#182), AI date parsing (#183),
-attachments and storage billing (#184), the "Add tasks by email" settings (#186), and the polish of the E2E run
-(#224):
+attachments and storage billing (#184), the "Add tasks by email" settings (#186), task states and resolutions
+(#272) and the polish of the E2E run (#224):
 
-- the sidebar (a search box, then Today with a count, Upcoming, All, Completed, Labels, Trash, Settings, then
+- the sidebar (a search box, then Today with a count, Upcoming, All, Closed, Labels, Trash, Settings, then
   a **Filters** section; a top bar of scrolling rows on phones), the "Tasks are blocked" and "Storage is paused"
   banners;
 - **Today** `/todo/` (the quick-add box with the free-tasks line, the Overdue section with "Reschedule overdue to
   today", today's tasks, drag-and-drop and keyboard order), **Upcoming** `/todo/upcoming/` (14 days, "Nothing due"),
-  **All** `/todo/all/` (sorts and their direction, 50 per page), **Completed**, **Trash**;
+  **All** `/todo/all/` (sorts and their direction, 50 per page), **Closed** `/todo/closed/` (Done and Won't do, a
+  filter), **Trash**;
 - the task page `/todo/<number>/`: inline title edit, the Markdown description (checklists, `#1234` references,
-  links), Complete, Postpone, Move to trash, Restore, Delete forever, then the details (the "Or type a date" box, due
+  links), Complete, Close as won't do, the state chip, Postpone, Move to trash, Restore, Delete forever, then the details (the "Or type a date" box, due
   date, time, priority, labels, repeat), reminders, subtasks (add, complete, reorder), "Referenced by", then,
   outside the panel, **Attachments** and **Comments** (with their own files);
+- task states (To do, In progress, On hold: the chip on rows and the page, quick add, Today and Upcoming grouping and
+  drag order, muted tasks and where they show on Today, held reminders) and resolutions (Done, Won't do with an
+  optional note, the close dialog for a parent with open subtasks, changing a resolution, reopening);
 - repeating tasks (every rule the Repeat popover builds, fixed schedule and from completion, stop repeating, an
   owed next occurrence that blocks creation until a top-up settles it, the open-task cap's notice);
 - comments (add, edit with a visible history, delete and restore, Markdown, files) and "Referenced by";
@@ -164,8 +168,8 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Go to `/` and click **To-do** in the top navigation (check-square icon). | Lands on `/todo/`. Tab title "Today - To-do - ZipTrigo". |
-| 2 | Look at the page. | A sidebar with, from the top: a "Search tasks" box (a `?` help button, **Regex** and **Include completed** checkboxes); Today (highlighted, no count), Upcoming, All, Completed, Labels, Trash, Settings, each with an icon; then a **Filters** heading with "No saved filters". Heading "Today". A quick-add box: a "Add a task" field, an **Add task** button, Date, Time and Priority controls and an "Add labels" button, and the line "0 of 10 free tasks used this month." Below, "Today <weekday date>" with an empty state (check icon, "Nothing due today", "Add a task above."). No Overdue section. No raw `{{ }}`/`{% %}`, broken icons or console errors. |
-| 3 | Click each sidebar entry in turn. | Each page opens with its own heading and a sensible empty state ("No open tasks. Add one above.", "No completed tasks yet.", "The trash is empty.", "No labels yet. Add your first below."); Upcoming shows 14 day headings, the first "Tomorrow, <d Mon>", each with "Nothing due", and a "Later: see all tasks" link; the active entry is highlighted. |
+| 2 | Look at the page. | A sidebar with, from the top: a "Search tasks" box (a `?` help button, **Regex** and **Include closed** checkboxes); Today (highlighted, no count), Upcoming, All, Closed, Labels, Trash, Settings, each with an icon; then a **Filters** heading with "No saved filters". Heading "Today". A quick-add box: a "Add a task" field, an **Add task** button, Date, Time, Priority, State (a select showing "To do") controls and an "Add labels" button, and the line "0 of 10 free tasks used this month." Below, "Today <weekday date>" with an empty state (check icon, "Nothing due today", "Add a task above."). No Overdue section. No raw `{{ }}`/`{% %}`, broken icons or console errors. |
+| 3 | Click each sidebar entry in turn. | Each page opens with its own heading and a sensible empty state ("No open tasks. Add one above.", "No closed tasks yet.", "The trash is empty.", "No labels yet. Add your first below."); Upcoming shows 14 day headings, the first "Tomorrow, <d Mon>", each with "Nothing due", and a "Later: see all tasks" link; the active entry is highlighted. |
 
 ### TODO-03 Quick add
 
@@ -190,7 +194,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Click `Write report` in the list. | `/todo/1000/`: a back link "All tasks"; "#1000"; the title as a heading; then, in this order, a **Description** section with **Edit** and "No description."; the buttons **Complete**, **Postpone**, **Move to trash**; a **Details** section (an "Or type a date" box with the placeholder "Type a date... (every Monday at 9am)", then Date today, Time empty, Priority 1, "Add labels", **Repeat**, **Save**); **Reminders**; a **Subtasks** section with a "New subtask" box; and, at the bottom, **Attachments** and **Comments** (a **Referenced by** section sits between Subtasks and Attachments once another task mentions this one). |
+| 1 | Click `Write report` in the list. | `/todo/1000/`: a back link "All tasks"; "#1000"; the title as a heading; then, in this order, a **Description** section with **Edit** and "No description."; the buttons **Complete**, **Close as won't do**, a state chip ("To do" with a chevron), **Postpone**, **Move to trash**; a **Details** section (an "Or type a date" box with the placeholder "Type a date... (every Monday at 9am)", then Date today, Time empty, Priority 1, "Add labels", **Repeat**, **Save**); **Reminders**; a **Subtasks** section with a "New subtask" box; and, at the bottom, **Attachments** and **Comments** (a **Referenced by** section sits between Subtasks and Attachments once another task mentions this one). |
 | 2 | Click the pencil beside the title, change it to `Write the report`, press the check button. | The heading becomes `Write the report` (the whole panel re-renders; no page reload) and the browser tab title becomes `Write the report - To-do - ZipTrigo`. Press Escape (or the X) while editing instead: it cancels, and opening the editor again shows the saved title, not what you typed. |
 | 3 | Click **Edit** on the description. | A textarea (monospace) with a hint line listing the Markdown syntax (bold, italic, code, headings, lists, checklists, quotes, links, `#1234`). **Cancel** and **Save**. Type something extra and press **Cancel** or Escape: reopening shows the saved text. |
 | 4 | Enter `Plan:` then a blank line, then `- [ ] outline`, `- [ ] draft`, a blank line, `See #1001 and https://example.com and **bold**`; click **Save**. | The description renders: "Plan:", two unchecked boxes (outline, draft), "See" with `#1001` as a link, `https://example.com` as a link, **bold** in bold. |
@@ -204,15 +208,15 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 ### TODO-05 Complete and uncomplete
 
-**Purpose:** completing takes a task off the open lists and puts it in Completed.
+**Purpose:** completing (closing as Done) takes a task off the open lists and puts it in Closed.
 **Preconditions:** TODO-03 done; on `/todo/`.
 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Click the circle beside `Call dentist`. | The row disappears from Today without a reload; the sidebar count drops by one. |
-| 2 | Open **Completed**. | `Call dentist` with a filled circle, struck through, "Completed <date>". |
-| 3 | Click its filled circle (tooltip "Uncomplete"). | The row leaves Completed. Back on Today it is open again. |
-| 4 | Open `/todo/1001/` and click **Complete**. | The panel shows "Completed <date, time>" in green and an **Uncomplete** button instead of Complete/Postpone. Click **Uncomplete**: open again. |
+| 2 | Open **Closed**. | `Call dentist` with a filled circle, struck through, a green "Done" pill and "Closed <date>". |
+| 3 | Click its filled circle (tooltip "Uncomplete"). | The row leaves Closed. Back on Today it is open again, as **To do**. |
+| 4 | Open `/todo/1001/` and click **Complete**. | The panel shows "Done <date, time>" in green and, instead of Complete/Postpone, a **Reopen** button, **Mark as won't do** and no state chip. Click **Reopen**: open again, as To do. |
 
 ### TODO-06 Postpone and reschedule overdue
 
@@ -233,7 +237,7 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 
 ### TODO-07 Subtasks
 
-**Purpose:** subtasks are one level deep, ordered by hand, and completed with their parent after asking.
+**Purpose:** subtasks are one level deep, ordered by hand, and closed with their parent after asking (TODO-46 has the dialog's other choices).
 **Preconditions:** TODO-04 done; open `/todo/1000/` (`T_PARENT`).
 
 | # | Action | Expected result |
@@ -243,10 +247,10 @@ Examples: `todoPick([{ name: 'photo.png', type: 'image/png', base64: PNG_A }])`,
 | 3 | Back on the task page, drag `Sub three`'s handle above `Sub one`. | The order changes at once. Reload: the order is kept. (Keyboard ordering is TODO-24.) |
 | 4 | Click the circle of `Sub one`. | It becomes a filled circle and stays in the list (struck through). The badge on All reads `1/3`. |
 | 5 | Open `Sub two`'s page. | "Subtask of Write report" with a link; no Subtasks section (a subtask has no subtasks). |
-| 6 | On the parent's page click **Complete**. | A dialog "Complete task": "Write report has 2 open subtasks. Completing it completes them too." with **Cancel** and **Complete**. Cancel closes it. (The count is 2 even if the page was loaded before step 4: completing a subtask refreshes the parent's button.) |
-| 7 | Click **Complete** again, then **Complete** in the dialog. | The page reloads showing the parent completed and all three subtasks completed. **Completed** lists all four. |
-| 8 | Uncomplete only `Sub two` (its page or the Completed list). | `Sub two` is open; the parent stays completed. |
-| 9 | Uncomplete the parent. | The parent is open; the other subtasks stay completed. |
+| 6 | On the parent's page click **Complete**. | A dialog "Complete task" ("Write report will be marked as done."): "It has 2 open subtasks:" and three radios, "Close them as Done" (selected), "Close them as Won't do", "Leave them open", with **Cancel** and **Complete**. Cancel closes it (Escape too) and returns the focus to the button. (The count is 2 even if the page was loaded before step 4: completing a subtask refreshes the parent's button.) |
+| 7 | Click **Complete** again, then **Complete** in the dialog ("Close them as Done" selected). | The page reloads showing the parent done and all three subtasks done. **Closed** lists all four, each with a "Done" pill. |
+| 8 | Reopen only `Sub two` (its page or the Closed list). | `Sub two` is open (To do); the parent stays done. |
+| 9 | Reopen the parent. | The parent is open; the other subtasks stay done. |
 
 ### TODO-08 Labels
 
@@ -364,7 +368,7 @@ reaches it (TODO-20 step 6); here it is set from the admin shell.
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/admin/` and find the **To-do** section. | Entries (any order): Attachments, Comments, Inbound emails, Inbound messages, Labels, Recurrences, Reminder deliveries, Reminders, Saved filters, Tasks, To-do accounts, To-do settings (no "Deliverys"). |
-| 2 | Open **Tasks**. | A read-only list (user, number, title, due date, priority, charged credits, unpaid, source) with filters for priority, source, completed, trash and unpaid, and a search box (title, number, email). No "Add" button; opening a task shows no Save button; deleting is refused. |
+| 2 | Open **Tasks**. | A read-only list (user, number, title, state, resolution, due date, priority, charged credits, unpaid, source) with filters for state, resolution, priority, source, closed, trash and unpaid, and a search box (title, number, email). No "Add" button; opening a task shows no Save button; deleting is refused. |
 | 3 | Search `1000`. | The tasks numbered 1000 of every user. |
 | 4 | Open **To-do settings**. | Straight to the one form: free tasks per month (10), task price (10), trash days (30), max open tasks per user (10000), max labels per user (200), max attachment bytes (52428800), max attachments per task (20), max inbound rows per day (500), each with its help text. Change the price to `0`, save; as `qa.user@example.com` the next task beyond the allowance costs nothing. Put it back to 10. |
 | 5 | Open **To-do accounts**. | One row per user who visited, with next task number, "Created this month", "Task creation blocked", stored bytes and "Storage frozen"; opening one shows its email address codes inline (code, active, created, retired), read-only. Filters for blocked and frozen. |
@@ -441,9 +445,9 @@ at step 5 is the 5th of this month, and step 7's new occurrence is due on the 1s
 | 3 | Click **Done**, then **Add task**. | The task is created. It is not on Today (it is due on the 1st, unless today is the 1st); open **All**: the row shows `Pay rent`, the date of the 1st and a repeat icon with "Every month on the 1st". Record the number as `T_RENT`. |
 | 4 | Open `/todo/<T_RENT>/`. | The Date field is the 1st (a rule with no date takes its first date). Below Details: the chip "Every month on the 1st (fixed schedule)" and a **Stop repeating** link. |
 | 5 | Click **Postpone** > **Pick a date**, choose the 5th (of the month the 1st is in). | The Date field is the 5th. The chip still says "Every month on the 1st". |
-| 6 | Click **Complete**. | The task shows Completed, with the note "Uncompleting this task keeps the next occurrence of the repeat if one was already created: nothing is deleted or refunded." |
-| 7 | Open **All**. | A new `Pay rent` (number `T_RENT + 1`) is due on the 1st of the month **after** the one it was due in (not the 5th plus a month), with the same chip. Open **Completed**: the finished one is its own row. |
-| 8 | Open `/todo/<T_RENT>/` and click **Uncomplete**. | It is open again; **All** still lists the next occurrence (two open `Pay rent` rows). Move this older one to the trash with its row's trash icon: with two open occurrences there is no "Also stop repeating" checkbox, it just moves. |
+| 6 | Click **Complete**. | The task shows "Done <date, time>", with the note "Reopening this task keeps the next occurrence of the repeat if one was already created: nothing is deleted or refunded." |
+| 7 | Open **All**. | A new `Pay rent` (number `T_RENT + 1`) is due on the 1st of the month **after** the one it was due in (not the 5th plus a month), with the same chip. Open **Closed**: the finished one is its own row. |
+| 8 | Open `/todo/<T_RENT>/` and click **Reopen**. | It is open again; **All** still lists the next occurrence (two open `Pay rent` rows). Move this older one to the trash with its row's trash icon: with two open occurrences there is no "Also stop repeating" checkbox, it just moves. |
 | 9 | On the newer occurrence's row click the trash icon. | Now the newest is the only open occurrence: a dialog "Move to trash" with an unticked checkbox "Also stop repeating". Tick it and confirm. The row leaves **All**. Open its page from **Trash**: "This task no longer repeats." and no chip. |
 | 10 | Create `Weekly review` with Repeat = Week, ticking Monday and Wednesday, Ends "After a number of times" `2`. | The button reads "Every week on Monday, Wednesday, 2 times". After adding, its date is the next Monday or Wednesday on or after today. |
 | 11 | Open `Weekly review`, click **Stop repeating**. | The chip and the link disappear and "This task no longer repeats." shows; the task stays open. Click **Repeat** > **Week** > **Done** > **Save**: the chip returns ("Every week"). |
@@ -459,7 +463,7 @@ at step 5 is the 5th of this month, and step 7's new occurrence is due on the 1s
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Add `Rotate tires` with today's date, Repeat = **Month**, "Every" `3`, "On" = **The same day of the month**, mode **From completion**. | The label reads "Every 3 months" and the chip after adding says "Every 3 months (from completion)". The task is due today. |
-| 2 | Complete it from Today. | It leaves Today. Open **All**: a new `Rotate tires` due exactly 3 months from **today** (the completion day). Its subtasks (if any were open) are copied; the completed original is in **Completed**. |
+| 2 | Complete it from Today. | It leaves Today. Open **All**: a new `Rotate tires` due exactly 3 months from **today** (the completion day). Its subtasks (if any were open) are copied; the closed original is in **Closed**. |
 | 3 | Open the new task, change Date to a day last week and **Save**, then **Complete**. | The next one is again 3 months from the day you completed it (today), not from the date you edited. |
 | 4 | Create a task `Water plants`, Repeat = **Day**, Ends **On a date** = tomorrow, mode Fixed. Complete it twice. | After the first completion a new one is due tomorrow. After completing that one, no new `Water plants` is created and the last one shows "This task no longer repeats." |
 | 5 | Add a task whose Repeat is **Year**, "On" = **A month and day**, left at day 1, month January. | The label reads "Every year on January 1" (month first; "1 January" for `dd/mm/yyyy`); after adding, the date is the next 1 January on or after today. |
@@ -500,13 +504,13 @@ matter): `Pay the rent` (priority 1, label `Home`, due in 2 days), `Walk the Cã
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look at the sidebar of **Today**. | Above the menu a "Search tasks" box with a `?` button, a **Regex** checkbox and an **Include completed** checkbox; below the menu a **Filters** heading ("No saved filters" for now). On a 375 px wide screen the box sits at the top of the page. |
+| 1 | Look at the sidebar of **Today**. | Above the menu a "Search tasks" box with a `?` button, a **Regex** checkbox and an **Include closed** checkbox; below the menu a **Filters** heading ("No saved filters" for now). On a 375 px wide screen the box sits at the top of the page. |
 | 2 | Type `rent` in the box and press Enter. | `/todo/search/?q=rent`: the heading "Search", the search form with `rent` in it, "2 results" (`Pay the rent` and `Parent 0` -- "rent" inside "parent" --, and no completed task), each row with a line such as "Title: pay the **rent**" where the match is highlighted, and the note "matches shown without accents or formatting". `Old rent receipt` is not listed. |
-| 3 | Tick **Include completed** (in the page's form). | The list refreshes without a page reload and the address bar changes to `...?q=rent&include_completed=1`: 3 results, `Old rent receipt` last, struck through. |
+| 3 | Tick **Include closed** (in the page's form; a "Closed as" select, All / Done / Won't do, appears next to it). | The list refreshes without a page reload and the address bar changes to `...?q=rent&include_completed=1`: 3 results, `Old rent receipt` last, struck through. |
 | 4 | Replace the text with `CAO` (capitals, no accent). | `Walk the Cão` is found ("Title: walk the **cao**"). Try `walk the cão!` too: found. |
 | 5 | Search `big leash`, then `**big**`. | Both find `Walk the Cão` with "Description: take the **big** leash" (the Markdown marks are not part of the text). |
 | 6 | Search `plumber`. | `Walk the Cão` is found with "Comment: the **plumber** called". |
-| 7 | Search `pay*rent`, then `pa?ent`, then `pa.ent`. | `pay*rent` finds `Pay the rent`; `pa?ent` finds `Parent 0` ("pa" + any letter + "ent"); `pa.ent` finds nothing (a dot is not a wildcard) and the list says "Nothing matches. Completed tasks are left out unless you tick Include completed." (the second sentence only while that box is unticked). |
+| 7 | Search `pay*rent`, then `pa?ent`, then `pa.ent`. | `pay*rent` finds `Pay the rent`; `pa?ent` finds `Parent 0` ("pa" + any letter + "ent"); `pa.ent` finds nothing (a dot is not a wildcard) and the list says "Nothing matches. Closed tasks are left out unless you tick Include closed." (the second sentence only while that box is unticked). |
 | 8 | Search `/^pay (the )?rent$/`. | `Pay the rent` only. The slashes alone make it a regular expression. Then type `^pay` with the **Regex** box ticked: `Pay the rent`. Then `/^Pay/` (a capital): also `Pay the rent`, because the letters you type are lower-cased for you. |
 | 9 | Search `/(/`. | A red line "Invalid regular expression." above the results; nothing else changes. Try `/(a)\1/`, `/a(?=b)/`, `/(?>a+)b/`, `/a++b/` and `/(?P<x>a)b/`: the same message. Clear the box and press Search: "Type something to search for." |
 | 10 | Type 201 characters. | The browser stops at 200 characters in the box. |
@@ -527,9 +531,9 @@ reordered and deleted.
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Search `rent*` with **Include completed** ticked and click **Save as filter**. | A dialog "Save as filter" with a Name box focused. |
+| 1 | Search `rent*` with **Include closed** ticked and click **Save as filter**. | A dialog "Save as filter" with a Name box focused. |
 | 2 | Click **Save** with the name empty. | The browser asks to fill in the field; nothing is saved. |
-| 3 | Name it `Rent stuff` and press Enter. | The page goes to `/todo/filters/<id>/` headed "Rent stuff", with a green message "Saved the filter Rent stuff." and the summary `"rent*" · including completed`; the same results as the search. The sidebar's **Filters** now lists `Rent stuff` highlighted, with a count of its **open** tasks (the count appears a moment after the page, not with it). |
+| 3 | Name it `Rent stuff` and press Enter. | The page goes to `/todo/filters/<id>/` headed "Rent stuff", with a green message "Saved the filter Rent stuff." and the summary `"rent*" · including closed`; the same results as the search. The sidebar's **Filters** now lists `Rent stuff` highlighted, with a count of its **open** tasks (the count appears a moment after the page, not with it). |
 | 4 | Save the same search again as `rent stuff` (another case). | The dialog shows "Name: You already have a filter with this name." and stays open. Cancel closes it. |
 | 5 | On the filter's page tick **Priority 1**. | The results refresh, the address bar becomes `/todo/filters/<id>/?q=rent*&include_completed=1&priorities=1&sort=date` and an **Update filter** button appears beside **Save as filter**. Untick it: the button goes away. |
 | 6 | Tick **Priority 1** again and click **Update filter**. | The page reloads at `/todo/filters/<id>/` with "Updated the filter Rent stuff."; the summary now starts `priority 1 ·`; the sidebar count changed. |
@@ -568,7 +572,7 @@ task, and a parent with two open subtasks.
 |---|---|---|
 | 1 | On **Today** complete the only task due today (click its circle). | The row leaves and, without a reload, the empty state appears in its place: a check icon, "Nothing due today", "Add a task above." (after a reload with an overdue task still listed it would read "Nothing else due today"). The sidebar count drops. |
 | 2 | Complete the only overdue task from its circle (or, on a fresh overdue task, use **Reschedule overdue to today** and confirm). | When the Overdue list loses its last task the whole Overdue section disappears (its heading and its button too) without a reload. |
-| 3 | Open **Upcoming**; trash the only task of a day. | That day's list shows "Nothing due" in its place. Do the same on **All** with the last open task: "No open tasks. Add one above."; on **Completed**: "No completed tasks yet."; on **Trash** delete the last one forever: "The trash is empty." |
+| 3 | Open **Upcoming**; trash the only task of a day. | That day's list shows "Nothing due" in its place. Do the same on **All** with the last open task: "No open tasks. Add one above."; on **Closed**: "No closed tasks yet."; on **Trash** delete the last one forever: "The trash is empty." |
 | 4 | On **All** trash the parent that has two open subtasks. | The parent's row **and** both subtask rows leave the list at once. In **Trash** all three are listed; restoring or deleting the parent forever there removes the subtask rows too. A subtask trashed on its own earlier stays listed. |
 | 5 | Trash a parent with subtasks, open **Trash** and restore one subtask (red "Restore the parent task first."), then restore the parent. | The red message is cleared by the successful restore. |
 
@@ -631,7 +635,7 @@ admin context for `/admin/todo/todosettings/`.
 | 5 | `todoPick([{ name: 'photo-2.png', type: 'image/png', base64: PNG_A }])`. | It uploads: 4 files. |
 | 6 | `todoPick([{ name: 'photo-3.png', type: 'image/png', base64: PNG_A }])`. | The row ends in red "✕ A task can have up to 4 files."; the list still has 4. Remove `photo-2.png` (flash "Removed photo-2.png."). |
 | 7 | As admin put the two settings back to `52428800` and `20`. | Saved. The task page's hint is "Up to 50.0 MB each, 20 per task. ..." again. |
-| 8 | **Complete** the task. | The panel shows it completed. After a reload the Attachments section has **no** drop zone or **Add files** (a completed task takes no files), but the files are listed with Download / Open / Remove, and Download still works. The comment form still has **Attach files** (TODO-30). **Uncomplete** it. |
+| 8 | **Complete** the task. | The panel shows it done. After a reload the Attachments section has **no** drop zone or **Add files** (a completed task takes no files), but the files are listed with Download / Open / Remove, and Download still works. The comment form still has **Attach files** (TODO-30). **Reopen** it. |
 | 9 | **Move to trash**, then open the task from **Trash**. | No drop zone; the files are listed with **Download** (it works) and **Remove** (don't use it here). The comments are read-only. **Restore** the task: after a reload the drop zone is back. |
 | 10 | Add a task `Throwaway` (no date), attach `scan.pdf` to it, note the "Files" line in Settings, then move it to the trash. | The Settings line is unchanged by the trash ("Files on tasks in the trash are billed until the trash is emptied"). |
 | 11 | In **Trash** delete `Throwaway` forever and confirm. | "Task deleted."; Settings' "Files" drops by 588 bytes (its file was deleted with it). |
@@ -652,7 +656,7 @@ admin context for `/admin/todo/todosettings/`.
 | 7 | `todoPickComment('comment-text-<that comment's id>', [{ name: 'scan.pdf', type: 'application/pdf', base64: PDF_A }])` (the id is in the comment's `id="comment-<id>"`), wait for the chip, **Save** without changing the text. | The comment now shows `photo.png` and `scan.pdf`, and **no** "(edited)" marker (a change of files only is not an edit of the text). |
 | 8 | Edit again, tick **Remove** next to `photo.png`, **Save**. | Only `scan.pdf` is left under the comment. |
 | 9 | Delete the comment (menu > **Delete**, confirm), **Show** it, then **Restore**. | While deleted its files are not shown; after Restore `scan.pdf` is back under it. |
-| 10 | **Complete** the task and add a comment `done, receipt attached` with `notes.txt` attached. | Allowed: a completed task takes comment files (but no task attachments). **Uncomplete** the task. |
+| 10 | **Complete** the task and add a comment `done, receipt attached` with `notes.txt` attached. | Allowed: a completed task takes comment files (but no task attachments). **Reopen** the task. |
 | 11 | As admin set "Max attachments per task" to the number of files the task has now (its Attachments list plus the files under its comments, deleted comments included), then attach one more file to a new comment. | The upload row ends in red "✕ A task can have up to <n> files." (comment files count toward the task's cap). Put the setting back to `20`. |
 | 12 | Set the window to 375 px wide and dark mode (account page > Appearance). | The chips, the upload rows and the file lines under a comment wrap without horizontal scroll and have dark twins. |
 
@@ -788,8 +792,8 @@ says so in the app.
 | 1 | As `T2` add `Cap repeat` due today, Repeat **Week**. | Created. |
 | 2 | As admin set To-do settings "Max open tasks per user" to `1`. | Saved. |
 | 3 | As `T2` add a task. | Red "Too many open tasks. Complete or delete some to add more."; nothing created. |
-| 4 | **Complete** `Cap repeat`. | It completes, but no new `Cap repeat` appears in **All**. The bell has a notification "Couldn’t create the next “Cap repeat”" saying the next occurrence was not created, usually because of the open-task limit, and how to retry; clicking it opens the completed task. |
-| 5 | As admin put the limit back to `10000`. As `T2`, **Uncomplete** then **Complete** `Cap repeat`. | The next `Cap repeat` is created (due a week after the first). The "Couldn’t create" notification is gone. |
+| 4 | **Complete** `Cap repeat`. | It completes, but no new `Cap repeat` appears in **All**. The bell has a notification "Couldn’t create the next “Cap repeat”" saying the next occurrence was not created, usually because of the open-task limit, and how to retry; clicking it opens the closed task. |
+| 5 | As admin put the limit back to `10000`. As `T2`, **Reopen** then **Complete** `Cap repeat`. | The next `Cap repeat` is created (due a week after the first). The "Couldn’t create" notification is gone. |
 
 ### TODO-38 Markdown rendering
 
@@ -813,7 +817,7 @@ says so in the app.
 |---|---|---|
 | 1 | On **Upcoming** add `In three days` with the date today + 3. | It appears under that day's heading without a reload; the box is cleared. The free-tasks line is under the box. |
 | 2 | On **Upcoming** add `No date here` with no date. | Created (it shows on **All**, not on Upcoming). |
-| 3 | On **All** (heading "All tasks") add `From All`. | It appears in the list in its sorted place. **Completed** and **Trash** have no quick-add box. |
+| 3 | On **All** (heading "All tasks") add `From All`. | It appears in the list in its sorted place. **Closed** and **Trash** have no quick-add box. |
 
 ### TODO-40 A reminder pushed to a phone: Complete and Snooze
 
@@ -832,7 +836,7 @@ push configured on this server (NOTIF-20's preconditions: without it the endpoin
 | 4 | **(shell step)** `curl -s -X POST http://localhost:8765/push/action/ -H 'Content-Type: application/json' -d '{"token": "<TOKEN_1>", "action": "snooze"}'` | `{"message": "Snoozed until H:MM AM/PM."}` with the time an hour from now on your clock (another day: "Snoozed until Thu Oct 29, 9:15 AM." style; always the public wording, whatever the account's format). |
 | 5 | Open `/todo/<T_PLANT>/`. | The reminder reads "Snoozed until" and that date and time. **History** lists a "Push" row. |
 | 6 | Step 4 again with `"action": "complete"`. | An empty answer (`204`): the first answer to a push is kept, and the task is still open. |
-| 7 | Step 3 again (a new token, `TOKEN_2`), then step 4 with `TOKEN_2` and `"action": "complete"`. | `{"message": "Completed."}`; the task page shows the task completed. |
+| 7 | Step 3 again (a new token, `TOKEN_2`), then step 4 with `TOKEN_2` and `"action": "complete"`. | `{"message": "Completed."}`; the task page shows the task done. |
 | 8 | Step 3 again (`TOKEN_3`; the task is completed), then step 4 with `TOKEN_3` and `"action": "snooze"`. | `{"message": "Already completed."}`; nothing changes. |
 | 9 | Move the task to the Trash, step 3 again (`TOKEN_4`) and step 4 with `"action": "complete"`. | `{"message": "This task is in the Trash."}`. |
 | 10 | Set **Snooze for** back to "15 minutes" and Save. | Saved. |
@@ -863,6 +867,132 @@ unambiguous, pick a "next November 5" in step 4 if today is near it). `<Y>` is t
 | 12 | Open a comment's time (add one on any task; hover its relative time). | The tooltip reads `<MM/DD/YYYY>, <h:mm AM/PM>` (or `DD/MM/YYYY, HH:MM` with the other format) in the browser's time zone. |
 | 13 | **Settings > Default due time**: the box shows `9:00 AM` (`09:00` on a 24-hour account). Reminder history (`/todo/reminders/history/`). | Times written in the account's format. The reminder email of TODO-32 and the bell notification are the public wording in both formats. |
 | 14 | Restore `mm/dd/yyyy` and `12-hour`. | - |
+
+### TODO-42 Task states: the chip, quick add and independence
+
+**Purpose:** an open task is To do, In progress or On hold; the state is set from a row's chip, the task page and
+quick add; a parent and its subtasks have their own.
+**Preconditions:** logged in as `qa.user@example.com` on `/todo/`; TODO-07 done (`Write report` is `T_PARENT` and
+`T_REPORT`, its subtasks `Sub one` to `Sub three`, open: Reopen any that are closed). Today is `<today>`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | In the quick-add box look at the **State** select. | Options "To do" (selected), "In progress", "On hold". |
+| 2 | Add `State doing` due today with State **In progress**, and `State paused` due today with State **On hold**. | Both are added. Their rows show a pill: "In progress" (blue, half-filled circle) and "On hold" (grey, pause icon), each with a small chevron. `State paused`'s title is grey (not struck). A plain task shows "To do". |
+| 3 | Click the pill on `Write report`'s row. | A menu (named "State of Write report") with "To do" (ticked), "In progress", "On hold". Escape closes it and returns the focus to the pill. |
+| 4 | Open it again and choose **In progress**. | The whole Today list refreshes: `Write report` moves above the To do tasks of its day (groups: In progress first, then To do, then On hold); its pill reads "In progress". The sidebar count is unchanged. |
+| 5 | Open `/todo/<T_REPORT>/`: next to **Close as won't do** there is the state chip ("In progress"). Open it and choose **On hold**. | The panel re-renders without a page reload; the chip reads "On hold" and a note says "This task is on hold: it is shown dimmed, never as overdue, and its reminders wait. Set it to To do or In progress to get one reminder for what you missed." |
+| 6 | Open the page of `Sub one` and set it **In progress**; reopen `/todo/<T_REPORT>/`. | The parent is still On hold and `Sub one` In progress: nothing propagates either way. Set the parent back to **To do**. |
+| 7 | Open **All**. | Same order as before the states (by due date, then the usual order: states do not change All). Every open row has its state pill. |
+| 8 | Complete `State doing` and open **Closed**. | Its row has no state pill; reopen it from its circle: it is open again as **To do** (not In progress). |
+| 9 | Send `POST /todo/<T_REPORT>/state/` with `state=blocked` (browser console: `fetch('/todo/<T_REPORT>/state/', {method: 'POST', headers: {'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)[1], 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded'}, body: 'state=blocked&ctx=page'}).then(r => r.status)`). | `422`; the page's message slot would read "State: Choose To do, In progress or On hold." and nothing changes. |
+| 10 | Complete `Write report`'s subtask `Sub two` from the task page, then open `Sub two` and try its state chip. | A closed task has no chip; `fetch` the same URL for `Sub two` with `state=on_hold`: 422 "Reopen the task before changing its state." |
+| 11 | As another account (`qa.broke@example.com`) request `/todo/<T_REPORT>/state/`. | 404. |
+
+### TODO-43 On hold tasks: never overdue, never rescheduled, where they show on Today
+
+**Purpose:** a muted (On hold) task is dimmed, never red, never moved by "Reschedule overdue", and the Settings choice
+decides where it shows on Today.
+**Preconditions:** TODO-42 done; no other overdue tasks (move or complete them); Today is `<today>`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Add `Late todo` and `Late hold` with yesterday's date; set `Late hold` to **On hold** from its chip. Open **Today**. | An **Overdue** section: `Late todo` (red date, "(overdue)" for screen readers) first, then `Late hold` at the bottom, dimmed with a **grey** date (not red, no "(overdue)"). The sidebar count beside Today counts both. |
+| 2 | Click **Reschedule overdue to today**. | The dialog says "Move the date of 1 overdue task to today? Their times stay. Tasks that are on hold stay where they are." Confirm: `Late todo` moves to Today; `Late hold` stays in Overdue with yesterday's date (also open it: its date is unchanged). |
+| 3 | Complete `Late todo` (so only `Late hold` is overdue). Open Today. | The Overdue section lists only `Late hold` and has **no** Reschedule button (nothing it could move). |
+| 4 | **Settings > On hold tasks on Today** shows "When an On hold task is overdue" with "Today, dimmed" (selected), "Hidden from Today", "Own section". Choose **Hidden from Today** and **Save**. | "Saved." Open Today: `Late hold` is not on the page and the sidebar count no longer counts it; it is still on **All** with a grey date. |
+| 5 | Choose **Own section**, Save, open Today. | At the bottom of Today a collapsed section "On hold & blocked (1)"; expanding it (click, Enter or Space on the summary) lists `Late hold`. The Overdue section is gone. The sidebar count excludes it. |
+| 6 | Set `Late hold`'s date to today (Details > Save). Open Today with each of the three settings. | It is in Today's list, in the On hold group (at the bottom of the day), in every setting. |
+| 7 | Send `POST /todo/settings/` with `default_due_time=09:00&muted_overdue=nowhere` (console, as TODO-42 step 9). | `422` and the message "On hold and overdue: Choose Today (dimmed), Hidden from Today or Own section." Nothing saved. Restore "Today, dimmed". |
+| 8 | **Search** `/todo/search/`, choose **Due date > Overdue**. | `Late hold` is not listed (a muted task is never overdue). |
+| 9 | In dark mode and at 375 px wide check the pills, the dimmed rows and the collapsed section. | Readable text (the dimmed title is grey-500 on white), no horizontal scroll. |
+
+### TODO-44 Reminders are held while a task is on hold
+
+**Purpose:** a reminder due while the task is muted waits; leaving the state sends one reminder on the channels the
+held ones used, and marks them skipped.
+**Preconditions:** signed in as `T2` (TODO-27; it has a confirmed email), a shell (without one mark this case
+**BLOCKED (needs-setup)**); `T2` has push on or not (push is only checked when set up, see TODO-40).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Add `Held reminder` due today at 23:30 (use tomorrow after 23:00), set it **On hold** from its chip. Its default reminder is "5 minutes before (in-app)"; add **1 hour before** with channel **Email** and **At time of task** with channel **Both**. Record `T2_HELD`. | Three reminders listed. |
+| 2 | (shell step) Make them all due: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.todo.models import Reminder; print(Reminder.objects.filter(task__user__email='<T2>', task__number=<T2_HELD>).update(fire_at=timezone.now() - timedelta(minutes=2), sent_at=None))"` (prints `3`), then `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"`. | No error. As `T2` the bell has **no** notification and `/__e2e__/mail/?to=<T2>` shows no email. On the page the reminders still say "Fires ...", none "Sent". |
+| 3 | (shell step) Make them very old (`fire_at` 5 hours ago, `created_at` 6 hours ago) and run `send_reminders()` again. | Still nothing: the stale sweep leaves a muted task's reminders alone (no "Skipped"). |
+| 4 | On `/todo/<T2_HELD>/` change the state to **To do**. | The panel re-renders. The bell gets **one** notification titled `Held reminder` ("Due <date>, 11:30 PM") and `/__e2e__/mail/?to=<T2>` one email "Reminder: Held reminder" (the union of the held channels: in-app and email, each once, not one per reminder). All three reminders say "Skipped <date, time>" and **History** lists two rows, "In-app" and "Email" (plus "Push" when a device has push on). |
+| 5 | Set it **On hold** again, then **In progress** straight after (shell: make a new reminder due first if needed). | Leaving On hold for In progress releases too (nothing is held now, so nothing is sent). Moving between To do and In progress never sends anything. |
+| 6 | Add `Held and closed` with a default reminder, set it **On hold**, make its reminder due (as in step 2), run `send_reminders()`, then **Complete** it and make the reminder old (step 3). Run `send_reminders()`. | Closing does not release anything (no notification, no email). The old reminder ends as "Skipped" by the ordinary rule once the sweep runs. |
+| 7 | Trash a muted task with a due reminder, make it old and run `send_reminders()`. | Nothing is delivered; the reminder is swept as skipped (a trashed task follows the ordinary rules). |
+
+### TODO-45 Today and Upcoming: grouped by state, dragged inside a group
+
+**Purpose:** within each day In progress comes first, then To do, then On hold; Today's manual order only exists
+inside a group, by mouse and by keyboard.
+**Preconditions:** logged in as `qa.user@example.com`; today has no tasks (move or complete them); then add, due
+today: `G1` (To do), `G2` (To do), `G3` (To do), `P1` (In progress), `P2` (In progress), `H1` (On hold), `H2` (On hold),
+and due tomorrow `UH` (On hold), `UT` (To do), `UP` (In progress).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open **Today**. | Order: `P1`, `P2`, `G1`, `G2`, `G3`, `H1`, `H2` (the usual order inside each group: oldest first). Each row has `data-group` in the DOM (`in_progress`, `todo`, `muted`). |
+| 2 | Open **Upcoming**. | Under tomorrow: `UP`, `UT`, `UH`. |
+| 3 | Drag `G3`'s grip above `G1`. | `G3` goes first **among the To do rows**; reload: kept, and the groups are still In progress, To do, On hold. |
+| 4 | Try to drag `G3` above `P1` (into the In progress group) and below `H1`. | The row cannot be dropped there: it stays inside the To do group. |
+| 5 | Focus `G3`'s handle and press the up arrow until it is first in its group, then once more. | Each press moves it one place and announces "G3 moved to position <n> of 7."; at the top of its group the next press announces "G3 is already first in its group." and moves nothing. Down arrows at the bottom of its group: "G3 is already last in its group." |
+| 6 | Set `G2` to **In progress** from its chip. | The list refreshes and `G2` is in the In progress group, after `P1` and `P2` (the end of the group, since Today has a manual order). |
+| 7 | Add `New one` due today (State To do) with the manual order in place. | It is the last To do row (not above the older ones). |
+| 8 | Open **All**, **Search** `*`, and a saved filter. | Their order is unchanged by states (All: by due date and the usual order; search by its sort). |
+
+### TODO-46 Close as won't do, and closing a parent with open subtasks
+
+**Purpose:** "Close as won't do" lives on the task page with an optional note that becomes a comment; closing a
+parent asks what to do with its open subtasks; a closed task's resolution can be changed; a won't do row has a
+crossed circle.
+**Preconditions:** logged in as `qa.user@example.com`; `Write report` (`T_REPORT`) with three open subtasks (TODO-07;
+reopen them) and no comments; a task `Plain` (no subtasks).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look at a **row** of `Plain` on Today/All. | No "won't do" button anywhere on a row (the circle completes; the state pill and Postpone are the only other actions besides the trash). |
+| 2 | Open `/todo/<Plain>/` and click **Close as won't do**. | A dialog "Close as won't do" ("Plain will be closed as won't do."), a **Note (optional)** textarea ("Why won't this be done?", focused), "A note is added to the task as a comment.", **Cancel** and **Close as won't do**. No subtask question (it has none). Escape closes it and returns the focus to the button. |
+| 3 | Open it again, type `Not worth the trouble`, click **Close as won't do**. | The page reloads on the task: "Won't do <date, time>" (grey, crossed-circle icon), a **Reopen** button and **Mark as done**; the **Comments** section has a comment `Not worth the trouble` by you. |
+| 4 | Open **Closed**. | `Plain` with a crossed circle, a struck-through title, a grey "Won't do" pill and "Closed <date>". Click the crossed circle (tooltip "Reopen"): the row leaves Closed; `Plain` is open as **To do**. |
+| 5 | Close `Plain` as won't do again with an **empty** note, then in the dialog of another task paste a note of 10,001 characters and send. | No comment is added for the empty one. For the long one the page returns with the message "Note: Note is too long (at most 10,000 characters)." and the task is still open (the textarea stops typing at 10,000: `maxlength`; send it with the console as in TODO-42 step 9 to see the message: `POST /todo/<n>/wont-do/` with `note=<10,001 x>&ctx=page` answers 422). |
+| 6 | On `Plain`'s page (closed as won't do) click **Mark as done**. | The panel says "Done <time>" (the time it was closed at is unchanged), the buttons are **Reopen** and **Mark as won't do**; no new comment, no new task. Click **Mark as won't do**: back. |
+| 7 | Open `Write report`'s page and click **Complete**. | The dialog "Complete task" with the three radios of TODO-07 step 6. Choose **Leave them open** and **Complete**: the parent is Done, the three subtasks are still open (rows in its Subtasks list, not struck). |
+| 8 | Reopen the parent. Click **Close as won't do**. | The dialog has the note box **and** "It has 3 open subtasks:" with the radios. Choose **Close them as Won't do**, type a note and confirm: the parent and all three subtasks are "Won't do" (crossed circles in the Subtasks list); the note is a comment on the parent only. |
+| 9 | Reopen all four. On **All**, click the circle of the parent (it has open subtasks). | The same close dialog opens (not the old confirmation) with "Close them as Done" selected; confirm: parent and subtasks leave All and are in **Closed** as Done. |
+| 10 | Reopen them. On a **repeating** task (`Pay rent`, TODO-19) use **Close as won't do**. | The next occurrence is created exactly as on Complete (due on schedule) and starts **To do**; the closed one is Won't do. Use **Mark as done** on the closed one: **no** second occurrence appears. |
+| 11 | Push: (TODO-40 step 4 with `"action": "complete"`) on a parent with open subtasks. | `{"message": "Completed, with 2 open subtasks."}`: the subtasks are Done, not Won't do; there is no won't do button on a push. |
+| 12 | Console: `POST /todo/<Plain>/resolution/` with `resolution=maybe&ctx=page` on a closed task, then with `resolution=done` on an **open** task. | 422 "Resolution: Choose Done or Won't do." and 422 "Only a closed task has a resolution to change." Another user's task number: 404 for `/wont-do/`, `/resolution/`, `/complete/` and `/state/`. |
+
+### TODO-47 The Closed page
+
+**Purpose:** the Completed page became Closed: both resolutions, each row says which, a filter.
+**Preconditions:** TODO-46 done: at least one task closed as Done and one as Won't do; one open task.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open **Closed** in the sidebar. | `/todo/closed/`, heading "Closed", tab title "Closed - To-do - ZipTrigo". Tabs "All" (current), "Done", "Won't do" with a sliding underline. Both kinds of task are listed, newest closed first; a Done row has a filled circle and a green "Done" pill, a Won't do row a crossed circle, a struck-through title and a grey "Won't do" pill; both show "Closed <date>". The open task is not listed. |
+| 2 | Click **Won't do**. | The list refreshes without a reload; the address bar becomes `/todo/closed/?resolution=wont_do`; only Won't do tasks. **Done** shows only Done. Reload keeps the filter. With nothing in a tab: "No tasks closed as done yet." / "No tasks closed as won't do yet." |
+| 3 | Open `/todo/completed/` and `/todo/completed/?resolution=done`. | Redirected to `/todo/closed/` and `/todo/closed/?resolution=done`. Logged out, `/todo/completed/` goes to the login page. |
+| 4 | Open `/todo/closed/?resolution=junk`. | Treated as All. |
+| 5 | Page through (more than 50 closed tasks, if present) with a filter on. | The pager keeps `resolution`. |
+
+### TODO-48 Search and saved filters: state and resolution
+
+**Purpose:** search and saved filters can select open states and the resolution of closed tasks.
+**Preconditions:** TODO-42 to TODO-47 done (open tasks in each state, closed tasks of both resolutions).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/todo/search/`. | The filter bar has a **State** group (To do, In progress, On hold) next to Priority and Labels, and **Include closed** (renamed) in the switches row. The "Closed as" select is hidden. |
+| 2 | Tick **On hold**. | The list refreshes; the address bar gets `states=on_hold`; only On hold tasks. Tick **In progress** too: both (any of them). Nothing else selected is not required for results (a state alone is a criterion). |
+| 3 | Tick **Include closed**. | A "Closed as" select appears (All, Done, Won't do). The results add every closed task (a state filter does not narrow closed tasks). Choose **Won't do**: only won't do closed tasks are added (the open ones are still the selected states); the URL has `include_completed=1&resolution=wont_do`. Untick **Include closed**: the select hides and `resolution` leaves the URL. |
+| 4 | With **On hold** and **Include closed** > **Won't do** ticked, click **Save as filter**, name it `Paused or skipped`. | The filter's page summary reads `state on hold · including won't do`; the sidebar lists it with a count of its **open** tasks. |
+| 5 | Open the filter, change the state to **To do**, click **Update filter**. | Saved; the summary changes. Reopening from the sidebar shows the saved criteria in the form. |
+| 6 | Search for a term that matches nothing (`zzzz`). | "Nothing matches. Closed tasks are left out unless you tick Include closed." |
+| 7 | The sidebar search box. | Its checkbox reads **Include closed**. |
 
 ---
 

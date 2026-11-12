@@ -49,8 +49,8 @@ apps/short_url/       Short URLs (issue #162): links with editable destinations,
                       tooling, one-off billing of its extras, dashboard/stats pages, the JWT API
                       (`/api/s/`) and the `admin/shorturl.py` CLI (see "Short URLs").
 apps/todo/            To-do (issue #161, foundation #178): tasks and subtasks with per-user numbers
-                      from 1000, labels, due dates in the user's time zone, Today / Upcoming / All /
-                      Completed / Trash pages, task billing (a monthly free allowance, then a price),
+                      from 1000, labels, due dates in the user's time zone, task states and
+                      resolutions (#272), Today / Upcoming / All / Closed / Trash pages, task billing (a monthly free allowance, then a price),
                       tasks added by email, the JWT API (`/api/todo/`) and the `admin/todo.py` CLI
                       (see "To-do").
 admin/                Typer CLIs for lint/test/server/pip/api/aws/email/users/qrcode/filetransfer/
@@ -3757,14 +3757,15 @@ Layout like `receipts`: `models/`, `services/`, `views/`, `forms/`, `api/`, `sch
 
 `apps.todo` (issue #161, foundation #178; app label `todo`) is a task manager in the spirit of
 Todoist: tasks with a Markdown description, a due date with an optional time, a priority, labels
-and subtasks one level deep, shown on Today / Upcoming / All / Completed / Trash pages. A product
+and subtasks one level deep, shown on Today / Upcoming / All / Closed / Trash pages. A product
 (same layer as `qr_code`/`file_transfer`/`receipts`/`short_url`), logged-in users only. **Built so
 far:** the foundation (this section), repeating tasks (#179, "Recurrence"), comments with task
 references (#180, "Comments and references" below), search with saved filters (#181, "Search and
 saved filters" below), attachments (#184, "Attachments and storage billing" below), reminders
 (#182, "Reminders" below), AI date parsing in the title (#183, "AI date parsing" below) and tasks
-added by email (#186, "Email intake" below) and the JWT API with the `inv todo` CLI (#187, "API and
-CLI" below).
+added by email (#186, "Email intake" below), the JWT API with the `inv todo` CLI (#187, "API and
+CLI" below) and task states and resolutions (#272, part 1 of 4 of #271, "States and resolutions"
+below; blockers, the activity log and the API/CLI/Android change are #273 to #275).
 Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, `templatetags/`,
 `templates/todo/`, `static/todo/`, `jobs.py`, `admin.py`, `checks.py`, `urls.py` (mounted at
 `/todo/`, `app_name = 'todo'`).
@@ -3840,13 +3841,15 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   the date is cleared, lets a task move under a parent only when it has no subtasks of its own (decided inside the
   write's transaction with the task and the new parent locked, `select_for_update` in pk order, so
   two concurrent moves can't leave two levels of nesting), and refuses a trashed task. A date
-  change resets `today_position`. `complete_task` is a conditional write (`completed_at IS NULL`) that also
-  completes the open, non-trashed subtasks in the same transaction (the web asks first, see below;
-  `complete_task` also creates the next occurrence of a repeating task, see "Recurrence"); `uncomplete_task` leaves a subtask's parent as it is.
+  change resets `today_position`. `complete_task` is "close as Done" (`close_task`, see "States and
+  resolutions"): a conditional write (`completed_at IS NULL`) that also completes the open, non-trashed
+  subtasks in the same transaction by default (the web asks first, see below; it also creates the next
+  occurrence of a repeating task, see "Recurrence"); `uncomplete_task` leaves a subtask's parent as it is.
   `postpone_task(task, preset=, date=)`: `tomorrow`, `next_week` (the next Monday *after* today,
   so on a Monday it means in 7 days), `next_weekend` (the next Saturday after today, on a Saturday
   in 7 days), `date` (today or later), "today" being the owner's, keeping the time; a task without a
-  date gets one. `reschedule_overdue(user)` sets `due_date` to today on every open overdue task.
+  date gets one. `reschedule_overdue(user)` sets `due_date` to today on every open overdue task that is not
+  muted (On hold).
   `trash_task` stamps the task and its not-yet-trashed subtasks with **one** `deleted_at`;
   `restore_task` clears it on the task and the subtasks with that same value (a subtask trashed on
   its own stays trashed) and refuses a subtask whose parent is still trashed; `delete_forever`
@@ -3869,7 +3872,9 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   URL a reference too; comments render through both (see "Comments and references").
 - **Ordering** (`services/dates.py`). The default sort, in every list: due date ascending with
   undated last, then date-only before timed, then the time, then priority (1 first, none last),
-  then oldest; done in the database (`order_tasks`, so pagination works). `?sort=` on All:
+  then oldest; done in the database (`order_tasks`, so pagination works). **Today and Upcoming (issue #272)
+  group each day by state first** (In progress, To do, muted: `dates.order_grouped`, see "States and
+  resolutions"); the API keeps this plain order. `?sort=` on All:
   `priority` (then date), `created` (newest), `title` (the normalised title). **`?dir=asc|desc` reverses it** (`dates.sort_direction`; each sort has a default: `date`, `priority` and `title` ascending, `created` descending; `order_tasks(qs, sort, direction)` returns the exact reverse of the default order for the opposite direction, ties included, and an unknown `dir` means the default). The "Sort by" bar (`views.lists.sort_links`) links the active sort to the opposite direction, so a second click reverses it, shows a small up/down arrow (with an `sr-only` "sorted ascending/descending") on it, and writes `dir` into the URL only when it isn't the sort's default. Only the All page has the bar; the search page's sort `<select>` is unchanged. **Manual order exists
   in two lists only, each with its own column**, so ordering one never changes the other: Today
   (the tasks due *today*, subtasks included; the overdue ones keep the default sort above them) in
@@ -3923,8 +3928,9 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   `HX-Retarget` to the slot of the control that was used (`#quick-add-msg`, `#task-msg`,
   `#subtask-msg`, `#label-msg`, `#settings-msg`, else `#todo-msg`); `InsufficientCreditsError` is a
   422 with a Top up link to `billing:credits-history`. A parent with open subtasks asks first: its
-  circle and its Complete button open the shared `confirmModal` (plain POST, so the redirect-back
-  path above), no script of its own. The Postpone menu is Alpine in the template.
+  circle and its Complete button open the close dialog (plain POST, so the redirect-back path above;
+  see "States and resolutions"), which replaced the shared `confirmModal` question. The Postpone menu
+  is Alpine in the template.
   `static/todo/js/tasks.js` (deferred, wired through `htmx.onLoad` so it covers swapped-in HTML)
   enables the description's checklist boxes (the server renders them `disabled`; a change posts to
   the block's `data-checklist-url`) and makes `[data-sortable]` lists sortable by their
@@ -4076,7 +4082,7 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
     since an empty `rrule` means "does not repeat"). Month offers the same day of the month, a day,
     the last day, or the nth weekday; year a month and day or the same date. Rows and the task
     page show `{% repeat_chip task %}` (`fas fa-repeat`, the sentence, the mode: always on the page,
-    in a row only for "from completion", the mode name as the tooltip); Completed lists each
+    in a row only for "from completion", the mode name as the tooltip); Closed lists each
     occurrence as its own row. The 422 for a bad rule is `Repeat: Unsupported repeat rule.`.
   - **Admin**: read-only `RecurrenceAdmin`; `TaskAdmin` lists `recurrence`. Tests:
     `apps/todo/tests/test_recurrence.py`; the AI plan has TODO-19 (fixed) and TODO-20 (from
@@ -4088,6 +4094,127 @@ Layout like `receipts`/`short_url`: `models/`, `services/`, `forms/`, `views/`, 
   references") and the AI plan `tests_e2e/ai/todo.md`. A test that needs a fixed day
   uses the `wednesday`/`freeze_now` fixtures (`timezone.now` is replaced), billing tests the
   `config` fixture (2 free tasks, price 5).
+
+#### States and resolutions
+
+Issue #272 (part 1 of 4 of #271; spec `docs/todo-task-states.md`; migration `0011_task_states`).
+Blockers (#273, which adds the fourth, muted *Blocked* state), the activity log (#274) and the
+API/CLI/Android change (#275) are not here.
+
+- **Model.** `Task.state` (`TaskState`: `todo`, `in_progress`, `on_hold`; default `todo`, `db_default`
+  too: the #102 lesson, the old container keeps inserting while `0011` runs) is what an *open* task is
+  doing. `Task.resolution` (`Resolution`: `done`, `wont_do`; `''` while open, `db_default` too) is how a
+  *closed* one was closed. **`completed_at` keeps meaning "closed at" for both**, so the API and every
+  reader of it keep working, and `Task.is_open` / `is_completed` are unchanged. There is deliberately
+  **no database constraint** tying `resolution` to `completed_at`: a container serving during a deploy
+  writes `completed_at` alone, so a closed task with no resolution **reads as Done** (`is_wont_do` is
+  the only test, `dates.closed_set(user, 'done')` excludes `wont_do` rather than matching `done`).
+  `0011` marks every already completed task Done (`mark_completed_as_done`, reversible as a no-op; the
+  rows' state is To do through the column default). `models.MUTED_STATES` (`{on_hold}`) is the one place
+  that says which states are muted; #273 adds `blocked` to it. `Task.is_muted`, `Task.state_group`
+  (`in_progress`, `todo`, `muted`: how Today and Upcoming group a day, and what a drag stays inside) and
+  `Task.is_overdue` (false for a muted task) read it. `TodoAccount.muted_overdue` (`MutedOverdue`:
+  `dimmed` default, `hidden`, `section`; `db_default` too) is the To-do setting below.
+- **Services** (`services/tasks.py`). `close_task(task, resolution=DONE, *, subtasks='done', note='')`
+  closes in one transaction: a conditional `UPDATE` on `completed_at IS NULL` writes `completed_at`,
+  `resolution` and resets `state` to To do (a closed task has no state; reopening sets To do too), then
+  `recurrence.on_completed` -- **whatever the resolution**: Won't do means "skip this one", so the next
+  occurrence is created and billed exactly as on Done and starts To do (a changed resolution later
+  never triggers it) -- then the open, non-trashed subtasks per `subtasks` (`done`, `wont_do`, or
+  `leave`; `SUBTASK_ACTIONS`; nothing said is `done`, which is what the circle, the push notification's
+  Complete button and `POST /api/todo/tasks/{n}/complete` do, so where nobody can be asked Done closes
+  them as Done) and, for a non-empty `note`, `comments.add_comment` (its rules; the length is checked
+  up front by `clean_note`, so a refusal writes nothing, and the note is dropped when the task was
+  already closed). A closed task is left as it is. `complete_task(task, *, subtasks='done')` is
+  `close_task(task, DONE, ...)`. `set_resolution(task, resolution)` changes how a *closed* task was closed
+  ("Only a closed task has a resolution to change." for an open one): no occurrence, no subtasks touched,
+  `completed_at` kept. `uncomplete_task` clears the resolution and sets To do. `set_state(task, state)`
+  is for an open, non-trashed task (a closed one: "Reopen the task before changing its state."; an
+  unknown state: "Choose To do, In progress or On hold."), under the row lock, a no-op for the same state;
+  parent and subtask states are independent (nothing propagates). A task due today that changes state
+  goes to the end of Today's manual order (`next_today_position`). `create_task(state=...)` (To do by
+  default, whatever the source; the quick-add box's State select posts it, `TaskForm.requested_state()`,
+  which `changes()` leaves out because `update_task` doesn't take it).
+- **Muted tasks.** A muted task is dimmed (grey title, not struck), never shown overdue (no red badge,
+  `due_badge` reads `is_overdue`) and never moved by "Reschedule overdue to today"
+  (`dates.overdue_set` leaves them out; `dates.muted_overdue_set` is the other half). **Where a muted
+  *overdue* task shows on Today is `TodoAccount.muted_overdue`** (settings page, "On hold tasks on Today";
+  `set_muted_overdue`): `dimmed` (the bottom of Overdue, after the movable ones, which the reschedule
+  button and its question count alone), `hidden` (not on Today), `section` (a collapsed `<details>`
+  "On hold & blocked (N)" at the bottom of Today, the spec's wording, with #273 in mind). A muted task due
+  *today* stays in Today's list in its group whatever the setting. `dates.today_count(user, account)`
+  (the number beside Today; replaces `today_set(...).count()` in the views) leaves muted overdue tasks
+  out unless they are shown dimmed. The search "overdue" date range leaves them out too.
+- **Held reminders** (`services/reminders.py`; see its module docstring). `deliver_due` skips a muted
+  task's reminders (they stay unsent, due) and `sweep_stale` does not sweep them while the task is open
+  and muted. Leaving a muted state (`set_state`, in its transaction) calls `reminders.release_held(task)`:
+  **one** reminder for the task, on the union of the channels the held (unsent, already due) reminders
+  used (`in_app`, `email` or `both`; in-app brings its push), delivered through `_deliver` with a channel
+  override as a delivery of the earliest held one (email dedupes on a fresh `fire_token`), and **every**
+  held reminder marked sent and `skipped`; reminders still ahead stay armed. A delivery that raises is
+  rolled back in its own savepoint and logged: the state change stands and the reminders stay unsent for
+  the job. A task that is *closed* (closing resets the state) or *trashed* while muted follows the
+  ordinary rules (the job skips it, the sweep ends the old reminders). Nothing is released by closing.
+- **Sorting.** `dates.order_grouped(queryset, today, manual=False)` is the order of Today and Upcoming:
+  due date, then within a day **In progress, To do, muted** (`dates.state_rank`), then the usual order
+  (time, priority, oldest); with `manual` the ones due today follow `today_position` *inside* their group
+  (the group comes first, so a position only ever competes with its own group). The Today page renders one
+  sortable list whose rows carry `data-group`; core's `initSortableList` gained a `canMove(item, other)`
+  option (SortableJS `onMove` and the arrow keys, announcing "already first/last in its group") that
+  `tasks.js` sets for `data-scope="today"`, so a drag never moves a row into another group; changing a
+  state re-renders the whole list (`HX-Retarget: #task-list`) so the row lands in its group. `order_today`
+  and `order_tasks` are untouched (the API uses them); All, filters and search are unchanged.
+- **Web.** `partials/state_menu.html` is the state chip (`{% state_pill task %}`: To do / In progress /
+  On hold, with `todo_ui._STATE_STYLE`) and its Alpine menu (`role="menu"`, `menuitemradio`), on every
+  open row and on the task page; it posts `todo:set-state` (`POST /todo/<n>/state/`, `StateForm`, a
+  `ctx=row` answer is the row, or the whole list on Today and Upcoming; `ctx=page` the panel; 422 for an
+  unknown state or a closed task; `TODO_EDIT_USER` charged after validation; 404 for another user's task).
+  **Closing.** `POST /todo/<n>/complete/` takes an optional `subtasks`; `POST /todo/<n>/wont-do/`
+  ("Close as won't do", **the task page only**: no row button, no push button) takes `note` and
+  `subtasks`; `POST /todo/<n>/resolution/` (`resolution=done|wont_do`) is "Mark as done" / "Mark as won't
+  do" on a closed task's page; `uncomplete` is "Reopen". All share `CloseForm` / `ResolutionForm` and
+  `views.tasks._close`, charge `TODO_EDIT_USER`, and remove the closed subtasks' rows out of band.
+  **The close dialog** (`partials/close_dialog.html`, `static/todo/js/close_dialog.js`, one per page in the
+  layout; opened by `todoOpenCloseDialog(button)` reading `data-url`, `data-mode`, `data-ctx`, `data-title`,
+  `data-count`) replaced the `confirmModal` question for a parent with open subtasks (the row circle and
+  the page's Complete button): "close them as Done / as Won't do / leave them open"; Won't do adds the
+  optional note (becomes a comment) and the same question. It is a plain POST that redirects back (like
+  the confirmation modal). A **Won't do** row has a crossed circle (`fa-circle-xmark`, `.is-wont-do` in
+  `site.css`; clicking it reopens, like the tick), a struck title and a "Won't do" pill
+  (`{% resolution_pill task %}`; on the Closed page both resolutions have one). The task page says
+  "Done <time>" or "Won't do <time>".
+- **The Closed page.** The Completed page became **Closed** (nav label, heading, title; view key
+  `closed`, `todo:closed` at `/todo/closed/`, template `closed.html`): both resolutions, a pill-tab
+  filter All / Done / Won't do (`?resolution=`, kept by the pager and the pushed URL). `/todo/completed/`
+  (`todo:completed`) stays as a login-required redirect (the query string is kept); `view=completed`
+  (the list partial, a row action posted by a page loaded before the deploy) is aliased to `closed`
+  (`views.lists.VIEW_ALIASES`).
+- **Search and saved filters.** `FilterParams` gained `states` (a subset of the open states; an open task
+  in any of them matches; closed tasks are not narrowed by it) and `resolution` (`done` / `wont_do`, read
+  as empty unless `include_completed`: which closed tasks "Include closed" lists; a closed task with no
+  resolution counts as Done). **The `include_completed` key and query parameter are unchanged** (the API
+  uses it); only the label says "Include closed", and the resolution `<select>` ("Closed as") shows while
+  it is ticked. `has_criteria` counts states, not the resolution alone. `to_dict()` writes `states` and
+  `resolution` **only when set**, so a filter saved before them reads back identically and the stored
+  form of everything else did not change; `describe_params` says `state in progress, on hold` and
+  `including closed` / `including won't do`. **The API is untouched by them**: `FilterParamsSchema`
+  stays closed to the new keys, a saved filter's `params` in the API leaves them out
+  (`FilterParams.to_legacy_dict()`), its `summary` keeps the old wording (`describe_params(...,
+  closed_wording=False)` says "including completed") and running one (`GET /filters/{id}/tasks`) honours
+  its states as saved. `docs/openapi.yml` did not change.
+- **The API behaves as before** (the hard constraint of this issue): a Won't do task is reported as
+  completed (it has `completed_at`), `view=completed` and `include_completed` list both resolutions,
+  `POST .../complete` is Done (open subtasks closed as Done), `uncomplete` reopens (To do), no field was
+  added (a test pins `TASK_KEYS`) and `view=today` is still `today_set` / `order_today`. #275 changes it.
+- **Admin.** `TaskAdmin` lists and filters `state` and `resolution`; the "completed" filter is titled
+  "closed".
+- **Tests.** `apps/todo/tests/test_states.py` (model and migration function, every service rule, held
+  reminders per channel, the three Today settings, grouping and manual order, the endpoints, the dialog's
+  POSTs, the Closed page, the settings page, filters, the API unchanged); the AI plan has TODO-42 to
+  TODO-48. Existing tests changed legitimately: the Completed page is `todo:closed`, the task page says
+  "Done"/"Reopen" instead of "Completed"/"Uncomplete", a parent's row opens the close dialog
+  (`data-count`) instead of the confirm modal text, and the summary of `include_completed` is "including
+  closed".
 
 #### Comments and references
 
@@ -4431,7 +4558,8 @@ Issue #182 (`models/reminder.py`, `services/reminders.py`, `views/reminders.py`,
   task's (`minutes_before`, `channel`, `fire_at` recomputed for the new date, `sent_at` null): the
   occurrence has exactly the reminders its predecessor had, none if the user removed them all.
 - **Delivery.** `todo.send_reminders` (every minute, lease 5 minutes; `jobs.send_reminders`) calls
-  `deliver_due(now)`. It first sweeps (`sweep_stale`, in batches under row locks): an unsent
+  `deliver_due(now)`. (**A muted task's reminders are held**, neither delivered nor swept, and one
+  reminder is sent when it leaves the state: see "States and resolutions".) It first sweeps (`sweep_stale`, in batches under row locks): an unsent
   reminder more than `FIRE_WINDOW` (1 h) overdue is marked sent **and `skipped`** without a
   delivery (a long-dated edit, a job that was down), and, when its task is open and its owner
   active, gets a `ReminderDelivery` with `note='skipped'` so the history says why nothing came
@@ -4774,7 +4902,7 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   `include_completed` win over the filters' own); `filters.filter_page(user, params)` is the same for a
   `FilterParams`.
 - **Structured filters** (`FilterParams`, frozen): `q`, `mode`, `include_completed`, `priorities` (a subset of
-  0..3, any of them), `labels` (the user's ids sorted, and `none`; **any of them**), `date_range` (`any`,
+  0..3, any of them), `states` and `resolution` (issue #272, see "States and resolutions"), `labels` (the user's ids sorted, and `none`; **any of them**), `date_range` (`any`,
   `overdue` (open, before today), `today`, `next_7_days` / `next_30_days` (**today through today + N**,
   inclusive, overdue left out), `no_date`, `custom` with `date_from` / `date_to`, either open-ended; presets
   are resolved against `user_today` on every run, so a saved "Next 7 days" stays relative) and `sort`.
@@ -4806,7 +4934,7 @@ Issue #181 (`services/search.py`, `services/filters.py`, `services/saved_filters
   filters as one `Q` (`narrow` is `queryset.filter(structured_condition)`), `search.search_condition` the
   text part. `filter_rows(user, filters)` (the filters page) is params + summary, with no count;
   `sidebar_filters(user)` is up to 20 `SavedFilter`s and how many more.
-- **Web.** The search box (`q` with `autocomplete="off"`, **Regex** = `mode=regex`, **Include completed**, a `?`
+- **Web.** The search box (`q` with `autocomplete="off"`, **Regex** = `mode=regex`, **Include closed** (`include_completed`), a `?`
   help popover) is above the menu in `todo/layout.html` (so at the top on phones) and the sidebar lists
   "Filters" below it with "and N more"; both come from `render_page`. **The counts are not part of the
   render** (review of #196: up to 20 counts, each its own regex scan, on every To-do page and 50 on the
@@ -4995,7 +5123,7 @@ CLI does with them.
   number of queries of a 100-task page. Routes that are not a task number (`/tasks/reorder`,
   `/labels/reorder`, ...) are registered before the `{number}` / `{id}` ones: a router tries paths
   in the order they were added.
-- **`GET /tasks`** is the Today / Upcoming / All / Completed / Trash pages and the search page in
+- **`GET /tasks`** is the Today / Upcoming / All / Completed (both resolutions) / Trash pages and the search page in
   one. `view` picks the base set (`dates.today_set`, `upcoming_set`, `open_tasks`, `completed_set`,
   `trash_set`, which the web's list pages use too; `parent=<number>` alone lists that task's subtasks, completed ones too, in the
   user's manual order when they gave one), `FilterParams` the rest (`condition(user)` is the
