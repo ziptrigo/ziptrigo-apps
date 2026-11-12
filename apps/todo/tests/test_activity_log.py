@@ -397,6 +397,25 @@ class TestStatesAndClosing:
 
 
 class TestBlockers:
+    def test_the_blocked_entry_names_the_blockers_the_database_says_are_open(self, funded_user):
+        from ..services import blockers as blockers_service
+
+        blocker = make(funded_user, 'B')
+        stale = Task.objects.get(pk=blocker.pk)
+        stale.completed_at = timezone.now()  # what a stale copy believes: closed
+        task = make(funded_user, 'T')
+
+        blockers_service.link_new_task(task, [stale])
+
+        entry = last(task, 'blocked')
+        assert entry.data['blockers'] == [{'number': blocker.number, 'title': 'B'}]
+        assert describe(entry) == f'Blocked by #{blocker.number} B'
+
+    def test_a_blocked_entry_with_no_names_still_reads(self):
+        entry = TaskEvent(kind=EventKind.BLOCKED, data={'blockers': []})
+
+        assert describe(entry) == 'Blocked'
+
     def test_adding_a_blocker_logs_it_and_the_automatic_block(self, funded_user):
         blocker, task = make(funded_user, 'B'), make(funded_user, 'T')
 
@@ -785,6 +804,17 @@ class TestRobustness:
         assert 'TaskEvent' not in locked
         assert TaskEvent.objects.count() > 5
 
+    def test_the_foreign_keys_have_no_database_constraint(self):
+        """On PostgreSQL an insert into a table with a foreign key takes `FOR KEY SHARE` on the
+        referenced row, which conflicts with the `FOR UPDATE` the services hold (a deadlock the
+        spy above can't see). The ORM still cascades (the tests of the Trash and the user)."""
+        task_fk = TaskEvent._meta.get_field('task')  # ty: ignore[missing-attribute]
+        user_fk = TaskEvent._meta.get_field('user')  # ty: ignore[missing-attribute]
+
+        assert task_fk.db_constraint is False
+        assert user_fk.db_constraint is False
+        assert task_fk.db_index is False  # `(task, created_at)` covers it
+
     def test_an_entry_is_one_insert_in_the_changes_transaction(self, funded_user):
         task = make(funded_user, 'Old')
 
@@ -843,6 +873,115 @@ class TestRendering:
 
 
 # -- The page ------------------------------------------------------------------------------------
+
+
+class TestChecklistItemText:
+    def entry_text(self, funded_user, description, index):
+        task = make(funded_user, description=description)
+        toggle_checklist(task, index, True)
+        return last(task, 'checklist').data['text']
+
+    def test_a_block_quoted_item_is_named_without_the_quote_marker(self, funded_user):
+        assert self.entry_text(funded_user, '> - [ ] buy *milk*\n> - [ ] call dad', 0) == 'buy milk'
+
+    def test_a_nested_item(self, funded_user):
+        description = '- [ ] outer\n  - [ ] inner `code`\n- [ ] last'
+
+        assert self.entry_text(funded_user, description, 1) == 'inner code'
+
+    def test_lone_carriage_return_line_endings(self, funded_user):
+        description = 'Plan\r- [ ] one\r- [ ] two\r- [ ] three'
+
+        assert self.entry_text(funded_user, description, 2) == 'three'
+
+    def test_a_long_item_is_cut(self, funded_user):
+        text = self.entry_text(funded_user, '- [ ] ' + 'word ' * 40, 0)
+
+        assert len(text) == 80 and text.endswith('…')
+
+
+class TestHistoryRefresh:
+    """The task page's open history refreshes on `HX-Trigger: taskChanged`."""
+
+    def trigger(self, response):
+        return response.headers.get('HX-Trigger')
+
+    def test_task_changing_views_send_it(self, web, funded_user):
+        task = make(funded_user, 'T', description='- [ ] a')
+        blocker = make(funded_user, 'B')
+        n = task.number
+
+        def go(name, args, data, **extra):
+            return web.post(reverse(f'todo:{name}', args=args), data, **HTMX, **extra)
+
+        responses = {
+            'edit': go('edit', [n], {'part': 'title', 'title': 'New'}, HTTP_HX_CURRENT_URL=''),
+            'checklist': go('checklist', [n], {'index': 0, 'checked': 'true'}),
+            'subtask': go('subtask-add', [n], {'title': 'Sub'}),
+            'state': go('set-state', [n], {'state': 'on_hold'}, HTTP_HX_CURRENT_URL=''),
+            'blocker': go('blocker-add', [n], {'blocker': str(blocker.number)}),
+            'comment': go('comment-add', [n], {'body': 'hello'}),
+        }
+
+        other = make(funded_user, 'Other')
+        responses['complete'] = go('complete', [other.number], {})
+
+        for name, response in responses.items():
+            assert response.status_code == 200, name
+            assert self.trigger(response) == 'taskChanged', name
+
+    def test_a_refusal_and_a_plain_request_send_nothing(self, web, funded_user):
+        task = make(funded_user, 'T')
+        url = reverse('todo:edit', args=[task.number])
+
+        refused = web.post(url, {'part': 'title', 'title': ''}, **HTMX)
+        plain = web.post(url, {'part': 'title', 'title': 'New'})
+
+        assert refused.status_code == 422 and self.trigger(refused) is None
+        assert plain.status_code == 302 and self.trigger(plain) is None
+
+    def test_the_attachment_list_refresh_sends_it(self, web, funded_user):
+        task = make(funded_user, 'T')
+
+        response = web.get(reverse('todo:attachment-list', args=[task.number]), **HTMX)
+
+        assert self.trigger(response) == 'taskChanged'
+
+
+class TestQueries:
+    def close_sub(self, funded_user, cached):
+        parent = make(funded_user, 'P')
+        sub = make(funded_user, 'S', parent=parent)
+        fresh = Task.objects.select_related('parent').get(pk=sub.pk)
+        if not cached:
+            fresh = Task.objects.get(pk=sub.pk)
+        with CaptureQueriesContext(connection) as queries:
+            complete_task(fresh)
+        assert kinds(parent)[-1] == 'subtask_closed'
+        return len(queries)
+
+    def test_a_loaded_parent_is_not_fetched_again(self, funded_user):
+        cold = self.close_sub(funded_user, cached=False)
+        warm = self.close_sub(funded_user, cached=True)
+
+        assert warm == cold - 1
+
+    def test_closing_the_subtasks_reads_them_once(self, funded_user):
+        parent = make(funded_user, 'P')
+        for n in range(3):
+            make(funded_user, f'S{n}', parent=parent)
+
+        with CaptureQueriesContext(connection) as queries:
+            complete_task(Task.objects.get(pk=parent.pk))
+
+        by_parent = [
+            q
+            for q in queries.captured_queries
+            if q['sql'].startswith('SELECT')
+            and 'WHERE ("todo_task"."completed_at" IS NULL' in q['sql']
+        ]
+        assert len(by_parent) == 1  # the ids; the locked rows are the ones recorded
+        assert TaskEvent.objects.filter(kind='closed').count() == 4
 
 
 class TestEndpoint:
@@ -916,6 +1055,12 @@ class TestEndpoint:
     @pytest.mark.parametrize('cursor', ['x', '2026-01-01T00:00:00_notauuid', '_'])
     def test_a_bad_cursor_is_a_404(self, web, funded_user, cursor):
         task = make(funded_user)
+
+        assert web.get(self.url(task, before=cursor)).status_code == 404
+
+    def test_a_cursor_without_a_time_zone_is_a_404(self, web, funded_user):
+        task = make(funded_user)
+        cursor = '2026-11-11T10:00:00_00000000-0000-0000-0000-000000000000'
 
         assert web.get(self.url(task, before=cursor)).status_code == 404
 

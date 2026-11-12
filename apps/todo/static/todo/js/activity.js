@@ -4,7 +4,8 @@
  * first time it is pressed, and presses after that only show or hide what is there. "Show more"
  * is a plain htmx button inside the fetched HTML; this file moves keyboard focus to what just
  * arrived (the heading after the first load, the first new row after "Show more") and re-fetches the
- * first page after an action on the task, so an open history doesn't go stale.
+ * first page when the server says the task changed (`HX-Trigger: taskChanged`, sent by the views
+ * that can record an entry), so an open history doesn't go stale.
  */
 (function () {
     'use strict';
@@ -36,6 +37,10 @@
         }
     });
 
+    document.addEventListener('taskChanged', function () {
+        if (loaded && !body.hidden) load(false);
+    });
+
     // Rows added by "Show more": focus the first new one, so the keyboard continues from there.
     document.addEventListener('htmx:afterSettle', function (event) {
         const target = event.detail && event.detail.target;
@@ -46,8 +51,6 @@
                 fresh.removeAttribute('data-activity-new');
                 fresh.focus();
             }
-        } else if (loaded && !body.hidden && (target.id === 'task-panel' || target.id === 'attachment-list')) {
-            load(false);  // something changed on the task: show it
         }
     });
 })();

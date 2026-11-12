@@ -5,7 +5,8 @@ Ownership: a task that is not the requester's is a 404, never a 403, so a number
 A trashed task is a 404 too, except where a view says it accepts one (`trashed=True`/`None`).
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from functools import wraps
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
@@ -106,6 +107,30 @@ def render_page(
     }
     page_context.update(context or {})
     return render(request, template, page_context, status=status)
+
+
+TASK_CHANGED = 'taskChanged'
+
+
+def announces_change(view: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
+    """Mark a view that can record an entry in a task's activity log: its successful htmx answer
+    carries `HX-Trigger: taskChanged`, which `static/todo/js/activity.js` listens for to refresh an
+    open history (so the script keeps no list of the page's swap targets). A refusal (422, 429),
+    a redirect and a non-htmx request carry nothing."""
+
+    @wraps(view)
+    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+        response = view(request, *args, **kwargs)
+        if (
+            is_htmx(request)
+            and response.status_code == 200
+            and 'HX-Redirect' not in response.headers
+            and 'HX-Trigger' not in response.headers
+        ):
+            response['HX-Trigger'] = TASK_CHANGED
+        return response
+
+    return wrapper
 
 
 def owned_task(

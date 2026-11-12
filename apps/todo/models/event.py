@@ -71,12 +71,27 @@ class TaskEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     task = cast(
         'Task',
-        models.ForeignKey(Task, on_delete=models.CASCADE, related_name='events'),
+        models.ForeignKey(
+            Task,
+            on_delete=models.CASCADE,
+            related_name='events',
+            # No constraint, no single-column index: an insert into a table with a foreign key
+            # takes `FOR KEY SHARE` on the referenced row on PostgreSQL, which conflicts with the
+            # `FOR UPDATE` the services hold on tasks and could close a deadlock cycle. Django's
+            # collector still cascades; `(task, created_at)` below covers lookups by task.
+            db_constraint=False,
+            db_index=False,
+        ),
     )
     #: The task's owner (the person the change was made for), kept for the admin's filters.
     user = cast(
         'User',
-        models.ForeignKey(User, on_delete=models.CASCADE, related_name='todo_task_events'),
+        models.ForeignKey(
+            User,
+            on_delete=models.CASCADE,
+            related_name='todo_task_events',
+            db_constraint=False,  # see `task`
+        ),
     )
     kind = cast(str, models.CharField(max_length=24, choices=EventKind.choices))
     data = cast(dict[str, Any], models.JSONField(default=dict, db_default={}, blank=True))

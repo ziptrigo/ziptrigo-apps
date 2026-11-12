@@ -68,6 +68,7 @@ from ..services import (
 from .attachments import attachments_context
 from .comments import comments_context
 from .common import (
+    announces_change,
     form_error_lines,
     free_line,
     limited,
@@ -306,6 +307,7 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
 
 @login_required
 @require_POST
+@announces_change
 def subtask_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     parent = owned_task(request, number)
     form = SubtaskForm(request.POST)
@@ -353,6 +355,7 @@ def task_page(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
 
 @login_required
 @require_POST
+@announces_change
 def task_edit(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Save a part of the task (`part`: `title`, `description` or `details`), or all of the task
     form when there is none."""
@@ -374,6 +377,7 @@ def task_edit(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
 
 @login_required
 @require_POST
+@announces_change
 def task_checklist(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Tick or untick a checklist box of the description; answers the re-rendered description."""
     task = owned_task(request, number)
@@ -543,6 +547,7 @@ def _close(
 
 @login_required
 @require_POST
+@announces_change
 def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Complete (close as Done). `subtasks` (`done`, `wont_do` or `leave`) says what happens to the
     open subtasks of a parent; without it they are completed too, as the API's complete does."""
@@ -563,6 +568,7 @@ def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpRespons
 
 @login_required
 @require_POST
+@announces_change
 def task_wont_do(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Close as Won't do, with an optional `note` (added as a comment) and what to do with the open
     subtasks (`subtasks`). The task page's dialog posts it; there is no row or push button."""
@@ -584,6 +590,7 @@ def task_wont_do(request: AuthenticatedHttpRequest, number: int) -> HttpResponse
 
 @login_required
 @require_POST
+@announces_change
 def task_resolution(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Change how a closed task was closed ("Mark as done" / "Mark as won't do"): no occurrence,
     no subtasks touched."""
@@ -603,6 +610,7 @@ def task_resolution(request: AuthenticatedHttpRequest, number: int) -> HttpRespo
 
 @login_required
 @require_POST
+@announces_change
 def task_state(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Set an open task's state. On Today and Upcoming the whole list is re-rendered, since the row
     moves to the group of its new state (In progress, To do, muted) -- and may leave the page
@@ -647,12 +655,14 @@ def _list_response(request: AuthenticatedHttpRequest, view: str) -> HttpResponse
 
 @login_required
 @require_POST
+@announces_change
 def task_uncomplete(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     return _act(request, number, uncomplete_task)
 
 
 @login_required
 @require_POST
+@announces_change
 def task_postpone(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     task = owned_task(request, number)
     form = PostponeForm(request.POST)
@@ -672,6 +682,7 @@ def task_postpone(request: AuthenticatedHttpRequest, number: int) -> HttpRespons
 
 @login_required
 @require_POST
+@announces_change
 def task_trash(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Move to the Trash. A repeating task's confirmation offers "Also stop repeating"
     (`stop_recurrence=1`); without it the repeat goes on."""
@@ -696,6 +707,7 @@ def task_trash(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
 
 @login_required
 @require_POST
+@announces_change
 def recurrence_stop(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Stop repeating: the repeat rule ends, the task stays."""
     return _act(request, number, recurrence.stop, trashed=None)
@@ -703,6 +715,7 @@ def recurrence_stop(request: AuthenticatedHttpRequest, number: int) -> HttpRespo
 
 @login_required
 @require_POST
+@announces_change
 def task_restore(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     # Restoring a parent restores the subtasks trashed with it (the same `deleted_at`): on the Trash
     # page their rows are removed with it, instead of staying as rows whose Restore answers a 404.

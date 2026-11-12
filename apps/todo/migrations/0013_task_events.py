@@ -24,8 +24,8 @@ class Migration(migrations.Migration):
                 ('automatic', models.BooleanField(db_default=False, default=False)),
                 ('channel', models.CharField(choices=[('web', 'Web'), ('api', 'API'), ('email', 'Email'), ('push', 'Push notification'), ('system', 'System')], db_default='system', default='system', max_length=12)),
                 ('created_at', models.DateTimeField(default=django.utils.timezone.now)),
-                ('task', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='events', to='todo.task')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='todo_task_events', to=settings.AUTH_USER_MODEL)),
+                ('task', models.ForeignKey(db_constraint=False, db_index=False, on_delete=django.db.models.deletion.CASCADE, related_name='events', to='todo.task')),
+                ('user', models.ForeignKey(db_constraint=False, on_delete=django.db.models.deletion.CASCADE, related_name='todo_task_events', to=settings.AUTH_USER_MODEL)),
             ],
             options={
                 'ordering': ['-created_at', '-id'],

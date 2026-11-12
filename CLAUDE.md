@@ -26,6 +26,9 @@ apps/core/            Site shell: base.html, landing page, the Privacy Policy an
                       (`apps.core.field_errors`, issue #219, see "HTMX form views"),
                       Web Push notifications, the service worker and the web manifest
                       (`apps.core.services.push`, issue #239, see "Web Push"),
+                      the request-channel context variable and its middleware
+                      (`apps.core.request_channel`, issue #274: which entry point a change came
+                      in through, read by To-do's activity log),
                       and the Alpine components every product
                       shares (`core/js/components.js`: `copyText`, `confirmModal`,
                       `notificationBell`).
@@ -4379,7 +4382,9 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
 - **Model** (`models/event.py`). `TaskEvent`: UUID `id`, `task` (`CASCADE`, `related_name='events'`),
   `user` (the owner, `CASCADE`), `kind` (`EventKind`), `data` (JSON snapshot), `automatic`, `channel`
   (`EventChannel`: `web`, `api`, `email`, `push`, `system`), `created_at`; ordered newest first
-  (`-created_at, -id`, a total order, which the paging relies on), index `(task, created_at)`. `data`
+  (`-created_at, -id`, a total order, which the paging relies on), index `(task, created_at)`. **Both
+  foreign keys are declared `db_constraint=False`** (and `task` `db_index=False`, the composite index
+  covers it): see "Recording". `data`
   holds the values themselves (old and new titles, task numbers and titles, label names, file names), so
   an entry still reads right after the task, label or file it mentions is gone. `db_default`s on
   `data`, `automatic` and `channel`.
@@ -4391,9 +4396,15 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
   **services**, never the views, so the web, the API, the phone's buttons, the email intake and jobs
   all record. `record(task, kind, data, automatic=)` / `record_many(entries)` is **one insert inside the
   transaction of the change** (so it commits or rolls back with it) in **its own savepoint**, and a
-  failure is **logged, never raised**: a history line can't refuse the user's edit. **It adds no
-  lock**: `lock_account` first, then the tasks, exactly as "Blockers" > "Locking" says; a test spies on
-  `select_for_update` and fails if the log ever asks for one. Only **real changes** are recorded (callers
+  failure is **logged, never raised**: a history line can't refuse the user's edit. **It asks for no
+  row lock of its own** (no `select_for_update`) **and takes none through its foreign keys**: an insert
+  into a table with a foreign key takes `FOR KEY SHARE` on the referenced row on PostgreSQL, which
+  conflicts with the `FOR UPDATE` the services hold on tasks (and on the parent's, the old parent's and
+  the user's rows, which a transaction does not otherwise lock) and could close a deadlock cycle, so
+  `TaskEvent.task` and `.user` have no database constraint (Django's collector still cascades, tests
+  cover delete forever, the purge and a deleted user). The order stays `lock_account` first, then the
+  tasks, exactly as "Blockers" > "Locking" says; tests spy on `select_for_update` and assert the two
+  foreign keys have `db_constraint` False, so neither can regress silently (SQLite has no row locks). Only **real changes** are recorded (callers
   compare the locked row with the new values; an empty `PATCH`, the same title, a no-op state, closing a
   closed task record nothing). **One entry per logical field**: an `update_task` that changes the title,
   priority and description writes three; a due date and its time are one `due` entry; the labels are one
@@ -4406,11 +4417,15 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
   per task), `labels`, `repeat` (set, changed, mode changed, stopped; an automatic one when the rule runs
   out), `description` ("Description edited", no text stored), `checklist` (**a ticked or unticked box is
   its own entry, "Checklist item ticked: <text>"**, not a description edit: `toggle_checklist` passes
-  `update_task(checklist=(checked, text))`), blockers (`blocker_added` / `blocker_removed` by the user and,
+  `update_task(checklist=(checked, text))`, the text read by `apps.core.markdown.checklist_item_text`
+  through the same checklist machinery as the toggle: plain text, right for quoted and nested items and
+  any line ending), blockers (`blocker_added` / `blocker_removed` by the user and,
   as **separate automatic** entries, `blocked` when it turned the task Blocked and `unblocked` naming the
   blockers that were closed, trashed, deleted or removed: `blockers.causes_of` reads them before the links
   go), subtasks on the parent's log (`subtask_added`, `subtask_removed`, `subtask_closed` with the
-  resolution; a move under or out of a parent is also `moved` on the task itself; the copies a repeating
+  resolution. **Not symmetric, by decision:** the parent's log records a subtask being added, moved in or
+  out and closed, but not one reopened, trashed on its own, restored or deleted, so it can end on
+  "closed" for a subtask that is open again or gone; a move under or out of a parent is also `moved` on the task itself; the copies a repeating
   task makes of its subtasks don't flood the new parent) , `attachment_added` / `attachment_removed` (by
   file name; a comment's file is logged when it is attached to a comment, not when the draft uploads, and a
   discarded draft never), `trashed` / `restored`. **Cascades are automatic**: a parent closed with its
@@ -4419,9 +4434,13 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
 - **Automatic** means nobody asked for it in that moment: unblocking, the next occurrence, a task made from
   an email (and its files), a rule that ended, what a parent's close/trash does to its subtasks. The phone's
   Complete button is the user's own action, so it is **not**.
-- **Channel** is not passed down the services: a context variable holds it (`events.channel(name)`,
-  default `system`: jobs, the shell). `apps.todo.middleware.EventChannelMiddleware` (in `MIDDLEWARE`,
-  sync and async) sets `api` for `/api/` and `web` for every other request; the push answer handler
+- **Channel** is not passed down the services: a context variable in `core`
+  (`apps.core.request_channel`: `current_channel()`, the `channel(name)` context manager, plain strings
+  `web`/`api`/`email`/`push`/`system`, default `system`: jobs, the shell; `events.channel` re-exports it)
+  holds it. `apps.core.request_channel.RequestChannelMiddleware` (in `MIDDLEWARE`, sync and async) sets
+  `api` for `/api/` and `web` for every other request and resets it after the response, also when the
+  view raises (a `StreamingHttpResponse` body is consumed after the reset, so changes made while
+  streaming would log as `system`; nothing does); the push answer handler
   (`reminders.answer_push`, for Complete) wraps its work in `push`, and `inbound.ingest` in `email`. A new
   entry point that is not a request wraps its work in `with events.channel(...)`.
 - **Sentences** (`services/event_text.py`, `describe(event)`): from `kind` and `data` only, **no query**,
@@ -4435,11 +4454,13 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
   (`#task-activity-toggle`, `aria-expanded`, `aria-controls="task-activity-body"`) in `#task-activity`
   after the comments, outside `#task-panel`. `static/todo/js/activity.js` fetches the first page on the
   first press (`htmx.ajax` into `#task-activity-body`, then focus moves to the heading), later presses
-  show or hide what is there ("Hide history"), and the history is fetched again after an action on the
-  task (`htmx:afterSettle` of `#task-panel` or the attachments list) while it is open. The first page is
+  show or hide what is there ("Hide history"), and the history is fetched again while it is open when the server says the task changed: the
+  views that can record an entry (`views.common.announces_change`: the panel actions, description save,
+  checklist, blockers, subtask add, comment add/edit, the attachments list refresh) send `HX-Trigger:
+  taskChanged` on a successful htmx answer, which `activity.js` listens for (no list of swap targets). The first page is
   the latest `PAGE_SIZE` (20) entries newest first (sentence, an "Automatic" pill, the time as
   `{% local_time %}`); "Show more" is a keyset cursor `?before=<time>_<id>` (so entries written meanwhile
-  never repeat or skip one; a malformed cursor is a 404) that appends rows to `#task-activity-list` and
+  never repeat or skip one; a malformed cursor, or one without a time zone, is a 404) that appends rows to `#task-activity-list` and
   replaces `#task-activity-more` out of band, and focus moves to the first new row
   (`data-activity-new`). It only reads, so a task in the Trash works too; another user's task is a 404;
   `@login_required`. **No rate-limit rule**, like the notification endpoints: session-bound and one
@@ -4451,7 +4472,8 @@ Issue #274 (part 3 of 4 of #271; spec `docs/todo-task-states.md` section 6; migr
   but the log is exposed through the API in #275.
 - **Tests.** `apps/todo/tests/test_activity_log.py` (every kind from every path, no-change records
   nothing, automatic flags and channels through the web, the API, the push answer, the email intake and
-  the shell, cascades, the failing insert, no lock, the sentences in both date formats, the endpoint's
+  the shell, cascades, the failing insert, no lock and no foreign key constraint, the `taskChanged` header,
+  checklist item texts, query counts of the write path, `apps/core/tests/test_request_channel.py`, the sentences in both date formats, the endpoint's
   paging, cursor, 404s, escaping and query counts, that the task page neither renders nor queries the
   log, the admin) and the Playwright `tests_e2e/test_todo_activity.py`; the AI plan has TODO-56 to
   TODO-58 and `admin.md` ADM-57.

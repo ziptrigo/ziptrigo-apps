@@ -1,4 +1,4 @@
-from .checklist import count_checklist_items, toggle_checklist_item
+from .checklist import checklist_item_text, count_checklist_items, toggle_checklist_item
 from .extract import extract_references
 from .limits import MAX_MARKDOWN_CHARS
 from .links import task_number_from_href
@@ -8,6 +8,7 @@ from .render import ReferenceResolver, render
 __all__ = [
     'MAX_MARKDOWN_CHARS',
     'ReferenceResolver',
+    'checklist_item_text',
     'count_checklist_items',
     'extract_references',
     'normalize_for_search',

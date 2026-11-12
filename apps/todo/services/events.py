@@ -2,9 +2,12 @@
 
 Every change to a task is written here as a `TaskEvent`, by the **services** (never the views), so a
 change made from the web, the API, an email, a phone notification or a job is recorded alike. The
-log adds **no locks**: an entry is one insert inside the transaction of the change it records
-(`lock_account` first, then the tasks, as `services.blockers` describes), so it commits or rolls back
-with it and can't change the lock order.
+log asks for **no row lock of its own** (no `select_for_update`) and its foreign keys are declared
+without a database constraint (`TaskEvent.task` and `.user`: `db_constraint=False`), so an insert
+takes no `FOR KEY SHARE` on the task or user row either, which on PostgreSQL would conflict with the
+`FOR UPDATE` the services take and could close a deadlock cycle. An entry is one insert inside the
+transaction of the change it records (`lock_account` first, then the tasks, as `services.blockers`
+describes), so it commits or rolls back with it and can't change the lock order.
 
 **Never fails the change.** The insert runs in its own savepoint and a failure is logged, not raised:
 a user's edit must not be refused because its history line could not be written.
@@ -14,9 +17,9 @@ field: a due date and its time are one entry, labels are one entry listing what 
 removed, an edit that changes several fields writes several entries.
 
 **The channel** says which entry point made the change (`EventChannel`). It is not passed down
-through the services: a context variable holds it, `SYSTEM` by default (jobs, the shell). The
-`EventChannelMiddleware` (`apps/todo/middleware.py`) sets `API` for `/api/` requests and `WEB` for
-every other; the phone's answer handler, the email intake and anything else that is not a request
+through the services: a context variable of `core` (`apps.core.request_channel`) holds it, `system`
+by default (jobs, the shell). Its `RequestChannelMiddleware` sets `api` for `/api/` requests and
+`web` for every other; the phone's answer handler, the email intake and anything else that is not a request
 wrap their work in `with channel(EventChannel.PUSH)` (or `EMAIL`).
 
 **`automatic`** marks a change nobody asked for in that moment: an automatic Blocked or unblock, the
@@ -45,9 +48,7 @@ gone; `services.event_text` writes the sentence):
 """
 
 import logging
-from collections.abc import Generator, Iterable
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Iterable
 from datetime import date, time, timedelta
 from typing import Any, NamedTuple
 from uuid import UUID
@@ -55,25 +56,13 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone
 
-from ..models import EventChannel, EventKind, Task, TaskEvent
+from apps.core.request_channel import channel, current_channel
+
+from ..models import EventKind, Task, TaskEvent
 
 logger = logging.getLogger(__name__)
 
-_channel: ContextVar[str] = ContextVar('todo_event_channel', default=EventChannel.SYSTEM)
-
-
-@contextmanager
-def channel(name: str) -> Generator[None]:
-    """Record the changes made inside the block as made through `name` (an `EventChannel`)."""
-    token = _channel.set(name)
-    try:
-        yield
-    finally:
-        _channel.reset(token)
-
-
-def current_channel() -> str:
-    return _channel.get()
+__all__ = ['channel', 'current_channel']  # re-exported: the services say `events.channel(...)`
 
 
 class Entry(NamedTuple):
@@ -101,7 +90,7 @@ def record_many(entries: Iterable[Entry]) -> None:
     if not rows:
         return
     now = timezone.now()
-    where = _channel.get()
+    where = current_channel()
     try:
         with transaction.atomic():
             TaskEvent.objects.bulk_create(

@@ -91,8 +91,10 @@ def test_history_works_from_the_keyboard(page: Page, receipts_server: ReceiptsSe
         expect(page.locator('#task-activity-heading')).to_be_focused()
         expect(page.locator('#task-activity-list > li')).to_have_count(20)
 
+        expect(page.locator('.htmx-added, .htmx-settling')).to_have_count(0)  # htmx is done
         more = page.get_by_role('button', name='Show more')
         more.focus()
+        expect(more).to_be_focused()
         page.keyboard.press('Enter')
         expect(page.locator('#task-activity-list > li')).to_have_count(26)
         expect(page.locator('#task-activity-list > li').nth(20)).to_be_focused()

@@ -193,7 +193,8 @@ def describe(event: Any) -> str:
         case EventKind.BLOCKER_REMOVED:
             return f'Blocker removed: {_ref(data)}'
         case EventKind.BLOCKED:
-            return f'Blocked by {_refs(data.get("blockers") or [])}'
+            blockers = data.get('blockers') or []
+            return f'Blocked by {_refs(blockers)}' if blockers else 'Blocked'
         case EventKind.UNBLOCKED:
             blockers = data.get('blockers') or []
             reasons = '; '.join(

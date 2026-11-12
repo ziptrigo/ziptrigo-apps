@@ -13,7 +13,6 @@ Done", which is what the circle, the Complete button, the push notification and 
 """
 
 import logging
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
@@ -28,7 +27,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 from apps.billing.services import InsufficientCreditsError
-from apps.core.markdown import toggle_checklist_item
+from apps.core.markdown import checklist_item_text, toggle_checklist_item
 
 from ..models import (
     SELECTABLE_STATES,
@@ -617,7 +616,7 @@ def update_task(
         )
         old_rule = current.active_recurrence if rule_action is not None else None
         old_parent = (
-            Task.objects.filter(pk=current.parent_id).first()
+            _loaded_parent(task, current.parent_id)
             if moves and current.parent_id is not None
             else None
         )
@@ -782,24 +781,20 @@ def toggle_checklist(task: Task, index: int, checked: bool) -> Task:
             description = toggle_checklist_item(fresh.description, index, checked)
         except IndexError, ValueError:
             raise _error('index', 'No such checklist item.') from None
-        text = _changed_item_text(fresh.description, description)
+        text = _item_text(fresh.description, index)
         return update_task(fresh, changes={'description': description}, checklist=(checked, text))
 
 
-_ITEM_MARKER = re.compile(r'^\s*(?:[-*+]|[0-9]+[.)])\s*\[[ xX]\]\s*')
 ITEM_TEXT_CHARS = 80
 
 
-def _changed_item_text(before: str, after: str) -> str:
-    """The text of the checklist item whose box differs between the two versions of the
-    description (the first line that differs), without its list marker, cut short."""
-    for old, new in zip(before.split('\n'), after.split('\n'), strict=False):
-        if old != new:
-            text = ' '.join(_ITEM_MARKER.sub('', new, count=1).split())
-            if len(text) > ITEM_TEXT_CHARS:
-                text = f'{text[: ITEM_TEXT_CHARS - 1].rstrip()}…'
-            return text
-    return ''
+def _item_text(description: str, index: int) -> str:
+    """The text of the `index`th checklist item (as `toggle_checklist_item` numbers them), plain
+    and cut short, for the activity log."""
+    text = checklist_item_text(description, index)
+    if len(text) > ITEM_TEXT_CHARS:
+        text = f'{text[: ITEM_TEXT_CHARS - 1].rstrip()}…'
+    return text
 
 
 # -- Closing and states --------------------------------------------------------------------------
@@ -858,9 +853,13 @@ def close_task(
             )
             subtask_ids = list(open_subtasks.values_list('pk', flat=True))
             if subtask_ids:
-                lock_tasks(*subtask_ids)
+                # Re-read under the lock: what is still open now is what this close closes.
+                cascaded = [
+                    sub
+                    for sub in lock_tasks(*subtask_ids).values()
+                    if sub.completed_at is None and sub.deleted_at is None
+                ]
             ended += subtask_ids
-            cascaded = list(open_subtasks.filter(pk__in=subtask_ids))
             open_subtasks.update(
                 completed_at=now, resolution=subtasks, state=TaskState.TODO, updated_at=now
             )
@@ -874,6 +873,14 @@ def close_task(
     task.state = TaskState.TODO
     task.updated_at = now
     return task
+
+
+def _loaded_parent(task: Task, parent_id: UUID) -> Task | None:
+    """The task `parent_id`, for an activity-log entry: the parent already loaded on `task` when
+    it is that one (the pages load it with `select_related`), else one query."""
+    if Task.parent.is_cached(task) and task.parent is not None and task.parent.pk == parent_id:  # ty: ignore[missing-attribute]
+        return task.parent
+    return Task.objects.filter(pk=parent_id).first()
 
 
 def _record_closed(task: Task, resolution: str, cascaded: list[Task], subtasks: str) -> None:
@@ -891,7 +898,7 @@ def _record_closed(task: Task, resolution: str, cascaded: list[Task], subtasks: 
         for sub in cascaded
     ]
     if task.parent_id is not None:
-        parent = Task.objects.filter(pk=task.parent_id).first()
+        parent = _loaded_parent(task, task.parent_id)
         if parent is not None:
             entries.append(
                 events.entry(

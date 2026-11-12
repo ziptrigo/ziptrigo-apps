@@ -47,7 +47,8 @@ same lock is what makes the no-cycle rule hold for any number of links added at 
 **The activity log** (issue #274, `services.events`) records, on the task that is blocked or freed:
 a blocker added or removed by the user (`blocker_added` / `blocker_removed`) and, as separate entries,
 the automatic state change that came of it (`blocked`, `unblocked`, which names the blockers that
-closed, were trashed or deleted). Inserts only, in the transactions above: no lock is added.
+closed, were trashed or deleted). Inserts only, in the transactions above, with no lock or
+foreign key constraint of their own (see `services.events`).
 """
 
 import logging
@@ -111,6 +112,17 @@ def has_open_blocker(task_id: UUID) -> bool:
     return TaskBlocker.objects.filter(
         blocked_id=task_id, blocker__completed_at__isnull=True, blocker__deleted_at__isnull=True
     ).exists()
+
+
+def open_blocker_ids(task_id: UUID) -> set[UUID]:
+    """The ids of the task's blockers that are open and not in the Trash. One query."""
+    return set(
+        TaskBlocker.objects.filter(
+            blocked_id=task_id,
+            blocker__completed_at__isnull=True,
+            blocker__deleted_at__isnull=True,
+        ).values_list('blocker_id', flat=True)
+    )
 
 
 def blockers_of(task: Task) -> list[Task]:
@@ -399,11 +411,12 @@ def link_new_task(task: Task, blockers: Sequence[Task]) -> None:
     entries = [
         events.entry(task, EventKind.BLOCKER_ADDED, events.task_ref(other)) for other in blockers
     ]
-    if has_open_blocker(task.pk):
+    open_ids = open_blocker_ids(task.pk)  # the one query that decides, and names them
+    if open_ids:
         previous = task.state
         task.state = TaskState.BLOCKED
         Task.objects.filter(pk=task.pk).update(state=TaskState.BLOCKED)
-        open_ones = [other for other in blockers if other.is_open]
+        open_ones = [other for other in blockers if other.pk in open_ids]
         entries.append(_blocked_entry(task, previous, open_ones))
     events.record_many(entries)
 

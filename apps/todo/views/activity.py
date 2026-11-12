@@ -34,9 +34,13 @@ def _parse_cursor(raw: str) -> tuple[datetime, UUID]:
     """The `(time, id)` a "Show more" link carries; anything else is a 404."""
     try:
         when, _, pk = raw.rpartition('_')
-        return datetime.fromisoformat(when), UUID(pk)
+        moment = datetime.fromisoformat(when)
+        parsed = UUID(pk)
     except ValueError:
         raise Http404('Unknown page') from None
+    if moment.tzinfo is None:  # a naive time would be compared in whatever zone is active
+        raise Http404('Unknown page')
+    return moment, parsed
 
 
 def activity_context(task: Task, cursor: str = '') -> dict:

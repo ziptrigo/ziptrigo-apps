@@ -18,7 +18,7 @@ from apps.core.htmx import is_htmx
 from ..forms import BlockerForm
 from ..models import Task
 from ..services import blockers
-from .common import form_error_lines, owned_task, refuse, validation_lines
+from .common import announces_change, form_error_lines, owned_task, refuse, validation_lines
 from .tasks import _act, _task_url
 
 BLOCKER_MSG = '#blocker-msg'
@@ -26,6 +26,7 @@ BLOCKER_MSG = '#blocker-msg'
 
 @login_required
 @require_POST
+@announces_change
 def blocker_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """Add a blocker to the task: a number, or a title the suggestions offered. Everything that can
     be told without writing is checked first, so a refusal spends no rate-limit budget."""
@@ -53,6 +54,7 @@ def blocker_add(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
 
 @login_required
 @require_POST
+@announces_change
 def blocker_remove(
     request: AuthenticatedHttpRequest, number: int, blocker_number: int
 ) -> HttpResponse:
