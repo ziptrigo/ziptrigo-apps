@@ -1,6 +1,7 @@
 {% comment %} The close dialog: what Complete (a parent with open subtasks) and "Close as won't do" ask. Opened with
    `todoOpenCloseDialog(button)` (close_dialog.js) from a button carrying `data-url`, `data-mode` (`done` or `wont_do`),
-   `data-ctx` (`row` or `page`: where the answer goes), `data-title` (the task) and `data-count` (its open subtasks). A plain
+   `data-ctx` (`row` or `page`: where the answer goes), `data-title` (the task) and `data-count` (its open subtasks), `data-blockers` (how many open blockers it has) and `data-blockers-url` (where to fetch their names).
+   A task with open blockers asks to confirm: the form posts `confirm_blockers=1` and lists them; so does closing subtasks (not "leave them open") that have open blockers of their own, which it names too. A plain
    POST, like the confirmation modal: the views redirect back (a refusal is a flash message). Won't do has an optional note,
    which becomes a comment; with open subtasks it asks whether to close them as Done, as Won't do, or leave them open. {% endcomment %}
 <div x-data="closeDialog" @open-close-dialog.window="show($event.detail)">
@@ -28,6 +29,32 @@
                         <textarea id="close-note" name="note" rows="3" maxlength="10000" x-ref="note" placeholder="Why won't this be done?"
                                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"></textarea>
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A note is added to the task as a comment.</p>
+                    </div>
+                </template>
+                <template x-if="needsConfirm">
+                    <div class="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100" data-blockers-list>
+                        <input type="hidden" name="confirm_blockers" value="1">
+                        <template x-if="blockers > 0">
+                            <div>
+                                <p class="font-medium" x-text="blockers === 1 ? 'An open task is still blocking it:' : blockers + ' open tasks are still blocking it:'"></p>
+                                <ul class="mt-1 list-disc pl-5">
+                                    <template x-for="item in blockerList" :key="item.number">
+                                        <li x-text="'#' + item.number + ' ' + item.title"></li>
+                                    </template>
+                                </ul>
+                            </div>
+                        </template>
+                        <template x-if="subtasks !== 'leave' && subtaskList.length > 0">
+                            <div data-subtask-blockers :class="blockers > 0 ? 'mt-2' : ''">
+                                <p class="font-medium" x-text="subtaskList.length === 1 ? 'A subtask closed with it is still blocked:' : 'Subtasks closed with it are still blocked:'"></p>
+                                <ul class="mt-1 list-disc pl-5">
+                                    <template x-for="item in subtaskList" :key="item.number">
+                                        <li x-text="'#' + item.number + ' ' + item.title + ' is still blocked by ' + item.blockers.map(function (blocker) { return '#' + blocker.number + ' ' + blocker.title; }).join(', ')"></li>
+                                    </template>
+                                </ul>
+                            </div>
+                        </template>
+                        <p class="mt-1">Closing it keeps the links.</p>
                     </div>
                 </template>
                 <template x-if="count > 0">

@@ -47,7 +47,9 @@ FIELD_LABELS = {
     'resolution': 'Resolution',
     'subtasks': 'Subtasks',
     'note': 'Note',
-    'muted_overdue': 'On hold and overdue',
+    'muted_overdue': 'On hold or blocked, and overdue',
+    'blocker': 'Blocker',
+    'blocked_by': 'Blocked by',
 }
 
 

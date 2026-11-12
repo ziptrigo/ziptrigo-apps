@@ -7,6 +7,7 @@ from .attachments import (
     attachment_list,
     attachment_start,
 )
+from .blockers import blocker_add, blocker_remove, blocker_suggest, open_blockers
 from .comments import (
     comment_add,
     comment_delete,
@@ -69,6 +70,9 @@ __all__ = [
     'attachment_list',
     'attachment_start',
     'all_page',
+    'blocker_add',
+    'blocker_remove',
+    'blocker_suggest',
     'comment_add',
     'comment_delete',
     'comment_deleted_view',
@@ -91,6 +95,7 @@ __all__ = [
     'label_edit',
     'label_reorder',
     'labels_page',
+    'open_blockers',
     'parse_view',
     'recurrence_stop',
     'reminder_add',

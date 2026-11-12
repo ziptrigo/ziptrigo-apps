@@ -32,6 +32,17 @@ def get_account(user: User) -> TodoAccount:
     return account
 
 
+def lock_account(user_id: object) -> None:
+    """Lock the user's `TodoAccount` row (`select_for_update`), held until the caller's transaction
+    ends. Call it inside a transaction, as the **first** lock it takes: every write that touches the
+    blocker graph (closing, trashing, restoring, reopening, deleting a task, adding or removing a
+    link, and the other writes that lock more than one task) takes this one lock first, so one
+    user's graph writes take turns and their row locks can't be taken in conflicting orders (see
+    `services.blockers`). A second lock of the same row by the same transaction doesn't block, so
+    a call that already ran under it (`allocate_number`) may repeat it."""
+    TodoAccount.objects.select_for_update().filter(pk=user_id).first()
+
+
 def allocate_number(account: TodoAccount) -> int:
     """The next task number of `account`'s user, taken for good (numbers are never reused: a
     trashed or purged task keeps its number out of circulation).
@@ -164,10 +175,12 @@ def update_inbox_settings(user: User, *, sender_allowlist: str | Iterable[str]) 
 
 
 def set_muted_overdue(account: TodoAccount, value: str) -> TodoAccount:
-    """Choose where an overdue task that is On hold shows on Today (`MutedOverdue`)."""
+    """Choose where an overdue task that is On hold or Blocked shows on Today (`MutedOverdue`)."""
     if value not in MutedOverdue.values:
         raise ValidationError(
-            {'muted_overdue': 'Choose Today (dimmed), Hidden from Today or On hold section.'}
+            {
+                'muted_overdue': 'Choose Today (dimmed), Hidden from Today or On hold & blocked section.'
+            }
         )
     account.muted_overdue = value
     account.save(update_fields=['muted_overdue'])

@@ -1,0 +1,67 @@
+{% load todo_ui %}
+{% comment %} "Blocked by" and "Blocks" (issue #273). Needs `task`, `blocker_tasks` (every blocker of the task, closed and
+   trashed ones too) and `blocked_tasks` (every task it blocks). "Blocked by" has the add box (a number, or a title from the
+   suggestions; a plain list fed by `todo:blocker-suggest`) and a Remove button per link; "Blocks" is read-only, each item links to
+   its task. A closed or trashed task carries a marker. A trashed task's own lists are read-only. Hidden when the task has neither
+   and cannot be given one. {% endcomment %}
+{% if blocker_tasks or blocked_tasks or not task.is_trashed %}
+<section id="blockers" aria-labelledby="blockers-title" class="mb-8">
+    <h2 id="blockers-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">Blocked by</h2>
+    <div id="blocker-msg" class="mb-2 text-sm" aria-live="polite"></div>
+    {% if blocker_tasks %}
+    <ul class="mb-4 space-y-1 text-sm">
+        {% for blocker in blocker_tasks %}
+        <li class="flex flex-wrap items-center gap-x-2 gap-y-1" data-blocker="{{ blocker.number }}">
+            <a href="{% url 'todo:task' blocker.number %}"
+               class="text-sage-600 dark:text-sage-300 hover:underline {% if blocker.is_completed or blocker.is_trashed %}line-through{% endif %}">#{{ blocker.number }} {{ blocker.title }}</a>
+            {% blocker_marker blocker %}
+            {% if not task.is_trashed %}
+            <button type="button" hx-post="{% url 'todo:blocker-remove' task.number blocker.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+                    aria-label="Remove blocker #{{ blocker.number }} {{ blocker.title }}" title="Remove"
+                    class="btn rounded-full p-1 text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"><i class="fas fa-times" aria-hidden="true"></i></button>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% elif task.is_trashed %}
+    <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Nothing blocks this task.</p>
+    {% endif %}
+    {% if not task.is_trashed %}
+    <form method="post" action="{% url 'todo:blocker-add' task.number %}"
+          hx-post="{% url 'todo:blocker-add' task.number %}" hx-target="#task-panel" hx-swap="outerHTML"
+          hx-vals='{"ctx": "page"}'
+          hx-disabled-elt="find button[type='submit']"
+          class="flex items-end gap-3">
+        {% csrf_token %}
+        <input type="hidden" name="ctx" value="page">
+        <div class="min-w-0 flex-1">
+            <label for="blocker-input" class="block mb-1 text-sm font-medium">Add a blocker</label>
+            <input id="blocker-input" name="blocker" type="text" maxlength="200" required autocomplete="off" list="blocker-options"
+                   placeholder="A task number or title"
+                   hx-get="{% url 'todo:blocker-suggest' task.number %}" hx-trigger="input changed delay:200ms, focus once" hx-target="#blocker-options" hx-swap="innerHTML"
+                   hx-sync="this:replace" hx-disabled-elt="unset"
+                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+            <datalist id="blocker-options"></datalist>
+        </div>
+        <button type="submit"
+                class="btn inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">
+            <i class="fas fa-plus mr-2" aria-hidden="true"></i>Add
+        </button>
+    </form>
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">An open blocker makes this task Blocked until every blocker is closed. Closing a blocker, either way, frees it.</p>
+    {% endif %}
+
+    {% if blocked_tasks %}
+    <h3 id="blocks-title" class="mt-6 mb-2 text-base font-semibold">Blocks</h3>
+    <ul class="space-y-1 text-sm" aria-labelledby="blocks-title">
+        {% for blocked in blocked_tasks %}
+        <li class="flex flex-wrap items-center gap-x-2 gap-y-1" data-blocks="{{ blocked.number }}">
+            <a href="{% url 'todo:task' blocked.number %}"
+               class="text-sage-600 dark:text-sage-300 hover:underline {% if blocked.is_completed or blocked.is_trashed %}line-through{% endif %}">#{{ blocked.number }} {{ blocked.title }}</a>
+            {% blocker_marker blocked %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</section>
+{% endif %}

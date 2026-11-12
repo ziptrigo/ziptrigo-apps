@@ -15,11 +15,11 @@ from .reminder import ReminderChannel, SnoozeChoice
 
 
 class MutedOverdue(models.TextChoices):
-    """Where a muted (On hold) task that is overdue shows on Today (issue #272)."""
+    """Where a muted (On hold or Blocked) task that is overdue shows on Today (issues #272, #273)."""
 
     DIMMED = 'dimmed', 'Today, dimmed'
     HIDDEN = 'hidden', 'Hidden from Today'
-    SECTION = 'section', 'On hold section'
+    SECTION = 'section', 'On hold & blocked section'
 
 
 class TodoAccount(models.Model):
@@ -104,7 +104,7 @@ class TodoAccount(models.Model):
             choices=MutedOverdue,
             default=MutedOverdue.DIMMED,
             db_default=MutedOverdue.DIMMED,
-            help_text='Where an overdue task that is On hold shows on Today: dimmed at the bottom '
+            help_text='Where an overdue task that is On hold or Blocked shows on Today: dimmed at the bottom '
             'of Overdue, hidden, or in its own collapsed section.',
         ),
     )

@@ -21,7 +21,7 @@ from apps.core.datetime_format import DisplayFormats, format_date, format_time
 from apps.core.markdown import render
 from apps.core.templatetags.core_ui import pill_html
 
-from ..models import Label, Resolution, Task, TaskState
+from ..models import SELECTABLE_STATES, Label, Resolution, Task, TaskState
 from ..services.recurrence import MONTH_NAMES, WEEKDAY_NAMES, describe, mode_label
 from ..services.references import TASK_URL_PATH, resolver_for_request
 
@@ -89,30 +89,61 @@ def due_badge(context, task: Task) -> SafeString:
 
 
 #: State -> (pill tone, icon) of the state chip: To do is the plain one, In progress stands out,
-#: On hold (muted) is grey like the dimmed row.
+#: On hold and Blocked (muted) are grey like the dimmed row.
 _STATE_STYLE = {
     TaskState.TODO: ('gray', 'far fa-circle'),
     TaskState.IN_PROGRESS: ('sky', 'fas fa-circle-half-stroke'),
+    TaskState.BLOCKED: ('gray', 'fas fa-ban'),
     TaskState.ON_HOLD: ('gray', 'fas fa-pause'),
 }
+#: How many open blockers a Blocked chip's tooltip names before "and N more".
+_TOOLTIP_BLOCKERS = 5
+
+
+def blockers_text(task: Task) -> str:
+    """`#1200 Pay rent, #1201 Call` for the task's open blockers (the first few, then `and N more`):
+    what a Blocked chip's tooltip and the close question say it waits for."""
+    blockers = task.open_blockers
+    names = [f'#{blocker.number} {blocker.title}' for blocker in blockers[:_TOOLTIP_BLOCKERS]]
+    text = ', '.join(names)
+    if len(blockers) > _TOOLTIP_BLOCKERS:
+        text += f' and {len(blockers) - _TOOLTIP_BLOCKERS} more'
+    return text
 
 
 @register.simple_tag
 def state_pill(task: Task) -> SafeString:
-    """The state of an open task as a pill (`To do`, `In progress`, `On hold`)."""
+    """The state of an open task as a pill (`To do`, `In progress`, `Blocked`, `On hold`). A Blocked
+    one says in its tooltip which open tasks it waits for."""
     tone, icon = _STATE_STYLE.get(task.state, _STATE_STYLE[TaskState.TODO])
     label = TaskState(task.state).label if task.state in TaskState.values else 'To do'
-    return pill_html(tone, label, icon=icon, title='State')
+    title = 'State'
+    if task.state == TaskState.BLOCKED and (names := blockers_text(task)):
+        title = f'Blocked by {names}'
+    return pill_html(tone, label, icon=icon, title=title)
 
 
 @register.simple_tag
 def state_choices() -> list[dict]:
     """The states a person can pick, with the icon each has in its pill: what the state menus
-    list (a muted state is marked, since it holds reminders)."""
+    list. Blocked is not one: only a blocker sets it."""
     return [
-        {'value': value, 'label': label, 'icon': _STATE_STYLE[TaskState(value)][1]}
-        for value, label in TaskState.choices
+        {'value': state.value, 'label': state.label, 'icon': _STATE_STYLE[state][1]}
+        for state in SELECTABLE_STATES
     ]
+
+
+@register.simple_tag
+def blocker_marker(task: Task) -> SafeString:
+    """What a task in a "Blocked by" / "Blocks" list is, when it is not simply open: `Done`, `Won't do`
+    or `In the trash`. Nothing for an open task."""
+    if task.is_trashed:
+        return pill_html('red', 'In the trash', icon='fas fa-trash')
+    if task.is_wont_do:
+        return pill_html('gray', "Won't do", icon='fas fa-circle-xmark')
+    if task.is_completed:
+        return pill_html('green', 'Done', icon='fas fa-check')
+    return SafeString('')
 
 
 @register.simple_tag

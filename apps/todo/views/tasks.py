@@ -41,6 +41,7 @@ from ..models import Label, ReminderChannel, Resolution, Task, TodoSettings
 from ..services import (
     SUBTASKS_DONE,
     SUBTASKS_LEAVE,
+    blockers,
     close_task,
     create_task,
     delete_forever,
@@ -129,6 +130,8 @@ def panel_context(request: AuthenticatedHttpRequest, task: Task) -> dict:
         'reminder_channels': ReminderChannel.choices,
         'default_reminder_channel': get_account(user).default_reminder_channel,
         'referenced_by': referenced_by(task),
+        'blocker_tasks': blockers.blockers_of(task),
+        'blocked_tasks': blockers.blocked_by(task),
         'task': task,
         'subtasks': subtasks,
         'open_subtasks': open_subtasks,
@@ -265,7 +268,12 @@ def task_create(request: AuthenticatedHttpRequest) -> HttpResponse:
     if (response := limited(request, 'TODO_CREATE_USER', retarget='#quick-add-msg')) is not None:
         return response
     try:
-        create_task(request.user, state=form.requested_state(), **form.changes())
+        create_task(
+            request.user,
+            state=form.requested_state(),
+            blocked_by=form.requested_blockers(),
+            **form.changes(),
+        )
     except InsufficientCreditsError:
         return refuse(request, CREDITS_LINE, retarget='#quick-add-msg', top_up=True)
     except ValidationError as exc:
@@ -332,9 +340,12 @@ def task_page(request: AuthenticatedHttpRequest, number: int) -> HttpResponse:
     """The task page. A trashed task opens too, read-only, with Restore."""
     task = owned_task(request, number, trashed=None)
     get_account(request.user)
-    context = {**comments_context(request, task), **panel_context(request, task)}
+    panel = panel_context(request, task)
+    context = {**comments_context(request, task), **panel}
     context['title_task'] = task
     context.update(attachments_context(request, task))
+    # The one loaded like a row: the attachments' context has its own.
+    context['task'] = panel['task']
     return render_page(
         request, 'todo/task.html', context, nav='trash' if task.is_trashed else 'all'
     )
@@ -392,25 +403,33 @@ def _act(
     task: Task | None = None,
     refresh_comments: bool = False,
     also_limit: str | None = None,
+    retarget: str = '',
 ):
     """Look up the task (unless the caller already has it), charge the edit budget, run
     `action(task)` and answer (`refresh_comments`: see `panel_response`). `also_limit` names a
     second rule the action spends (a note that becomes a comment spends `TODO_COMMENT_USER`): both
-    are peeked first, so a refusal spends neither, then both are charged."""
+    are peeked first, so a refusal spends neither, then both are charged. `retarget` is the message
+    slot of a refusal when it is not the page's own (`_slot`)."""
     if task is None:
         task = owned_task(request, number, trashed=trashed)
+    slot = retarget or _slot(request)
     if also_limit:
         for rule in ('TODO_EDIT_USER', also_limit):
             result = ratelimit.peek(str(request.user.pk), rule)
             if not result.allowed:
-                return ratelimit.web_response(request, result, retarget=_slot(request))
+                return ratelimit.web_response(request, result, retarget=slot)
         ratelimit.hit_user(request.user, also_limit)
-    if (response := limited(request, 'TODO_EDIT_USER', retarget=_slot(request))) is not None:
+    if (response := limited(request, 'TODO_EDIT_USER', retarget=slot)) is not None:
         return response
     try:
         action(task)
     except ValidationError as exc:
-        return _refuse_validation(request, exc, task)
+        return refuse(
+            request,
+            validation_lines(exc),
+            retarget=slot,
+            fallback=_task_url(task) if _is_page(request) else '',
+        )
     return after_action(request, task, refresh_comments=refresh_comments)
 
 
@@ -426,6 +445,48 @@ def _open_subtask_numbers(request: AuthenticatedHttpRequest, number: int) -> lis
     )
 
 
+def _unconfirmed_blockers(task: Task, subtasks: str) -> list[str]:
+    """What closing `task` would leave blocked, as sentences: its own open blockers, and -- when the
+    close also closes its open subtasks -- those of the subtasks that are still blocked by something
+    that stays open (`blockers.subtasks_with_open_blockers`)."""
+
+    def names(tasks: list[Task]) -> str:
+        return ', '.join(f'#{other.number} {other.title}' for other in tasks)
+
+    sentences = []
+    if waiting := task.open_blockers:
+        sentences.append(f'This task is still blocked by {names(waiting)}.')
+    if subtasks != SUBTASKS_LEAVE:
+        sentences.extend(
+            f'#{sub.number} {sub.title} is still blocked by {names(its_blockers)}.'
+            for sub, its_blockers in blockers.subtasks_with_open_blockers(task)
+        )
+    return sentences
+
+
+def _close_controls(request: AuthenticatedHttpRequest, task: Task) -> bytes:
+    """Out of band, `task`'s row (from a list) or its Complete buttons (from the task page) as they
+    are now, so a page that was out of date gets controls that open the close dialog."""
+    fresh = row_task(request.user, task.pk)
+    if _is_page(request):
+        template = 'todo/partials/complete_button.html'
+        context = {
+            'task': fresh,
+            'open_subtasks': subtasks_of(fresh).filter(completed_at__isnull=True).count(),
+            'oob': True,
+        }
+    else:
+        template = 'todo/partials/task_row.html'
+        context = {
+            'task': fresh,
+            'view': _view_of(request),
+            'today': user_today(request.user),
+            'oob': True,
+            'sortable': request.POST.get('sortable') == '1',
+        }
+    return render_to_string(template, context, request=request).encode()
+
+
 def _close(
     request: AuthenticatedHttpRequest,
     task: Task,
@@ -433,12 +494,29 @@ def _close(
     *,
     subtasks: str,
     note: str = '',
+    confirmed: bool = False,
 ) -> HttpResponse:
-    """Close `task` (`services.close_task`) and answer. Closing a parent closes its open subtasks
+    """Close `task` (`services.close_task`) and answer. A task that still has open blockers is only
+    closed once the person confirmed it (`confirmed`, posted by the close dialog, which names them);
+    the links stay either way. Closing a parent closes its open subtasks
     too unless told to leave them: on a list their rows are on the same page as the parent's, so
     they are removed along with it (out of band) instead of staying as open rows until a reload.
     (The task page re-renders its whole panel anyway.) A note becomes a comment, so the page's
     comments are refreshed."""
+    if not confirmed:
+        sentences = _unconfirmed_blockers(task, subtasks)
+        if sentences:
+            response = refuse(
+                request,
+                ' '.join([*sentences, 'Confirm to close it anyway.']),
+                retarget=_slot(request),
+                fallback=_task_url(task) if _is_page(request) else '',
+            )
+            if is_htmx(request):
+                # The page that sent this was rendered before the blocker was added: refresh the
+                # row (or the Complete buttons) so the next click opens the dialog naming them.
+                response.content += _close_controls(request, task)
+            return response
     cascaded = [] if subtasks == SUBTASKS_LEAVE else _open_subtask_numbers(request, task.number)
     already_closed: list[bool] = []
 
@@ -475,7 +553,11 @@ def task_complete(request: AuthenticatedHttpRequest, number: int) -> HttpRespons
             request, form_error_lines(form), retarget=_slot(request), fallback=_task_url(task)
         )
     return _close(
-        request, task, Resolution.DONE, subtasks=form.cleaned_data['subtasks'] or SUBTASKS_DONE
+        request,
+        task,
+        Resolution.DONE,
+        subtasks=form.cleaned_data['subtasks'] or SUBTASKS_DONE,
+        confirmed=form.cleaned_data['confirm_blockers'],
     )
 
 
@@ -496,6 +578,7 @@ def task_wont_do(request: AuthenticatedHttpRequest, number: int) -> HttpResponse
         Resolution.WONT_DO,
         subtasks=form.cleaned_data['subtasks'] or SUBTASKS_DONE,
         note=form.cleaned_data['note'],
+        confirmed=form.cleaned_data['confirm_blockers'],
     )
 
 

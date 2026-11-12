@@ -24,7 +24,7 @@ There is no "Waiting" state and On hold has no "until" date.
 - Shown dimmed, never shown as overdue (no red badge), never moved by "Reschedule overdue to today".
 - Where a muted overdue task appears on Today is a **To-do setting**: "Today, dimmed" (default, at
   the bottom of Overdue), "Hidden from Today", or "Own section" (a collapsed "On hold & blocked (N)"
-  section at the bottom; until #273 adds Blocked it reads "On hold (N)").
+  section at the bottom).
 - **Reminders are held**: a reminder whose time passes while the task is muted is not delivered.
   When the task becomes To do or In progress again, **one** reminder is sent for the task, on the
   channels the held reminders used (each channel once: in-app, email and/or push); the held
@@ -50,6 +50,9 @@ through the API and CLI. Parent and subtask states are independent (nothing prop
   to **To do**, whatever it was before closing.
 - **Closing with open blockers** (either resolution) is allowed after a confirmation naming them; the
   links are kept.
+  When the close also closes the open subtasks (as Done or Won't do), the same confirmation names the
+  subtasks that have open blockers of their own ("#1205 Sub is still blocked by #1100 ...") and
+  covers them; their links are kept too.
 - **Subtasks**: closing a parent (Done or Won't do) with open subtasks shows them and asks: close
   them as Done, as Won't do, or leave them open. This replaces today's "complete the open subtasks
   too" question. Where nobody can be asked (the phone notification's Complete button, an API call

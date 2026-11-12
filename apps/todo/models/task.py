@@ -34,12 +34,20 @@ class Priority(models.IntegerChoices):
 
 
 class TaskState(models.TextChoices):
-    """What an *open* task is doing (issue #272). Blocked (#273) is derived from blockers and joins
-    here, and in `MUTED_STATES`, when those exist."""
+    """What an *open* task is doing (issues #272, #273). Blocked comes from blockers, never from a
+    menu: a task becomes Blocked when an open blocker is added to it (or when it is reopened with
+    one) and goes back to To do when its last open blocker ends (`services.blockers`). The others
+    are chosen (`SELECTABLE_STATES`)."""
 
     TODO = 'todo', 'To do'
     IN_PROGRESS = 'in_progress', 'In progress'
+    BLOCKED = 'blocked', 'Blocked'
     ON_HOLD = 'on_hold', 'On hold'
+
+
+#: The states a person can choose, in menus, the quick-add box and `services.set_state`: everything
+#: but Blocked, which only blockers set.
+SELECTABLE_STATES = (TaskState.TODO, TaskState.IN_PROGRESS, TaskState.ON_HOLD)
 
 
 class Resolution(models.TextChoices):
@@ -51,7 +59,7 @@ class Resolution(models.TextChoices):
 
 #: The states that are muted: shown dimmed, never overdue, never moved by "reschedule overdue", and
 #: whose reminders are held until the task leaves them (`services.reminders.release_held`).
-MUTED_STATES = frozenset({TaskState.ON_HOLD})
+MUTED_STATES = frozenset({TaskState.ON_HOLD, TaskState.BLOCKED})
 
 
 class Task(models.Model):
@@ -77,6 +85,10 @@ class Task(models.Model):
     reminder_deliveries: ClassVar['models.Manager']
     #: The reverse accessor of `InboundEmail.task` (a task made from an email, issue #186).
     inbound_emails: ClassVar['models.Manager']
+    #: The reverse accessors of `TaskBlocker` (issue #273): the links where this task is the one
+    #: blocked (`blocked_by_links`: its blockers) and where it blocks another (`blocks_links`).
+    blocked_by_links: ClassVar['models.Manager']
+    blocks_links: ClassVar['models.Manager']
     # `ty` types `pk` as the primary key field object itself, not the value it holds.
     pk: uuid.UUID
     user_id: uuid.UUID
@@ -94,6 +106,9 @@ class Task(models.Model):
     attachment_count: int
     # Set by `services.reminders.with_reminder_flags` on the tasks a list shows (not stored).
     has_reminders: bool
+    # Set by `views.lists.decorate` (a `Prefetch`, not stored): the `TaskBlocker` rows of the task's
+    # open, non-trashed blockers, each with its `blocker` loaded.
+    open_blocker_links: list
     # Set by `services.search` on the tasks a search shows (not stored): which field matched
     # (`title`, `description`, `comment`, or `''`) and a highlighted snippet of the normalised text.
     search_field: str
@@ -241,6 +256,19 @@ class Task(models.Model):
     def is_muted(self) -> bool:
         """An open task in a muted state (`MUTED_STATES`)."""
         return self.is_open and self.state in MUTED_STATES
+
+    @property
+    def open_blockers(self) -> list['Task']:
+        """The task's open, non-trashed blockers, by number. Reads what `views.lists.decorate`
+        prefetched (a list shows its rows without a query each), else asks."""
+        links = getattr(self, 'open_blocker_links', None)
+        if links is not None:
+            return sorted((link.blocker for link in links), key=lambda task: task.number)
+        return list(
+            Task.objects.filter(
+                blocks_links__blocked=self, completed_at__isnull=True, deleted_at__isnull=True
+            ).order_by('number')
+        )
 
     @property
     def state_group(self) -> str:

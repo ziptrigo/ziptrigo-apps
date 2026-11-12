@@ -103,7 +103,7 @@ class TestModel:
 
         assert todo.is_overdue(TODAY) and not held.is_overdue(TODAY)
         assert held.is_muted and not todo.is_muted
-        assert MUTED_STATES == {TaskState.ON_HOLD}
+        assert MUTED_STATES == {TaskState.ON_HOLD, TaskState.BLOCKED}
 
     def test_the_state_group(self, funded_user):
         assert make_task(funded_user, state='todo').state_group == 'todo'
@@ -434,7 +434,7 @@ class TestMutedOverdue:
         body = text(web.get(reverse('todo:today')))
 
         assert body.index('Late todo') < body.index('Late hold') < body.index('Today todo')
-        assert 'On hold (' not in body
+        assert 'On hold & blocked (' not in body
         assert 'id="overdue-title"' in body
 
     def test_the_badge_of_a_muted_task_is_not_red_or_overdue(self, web, funded_user, wednesday):
@@ -466,7 +466,7 @@ class TestMutedOverdue:
         body = text(web.get(reverse('todo:today')))
 
         assert 'Late hold' not in body and 'Late todo' in body
-        assert 'On hold (' not in body
+        assert 'On hold & blocked (' not in body
 
     def test_own_section(self, web, funded_user, wednesday):
         self.make(funded_user, wednesday)
@@ -474,9 +474,11 @@ class TestMutedOverdue:
 
         body = text(web.get(reverse('todo:today')))
 
-        assert 'On hold (1)' in body
+        assert 'On hold & blocked (1)' in body
         assert '<details' in body and '<details open' not in body  # collapsed
-        assert body.index('Today todo') < body.index('On hold (1)') < body.index('Late hold')
+        assert (
+            body.index('Today todo') < body.index('On hold & blocked (1)') < body.index('Late hold')
+        )
 
     def test_a_muted_task_due_today_stays_in_the_today_list_in_every_setting(
         self, web, funded_user, wednesday
@@ -1251,13 +1253,15 @@ class TestSettingsPage:
         )
 
         assert response.status_code == 422
-        assert 'Choose Today (dimmed), Hidden from Today or On hold section.' in text(response)
+        assert 'Choose Today (dimmed), Hidden from Today or On hold & blocked section.' in text(
+            response
+        )
         assert get_account(funded_user).muted_overdue == 'dimmed'
 
     def test_the_page_lists_the_three_choices(self, web):
         body = text(web.get(reverse('todo:settings')))
 
-        for label in ('Today, dimmed', 'Hidden from Today', 'On hold section'):
+        for label in ('Today, dimmed', 'Hidden from Today', 'On hold & blocked section'):
             assert label in body
 
 
@@ -1291,7 +1295,7 @@ class TestFilterParams:
             }
         )
 
-        assert params.states == ('on_hold', 'todo')
+        assert params.states == ('blocked', 'on_hold', 'todo')
         assert params.resolution == 'wont_do'
 
     def test_a_resolution_needs_include_closed(self):

@@ -6,7 +6,8 @@ from django.core.exceptions import ValidationError
 from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 
-from ..models import Label, Priority, RecurrenceMode, Resolution, TaskState
+from ..models import SELECTABLE_STATES, Label, Priority, RecurrenceMode, Resolution, TaskState
+from ..services.blockers import parse_numbers
 from ..services.limits import TITLE_MAX
 from ..services.recurrence import parse_rule
 from ..services.tasks import (
@@ -66,9 +67,12 @@ class TaskForm(forms.Form):
     state = forms.ChoiceField(
         label='State',
         required=False,
-        choices=TaskState.choices,
+        choices=[(state.value, state.label) for state in SELECTABLE_STATES],
         error_messages={'invalid_choice': STATE_MESSAGE},
     )
+    # Only the quick-add box has it too: the numbers of the tasks blocking the new one ("1200,
+    # 1201" or "#1200 #1201"). An existing task's blockers change through `BlockerForm`.
+    blocked_by = forms.CharField(label='Blocked by', required=False, max_length=200)
 
     def __init__(self, *args, user: User, part: str = '', **kwargs):
         super().__init__(*args, **kwargs)
@@ -80,6 +84,12 @@ class TaskForm(forms.Form):
             for name in list(self.fields):
                 if name not in keep:
                     del self.fields[name]
+
+    def clean_blocked_by(self) -> list[int]:
+        try:
+            return parse_numbers(self.cleaned_data['blocked_by'])
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.message_dict['blocked_by']) from None
 
     def clean_description(self) -> str:
         try:
@@ -119,7 +129,7 @@ class TaskForm(forms.Form):
             # A request without the Repeat controls leaves the repeat rule alone (an empty `rrule`
             # would stop it).
             and (name not in ('rrule', 'recurrence_mode') or name in self.data)
-            and name != 'state'
+            and name not in ('state', 'blocked_by')
         }
         if 'labels' in values:
             values['labels'] = list(values['labels'])
@@ -128,6 +138,10 @@ class TaskForm(forms.Form):
     def requested_state(self) -> str:
         """The state the quick-add box asked for (To do when it didn't)."""
         return self.cleaned_data.get('state') or TaskState.TODO
+
+    def requested_blockers(self) -> list[int]:
+        """The numbers of the tasks the quick-add box said block the new one."""
+        return self.cleaned_data.get('blocked_by') or []
 
 
 class SubtaskForm(forms.Form):
@@ -164,13 +178,27 @@ class CloseForm(forms.Form):
         error_messages={'invalid_choice': SUBTASKS_MESSAGE},
     )
     note = forms.CharField(label='Note', required=False, strip=False)
+    #: "I know it still has open blockers": the close dialog posts it. Without it a task with open
+    #: blockers is not closed from the web (`views.tasks._close`).
+    confirm_blockers = forms.BooleanField(required=False)
 
 
 class StateForm(forms.Form):
     state = forms.ChoiceField(
         label='State',
-        choices=TaskState.choices,
+        choices=[(state.value, state.label) for state in SELECTABLE_STATES],
         error_messages={'required': STATE_MESSAGE, 'invalid_choice': STATE_MESSAGE},
+    )
+
+
+class BlockerForm(forms.Form):
+    """Adding a blocker on the task page: a task number (`1200` or `#1200`), or part of a title the
+    suggestions offered; `views.blockers` resolves it to one of the user's tasks."""
+
+    blocker = forms.CharField(
+        label='Blocker',
+        max_length=200,
+        error_messages={'required': 'Enter the number of a task.'},
     )
 
 

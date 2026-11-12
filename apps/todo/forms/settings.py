@@ -51,13 +51,13 @@ class SettingsForm(forms.Form):
         error_messages={'invalid_choice': 'Choose 15 minutes, 1 hour, 8 hours or 1 day.'},
     )
 
-    # Where an overdue task that is On hold shows on Today. A request without it leaves it alone.
+    # Where an overdue task that is On hold or Blocked shows on Today. A request without it leaves it alone.
     muted_overdue = forms.ChoiceField(
-        label='On hold and overdue',
+        label='On hold or blocked, and overdue',
         required=False,
         choices=MutedOverdue.choices,
         error_messages={
-            'invalid_choice': 'Choose Today (dimmed), Hidden from Today or On hold section.'
+            'invalid_choice': 'Choose Today (dimmed), Hidden from Today or On hold & blocked section.'
         },
     )
 

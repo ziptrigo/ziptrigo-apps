@@ -1,4 +1,4 @@
-"""`/todo/settings/`: the default due time, the default reminder, where an overdue On hold task shows on
+"""`/todo/settings/`: the default due time, the default reminder, where an overdue On hold or Blocked task shows on
 Today, the free-tasks line and the price,
 the storage line and the email address tasks can be sent to (`views.inbox`).
 """

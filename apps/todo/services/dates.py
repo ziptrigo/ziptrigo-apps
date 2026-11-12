@@ -13,6 +13,7 @@ from django.db.models import (
     Count,
     F,
     IntegerField,
+    Max,
     OuterRef,
     Q,
     QuerySet,
@@ -171,7 +172,7 @@ def has_manual_order(queryset: QuerySet, field: str = 'position') -> bool:
     """Whether anything in `queryset` was ever positioned by hand in `field` (`position` for a
     parent's subtasks, `today_position` for the Today list). A reorder writes 0, 1, 2, ..., so any
     value above 0 means one happened. `queryset` must be exactly the set the list orders, and
-    `tasks.next_position` / `tasks.next_today_position` take their maximum over the same set."""
+    `next_position` / `next_today_position` (below) take their maximum over the same set."""
     return queryset.filter(**{f'{field}__gt': 0}).exists()
 
 
@@ -283,3 +284,31 @@ def today_count(user: User, account: TodoAccount | None = None) -> int:
     if account.muted_overdue != MutedOverdue.DIMMED:
         queryset = queryset.exclude(due_date__lt=user_today(user), state__in=MUTED_STATES)
     return queryset.count()
+
+
+# -- Where a new or moved task goes in a manual order ------------------------------------------
+
+
+def after_the_others(queryset, field: str) -> int:
+    """`max(field) + 1` over `queryset` when it has a manual order (any value above 0), else 0 (the
+    default sort applies). `queryset` is the very set the list orders (`dates.has_manual_order`)."""
+    top = queryset.aggregate(top=Max(field))['top'] or 0
+    return top + 1 if top > 0 else 0
+
+
+def next_position(parent: Task | None) -> int:
+    """`Task.position` of a task that joins `parent`'s subtasks: after the others when they have a
+    manual order, else 0. Only subtasks have a manual order in `position`; a top-level task is
+    ordered in Today by `today_position` (`next_today_position`) and keeps 0 here."""
+    if parent is None:
+        return 0
+    return after_the_others(subtasks_of(parent), 'position')
+
+
+def next_today_position(user: User, due_date: date | None) -> int:
+    """`Task.today_position` of a new task: after the others only when it lands in the Today list
+    (it is due today) and *that list* already has a manual order; else 0, so a task created for
+    another day, or in a list nobody reordered, never changes how Today sorts."""
+    if due_date is None or due_date != user_today(user):
+        return 0
+    return after_the_others(todays_tasks(user), 'today_position')

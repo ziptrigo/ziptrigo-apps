@@ -14,7 +14,7 @@ notification**, each in its own case: welcome credits, a promo code granted at s
 transfer suspended (and the notice removed when it is re-enabled), Receipts storage paused (and
 removed on unfreeze), a To-do reminder delivered in-app, To-do storage paused (and removed), a
 To-do repeating task whose next occurrence could not be created, and To-do "emailed tasks were not
-created". Also **Web Push** (issue #239): the service worker and manifest at the root, the account
+created", and the two blocker notices (a task no longer blocked, a blocker reopened). Also **Web Push** (issue #239): the service worker and manifest at the root, the account
 page's **Notifications on this device** section, the answer endpoint and sign-out (NOTIF-19 to
 NOTIF-22). The read-only admin of notifications is in `admin.md` (ADM-32), push in ADM-54. The emails these events
 send are checked here only for arrival, subject and links; `emails.md` has them in full.
@@ -439,6 +439,30 @@ the account's format; pushes use the same public wording.
 |---|---|---|
 | 1 | On `/todo/` add `Notif held` for tomorrow at `9am` (default in-app reminder), open its page (`T_HELD`) and set the state chip to **On hold**. **(shell step)** make its reminder due as in NOTIF-15 step 3 (filter on `task__number=<T_HELD>`) and run `send_reminders()`. | Prints `1`. Reload and open the bell: **no** new notification, and the reminder still says "Fires ...". |
 | 2 | Set the state back to **To do** on the page. | One new notification `Notif held` with the body `Due <tomorrow as "Nov 2, 2026">, 9:00 AM`; the reminder says "Skipped ...". Run `send_reminders()` again: nothing more. |
+
+### NOTIF-25 To-do: a task is no longer blocked
+
+**Purpose:** when the last open blocker of a task ends, the owner gets one in-app notice, whatever state the task has
+(issue #273). The full case is `todo.md` TODO-51.
+**Preconditions:** NOTIF-15 done (`<NOTIF_B>` signed in).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/todo/` add `Notif blocker`, then `Notif waits` with **Blocked by** its number. Complete `Notif blocker`. | The bell shows one new notification `#<number> Notif waits is no longer blocked` with the body "Everything that was blocking it is closed."; clicking it opens `Notif waits`, whose chip reads "To do". |
+| 2 | Block `Notif waits` again with another new task, set it **On hold**, complete that task. | Still **On hold**, and the notification is replaced (one entry for `Notif waits`, now new again), not duplicated. |
+| 3 | Open `/notifications/`. | The entry is listed with its task link; dismissing it works like any other. |
+
+### NOTIF-26 To-do: a blocker was reopened
+
+**Purpose:** a blocker that comes back (reopened, or restored from the Trash) tells the open tasks it blocks and does
+**not** block them again (issue #273; `todo.md` TODO-52).
+**Preconditions:** NOTIF-25 done.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Reopen `Notif blocker` (it is closed and still linked to `Notif waits`). | One new notification `#<blocker number> was reopened and blocks #<waits number>`, body naming both tasks and saying `Notif waits` keeps its state. `Notif waits` is still To do. |
+| 2 | Trash `Notif blocker`, restore it. | The notification is replaced by a new one (same key). |
+| 3 | Complete `Notif waits`, reopen `Notif blocker`. | No notification (only open tasks are told). |
 
 ## Out of scope
 

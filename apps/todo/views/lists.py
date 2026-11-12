@@ -11,7 +11,7 @@ from math import ceil
 
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import QuerySet
+from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -24,7 +24,7 @@ from apps.accounts.services.timezones import user_today
 from apps.core.htmx import is_htmx
 
 from ..forms import TaskForm
-from ..models import Label, MutedOverdue, Resolution, Task, TodoSettings
+from ..models import Label, MutedOverdue, Resolution, Task, TaskBlocker, TodoSettings
 from ..services import (
     DEFAULT_DIRECTIONS,
     SORT_DEFAULT,
@@ -95,13 +95,23 @@ def belongs(task: Task, view: str, today: date) -> bool:
 
 def decorate(queryset: QuerySet) -> QuerySet:
     """What a row needs: the subtask and comment counts, whether it has reminders, the parent (shown
-    on a subtask), the repeat rule and the labels."""
+    on a subtask), the repeat rule, the labels and the open blockers (one more query for the whole
+    list: a Blocked chip names them and closing asks about them, `Task.open_blockers`)."""
     return (
         with_reminder_flags(
             with_open_occurrences(with_comment_counts(with_subtask_counts(queryset)))
         )
         .select_related('parent', 'recurrence')
-        .prefetch_related('labels')
+        .prefetch_related(
+            'labels',
+            Prefetch(
+                'blocked_by_links',
+                queryset=TaskBlocker.objects.filter(
+                    blocker__completed_at__isnull=True, blocker__deleted_at__isnull=True
+                ).select_related('blocker'),
+                to_attr='open_blocker_links',
+            ),
+        )
     )
 
 
