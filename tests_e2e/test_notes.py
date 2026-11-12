@@ -1,6 +1,6 @@
 """Notes (issue #260), end to end in a real browser: the editor with its live preview, coloured code
 and a table, ticking a box on the note page, reordering the list with the keyboard, archiving, the
-Trash and restoring, and (PR 5) searching from the sidebar, narrowing the results, saving a filter,
+Trash and restoring, Share from the row menu, and (PR 5) searching from the sidebar, narrowing the results, saving a filter,
 its count in the sidebar and renaming and deleting it.
 
 Run on the shared e2e server (`receipts_server`). Every note this makes has the title prefix
@@ -307,5 +307,22 @@ def test_reordering_filters_reorders_the_sidebar_without_asking_again(
         ]
         page.reload()
         expect(sidebar_names).to_have_text(['Zn Three', 'Zn One', 'Zn Two'])
+    finally:
+        receipts_server.shell(CLEANUP)
+
+
+def test_share_from_the_row_menu_opens_the_panel(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.shell(CLEANUP)
+    receipts_server.shell(SEED_THREE)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/notes/')
+        page.get_by_role('button', name='Actions for Zn B').click()
+        items = page.locator('li.note-row:has-text("Zn B") [role="menuitem"]')
+        expect(items).to_have_text(['Edit', 'Share', 'Duplicate', 'Archive', 'Move to trash'])
+        page.get_by_role('menuitem', name='Share').click()
+        page.wait_for_url(re.compile(r'/notes/[0-9a-f-]{36}/\?share=1#share-panel$'))
+        expect(page.get_by_text('Share this note')).to_be_visible()
+        expect(page.get_by_role('button', name='Create link')).to_be_visible()
     finally:
         receipts_server.shell(CLEANUP)

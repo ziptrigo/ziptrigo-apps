@@ -1,4 +1,4 @@
-{% comment %} The row menu: Edit, Duplicate, Archive/Unarchive, Move to trash. Needs `note`, `list_next` and
+{% comment %} The row menu: Edit, Share, Duplicate, Archive/Unarchive, Move to trash. Needs `note`, `list_next` and
    `duplicate_cost`. Duplicating a note that costs credits opens the page's confirmation modal (an ancestor with
    x-data="confirmModal"). A locked or taken-down note can't be edited or archived, and a taken-down one can't be duplicated. {% endcomment %}
 <div class="relative" x-data="{ menu: false }" @click.outside="menu = false"
@@ -14,6 +14,14 @@
         <a href="{% url 'notes:edit' note.pk %}" role="menuitem"
            class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
             <i class="fas fa-pen mr-2 w-4 text-center" aria-hidden="true"></i>Edit</a>
+        {% endif %}
+        {% if not note.is_read_only or note.has_active_link %}
+        {% comment %} The note page with its share panel open (`?share=1`, the anchor scrolls to it). Shown when the
+           note page shows its Share button (`links.share_flags`' `show_share`): a note that can be shared, or a
+           read-only one that still has an active link, so the owner can revoke it. {% endcomment %}
+        <a href="{% url 'notes:note' note.pk %}?share=1#share-panel" role="menuitem"
+           class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+            <i class="fas fa-share-nodes mr-2 w-4 text-center" aria-hidden="true"></i>Share</a>
         {% endif %}
         {% if note.is_taken_down %}
         {% elif duplicate_cost %}
