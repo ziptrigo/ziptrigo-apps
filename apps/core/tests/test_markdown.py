@@ -1063,8 +1063,63 @@ def test_an_unknown_language_a_missing_one_and_indented_code_stay_plain():
     assert 'class="hl"' not in extended('```nosuchlanguage\nx\n```')
 
 
+def test_every_allow_listed_tag_resolves_to_a_lexer_and_is_coloured():
+    from apps.core.markdown.highlight import _LEXERS, HIGHLIGHT_LANGUAGES
+
+    assert set(_LEXERS) == set(HIGHLIGHT_LANGUAGES)
+    for tag in HIGHLIGHT_LANGUAGES:
+        assert f'<code class="language-{tag}">' in extended(f'```{tag}\nx = 1\n```'), tag
+
+
+def test_the_required_languages_are_on_the_allow_list():
+    from apps.core.markdown.highlight import HIGHLIGHT_LANGUAGES
+
+    required = 'python py typescript ts javascript js sh bash shell json yaml sql html css'.split()
+    assert set(required) <= set(HIGHLIGHT_LANGUAGES)
+
+
+def test_a_real_pygments_language_off_the_allow_list_stays_plain():
+    from pygments.lexers import get_lexer_by_name
+
+    get_lexer_by_name('brainfuck')  # Pygments does know it
+
+    assert extended('```brainfuck\n+++\n```') == render('```brainfuck\n+++\n```')
+    assert 'class="hl"' not in extended('```brainfuck\n+++\n```')
+
+
+def test_the_lexer_is_not_looked_up_by_name_at_render_time(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError('looked up at render time')
+
+    monkeypatch.setattr('pygments.lexers.get_lexer_by_name', boom)
+    monkeypatch.setattr('pygments.lexers.find_lexer_class_by_name', boom)
+
+    assert 'class="hl"' in extended('```python\nx = 1\n```')
+
+
+def test_a_document_has_a_highlight_budget_and_later_fences_stay_plain():
+    from apps.core.markdown.highlight import MAX_HIGHLIGHT_CHARS_PER_DOCUMENT
+
+    block = 'x' * 7_999
+    fits = MAX_HIGHLIGHT_CHARS_PER_DOCUMENT // len(block)
+    source = '\n\n'.join(f'```python\n{block}\n```' for _ in range(fits + 1))
+    html = extended(source)
+
+    assert html.count('<pre class="hl">') == fits
+    assert html.count('<pre><code class="language-python">') == 1
+    assert fits == 5
+
+
+def test_the_budget_is_per_render():
+    block = 'x' * 19_000
+    source = '\n\n'.join(f'```python\n{block}\n```' for _ in range(2))
+
+    assert extended(source).count('<pre class="hl">') == 2
+    assert extended(source).count('<pre class="hl">') == 2
+
+
 def test_code_over_the_highlight_cap_stays_plain():
-    from apps.core.markdown.renderer import MAX_HIGHLIGHT_CHARS
+    from apps.core.markdown.highlight import MAX_HIGHLIGHT_CHARS
 
     at_cap = 'x' * (MAX_HIGHLIGHT_CHARS - 1)
     over = 'x' * (MAX_HIGHLIGHT_CHARS + 1)
@@ -1077,7 +1132,7 @@ def test_a_pygments_failure_falls_back_to_plain(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError('lexer blew up')
 
-    monkeypatch.setattr('apps.core.markdown.renderer.pygments.highlight', boom)
+    monkeypatch.setattr('apps.core.markdown.highlight.pygments.highlight', boom)
 
     assert extended('```python\nx = 1\n```') == render('```python\nx = 1\n```')
 

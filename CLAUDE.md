@@ -1417,16 +1417,30 @@ image labels), `limits.py` (the length guard), and the public `render.py`, `plai
   described here, which To-do keeps using) or `'extended'` (Notes): `basic` plus **tables** (`table`
   rule; alignment is a class, `text-left|center|right`, never a `style`; wrapped in `<div
   class="md-table">` for horizontal scroll) and **Pygments syntax colouring** of a fenced block whose
-  language tag Pygments knows (`<pre class="hl"><code class="language-<tag>">` with `hl-`-prefixed
-  spans; no tag, an unknown one, over `MAX_HIGHLIGHT_CHARS` (20,000), a Pygments error and indented
-  blocks all render as `basic` does). An unknown profile is a `ValueError`. `parser.get_parser(profile)`
-  keeps one parser per thread **per profile**; the `extended` sanitiser allow-list adds `table thead
-  tbody tr th td span div` and `class` on `th td span div pre`; plain text separates table cells by a
-  space and ends rows in a newline. The stylesheet is generated: `./manage.py build_highlight_css`
-  writes `core/css/highlight.css` (Pygments `friendly` scoped to `pre.hl`, `github-dark` to `.dark
-  pre.hl`, plus the `.md-table` rules; loaded by `core/base.html` after `site.css`) from
-  `apps/core/markdown/highlight_css.py`, and `apps/core/tests/test_highlight_css.py` fails while the
-  committed file differs. `pygments` is a runtime dependency.
+  language tag is on an **allow-list** (`apps/core/markdown/highlight.py`, `HIGHLIGHT_LANGUAGES`: fence
+  tag -> Pygments alias, ~65 tags for python, ts/js/jsx/tsx, shells, json/yaml/toml/ini/xml/html/css/scss,
+  sql, the common compiled and scripting languages, dockerfile, makefile, nginx, diff, markdown, graphql,
+  hcl/terraform, text). Pygments' lexers are backtracking regexes with a history of ReDoS advisories and
+  the tag is the author's choice on pages anonymous visitors can reload, so a tag off the list, a real
+  Pygments language included (`brainfuck`), renders as `basic` does. Each lexer class is resolved once at
+  import (a test checks every alias; no `get_lexer_by_name` at render time), instantiated per call, with
+  one module-level `HtmlFormatter(nowrap=True, classprefix='hl-')`. Bounds: a fence over
+  `MAX_HIGHLIGHT_CHARS` (20,000) stays plain, and a document gets at most
+  `MAX_HIGHLIGHT_CHARS_PER_DOCUMENT` (40,000) characters of colouring in total (counted in the render
+  `env`; a fence that would pass it stays plain). Output is `<pre class="hl"><code
+  class="language-<tag>">` with `hl-`-prefixed spans; no tag, no allow-listed tag, the caps, a Pygments
+  error and indented blocks all render as `basic` does. An unknown profile is a `ValueError`.
+  `parser.get_parser(profile)` keeps one parser per thread **per profile**; the `extended` sanitiser
+  allow-list adds `table thead tbody tr th td span div` and `class` on `th td span div pre`; plain text
+  separates table cells by a space and ends rows in a newline. The stylesheet is generated:
+  `./manage.py build_highlight_css` writes `core/css/highlight.css` (Pygments `xcode` scoped to `pre.hl`,
+  `github-dark` to `.dark pre.hl`, plus the `.md-table` rules; loaded by `core/base.html` after
+  `site.css`) from `apps/core/markdown/highlight_css.py`. The block background is
+  `rgb(var(--c-gray-50))` / `rgb(var(--c-gray-900))` (follows the colour scheme and high contrast, no
+  hex), and the generator raises any token colour under 4.5:1 on the Sage gray-50 / gray-900 (a few dark
+  tokens; `xcode` needs none). `apps/core/tests/test_highlight_css.py` fails while the committed file
+  differs (re-run the command after a Pygments upgrade too) and asserts every emitted colour is >= 4.5:1.
+  `pygments` is a runtime dependency.
 - **Supported syntax, exactly:** paragraphs, `*italic*`/`_italic_`, `**bold**`/`__bold__`,
   `` `code` ``, fenced and indented code blocks, headings `#` to `######` (no `id`, no anchors),
   ordered and unordered (nested) lists, checklists, block quotes, horizontal rules, links, bare

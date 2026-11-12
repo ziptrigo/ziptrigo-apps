@@ -8,15 +8,13 @@ references and checklist boxes. `render.render` sanitises whatever they write.
 import re
 from collections.abc import Sequence
 
-import pygments
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
 from markdown_it.utils import EnvType, OptionsDict
-from pygments.formatters.html import HtmlFormatter
-from pygments.lexers import get_lexer_by_name
 
+from .highlight import highlighted
 from .inline_text import inline_text
 from .links import LinkKind, classify_href
 
@@ -28,10 +26,6 @@ _OPEN_LINKS = 'open_links'
 
 _LANGUAGE_CHARS = re.compile(r'[^a-z0-9+\-]')
 _MAX_LANGUAGE_LENGTH = 20
-#: A fenced block longer than this (characters) is never coloured (the `extended` profile).
-MAX_HIGHLIGHT_CHARS = 20_000
-#: Pygments' class prefix; `build_highlight_css` writes the matching stylesheet.
-HIGHLIGHT_PREFIX = 'hl-'
 _ALIGNMENT = re.compile(r'text-align:\s*(left|center|right)')
 
 
@@ -137,27 +131,13 @@ def install_renderer(md: MarkdownIt) -> None:
         md.add_render_rule(rule.__name__, rule)
 
 
-def highlighted(code: str, language: str) -> str | None:
-    """`code` as Pygments spans (no wrapper), or None when it should stay plain: no language, too
-    long, a language Pygments doesn't know, or any Pygments error."""
-    if not language or len(code) > MAX_HIGHLIGHT_CHARS:
-        return None
-    try:
-        lexer = get_lexer_by_name(language)
-        return pygments.highlight(
-            code, lexer, HtmlFormatter(nowrap=True, classprefix=HIGHLIGHT_PREFIX)
-        )
-    except Exception:
-        return None
-
-
 def fence_extended(
     self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: EnvType
 ) -> str:
-    """`fence` with Pygments colouring when the block has a language Pygments knows."""
+    """`fence` with Pygments colouring when the block's tag is on the allow-list (`highlight`)."""
     token = tokens[idx]
     language = _language(token)
-    body = highlighted(token.content, language)
+    body = highlighted(token.content, language, env)
     if body is None:
         return fence(self, tokens, idx, options, env)
     return f'<pre class="hl"><code class="language-{language}">{body}</code></pre>\n'

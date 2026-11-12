@@ -3,8 +3,9 @@
 CommonMark with the `tasklists` plugin, bare-URL linkify (only `http://`, `https://`, `www.` and
 e-mail addresses: scheme-less `manage.py` or `README.md` stay text) and `breaks`, without
 strikethrough or raw HTML (`html=False`: HTML in the source is escaped, never rendered). The
-`basic` profile has no tables; `extended` adds them (and Pygments colouring, in the renderer). Sharing it
-is what keeps `render`, `to_plain_text` and `toggle_checklist_item` agreeing on what the text means.
+`basic` profile has no tables; `extended` adds them (and Pygments colouring, in the renderer).
+Sharing it is what keeps `render`, `to_plain_text` and `toggle_checklist_item` agreeing on what the
+text means.
 """
 
 import threading

@@ -56,7 +56,11 @@ from django.utils.safestring import SafeString
 from apps.accounts.models import User
 
 # The model-agnostic machinery lives in `apps.core.search` (shared with Notes, issue #260); it is
-# re-exported here so every To-do caller and test keeps importing it from this module.
+# re-exported here so every To-do caller and test keeps importing it from this module. Patching in
+# a test: `connection` (the PostgreSQL branch of `search_guard`) is read by `apps.core.search`, so
+# patch `apps.core.search.connection`; the constants and helpers `attach_matches` and the rest of
+# this module use (`SNIPPET_TIME_BUDGET`, `snippet_regex`, ...) are this module's own names, so
+# patch them here -- patching them on `apps.core.search` has no effect on To-do.
 from apps.core.search import (
     EMPTY_MESSAGE,
     INVALID_MESSAGE,
