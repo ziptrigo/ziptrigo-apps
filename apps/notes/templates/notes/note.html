@@ -1,5 +1,5 @@
 {% extends 'notes/layout.html' %}
-{% load local_time notes_ui %}
+{% load datetime_format local_time notes_ui %}
 
 {% block title %}{{ note.title }} - Notes - ZipTrigo{% endblock %}
 
@@ -10,7 +10,12 @@
     <h1 class="min-w-0 break-words text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ note.title }}</h1>
     {% if note.is_archived %}<span class="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300"><i class="fas fa-box-archive text-[10px]" aria-hidden="true"></i>Archived</span>{% endif %}
 </div>
-<p class="mb-4 text-xs text-gray-500 dark:text-gray-400">Updated {% local_time note.updated_at %}</p>
+<p class="mb-4 text-xs text-gray-500 dark:text-gray-400">Updated {% local_time note.updated_at %}
+    <span data-renewal class="ml-2">&middot;
+    {% if note.is_free %}Free
+    {% elif note.is_locked %}Renewal unpaid since {{ note.paid_through|fdate }}
+    {% elif renewal_overdue %}Renewal was due {{ note.paid_through|fdate }}
+    {% else %}Renews {{ note.paid_through|fdate }}{% endif %}</span></p>
 
 {% if note.is_trashed %}
 <div role="status" class="mb-4 rounded-xl border border-red-600/40 dark:border-red-400/40 bg-red-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">

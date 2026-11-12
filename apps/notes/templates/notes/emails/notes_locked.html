@@ -1,0 +1,11 @@
+<div style="font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: #2c3432; line-height: 1.5;">
+  <p>Your credit balance couldn't cover the renewal of {{ count }} of your notes ({{ renewal_price }} credit{{ renewal_price|pluralize }} each), so {{ count|pluralize:"it is,they are" }} now locked:</p>
+  <ul>
+    {% for note in notes %}<li>{{ note.title }}{% if note.due %} (renewal due {{ note.due }}){% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% if more %}<p>...and {{ more }} more.</p>{% endif %}
+  <p>Nothing was deleted. You can still read, copy, download and delete a locked note; it can't be edited and its share links stop working until you add credits. Adding {{ total }} credit{{ total|pluralize }} unlocks {{ count|pluralize:"it,them all" }} automatically.</p>
+  <p><a href="{{ top_up_url }}" style="color: #3b4a47;">Add credits</a> &middot; <a href="{{ notes_url }}" style="color: #3b4a47;">Your notes</a></p>
+  <p>--<br>The ZipTrigo Team</p>
+</div>

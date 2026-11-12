@@ -22,7 +22,7 @@ from apps.core.markdown import count_checklist_items, toggle_checklist_item
 
 from ..limits import CONTENT_MAX, TITLE_MAX
 from ..models import Note, NotesSettings, NoteVersion, Tag
-from . import versions
+from . import notices, versions
 from .accounts import get_account, lock_account
 from .errors import CostChangedError, NoteConflictError
 from .versions import Editor
@@ -424,6 +424,7 @@ def restore(note: Note, expected_cost: int | None = None) -> Note:
         cost, becomes_paid, renews = _restore_plan(locked, config)
         if expected_cost is not None and expected_cost != cost:
             raise CostChangedError(cost)
+        was_locked = locked.locked_at is not None
         now = timezone.now()
         if cost:
             prefix = 'Notes renewal' if renews else 'Notes'
@@ -442,6 +443,9 @@ def restore(note: Note, expected_cost: int | None = None) -> Note:
                 fields.append('charged_credits')
         locked.deleted_at = None
         locked.save(update_fields=fields)
+        if was_locked and renews:
+            # The renewal it skipped is paid: the "locked" notice is stale.
+            notices.clear_locked(note.user_id, locked.pk)
     return locked
 
 

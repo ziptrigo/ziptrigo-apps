@@ -55,6 +55,8 @@ Subjects are quoted from the code; `<...>` is filled in at send time.
 | 22 | `Your to-do file storage is paused` | To-do attachment storage can't be paid (shell step) | The owner, if confirmed | MAIL-20 |
 | 23 | `One of your short links was removed` | Admin takedown of a short link with "Notify the owner" ticked | The owner, if confirmed | MAIL-21 |
 | 24 | `Reminder: <task title>` | A to-do reminder with channel Email or Both comes due (shell step) | The owner, if confirmed | MAIL-22 |
+| 25 | `Some of your notes are locked` | The Notes renewal job can't pay a renewal and locks notes (shell step), one email per user per run | The owner, if confirmed | MAIL-24 |
+| 26 | `Your notes renew soon` | The Notes renewal job finds the balance short of the renewals due within 7 days (shell step), once per window | The owner, if confirmed | MAIL-25 |
 
 Out of scope (see the end of the file): the Google / Microsoft wording of email 2, delivery
 failures, and rate-limited sends.
@@ -469,12 +471,47 @@ so the delivery job is run by hand.
 | 8 | (shell step) Run `python tests_e2e/ai/manage.py shell -c "from apps.todo.jobs import send_reminders; send_reminders()"` again; wait a minute. | No second reminder email (a reminder is delivered once). |
 | 9 | (Held reminders, `todo.md` TODO-44) Set the task On hold before step 3, run step 3, then set it back to To do. | No email while it is on hold; after leaving the state **one** email with the same subject and body (a held reminder is sent once, on release). |
 
+### MAIL-24 Notes: "some of your notes are locked" (shell steps)
+
+**Purpose:** a renewal run that locks notes sends the owner **one** email listing them, escaped, with working links and
+the public date wording; none for an unconfirmed address.
+**Preconditions:** a fresh account `MAIL_NOTES` = `qa.mail.notes.<R>@example.com` (confirmed, 1,000 welcome credits)
+with five free notes and two paid notes titled `Locked <b>one</b> & co` and `Locked two`; the admin spends the
+balance down to 0 (`/admin/billing/credittransaction/adjust/`, Direction Spend); shell access.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | (shell step) Make both due and run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import datetime, timedelta, timezone as tz; from django.utils import timezone; from apps.notes.models import Note; from apps.notes.jobs import renew; qs = Note.objects.filter(user__email='<MAIL_NOTES>', is_free=False); qs.filter(title='Locked two').update(paid_through=datetime(2026, 11, 10, 23, 30, tzinfo=tz.utc)); qs.exclude(title='Locked two').update(paid_through=datetime(2026, 11, 9, 8, 0, tzinfo=tz.utc)); renew()"` | No traceback. Both notes are locked. |
+| 2 | `/__e2e__/mail/?to=<MAIL_NOTES>` (reload until it arrives). | Exactly **one** new email, subject exactly `Some of your notes are locked` (no title in it). |
+| 3 | Text body. | "Your credit balance couldn't cover the renewal of 2 of your notes (5 credits each), so they are now locked:", then `- Locked <b>one</b> & co (renewal due Nov 9, 2026)` and `- Locked two (renewal due Nov 10, 2026)` (oldest first; the public wording whatever the account's date format), "Nothing was deleted. You can still read, copy, download and delete a locked note; it can't be edited and its share links stop working until you add credits. Adding 10 credits unlocks them all automatically.", `Add credits: <BASE>/billing/credits/`, `Your notes: <BASE>/notes/` and the signature "The ZipTrigo Team". |
+| 4 | HTML source. | The same sentences; the title as `Locked &lt;b&gt;one&lt;/b&gt; &amp; co` (never a raw `<b>`); links "Add credits" and "Your notes" to those URLs. |
+| 5 | Click both links. | `/billing/credits/` and `/notes/` (the two rows with a lock icon). |
+| 6 | (shell step) Run the job again (`renew()`). Wait a minute. | No second email. |
+| 7 | (Unconfirmed address) Make another account `MAIL_NOTES2` with one due paid note and no credits, then un-confirm it: `python tests_e2e/ai/manage.py shell -c "from apps.accounts.models import User; User.objects.filter(email='<MAIL_NOTES2>').update(email_confirmed=False)"`, run `renew()`. | The note is locked and the bell has its notice, but **no email** reaches `?to=<MAIL_NOTES2>`. |
+| 8 | (one email per run) Make a third paid note of `MAIL_NOTES` (it costs credits: add 1 first and spend it again), make it due and run `renew()`. | A second email lists only that note: each run's email names only the notes that run locked. |
+
+### MAIL-25 Notes: "your notes renew soon" (shell steps)
+
+**Purpose:** the warning email states the numbers, the first renewal date and how many credits are missing, once per
+window.
+**Preconditions:** a fresh account `MAIL_WARN` = `qa.mail.warn.<R>@example.com` (confirmed) with five free notes and
+two paid notes; the admin spends the balance down to exactly 7; shell access.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | (shell step) Make the paid notes renew in 3 and 5 days and run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.notes.models import Note; from apps.notes.jobs import renew; notes = list(Note.objects.filter(user__email='<MAIL_WARN>', is_free=False).order_by('created_at')); [Note.objects.filter(pk=n.pk).update(paid_through=timezone.now()+timedelta(days=d)) for n, d in zip(notes, (3, 5))]; renew()"` | No traceback. |
+| 2 | `/__e2e__/mail/?to=<MAIL_WARN>` (reload until it arrives). | Exactly one email, subject exactly `Your notes renew soon`. |
+| 3 | Text body. | "2 of your notes renew in the next 7 days (the first on <date 3 days from today, e.g. Nov 14, 2026>) for 10 credits in all, and your balance is 7 credits.", "If the balance can't cover a renewal when it falls due, that note is locked: it can't be edited and its share links stop working until you add credits. Nothing is deleted. Adding 3 more credits covers them.", `Add credits: <BASE>/billing/credits/`, `Your notes: <BASE>/notes/` and the signature. |
+| 4 | HTML source. | The same sentences with links "Add credits" and "Your notes". |
+| 5 | (shell step) Run `renew()` again. Wait a minute. | No second email (once per 7-day window); in the app, the bell has one `Notes renewal: not enough credits`. |
+| 6 | With one paid note instead of two (trash one, reset `NotesAccount.renewal_warned_at` to 8 days ago, balance 4). | The new email reads "1 of your notes renews in the next 7 days ... for 5 credits in all, and your balance is 4 credits ... Adding 1 more credit covers them." |
+
 ## Cross-checks
 
 ### MAIL-23 Every email of the run follows the rules
 
 **Purpose:** a final sweep over everything this file made the site send.
-**Preconditions:** MAIL-01 to MAIL-22 have run.
+**Preconditions:** MAIL-01 to MAIL-25 have run.
 
 | # | Action | Expected result |
 |---|---|---|

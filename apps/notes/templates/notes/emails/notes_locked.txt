@@ -1,0 +1,13 @@
+{% autoescape off %}Your credit balance couldn't cover the renewal of {{ count }} of your notes ({{ renewal_price }} credit{{ renewal_price|pluralize }} each), so {{ count|pluralize:"it is,they are" }} now locked:
+
+{% for note in notes %}- {{ note.title }}{% if note.due %} (renewal due {{ note.due }}){% endif %}
+{% endfor %}{% if more %}...and {{ more }} more.
+{% endif %}
+Nothing was deleted. You can still read, copy, download and delete a locked note; it can't be edited and its share links stop working until you add credits. Adding {{ total }} credit{{ total|pluralize }} unlocks {{ count|pluralize:"it,them all" }} automatically.
+
+Add credits: {{ top_up_url }}
+Your notes: {{ notes_url }}
+
+--
+The ZipTrigo Team
+{% endautoescape %}

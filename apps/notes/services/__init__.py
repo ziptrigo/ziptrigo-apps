@@ -1,4 +1,4 @@
-from . import lists, notes, tags, versions
+from . import billing, lists, notes, tags, versions
 from .accounts import get_account, lock_account
 from .errors import CostChangedError, NoteConflictError
 from .lists import (
@@ -51,6 +51,7 @@ __all__ = [
     'sort_direction',
     'sort_for',
     'trashed_notes',
+    'billing',
     'lists',
     'CostChangedError',
     'Editor',
