@@ -1,0 +1,18 @@
+{% extends 'notes/layout.html' %}
+
+{% block title %}Filters - Notes - ZipTrigo{% endblock %}
+
+{% block notes_content %}
+<h1 class="mb-6 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Filters</h1>
+<p class="mb-6 text-sm text-gray-500 dark:text-gray-400">A filter is a saved search: text, tags, whether a note is shared, when it was updated and a sort. It is listed in the sidebar with the number of notes it selects. Run a search and choose "Save as filter" to add one.</p>
+
+<div id="filter-msg" class="mb-4 text-sm" aria-live="polite"></div>
+<div id="filters">
+    {% include 'notes/partials/filter_list.html' %}
+</div>
+<p class="mt-4 text-sm"><a href="{% url 'notes:search' %}" class="text-sage-600 dark:text-sage-300 hover:underline"><i class="fas fa-magnifying-glass mr-1" aria-hidden="true"></i>Search notes</a></p>
+{% endblock %}
+
+{% block notes_js_libs %}
+{% include 'core/partials/sortable_script.html' %}
+{% endblock %}

@@ -993,10 +993,10 @@ push configured (NOTIF-20's preconditions).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | `/admin/`, find the **Notes** group. | **Notes settings** (Change only, never Add), **Notes** (View), **Tags** (View), **Notes accounts** (View). |
+| 1 | `/admin/`, find the **Notes** group. | **Notes settings** (Change only, never Add), **Notes** (View), **Tags** (View), **Notes accounts** (View), **Saved filters** (View). |
 | 2 | `/admin/notes/note/`. | A list with **Title**, **User**, **Version**, **Free**, **Paid through**, **Archived**, **In the Trash**, **Locked**, **Charged credits**, **Updated at** (the three flags as green ticks / red crosses); no **Add** button; a search box finds a title and `qa.user@example.com`; filters **Is free**, **Archived**, **In the trash**, **Locked** and **Created at** each narrow the list as named (the Trash filter finds the trashed note, **Locked** finds nothing). |
 | 3 | Open a note. | Every field is read-only, there is no **Save** and no **Delete**, and a **Versions** inline lists its versions (number, editor kind, editor, created, updated, title), newest first. `/admin/notes/note/add/` and `/admin/notes/note/<id>/delete/` are 403. |
-| 4 | `/admin/notes/tag/`, `/admin/notes/notesaccount/`. | Tags with name, user, colour, description and the number of notes outside the Trash; accounts with the renewal-warning column empty. Both read-only (no Add, no Delete). |
+| 4 | `/admin/notes/tag/`, `/admin/notes/notesaccount/`, `/admin/notes/savedfilter/` (after `notes.md` NOTES-28 step 3). | Tags with name, user, colour, description and the number of notes outside the Trash; accounts with the renewal-warning column empty; saved filters with name, user, position, the search text and created; a search by the user's email finds them. All read-only (no Add, no Save, no Delete). |
 | 5 | `/admin/notes/notessettings/`. | Straight to the form: Free notes 5, Creation price (credits) 1, Renewal price (credits) 5, Renewal days 365, Renewal warning days 7, Trash days 30, Max notes per user 2000, Max tags per user 200, Max links per note 10, Max versions per note 50, each with a plain-language help text. |
 | 6 | Set Renewal days `0`, Trash days `0` and Creation price `-1`; **Save**. | `Ensure this value is greater than or equal to 1.` under the first two and `Ensure this value is greater than or equal to 0.` under the price. Restore the defaults; Save: the settings are saved ("Notes settings" changed successfully). |
 | 7 | Set **Max versions per note** to `2`, save; as `qa.user` save a note's content three times with different editors or after ten minutes. | Only two versions remain on the note's History (the oldest was dropped). Restore 50. |
@@ -1006,13 +1006,13 @@ push configured (NOTIF-20's preconditions).
 ### ADM-59 Delete a user who has Notes
 
 **Purpose:** deleting a user removes their notes, versions, tags and Notes account (the read-only admins don't block it).
-**Preconditions:** Session A; a throwaway user with notes (create one through the register page and add two notes, one in the Trash, a tag and a few versions).
+**Preconditions:** Session A; a throwaway user with notes (create one through the register page and add two notes, one in the Trash, a tag, a few versions and a saved filter).
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open the user's change form > **Delete**. | The confirmation page lists the related objects: the Notes account, the notes, their versions and the tag; no "Cannot delete" message. |
+| 1 | Open the user's change form > **Delete**. | The confirmation page lists the related objects: the Notes account, the notes, their versions, the tag and the saved filter; no "Cannot delete" message. |
 | 2 | Confirm. | "The user ... was deleted successfully." |
-| 3 | Search the user's email in `/admin/notes/note/`, `/admin/notes/tag/` and `/admin/notes/notesaccount/`. | No rows. |
+| 3 | Search the user's email in `/admin/notes/note/`, `/admin/notes/tag/`, `/admin/notes/notesaccount/` and `/admin/notes/savedfilter/`. | No rows. |
 
 
 ### ADM-60 Share links in the admin never show a code

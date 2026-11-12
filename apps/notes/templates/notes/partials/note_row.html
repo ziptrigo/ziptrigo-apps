@@ -1,6 +1,6 @@
 {% load local_time notes_ui %}
 {% comment %} One note in a list. Needs `note` (loaded like a list loads its rows: tags prefetched, `excerpt` set), `view`
-   (notes, archived or trash), `sortable` for a drag handle, `list_next` (where an action comes back to) and
+   (notes, archived, trash or search), `sortable` for a drag handle, `list_next` (where an action comes back to) and
    `duplicate_cost`. {% endcomment %}
 <li id="note-{{ note.pk }}" data-sort-id="{{ note.pk }}"
     class="note-row flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
@@ -15,11 +15,15 @@
         <div class="flex items-baseline gap-2">
             <a href="{% url 'notes:note' note.pk %}"
                class="min-w-0 truncate text-sm font-medium {% if note.is_trashed %}text-gray-500 dark:text-gray-400{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline rounded-md">{{ note.title }}</a>
+            {% if view == 'search' and note.is_archived %}<span class="flex-shrink-0 rounded-full border border-gray-300 dark:border-gray-600 px-2 text-xs text-gray-600 dark:text-gray-300">Archived</span>{% endif %}
             {% if note.is_locked %}<span class="flex-shrink-0 text-xs text-amber-600 dark:text-amber-400" title="Locked until its renewal is paid"><i class="fas fa-lock" aria-hidden="true"></i><span class="sr-only">Locked</span></span>{% endif %}
             {% if note.is_taken_down %}<span class="flex-shrink-0 text-xs text-red-600 dark:text-red-400" title="Taken down"><i class="fas fa-ban" aria-hidden="true"></i><span class="sr-only">Taken down</span></span>{% endif %}
             {% if note.has_active_link and not note.is_read_only %}<span class="flex-shrink-0 text-xs text-sage-500 dark:text-sage-300" title="Shared by link" data-shared><i class="fas fa-link" aria-hidden="true"></i><span class="sr-only">Shared by link</span></span>{% endif %}
         </div>
-        {% if note.excerpt %}<p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{{ note.excerpt }}</p>{% endif %}
+        {% if note.search_snippet %}
+        {% comment %} A search result: where the text matched (the title, else the content), the match in <mark>. {% endcomment %}
+        <p class="mt-0.5 text-xs text-gray-600 dark:text-gray-400 [&_mark]:rounded-sm [&_mark]:bg-yellow-200 [&_mark]:px-0.5 [&_mark]:text-gray-900 dark:[&_mark]:bg-yellow-600/60 dark:[&_mark]:text-gray-100"><span class="font-medium">{{ note.search_field|capfirst }}:</span> {{ note.search_snippet }}</p>
+        {% elif note.excerpt %}<p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{{ note.excerpt }}</p>{% endif %}
         <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             {% for tag in note.tags.all %}{% tag_chip tag %}{% endfor %}
             <span class="text-xs text-gray-500 dark:text-gray-400">{% if view == 'trash' %}{% if note.days_left %}deleted in {{ note.days_left }} day{{ note.days_left|pluralize }}{% else %}deleted soon{% endif %}{% else %}Updated {% local_time note.updated_at 'short' %}{% endif %}</span>

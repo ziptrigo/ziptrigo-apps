@@ -7,7 +7,8 @@
  *    sortable with core's `initSortableList` (core/js/sortable_list.js: SortableJS by its
  *    `.drag-handle`, arrow keys on the focused handle, announcements); the new order of the rows'
  *    `data-sort-id`s is posted to `data-reorder-url` as `ids[]`. A refusal's message goes to
- *    `data-msg`.
+ *    `data-msg`. A list may also name `data-after-reorder-url` and `data-after-reorder-target`: once
+ *    the order is saved that URL is fetched into the target (the filters page refreshes the sidebar).
  *  - `notesCancelEdit(form, slot)`: Cancel / Escape on an inline editor throws away what was typed.
  */
 (function () {
@@ -42,6 +43,12 @@
         }).then(function (response) {
             if (!response.ok) return response.text().then(function (html) { showProblem(list, html); });
             showProblem(list, '');
+            // The saved filters list refreshes the sidebar's copy of the order once it is saved.
+            const url = list.dataset.afterReorderUrl;
+            const target = list.dataset.afterReorderTarget;
+            if (url && target && document.querySelector(target)) {
+                htmx.ajax('GET', url, { target: target, swap: 'outerHTML' }).catch(function () {});
+            }
         }).catch(function () {
             showProblem(list, '<p class="text-red-600 dark:text-red-400" role="alert">Could not save the new order.</p>');
         });

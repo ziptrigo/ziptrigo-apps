@@ -23,7 +23,7 @@ from apps.core.field_errors import validation_lines as core_validation_lines
 from apps.core.htmx import is_htmx
 
 from ..models import Note
-from ..services import NoteConflictError, get_account
+from ..services import NoteConflictError, get_account, sidebar_filters
 
 FIELD_LABELS = {
     'title': 'Title',
@@ -63,11 +63,16 @@ def render_page(
     status: int = 200,
 ) -> HttpResponse:
     """Render a full Notes page. Makes sure the user's Notes account exists (created on first
-    visit) and adds what the layout shows: the sidebar, with `nav` highlighted."""
+    visit) and adds what the layout shows: the sidebar, with `nav` highlighted, the search box and
+    the saved filters (their counts are not here: the sidebar asks for them after the page loads)."""
+    saved_filters, more_filters = sidebar_filters(request.user)
     page_context = {
         'account': get_account(request.user),
         'nav': nav,
         'nav_items': nav_items(),
+        'sidebar_filters': saved_filters,
+        'sidebar_more': more_filters,
+        'show_sidebar_search': True,
     }
     page_context.update(context or {})
     return render(request, template, page_context, status=status)

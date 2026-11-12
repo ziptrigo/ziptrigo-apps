@@ -1,6 +1,7 @@
 """Notes (issue #260), end to end in a real browser: the editor with its live preview, coloured code
 and a table, ticking a box on the note page, reordering the list with the keyboard, archiving, the
-Trash and restoring.
+Trash and restoring, and (PR 5) searching from the sidebar, narrowing the results, saving a filter,
+its count in the sidebar and renaming and deleting it.
 
 Run on the shared e2e server (`receipts_server`). Every note this makes has the title prefix
 `Zn `; each test removes what it made first and last.
@@ -20,7 +21,8 @@ CONTENT = (
 )
 CLEANUP = (
     'import os\n'
-    'from apps.notes.models import Note, Tag\n'
+    'from apps.notes.models import Note, SavedFilter, Tag\n'
+    "SavedFilter.objects.filter(user__email=os.environ['E2E_EMAIL'], name__startswith='Zn ').delete()\n"
     "Note.objects.filter(user__email=os.environ['E2E_EMAIL'], title__startswith='Zn ').delete()\n"
     "Tag.objects.filter(user__email=os.environ['E2E_EMAIL'], name__startswith='Zn ').delete()\n"
 )
@@ -176,5 +178,78 @@ def test_an_edit_that_lost_a_race_shows_the_conflict_panel(
         page.click('button:has-text("Save mine anyway")')
         page.wait_for_url(re.compile(r'/notes/[0-9a-f-]{36}/$'))
         expect(page.locator('#note-body')).to_contain_text('my text')
+    finally:
+        receipts_server.shell(CLEANUP)
+
+
+SEED_SEARCH = (
+    'import os\n'
+    'from apps.accounts.models import User\n'
+    'from apps.notes.services import create_note\n'
+    "user = User.objects.get(email=os.environ['E2E_EMAIL'])\n"
+    "create_note(user, title='Zn Deploy plan', content='ship the release on friday')\n"
+    "create_note(user, title='Zn Release notes', content='the deploy steps are in the wiki')\n"
+    "create_note(user, title='Zn Groceries', content='eggs and milk')\n"
+)
+
+
+def test_search_narrow_save_a_filter_and_manage_it(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.shell(CLEANUP)
+    receipts_server.shell(SEED_SEARCH)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/notes/')
+
+        # The sidebar's box goes to the search page: a title match and a content match, the text
+        # highlighted, the unrelated note left out.
+        page.fill('#notes-search-q', 'deploy')
+        page.press('#notes-search-q', 'Enter')
+        page.wait_for_url(re.compile(r'/notes/search/\?q=deploy$'))
+        results = page.locator('#search-results')
+        expect(results.locator('li.note-row', has_text='Zn Deploy plan')).to_be_visible()
+        expect(results.locator('li.note-row', has_text='Zn Release notes')).to_be_visible()
+        expect(results.locator('li.note-row', has_text='Zn Groceries')).to_have_count(0)
+        expect(results.locator('mark', has_text='deploy').first).to_be_visible()
+        expect(results.locator('li.note-row', has_text='Zn Release notes')).to_contain_text(
+            'Content:'
+        )
+
+        # Changing a control re-fetches the list and the address follows it.
+        page.select_option('#search-sort', 'title')
+        page.wait_for_url(re.compile(r'q=deploy&sort=title'))
+        rows = results.locator('li.note-row a.truncate')
+        expect(rows.first).to_have_text('Zn Deploy plan')
+
+        # A refused pattern is a line above the form, not a crash.
+        page.fill('#search-q', '/(/')
+        page.press('#search-q', 'Enter')
+        expect(page.locator('#search-msg')).to_contain_text('Invalid regular expression.')
+        page.fill('#search-q', 'deploy*')
+        page.press('#search-q', 'Enter')
+        expect(results.locator('li.note-row', has_text='Zn Deploy plan')).to_be_visible()
+
+        # Save it as a filter: it lands on the filter's page and is listed in the sidebar with its count.
+        page.click('button:has-text("Save as filter")')
+        page.fill('#filter-name', 'Zn Deploy')
+        page.click('form[action$="/notes/filters/"] button[type="submit"]')
+        page.wait_for_url(re.compile(r'/notes/filters/[0-9a-f-]{36}/$'))
+        expect(page.get_by_text('Saved the filter Zn Deploy.')).to_be_visible()
+        sidebar = page.locator('#sidebar-filters')
+        expect(sidebar.get_by_role('link', name=re.compile('Zn Deploy'))).to_be_visible()
+        expect(sidebar.locator('[id^="side-count-"]')).to_contain_text('2')
+
+        # The filters page: the count, rename in place, delete through the confirmation.
+        page.click('#sidebar-filters >> text=Filters')
+        page.wait_for_url(re.compile(r'/notes/filters/$'))
+        expect(page.locator('[id^="page-count-"]')).to_contain_text('2 notes')
+        page.click('button[aria-label="Rename Zn Deploy"]')
+        page.fill('input[name="name"]', 'Zn Shipping')
+        page.press('input[name="name"]', 'Enter')
+        expect(page.locator('#filters').get_by_role('link', name='Zn Shipping')).to_be_visible()
+        expect(sidebar.get_by_role('link', name=re.compile('Zn Shipping'))).to_be_visible()
+        page.click('button[aria-label="Delete Zn Shipping"]')
+        page.click('[role="dialog"] button[type="submit"]')
+        expect(page.get_by_text('Deleted the filter Zn Shipping.')).to_be_visible()
+        expect(page.locator('#filters')).to_contain_text('No saved filters yet')
     finally:
         receipts_server.shell(CLEANUP)

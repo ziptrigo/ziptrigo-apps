@@ -107,6 +107,12 @@ def sort_links(view: str, sort: str, direction: str, tag: str) -> list[dict]:
     return links
 
 
+def decorate(queryset: QuerySet) -> QuerySet:
+    """What a list's rows need loaded: the share flag (one subquery) and the tags (one query for
+    the page). Search applies it to its page of results too."""
+    return links.with_active_link_flag(queryset).prefetch_related('tags')
+
+
 def _queryset(view: str, user) -> QuerySet:
     return {'notes': active_notes, 'archived': archived_notes, 'trash': trashed_notes}[view](user)
 
@@ -128,7 +134,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
         queryset = queryset.order_by('-deleted_at', 'pk')
     else:
         queryset = order_notes(queryset, sort, direction)
-    queryset = links.with_active_link_flag(queryset).prefetch_related('tags')
+    queryset = decorate(queryset)
     page_obj = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get('page'))
     notes = list(page_obj.object_list)
     for note in notes:
