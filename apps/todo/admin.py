@@ -51,11 +51,11 @@ class TodoSettingsAdmin(SingletonSettingsAdmin):
 
 
 class CompletedFilter(admin.SimpleListFilter):
-    title = 'completed'
+    title = 'closed'
     parameter_name = 'completed'
 
     def lookups(self, request, model_admin):
-        return [('yes', 'Completed'), ('no', 'Open')]
+        return [('yes', 'Closed'), ('no', 'Open')]
 
     def queryset(self, request, queryset):
         if self.value() == 'yes':
@@ -85,6 +85,8 @@ class TaskAdmin(ReadOnlyModelAdmin):
         'user',
         'number',
         'title',
+        'state',
+        'resolution',
         'due_date',
         'priority',
         'recurrence',
@@ -94,6 +96,8 @@ class TaskAdmin(ReadOnlyModelAdmin):
         'created_at',
     ]
     list_filter = [
+        'state',
+        'resolution',
         'priority',
         'source',
         CompletedFilter,

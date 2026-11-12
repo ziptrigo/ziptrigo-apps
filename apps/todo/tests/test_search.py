@@ -1194,7 +1194,7 @@ class TestDescribeParams:
 
         assert describe_params(params) == (
             'priority none, 2 · no label · Nov 1, 2026 to Nov 30, 2026 · /a.b/ · '
-            'including completed · by title'
+            'including closed · by title'
         )
 
     def test_regex_mode_and_open_ended_ranges(self):

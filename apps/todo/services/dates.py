@@ -26,7 +26,8 @@ from django.db.models.functions import Coalesce
 from apps.accounts.models import User
 from apps.accounts.services.timezones import local_datetime, user_today
 
-from ..models import Task, TodoAccount
+from ..models import MUTED_STATES, MutedOverdue, Resolution, Task, TaskState, TodoAccount
+from .accounts import get_account
 
 #: The sorts a list may ask for with `?sort=`. `manual` exists only for Today and a parent's
 #: subtasks (see `order_tasks`).
@@ -66,6 +67,16 @@ def _date_order() -> list[OrderBy]:
         F('due_date').asc(nulls_last=True),
         F('due_time').asc(nulls_first=True),
     ]
+
+
+def state_rank() -> Case:
+    """The group a task sorts into within a day: In progress (0), To do (1), muted (2)."""
+    return Case(
+        When(state=TaskState.IN_PROGRESS, then=Value(0)),
+        When(state__in=MUTED_STATES, then=Value(2)),
+        default=Value(1),
+        output_field=IntegerField(),
+    )
 
 
 def default_order() -> list:
@@ -123,6 +134,32 @@ def order_today(queryset: QuerySet, today: date, *, manual: bool) -> QuerySet:
     return queryset.order_by(
         F('due_date').asc(nulls_last=True),
         in_todays_order.asc(),
+        F('due_time').asc(nulls_first=True),
+        _priority_rank().asc(),
+        'created_at',
+        'number',
+    )
+
+
+def order_grouped(queryset: QuerySet, today: date, *, manual: bool = False) -> QuerySet:
+    """The order of the Today and Upcoming pages (issue #272): by due date, and within each day In
+    progress first, then To do, then muted, then the usual order (time, priority, oldest). With
+    `manual` (the tasks due today were ordered by hand) the ones due `today` follow
+    `Task.today_position` inside their group; a position only means something among the tasks of
+    one day and one group, which is why the group comes first. The API keeps `order_today`."""
+    in_todays_order = (
+        Case(
+            When(due_date=today, then=F('today_position')),
+            default=Value(0),
+            output_field=IntegerField(),
+        )
+        if manual
+        else Value(0)
+    )
+    return queryset.order_by(
+        F('due_date').asc(nulls_last=True),
+        state_rank().asc(),
+        in_todays_order,
         F('due_time').asc(nulls_first=True),
         _priority_rank().asc(),
         'created_at',
@@ -189,9 +226,22 @@ def upcoming_set(user: User) -> QuerySet:
     )
 
 
+def closed_set(user: User, resolution: str = '') -> QuerySet:
+    """Closed tasks (either resolution) that are not in the Trash, unordered: what the Closed page
+    lists. `resolution` (`done` or `wont_do`) narrows it; a closed task with no resolution recorded
+    (one closed by a container that predates the column) counts as Done."""
+    queryset = Task.objects.filter(user=user, completed_at__isnull=False, deleted_at__isnull=True)
+    if resolution == Resolution.WONT_DO:
+        return queryset.filter(resolution=Resolution.WONT_DO)
+    if resolution == Resolution.DONE:
+        return queryset.exclude(resolution=Resolution.WONT_DO)
+    return queryset
+
+
 def completed_set(user: User) -> QuerySet:
-    """Completed tasks that are not in the Trash, unordered: what the Completed page lists."""
-    return Task.objects.filter(user=user, completed_at__isnull=False, deleted_at__isnull=True)
+    """Closed tasks of either resolution (the API's `view=completed`: a Won't do task is reported
+    as completed, as it has `completed_at`)."""
+    return closed_set(user)
 
 
 def trash_set(user: User) -> QuerySet:
@@ -212,4 +262,24 @@ def subtasks_of(parent: Task) -> QuerySet:
 
 
 def overdue_set(user: User) -> QuerySet:
-    return open_tasks(user).filter(due_date__lt=user_today(user))
+    """Open, non-trashed tasks due before today that are not muted: what is overdue, what the Overdue
+    section lists and what "Reschedule overdue to today" moves."""
+    return open_tasks(user).filter(due_date__lt=user_today(user)).exclude(state__in=MUTED_STATES)
+
+
+def muted_overdue_set(user: User) -> QuerySet:
+    """Open, non-trashed muted tasks due before today: never shown as overdue, never moved by
+    "Reschedule overdue"; where they show on Today is `TodoAccount.muted_overdue`."""
+    return open_tasks(user).filter(due_date__lt=user_today(user), state__in=MUTED_STATES)
+
+
+def today_count(user: User, account: TodoAccount | None = None) -> int:
+    """The number beside Today: the tasks due today or earlier that the page lists, which leaves out
+    the muted overdue ones unless the account shows them dimmed in Overdue (hidden, or in their own
+    collapsed section, they are not part of the count)."""
+    queryset = today_set(user)
+    if account is None:
+        account = get_account(user)
+    if account.muted_overdue != MutedOverdue.DIMMED:
+        queryset = queryset.exclude(due_date__lt=user_today(user), state__in=MUTED_STATES)
+    return queryset.count()

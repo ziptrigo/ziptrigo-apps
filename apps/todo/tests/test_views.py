@@ -23,7 +23,7 @@ PAGES = [
     'todo:today',
     'todo:upcoming',
     'todo:all',
-    'todo:completed',
+    'todo:closed',
     'todo:trash',
     'todo:labels',
     'todo:settings',
@@ -146,7 +146,7 @@ class TestPages:
         client = Client()
         client.force_login(funded_user)
 
-        body = text(client.get(reverse('todo:completed')))
+        body = text(client.get(reverse('todo:closed')))
 
         assert body.index('Second done') < body.index('First done')
         assert 'title="Uncomplete"' in body
@@ -206,7 +206,7 @@ class TestListPartial:
 
         assert response['HX-Push-Url'] == reverse('todo:all')
 
-    @pytest.mark.parametrize('view', ['today', 'upcoming', 'all', 'completed', 'trash'])
+    @pytest.mark.parametrize('view', ['today', 'upcoming', 'all', 'closed', 'trash'])
     def test_every_view(self, web, view):
         response = web.get(reverse('todo:list'), {'view': view}, **HTMX)
 
@@ -500,7 +500,7 @@ class TestTaskPage:
 
         body = text(client.get(reverse('todo:task', args=[done.number])))
 
-        assert 'Completed 10/28/2026, ' in body and 'Uncomplete' in body
+        assert 'Done 10/28/2026, ' in body and 'Reopen' in body
 
     def test_a_trashed_task_is_read_only_with_restore(self, seeded):
         client = Client()
@@ -761,7 +761,7 @@ class TestRowActions:
         response = self.row(web, 'todo:complete', task, ctx='page')
 
         body = text(response)
-        assert 'id="task-panel"' in body and 'Uncomplete' in body
+        assert 'id="task-panel"' in body and 'Reopen' in body
 
     def test_completing_a_parent_with_open_subtasks_completes_them(self, web, funded_user):
         parent = create_task(funded_user, title='P')
@@ -778,7 +778,7 @@ class TestRowActions:
 
         body = text(client.get(reverse('todo:all')))
 
-        assert 'has 1 open subtask. Completing it completes it too.' in body
+        assert 'todoOpenCloseDialog($el)' in body and 'data-count="1"' in body
         assert f'data-url="{reverse("todo:complete", args=[parent.number])}"' in body
 
     def test_reschedule_overdue(self, web, funded_user, wednesday):

@@ -1,12 +1,12 @@
 {% load datetime_format %}
 {% load todo_ui %}
 {% comment %} One task in a list. Needs `task` (loaded like a list loads its rows: subtask counts, parent and
-   labels), `view` (the list it is in: today, upcoming, all, completed, trash, or subtask on the task page),
-   `today`, and `sortable` for a drag handle. Its actions are htmx posts that answer this row again, or
+   labels), `view` (the list it is in: today, upcoming, all, closed, trash, or subtask on the task page),
+   `today`, and `sortable` for a drag handle. `data-group` is the state group (in_progress, todo, muted): a drag stays inside it. Its actions are htmx posts that answer this row again, or
    nothing when the row no longer belongs to the list (`views.tasks.after_action`); the <li> carries the
    target and the values every action sends. With `oob` the row is sent out of band, to refresh a row the action
    did not answer. {% endcomment %}
-<li id="task-{{ task.number }}" data-task-id="{{ task.pk }}"{% if oob %} hx-swap-oob="true"{% endif %}
+<li id="task-{{ task.number }}" data-task-id="{{ task.pk }}" data-group="{{ task.state_group }}"{% if oob %} hx-swap-oob="true"{% endif %}
     hx-target="#task-{{ task.number }}" hx-swap="outerHTML swap:200ms"
     hx-vals='{"view": "{{ view }}", "ctx": "row"{% if sortable %}, "sortable": "1"{% endif %}}'
     class="task-row row-leave row-enter flex items-start gap-3 px-4 py-3 sm:px-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-150 ease-in-out">
@@ -19,6 +19,10 @@
 
     {% if task.is_trashed %}
     <span class="mt-0.5 h-5 w-5 flex-shrink-0 rounded-full border-2 border-gray-300 dark:border-gray-600" aria-hidden="true"></span>
+    {% elif task.is_wont_do %}
+    <button type="button" hx-post="{% url 'todo:uncomplete' task.number %}"
+            aria-label="Reopen {{ task.title }} (closed as won't do)" title="Reopen"
+            class="is-wont-do btn mt-0.5 flex-shrink-0 rounded-full text-gray-400"><svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M7.2 7.2l5.6 5.6M12.8 7.2l-5.6 5.6"/></svg></button>
     {% elif task.is_completed %}
     <button type="button" hx-post="{% url 'todo:uncomplete' task.number %}"
             aria-label="Mark {{ task.title }} as not done" title="Uncomplete"
@@ -26,11 +30,10 @@
         <svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M6 10.3l2.6 2.6L14 7.6"/></svg>
     </button>
     {% elif task.subtask_open %}
-    <button type="button" @click="show($el)"
-            data-url="{% url 'todo:complete' task.number %}"
-            data-title="Complete task"
-            data-body="{{ task.title }} has {{ task.subtask_open }} open subtask{{ task.subtask_open|pluralize }}. Completing it completes {{ task.subtask_open|pluralize:'it,them' }} too."
-            data-label="Complete" data-tone="primary"
+    {% comment %}A parent with open subtasks asks what to do with them (the close dialog, close_dialog.html): close them as Done or as Won't do, or leave them open.{% endcomment %}
+    <button type="button" @click="todoOpenCloseDialog($el)"
+            data-url="{% url 'todo:complete' task.number %}" data-mode="done" data-ctx="row"
+            data-title="{{ task.title }}" data-count="{{ task.subtask_open }}"
             aria-label="Complete {{ task.title }}" title="Complete"
             class="btn mt-0.5 flex-shrink-0 rounded-full text-gray-400 hover:text-sage-400 dark:text-gray-500 dark:hover:text-sage-300"><svg class="check-svg" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><path d="M6 10.3l2.6 2.6L14 7.6"/></svg></button>
     {% else %}
@@ -44,10 +47,12 @@
     <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2">
             <a href="{% url 'todo:task' task.number %}"
-               class="task-title min-w-0 truncate text-sm font-medium {% if task.is_completed or task.is_trashed %}text-gray-500 dark:text-gray-400 line-through{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline rounded-md">{{ task.title }}</a>
+               class="task-title min-w-0 truncate text-sm font-medium {% if task.is_completed or task.is_trashed %}text-gray-500 dark:text-gray-400 line-through{% elif task.is_muted %}text-gray-500 dark:text-gray-400{% else %}text-gray-900 dark:text-gray-100{% endif %} hover:underline rounded-md">{{ task.title }}</a>
             <span class="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">#{{ task.number }}</span>
         </div>
         <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {% if not task.is_completed and not task.is_trashed %}{% include 'todo/partials/state_menu.html' %}{% endif %}
+            {% if view == 'closed' %}{% resolution_pill task True %}{% else %}{% resolution_pill task %}{% endif %}
             {% priority_flag task %}
             {% if not task.is_completed %}{% due_badge task %}{% repeat_chip task %}{% endif %}
             {% if task.subtask_total %}
@@ -63,8 +68,8 @@
             {% if task.parent and view != 'subtask' %}
             <span class="text-xs text-gray-500 dark:text-gray-400">in <a href="{% url 'todo:task' task.parent.number %}" class="hover:underline">{{ task.parent.title }}</a></span>
             {% endif %}
-            {% if view == 'completed' and task.completed_at %}
-            <span class="text-xs text-gray-500 dark:text-gray-400">Completed {{ task.completed_at|fdate }}</span>
+            {% if view == 'closed' and task.completed_at %}
+            <span class="text-xs text-gray-500 dark:text-gray-400">Closed {{ task.completed_at|fdate }}</span>
             {% endif %}
             {% if view == 'trash' %}
             <span class="text-xs text-gray-500 dark:text-gray-400">{% if task.days_left %}deleted in {{ task.days_left }} day{{ task.days_left|pluralize }}{% else %}deleted soon{% endif %}</span>

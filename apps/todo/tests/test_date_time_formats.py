@@ -170,7 +170,7 @@ def test_completed_and_trashed_dates_follow_the_format(web, funded_user, wednesd
 
     body = page(web, 'todo:task', task.number)
 
-    assert 'Completed 28/10/2026, 12:00' in body
+    assert 'Done 28/10/2026, 12:00' in body
 
 
 # -- messages are always public ------------------------------------------------------------------------

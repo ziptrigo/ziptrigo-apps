@@ -14,6 +14,14 @@ from ..limits import FIRST_TASK_NUMBER, MAX_REMINDER_MINUTES
 from .reminder import ReminderChannel, SnoozeChoice
 
 
+class MutedOverdue(models.TextChoices):
+    """Where a muted (On hold) task that is overdue shows on Today (issue #272)."""
+
+    DIMMED = 'dimmed', 'Today, dimmed'
+    HIDDEN = 'hidden', 'Hidden from Today'
+    SECTION = 'section', 'On hold section'
+
+
 class TodoAccount(models.Model):
     """A user's To-do account: their task numbering, their default due time and the billing state
     of task creation. Created lazily on first use, through
@@ -87,6 +95,17 @@ class TodoAccount(models.Model):
             db_default=SnoozeChoice.MIN_15,
             help_text='How long the Snooze button of a pushed reminder waits before reminding '
             'again.',
+        ),
+    )
+    muted_overdue = cast(
+        str,
+        models.CharField(
+            max_length=8,
+            choices=MutedOverdue,
+            default=MutedOverdue.DIMMED,
+            db_default=MutedOverdue.DIMMED,
+            help_text='Where an overdue task that is On hold shows on Today: dimmed at the bottom '
+            'of Overdue, hidden, or in its own collapsed section.',
         ),
     )
     sender_allowlist = cast(

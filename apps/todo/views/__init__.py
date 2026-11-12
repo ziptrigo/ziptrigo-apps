@@ -29,6 +29,7 @@ from .inbox import inbox_regenerate, inbox_update
 from .labels import label_delete, label_edit, label_reorder, labels_page
 from .lists import (
     all_page,
+    closed_page,
     completed_page,
     task_list,
     today_page,
@@ -51,9 +52,12 @@ from .tasks import (
     task_edit,
     task_page,
     task_postpone,
+    task_resolution,
     task_restore,
+    task_state,
     task_trash,
     task_uncomplete,
+    task_wont_do,
 )
 
 __all__ = [
@@ -71,6 +75,7 @@ __all__ = [
     'comment_edit',
     'comment_history_view',
     'comment_restore',
+    'closed_page',
     'completed_page',
     'filter_counts_view',
     'filter_delete',
@@ -106,9 +111,12 @@ __all__ = [
     'task_list',
     'task_page',
     'task_postpone',
+    'task_resolution',
     'task_restore',
+    'task_state',
     'task_trash',
     'task_uncomplete',
+    'task_wont_do',
     'today_page',
     'trash_page',
     'upcoming_page',

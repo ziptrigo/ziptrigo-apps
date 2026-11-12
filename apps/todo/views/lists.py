@@ -1,4 +1,4 @@
-"""The task lists and the pages that hold them: Today, Upcoming, All, Completed and Trash.
+"""The task lists and the pages that hold them: Today, Upcoming, All, Closed and Trash.
 
 Each page and `/todo/list/` (the partial every one of them fetches with htmx) are built from the
 same context (`list_context`), the Receipts dashboard's pattern: a change re-fetches the partial
@@ -24,16 +24,18 @@ from apps.accounts.services.timezones import user_today
 from apps.core.htmx import is_htmx
 
 from ..forms import TaskForm
-from ..models import Label, Task, TodoSettings
+from ..models import Label, MutedOverdue, Resolution, Task, TodoSettings
 from ..services import (
     DEFAULT_DIRECTIONS,
     SORT_DEFAULT,
     SORTS,
     UPCOMING_DAYS,
-    completed_set,
+    closed_set,
     get_account,
     has_manual_order,
+    muted_overdue_set,
     open_tasks,
+    order_grouped,
     order_tasks,
     overdue_set,
     sort_direction,
@@ -49,14 +51,18 @@ from ..services.reminders import with_reminder_flags
 from .common import render_page
 
 PAGE_SIZE = 50
-VIEWS = ('today', 'upcoming', 'all', 'completed', 'trash')
+VIEWS = ('today', 'upcoming', 'all', 'closed', 'trash')
 TITLES = {
     'today': 'Today',
     'upcoming': 'Upcoming',
     'all': 'All tasks',
-    'completed': 'Completed',
+    'closed': 'Closed',
     'trash': 'Trash',
 }
+#: The Closed page's filter, `?resolution=`: all of them, or one of the two resolutions.
+RESOLUTION_TABS = (('', 'All'), (Resolution.DONE, 'Done'), (Resolution.WONT_DO, "Won't do"))
+#: What an older page (loaded before the Completed page became Closed) may still send as `view`.
+VIEW_ALIASES = {'completed': 'closed'}
 
 
 def page_url(view: str) -> str:
@@ -66,7 +72,7 @@ def page_url(view: str) -> str:
 def belongs(task: Task, view: str, today: date) -> bool:
     """Whether `task` (as it is now) would still be listed in `view`: after an action on a row,
     one that no longer belongs is removed instead of re-rendered. `subtask` is the list on the task
-    page, where a completed subtask stays, and `search`, whose results include completed tasks when
+    page, where a closed subtask stays, and `search`, whose results include closed tasks when
     asked."""
     if view in ('subtask', 'search'):
         return not task.is_trashed
@@ -74,7 +80,7 @@ def belongs(task: Task, view: str, today: date) -> bool:
         return task.is_trashed
     if task.is_trashed:
         return False
-    if view == 'completed':
+    if view == 'closed':
         return task.is_completed
     if task.is_completed:
         return False
@@ -134,8 +140,8 @@ def sort_links(sort: str, direction: str) -> list[dict]:
 
 
 def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
-    """The context of the list `view` (`today`, `upcoming`, `all`, `completed`, `trash`) for the
-    requester, reading `sort` and `page` from the query string."""
+    """The context of the list `view` (`today`, `upcoming`, `all`, `closed`, `trash`) for the
+    requester, reading `sort`, `page` and (Closed) `resolution` from the query string."""
     user = request.user
     today = user_today(user)
     sort = request.GET.get('sort', '')
@@ -144,13 +150,25 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     context: dict = {'view': view, 'list_title': TITLES[view], 'today': today}
 
     if view == 'today':
-        overdue = list(decorate(order_tasks(overdue_set(user))))
+        account = get_account(user)
+        # What is overdue and can be moved to today; a muted (On hold) overdue task is never shown as
+        # overdue and where it shows is the account's choice: dimmed at the bottom of Overdue, left
+        # out, or in its own collapsed section.
+        movable = list(decorate(order_grouped(overdue_set(user), today)))
+        muted = (
+            []
+            if account.muted_overdue == MutedOverdue.HIDDEN
+            else list(decorate(order_tasks(muted_overdue_set(user))))
+        )
         todays = todays_tasks(user)
         manual = has_manual_order(todays, 'today_position')
         context.update(
             {
-                'overdue': overdue,
-                'tasks': list(decorate(order_tasks(todays, 'today_manual' if manual else 'date'))),
+                'overdue': movable
+                + (muted if account.muted_overdue == MutedOverdue.DIMMED else []),
+                'overdue_movable': len(movable),
+                'muted_section': muted if account.muted_overdue == MutedOverdue.SECTION else [],
+                'tasks': list(decorate(order_grouped(todays, today, manual=manual))),
                 'manual': manual,
             }
         )
@@ -159,7 +177,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     if view == 'upcoming':
         queryset = upcoming_set(user)
         by_day: dict[date, list[Task]] = {}
-        for task in decorate(order_tasks(queryset)):
+        for task in decorate(order_grouped(queryset, today)):
             assert task.due_date is not None  # filtered above
             by_day.setdefault(task.due_date, []).append(task)
         context['days'] = [
@@ -170,8 +188,12 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
 
     if view == 'all':
         queryset = order_tasks(decorate(open_tasks(user)), sort, direction)
-    elif view == 'completed':
-        queryset = decorate(completed_set(user)).order_by('-completed_at', '-number')
+    elif view == 'closed':
+        resolution = request.GET.get('resolution', '')
+        resolution = resolution if resolution in Resolution.values else ''
+        context['resolution'] = resolution
+        context['resolution_tabs'] = RESOLUTION_TABS
+        queryset = decorate(closed_set(user, resolution)).order_by('-completed_at', '-number')
     else:
         queryset = decorate(trash_set(user)).order_by('-deleted_at', '-number')
     page_obj = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get('page'))
@@ -188,6 +210,7 @@ def list_context(request: AuthenticatedHttpRequest, view: str) -> dict:
     base = {
         'sort': sort if sort != SORT_DEFAULT else '',
         'dir': direction if direction != DEFAULT_DIRECTIONS[sort] else '',
+        'resolution': context.get('resolution', ''),
     }
     context.update(
         {
@@ -244,8 +267,17 @@ def all_page(request: AuthenticatedHttpRequest) -> HttpResponse:
 @login_required
 @require_GET
 @ensure_csrf_cookie
+def closed_page(request: AuthenticatedHttpRequest) -> HttpResponse:
+    return _page(request, 'closed')
+
+
+@login_required
+@require_GET
 def completed_page(request: AuthenticatedHttpRequest) -> HttpResponse:
-    return _page(request, 'completed')
+    """The Completed page was renamed Closed (it lists both resolutions): old links and bookmarks
+    land on it, with their query string."""
+    query = request.META.get('QUERY_STRING', '')
+    return redirect(f'{page_url("closed")}?{query}' if query else page_url('closed'))
 
 
 @login_required
@@ -261,9 +293,11 @@ def task_list(request: AuthenticatedHttpRequest) -> HttpResponse:
     """The list partial (`view`, `sort`, `page`). Opened directly (not by htmx) it goes to the full
     page instead."""
     view = request.GET.get('view', '')
+    view = VIEW_ALIASES.get(view, view)
     if view not in VIEWS:
         view = 'today'
     if not is_htmx(request):
+        resolution = request.GET.get('resolution', '')
         sort = request.GET.get('sort', '')
         sort = sort if sort in SORTS else ''
         direction = request.GET.get('dir', '')
@@ -271,6 +305,7 @@ def task_list(request: AuthenticatedHttpRequest) -> HttpResponse:
         query = _query(
             sort=sort,
             dir=direction if direction in DIRECTIONS else '',
+            resolution=resolution if view == 'closed' and resolution in Resolution.values else '',
             page=str(int(page)) if page.isascii() and page.isdigit() else '',
         )
         return redirect(f'{page_url(view)}?{query}' if query else page_url(view))

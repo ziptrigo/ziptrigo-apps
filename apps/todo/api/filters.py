@@ -22,7 +22,7 @@ from ..schemas import (
     TaskListSchema,
 )
 from ..services import saved_filters
-from ..services.filters import filter_tasks, label_names
+from ..services.filters import FilterParams, filter_tasks, label_names
 from ..services.saved_filters import stored_params
 from ..services.search import search_guard
 from .common import (
@@ -44,14 +44,32 @@ def _owned(request, filter_id: UUID) -> SavedFilter:
     )
 
 
+def _with_stored_extras(saved: SavedFilter, params: dict) -> dict:
+    """`params` from an API body plus the criteria the API cannot express (states, the resolution
+    of closed tasks) that the filter was saved with on the website: replacing the params through the
+    API must not clear them."""
+    stored = FilterParams.from_dict(saved.params)
+    merged = dict(params)
+    if stored.states:
+        merged['states'] = list(stored.states)
+    if stored.resolution:
+        merged['resolution'] = stored.resolution
+    return merged
+
+
 def _data(saved: SavedFilter, user, names: dict[str, str]) -> dict:
+    """A saved filter as `FilterSchema`. A filter saved on the website can carry criteria the API
+    has no field for (states, the resolution of closed tasks: issue #272); `params` leaves them out,
+    as the schema is closed to them, and so does the summary, which describes only the criteria
+    the API knows (with its own wording)."""
     params = stored_params(saved, user)
+    legacy = FilterParams.from_dict(params.to_legacy_dict())
     return {
         'id': saved.pk,
         'name': saved.name,
         'position': saved.position,
-        'params': params.to_dict(),
-        'summary': services.describe_params(params, names, PUBLIC),
+        'params': legacy.to_dict(),
+        'summary': services.describe_params(legacy, names, PUBLIC, closed_wording=False),
         'created_at': saved.created_at,
     }
 
@@ -104,14 +122,19 @@ def update_filter(request, filter_id: UUID, payload: FilterUpdateSchema):
         with mapped_errors():
             if 'name' in changes:
                 saved_filters.clean_name(changes['name'])
-            if payload.params is not None:
-                saved_filters.clean_params(request.auth, payload.params.to_params())
+            new_params = (
+                _with_stored_extras(saved, payload.params.to_params())
+                if payload.params is not None
+                else None
+            )
+            if new_params is not None:
+                saved_filters.clean_params(request.auth, new_params)
             charge(request, 'TODO_EDIT_USER')
             with transaction.atomic():
                 if 'name' in changes:
                     services.rename_filter(saved, changes['name'])
-                if payload.params is not None:
-                    services.update_filter_params(saved, payload.params.to_params())
+                if new_params is not None:
+                    services.update_filter_params(saved, new_params)
     return _data(saved, request.auth, label_names(request.auth))
 
 

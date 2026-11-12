@@ -10,6 +10,8 @@
 //     label(handle, item) { return 'Item'; },          // the name announced ("<name> moved to position ...")
 //     liveRegion: element | (container) => element,    // the polite live region (default: one in <body>)
 //     horizontalKeys: false,          // also let Left/Right (earlier/later) move an item (a grid)
+//     canMove(item, other) { return true; },  // false stops an item being dragged (or moved by key) past `other`
+//                                     //   (To-do's Today: a row stays inside its own state group)
 //     debounceMs: 400,                // quiet time after the last key press before onReorder runs
 //   });
 //
@@ -69,6 +71,12 @@
       handle: config.handle,
       draggable: config.item,
       animation: 150,
+      onMove: function (event) {
+        // Returning false cancels the move; `related` is the item the dragged one would pass.
+        if (typeof config.canMove !== 'function') return true;
+        if (!event.related || !event.related.matches(config.item)) return true;
+        return config.canMove(event.dragged, event.related) !== false;
+      },
       onEnd: function (event) {
         if (event.oldIndex !== event.newIndex) reorder(container, config, false);
       },
@@ -105,6 +113,10 @@
     const name = config.label(handle, item);
     if (to < 0 || to >= items.length) {
       announce(container, config, name + ' is already ' + (earlier ? 'first' : 'last') + '.');
+      return;
+    }
+    if (typeof config.canMove === 'function' && config.canMove(item, items[to]) === false) {
+      announce(container, config, name + ' is already ' + (earlier ? 'first' : 'last') + ' in its group.');
       return;
     }
     if (earlier) container.insertBefore(item, items[to]);

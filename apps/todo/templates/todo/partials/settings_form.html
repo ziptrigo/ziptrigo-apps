@@ -63,6 +63,18 @@
         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">In-app reminders also go to the devices where you turned notifications on (on your <a href="{% url 'accounts:account' %}" class="underline">account page</a>), with Complete and Snooze buttons. Snooze reminds you again after this long.</p>
     </section>
 
+    <section class="mb-8" aria-labelledby="muted-title">
+        <h2 id="muted-title" class="pb-2 mb-4 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">On hold tasks on Today</h2>
+        <div>
+            <label for="muted-overdue" class="block mb-1 text-sm font-medium">When an On hold task is overdue</label>
+            <select id="muted-overdue" name="muted_overdue"
+                    class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+                {% for value, label in muted_overdue_choices %}<option value="{{ value }}" {% if value == account.muted_overdue %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </div>
+        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">An On hold task is never shown as overdue and "Reschedule overdue to today" never moves it. This decides where it shows on Today: dimmed at the bottom of Overdue, left out, or in a collapsed section of its own. Reminders of an On hold task wait: when you set it back to To do or In progress you get one reminder.</p>
+    </section>
+
     <button type="submit"
             class="btn mb-8 inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save</button>
 </form>

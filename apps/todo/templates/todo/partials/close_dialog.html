@@ -1,0 +1,50 @@
+{% comment %} The close dialog: what Complete (a parent with open subtasks) and "Close as won't do" ask. Opened with
+   `todoOpenCloseDialog(button)` (close_dialog.js) from a button carrying `data-url`, `data-mode` (`done` or `wont_do`),
+   `data-ctx` (`row` or `page`: where the answer goes), `data-title` (the task) and `data-count` (its open subtasks). A plain
+   POST, like the confirmation modal: the views redirect back (a refusal is a flash message). Won't do has an optional note,
+   which becomes a comment; with open subtasks it asks whether to close them as Done, as Won't do, or leave them open. {% endcomment %}
+<div x-data="closeDialog" @open-close-dialog.window="show($event.detail)">
+    <div x-show="open" style="display: none"
+         @keydown.escape.window="if (open) close()" @click.self="close()"
+         x-transition:enter="transition-opacity duration-[220ms] ease-out"
+         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+         x-transition:leave="transition-opacity duration-[140ms] ease-in"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70 backdrop-blur-[2px]">
+        <div x-show="open" role="dialog" aria-modal="true" aria-labelledby="close-dialog-title"
+             x-transition:enter="transform transition duration-[220ms] ease-out"
+             x-transition:enter-start="opacity-0 translate-y-2 scale-[.97]" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+             x-transition:leave="transform transition duration-[140ms] ease-in"
+             x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 translate-y-2 scale-[.97]"
+             class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4">
+            <form method="post" :action="url" class="p-6">
+                {% csrf_token %}
+                <input type="hidden" name="ctx" :value="ctx">
+                <p id="close-dialog-title" x-text="heading" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2"></p>
+                <p x-text="intro" class="text-sm text-gray-600 dark:text-gray-400 mb-4"></p>
+                <template x-if="mode === 'wont_do'">
+                    <div class="mb-4">
+                        <label for="close-note" class="block mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">Note (optional)</label>
+                        <textarea id="close-note" name="note" rows="3" maxlength="10000" x-ref="note" placeholder="Why won't this be done?"
+                                  class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"></textarea>
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A note is added to the task as a comment.</p>
+                    </div>
+                </template>
+                <template x-if="count > 0">
+                    <fieldset class="mb-6 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                        <legend class="mb-1 font-medium" x-text="count === 1 ? 'It has 1 open subtask:' : 'It has ' + count + ' open subtasks:'"></legend>
+                        <label class="flex items-center gap-2"><input type="radio" name="subtasks" value="done" x-model="subtasks" class="h-4 w-4 border-gray-300 accent-sage-500"> <span x-text="count === 1 ? 'Close it as Done' : 'Close them as Done'"></span></label>
+                        <label class="flex items-center gap-2"><input type="radio" name="subtasks" value="wont_do" x-model="subtasks" class="h-4 w-4 border-gray-300 accent-sage-500"> <span x-text="count === 1 ? 'Close it as Won\'t do' : 'Close them as Won\'t do'"></span></label>
+                        <label class="flex items-center gap-2"><input type="radio" name="subtasks" value="leave" x-model="subtasks" class="h-4 w-4 border-gray-300 accent-sage-500"> <span x-text="count === 1 ? 'Leave it open' : 'Leave them open'"></span></label>
+                    </fieldset>
+                </template>
+                <div class="flex justify-end gap-3">
+                    <button type="button" x-ref="cancel" @click="close()"
+                            class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Cancel</button>
+                    <button type="submit" x-text="mode === 'wont_do' ? 'Close as won\'t do' : 'Complete'"
+                            class="btn px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400 transition-colors"></button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

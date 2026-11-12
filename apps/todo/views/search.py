@@ -22,7 +22,7 @@ from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today
 from apps.core.htmx import is_htmx
 
-from ..models import Label, SavedFilter
+from ..models import Label, Resolution, SavedFilter, TaskState
 from ..services import SORTS, FilterParams, describe_params, filter_page, parse_filter_params
 from ..services.filters import DATE_RANGES, QUERY_KEYS, label_names
 from ..services.saved_filters import dropped_label_count, stored_params
@@ -32,6 +32,8 @@ from .lists import decorate
 
 SEARCH_MSG = '#search-msg'
 PRIORITY_CHOICES = ((1, 'Priority 1'), (2, 'Priority 2'), (3, 'Priority 3'), (0, 'No priority'))
+#: The open states a filter can select, and the resolutions "Include closed" can be narrowed to.
+RESOLUTION_CHOICES = (('', 'All'), (Resolution.DONE, 'Done'), (Resolution.WONT_DO, "Won't do"))
 
 
 def search_url() -> str:
@@ -80,6 +82,9 @@ def build_context(
         'labels': labels,
         'selected_labels': set(params.labels),
         'selected_priorities': set(params.priorities),
+        'state_choices': TaskState.choices,
+        'selected_states': set(params.states),
+        'resolution_choices': RESOLUTION_CHOICES,
         'priority_choices': PRIORITY_CHOICES,
         'date_ranges': DATE_RANGES,
         'sorts': SORTS,

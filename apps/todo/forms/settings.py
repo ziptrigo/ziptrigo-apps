@@ -2,7 +2,7 @@ from django import forms
 
 from apps.core.services.mail.addresses import parse_allowlist
 
-from ..models import ReminderChannel, SnoozeChoice
+from ..models import MutedOverdue, ReminderChannel, SnoozeChoice
 from .reminder import UNITS, to_minutes
 
 SENDER_MODES = (('any', 'Anyone'), ('only', 'Only these'))
@@ -49,6 +49,16 @@ class SettingsForm(forms.Form):
         empty_value=None,
         choices=SnoozeChoice.choices,
         error_messages={'invalid_choice': 'Choose 15 minutes, 1 hour, 8 hours or 1 day.'},
+    )
+
+    # Where an overdue task that is On hold shows on Today. A request without it leaves it alone.
+    muted_overdue = forms.ChoiceField(
+        label='On hold and overdue',
+        required=False,
+        choices=MutedOverdue.choices,
+        error_messages={
+            'invalid_choice': 'Choose Today (dimmed), Hidden from Today or On hold section.'
+        },
     )
 
     #: `(minutes or None, channel)` to save, or None to leave the default reminder as it is.

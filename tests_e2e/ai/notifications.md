@@ -325,7 +325,7 @@ per user** (default `10000`); step 9 puts it back.
 | 6 | As `<NOTIF_B>` open `/todo/<T_W2>/` and press **Complete**. | The task is completed (completing never fails), but no next `Water ferns` is created. The bell shows `Couldn’t create the next “Water ferns”` with the body "The next occurrence of this repeating task was not created, usually because you have reached the open-task limit. Free some space by completing or deleting tasks, then uncomplete and complete this task again, or set the date manually." linking to `/todo/<T_W2>/`. |
 | 7 | Open `/notifications/`. | Only one notice for this repeating task: `Couldn’t create ...` replaced `... has no subtasks` (which is gone). |
 | 8 | As `qa.admin` set **Max open tasks per user** back to `10000`, **Save**. | Saved. |
-| 9 | As `<NOTIF_B>`, on `/todo/<T_W2>/` press **Uncomplete**, then **Complete**. | A new `Water ferns` is created (due the day after `T_W2`'s date). The `Couldn’t create ...` notice is gone from the bell and the page. |
+| 9 | As `<NOTIF_B>`, on `/todo/<T_W2>/` press **Reopen**, then **Complete**. | A new `Water ferns` is created (due the day after `T_W2`'s date). The `Couldn’t create ...` notice is gone from the bell and the page. |
 
 ### NOTIF-18 To-do: emailed tasks not created for lack of credits
 
@@ -428,6 +428,17 @@ the account's format; pushes use the same public wording.
 | 2 | Hover the relative time (`2 minutes ago`) of any notification. | The tooltip reads `YYYY-MM-DD HH:MM` (24-hour, the account's clock, browser zone) without "UTC"; with `12-hour` it reads `YYYY-MM-DD h:mm AM/PM`. |
 | 3 | (Push, NOTIF-22's shell steps) read a pushed reminder's payload body and a snooze answer. | `Due Nov 2, 2026, 9:00 AM`; `Snoozed until 9:15 AM.` / `Snoozed until Thu Oct 29, 9:15 AM.` in the public wording whatever the account's format. |
 | 4 | Restore `mm/dd/yyyy` + `12-hour`. | - |
+
+### NOTIF-24 To-do: a reminder held while the task is on hold
+
+**Purpose:** a reminder that comes due while a task is On hold makes no notification; leaving the state makes **one**
+(issue #272). The full case, with channels and the history, is `todo.md` TODO-44.
+**Preconditions:** NOTIF-15 done (`<NOTIF_B>` signed in, a shell).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/todo/` add `Notif held` for tomorrow at `9am` (default in-app reminder), open its page (`T_HELD`) and set the state chip to **On hold**. **(shell step)** make its reminder due as in NOTIF-15 step 3 (filter on `task__number=<T_HELD>`) and run `send_reminders()`. | Prints `1`. Reload and open the bell: **no** new notification, and the reminder still says "Fires ...". |
+| 2 | Set the state back to **To do** on the page. | One new notification `Notif held` with the body `Due <tomorrow as "Nov 2, 2026">, 9:00 AM`; the reminder says "Skipped ...". Run `send_reminders()` again: nothing more. |
 
 ## Out of scope
 

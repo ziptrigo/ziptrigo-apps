@@ -1,7 +1,8 @@
 """The structured filters of a search and of a saved filter (issue #181).
 
 `FilterParams` is one value for everything the search page and a `SavedFilter` can say: the search
-text (`q`, `mode`, `include_completed`), priorities, labels, a date range and a sort. It is read
+text (`q`, `mode`, `include_completed`), priorities, labels, states, the resolution of the closed
+tasks, a date range and a sort. It is read
 *leniently* from a query string or a stored dict (a bad value is dropped, like Receipts'
 `parse_filters`), written back in a canonical form (`to_query`, `to_dict`: defaults left out, lists
 sorted), and applied by `filter_tasks`. The canonical URL is `/todo/search/?<to_query()>`.
@@ -21,7 +22,7 @@ from apps.accounts.models import User
 from apps.accounts.services.timezones import user_today
 from apps.core.datetime_format import DisplayFormats, format_date
 
-from ..models import Label, Task
+from ..models import MUTED_STATES, Label, Resolution, Task, TaskState
 from .dates import SORT_DEFAULT, SORTS
 from .search import (
     MODES,
@@ -34,6 +35,12 @@ from .search import (
 )
 
 PRIORITIES = (0, 1, 2, 3)
+#: The open states a filter can select, and the resolutions that narrow "Include closed".
+STATES = tuple(TaskState.values)
+RESOLUTIONS = tuple(Resolution.values)
+#: The keys `to_dict` only writes when set: the API's saved filters never had them
+#: (`FilterParams.to_legacy_dict`).
+NEW_KEYS = ('states', 'resolution')
 #: A task without a label, in `labels`.
 NO_LABEL = 'none'
 MAX_LABELS = 50
@@ -60,6 +67,8 @@ QUERY_KEYS = (
     'include_completed',
     'priorities',
     'labels',
+    'states',
+    'resolution',
     'date_range',
     'date_from',
     'date_to',
@@ -103,6 +112,12 @@ class FilterParams:
     priorities: tuple[int, ...] = ()
     #: Label ids of the user, sorted, and `none` for unlabelled; a task with any of them matches.
     labels: tuple[str, ...] = ()
+    #: A subset of `STATES` (open states), sorted; an open task in any of them matches. Empty: any.
+    #: Closed tasks are not narrowed by it (`include_completed` and `resolution` decide those).
+    states: tuple[str, ...] = ()
+    #: `done` or `wont_do`: which closed tasks "Include closed" lists. Empty: both; only meaningful
+    #: with `include_completed`, and read as empty without it.
+    resolution: str = ''
     date_range: str = DATE_ANY
     #: Only with `date_range == 'custom'`; either may be missing (open-ended).
     date_from: date | None = None
@@ -142,6 +157,11 @@ class FilterParams:
                     continue
             labels.append(label_id)
 
+        states = {token for token in _tokens(raw.get('states') or []) if token in STATES}
+        resolution = first('resolution').strip().lower()
+        if resolution not in RESOLUTIONS or not include:
+            resolution = ''
+
         date_range = first('date_range').strip().lower()
         date_from = _date(first('date_from'))
         date_to = _date(first('date_to'))
@@ -160,6 +180,8 @@ class FilterParams:
             include_completed=include,
             priorities=tuple(sorted(priorities)),
             labels=tuple(sorted(labels)),
+            states=tuple(sorted(states)),
+            resolution=resolution,
             date_range=date_range,
             date_from=date_from,
             date_to=date_to,
@@ -191,8 +213,10 @@ class FilterParams:
 
     def to_dict(self) -> dict[str, Any]:
         """The JSON-able dict a `SavedFilter` stores. Complete (defaults included), so what is
-        stored doesn't depend on what the defaults are today."""
-        return {
+        stored doesn't depend on what the defaults are today. `states` and `resolution` (issue #272)
+        are written only when set, so a filter saved before them reads back identically and the
+        stored form of everything else is unchanged."""
+        data: dict[str, Any] = {
             'q': self.q,
             'mode': self.mode,
             'include_completed': self.include_completed,
@@ -203,6 +227,16 @@ class FilterParams:
             'date_to': self.date_to.isoformat() if self.date_to else None,
             'sort': self.sort,
         }
+        if self.states:
+            data['states'] = list(self.states)
+        if self.resolution:
+            data['resolution'] = self.resolution
+        return data
+
+    def to_legacy_dict(self) -> dict[str, Any]:
+        """`to_dict` without the keys added by issue #272: what the JWT API has always shown as a
+        saved filter's `params` (its schema is closed to them)."""
+        return {key: value for key, value in self.to_dict().items() if key not in NEW_KEYS}
 
     def to_pairs(self, *, keep_sort: bool = False) -> list[tuple[str, str]]:
         """The query-string pairs, defaults left out (`keep_sort` writes the sort anyway)."""
@@ -215,6 +249,9 @@ class FilterParams:
             pairs.append(('include_completed', '1'))
         pairs += [('priorities', str(priority)) for priority in self.priorities]
         pairs += [('labels', label) for label in self.labels]
+        pairs += [('states', state) for state in self.states]
+        if self.resolution:
+            pairs.append(('resolution', self.resolution))
         if self.date_range != DATE_ANY:
             pairs.append(('date_range', self.date_range))
         if self.date_from:
@@ -234,9 +271,15 @@ class FilterParams:
 
     @property
     def has_criteria(self) -> bool:
-        """Whether anything selects tasks (text, priorities, labels or a date range); the sort
-        and the completed switch alone select nothing."""
-        return bool(self.q.strip() or self.priorities or self.labels or self.date_range != DATE_ANY)
+        """Whether anything selects tasks (text, priorities, labels, states or a date range); the
+        sort and the closed switch (and its resolution) alone select nothing."""
+        return bool(
+            self.q.strip()
+            or self.priorities
+            or self.labels
+            or self.states
+            or self.date_range != DATE_ANY
+        )
 
     @property
     def is_regex(self) -> bool:
@@ -258,7 +301,7 @@ class FilterParams:
         return None, None
 
     def structured_condition(self, user: User) -> Q:
-        """The priorities, labels and date range as one condition on a `Task` (empty when they
+        """The priorities, labels, states, resolution and date range as one condition on a `Task` (empty when they
         select nothing). The labels are an existence test on the through table, not a join, so a
         list's counts aren't multiplied."""
         condition = Q()
@@ -273,9 +316,18 @@ class FilterParams:
             if NO_LABEL in self.labels:
                 any_label |= ~Q(Exists(through))
             condition &= any_label
+        if self.states:
+            # A closed task has no state: "Include closed" and the resolution decide those.
+            condition &= Q(completed_at__isnull=False) | Q(state__in=self.states)
+        if self.resolution == Resolution.WONT_DO:
+            condition &= Q(completed_at__isnull=True) | Q(resolution=Resolution.WONT_DO)
+        elif self.resolution == Resolution.DONE:  # a closed task with none recorded is Done
+            condition &= Q(completed_at__isnull=True) | ~Q(resolution=Resolution.WONT_DO)
         today = user_today(user)
-        if self.date_range == 'overdue':
-            condition &= Q(due_date__lt=today, completed_at__isnull=True)
+        if self.date_range == 'overdue':  # a muted task is never overdue
+            condition &= Q(due_date__lt=today, completed_at__isnull=True) & ~Q(
+                state__in=MUTED_STATES
+            )
         elif self.date_range == 'no_date':
             condition &= Q(due_date__isnull=True)
         else:
@@ -357,10 +409,14 @@ def describe_params(
     params: FilterParams,
     names: Mapping[str, str] | None = None,
     formats: DisplayFormats | None = None,
+    *,
+    closed_wording: bool = True,
 ) -> str:
     """A short summary: `priority 1 · @home · next 7 days · "rent*"`. `names` maps label ids
     to names (`label_names(user)`); a label it doesn't know is left out. Dates are written in
-    `formats` (default: the formats active for the request; the API passes `PUBLIC`)."""
+    `formats` (default: the formats active for the request; the API passes `PUBLIC`).
+    `closed_wording=False` says "including completed" for the closed switch (what the API has
+    always said); the pages say "including closed"."""
 
     def _day(value: date) -> str:
         return format_date(value, 'full', formats)
@@ -369,6 +425,10 @@ def describe_params(
     if params.priorities:
         levels = ['none' if priority == 0 else str(priority) for priority in params.priorities]
         parts.append(f'priority {", ".join(levels)}')
+    if params.states:
+        parts.append(
+            f'state {", ".join(TaskState(state).label.lower() for state in params.states)}'
+        )
     names_by_id = names or {}
     for label in params.labels:
         if label == NO_LABEL:
@@ -392,7 +452,10 @@ def describe_params(
         else:
             parts.append(f'"{text}"')
     if params.include_completed:
-        parts.append('including completed')
+        if params.resolution:
+            parts.append(f'including {Resolution(params.resolution).label.lower()}')
+        else:
+            parts.append('including closed' if closed_wording else 'including completed')
     if params.sort != SORT_DEFAULT:
         parts.append(f'by {SORTS[params.sort].lower()}')
     return ' · '.join(parts) or 'all open tasks'
@@ -406,6 +469,8 @@ __all__ = [
     'NO_LABEL',
     'PRIORITIES',
     'QUERY_KEYS',
+    'RESOLUTIONS',
+    'STATES',
     'FilterParams',
     'describe_params',
     'filter_page',

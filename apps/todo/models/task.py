@@ -33,6 +33,27 @@ class Priority(models.IntegerChoices):
     P3 = 3, 'Priority 3'
 
 
+class TaskState(models.TextChoices):
+    """What an *open* task is doing (issue #272). Blocked (#273) is derived from blockers and joins
+    here, and in `MUTED_STATES`, when those exist."""
+
+    TODO = 'todo', 'To do'
+    IN_PROGRESS = 'in_progress', 'In progress'
+    ON_HOLD = 'on_hold', 'On hold'
+
+
+class Resolution(models.TextChoices):
+    """How a *closed* task was closed. `Task.resolution` is empty while the task is open."""
+
+    DONE = 'done', 'Done'
+    WONT_DO = 'wont_do', "Won't do"
+
+
+#: The states that are muted: shown dimmed, never overdue, never moved by "reschedule overdue", and
+#: whose reminders are held until the task leaves them (`services.reminders.release_held`).
+MUTED_STATES = frozenset({TaskState.ON_HOLD})
+
+
 class Task(models.Model):
     """One task, or a subtask (one level deep: a subtask's parent has no parent).
 
@@ -104,7 +125,23 @@ class Task(models.Model):
     due_date = cast(date | None, models.DateField(null=True, blank=True))
     due_time = cast(time | None, models.TimeField(null=True, blank=True))
 
+    #: "Closed at": set when the task is closed, with either resolution (the name is kept: the API
+    #: and everything that reads it call a closed task completed).
     completed_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
+    #: What an open task is doing. A closed task is always `todo` (closing resets it).
+    state = cast(
+        str,
+        models.CharField(
+            max_length=12, choices=TaskState, default=TaskState.TODO, db_default=TaskState.TODO
+        ),
+    )
+    #: How a closed task was closed; empty while open. Deliberately no database constraint tying it
+    #: to `completed_at`: a container serving during a deploy still writes `completed_at` alone, so
+    #: a closed task with no resolution reads as Done (`is_wont_do` is the only test that matters).
+    resolution = cast(
+        str,
+        models.CharField(max_length=8, choices=Resolution, blank=True, default='', db_default=''),
+    )
     deleted_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
     #: Manual order among a parent's subtasks (`services.tasks.reorder`, scope `subtasks`).
     position = cast(int, models.IntegerField(default=0))
@@ -187,9 +224,31 @@ class Task(models.Model):
     def is_open(self) -> bool:
         return self.completed_at is None and self.deleted_at is None
 
+    #: Set (never stored) by `services.close_task` on an instance whose close lost a race with another
+    #: one, so the caller can say the task was already closed.
+    already_closed: bool = False
+
     @property
     def is_completed(self) -> bool:
         return self.completed_at is not None
+
+    @property
+    def is_wont_do(self) -> bool:
+        """Closed as "won't do" (any other closed task counts as done)."""
+        return self.completed_at is not None and self.resolution == Resolution.WONT_DO
+
+    @property
+    def is_muted(self) -> bool:
+        """An open task in a muted state (`MUTED_STATES`)."""
+        return self.is_open and self.state in MUTED_STATES
+
+    @property
+    def state_group(self) -> str:
+        """The group the Today and Upcoming lists sort an open task into within a day, and the
+        group a drag stays inside: `in_progress`, `todo` or `muted`."""
+        if self.state in MUTED_STATES:
+            return 'muted'
+        return 'in_progress' if self.state == TaskState.IN_PROGRESS else 'todo'
 
     @property
     def is_trashed(self) -> bool:
@@ -231,8 +290,14 @@ class Task(models.Model):
         return count <= 1
 
     def is_overdue(self, today_local: date) -> bool:
-        """Open, with a due date before `today_local` (the user's today)."""
-        return self.is_open and self.due_date is not None and self.due_date < today_local
+        """Open, not muted, with a due date before `today_local` (the user's today): a muted task is
+        never overdue."""
+        return (
+            self.is_open
+            and self.state not in MUTED_STATES
+            and self.due_date is not None
+            and self.due_date < today_local
+        )
 
     def clean(self) -> None:
         super().clean()

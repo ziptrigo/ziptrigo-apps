@@ -20,6 +20,16 @@
         <option value="3" {% if task.priority == 3 %}selected{% endif %}>Priority 3</option>
     </select>
 </div>
+{% if mode == 'quick' %}{% comment %}Only a new task chooses its state here; an existing one changes it from the state chip (the task page and the rows).{% endcomment %}
+<div>
+    <label for="state-{{ uid }}" class="block mb-1 text-xs text-gray-500 dark:text-gray-400">State</label>
+    <select id="state-{{ uid }}" name="state"
+            class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm">
+        {% state_choices as state_options %}
+        {% for option in state_options %}<option value="{{ option.value }}"{% if option.value == 'todo' %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+    </select>
+</div>
+{% endif %}
 <div class="relative" x-data="{ open: false }" @click.outside="open = false"
      @keydown.escape="if (open) { open = false; $refs.trigger.focus() }">
     <span class="block mb-1 text-xs text-gray-500 dark:text-gray-400">Labels</span>

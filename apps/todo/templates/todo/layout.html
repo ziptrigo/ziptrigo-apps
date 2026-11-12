@@ -2,7 +2,7 @@
 {% load static %}
 
 {% comment %} Shared by every To-do page: the sidebar (a top bar on phones), the "Tasks are blocked" banner, the
-   page-level message slot and the one confirmation modal the whole page shares. Pages that reorder
+   page-level message slot and the one confirmation modal the whole page shares and the close dialog. Pages that reorder
    load SortableJS and the shared helper (core/partials/sortable_script.html) in `todo_js_libs`. {% endcomment %}
 {% block content %}
 {% comment %} `data-scroll-hint` (tasks.js sets `data-more-right` while there is more to scroll to): on a phone the menus are
@@ -61,6 +61,7 @@
         </div>
     </div>
     {% include 'core/partials/confirm_modal.html' %}
+    {% include 'todo/partials/close_dialog.html' %}
 </div>
 {% endblock %}
 
@@ -68,6 +69,7 @@
 {% block todo_js_libs %}{% endblock %}
 {% comment %} Classic (not deferred): its alpine:init listener must exist before Alpine starts. {% endcomment %}
 <script src="{% static 'todo/js/recurrence.js' %}"></script>
+<script src="{% static 'todo/js/close_dialog.js' %}"></script>
 <script defer src="{% static 'todo/js/tasks.js' %}"></script>
 <script defer src="{% static 'todo/js/title_parse.js' %}"></script>
 {% endblock %}

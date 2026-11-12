@@ -42,7 +42,7 @@ class TestParentCompleteButton:
 
         body = text(self.row(web, first.number))
         assert 'id="complete-action"' in body and 'hx-swap-oob="true"' in body
-        assert 'Report has 1 open subtask.' in body
+        assert 'data-count="1"' in body and 'todoOpenCloseDialog' in body
 
         body = text(self.row(web, second.number))
         assert 'id="complete-action"' in body
