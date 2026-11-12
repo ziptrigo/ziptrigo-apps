@@ -10,7 +10,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from ..models import InboxCode, SavedFilter, TodoAccount
-from ..services import complete_task, create_task, get_account, save_filter
+from ..services import complete_task, create_task, get_account, save_filter, saved_filters
 from ..services.filters import FilterParams
 from ..services.parsing import ParsedTitle, ParseUnavailable
 from .api_support import (  # noqa: F401 -- the fixtures are used by name
@@ -89,6 +89,40 @@ class TestFilters:
         ).json()
         assert updated['dropped_labels'] == 0
         assert get(client, '/filters', auth).json()[0]['dropped_labels'] == 0
+
+    def test_none_is_never_a_dropped_label(self, client, auth, funded_user):
+        gone = make_label(funded_user, 'Gone')
+        only_none = post(client, '/filters', auth, {'name': 'N', 'params': {'labels': ['none']}})
+        mixed = post(
+            client, '/filters', auth, {'name': 'M', 'params': {'labels': ['none', str(gone.pk)]}}
+        )
+        assert only_none.json()['dropped_labels'] == 0
+        assert mixed.json()['dropped_labels'] == 0
+        gone.delete()
+        rows = {row['name']: row for row in get(client, '/filters', auth).json()}
+        assert rows['N']['dropped_labels'] == 0 and rows['M']['dropped_labels'] == 1
+
+    def test_a_renamed_label_still_counts_as_present(self, client, auth, funded_user):
+        label = make_label(funded_user, 'Old')
+        post(client, '/filters', auth, {'name': 'R', 'params': {'labels': [str(label.pk)]}})
+        label.name = 'New'
+        label.save()
+        assert get(client, '/filters', auth).json()[0]['dropped_labels'] == 0
+
+    def test_the_api_agrees_with_the_web_count(self, client, auth, funded_user):
+        gone, keep = make_label(funded_user, 'Gone'), make_label(funded_user, 'Keep')
+        for name, labels in (
+            ('a', ['none']),
+            ('b', ['none', str(gone.pk)]),
+            ('c', [str(gone.pk), str(keep.pk)]),
+        ):
+            save_filter(funded_user, name, FilterParams(labels=tuple(labels)))
+        gone.delete()
+        body = get(client, '/filters', auth).json()
+        by_name = {row['name']: row['dropped_labels'] for row in body}
+        assert by_name == {'a': 0, 'b': 1, 'c': 1}
+        for saved in SavedFilter.objects.filter(user=funded_user):
+            assert by_name[saved.name] == saved_filters.dropped_label_count(saved, funded_user)
 
     def test_listing_filters_costs_the_same_queries_whatever_their_number(
         self, client, auth, funded_user, django_assert_num_queries

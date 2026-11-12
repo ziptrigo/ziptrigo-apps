@@ -9,7 +9,7 @@ counts are not computed when a page renders: the page asks for them afterwards
 filter.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -71,12 +71,20 @@ def stored_params(saved: SavedFilter, user: User | None = None) -> FilterParams:
     )
 
 
-def dropped_label_count(saved: SavedFilter, user: User) -> int:
-    """How many labels the filter was saved with that no longer exist (deleted since). They simply
-    drop out of the filter when it runs; a filter whose only criterion was one then selects every
-    open task, which the pages say instead of leaving it as a surprise."""
+def dropped_labels(saved: SavedFilter, valid_ids: Collection[str]) -> int:
+    """How many labels the filter was saved with that are not among `valid_ids` (the user's label
+    ids; deleted since). The "No label" criterion (`none`) is never one of them: `FilterParams`
+    keeps it whatever the ids are. They simply drop out of the filter when it runs; a filter whose
+    only criterion was one then selects every open task, which the pages say instead of leaving it
+    as a surprise."""
     saved_with = set(FilterParams.from_dict(saved.params).labels)
-    return len(saved_with - set(stored_params(saved, user).labels))
+    kept = set(FilterParams.from_dict(saved.params, valid_label_ids=set(valid_ids)).labels)
+    return len(saved_with - kept)
+
+
+def dropped_label_count(saved: SavedFilter, user: User) -> int:
+    """`dropped_labels` for `user`'s current labels."""
+    return dropped_labels(saved, label_ids(user))
 
 
 def list_filters(user: User) -> QuerySet:
@@ -213,14 +221,13 @@ def filter_rows(user: User, filters: Sequence[SavedFilter]) -> list[FilterRow]:
     """`FilterRow`s for `filters`; the user's labels are read once. No count is computed."""
     params = _read_params(user, filters)
     names = label_names(user)
+    valid_ids = set(names)
     return [
         FilterRow(
             filter=saved,
             params=params[saved.pk],
             summary=describe_params(params[saved.pk], names),
-            dropped_labels=len(
-                set(FilterParams.from_dict(saved.params).labels) - set(params[saved.pk].labels)
-            ),
+            dropped_labels=dropped_labels(saved, valid_ids),
         )
         for saved in filters
     ]
