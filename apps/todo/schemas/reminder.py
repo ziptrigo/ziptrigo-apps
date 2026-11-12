@@ -12,7 +12,10 @@ class ReminderSchema(Schema):
     """A reminder of a task: `minutes_before` its due time, `channel` `in_app`, `email` or `both`,
     `fire_at` the instant it is due and `sent_at` when it was delivered (or swept), else `null`.
     `snoozed_until` is set while it waits for a snooze (the Snooze button of a pushed reminder):
-    `fire_at` is then that instant."""
+    `fire_at` is then that instant. `skipped` is true when it was marked sent without a delivery
+    of its own: too late to deliver (more than an hour past its time, or created more than a day
+    late), or folded into the single reminder sent when a task left On hold or Blocked. `sent_at`
+    is then when that happened, not when anything was delivered."""
 
     id: UUID
     minutes_before: int
@@ -20,6 +23,7 @@ class ReminderSchema(Schema):
     fire_at: datetime
     sent_at: datetime | None
     snoozed_until: datetime | None
+    skipped: bool
 
 
 class ReminderCreateSchema(Schema):
@@ -46,7 +50,10 @@ class DeliverySchema(Schema):
     """One delivery of a reminder through one channel (the history). `task` is the task's number,
     `null` once the task is deleted for good; `task_number` and `task_title` are copied at
     delivery. `channel` is `in_app`, `email` or `push` (an in-app reminder also pushed to the
-    owner's devices). `note` is `unconfirmed`, `failed`, `skipped` or empty."""
+    owner's devices). `note` is `unconfirmed`, `failed`, `skipped` or empty. History rows and
+    skipped reminders do not map one to one: there is no row for a reminder created already due,
+    for reminders folded into the one a release sent, or for one swept while its task was closed or
+    trashed or its owner inactive."""
 
     id: UUID
     task: int | None

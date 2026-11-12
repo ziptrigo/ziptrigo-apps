@@ -2,13 +2,22 @@
 `/reminders/history`, `.../attachments`, `/attachments/{id}`)."""
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, time
 
 import pytest
 from django.utils import timezone
 
 from ..models import Attachment, Reminder, ReminderDelivery, TodoAccount
-from ..services import complete_task, create_task, get_account, trash_task
+from ..services import (
+    complete_task,
+    create_task,
+    get_account,
+    set_state,
+    trash_task,
+)
+from ..services import (
+    reminders as reminder_service,
+)
 from ..services.storage import attachment_key
 from .api_support import (  # noqa: F401 -- the fixtures are used by name
     auth,
@@ -25,7 +34,15 @@ from .fakes import b64_sha256
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
 
-REMINDER_KEYS = {'id', 'minutes_before', 'channel', 'fire_at', 'sent_at', 'snoozed_until'}
+REMINDER_KEYS = {
+    'id',
+    'minutes_before',
+    'channel',
+    'fire_at',
+    'sent_at',
+    'snoozed_until',
+    'skipped',
+}
 
 
 @pytest.fixture
@@ -266,6 +283,130 @@ class TestReminders:
         last = get(client, '/reminders/history', auth, limit=3, offset=3).json()['results'][0]
         assert last['id'] == str(gone.pk) and last['task'] is None
         assert last['task_number'] == 1234 and last['note'] == 'unconfirmed'
+
+    def test_skipped_is_reported(self, client, auth, dated):
+        quiet = Reminder.objects.create(
+            task=dated,
+            minutes_before=5,
+            channel='in_app',
+            fire_at=timezone.now(),
+            sent_at=timezone.now(),
+            skipped=True,
+        )
+        live = Reminder.objects.create(
+            task=dated, minutes_before=10, channel='in_app', fire_at=timezone.now()
+        )
+
+        got = {r['id']: r for r in get(client, f'/tasks/{dated.number}', auth).json()['reminders']}
+
+        assert got[str(quiet.pk)]['skipped'] is True
+        assert got[str(live.pk)]['skipped'] is False
+
+    def test_a_reminder_added_over_a_day_late_is_skipped(
+        self, client, auth, funded_user, wednesday
+    ):
+        task = create_task(funded_user, title='Old', due_date=date(2026, 10, 20))
+        Reminder.objects.filter(task=task).delete()
+
+        reminder_service.add_reminder(task, minutes_before=5)
+
+        got = get(client, f'/tasks/{task.number}', auth).json()['reminders']
+        assert [r['skipped'] for r in got] == [True]
+        assert got[0]['sent_at'] is not None
+
+    def test_a_swept_reminder_is_skipped(self, client, auth, funded_user, wednesday):
+        task = create_task(
+            funded_user, title='Late', due_date=date(2026, 10, 28), due_time=time(14, 30)
+        )
+
+        reminder_service.sweep_stale(datetime(2026, 10, 28, 20, 0, tzinfo=UTC))
+
+        got = get(client, f'/tasks/{task.number}', auth).json()['reminders']
+        assert got and all(r['skipped'] is True for r in got)
+
+    def test_a_release_folds_all_but_the_delivered_one(
+        self, client, auth, funded_user, wednesday, freeze_now, django_capture_on_commit_callbacks
+    ):
+        task = create_task(
+            funded_user, title='Held', due_date=date(2026, 10, 28), due_time=time(14, 30)
+        )
+        set_state(task, 'on_hold')
+        reminder_service.add_reminder(task, minutes_before=60)
+        freeze_now(2026, 10, 28, 15, 0)
+
+        with django_capture_on_commit_callbacks(execute=True):
+            set_state(task, 'todo')
+
+        got = get(client, f'/tasks/{task.number}', auth).json()['reminders']
+        by_time = sorted(got, key=lambda r: r['fire_at'])
+        assert [r['skipped'] for r in by_time] == [False, True]
+        assert all(r['sent_at'] is not None for r in by_time)
+
+    def test_the_delivery_index_exists(self):
+        indexes = {i.name: i for i in ReminderDelivery._meta.indexes}  # ty: ignore[missing-attribute]
+        assert list(indexes['todo_delivery_user_task_sent'].fields) == [
+            'user',
+            'task_number',
+            '-sent_at',
+        ]
+
+    def test_the_history_of_one_task(self, client, auth, funded_user, dated):
+        other = create_task(funded_user, title='Other', due_date=date(2026, 11, 1))
+        now = timezone.now()
+        for n in range(3):
+            ReminderDelivery.objects.create(
+                user=funded_user,
+                task=dated,
+                task_number=dated.number,
+                task_title='Dated',
+                channel='in_app',
+                sent_at=now + timezone.timedelta(minutes=n),
+                fire_at=now,
+            )
+        ReminderDelivery.objects.create(
+            user=funded_user,
+            task=other,
+            task_number=other.number,
+            task_title='Other',
+            channel='in_app',
+            sent_at=now,
+            fire_at=now,
+        )
+        gone = ReminderDelivery.objects.create(
+            user=funded_user,
+            task=None,
+            task_number=1234,
+            task_title='Gone',
+            channel='email',
+            sent_at=now,
+            fire_at=now,
+        )
+
+        page = get(client, '/reminders/history', auth, task=dated.number, limit=2).json()
+        rest = get(client, '/reminders/history', auth, task=dated.number, limit=2, offset=2).json()
+        deleted = get(client, '/reminders/history', auth, task=1234).json()
+
+        assert page['count'] == 3 and len(page['results']) == 2
+        assert page['results'][0]['sent_at'] > page['results'][1]['sent_at']
+        assert len(rest['results']) == 1
+        assert {r['task_number'] for r in page['results'] + rest['results']} == {dated.number}
+        assert [r['id'] for r in deleted['results']] == [str(gone.pk)]
+
+    def test_the_history_of_a_foreign_number_is_empty(self, client, auth, other_user):
+        task = create_task(other_user, title='Theirs', due_date=date(2026, 11, 1))
+        ReminderDelivery.objects.create(
+            user=other_user,
+            task=task,
+            task_number=task.number,
+            task_title='Theirs',
+            channel='in_app',
+            sent_at=timezone.now(),
+            fire_at=timezone.now(),
+        )
+
+        body = get(client, '/reminders/history', auth, task=task.number).json()
+
+        assert body['count'] == 0 and body['results'] == []
 
     def test_the_history_is_the_callers_own(self, client, auth, other_user):
         task = create_task(other_user, title='Theirs', due_date=date(2026, 11, 1))
