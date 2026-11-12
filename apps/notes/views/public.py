@@ -46,9 +46,8 @@ from ..services import (
     LinkUnavailableError,
     NoteConflictError,
     check_can_create,
-    check_duplicable,
     check_toggle,
-    duplicate,
+    duplicate_shared,
     links,
     quote_create,
     reports,
@@ -448,7 +447,6 @@ def shared_duplicate(request: PublicHttpRequest, code: str) -> HttpResponse:
     back = _page_url(link)
     note = link.note
     try:  # validated first, charged after: a refused request spends no budget
-        check_duplicable(note)
         check_can_create(user, title=note.title, content=note.content)
     except ValidationError as exc:
         messages.error(request, ' '.join(exc.messages))
@@ -465,7 +463,10 @@ def shared_duplicate(request: PublicHttpRequest, code: str) -> HttpResponse:
     if not result.allowed:
         return private(ratelimit.page_response(request, result))
     try:
-        copy = duplicate(link.note, user, expected_cost=cost, keep_title=True)
+        # Whether the link still works is decided again inside, on a fresh read.
+        copy = duplicate_shared(link, user, expected_cost=cost)
+    except LinkUnavailableError:
+        return _became_unavailable(request)
     except CostChangedError as exc:
         messages.error(
             request,

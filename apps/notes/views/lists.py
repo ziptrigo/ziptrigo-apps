@@ -22,10 +22,9 @@ from django.views.decorators.http import require_GET
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core.htmx import is_htmx
-from apps.core.markdown import to_plain_text
 
-from ..limits import EXCERPT_CHARS, PAGE_SIZE
-from ..models import Note, NotesSettings, Tag
+from ..limits import PAGE_SIZE
+from ..models import NotesSettings, Tag
 from ..services import (
     DEFAULT_DIRECTIONS,
     DIRECTIONS,
@@ -42,29 +41,16 @@ from ..services import (
     sort_for,
     trashed_notes,
 )
-from ..services.lists import VIEW_DEFAULT_SORT
+from ..services.lists import VIEW_DEFAULT_SORT, excerpt
 from .common import render_page
 
 VIEWS = ('notes', 'archived', 'trash')
 TITLES = {'notes': 'Notes', 'archived': 'Archived', 'trash': 'Trash'}
 URL_NAMES = {'notes': 'notes:list', 'archived': 'notes:archived', 'trash': 'notes:trash'}
-#: How much of a note's text is turned into plain text for its row's excerpt: the row shows 140
-#: characters, so parsing a 50,000-character note in full for each of 50 rows would be wasted work.
-EXCERPT_SOURCE_CHARS = 1500
 
 
 def page_url(view: str) -> str:
     return reverse(URL_NAMES[view])
-
-
-def excerpt(note: Note) -> str:
-    """The first characters of the note's text without Markdown marks, on one line."""
-    try:
-        text = to_plain_text(note.content[:EXCERPT_SOURCE_CHARS], profile='extended')
-    except ValueError:
-        text = note.content[:EXCERPT_SOURCE_CHARS]
-    text = ' '.join(text.split())
-    return text if len(text) <= EXCERPT_CHARS else text[: EXCERPT_CHARS - 1].rstrip() + '…'
 
 
 def _uuid_or_empty(value: str) -> str:

@@ -647,6 +647,34 @@ class TestDuplicate:
         assert client.post(public('duplicate', read_link.code)).status_code == 404
         assert not Note.objects.filter(user=other_user).exists()
 
+    def test_a_note_that_stops_working_during_the_copy_is_the_neutral_page(
+        self, note, read_link, other_user, monkeypatch
+    ):
+        """The link worked when it was looked up, then the note was taken down / trashed / its link
+        revoked before the copy was made: decided again on a fresh read, answered as an unknown
+        code is (never a message that says why)."""
+        from ..views import public as public_views
+
+        unknown = Client().post(public('duplicate', 'nope' * 5))
+        assert unknown.status_code == 404
+        client = Client()
+        client.force_login(other_user)
+        held = links.get_available(read_link.code)
+        assert held is not None
+        monkeypatch.setattr(public_views.links, 'get_available', lambda code: held)
+        for stop in (
+            lambda: takedown.take_down_note(note, by=make_user(is_staff=True), reason='x'),
+            lambda: trash(note),
+        ):
+            stop()
+            response = client.post(public('duplicate', read_link.code))
+            assert response.status_code == 404 and response.content == unknown.content
+            Note.objects.filter(pk=note.pk).update(taken_down_at=None, deleted_at=None)
+        links.revoke_link(read_link)
+        response = client.post(public('duplicate', read_link.code))
+        assert response.status_code == 404 and response.content == unknown.content
+        assert not Note.objects.filter(user=other_user).exists()
+
     @pytest.mark.terms_gate
     def test_a_visitor_who_has_not_accepted_the_terms_is_sent_to_accept_them(
         self, note, read_link, other_user

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.1.0
+  version: 2.2.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -3966,6 +3966,1037 @@ paths:
       tags:
       - To-do
       deprecated: true
+      security:
+      - JWTAuth: []
+  /api/notes/filters:
+    get:
+      operationId: apps_notes_api_filters_list_filters
+      summary: List Filters
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/NoteFilterSchema'
+                title: Response
+                type: array
+      description: 'The caller''s saved filters in order. A tag deleted since a filter was saved is dropped from
+
+        its `params`.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+    post:
+      operationId: apps_notes_api_filters_create_filter
+      summary: Create Filter
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteFilterSchema'
+      description: 'Save a search under a name (unique, ignoring case; at most 50 filters). A search text that
+
+        can''t run (empty after cleaning, too long, an invalid pattern) is a 400, before the edit budget
+
+        is spent.'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteFilterCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/filters/reorder:
+    post:
+      operationId: apps_notes_api_filters_reorder_filters
+      summary: Reorder Filters
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/NoteFilterSchema'
+                title: Response
+                type: array
+      description: 'Put the saved filters in the order given (ids that aren''t yours are ignored; at most 50, a
+
+        longer list is a 422).'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteFilterOrderSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/filters/{filter_id}:
+    patch:
+      operationId: apps_notes_api_filters_update_filter
+      summary: Update Filter
+      parameters:
+      - in: path
+        name: filter_id
+        schema:
+          format: uuid
+          title: Filter Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteFilterSchema'
+      description: 'Rename a filter and/or replace its search (`params`, as a whole: criteria left out take
+
+        their defaults, as on the website). Both are saved, or neither. Neither can be cleared: an
+
+        explicit `null` is a 400 (to search for everything, send the default `params`). A body with
+
+        nothing in it changes nothing and spends no budget; a value that can''t be used is refused
+
+        before the edit budget is spent.'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteFilterUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_notes_api_filters_delete_filter
+      summary: Delete Filter
+      parameters:
+      - in: path
+        name: filter_id
+        schema:
+          format: uuid
+          title: Filter Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/filters/{filter_id}/notes:
+    get:
+      operationId: apps_notes_api_filters_run_filter
+      summary: Run Filter
+      parameters:
+      - in: path
+        name: filter_id
+        schema:
+          format: uuid
+          title: Filter Id
+          type: string
+        required: true
+      - in: query
+        name: limit
+        schema:
+          default: 50
+          title: Limit
+          type: integer
+        required: false
+      - in: query
+        name: offset
+        schema:
+          default: 0
+          title: Offset
+          type: integer
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteListSchema'
+      description: 'Run a saved filter: the notes it selects (in its scope, never the Trash), in its sort
+
+        order, as `GET /notes` lists them. `limit` (1-100, default 50) and `offset` page the result;
+
+        `count` is the total. Spends `NOTES_SEARCH_USER` (nothing when its search text can''t run: that
+
+        is a 400). When the filter has search text each note carries the snippet fields of
+
+        `GET /notes`; without it they are `null`.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/links:
+    get:
+      operationId: apps_notes_api_links_list_links
+      summary: List Links
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/NoteLinkSchema'
+                title: Response
+                type: array
+      description: 'The note''s share links: the active ones first (newest first), then the revoked and expired
+
+        ones.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+    post:
+      operationId: apps_notes_api_links_create_link
+      summary: Create Link
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteLinkSchema'
+      description: 'Make a share link: `read` (the note, read-only) or `edit` (anyone with the link can also
+
+        change its content; they can never change the title or see who you are). `expires_at` is a date
+
+        (the end of that day in your time zone) or a date-time, not in the past. At most 10 links per
+
+        note are active at once (400).'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteLinkCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/links/{link_id}:
+    patch:
+      operationId: apps_notes_api_links_update_link
+      summary: Update Link
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      - in: path
+        name: link_id
+        schema:
+          format: uuid
+          title: Link Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteLinkSchema'
+      description: 'Change a link''s `mode`, `label` or `expires_at`; only the fields present are applied, and an
+
+        explicit `null` clears `label` and `expires_at` (`mode` cannot be null: a 400). A revoked link
+
+        cannot be changed (400); the code never changes. A body with nothing in it changes nothing and
+
+        spends no budget.'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteLinkUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_notes_api_links_revoke_link
+      summary: Revoke Link
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      - in: path
+        name: link_id
+        schema:
+          format: uuid
+          title: Link Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Revoke a link: it stops working for good (idempotent, and allowed whatever the note''s state:
+
+        a leaked link can always be killed). A revoked link is never active again; make another.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes:
+    get:
+      operationId: apps_notes_api_notes_list_notes
+      summary: List Notes
+      parameters:
+      - in: query
+        name: view
+        schema:
+          default: active
+          title: View
+          type: string
+        required: false
+      - in: query
+        name: q
+        schema:
+          default: ''
+          title: Q
+          type: string
+        required: false
+      - in: query
+        name: mode
+        schema:
+          default: glob
+          title: Mode
+          type: string
+        required: false
+      - in: query
+        name: tag
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tag
+        required: false
+      - in: query
+        name: shared
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Shared
+        required: false
+      - in: query
+        name: updated
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated
+        required: false
+      - in: query
+        name: updated_from
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated From
+        required: false
+      - in: query
+        name: updated_to
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated To
+        required: false
+      - in: query
+        name: sort
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sort
+        required: false
+      - in: query
+        name: dir
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Dir
+        required: false
+      - in: query
+        name: limit
+        schema:
+          default: 50
+          title: Limit
+          type: integer
+        required: false
+      - in: query
+        name: offset
+        schema:
+          default: 0
+          title: Offset
+          type: integer
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteListSchema'
+      description: "List the caller's notes (no content: an `excerpt` instead; read a note for its text).\n\n- `view`: `active` (not archived; the default), `archived`, `trash` or `all` (active and\n  archived; the Trash is never included).\n- `q`: search the titles and contents, ignoring case, accents and punctuation: `*` and `?` are\n  wildcards (`mode=glob`, the default) or a regular expression (`mode=regex`, or `/.../`). 200\n  characters at most; a 400 for an empty, invalid or too slow pattern. Edit history is not\n  searched.\n- `tag`: comma-separated tag ids, and `none` for notes without a tag; any of them.\n- `shared`: `yes` (the note has a share link that is active and works) or `no`.\n- `updated`: `any`, `today`, `last_7_days`, `last_30_days` or `custom` with `updated_from` /\n  `updated_to` (`YYYY-MM-DD`, inclusive, either may be left out; dates alone mean `custom`).\n  Relative ranges are the caller's own days.\n- `sort`: `manual` (the order set by hand; the default of `active`), `updated` (the default of\n  the other views), `created` or `title`. The Trash lists the most recently deleted first.\n- `dir`: `asc` or `desc`, the direction of the sort: each sort's own default when left out\n  (`manual` and `title` ascending, `updated` and `created` newest first), the exact reverse\n  for the other one; a 400 for any other value. Without `sort`, `dir` reverses the view's\n  default sort; for `view=trash`, whose own order is not a sort, it is a 400\n  `dir: Choose a sort to reverse.`\n- `limit` (1-100, default 50) and `offset` page the result; `count` is the total.\n\nA search, or any of `tag`, `shared` and `updated`, spends `NOTES_SEARCH_USER`; a search text\nthat is refused (a 400) spends nothing.\n\nWith `q`, each note also carries `search_field`, `search_snippet`, `match_start` and\n`match_end` (see `NoteListItemSchema`); without it all four are `null`."
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+    post:
+      operationId: apps_notes_api_notes_create_note
+      summary: Create Note
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: 'Make a note, first in the manual order. A free slot makes a free note; otherwise it costs
+
+        the creation price (`GET /settings`) and is paid for a year. `expected_cost` guards the cost
+
+        (a 409 if it differs; leave it out to accept any). A 402 when the balance can''t pay, which
+
+        spends no rate-limit budget.'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/notes/reorder:
+    post:
+      operationId: apps_notes_api_notes_reorder_notes
+      summary: Reorder Notes
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteCountSchema'
+      description: 'Put the notes with these ids in this manual order. Ids that aren''t yours, or are in the
+
+        Trash, are ignored; the notes not listed keep their places. `count` is how many were
+
+        positioned.'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteReorderSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}:
+    get:
+      operationId: apps_notes_api_notes_get_note
+      summary: Get Note
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: 'One of the caller''s notes, also one in the Trash, with its content and the content
+
+        rendered.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+    patch:
+      operationId: apps_notes_api_notes_update_note
+      summary: Update Note
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteConflictSchema'
+      description: 'Change a note''s title, content and/or tags; only the fields present are applied, and both
+
+        kinds of change are saved together or not at all. **Send `base_version`** (the `version` you
+
+        read) with a `title` or `content`: a save on an out-of-date one is a 409 whose body carries the
+
+        current version, title and content (nothing is written), so the client can merge and send
+
+        again. A change that leaves the title and content as they are is not a save. A note in the
+
+        Trash is a 400, a locked one a 402 and one taken down a 409; tags alone are changed the same
+
+        way. An explicit `null` clears `content` and `tags`; a `title` cannot be empty (a 400).'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_notes_api_notes_trash_note
+      summary: Trash Note
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Move a note to the Trash (always allowed, even locked; idempotent). Trashing a free note
+
+        frees its slot. It is deleted for good `trash_days` days later (`GET /settings`).'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/checklist:
+    post:
+      operationId: apps_notes_api_notes_toggle_checklist
+      summary: Toggle Checklist
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: 'Tick or untick a checklist box of the content (`- [ ] item`), counted from 0; the box is
+
+        written back to the text and recorded as a version. No `base_version`: two boxes ticked at once
+
+        both survive. A 400 when there is no such box.'
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteChecklistSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/archive:
+    post:
+      operationId: apps_notes_api_notes_archive_note
+      summary: Archive Note
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: 'Hide the note from the main list (idempotent; its share links keep working). Refused for a
+
+        note in the Trash (400), locked (402) or taken down (409).'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/unarchive:
+    post:
+      operationId: apps_notes_api_notes_unarchive_note
+      summary: Unarchive Note
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: Move an archived note back to the main list (idempotent; refused as `archive` is).
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/restore:
+    post:
+      operationId: apps_notes_api_notes_restore_note
+      summary: Restore Note
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      - in: query
+        name: expected_cost
+        schema:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          title: Expected Cost
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: 'Take a note out of the Trash (a note that isn''t in it is returned as it is). A free note
+
+        with no free slot left becomes a paid note (the creation price, paid for a year); a paid note
+
+        whose renewal fell due while it was in the Trash is renewed (the renewal price) and unlocked;
+
+        else it is free. `restore_cost` on the note says which, beforehand. `expected_cost` guards the
+
+        cost (a 409 if it differs). The cap on notes applies.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/delete-forever:
+    post:
+      operationId: apps_notes_api_notes_delete_note_forever
+      summary: Delete Note Forever
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete a note that is in the Trash for good, with its history and links. A 404 for a note
+
+        that isn''t in the Trash (as the website). Nothing is refunded.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/duplicate:
+    post:
+      operationId: apps_notes_api_notes_duplicate_note
+      summary: Duplicate Note
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      - in: query
+        name: expected_cost
+        schema:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          title: Expected Cost
+        required: false
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: 'Copy a note (its content, no tags, links or history) as `<title> (copy)`: a normal new note,
+
+        free while a slot is open, else the creation price (`expected_cost` guards it: a 409 if it
+
+        differs). A note taken down cannot be copied (409).'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/settings:
+    get:
+      operationId: apps_notes_api_settings_get_settings
+      summary: Get Settings
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSettingsSchema'
+      description: 'The prices and limits that apply to the caller, and what the next note would cost
+
+        (`next_note_cost`: 0 while a free slot is open) -- the number to send as `expected_cost`.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/shared/{code}/duplicate:
+    post:
+      operationId: apps_notes_api_shared_duplicate_shared_note
+      summary: Duplicate Shared Note
+      parameters:
+      - in: path
+        name: code
+        schema:
+          title: Code
+          type: string
+        required: true
+      - in: query
+        name: expected_cost
+        schema:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          title: Expected Cost
+        required: false
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+      description: 'Copy the note a share link (`<site>/n/<code>`) points to into your own notes: its title and
+
+        content, no tags, links or history. A normal new note: free while a free slot is open, else the
+
+        creation price; `expected_cost` guards it (a 409 if it differs). A 404 for a code that doesn''t
+
+        work (revoked, expired, unknown, or its note is in the Trash, locked or taken down: the same
+
+        answer for all, also when that changes while the copy is being made).'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/tags:
+    get:
+      operationId: apps_notes_api_tags_list_tags
+      summary: List Tags
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/NoteTagSchema'
+                title: Response
+                type: array
+      description: The caller's tags in order (`note_count` leaves out notes in the Trash).
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+    post:
+      operationId: apps_notes_api_tags_create_tag
+      summary: Create Tag
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteTagSchema'
+      description: Add a tag at the end of the list. Names are unique, ignoring case; `color` is `#rrggbb`.
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteTagCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/tags/reorder:
+    post:
+      operationId: apps_notes_api_tags_reorder_tags
+      summary: Reorder Tags
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/NoteTagSchema'
+                title: Response
+                type: array
+      description: Put the tags in the order given; ids that aren't yours are ignored.
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteTagOrderSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/notes/tags/{tag_id}:
+    patch:
+      operationId: apps_notes_api_tags_update_tag
+      summary: Update Tag
+      parameters:
+      - in: path
+        name: tag_id
+        schema:
+          format: uuid
+          title: Tag Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteTagSchema'
+      description: Rename, recolour or re-describe a tag; only the fields present are applied.
+      tags:
+      - Notes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteTagUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_notes_api_tags_delete_tag
+      summary: Delete Tag
+      parameters:
+      - in: path
+        name: tag_id
+        schema:
+          format: uuid
+          title: Tag Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: Delete a tag; the notes that had it keep their other tags.
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/versions:
+    get:
+      operationId: apps_notes_api_versions_list_note_versions
+      summary: List Note Versions
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/NoteVersionListItemSchema'
+                title: Response
+                type: array
+      description: 'The note''s history, newest first (at most 50 versions), without the text: read one version
+
+        for its content. A run of saves by the same editor within ten minutes is a single version.'
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/versions/{version_id}:
+    get:
+      operationId: apps_notes_api_versions_get_note_version
+      summary: Get Note Version
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      - in: path
+        name: version_id
+        schema:
+          format: uuid
+          title: Version Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteVersionSchema'
+      description: One version, with the title and content the note had after that save.
+      tags:
+      - Notes
+      security:
+      - JWTAuth: []
+  /api/notes/notes/{note_id}/versions/{version_id}/restore:
+    post:
+      operationId: apps_notes_api_versions_restore_note_version
+      summary: Restore Note Version
+      parameters:
+      - in: path
+        name: note_id
+        schema:
+          format: uuid
+          title: Note Id
+          type: string
+        required: true
+      - in: path
+        name: version_id
+        schema:
+          format: uuid
+          title: Version Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteSchema'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteConflictSchema'
+      description: 'Make a version''s title and content the note''s again: a new save (a new version, so what it
+
+        replaced stays in the history). Restoring what the note already holds changes nothing. Refused
+
+        as any change is: in the Trash (400), locked (402), taken down (409).'
+      tags:
+      - Notes
       security:
       - JWTAuth: []
 components:
@@ -8790,6 +9821,1018 @@ components:
       - checked
       title: ChecklistSchema
       type: object
+    NoteFilterParamsSchema:
+      additionalProperties: false
+      description: 'What a saved filter selects (the same criteria as the query of `GET /notes`): search text
+
+        `q` in `mode` `glob` or `regex`, a `scope` (`active`, `archived` or `all`: the Trash is never
+
+        searched), `tags` (tag ids, and `none` for notes without a tag; a note with any of them
+
+        matches), `shared` (`yes`: the note has a share link that is active and works; `no`: it does
+
+        not; `null`: either), an `updated` range (`any`, `today`, `last_7_days`, `last_30_days` or
+
+        `custom` with `updated_from` / `updated_to`, inclusive days in your time zone, either may be
+
+        left out; relative ranges are resolved on every run) and a `sort` (`updated`, `created`,
+
+        `title` or `manual`) with its `dir` (`asc` or `desc`; `null`: the sort''s own default, newest
+
+        first for `updated` and `created`). A tag id that isn''t yours is dropped, as is one deleted
+
+        later.'
+      properties:
+        q:
+          default: ''
+          title: Q
+          type: string
+        mode:
+          default: glob
+          enum:
+          - glob
+          - regex
+          title: Mode
+          type: string
+        scope:
+          default: active
+          enum:
+          - active
+          - archived
+          - all
+          title: Scope
+          type: string
+        tags:
+          default: []
+          items:
+            type: string
+          maxItems: 201
+          title: Tags
+          type: array
+        shared:
+          anyOf:
+          - enum:
+            - 'yes'
+            - 'no'
+            type: string
+          - type: 'null'
+          title: Shared
+        updated:
+          default: any
+          enum:
+          - any
+          - today
+          - last_7_days
+          - last_30_days
+          - custom
+          title: Updated
+          type: string
+        updated_from:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Updated From
+        updated_to:
+          anyOf:
+          - format: date
+            type: string
+          - type: 'null'
+          title: Updated To
+        sort:
+          default: updated
+          enum:
+          - updated
+          - created
+          - title
+          - manual
+          title: Sort
+          type: string
+        dir:
+          anyOf:
+          - enum:
+            - asc
+            - desc
+            type: string
+          - type: 'null'
+          title: Dir
+      title: NoteFilterParamsSchema
+      type: object
+    NoteFilterSchema:
+      description: 'A saved filter. `params` is what it selects (see `NoteFilterParamsSchema`) and `summary` a short
+
+        description of it in the public wording (`@work · shared · last 7 days · "deploy*"`).'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        position:
+          title: Position
+          type: integer
+        params:
+          $ref: '#/components/schemas/NoteFilterParamsSchema'
+        summary:
+          title: Summary
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+      required:
+      - id
+      - name
+      - position
+      - params
+      - summary
+      - created_at
+      title: NoteFilterSchema
+      type: object
+    NoteFilterCreateSchema:
+      additionalProperties: false
+      properties:
+        name:
+          title: Name
+          type: string
+        params:
+          allOf:
+          - $ref: '#/components/schemas/NoteFilterParamsSchema'
+          default:
+            q: ''
+            mode: glob
+            scope: active
+            tags: []
+            shared: null
+            updated: any
+            updated_from: null
+            updated_to: null
+            sort: updated
+            dir: null
+      required:
+      - name
+      title: NoteFilterCreateSchema
+      type: object
+    NoteFilterOrderSchema:
+      additionalProperties: false
+      description: 'Body for `POST /filters/reorder`: the filter ids in the new order (at most 50, the most saved
+
+        filters one user can have; a longer list is a 422).'
+      properties:
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 50
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: NoteFilterOrderSchema
+      type: object
+    NoteFilterUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /filters/{id}`: a new `name` and/or new `params` (replacing the old ones as
+
+        a whole). A field left out is unchanged; neither can be cleared (an explicit `null` is a 400).'
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        params:
+          anyOf:
+          - $ref: '#/components/schemas/NoteFilterParamsSchema'
+          - type: 'null'
+      title: NoteFilterUpdateSchema
+      type: object
+    NoteListItemSchema:
+      description: 'One note as a list shows it: everything of `NoteSchema` except the content, which is
+
+        replaced by `excerpt` (the first 140 characters of the text without Markdown marks, on one
+
+        line). Read the note itself (`GET /notes/{id}`) for its `content` and `content_html`.
+
+
+        With `q`, `search_field` (`title` or `content`), `search_snippet` (plain text around the first
+
+        match, in the normalised text the search runs over: no accents or formatting) and the offsets
+
+        of the match in it (`match_start`, `match_end`) say where it matched; they are `null` without
+
+        `q`, and for a row the snippet pass did not reach (the rows are listed all the same).'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        title:
+          title: Title
+          type: string
+        excerpt:
+          title: Excerpt
+          type: string
+        version:
+          title: Version
+          type: integer
+        tags:
+          items:
+            $ref: '#/components/schemas/NoteTagRefSchema'
+          title: Tags
+          type: array
+        archived_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Archived At
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Deleted At
+        is_free:
+          description: 'Created in a free slot: it never renews.'
+          title: Is Free
+          type: boolean
+        paid_through:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          description: The date a paid note must be renewed by; `null` for a free note.
+          title: Paid Through
+        locked:
+          description: 'Its yearly renewal could not be paid: read-only until it is (see 402).'
+          title: Locked
+          type: boolean
+        taken_down:
+          description: 'Taken down by staff: final, read-only.'
+          title: Taken Down
+          type: boolean
+        takedown_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Why, when `taken_down` (never who reported it); `null` otherwise.
+          title: Takedown Reason
+        has_active_link:
+          description: It has a share link that is not revoked and not expired.
+          title: Has Active Link
+          type: boolean
+        charged_credits:
+          description: What creating the note cost.
+          title: Charged Credits
+          type: integer
+        restore_cost:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: What taking the note out of the Trash would cost now, in credits (to send as `expected_cost`); `null` unless it is in the Trash.
+          title: Restore Cost
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+        search_field:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Search Field
+        search_snippet:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Search Snippet
+        match_start:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Match Start
+        match_end:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Match End
+      required:
+      - id
+      - title
+      - excerpt
+      - version
+      - tags
+      - archived_at
+      - deleted_at
+      - is_free
+      - paid_through
+      - locked
+      - taken_down
+      - takedown_reason
+      - has_active_link
+      - charged_credits
+      - restore_cost
+      - created_at
+      - updated_at
+      title: NoteListItemSchema
+      type: object
+    NoteListSchema:
+      properties:
+        count:
+          title: Count
+          type: integer
+        limit:
+          title: Limit
+          type: integer
+        offset:
+          title: Offset
+          type: integer
+        results:
+          items:
+            $ref: '#/components/schemas/NoteListItemSchema'
+          title: Results
+          type: array
+      required:
+      - count
+      - limit
+      - offset
+      - results
+      title: NoteListSchema
+      type: object
+    NoteTagRefSchema:
+      description: 'A tag as a note carries it: enough to show and to filter by.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        color:
+          title: Color
+          type: string
+      required:
+      - id
+      - name
+      - color
+      title: NoteTagRefSchema
+      type: object
+    NoteLinkSchema:
+      description: 'One share link of a note. `url` is the address to hand out (`<site>/n/<code>`); `mode` is
+
+        `read` (the note, read-only) or `edit` (anyone with the link can also change the note''s
+
+        content). `label` is the owner''s own reminder of who it is for, never shown publicly. `active`
+
+        means not revoked and not expired; the link *works* only while its note is also out of the
+
+        Trash, not locked and not taken down. A revoked link is never active again.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        url:
+          title: Url
+          type: string
+        mode:
+          enum:
+          - read
+          - edit
+          title: Mode
+          type: string
+        label:
+          title: Label
+          type: string
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Expires At
+        revoked_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Revoked At
+        active:
+          title: Active
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        last_edited_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Last Edited At
+      required:
+      - id
+      - url
+      - mode
+      - label
+      - expires_at
+      - revoked_at
+      - active
+      - created_at
+      - last_edited_at
+      title: NoteLinkSchema
+      type: object
+    NoteLinkCreateSchema:
+      additionalProperties: false
+      description: Body for `POST /notes/{id}/links`. At most 10 links per note are active at once.
+      properties:
+        mode:
+          default: read
+          enum:
+          - read
+          - edit
+          title: Mode
+          type: string
+        label:
+          default: ''
+          title: Label
+          type: string
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - format: date
+            type: string
+          - type: 'null'
+          description: 'A date ("2027-12-31"): the link stops working at the end of that day in the owner''s time zone. Or an ISO 8601 date-time; one without a UTC offset is read in the owner''s time zone. `null` means no expiry. Not in the past.'
+          title: Expires At
+      title: NoteLinkCreateSchema
+      type: object
+    NoteLinkUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /notes/{id}/links/{link_id}`: only the fields present are applied. An
+
+        explicit `null` clears `expires_at` and `label`; `mode` cannot be null (a 400). A revoked link
+
+        cannot be changed (a 400); extending an expired one makes it active again.'
+      properties:
+        mode:
+          anyOf:
+          - enum:
+            - read
+            - edit
+            type: string
+          - type: 'null'
+          title: Mode
+        label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Label
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - format: date
+            type: string
+          - type: 'null'
+          description: 'A date ("2027-12-31"): the link stops working at the end of that day in the owner''s time zone. Or an ISO 8601 date-time; one without a UTC offset is read in the owner''s time zone. `null` means no expiry. Not in the past.'
+          title: Expires At
+      title: NoteLinkUpdateSchema
+      type: object
+    NoteSchema:
+      description: 'One note, as every note endpoint returns it.
+
+
+        `version` counts the saves of the title or content: send the one you read as `base_version`
+
+        when you change them (`PATCH /notes/{id}`), and a save made on a stale one is a 409.
+
+        `content_html` is the Markdown rendered and sanitised (tables, coloured code blocks and
+
+        checklists included). `updated_at` moves only on a save of the title, content or a checklist
+
+        box, not on archiving, tagging or ordering.
+
+
+        A note is read-only while it is `locked`, `taken_down` or in the Trash (`deleted_at`).'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        title:
+          title: Title
+          type: string
+        content:
+          title: Content
+          type: string
+        content_html:
+          title: Content Html
+          type: string
+        version:
+          title: Version
+          type: integer
+        tags:
+          items:
+            $ref: '#/components/schemas/NoteTagRefSchema'
+          title: Tags
+          type: array
+        archived_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Archived At
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Deleted At
+        is_free:
+          description: 'Created in a free slot: it never renews.'
+          title: Is Free
+          type: boolean
+        paid_through:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          description: The date a paid note must be renewed by; `null` for a free note.
+          title: Paid Through
+        locked:
+          description: 'Its yearly renewal could not be paid: read-only until it is (see 402).'
+          title: Locked
+          type: boolean
+        taken_down:
+          description: 'Taken down by staff: final, read-only.'
+          title: Taken Down
+          type: boolean
+        takedown_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Why, when `taken_down` (never who reported it); `null` otherwise.
+          title: Takedown Reason
+        has_active_link:
+          description: It has a share link that is not revoked and not expired.
+          title: Has Active Link
+          type: boolean
+        charged_credits:
+          description: What creating the note cost.
+          title: Charged Credits
+          type: integer
+        restore_cost:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: What taking the note out of the Trash would cost now, in credits (to send as `expected_cost`); `null` unless it is in the Trash.
+          title: Restore Cost
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - id
+      - title
+      - content
+      - content_html
+      - version
+      - tags
+      - archived_at
+      - deleted_at
+      - is_free
+      - paid_through
+      - locked
+      - taken_down
+      - takedown_reason
+      - has_active_link
+      - charged_credits
+      - restore_cost
+      - created_at
+      - updated_at
+      title: NoteSchema
+      type: object
+    NoteCreateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /notes`. `tags` are the ids of your own tags. `expected_cost` is the number
+
+        of credits you expect it to cost (see `GET /settings`, `next_note_cost`): when the real cost,
+
+        worked out when the note is made, differs, nothing is charged or created and the answer is a
+
+        409. Leave it out to accept whatever it costs.'
+      properties:
+        title:
+          maxLength: 800
+          title: Title
+          type: string
+        content:
+          default: ''
+          maxLength: 200000
+          title: Content
+          type: string
+        tags:
+          default: []
+          items:
+            format: uuid
+            type: string
+          title: Tags
+          type: array
+        expected_cost:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          title: Expected Cost
+      required:
+      - title
+      title: NoteCreateSchema
+      type: object
+    NoteCountSchema:
+      properties:
+        count:
+          title: Count
+          type: integer
+      required:
+      - count
+      title: NoteCountSchema
+      type: object
+    NoteReorderSchema:
+      additionalProperties: false
+      description: 'Body for `POST /notes/reorder`: note ids in the new manual order (ids that aren''t yours or
+
+        are in the Trash are ignored; the notes not listed keep their places; at most 500, a longer
+
+        list is a 422).'
+      properties:
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 500
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: NoteReorderSchema
+      type: object
+    NoteConflictSchema:
+      description: 'A 409. Always a `detail`; a save made on an out-of-date `base_version` also carries what
+
+        is stored now (`current_version`, `current_title`, `current_content`), so the client can merge
+
+        by hand and send again with `base_version` set to `current_version`.'
+      properties:
+        detail:
+          title: Detail
+          type: string
+        current_version:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Current Version
+        current_title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Title
+        current_content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Content
+      required:
+      - detail
+      title: NoteConflictSchema
+      type: object
+    NoteUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /notes/{id}`: only the fields present are applied, and both kinds of change
+
+        are saved together or not at all. `base_version` (the `version` you read) is **required** when
+
+        `title` or `content` is sent: a save on an out-of-date one is a 409 carrying what is stored.
+
+        An explicit `null` clears `content` (to empty) and `tags` (to none); a `title` cannot be
+
+        empty, so `null` there is a 400. Changing nothing, or only `tags`, needs no `base_version`. A
+
+        key that is not one of these is a 422.'
+      properties:
+        title:
+          anyOf:
+          - maxLength: 800
+            type: string
+          - type: 'null'
+          title: Title
+        content:
+          anyOf:
+          - maxLength: 200000
+            type: string
+          - type: 'null'
+          title: Content
+        tags:
+          anyOf:
+          - items:
+              format: uuid
+              type: string
+            type: array
+          - type: 'null'
+          title: Tags
+        base_version:
+          anyOf:
+          - minimum: 1
+            type: integer
+          - type: 'null'
+          title: Base Version
+      title: NoteUpdateSchema
+      type: object
+    NoteChecklistSchema:
+      additionalProperties: false
+      description: 'Body for `POST /notes/{id}/checklist`: tick or untick the `index`th checklist box of the
+
+        content (`- [ ] item`, counted from 0 in document order). No `base_version`: two boxes ticked
+
+        at once both survive.'
+      properties:
+        index:
+          minimum: 0
+          title: Index
+          type: integer
+        checked:
+          title: Checked
+          type: boolean
+      required:
+      - index
+      - checked
+      title: NoteChecklistSchema
+      type: object
+    NoteSettingsSchema:
+      description: 'What notes cost and how many are free, for the caller.
+
+
+        `free_notes_used` of `free_notes` free slots are taken (a note in the Trash frees its slot).
+
+        `next_note_cost` is what the next note, duplicate or shared copy would cost right now: 0 while a
+
+        free slot is open, else `creation_price`; send it as `expected_cost`. A paid note is renewed
+
+        every `renewal_days` days for `renewal_price` credits; one that cannot be paid for is locked.
+
+        Notes stay in the Trash for `trash_days` days.'
+      properties:
+        free_notes:
+          title: Free Notes
+          type: integer
+        free_notes_used:
+          title: Free Notes Used
+          type: integer
+        creation_price:
+          title: Creation Price
+          type: integer
+        renewal_price:
+          title: Renewal Price
+          type: integer
+        renewal_days:
+          title: Renewal Days
+          type: integer
+        next_note_cost:
+          description: 0 while a free slot is open.
+          title: Next Note Cost
+          type: integer
+        trash_days:
+          title: Trash Days
+          type: integer
+      required:
+      - free_notes
+      - free_notes_used
+      - creation_price
+      - renewal_price
+      - renewal_days
+      - next_note_cost
+      - trash_days
+      title: NoteSettingsSchema
+      type: object
+    NoteTagSchema:
+      description: 'One of the caller''s tags. `note_count` counts the notes that have it, the Trash not
+
+        included.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        color:
+          title: Color
+          type: string
+        description:
+          title: Description
+          type: string
+        position:
+          title: Position
+          type: integer
+        note_count:
+          title: Note Count
+          type: integer
+      required:
+      - id
+      - name
+      - color
+      - description
+      - position
+      - note_count
+      title: NoteTagSchema
+      type: object
+    NoteTagCreateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tags`. `color` is `#rrggbb` (empty: the default colour).'
+      properties:
+        name:
+          title: Name
+          type: string
+        color:
+          default: ''
+          title: Color
+          type: string
+        description:
+          default: ''
+          title: Description
+          type: string
+      required:
+      - name
+      title: NoteTagCreateSchema
+      type: object
+    NoteTagOrderSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tags/reorder`: the tag ids in the new order (ids that aren''t yours are
+
+        ignored; at most 500, a longer list is a 422).'
+      properties:
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 500
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: NoteTagOrderSchema
+      type: object
+    NoteTagUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /tags/{id}`: only the fields present are applied. An explicit `null`
+
+        clears the field (`description` to empty, `color` to the default colour; a `name` cannot be
+
+        empty, so `null` there is a 400). A key that is not one of these is a 422.'
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      title: NoteTagUpdateSchema
+      type: object
+    NoteVersionListItemSchema:
+      description: 'One entry of a note''s history, without the text (read it with
+
+        `GET /notes/{id}/versions/{version_id}`).
+
+
+        `editor_kind` is who saved it: `owner`, `user` (another signed-in user, through a share link)
+
+        or `anonymous` (someone who was not signed in, through an editable share link). `editor_name`
+
+        is the account''s name for `owner` and `user` and `null` for `anonymous`. `via_link` says it
+
+        was saved through a share link. A run of saves by the same editor within ten minutes is one
+
+        version, overwritten in place: `created_at` is when it was first written, `updated_at` the last
+
+        save folded into it.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        number:
+          title: Number
+          type: integer
+        title:
+          title: Title
+          type: string
+        editor_kind:
+          enum:
+          - owner
+          - user
+          - anonymous
+          title: Editor Kind
+          type: string
+        editor_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Editor Name
+        via_link:
+          title: Via Link
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - id
+      - number
+      - title
+      - editor_kind
+      - editor_name
+      - via_link
+      - created_at
+      - updated_at
+      title: NoteVersionListItemSchema
+      type: object
+    NoteVersionSchema:
+      description: 'One version of a note: its title and content **after** that save.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        number:
+          title: Number
+          type: integer
+        title:
+          title: Title
+          type: string
+        editor_kind:
+          enum:
+          - owner
+          - user
+          - anonymous
+          title: Editor Kind
+          type: string
+        editor_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Editor Name
+        via_link:
+          title: Via Link
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+        content:
+          description: The note content as that save left it.
+          title: Content
+          type: string
+      required:
+      - id
+      - number
+      - title
+      - editor_kind
+      - editor_name
+      - via_link
+      - created_at
+      - updated_at
+      - content
+      title: NoteVersionSchema
+      type: object
   securitySchemes:
     JWTAuth:
       type: http
@@ -8818,3 +10861,5 @@ tags:
   description: Short links with editable destinations, their paid extras and click statistics.
 - name: To-do
   description: 'Tasks and subtasks with states (to do, in progress, on hold, blocked), resolutions (done, won''t do) and blockers, labels, comments, reminders, attachments, saved filters, settings and each task''s activity log. A task is addressed by its number, everything else by its id. Errors are `{"detail": ...}`: 400 a value refused (a service message, or a bad query parameter), 402 not enough credits or storage unpaid, 404 not yours or not there (never 403), 409 a conflict (creation blocked by an unpaid repeating task: also `unpaid_task_numbers`), 422 a malformed request, 429 rate limited (see `Retry-After`).'
+- name: Notes
+  description: Markdown notes, their versions, tags, share links and saved filters.

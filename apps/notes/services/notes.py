@@ -17,14 +17,20 @@ from django.db.models import Min
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.billing.services import spend_credits
+from apps.billing.services import InsufficientCreditsError, get_balance, spend_credits
 from apps.core.markdown import count_checklist_items, toggle_checklist_item
 
 from ..limits import CONTENT_MAX, TITLE_MAX
 from ..models import EditorKind, LinkMode, Note, NotesSettings, NoteVersion, ShareLink, Tag
 from . import notices, versions
 from .accounts import get_account, lock_account
-from .errors import CostChangedError, LinkUnavailableError, NoteConflictError
+from .errors import (
+    CostChangedError,
+    LinkUnavailableError,
+    NoteConflictError,
+    NoteLockedError,
+    NoteTakenDownError,
+)
 from .versions import Editor
 
 logger = logging.getLogger(__name__)
@@ -81,9 +87,9 @@ def require_writable(note: Note) -> None:
     if note.is_trashed:
         raise _error(NON_FIELD_ERRORS, IN_TRASH_MESSAGE)
     if note.is_taken_down:
-        raise _error(NON_FIELD_ERRORS, TAKEN_DOWN_MESSAGE)
+        raise NoteTakenDownError(TAKEN_DOWN_MESSAGE)
     if note.is_locked:
-        raise _error(NON_FIELD_ERRORS, LOCKED_MESSAGE)
+        raise NoteLockedError(LOCKED_MESSAGE)
 
 
 def check_tags(note: Note, tag_ids: Iterable[UUID | str]) -> None:
@@ -149,6 +155,21 @@ def quote_create(user: User) -> int:
     return 0 if _slot_open(user, config) else config.creation_price
 
 
+def _check_cap(user: User, config: NotesSettings) -> None:
+    """Refuse when the user already has the most notes outside the Trash. Lock-free when called on
+    its own (`check_can_create`, `check_restorable`); the writes call it again under the lock."""
+    if Note.objects.filter(user=user, deleted_at__isnull=True).count() >= config.max_notes_per_user:
+        raise _error(NON_FIELD_ERRORS, TOO_MANY_NOTES_MESSAGE)
+
+
+def check_can_afford(user: User, cost: int) -> None:
+    """Raise `InsufficientCreditsError` when `cost` is above the balance, without locking or
+    charging anything: the API checks it before it spends a rate-limit hit on a request that could
+    only end in a 402. (The charge itself decides again, atomically.)"""
+    if cost > 0 and get_balance(user) < cost:
+        raise InsufficientCreditsError('Insufficient credits')
+
+
 def _copy_title(title: str) -> str:
     if len(title) + len(COPY_SUFFIX) <= TITLE_MAX:
         return f'{title}{COPY_SUFFIX}'
@@ -195,10 +216,7 @@ def create_note(
         lock_account(user.pk)
         config = NotesSettings.load()  # after the lock: the cost is worked out as late as possible
         chosen = _own_tags(user, tags)
-        if Note.objects.filter(user=user, deleted_at__isnull=True).count() >= (
-            config.max_notes_per_user
-        ):
-            raise _error(NON_FIELD_ERRORS, TOO_MANY_NOTES_MESSAGE)
+        _check_cap(user, config)
         free = _slot_open(user, config)
         cost = 0 if free else config.creation_price
         if expected_cost is not None and expected_cost != cost:
@@ -235,16 +253,23 @@ def check_can_create(
     clean_title(title)
     clean_content(content)
     _own_tags(user, tags)
-    config = NotesSettings.load()
-    if Note.objects.filter(user=user, deleted_at__isnull=True).count() >= config.max_notes_per_user:
-        raise _error(NON_FIELD_ERRORS, TOO_MANY_NOTES_MESSAGE)
+    _check_cap(user, NotesSettings.load())
+
+
+def check_restorable(note: Note) -> None:
+    """The cap `restore` would apply, without locking or writing anything: bringing a note out of
+    the Trash puts it back among the counted ones, so a user at the cap is refused. A note that is
+    not in the Trash is never refused (restoring it does nothing). Checked before a rate-limit hit
+    is spent; `restore` decides again under the lock."""
+    if note.is_trashed:
+        _check_cap(note.user, NotesSettings.load())
 
 
 def check_duplicable(note: Note) -> None:
     """Refuse copying a note that was taken down (read afresh: a takedown is final, but the
     instance may predate it)."""
     if note.is_taken_down or Note.objects.filter(pk=note.pk, taken_down_at__isnull=False).exists():
-        raise _error(NON_FIELD_ERRORS, COPY_TAKEN_DOWN_MESSAGE)
+        raise NoteTakenDownError(COPY_TAKEN_DOWN_MESSAGE)
 
 
 def duplicate(
@@ -257,6 +282,38 @@ def duplicate(
     check_duplicable(note)
     title = note.title if keep_title else _copy_title(note.title)
     return create_note(user, title=title, content=note.content, expected_cost=expected_cost)
+
+
+def duplicate_shared(link: ShareLink, user: User, *, expected_cost: int | None = None) -> Note:
+    """Copy the note a share link points to into `user`'s account (title and content, no tags,
+    links or history): a normal new note, like `duplicate` with `keep_title`.
+
+    Whether the link works is decided here, on a fresh read, not on what the caller saw when it
+    looked the link up: the user's account is locked first (the order of every write), then the
+    source note's row, then the link is re-read and checked (`links.is_available`: active, and the
+    note out of the Trash, not locked, not taken down). A takedown, a Trash, a lock, a revoke or an
+    expiry that landed in between is `LinkUnavailableError`, which callers answer as they answer an
+    unknown code (the API a 404, the website the neutral page): nothing reveals the note's state.
+
+    Raises:
+        LinkUnavailableError, ValidationError, CostChangedError,
+        apps.billing.services.InsufficientCreditsError
+    """
+    from .links import is_available  # links imports this module
+
+    get_account(user)
+    with transaction.atomic():
+        lock_account(user.pk)
+        source = Note.objects.select_for_update().filter(pk=link.note_id).first()
+        fresh = ShareLink.objects.filter(pk=link.pk).first()
+        if source is None or fresh is None:
+            raise LinkUnavailableError
+        fresh.note = source
+        if not is_available(fresh):
+            raise LinkUnavailableError
+        return create_note(
+            user, title=source.title, content=source.content, expected_cost=expected_cost
+        )
 
 
 # -- Saving --------------------------------------------------------------------------------------
@@ -465,10 +522,7 @@ def restore(note: Note, expected_cost: int | None = None) -> Note:
         locked = _locked_note(note)
         if locked.deleted_at is None:
             return locked
-        if Note.objects.filter(user=note.user, deleted_at__isnull=True).count() >= (
-            config.max_notes_per_user
-        ):
-            raise _error(NON_FIELD_ERRORS, TOO_MANY_NOTES_MESSAGE)
+        _check_cap(note.user, config)
         cost, becomes_paid, renews = _restore_plan(locked, config)
         if expected_cost is not None and expected_cost != cost:
             raise CostChangedError(cost)

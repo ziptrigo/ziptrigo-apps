@@ -29,6 +29,7 @@ from apps.core.services.qr_image import render_png
 from ..limits import LINK_LABEL_MAX
 from ..models import LinkMode, Note, NotesSettings, ShareLink
 from .accounts import get_account, lock_account
+from .errors import NoteTakenDownError
 from .notes import _error, _locked_note, require_writable
 
 #: Means "leave the expiry as it is" in `update_link` (`None` would mean "no expiry").
@@ -83,13 +84,31 @@ def expiry_instant(note: Note, expires_on: date) -> datetime:
     return local_datetime(note.user, expires_on, time(23, 59, 59))
 
 
-def _clean_expiry(note: Note, expires_on: date | None) -> datetime | None:
+def _expiry_instant_of(note: Note, value: date | datetime) -> datetime:
+    """The instant an expiry given as a date (the end of that day in the owner's zone) or as a
+    date-time (that instant; one with no UTC offset is read in the owner's zone) means."""
+    if isinstance(value, datetime):
+        if timezone.is_naive(value):
+            return value.replace(tzinfo=user_tz(note.user))
+        return value
+    return expiry_instant(note, value)
+
+
+def _clean_expiry(note: Note, expires_on: date | datetime | None) -> datetime | None:
     if expires_on is None:
         return None
-    instant = expiry_instant(note, expires_on)
+    instant = _expiry_instant_of(note, expires_on)
     if instant <= timezone.now():
         raise _error('expires_on', PAST_DATE_MESSAGE)
     return instant
+
+
+def _expiry_changes(link: ShareLink, expires_on: date | datetime) -> bool:
+    """Whether `expires_on` would change the link's expiry: the day it already expires on is no
+    change (so an expired link's label can be edited), nor is the same instant."""
+    if isinstance(expires_on, datetime):
+        return _expiry_instant_of(link.note, expires_on) != link.expires_at
+    return expires_on != expiry_date(link)
 
 
 def expiry_date(link: ShareLink) -> date | None:
@@ -103,7 +122,7 @@ def require_shareable(note: Note) -> None:
     """Refuse creating or changing a note's links while it is read-only (in the Trash, locked or
     taken down; a takedown is checked before the lock). Revoking is exempt: see `revoke_link`."""
     if note.is_taken_down:
-        raise _error(NON_FIELD_ERRORS, TAKEN_DOWN_SHARE_MESSAGE)
+        raise NoteTakenDownError(TAKEN_DOWN_SHARE_MESSAGE)
     require_writable(note)
 
 
@@ -220,7 +239,7 @@ def _check_cap(note: Note, config: NotesSettings, *, exclude: ShareLink | None =
 
 
 def check_create(
-    note: Note, *, mode: object, label: object = '', expires_on: date | None = None
+    note: Note, *, mode: object, label: object = '', expires_on: date | datetime | None = None
 ) -> None:
     """The refusals `create_link` would make for the note's state, the fields and the cap, with no
     locks and no writes: the web checks them before it charges the rate limit. (`create_link`
@@ -237,7 +256,7 @@ def check_update(
     *,
     mode: object = None,
     label: object = None,
-    expires_on: date | None | object = UNCHANGED,
+    expires_on: date | datetime | None | object = UNCHANGED,
     clear_expiry: bool = False,
 ) -> None:
     """The refusals `update_link` would make for the note's state and the fields, with no locks
@@ -251,7 +270,7 @@ def check_update(
     if label is not None:
         clean_label(label)
     clearing = clear_expiry or expires_on is None
-    changing = not clearing and isinstance(expires_on, date) and expires_on != expiry_date(link)
+    changing = not clearing and isinstance(expires_on, date) and _expiry_changes(link, expires_on)
     if changing:
         assert isinstance(expires_on, date)
         _clean_expiry(note, expires_on)
@@ -261,11 +280,12 @@ def check_update(
 
 
 def create_link(
-    note: Note, *, mode: object, label: object = '', expires_on: date | None = None
+    note: Note, *, mode: object, label: object = '', expires_on: date | datetime | None = None
 ) -> ShareLink:
     """Make a new share link for the note.
 
-    `expires_on` is a date: the link stops working at the end of that day in the owner's zone, and
+    `expires_on` is a date (the link stops working at the end of that day in the owner's zone) or,
+    for the API, a date-time (that instant; with no UTC offset it is read in the owner's zone); it
     must not be in the past. At most `max_links_per_note` links are active at once.
 
     Raises:
@@ -310,7 +330,7 @@ def update_link(
     *,
     mode: object = None,
     label: object = None,
-    expires_on: date | None | object = UNCHANGED,
+    expires_on: date | datetime | None | object = UNCHANGED,
     clear_expiry: bool = False,
 ) -> ShareLink:
     """Change a link's mode, label or expiry (`None` leaves a field as it is; `clear_expiry` removes
@@ -347,7 +367,7 @@ def update_link(
                 fields.append('expires_at')
         elif expires_on is not UNCHANGED:
             assert isinstance(expires_on, date)
-            if expires_on != expiry_date(fresh):
+            if _expiry_changes(fresh, expires_on):
                 fresh.expires_at = _clean_expiry(note, expires_on)
                 fields.append('expires_at')
         if not was_active and fresh.is_active():
