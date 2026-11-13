@@ -26,7 +26,7 @@ day forgiven.
 
 import logging
 from datetime import timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from uuid import UUID
 
 from django.db import transaction
@@ -44,6 +44,7 @@ from apps.billing.services import (
     storage_charge,
     storage_day_cost,
 )
+from apps.core.costs import daily_rate_text
 from apps.core.services import notifications
 from apps.core.services.queue import enqueue_after_commit
 
@@ -84,14 +85,9 @@ def daily_storage_rate(stored_bytes: int, price_per_gb_per_day: Decimal | None =
 
 def describe_daily_rate(rate: Decimal) -> str:
     """`rate` (credits a day) for the settings page: "about 2.5 credits a day", "about 0.02
-    credits a day", "less than 0.01 credits a day"."""
-    if rate <= 0:
-        return '0 credits a day'
-    if rate < Decimal('0.01'):
-        return 'less than 0.01 credits a day'
-    shown = rate.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-    unit = 'credit' if shown == 1 else 'credits'
-    return f'about {format(shown.normalize(), "f")} {unit} a day'
+    credits a day", "less than 0.01 credits a day". The wording is core's, shared with the Costs
+    page."""
+    return daily_rate_text(rate)
 
 
 def meter_account(account_pk: object, price_per_gb_per_day: Decimal | None = None) -> None:

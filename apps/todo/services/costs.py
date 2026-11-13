@@ -31,10 +31,17 @@ def cost_section(user: User) -> CostSection:
             )
         )
         lines.append(
-            charge(f'Each task beyond {allowance:,} in a month', config.task_price, 'per task')
+            charge(
+                f'Each task beyond {allowance:,} in a month',
+                config.task_price,
+                'per task',
+                'Charged when the task is added.',
+            )
         )
     else:
-        lines.append(charge('Add a task', config.task_price, 'per task'))
+        lines.append(
+            charge('Add a task', config.task_price, 'per task', 'Charged when the task is added.')
+        )
     lines += [
         storage('Attach files', 'Files on tasks and on comments.', unit='per day'),
         free('Reading dates from a title, reminders, comments, search and saved filters'),

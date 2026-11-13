@@ -59,11 +59,9 @@ CostProvider = Callable[[Any], CostSection]
 
 
 def credits_text(amount: int | Decimal) -> str:
-    """`1 credit`, `10 credits`, `0.1 credits`, `1,000 credits`."""
+    """`1 credit`, `10 credits`, `0.1 credits`, `1,000 credits`, `1,234.5 credits`."""
     if isinstance(amount, Decimal):
-        shown = format(amount.normalize(), 'f')
-        if '.' not in shown:
-            shown = f'{int(shown):,}'
+        shown = format(amount.normalize(), ',f')
     else:
         shown = f'{amount:,}'
     return f'{shown} credit' if amount == 1 else f'{shown} credits'
@@ -92,8 +90,16 @@ def plural(count: int, singular: str, plural_form: str = '') -> str:
     return f'{count:,} {word}'
 
 
+def daily_storage_rate(stored_bytes: int, price_per_gb_per_day: Decimal) -> Decimal:
+    """What one day of storing `stored_bytes` accrues, fractions kept and with no minimum: every
+    product meters storage this way (`apps.billing.services.storage_charge`), spending only the
+    whole credits and carrying the rest."""
+    return price_per_gb_per_day * Decimal(stored_bytes) / _BYTES_PER_GB
+
+
 def daily_rate_text(rate: Decimal) -> str:
-    """`rate` (credits a day): "about 2.5 credits a day", "less than 0.01 credits a day"."""
+    """`rate` (credits a day): "about 2.5 credits a day", "about 0.02 credits a day", "less than
+    0.01 credits a day", "0 credits a day"."""
     if rate <= 0:
         return '0 credits a day'
     if rate < Decimal('0.01'):
@@ -103,7 +109,6 @@ def daily_rate_text(rate: Decimal) -> str:
 
 
 def storage_usage(stored_bytes: int, price_per_gb_per_day: Decimal) -> str:
-    """`You store 12.3 MB: less than 0.01 credits a day.` at the shared price, fractions kept
-    (what accrues each day; only whole credits are spent)."""
-    rate = price_per_gb_per_day * Decimal(stored_bytes) / _BYTES_PER_GB
+    """`You store 12.3 MB: less than 0.01 credits a day.` at the shared price."""
+    rate = daily_storage_rate(stored_bytes, price_per_gb_per_day)
     return f'You store {filesizeformat(stored_bytes)}: {daily_rate_text(rate)}.'

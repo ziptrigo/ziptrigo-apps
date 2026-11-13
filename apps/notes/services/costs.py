@@ -26,10 +26,15 @@ def cost_section(user: User) -> CostSection:
             f'Each note beyond {allowance:,}' if allowance else 'Create a note',
             config.creation_price,
             'to create',
-            'Duplicating a note, or restoring one from the Trash when your free notes are all in '
-            'use, counts as a new note.',
+            'You confirm the cost first. Duplicating a note, or restoring one from the Trash '
+            'when your free notes are all in use, counts as a new note.',
         ),
-        charge('Renewal of a paid note', config.renewal_price, every),
+        charge(
+            'Renewal of a paid note',
+            config.renewal_price,
+            every,
+            'Taken automatically on the renewal date.',
+        ),
         free('Tags, history, sharing, search and saved filters'),
     ]
 

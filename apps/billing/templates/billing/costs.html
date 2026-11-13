@@ -20,8 +20,9 @@
       </p>
     </div>
     <p class="text-sm text-gray-600 dark:text-gray-300 mb-6">
-      What each app charges, in credits. Anything not listed is free. A one-off charge is always
-      shown before you confirm it; storage is charged once a day.
+      What each app charges, in credits. Anything not listed is free. Storage is charged once a
+      day; other charges are taken when the action happens, and each one says below whether you
+      confirm its cost first.
     </p>
 
     <nav aria-label="Sections" class="flex flex-wrap gap-2 mb-8 text-sm">
@@ -75,11 +76,17 @@
         <h2 id="costs-{{ product.label }}-title" class="text-xl font-semibold mb-3 pb-2 border-b border-gray-200 dark:border-gray-700">
           <i class="{{ product.icon }} mr-2 text-sage-300" aria-hidden="true"></i>{{ product.name }}
         </h2>
+        {% if section is None %}
+          <p class="text-sm text-gray-600 dark:text-gray-300" data-cost-unavailable>
+            Prices for {{ product.name }} are not available right now. Try again in a moment.
+          </p>
+        {% endif %}
         {% if section.usage %}
           <ul class="text-sm text-gray-600 dark:text-gray-300 mb-3 space-y-0.5" data-cost-usage>
             {% for line in section.usage %}<li>{{ line }}</li>{% endfor %}
           </ul>
         {% endif %}
+        {% if section %}
         <dl class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
           {% for line in section.lines %}
             <div class="flex items-start justify-between gap-4 px-4 py-3" data-cost-line>
@@ -97,6 +104,7 @@
             </div>
           {% endfor %}
         </dl>
+        {% endif %}
         {% if section.footnote %}
           <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
             <i class="fas fa-circle-info mr-1" aria-hidden="true"></i>{{ section.footnote }}

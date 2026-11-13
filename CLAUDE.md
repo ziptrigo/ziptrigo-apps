@@ -2741,7 +2741,14 @@ shows as Free -- and `storage`, the shared price, which the page links to; `usag
 user's own allowance and what renews when, e.g. To-do's "This month: 4 of 10 free tasks used. The
 allowance starts again on 12/01/2026." and Notes' next renewal; `footnote`: what happens when the
 credits run out). The providers live in `apps/<product>/services/costs.py` and **read without
-creating** a product account. The page shows billing's shared section (the storage price with a
+creating** a product account. **Storage is shown at the rate that accrues** (`daily_storage_rate`,
+`daily_rate_text`, `storage_usage`: price x size, fractions kept), never at a product's resume
+threshold (file transfer's `daily_cost`, Receipts' and To-do's `daily_storage_cost`, at least 1
+credit): the daily jobs spend only the whole credits of the running total. Each line's note says
+whether the user confirms the cost first (Notes, Short URLs, a Receipts re-run) or it is taken as it
+happens (a To-do task beyond the allowance, a Receipts file, a renewal). A provider that raises is
+logged and its section reads "not available right now"; the page stays up. The page is capped at
+`MAX_QUERIES` (20) in its tests. The page shows billing's shared section (the storage price with a
 2 GB x 30 days example, the welcome credits) and then **every** product, switched-off ones too (a
 hidden app still charges), in the user's order (`products_for`). **A new product, or a new price,
 updates its provider in the same PR**; `test_every_product_has_a_cost_section` fails on a product

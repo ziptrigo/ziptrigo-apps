@@ -14,9 +14,9 @@ def cost_section(user: User) -> CostSection:
             'Read a receipt with AI',
             config.price_per_file,
             'per file',
-            "Uploaded or emailed in. A file that can't be read is refunded.",
+            "Charged when a file is uploaded or emailed in. A file that can't be read is refunded.",
         ),
-        charge('Re-run a receipt', config.price_per_file, 'per run'),
+        charge('Re-run a receipt', config.price_per_file, 'per run', 'You confirm the cost first.'),
         storage(
             'Store receipts',
             'Originals, previews and the emails they came in, receipts in the Trash included.',

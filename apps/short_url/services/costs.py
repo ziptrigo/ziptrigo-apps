@@ -39,6 +39,6 @@ def cost_section(user: User) -> CostSection:
     return CostSection(
         lines=lines,
         usage=usage,
-        footnote='No recurring charges: a link keeps every extra it paid for, also when it is '
-        'disabled and enabled again.',
+        footnote='You confirm the cost of a paid extra first. No recurring charges: a link keeps '
+        'every extra it paid for, also when it is disabled and enabled again.',
     )
