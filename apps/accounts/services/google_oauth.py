@@ -26,6 +26,7 @@ from authlib.integrations.django_client import OAuth
 from django.conf import settings
 from django.db import IntegrityError, transaction
 
+from ..backends import LOGIN_BACKEND  # noqa: F401  (re-exported)
 from ..models import User
 
 logger = logging.getLogger(__name__)
@@ -37,9 +38,8 @@ SCOPE = 'openid email profile'
 #: would let a stalled Google endpoint hold a gunicorn worker indefinitely.
 REQUEST_TIMEOUT_SECONDS = 10
 
-#: The backend `login()` records on the session. There is only one, but naming it explicitly keeps
-#: `login()` working if a second backend is ever added (it refuses to guess with several).
-LOGIN_BACKEND = 'apps.accounts.backends.EmailBackend'
+# `LOGIN_BACKEND` (the backend `login()` records on the session) lives in `apps.accounts.backends`;
+# it is imported above so `google_oauth.LOGIN_BACKEND` keeps working.
 
 INACTIVE_MESSAGE = 'User not active'
 CONFLICT_MESSAGE = (

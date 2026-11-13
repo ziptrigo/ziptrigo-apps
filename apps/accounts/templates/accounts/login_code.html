@@ -1,0 +1,22 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Email me a sign-in code - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
+    <div class="flex items-center gap-3 mb-2">
+      <img src="{% static 'accounts/images/logo_128x128.png' %}" alt="" class="h-8 w-8">
+      <h1 class="text-xl font-semibold">Email me a sign-in code</h1>
+    </div>
+    <p class="mb-6 text-sm text-gray-600 dark:text-gray-300">
+      No password needed. We'll email you a code and a link: use either one to sign in.
+    </p>
+
+    <div id="login-code-msg" role="alert" class="mb-4 text-sm"></div>
+
+    {% include 'accounts/partials/login_code_form.html' %}
+  </div>
+</div>
+{% endblock %}

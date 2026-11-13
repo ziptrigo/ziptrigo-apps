@@ -4,6 +4,7 @@ from .change_password import ChangePasswordForm
 from .display_formats import DisplayFormatsForm
 from .forgot_password import ForgotPasswordForm
 from .login import LoginForm
+from .login_code import LoginCodeForm, LoginCodeRequestForm
 from .profile import ProfileForm
 from .register import RegisterForm
 from .resend_confirmation import ResendConfirmationForm
@@ -17,6 +18,8 @@ __all__ = [
     'DisplayFormatsForm',
     'ChangePasswordForm',
     'ForgotPasswordForm',
+    'LoginCodeForm',
+    'LoginCodeRequestForm',
     'LoginForm',
     'ProfileForm',
     'RegisterForm',

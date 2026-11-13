@@ -320,6 +320,32 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     'FORGOT_PASSWORD_IP': (10, 60 * 60),
     'FORGOT_PASSWORD_EMAIL_IP': (3, 60 * 60),
     'FORGOT_PASSWORD_EMAIL': (15, 60 * 60),
+    # Sign-in by emailed code or link (issue #295). Requesting one answers the same whether or not
+    # the address has an account (queued for every submission, like forgot-password), so these are
+    # flat caps that reveal nothing: `_IP` bounds one client, `_EMAIL_IP` is the strict per-(address,
+    # IP) budget and `_EMAIL` a looser one across every IP (a third party who knows an address
+    # needs many IPs to use up the looser one). Each *new* code also supersedes the previous one, so
+    # these also bound how often someone can invalidate a victim's pending code. Checking a code
+    # mirrors password login: `LOGIN_OTP_VERIFY_IP` per IP (also the only rule on the emailed
+    # link's POST, a 43-character token nobody can guess), `LOGIN_OTP_VERIFY_EMAIL_IP` strict per
+    # (address, IP) on every attempt and `LOGIN_OTP_VERIFY_EMAIL` looser per address across IPs,
+    # counting only *failed* codes. On top of those, a code is burned after
+    # `CoreSettings.email_verification_max_attempts` wrong guesses. `LOGIN_OTP_VERIFY_EMAIL_DAY`
+    # is the daily ceiling on failures per address across every IP and window. Without it the
+    # 15-minute rule allows 30 x 96 = 2,880 failures a day, and the row limit (5 tries a code) with
+    # `LOGIN_OTP_REQUEST_EMAIL` (10 codes an hour) allows 10 x 24 x 5 = 1,200 guesses a day against
+    # one address: ~0.12% of a 6-digit code space a day, forever. 50 a day caps a distributed
+    # guesser at 50 / 10^6 = 0.005% a day, while an owner's honest typos (a handful) never get near
+    # it. Failures only, peeked before checking. A stranger can also use these per-address budgets
+    # up to give the owner a 429; that costs only this way
+    # in (see `apps.accounts.services.login_otp`).
+    'LOGIN_OTP_REQUEST_IP': (10, 60 * 60),
+    'LOGIN_OTP_REQUEST_EMAIL_IP': (5, 60 * 60),
+    'LOGIN_OTP_REQUEST_EMAIL': (10, 60 * 60),
+    'LOGIN_OTP_VERIFY_IP': (20, 5 * 60),
+    'LOGIN_OTP_VERIFY_EMAIL_IP': (10, 5 * 60),
+    'LOGIN_OTP_VERIFY_EMAIL': (30, 15 * 60),
+    'LOGIN_OTP_VERIFY_EMAIL_DAY': (50, 24 * 60 * 60),
     # Resend-confirmation: per-IP here; the per-*email*-per-day cap is enforced once, centrally,
     # by `EMAIL_VERIFICATION_START_EMAIL` below (every caller of
     # `apps.core.services.email_verification.start` shares it, including this endpoint).
@@ -714,6 +740,9 @@ SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _base_url.scheme == 'https'
 # confirmation's historical lifetime unchanged (behaviour for existing users must not change).
 EMAIL_CONFIRMATION_TOKEN_TTL_HOURS = int(os.getenv('EMAIL_CONFIRMATION_TOKEN_TTL_HOURS', '48'))
 PASSWORD_RESET_TOKEN_TTL_HOURS = int(os.getenv('PASSWORD_RESET_TOKEN_TTL_HOURS', '4'))
+# How long an emailed sign-in code and link (issue #295) stay valid, in minutes. Passed to
+# `start(..., validity=...)`: short on purpose, since it signs someone in.
+LOGIN_OTP_VALIDITY_MINUTES = int(os.getenv('LOGIN_OTP_VALIDITY_MINUTES', '10'))
 
 # JWT signing for the `/api/` endpoints. Separate from `SECRET_KEY` so it can be rotated on its own.
 JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')

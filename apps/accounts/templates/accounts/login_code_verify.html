@@ -1,0 +1,29 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Enter your sign-in code - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="flex-grow flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
+    <div class="flex items-center gap-3 mb-2">
+      <img src="{% static 'accounts/images/logo_128x128.png' %}" alt="" class="h-8 w-8">
+      <h1 class="text-xl font-semibold">Enter your sign-in code</h1>
+    </div>
+    {# Said for every address: whether it has an account is never revealed. #}
+    <p class="mb-6 text-sm text-gray-600 dark:text-gray-300">
+      If that address has an account, we've emailed it a code and a link. Type the code here, or open the link in the email. They expire in {{ validity }}.
+    </p>
+
+    {% if signed_in_email %}
+      <p class="mb-4 text-sm text-amber-700 dark:text-amber-300" role="status">
+        You're signed in as {{ signed_in_email }}. Signing in with a code switches this browser to the account the code belongs to.
+      </p>
+    {% endif %}
+
+    <div id="login-code-verify-msg" role="alert" class="mb-4 text-sm"></div>
+
+    {% include 'accounts/partials/login_code_verify_form.html' %}
+  </div>
+</div>
+{% endblock %}

@@ -442,14 +442,61 @@ def confirm_by_code(verification_id: uuid.UUID | str, code: str, purpose: str) -
     return result
 
 
-def confirm_by_token(token: str, purpose: str) -> str:
+def confirm_latest_by_code(email: str, code: str, purpose: str) -> str:
+    """`confirm_by_code` for a caller that cannot know the row's id: check `code` against the
+    *newest* verification started for `email`/`purpose` (matched case-insensitively, like `start`).
+    Returns the verified email exactly as the row stores it, or raises one of this module's
+    exceptions.
+
+    For flows where the code is typed on a page by someone who may not have the request that
+    started it at hand, and where the start itself was queued so the request never learned the
+    row's id (`accounts`' sign-in code, issue #295). Only the newest row is ever consulted, which
+    is what "a newer code replaces the older ones" means: an older, superseded row is never
+    reached from here. No row at all is `EmailVerificationNotFound`, so a caller can answer an
+    address nobody started anything for exactly as it answers a wrong code. Everything else --
+    attempts, burning, expiry, single use, the locking -- is `confirm_by_code`'s.
+    """
+    latest_id = (
+        EmailVerification.objects.filter(email__iexact=email, purpose=purpose)
+        .order_by('-created_at')
+        .values_list('pk', flat=True)
+        .first()
+    )
+    if latest_id is None:
+        raise EmailVerificationNotFound()
+    return confirm_by_code(latest_id, code, purpose)
+
+
+def peek_by_token(token: str, purpose: str) -> str | None:
+    """Read-only look at a pending verification by its token and purpose: the email it stores
+    exactly as stored, or `None` when there is no such row, it is already confirmed, was
+    invalidated (superseded) or has expired. **No writes and no attempt counting**: it consumes
+    nothing, so a page can show whose verification a link belongs to before the person presses
+    the button that actually confirms it (`accounts`' sign-in link, issue #295). Not a guarantee
+    the confirm will succeed (it may be used or expire in between)."""
+    verification = EmailVerification.objects.filter(
+        token_hash=_digest(token), purpose=purpose
+    ).first()
+    if (
+        verification is None
+        or verification.confirmed_at is not None
+        or verification.invalidated_at is not None
+        or timezone.now() >= verification.expires_at
+    ):
+        return None
+    return verification.email
+
+
+def confirm_by_token(token: str, purpose: str, *, single_use: bool = False) -> str:
     """Thin, string-returning wrapper around `confirm_by_token_verbose` for callers (`accounts`)
     that only ever need the email back -- see that function for the full contract and every
     exception this can raise."""
-    return confirm_by_token_verbose(token, purpose).email
+    return confirm_by_token_verbose(token, purpose, single_use=single_use).email
 
 
-def confirm_by_token_verbose(token: str, purpose: str) -> EmailVerificationResult:
+def confirm_by_token_verbose(
+    token: str, purpose: str, *, single_use: bool = False
+) -> EmailVerificationResult:
     """Confirm a pending verification by the token from its link and the `purpose` it was
     started for. Returns the verified email *and* the row's own id (see
     `EmailVerificationResult`), or raises one of this module's exceptions.
@@ -469,6 +516,13 @@ def confirm_by_token_verbose(token: str, purpose: str) -> EmailVerificationResul
     there's nothing to protect by burning it, and doing so would let a code-guessing attacker
     lock the real recipient out of their own link.
 
+    `single_use=True` removes that idempotency: a row that is already confirmed (by this token, by
+    its code, or by a concurrent request) raises `EmailVerificationAlreadyConfirmed`, as
+    `confirm_by_code` does. For a purpose whose confirmation *is* the act of signing someone in
+    (`accounts`' sign-in link, issue #295), where "works again within its window" would be a
+    reusable login link. Everything else about the token path stays: not guessable, so no attempt
+    burning.
+
     Concurrency: like `confirm_by_code`, the whole check runs inside `transaction.atomic()` with
     `select_for_update()` on the row, and (also like `confirm_by_code`) no exception is ever
     raised from inside that block -- see its docstring for why. Setting `confirmed_at` goes
@@ -476,8 +530,10 @@ def confirm_by_token_verbose(token: str, purpose: str) -> EmailVerificationResul
     a concurrent request already confirmed the row since this request read it, this call takes
     the same idempotent success path a genuine double-click would (still gated by `expires_at`,
     as above) rather than erroring or double-writing -- unlike `confirm_by_code`, two concurrent
-    *correct* token submissions are supposed to both "succeed" from the caller's point of view,
-    since a token isn't single-use by design.
+    *correct* token submissions both "succeed" from the caller's point of view, since a token
+    isn't single-use by default. **With `single_use=True` that no longer holds**: the loser of the
+    race (its conditional update matched 0 rows) gets `EmailVerificationAlreadyConfirmed`, so two
+    correct submissions never both succeed.
     """
     result: EmailVerificationResult | None = None
     error: EmailVerificationError | None = None
@@ -491,7 +547,9 @@ def confirm_by_token_verbose(token: str, purpose: str) -> EmailVerificationResul
             error = EmailVerificationNotFound()
         else:
             if verification.confirmed_at is not None:
-                if timezone.now() < verification.expires_at:
+                if single_use:
+                    error = EmailVerificationAlreadyConfirmed()
+                elif timezone.now() < verification.expires_at:
                     result = EmailVerificationResult(
                         email=verification.email, verification_id=verification.pk
                     )
@@ -504,16 +562,21 @@ def confirm_by_token_verbose(token: str, purpose: str) -> EmailVerificationResul
                 if now >= verification.expires_at:
                     error = EmailVerificationExpired()
                 else:
-                    EmailVerification.objects.filter(
+                    updated = EmailVerification.objects.filter(
                         pk=verification.pk, confirmed_at__isnull=True
                     ).update(confirmed_at=now)
-                    # Whether this call's own conditional update won the race or a concurrent
-                    # one already confirmed the row first, the outcome here is identical: report
-                    # success -- that's exactly the idempotent case this function is designed to
-                    # tolerate.
-                    result = EmailVerificationResult(
-                        email=verification.email, verification_id=verification.pk
-                    )
+                    if single_use and updated == 0:
+                        # A concurrent request used the row between our read and our write: two
+                        # correct submissions must not both succeed.
+                        error = EmailVerificationAlreadyConfirmed()
+                    else:
+                        # Whether this call's own conditional update won the race or a
+                        # concurrent one already confirmed the row first, the outcome here is
+                        # identical: report success -- that's exactly the idempotent case this
+                        # function is designed to tolerate.
+                        result = EmailVerificationResult(
+                            email=verification.email, verification_id=verification.pk
+                        )
 
     if error is not None:
         raise error

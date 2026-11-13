@@ -23,6 +23,7 @@ from apps.core.services.email import send_email
 from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
+from . import login_otp
 
 SUBJECT = 'Your ZipTrigo password was changed'
 
@@ -37,6 +38,8 @@ def change_password(user: User, new_password: str) -> None:
     """
     user.set_password(new_password)
     user.save(update_fields=['password'])
+    # A sign-in code or link emailed before the change is access the owner just secured against.
+    login_otp.invalidate_pending(user.email)
     enqueue_after_commit(send_password_changed_email, str(user.pk), timezone.now().isoformat())
 
 

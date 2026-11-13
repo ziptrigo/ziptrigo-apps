@@ -257,6 +257,22 @@ confirmation link and emails a set-password link that carries nothing the creato
 | 5 | Click the credits link (logged out). | The login page with `next=/billing/credits/`. Log in as `TAGGED` / `QaTagged-0001`: `/billing/credits/` with balance **0** and no welcome line; no welcome notification in the bell. Log out. |
 | 6 | Wait a minute and reload the mailbox. | Still exactly one `About your ZipTrigo welcome credits` (sent once). |
 
+### MAIL-26 Sign-in code and link email
+
+**Purpose:** asking for a sign-in code emails one message with a code and a link; an unknown or
+unconfirmed address gets nothing; the name is escaped (issue #295).
+**Preconditions:** MAIL-06 done (`MAIL_USER` confirmed and signed in on the Main window); Visitor window (logged out). At least a minute since the last request.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor window: `/account/login/code/`, Email `qa.mail.nobody.<R>@example.com`, **Email me a code**. Then do the same for `PENDING` (never confirmed in this file). | Both land on `/account/login/code/verify/`. After a minute `?to=` for each address still has "No emails." (PENDING has only its earlier confirmation email, if MAIL-04..08 sent one). |
+| 2 | Request a code for `MAIL_USER`. | Lands on the same page. |
+| 3 | `/__e2e__/mail/?to=<MAIL_USER>` (reload until it arrives). | Exactly one new email, subject exactly `Your ZipTrigo sign-in code` (no code in the subject). |
+| 4 | Read the text body. | `Hi QA <b>Mail</b> & "Co",`, "Use this code to sign in to ZipTrigo:", the code (6 digits) on its own line, `Or open the link below and press "Sign in":`, a link `<BASE>/account/login/link/<token>/`, "The code and the link work once and expire in 10 minutes.", "If you did not ask to sign in, you can ignore this email: nobody can sign in without it, and your password has not changed." and the signature. |
+| 5 | HTML source. | `Hi MAIL_NAME_HTML,`, the same 6-digit code in a monospaced paragraph, `<strong>Sign in</strong>` and an `<a href>` whose href and text are the link; no raw `<b>`; no `None`, `{{` or `{%`. |
+| 6 | Open the link from the email. | Title "Sign in - ZipTrigo", a **Sign in** button; the Visitor window is still logged out. Press **Sign in**: signed in as `MAIL_USER` on `/`. Log out again. |
+| 7 | Request another code for `MAIL_USER` right away (within the minute). | No second email arrives (the shared resend cooldown skips it silently), and the page answered exactly as before; the first email's code still works. |
+
 ## Feedback and admin
 
 ### MAIL-10 Feedback receipt and the superuser notice
@@ -513,7 +529,7 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 ### MAIL-23 Every email of the run follows the rules
 
 **Purpose:** a final sweep over everything this file made the site send.
-**Preconditions:** MAIL-01 to MAIL-25 have run.
+**Preconditions:** MAIL-01 to MAIL-26 have run.
 
 | # | Action | Expected result |
 |---|---|---|
