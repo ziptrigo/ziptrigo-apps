@@ -14,7 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import QuerySet
 from django.http import HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -22,6 +22,7 @@ from django.views.decorators.http import require_GET
 
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.core.htmx import is_htmx
+from apps.core.redirects import redirect_to_page
 
 from ..limits import PAGE_SIZE
 from ..models import NotesSettings, Tag
@@ -234,7 +235,7 @@ def note_list(request: AuthenticatedHttpRequest) -> HttpResponse:
             tag=_uuid_or_empty(request.GET.get('tag', '')),
             page=str(int(page)) if page.isascii() and page.isdigit() else '',
         )
-        return redirect(f'{page_url(view)}?{query}' if query else page_url(view))
+        return redirect_to_page(page_url(view), query)
 
     get_account(request.user)  # the partial is the first thing a stale tab may fetch
     context = list_context(request, view)

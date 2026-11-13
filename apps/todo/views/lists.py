@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -22,6 +22,7 @@ from django.views.decorators.http import require_GET
 from apps.accounts.http import AuthenticatedHttpRequest
 from apps.accounts.services.timezones import user_today
 from apps.core.htmx import is_htmx
+from apps.core.redirects import redirect_to_page
 
 from ..forms import TaskForm
 from ..models import Label, MutedOverdue, Resolution, Task, TaskBlocker, TodoSettings
@@ -287,7 +288,7 @@ def completed_page(request: AuthenticatedHttpRequest) -> HttpResponse:
     """The Completed page was renamed Closed (it lists both resolutions): old links and bookmarks
     land on it, with their query string."""
     query = request.META.get('QUERY_STRING', '')
-    return redirect(f'{page_url("closed")}?{query}' if query else page_url('closed'))
+    return redirect_to_page(page_url('closed'), query)
 
 
 @login_required
@@ -318,7 +319,7 @@ def task_list(request: AuthenticatedHttpRequest) -> HttpResponse:
             resolution=resolution if view == 'closed' and resolution in Resolution.values else '',
             page=str(int(page)) if page.isascii() and page.isdigit() else '',
         )
-        return redirect(f'{page_url(view)}?{query}' if query else page_url(view))
+        return redirect_to_page(page_url(view), query)
 
     get_account(request.user)  # the partial is the first thing a stale tab may fetch
     context = list_context(request, view)
