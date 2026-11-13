@@ -5859,8 +5859,10 @@ the JWT API is `api/` + `schemas/`, mounted at `/api/notes/`).
   reorder/` per burst; `ids[]` over 500 or unparsable is a 422 `Could not read the new order.`). A row has
   the title (link), an excerpt (the first 140 characters of `to_plain_text` of the first 1,500 characters
   of the content, one line), tag chips, `Updated {% local_time 'short' %}` (days left in the Trash), a lock
-  icon when locked and a menu (Edit, Duplicate, Archive/Unarchive, Move to trash; Restore and Delete
-  forever in the Trash).
+  icon when locked and a menu (Edit, Share, Duplicate, Archive/Unarchive, Move to trash; Restore and
+  Delete forever in the Trash). **Share** opens the note page with its share panel open
+  (`?share=1#share-panel`) and is shown when the page shows its Share button (`links.share_flags`'
+  `show_share`: a note that can be shared, or a read-only one that still has an active link).
 - **The note page** (`notes/note.html`): title, an Archived pill, "Updated <time>", the Trash banner (days
   left) or the locked banner (with a **Top up** link), the tag chips with an "Edit tags" popover (a checkbox
   list that posts on change with htmx and re-renders only `#note-tag-chips`, so the popover stays open;

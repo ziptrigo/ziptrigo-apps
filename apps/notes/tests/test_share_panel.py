@@ -115,6 +115,43 @@ class TestOpening:
         assert f'hx-get="{url("share", note.pk)}"' not in text(web.get(url('note', note.pk)))
 
 
+class TestRowMenuShare:
+    """The list row's menu has Share, which opens the note page with its share panel open, shown
+    when the note page shows its Share button."""
+
+    def share_href(self, note):
+        return f'href="{url("note", note.pk)}?share=1#share-panel"'
+
+    def test_the_row_menu_has_share(self, web, note):
+        body = text(web.get(url('list')))
+        assert self.share_href(note) in body
+        assert body.index('fa-pen') < body.index('fa-share-nodes') < body.index('fa-clone')
+
+    def test_it_opens_the_note_page_with_the_panel_loading(self, web, note):
+        page = text(web.get(f'{url("note", note.pk)}?share=1'))
+        assert f'hx-get="{url("share", note.pk)}" hx-trigger="load"' in page
+
+    def test_archived_and_search_rows_have_it_too(self, web, note):
+        from ..services import archive
+
+        other = create_note(note.user, title='Plan B', content='hello')
+        archive(other)
+        assert self.share_href(other) in text(web.get(url('archived')))
+        assert self.share_href(note) in text(web.get(url('search') + '?q=plan'))
+
+    def test_a_read_only_note_has_it_only_while_a_link_is_active(self, web, note):
+        type(note).objects.filter(pk=note.pk).update(locked_at=timezone.now())
+        assert self.share_href(note) not in text(web.get(url('list')))
+        links_note = type(note).objects.get(pk=note.pk)
+        make_link(links_note)
+        assert self.share_href(note) in text(web.get(url('list')))
+
+    def test_the_trash_has_no_menu(self, web, note):
+        make_link(note)
+        trash(note)
+        assert self.share_href(note) not in text(web.get(url('trash')))
+
+
 class TestCreating:
     def test_an_htmx_create_answers_the_panel(self, web, note):
         response = web.post(
