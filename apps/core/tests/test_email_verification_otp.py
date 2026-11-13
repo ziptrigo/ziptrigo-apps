@@ -173,3 +173,27 @@ class TestSingleUseToken:
 
         with pytest.raises(EmailVerificationAlreadyConfirmed):
             confirm_by_token(token, PURPOSE, single_use=True)
+
+
+def test_peek_by_token_reads_a_pending_row_without_touching_it(db, monkeypatch):
+    from apps.core.models import EmailVerification
+    from apps.core.services import email_verification
+
+    monkeypatch.setattr('apps.core.services.email_verification.send_email', lambda **kw: (1, 0))
+    seen = []
+
+    def build_email(context):
+        seen.append(context)
+        return 's', 't', 'h'
+
+    row_id = email_verification.start('Peek@example.com', 'p.peek', build_email=build_email)
+    token = seen[0].token
+
+    assert email_verification.peek_by_token(token, 'p.peek') == 'Peek@example.com'
+    assert email_verification.peek_by_token(token, 'p.other') is None
+    assert email_verification.peek_by_token('nope', 'p.peek') is None
+    row = EmailVerification.objects.get(pk=row_id)
+    assert row.confirmed_at is None and row.attempts == 0 and row.invalidated_at is None
+
+    email_verification.confirm_by_token(token, 'p.peek')
+    assert email_verification.peek_by_token(token, 'p.peek') is None  # used

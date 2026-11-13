@@ -36,6 +36,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 
+from ..backends import LOGIN_BACKEND  # noqa: F401  (re-exported)
 from ..models import User
 
 logger = logging.getLogger(__name__)
@@ -78,8 +79,7 @@ MICROSOFT_MAIL_DOMAINS = frozenset(
     for suffix in suffixes.split()
 )
 
-#: The backend `login()` records on the session (see `google_oauth.LOGIN_BACKEND`).
-LOGIN_BACKEND = 'apps.accounts.backends.EmailBackend'
+# `LOGIN_BACKEND` is `apps.accounts.backends.LOGIN_BACKEND`, imported above (still importable here).
 
 INACTIVE_MESSAGE = 'User not active'
 CONFLICT_MESSAGE = (

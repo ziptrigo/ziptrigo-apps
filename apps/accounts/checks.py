@@ -159,3 +159,27 @@ def check_google_native(*args, **kwargs):
             id='accounts.W006',
         )
     ]
+
+
+@register()
+def check_login_otp_validity(*args, **kwargs):
+    """Warn when `LOGIN_OTP_VALIDITY_MINUTES` is outside 1 to 60 (issue #295).
+
+    It is how long an emailed sign-in code and link work. Zero or negative makes every code
+    expire at once; over an hour leaves a code sitting in a mailbox (and a link in access logs)
+    valid for far longer than a sign-in needs. A warning, never an error: `migrate` runs the
+    checks.
+    """
+    value = settings.LOGIN_OTP_VALIDITY_MINUTES
+    if 1 <= value <= 60:
+        return []
+    return [
+        Warning(
+            f'LOGIN_OTP_VALIDITY_MINUTES is {value}, outside 1 to 60.',
+            hint=(
+                'It is the time (in minutes) an emailed sign-in code and link stay valid. Use a '
+                'value from 1 to 60; the default is 10.'
+            ),
+            id='accounts.W007',
+        )
+    ]

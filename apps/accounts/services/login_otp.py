@@ -26,11 +26,30 @@ confirmation can never sign anyone in, and the reverse.
   `max_attempts`, after which the row is burned. **Trade-off, accepted:** a stranger can burn or
   supersede someone's pending code (a few wrong guesses, or another request after the cooldown);
   the owner just asks for a new one, and the rate limits bound how often. It never locks the
-  account: the password and the other ways in are untouched.
+  account: the password and the other ways in are untouched. **Likewise a stranger can use up the
+  per-address budgets** (`LOGIN_OTP_REQUEST_EMAIL`, `LOGIN_OTP_VERIFY_EMAIL`,
+  `LOGIN_OTP_VERIFY_EMAIL_DAY`: they are keyed by address, across IPs) so the owner gets a 429 for
+  a while; that costs the owner only this way in, never the account or the password login, and the
+  budgets are sized so it takes many requests from many IPs.
+- **Burning the code leaves the link usable.** Five wrong guesses burn the *code* (`max_attempts`),
+  but a token isn't guessable, so the link in the same email still works until it expires or is
+  used; a code-guessing attacker therefore can't lock the real recipient out of their own link.
+- **Pending codes die with a security change.** A password change, a password reset and an email
+  change (for the address being left) call `invalidate_pending`, so a code or link emailed before
+  the owner secured the account can't be used after it.
 - **The link** is a token that opens a page with a button; only the POST signs in
-  (`views.login_code.login_link_page`), so a mail scanner's GET consumes nothing. It is strictly
-  single use too (`confirm_by_token(..., single_use=True)`): using the link burns the code and
-  using the code burns the link, since they are one row.
+  (`views.login_code.login_link_page`), so a mail scanner's GET consumes nothing. The GET does
+  look the row up *read-only* (`target_email_for_token`: no write, no attempt counted) to show the
+  masked address it signs into, and, for a visitor already signed in as someone else, a note saying
+  so: that is what stops a hostile link (login CSRF) from silently switching the browser to
+  another account. It is strictly single use too (`confirm_by_token(..., single_use=True)`): using
+  the link burns the code and using the code burns the link, since they are one row. **The token is
+  in the URL**, so it shows in access logs (gunicorn, nginx, `django.request` on a 500), as
+  `/n/<code>` and `/t/<slug>` do; it is consumed by the POST and valid only
+  `LOGIN_OTP_VALIDITY_MINUTES` (10 by default), which bounds what a log reader could do.
+- **Which account.** The signed-in user is the one whose address the verification row stores
+  (`User.objects.get(email=<stored>)`), never the address typed on the code page: with two legacy
+  accounts whose addresses differ only by case, the code can't sign in the other one.
 - **No side effects on the account.** Signing in this way never changes the password, never
   confirms an email (only confirmed accounts get here) and never writes `google_sub` or
   `microsoft_id`.
@@ -59,6 +78,8 @@ from apps.core.services.email_verification import (
     ResendTooSoon,
     confirm_by_token,
     confirm_latest_by_code,
+    invalidate,
+    peek_by_token,
     start,
 )
 from apps.core.services.notifications import is_safe_url
@@ -145,22 +166,33 @@ def build_sign_in_url(token: str, next_url: str = '') -> str:
 def check_before_verify(request: HttpRequest, email: str) -> RateLimitResult:
     """Call before checking a typed code for `email` (lower-cased). Charges the strict
     `LOGIN_OTP_VERIFY_IP` and per-(address, IP) `LOGIN_OTP_VERIFY_EMAIL_IP` on every attempt, then
-    only peeks at the looser per-address `LOGIN_OTP_VERIFY_EMAIL`, which counts failures alone
-    (`record_failed_verify`) -- the shape of `login_throttle`, for the same reason: right codes
-    never spend the budget a wrong guess from elsewhere is limited by. Returns the result that
-    blocks, or the allowed peek."""
+    only peeks at the looser per-address `LOGIN_OTP_VERIFY_EMAIL` and the daily
+    `LOGIN_OTP_VERIFY_EMAIL_DAY`, which count failures alone (`record_failed_verify`) -- the shape
+    of `login_throttle`, for the same reason: right codes never spend the budget a wrong guess from
+    elsewhere is limited by. Returns the result that blocks, or the last allowed peek."""
     limited = ratelimit.hit_ip(request, 'LOGIN_OTP_VERIFY_IP')
     if limited.allowed:
         limited = ratelimit.hit_ip_and_value(request, email, 'LOGIN_OTP_VERIFY_EMAIL_IP')
     if limited.allowed:
         limited = ratelimit.peek_value(email, 'LOGIN_OTP_VERIFY_EMAIL')
+    if limited.allowed:
+        limited = ratelimit.peek_value(email, 'LOGIN_OTP_VERIFY_EMAIL_DAY')
     return limited
 
 
 def record_failed_verify(email: str) -> None:
-    """Count one failed code for `email` (lower-cased) against `LOGIN_OTP_VERIFY_EMAIL`. Failures
-    for an address nobody has an account for count the same, so the limit reveals nothing."""
+    """Count one failed code for `email` (lower-cased) against `LOGIN_OTP_VERIFY_EMAIL` and
+    `LOGIN_OTP_VERIFY_EMAIL_DAY`. Failures for an address nobody has an account for count the
+    same, so the limits reveal nothing."""
     ratelimit.hit_value(email, 'LOGIN_OTP_VERIFY_EMAIL')
+    ratelimit.hit_value(email, 'LOGIN_OTP_VERIFY_EMAIL_DAY')
+
+
+def invalidate_pending(email: str) -> int:
+    """Retire every pending sign-in code and link for `email`. Called when something that
+    should end the access an emailed code grants happens: the password changes or is reset, or the
+    address is being left behind by an email change. Returns how many rows were invalidated."""
+    return invalidate(email, PURPOSE)
 
 
 def check_before_request(request: HttpRequest, email: str) -> RateLimitResult:
@@ -193,6 +225,13 @@ def user_for_token(token: str) -> User | None:
     except EmailVerificationError:
         return None
     return _eligible_user(verified_email)
+
+
+def target_email_for_token(token: str) -> str | None:
+    """The address a sign-in link's token is for, read **without consuming it** (no write, no
+    attempt counting), or `None` when it is not a pending, unexpired link. For the link page's GET,
+    which shows the masked address so a person sees which account the button signs them into."""
+    return peek_by_token(token, PURPOSE)
 
 
 def _eligible_user(email: str) -> User | None:

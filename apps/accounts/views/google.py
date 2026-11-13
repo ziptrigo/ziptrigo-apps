@@ -23,6 +23,7 @@ from django.views.decorators.http import require_GET
 
 from apps.core import ratelimit
 
+from ..backends import LOGIN_BACKEND
 from ..http import MaybeAuthenticatedHttpRequest
 from ..services import google_oauth
 from ..services.google_oauth import GoogleNotConfigured, GoogleSignInError, UnverifiedEmail
@@ -136,5 +137,5 @@ def google_callback(request: MaybeAuthenticatedHttpRequest) -> HttpResponse:
 
     # The same call the password form makes, so `user_logged_in` fires too (last login, and
     # `file_transfer` claiming a confirmed anonymous transfer for this address).
-    auth_login(request, user, backend=google_oauth.LOGIN_BACKEND)
+    auth_login(request, user, backend=LOGIN_BACKEND)
     return redirect(redirect_target(request, next_url))

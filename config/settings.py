@@ -330,13 +330,22 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # link's POST, a 43-character token nobody can guess), `LOGIN_OTP_VERIFY_EMAIL_IP` strict per
     # (address, IP) on every attempt and `LOGIN_OTP_VERIFY_EMAIL` looser per address across IPs,
     # counting only *failed* codes. On top of those, a code is burned after
-    # `CoreSettings.email_verification_max_attempts` wrong guesses.
+    # `CoreSettings.email_verification_max_attempts` wrong guesses. `LOGIN_OTP_VERIFY_EMAIL_DAY`
+    # is the daily ceiling on failures per address across every IP and window. Without it the
+    # 15-minute rule allows 30 x 96 = 2,880 failures a day, and the row limit (5 tries a code) with
+    # `LOGIN_OTP_REQUEST_EMAIL` (10 codes an hour) allows 10 x 24 x 5 = 1,200 guesses a day against
+    # one address: ~0.12% of a 6-digit code space a day, forever. 50 a day caps a distributed
+    # guesser at 50 / 10^6 = 0.005% a day, while an owner's honest typos (a handful) never get near
+    # it. Failures only, peeked before checking. A stranger can also use these per-address budgets
+    # up to give the owner a 429; that costs only this way
+    # in (see `apps.accounts.services.login_otp`).
     'LOGIN_OTP_REQUEST_IP': (10, 60 * 60),
     'LOGIN_OTP_REQUEST_EMAIL_IP': (5, 60 * 60),
     'LOGIN_OTP_REQUEST_EMAIL': (10, 60 * 60),
     'LOGIN_OTP_VERIFY_IP': (20, 5 * 60),
     'LOGIN_OTP_VERIFY_EMAIL_IP': (10, 5 * 60),
     'LOGIN_OTP_VERIFY_EMAIL': (30, 15 * 60),
+    'LOGIN_OTP_VERIFY_EMAIL_DAY': (50, 24 * 60 * 60),
     # Resend-confirmation: per-IP here; the per-*email*-per-day cap is enforced once, centrally,
     # by `EMAIL_VERIFICATION_START_EMAIL` below (every caller of
     # `apps.core.services.email_verification.start` shares it, including this endpoint).

@@ -9,6 +9,7 @@ from apps.core.admin_site import custom_admin_site
 from .forms.admin import UserAdminChangeForm, UserAdminCreationForm
 from .http import AuthenticatedHttpRequest
 from .models import RefreshToken, User
+from .services import login_otp
 from .services.email_change import notify_previous_address
 from .services.email_confirmation import get_email_confirmation_service, send_email_confirmed
 from .services.timezones import set_timezone
@@ -153,6 +154,7 @@ class UserAdmin(DjangoUserAdmin):
         if email_changed:
             service = get_email_confirmation_service()
             service.invalidate_pending_for_email(previous_email)
+            login_otp.invalidate_pending(previous_email)
             if not staff_confirmed:
                 service.send_confirmation_email(obj)
             if previous_confirmed:

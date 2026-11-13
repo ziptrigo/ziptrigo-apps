@@ -467,6 +467,26 @@ def confirm_latest_by_code(email: str, code: str, purpose: str) -> str:
     return confirm_by_code(latest_id, code, purpose)
 
 
+def peek_by_token(token: str, purpose: str) -> str | None:
+    """Read-only look at a pending verification by its token and purpose: the email it stores
+    exactly as stored, or `None` when there is no such row, it is already confirmed, was
+    invalidated (superseded) or has expired. **No writes and no attempt counting**: it consumes
+    nothing, so a page can show whose verification a link belongs to before the person presses
+    the button that actually confirms it (`accounts`' sign-in link, issue #295). Not a guarantee
+    the confirm will succeed (it may be used or expire in between)."""
+    verification = EmailVerification.objects.filter(
+        token_hash=_digest(token), purpose=purpose
+    ).first()
+    if (
+        verification is None
+        or verification.confirmed_at is not None
+        or verification.invalidated_at is not None
+        or timezone.now() >= verification.expires_at
+    ):
+        return None
+    return verification.email
+
+
 def confirm_by_token(token: str, purpose: str, *, single_use: bool = False) -> str:
     """Thin, string-returning wrapper around `confirm_by_token_verbose` for callers (`accounts`)
     that only ever need the email back -- see that function for the full contract and every
@@ -510,8 +530,10 @@ def confirm_by_token_verbose(
     a concurrent request already confirmed the row since this request read it, this call takes
     the same idempotent success path a genuine double-click would (still gated by `expires_at`,
     as above) rather than erroring or double-writing -- unlike `confirm_by_code`, two concurrent
-    *correct* token submissions are supposed to both "succeed" from the caller's point of view,
-    since a token isn't single-use by design.
+    *correct* token submissions both "succeed" from the caller's point of view, since a token
+    isn't single-use by default. **With `single_use=True` that no longer holds**: the loser of the
+    race (its conditional update matched 0 rows) gets `EmailVerificationAlreadyConfirmed`, so two
+    correct submissions never both succeed.
     """
     result: EmailVerificationResult | None = None
     error: EmailVerificationError | None = None

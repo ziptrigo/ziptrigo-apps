@@ -17,7 +17,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.accounts.services import login_otp
 from apps.accounts.views.login_code import INVALID_CODE_MESSAGE
-from apps.core.models import EmailVerification
+from apps.core.models import CoreSettings, EmailVerification
 from apps.core.services import email_verification
 
 pytestmark = [pytest.mark.django_db, pytest.mark.unit]
@@ -522,11 +522,102 @@ def test_get_shows_a_button_and_signs_nobody_in(client, link):
     assert _signed_in(client)
 
 
-def test_get_does_not_validate_the_token(client):
+def test_get_of_an_unknown_token_says_it_is_invalid_with_no_button(client):
     response = client.get(reverse('accounts:login-link', args=['not-a-real-token']))
 
     assert response.status_code == 200
-    assert 'Sign in' in response.content.decode()
+    html = response.content.decode()
+    assert 'That sign-in link is not valid or has expired' in html
+    assert 'csrfmiddlewaretoken' not in html
+    assert not _signed_in(client)
+
+
+def test_get_shows_the_masked_address_the_button_signs_into(client, link, user):
+    html = client.get(link).content.decode()
+
+    assert 't\u2022\u2022\u2022@example.com' in html
+    assert user.email not in html
+
+
+def test_get_peeks_without_consuming_or_counting(client, link, user):
+    row = EmailVerification.objects.get(email=user.email)
+
+    for _ in range(3):
+        assert client.get(link).status_code == 200
+
+    row.refresh_from_db()
+    assert row.confirmed_at is None
+    assert row.attempts == 0
+    assert row.invalidated_at is None
+    assert not _signed_in(client)
+    assert client.post(link).status_code == 302
+    assert _signed_in(client)
+
+
+@pytest.mark.parametrize('state', ['used', 'expired', 'superseded'])
+def test_get_of_a_dead_link_says_so(client, link, user, state):
+    row = EmailVerification.objects.get(email=user.email)
+    if state == 'used':
+        row.confirmed_at = timezone.now()
+    elif state == 'expired':
+        row.expires_at = timezone.now() - timedelta(seconds=1)
+    else:
+        row.invalidated_at = timezone.now()
+    row.save()
+
+    html = client.get(link).content.decode()
+
+    assert 'That sign-in link is not valid or has expired' in html
+    assert 'csrfmiddlewaretoken' not in html
+
+
+def test_get_warns_a_visitor_signed_in_as_someone_else(client, link, user):
+    other = User.objects.create_user(
+        email='other@example.com', password='otherpass123', email_confirmed=True
+    )
+    client.force_login(other)
+
+    html = client.get(link).content.decode()
+
+    assert 'You&#x27;re signed in as other@example.com' in html or (
+        "You're signed in as other@example.com" in html
+    )
+    assert 'continuing signs you in as t\u2022\u2022\u2022@example.com instead' in html
+    # Still nothing happened: the GET changed no session.
+    assert client.session[SESSION_KEY] == str(other.pk)
+
+
+def test_get_has_no_warning_for_the_same_user_or_a_signed_out_visitor(client, link, user):
+    assert 'signed in as' not in client.get(link).content.decode()
+
+    client.force_login(user)
+
+    assert 'signed in as' not in client.get(link).content.decode()
+
+
+def test_code_page_tells_a_signed_in_user_it_switches_accounts(client, user):
+    assert 'signed in as' not in client.get(VERIFY_URL).content.decode()
+
+    client.force_login(user)
+    html = client.get(VERIFY_URL).content.decode()
+
+    assert 'signed in as testuser@example.com' in html
+    assert 'switches this browser' in html
+
+
+def test_the_signed_in_user_is_the_row_s_account_never_the_typed_address(
+    client, sent, request_code
+):
+    """Two legacy accounts that differ only by case: the code sent to one signs in that one,
+    whichever spelling is typed with it."""
+    User.objects.create_user(email='Case@example.com', password='x', email_confirmed=True)
+    lower = User.objects.create_user(email='case@example.com', password='x', email_confirmed=True)
+    request_code('case@example.com')
+
+    response = _post_code(client, 'Case@example.com', _code(sent[0]))
+
+    assert response.status_code == 200
+    assert client.session[SESSION_KEY] == str(lower.pk)
 
 
 def test_post_signs_in_and_goes_home(client, link, user):
@@ -763,3 +854,134 @@ def test_the_link_post_is_limited_per_ip_and_its_get_is_not(
 
     assert response.status_code == 429
     assert not _signed_in(client)
+
+
+def test_verify_daily_ceiling_counts_failures_only_across_ips_and_windows(
+    client, user, settings, sent, request_code, ratelimit_clock
+):
+    _enable(settings, LOGIN_OTP_VERIFY_EMAIL_DAY=(2, 86400))
+    request_code(user.email)
+    for i in range(2):
+        assert (
+            _post_code(Client(REMOTE_ADDR=f'10.0.1.{i}'), user.email, '000000').status_code == 422
+        )
+    ratelimit_clock.advance(3600)  # well past the 15-minute window
+
+    blocked = _post_code(Client(REMOTE_ADDR='10.0.1.99'), user.email, _code(sent[0]))
+
+    assert blocked.status_code == 429
+    assert blocked['HX-Retarget'] == '#login-code-verify-msg'
+    # ... and the next day it works again.
+    ratelimit_clock.advance(86400)
+    assert (
+        _post_code(Client(REMOTE_ADDR='10.0.1.98'), user.email, _code(sent[0])).status_code == 200
+    )
+
+
+def test_right_codes_never_spend_the_daily_failure_budget(
+    client, user, settings, sent, request_code, ratelimit_clock
+):
+    _enable(settings, LOGIN_OTP_VERIFY_EMAIL_DAY=(1, 86400))
+    request_code(user.email)
+
+    assert _post_code(client, user.email, _code(sent[0])).status_code == 200
+
+
+# --- burning the code leaves the link ------------------------------------------------------
+
+
+def test_burning_the_code_leaves_the_link_in_the_same_email_usable(
+    client, user, sent, request_code
+):
+    request_code(user.email)
+    link = reverse('accounts:login-link', args=[_link_token(sent[0])])
+    max_attempts = CoreSettings.load().email_verification_max_attempts
+    for _ in range(max_attempts):
+        assert _post_code(Client(), user.email, '000000').status_code == 422
+    # The code is burned: even the right one fails now ...
+    assert _post_code(Client(), user.email, _code(sent[0])).status_code == 422
+
+    # ... but the link, which isn't guessable and so isn't burned, still signs the owner in.
+    assert client.post(link).status_code == 302
+    assert _signed_in(client)
+
+
+# --- pending codes die with a security change ----------------------------------------------
+
+
+def _pending(user, sent, request_code):
+    request_code(user.email)
+    return _code(sent[0]), _link_token(sent[0])
+
+
+def test_a_password_change_invalidates_pending_codes_and_links(user, sent, request_code):
+    from apps.accounts.services.password_change import change_password
+
+    code, token = _pending(user, sent, request_code)
+
+    change_password(user, 'brandnewpass123')
+
+    assert login_otp.user_for_token(token) is None
+    assert login_otp.user_for_code(user.email, code) is None
+
+
+def test_a_password_reset_invalidates_pending_codes_and_links(user, sent, request_code):
+    from apps.accounts.services.password_reset import PasswordResetService
+    from apps.accounts.tokens import PasswordResetToken
+
+    code, token = _pending(user, sent, request_code)
+
+    PasswordResetService.reset_password(
+        user, 'brandnewpass123', token=str(PasswordResetToken.for_user(user))
+    )
+
+    assert login_otp.user_for_token(token) is None
+    assert login_otp.user_for_code(user.email, code) is None
+
+
+def test_an_email_change_invalidates_codes_pending_for_the_address_left(
+    client, user, sent, request_code, monkeypatch
+):
+    from apps.accounts.tokens import CustomAccessToken
+
+    monkeypatch.setattr(
+        'apps.accounts.services.email_confirmation.EmailConfirmationService.send_confirmation_email',
+        lambda self, user: None,
+    )
+    code, token = _pending(user, sent, request_code)
+    old_email = user.email
+
+    response = client.put(
+        '/api/account',
+        {'email': 'new@example.com', 'current_password': 'testpass123'},
+        content_type='application/json',
+        HTTP_AUTHORIZATION=f'Bearer {CustomAccessToken.for_user(user)}',
+    )
+
+    assert response.status_code == 200
+    assert login_otp.user_for_token(token) is None
+    assert login_otp.user_for_code(old_email, code) is None
+
+
+# --- the validity setting check ------------------------------------------------------------
+
+
+@pytest.mark.parametrize('minutes', [1, 10, 60])
+def test_validity_check_is_quiet_for_sensible_values(settings, minutes):
+    from apps.accounts.checks import check_login_otp_validity
+
+    settings.LOGIN_OTP_VALIDITY_MINUTES = minutes
+
+    assert check_login_otp_validity() == []
+
+
+@pytest.mark.parametrize('minutes', [0, -5, 61, 1440])
+def test_validity_check_warns_outside_1_to_60(settings, minutes):
+    from apps.accounts.checks import check_login_otp_validity
+
+    settings.LOGIN_OTP_VALIDITY_MINUTES = minutes
+
+    (warning,) = check_login_otp_validity()
+    assert warning.id == 'accounts.W007'
+    assert warning.level == 30  # a Warning, never an Error: `migrate` runs the checks
+    assert str(minutes) in warning.msg

@@ -981,17 +981,39 @@ the Android app wants one). Code: `services/login_otp.py` (its docstring is the 
   the same for every address, and the limits below count every address alike, so even a 429 says nothing. The address
   typed is kept in the visitor's own session (`login_otp_email`) only to prefill the code page.
 - **The link** opens a page whose only content is a CSRF-protected "Sign in" button; only the POST consumes the token
-  (`confirm_email_page`'s pattern, a scanner's GET does nothing and doesn't read the token). A bad, expired, replaced or
-  used link is reported after the click by redirecting (PRG) to the request page with a message.
+  (`confirm_email_page`'s pattern, a scanner's GET does nothing and consumes nothing). **The GET does look the row up
+  read-only** (`core.email_verification.peek_by_token`: no write, no attempt counted, `None` for an unknown, used,
+  superseded or expired token) and shows the **masked** target address (`apps.core.services.mask.mask_email`:
+  `j•••@gmail.com`) next to the button, so a person sees which account it signs them into; a dead link shows the generic
+  invalid message and a "Request a new code" button with no sign-in button. **Decision (login CSRF):** an attacker's
+  valid link would otherwise silently switch a victim's browser to the attacker's account, so when the visitor is signed
+  in as a *different* user the page adds "You're signed in as X; continuing signs you in as j•••@... instead.", and the
+  code page tells a signed-in visitor that a code switches this browser to the code's account. A bad, expired, replaced
+  or used link on the POST is reported by redirecting (PRG) to the request page with a message. **The token is in the
+  URL**, so it appears in access logs (gunicorn, nginx, `django.request` on a 500) like `/n/<code>`; it is consumed by
+  the POST and valid `LOGIN_OTP_VALIDITY_MINUTES` only. **Which account:** the user signed in is the one whose address
+  the verification row stores, never the address typed with a code (two legacy case-variant accounts can't cross).
 - **Rate limits** (`RATELIMIT_RULES`, commented there): `LOGIN_OTP_REQUEST_IP` (10/h), `LOGIN_OTP_REQUEST_EMAIL_IP` (5/h per
   address and IP) and `LOGIN_OTP_REQUEST_EMAIL` (10/h per address, any IP), all counted per valid submission; checking a code
   has the `login_throttle` shape: `LOGIN_OTP_VERIFY_IP` (20/5 min) and the strict `LOGIN_OTP_VERIFY_EMAIL_IP` (10/5 min)
   on every attempt, and the looser `LOGIN_OTP_VERIFY_EMAIL` (30/15 min, any IP) peeked first and counting failures
-  only, plus the row's own attempt limit. The link's POST is charged `LOGIN_OTP_VERIFY_IP` only (its token is 43
+  only, plus the row's own attempt limit and the daily **`LOGIN_OTP_VERIFY_EMAIL_DAY`** (50 failures/day per address across
+  IPs, failures only, peeked before checking; arithmetic in the `RATELIMIT_RULES` comment: the other limits still allow
+  ~1,200 guesses a day against one address, ~0.12% of a 6-digit space, forever; 50 a day is ~0.005%). The link's POST is charged `LOGIN_OTP_VERIFY_IP` only (its token is 43
   random characters); the GET is not. A refused form (bad address, non-digit code) spends nothing.
+- **Pending codes are retired by security changes:** a password change (`change_password`), a password reset
+  (`PasswordResetService.reset_password`) and an email change (`PUT /api/account` and the admin, for the address being
+  left) call `login_otp.invalidate_pending(address)` (`email_verification.invalidate(address, PURPOSE)`), so a code or
+  link emailed before the owner secured the account can't be used after it.
 - **Accepted trade-offs.** Someone who knows an address can supersede or burn its pending code (a request after the
   cooldown, or five wrong guesses); the owner asks for a new one, the limits bound how often, and nothing locks the
-  account or touches its password. A successful sign-in this way never changes the password, never confirms an email
+  account or touches its password. **Burning the code leaves the link in the same email usable** (a token isn't
+  guessable, so a guesser can't lock the recipient out of it). **A stranger can also use up the per-address budgets**
+  (`LOGIN_OTP_REQUEST_EMAIL`, `LOGIN_OTP_VERIFY_EMAIL`, `LOGIN_OTP_VERIFY_EMAIL_DAY`: keyed by address across IPs) so the
+  owner gets a 429 for a while; it costs the owner only this way in, never the account or the password login, and it
+  takes many requests from many IPs. `LOGIN_BACKEND` now lives in `apps.accounts.backends` (`google_oauth` and
+  `microsoft_oauth` re-export it). `manage.py check` warns `accounts.W007` when `LOGIN_OTP_VALIDITY_MINUTES` is
+  outside 1 to 60 (a Warning, never an Error). A successful sign-in this way never changes the password, never confirms an email
   and never writes `google_sub`/`microsoft_id`. The email's subject is fixed with no code in it, the HTML is
   autoescaped (`user.name` is free text), links are absolute (`BASE_URL`).
 - **Tests:** `apps/accounts/tests/test_login_otp.py`, `apps/core/tests/test_email_verification_otp.py`; AI plan cases

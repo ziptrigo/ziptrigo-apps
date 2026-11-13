@@ -911,12 +911,14 @@ after the last one) and record the new email's link as `LINK_2` and its code as 
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Open `LINK_2` (`/account/login/link/<token>/`). | Tab title `Sign in - ZipTrigo`, heading `Sign in to ZipTrigo`, `Press the button below to finish signing in.` and a `Sign in` button. The header still shows `Login`: opening the link signed nobody in. |
+| 1 | Open `LINK_2` (`/account/login/link/<token>/`). | Tab title `Sign in - ZipTrigo`, heading `Sign in to ZipTrigo`, `Press the button below to finish signing in as q•••@example.com.` (the first letter of the address and three bullets: the full address is not shown) and a `Sign in` button. The header still shows `Login`: opening the link signed nobody in. |
 | 2 | Reload the page, then press `Sign in`. | Signed in, on `/` (the reload did not use the link up). |
-| 3 | Sign out. Open `LINK_2` and press `Sign in`. | Redirected to `/account/login/code/` with a message `That sign-in link is not valid or has expired. Request a new code to sign in.`; signed out. |
+| 3 | Sign out. Open `LINK_2`. | The page shows `That sign-in link is not valid or has expired. Request a new code to sign in.` and a `Request a new code` button, with no `Sign in` button; signed out. (A POST to a dead link, e.g. a stale tab's button, redirects to `/account/login/code/` with the same message.) |
 | 4 | On the code page enter `OTP_2` for `qa.user@example.com`. | The generic red block: the link already used the whole email (code and link are one). |
 | 5 | Request a code, wait 60 seconds, request another (two emails; record `LINK_3`, `LINK_4`). Open `LINK_3` and press `Sign in`. | The `not valid or has expired` message: only the newest code works. |
 | 6 | Open `LINK_4`, press `Sign in`. | Signed in. Sign out. |
+| 7 | Request another code for `qa.user@example.com` (record `LINK_5`). In Context B sign in as another account (for example OTPUNC after its ACC-54 confirmation, or any seeded one). In Context B open `LINK_5` (do not press the button). | The page says `You're signed in as <B's email>; continuing signs you in as q•••@example.com instead.` Context B is still signed in as its own account (opening the page changed nothing). |
+| 8 | In Context B open `/account/login/code/verify/`. | A note says `You're signed in as <B's email>. Signing in with a code switches this browser to the account the code belongs to.` |
 
 ### ACC-54 Wrong codes burn the code; other emails' tokens do not work
 
@@ -927,8 +929,11 @@ after the last one) and record the new email's link as `LINK_2` and its code as 
 |---|---|---|
 | 1 | Request a code for `qa.user@example.com` (60 seconds after the last request) and record it as `OTP_3`. Enter `000000` five times (use a wrong code that is not `OTP_3`). | The generic red block each time. |
 | 2 | Enter `OTP_3`. | Still the generic red block: five wrong tries burned the code. Signed out. |
-| 3 | Take the confirmation link from OTPUNC's email (`/account/confirm-email/<token>/`) and replace `confirm-email` with `login/link` in the address. Open it and press `Sign in`. | The `not valid or has expired` message; signed out. The OTPUNC address still can't be signed in by any means: request a code for it and wait, no email arrives. |
+| 2b | Open the link from the same email as `OTP_3` (`LINK_6`) and press `Sign in`. | Signed in: burning the code does not burn the link, which can't be guessed. Sign out. (Then request a new code if later steps need one.) |
+| 3 | Take the confirmation link from OTPUNC's email (`/account/confirm-email/<token>/`) and replace `confirm-email` with `login/link` in the address. Open it. | The `not valid or has expired` message (shown on opening the page, no button); signed out. The OTPUNC address still can't be signed in by any means: request a code for it and wait, no email arrives. |
 | 4 | Open the original confirmation link and press `Confirm my email` (OTPUNC is now confirmed), then request a sign-in code for OTPUNC. | Now a sign-in email arrives, and its code signs OTPUNC in. (The confirmation link still worked: the sign-in attempt in step 3 did not use it up.) Sign out. |
+| 5 | Request a sign-in code for `qa.user@example.com` (record `OTP_4`), then change that account's password on `/account/` (sign in with the password first in Context B, change it, sign out) and enter `OTP_4`. | The generic red block: a password change retires pending sign-in codes and links. (Same after a password reset and after changing the account's email.) |
+| 6 | Enter a wrong code for one address more than 50 times in a day from several IPs (or 30 within 15 minutes; or 10 within 5 minutes from one IP). | A `429` message with a retry time; the same for an unknown address. The account's password login and the other ways in are unaffected. |
 
 ## Out of scope
 

@@ -7,6 +7,7 @@ from apps.core import ratelimit
 from ..auth import JWTAuth
 from ..models import User
 from ..schemas import AccountSchema, AccountUpdateRequest, AccountUpdateResponse
+from ..services import login_otp
 from ..services.display_formats import set_display_formats
 from ..services.email_change import notify_previous_address
 from ..services.email_confirmation import get_email_confirmation_service
@@ -106,6 +107,8 @@ def update_account(request, payload: AccountUpdateRequest):
         # (issue #58 follow-up), so a link already sent to it can't later confirm whatever
         # account claims that address next.
         service.invalidate_pending_for_email(previous_email)
+        # ... and any sign-in code or link emailed to it (issue #295).
+        login_otp.invalidate_pending(previous_email)
         service.send_confirmation_email(user)
         # Tell the address being left behind, but only one the owner had proven: an unconfirmed
         # one may never have been theirs.

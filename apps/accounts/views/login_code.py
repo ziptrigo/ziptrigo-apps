@@ -19,13 +19,15 @@ from django.views.decorators.http import require_http_methods
 
 from apps.core import ratelimit
 from apps.core.htmx import hx_redirect, is_htmx
+from apps.core.services.mask import mask_email
 from apps.core.services.notifications import is_safe_url
 
+from ..backends import LOGIN_BACKEND
 from ..forms import LoginCodeForm, LoginCodeRequestForm
 from ..http import MaybeAuthenticatedHttpRequest
+from ..models import User
 from ..services import login_otp
 from ..services.email_confirmation import format_validity_minutes
-from ..services.google_oauth import LOGIN_BACKEND
 from .redirects import redirect_target
 
 #: Where the address typed on the request page waits for the code page (the visitor's own
@@ -45,6 +47,12 @@ def _next_url(request: MaybeAuthenticatedHttpRequest) -> str:
     """The `next` carried between these pages: kept only when it is a same-site path."""
     value = request.POST.get('next') or request.GET.get('next') or ''
     return value if is_safe_url(value) else ''
+
+
+def _signed_in_email(request: MaybeAuthenticatedHttpRequest) -> str:
+    """The address of the user already signed in on this browser, else `''`."""
+    user = request.user
+    return user.email if isinstance(user, User) else ''
 
 
 def _with_next(url: str, next_url: str) -> str:
@@ -119,6 +127,8 @@ def login_code_verify_page(request: MaybeAuthenticatedHttpRequest) -> HttpRespon
         'form': form,
         'next': next_url,
         'validity': format_validity_minutes(settings.LOGIN_OTP_VALIDITY_MINUTES),
+        # Signed in already: signing in with a code switches this browser to the code's account.
+        'signed_in_email': _signed_in_email(request),
     }
     return render(request, template, context, status=status)
 
@@ -128,14 +138,26 @@ def login_link_page(request: MaybeAuthenticatedHttpRequest, token: str) -> HttpR
     """The emailed sign-in link: GET shows a CSRF-protected "Sign in" button, only POST signs in.
 
     Mail security filters and link previewers fetch a link before the recipient clicks it, so a
-    GET changes nothing and doesn't read the token (`views.pages.confirm_email_page` is the same).
-    A link that is not valid, expired or already used (it works once, as the code does) is reported
+    GET changes nothing: it only *reads* the row (no write, no attempt) to show the masked address
+    the button signs into, and a note when the visitor is signed in as another user. A link that is not valid, expired or already used (it works once, as the code does) is reported
     after the click, by redirecting (post/redirect/get) to the code request page with a message.
     Only the POST is rate limited (`LOGIN_OTP_VERIFY_IP`).
     """
     next_url = _next_url(request)
     if request.method == 'GET':
-        return render(request, 'accounts/login_link.html', {'token': token, 'next': next_url})
+        # Read-only look at the row (nothing consumed, no attempt counted): shows whose account
+        # the button signs into, so a link can't silently switch someone to another account.
+        target = login_otp.target_email_for_token(token)
+        context: dict[str, object] = {'token': token, 'next': next_url}
+        if target is None:
+            context['invalid_message'] = INVALID_LINK_MESSAGE
+            context['request_url'] = _with_next(reverse('accounts:login-code'), next_url)
+        else:
+            context['masked_email'] = mask_email(target)
+            signed_in = _signed_in_email(request)
+            if signed_in and signed_in != target:
+                context['signed_in_email'] = signed_in
+        return render(request, 'accounts/login_link.html', context)
 
     limited = ratelimit.hit_ip(request, 'LOGIN_OTP_VERIFY_IP')
     if not limited.allowed:

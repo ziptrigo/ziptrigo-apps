@@ -45,6 +45,7 @@ from apps.core.services.queue import enqueue_after_commit
 
 from ..models import User
 from ..tokens import RESET_EMAIL_CLAIM, PasswordResetToken, matches_password
+from . import login_otp
 from .email_confirmation import get_email_confirmation_service, send_email_confirmed
 
 
@@ -134,6 +135,8 @@ class PasswordResetService:
                 current.set_password(new_password)
                 current.save(update_fields=['password'])
                 user.password = current.password
+                # Pending sign-in codes and links predate the reset: retire them.
+                login_otp.invalidate_pending(current.email)
                 if sent_to == current.email and not current.email_confirmed:
                     # Conditional on the address still being the one the link went to, so an
                     # email change that lands between the page load and this write can't be
