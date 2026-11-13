@@ -99,7 +99,7 @@ Create these local files before starting (the fake AI reads any real image as a 
 | 3 | Look at the rows. | Exactly one row (a transaction whose description only repeats its type label shows an empty Description cell, not the label twice): Date = today's date and a time in the browser's time zone (`YYYY-MM-DD h:mm AM/PM`, close to when the server was started; hover/inspect: the `<time>` element's `datetime` attribute is the UTC instant); Change = **+100** in green followed by a small grey pill `Purchase`; Description = `e2e seed`. |
 | 4 | Look below the table. | No pagination bar ("Page 1 of 1" is **not** shown when there is only one page). |
 | 5 | Note the transaction type label. | A grey pill with the display label, `Purchase`. |
-| 6 | Click **Back to Account**. | Goes to `/account/`: section **Credits**, "Current balance" **100 credits**, and a **Usage History** button. |
+| 6 | Click **Back to Account**. | Goes to `/account/`: section **Credits**, "Current balance" **100 credits**, and two buttons: an outlined **Costs** (tag icon) and **Usage History**. |
 | 7 | Click **Usage History**. | Back on `/billing/credits/`. |
 
 ### BILL-03 Empty state for a user with no transactions
@@ -586,6 +586,61 @@ and the admin's ledger are unchanged.
 | 2 | Set `24-hour` and reload. | `2026-11-05 21:05`. |
 | 3 | In a private window, nothing of this page is public. | `/billing/credits/` redirects to the login page. |
 | 4 | Restore `12-hour`. | - |
+
+## Costs page
+
+The page at `/billing/costs/` lists what every app charges, with each price read live from the
+settings pages in the admin, and a few lines about the signed-in user's own allowances.
+
+### BILL-34 The Costs page needs a login and is reached from the account page
+
+**Purpose:** `/billing/costs/` is `@login_required`, linked from the Credits section.
+**Preconditions:** logged out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Go to `/billing/costs/`. | Redirected to `/account/login/?next=/billing/costs/`. |
+| 2 | Sign in as `qa.user@example.com`. | You land on `/billing/costs/`. |
+| 3 | Open `/account/`. In **Credits**, click **Costs**. | `/billing/costs/`. Tab title `Costs - ZipTrigo`. A **Back to Account** link, a tag icon and heading **Costs**, "Your balance: **N credits** · Usage History" (the Usage History link opens `/billing/credits/`), and one line: "What each app charges, in credits. Anything not listed is free. Storage is charged once a day; other charges are taken when the action happens, and each one says below whether you confirm its cost first." |
+
+### BILL-35 What the page lists, at the default prices
+
+**Purpose:** the shared storage section and one section per app, with the default prices.
+**Preconditions:** signed in as `qa.user@example.com` on `/billing/costs/`; the admin settings pages untouched.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Look under the intro. | A row of chips: **Shared**, then one per app (QR Codes, File Transfer, Receipts, Short URLs, To-do, Notes, in the order the account's Apps section shows). Each chip jumps to its section. |
+| 2 | Look at **Shared by every app**. | A **File storage** card: "Files you keep in File Transfer, Receipts and To-do. Charged once a day ...", "Example: 2 GB kept for 30 days costs 6 credits.", and on the right **0.1 credits** / per GB per day. Under it **New accounts** "1,000 credits once the email address is confirmed." and **When credits run out**. |
+| 3 | Look at **QR Codes**. | One row, "Create, edit and download QR codes", **Free**. |
+| 4 | Look at **File Transfer**. | "Send a transfer" **Free** ("You need at least 1 credit to start one. ..."); "Keep the files available" **Storage** / per day ("Each transfer, for its size, while it is active.") with a **Storage price** link that jumps to the Shared section; `"Download all" as a zip` **Free**. Above the rows "You have no active transfers, so nothing is charged for them." or, with transfers, "You have N active transfers (size): ... a day." at the real rate: a few MB reads "less than 0.01 credits a day", never a 1-credit minimum. Under them "Out of credits: a transfer is suspended and its files are kept 7 days. Topping up turns it back on once your balance covers a day of its storage (at least 1 credit)." |
+| 5 | Look at **Receipts**. | "Read a receipt with AI" **1 credit** / per file ("Charged when a file is uploaded or emailed in. ..."); "Re-run a receipt" **1 credit** / per run ("You confirm the cost first."); "Store receipts" **Storage**; "Edit, search, export to CSV, vendors and categories" **Free**. With receipts uploaded (BILL-05) a line "You store X: less than 0.01 credits a day." |
+| 6 | Look at **Short URLs**. | "N of your 25 free active links are in use." Rows: "Create and follow links" **Free**; "Each active link beyond 25", "Custom alias", "Password", "Detailed statistics", each **1 credit** / once per link. Footnote "You confirm the cost of a paid extra first. No recurring charges: ...". |
+| 7 | Look at **To-do**. | "This month: N of 10 free tasks used. The allowance starts again on <the 1st of next month, in the account's date format>." Rows: "Add a task" **Free** ("The first 10 each month. ..."); "Each task beyond 10 in a month" **10 credits** / per task ("Charged when the task is added."); "Attach files" **Storage**; a **Free** row for dates, reminders, comments and search. |
+| 8 | Look at **Notes**. | "You have N of 5 free notes." Rows: "Your first 5 notes" **Free**; "Each note beyond 5" **1 credit** / to create ("You confirm the cost first. ..."); "Renewal of a paid note" **5 credits** / every 365 days ("Taken automatically on the renewal date."); "Tags, history, sharing, search and saved filters" **Free**. With a paid note (NOTES cases), a line "1 paid note renews every 365 days; the next renewal is on <date> for 5 credits." |
+| 9 | Phone width (375 px) and dark mode. | Nothing scrolls sideways; each amount stays on the right of its row; every text is readable in dark mode. |
+
+### BILL-36 Prices follow the admin settings
+
+**Purpose:** the page is never out of step with what is charged.
+**Preconditions:** BILL-35.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | As `qa.admin`: `/admin/billing/billingsettings/`, set the storage price to `0.25`, **Save**. `/admin/short_url/shorturlsettings/`: Password price `0`, **Save**. `/admin/receipts/receiptssettings/`: Price per file `3`, **Save**. | Each saves. |
+| 2 | As `qa.user`, reload `/billing/costs/`. | Storage **0.25 credits** / per GB per day and "Example: 2 GB kept for 30 days costs 15 credits."; Short URLs' **Password** is **Free**; Receipts' "Read a receipt with AI" and "Re-run a receipt" are **3 credits**. |
+| 3 | As `qa.admin`, put the three settings back (0.1, 1, 1). | - |
+
+### BILL-37 A switched-off app is still listed, in the account's order
+
+**Purpose:** a hidden app still charges, so the page lists every app; the order is the user's.
+**Preconditions:** signed in as `qa.user@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/account/#apps` drag **Notes** to the top and untick **Receipts**. | Saved (the header menu loses Receipts). |
+| 2 | Open `/billing/costs/`. | The chips and sections run Shared, **Notes**, then the others in the saved order; **Receipts** is still there. |
+| 3 | Put the Apps section back as it was. | - |
 
 ## Out of scope
 

@@ -1,0 +1,122 @@
+{% extends "core/base.html" %}
+
+{% block title %}Costs - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  <div class="w-full bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
+    <a href="{% url 'accounts:account' %}" class="text-sm text-gray-600 dark:text-gray-300 hover:underline">
+      <i class="fas fa-arrow-left mr-1" aria-hidden="true"></i>Back to Account
+    </a>
+
+    <div class="flex flex-wrap items-end justify-between gap-4 mt-3 mb-2">
+      <div class="flex items-center gap-3">
+        <i class="fas fa-tags text-2xl text-sage-300" aria-hidden="true"></i>
+        <h1 class="text-2xl font-semibold">Costs</h1>
+      </div>
+      <p class="text-sm text-gray-600 dark:text-gray-300">
+        Your balance: <span class="font-semibold text-gray-900 dark:text-gray-100">{{ credits_balance }} credit{% if credits_balance != 1 %}s{% endif %}</span>
+        &middot; <a href="{% url 'billing:credits-history' %}" class="underline hover:no-underline">Usage History</a>
+      </p>
+    </div>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-6">
+      What each app charges, in credits. Anything not listed is free. Storage is charged once a
+      day; other charges are taken when the action happens, and each one says below whether you
+      confirm its cost first.
+    </p>
+
+    <nav aria-label="Sections" class="flex flex-wrap gap-2 mb-8 text-sm">
+      <a href="#costs-shared" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">Shared</a>
+      {% for item in sections %}
+        <a href="#costs-{{ item.product.label }}" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">{{ item.product.name }}</a>
+      {% endfor %}
+    </nav>
+
+    <section id="costs-shared" class="mb-8 scroll-mt-6" aria-labelledby="costs-shared-title">
+      <h2 id="costs-shared-title" class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+        <i class="fas fa-layer-group mr-2 text-sage-300" aria-hidden="true"></i>Shared by every app
+      </h2>
+      <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 flex-1 basis-64">
+            <h3 class="font-medium"><i class="fas fa-database mr-2 text-sage-300" aria-hidden="true"></i>File storage</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">
+              Files you keep in File Transfer, Receipts and To-do. Charged once a day for what is
+              stored, files in the Trash included. Fractions add up from day to day, and only whole
+              credits are taken.
+            </p>
+            {% if storage_price %}
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">Example: {{ storage_example }}</p>
+            {% endif %}
+          </div>
+          {% if storage_price %}
+            {% include 'billing/partials/cost_tag.html' with cost=storage_price unit='per GB per day' %}
+          {% else %}
+            {% include 'billing/partials/cost_tag.html' with cost='Free' free=True %}
+          {% endif %}
+        </div>
+      </div>
+      <div class="mt-3 grid sm:grid-cols-2 gap-3 text-sm">
+        {% if welcome_credits %}
+          <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+            <h3 class="font-medium"><i class="fas fa-gift mr-2 text-sage-300" aria-hidden="true"></i>New accounts</h3>
+            <p class="text-gray-600 dark:text-gray-300 mt-1">{{ welcome_credits }} once the email address is confirmed.</p>
+          </div>
+        {% endif %}
+        <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+          <h3 class="font-medium"><i class="fas fa-circle-pause mr-2 text-sage-300" aria-hidden="true"></i>When credits run out</h3>
+          <p class="text-gray-600 dark:text-gray-300 mt-1">Nothing is deleted straight away. Each app below says what happens.</p>
+        </div>
+      </div>
+    </section>
+
+    {% for item in sections %}
+      {% with product=item.product section=item.section %}
+      <section id="costs-{{ product.label }}" class="{% if forloop.last %}mb-2{% else %}mb-8{% endif %} scroll-mt-6" aria-labelledby="costs-{{ product.label }}-title">
+        <h2 id="costs-{{ product.label }}-title" class="text-xl font-semibold mb-3 pb-2 border-b border-gray-200 dark:border-gray-700">
+          <i class="{{ product.icon }} mr-2 text-sage-300" aria-hidden="true"></i>{{ product.name }}
+        </h2>
+        {% if section is None %}
+          <p class="text-sm text-gray-600 dark:text-gray-300" data-cost-unavailable>
+            Prices for {{ product.name }} are not available right now. Try again in a moment.
+          </p>
+        {% endif %}
+        {% if section.usage %}
+          <ul class="text-sm text-gray-600 dark:text-gray-300 mb-3 space-y-0.5" data-cost-usage>
+            {% for line in section.usage %}<li>{{ line }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+        {% if section %}
+        <dl class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+          {% for line in section.lines %}
+            <div class="flex items-start justify-between gap-4 px-4 py-3" data-cost-line>
+              <dt class="min-w-0">
+                <div class="font-medium">{{ line.action }}</div>
+                {% if line.note or line.storage %}
+                  <div class="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+                    {{ line.note }}{% if line.storage %} <a href="#costs-shared" class="underline hover:no-underline">Storage price</a>.{% endif %}
+                  </div>
+                {% endif %}
+              </dt>
+              <dd class="shrink-0 text-right">
+                {% include 'billing/partials/cost_tag.html' with cost=line.cost unit=line.unit free=line.free %}
+              </dd>
+            </div>
+          {% endfor %}
+        </dl>
+        {% endif %}
+        {% if section.footnote %}
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+            <i class="fas fa-circle-info mr-1" aria-hidden="true"></i>{{ section.footnote }}
+          </p>
+        {% endif %}
+      </section>
+      {% endwith %}
+    {% endfor %}
+
+    <p class="text-xs text-gray-500 dark:text-gray-400 mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
+      Prices can change. This page always shows the current ones.
+    </p>
+  </div>
+</div>
+{% endblock %}
