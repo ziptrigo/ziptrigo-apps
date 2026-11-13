@@ -11,6 +11,8 @@ class NotesConfig(AppConfig):
     def ready(self):
         from apps.core.products import ProductApp, register
 
+        from .services.costs import cost_section
+
         register(
             ProductApp(
                 label=self.label,
@@ -18,6 +20,7 @@ class NotesConfig(AppConfig):
                 description='Markdown notes with code blocks, tags and share links.',
                 url_name='notes:list',
                 icon='fas fa-note-sticky',
+                costs=cost_section,
             )
         )
         self._register_jobs()

@@ -17,6 +17,7 @@ class ShortUrlConfig(AppConfig):
         from apps.core.products import ProductApp, register
 
         from . import checks  # noqa: F401
+        from .services.costs import cost_section
 
         # `weak=False`, as for receipts' receiver: a local closure would otherwise be garbage
         # collected as soon as `ready()` returns.
@@ -38,6 +39,7 @@ class ShortUrlConfig(AppConfig):
                 description='Shorten a link, track it, and share it as a QR code.',
                 url_name='short_url:dashboard',
                 icon='fas fa-link',
+                costs=cost_section,
             )
         )
 

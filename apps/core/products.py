@@ -7,6 +7,8 @@ import a product app -- the dependency only runs the other way.
 
 from dataclasses import dataclass
 
+from .costs import CostProvider
+
 
 @dataclass(frozen=True, slots=True)
 class ProductApp:
@@ -26,6 +28,9 @@ class ProductApp:
 
     icon: str
     """Font Awesome icon classes, e.g. ``'fas fa-qrcode'``."""
+
+    costs: CostProvider | None = None
+    """What the product charges, for the Costs page (`apps.core.costs`): called with the user."""
 
 
 _registry: dict[str, ProductApp] = {}

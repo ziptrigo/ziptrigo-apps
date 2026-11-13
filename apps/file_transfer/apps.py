@@ -11,6 +11,8 @@ class FileTransferConfig(AppConfig):
     def ready(self):
         from apps.core.products import ProductApp, register
 
+        from .services.costs import cost_section
+
         register(
             ProductApp(
                 label=self.label,
@@ -18,6 +20,7 @@ class FileTransferConfig(AppConfig):
                 description='Send large files to anyone with a link that expires.',
                 url_name='file_transfer:dashboard',
                 icon='fas fa-paper-plane',
+                costs=cost_section,
             )
         )
 

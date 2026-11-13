@@ -12,6 +12,7 @@ class ReceiptsConfig(AppConfig):
         from apps.core.products import ProductApp, register
 
         from . import checks  # noqa: F401
+        from .services.costs import cost_section
 
         register(
             ProductApp(
@@ -20,6 +21,7 @@ class ReceiptsConfig(AppConfig):
                 description='Email or snap your receipts and invoices; we file and categorize them.',
                 url_name='receipts:dashboard',
                 icon='fas fa-receipt',
+                costs=cost_section,
             )
         )
 

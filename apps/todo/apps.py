@@ -13,6 +13,7 @@ class TodoConfig(AppConfig):
         from apps.core.products import ProductApp, register
 
         from . import checks  # noqa: F401
+        from .services.costs import cost_section
 
         register(
             ProductApp(
@@ -21,6 +22,7 @@ class TodoConfig(AppConfig):
                 description='Tasks with due dates, labels and reminders, repeating when you need them.',
                 url_name='todo:today',
                 icon='fas fa-check-square',
+                costs=cost_section,
             )
         )
 

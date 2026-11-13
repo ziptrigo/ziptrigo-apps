@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Costs - ZipTrigo (mock)</title>
+    <link rel="icon" type="image/png" href="../../../apps/core/static/core/images/logo_32x32.png">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="../reference/assets/reference.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="../../../apps/core/static/core/css/site.css">
+</head>
+<!--
+  MOCK for review, not wired to anything. Two screens:
+    1. the account page's Credits section with the new "Costs" button;
+    2. the new Costs page (/billing/costs/), which reads every price live from the settings
+       singletons (BillingSettings, ReceiptsSettings, TodoSettings, ShortUrlSettings,
+       NotesSettings, FileTransferSettings), so it never drifts from what is charged.
+  Values shown are the current defaults. Switch screens with the bar at the top.
+-->
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 font-sans">
+
+    <!-- Mock switcher (not part of the design) -->
+    <div class="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100 text-sm">
+        <div class="container mx-auto px-4 py-2 flex flex-wrap items-center gap-3">
+            <span class="font-semibold"><i class="fas fa-flask mr-1"></i>Mock</span>
+            <button type="button" data-screen="account" class="screen-btn underline">1. Account &gt; Credits</button>
+            <button type="button" data-screen="costs" class="screen-btn underline">2. Costs page</button>
+            <span class="ml-auto opacity-80">Theme toggle is in the header</span>
+        </div>
+    </div>
+
+    <header class="bg-gray-100 dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700">
+        <nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex flex-wrap gap-x-6 gap-y-2">
+                <a href="#" class="text-lg font-semibold hover:text-sage-300">
+                    <img src="../../../apps/core/static/core/images/logo_32x32.png" alt="" class="inline h-6 w-6 mr-1 align-text-bottom">ZipTrigo
+                </a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-qrcode mr-1"></i>QR Codes</a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-paper-plane mr-1"></i>File Transfer</a>
+                <a href="#" class="text-lg hover:text-sage-300 hidden md:inline"><i class="fas fa-receipt mr-1"></i>Receipts</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="theme-toggle" type="button" class="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700" aria-label="Toggle theme" title="Toggle theme">
+                    <img id="theme-icon" alt="Theme icon" class="h-6 w-6"
+                         src="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-system="../../../apps/core/static/core/images/theme-system_128x128.png"
+                         data-light="../../../apps/core/static/core/images/theme-light_128x128.png"
+                         data-dark="../../../apps/core/static/core/images/theme-dark_128x128.png">
+                </button>
+                <a href="#" class="text-lg hover:text-sage-300"><i class="fas fa-user-circle mr-1"></i>Account</a>
+            </div>
+        </nav>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 1: account page, Credits section with the new button   -->
+    <!-- ============================================================ -->
+    <main id="screen-account" class="screen flex-grow flex items-start justify-center p-6">
+        <div class="w-full max-w-2xl bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
+            <div class="flex items-center gap-3 mb-6">
+                <i class="fas fa-user-cog text-2xl text-sage-300"></i>
+                <h1 class="text-2xl font-semibold">Account Settings</h1>
+            </div>
+
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-8 italic">… Profile Information …</p>
+
+            <section class="mb-8">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">Credits</h2>
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <div class="text-sm text-gray-600 dark:text-gray-300">Current balance</div>
+                        <div class="text-2xl font-semibold">880 credits</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <!-- NEW: secondary button, left of Usage History -->
+                        <a href="#costs" data-screen="costs"
+                           class="btn inline-flex justify-center items-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 font-medium px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+                            <i class="fas fa-tags mr-2 text-sage-500 dark:text-sage-300"></i>Costs
+                        </a>
+                        <a href="#"
+                           class="btn inline-flex justify-center items-center rounded-lg bg-brand-primary text-gray-900 font-medium px-4 py-2 hover:bg-sage-400 text-sm">
+                            Usage History
+                        </a>
+                    </div>
+                </div>
+                <div class="mt-4 text-sm text-gray-500 dark:text-gray-400 italic">… Have a promo code? …</div>
+            </section>
+
+            <p class="text-sm text-gray-500 dark:text-gray-400 italic">… Appearance, Apps …</p>
+        </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- SCREEN 2: the Costs page                                      -->
+    <!-- ============================================================ -->
+    <main id="screen-costs" class="screen hidden flex-grow flex items-start justify-center p-6">
+        <div class="w-full max-w-3xl bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl shadow-sm p-6">
+
+            <a href="#account" data-screen="account" class="text-sm text-gray-600 dark:text-gray-300 hover:text-sage-600 dark:hover:text-sage-300">
+                <i class="fas fa-arrow-left mr-1"></i>Account Settings
+            </a>
+
+            <div class="flex flex-wrap items-end justify-between gap-4 mt-3 mb-2">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-tags text-2xl text-sage-300"></i>
+                    <h1 class="text-2xl font-semibold">Costs</h1>
+                </div>
+                <div class="text-sm text-gray-600 dark:text-gray-300">
+                    Your balance: <span class="font-semibold text-gray-900 dark:text-gray-100">880 credits</span>
+                    · <a href="#" class="underline hover:text-sage-600 dark:hover:text-sage-300">Usage History</a>
+                </div>
+            </div>
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-6">
+                What each app charges, in credits. Anything not listed is free. A one-off charge is always
+                shown before you confirm it; storage is charged once a day.
+            </p>
+
+            <!-- Jump links -->
+            <nav aria-label="Apps" class="flex flex-wrap gap-2 mb-8 text-sm">
+                <a href="#c-shared" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">Shared</a>
+                <a href="#c-qr" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">QR Codes</a>
+                <a href="#c-ft" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">File Transfer</a>
+                <a href="#c-rc" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">Receipts</a>
+                <a href="#c-su" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">Short URLs</a>
+                <a href="#c-todo" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">To-do</a>
+                <a href="#c-notes" class="rounded-full border border-gray-200 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-700">Notes</a>
+            </nav>
+
+            <!-- ===== Shared ===== -->
+            <section id="c-shared" class="mb-8 scroll-mt-6">
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+                    <i class="fas fa-layer-group mr-2 text-sage-500 dark:text-sage-300"></i>Shared by every app
+                </h2>
+                <div class="rounded-xl border border-sage-200 dark:border-sage-700 bg-sage-50 dark:bg-sage-900/30 p-4">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div class="min-w-0 flex-1 basis-64">
+                            <div class="font-medium"><i class="fas fa-database mr-2 text-sage-500 dark:text-sage-300"></i>File storage</div>
+                            <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                                Files you keep in File Transfer, Receipts and To-do attachments. Charged once a day
+                                for what is stored, files in the Trash included. Fractions add up from day to day,
+                                and only whole credits are taken.
+                            </p>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                                Example: 2 GB kept for 30 days costs 6 credits.
+                            </p>
+                        </div>
+                        <span class="cost">0.1 credits <span class="cost-unit">per GB per day</span></span>
+                    </div>
+                </div>
+                <div class="mt-3 grid sm:grid-cols-2 gap-3 text-sm">
+                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <div class="font-medium"><i class="fas fa-gift mr-2 text-sage-500 dark:text-sage-300"></i>New accounts</div>
+                        <p class="text-gray-600 dark:text-gray-300 mt-1">1,000 credits once the email address is confirmed.</p>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <div class="font-medium"><i class="fas fa-circle-pause mr-2 text-sage-500 dark:text-sage-300"></i>When credits run out</div>
+                        <p class="text-gray-600 dark:text-gray-300 mt-1">Storage pauses and nothing is deleted straight away. Each app below says what happens.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== QR Codes ===== -->
+            <section id="c-qr" class="mb-8 scroll-mt-6">
+                <h2 class="app-h2"><i class="fas fa-qrcode mr-2 text-sage-500 dark:text-sage-300"></i>QR Codes</h2>
+                <dl class="cost-list">
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Create, edit and download QR codes</div>
+                            <div class="cost-note">Tracked codes and scan counts included.</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                </dl>
+            </section>
+
+            <!-- ===== File Transfer ===== -->
+            <section id="c-ft" class="mb-8 scroll-mt-6">
+                <h2 class="app-h2"><i class="fas fa-paper-plane mr-2 text-sage-500 dark:text-sage-300"></i>File Transfer</h2>
+                <dl class="cost-list">
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Send a transfer</div>
+                            <div class="cost-note">You need at least 1 credit to start one. Recipients, resends and downloads are free.</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Keep the files available</div>
+                            <div class="cost-note">Each transfer, while it is active. <a href="#c-shared" class="underline">Storage price</a>, at least 1 credit a day per transfer.</div></dt>
+                        <dd><span class="cost">Storage <span class="cost-unit">min. 1 / day</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">"Download all" as a zip</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Send without an account</div>
+                            <div class="cost-note">Smaller limits, no credits involved.</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                </dl>
+                <p class="out-of-credits"><i class="fas fa-circle-info mr-1"></i>Out of credits: the transfer is suspended and its files are kept 7 days. Topping up turns it back on.</p>
+            </section>
+
+            <!-- ===== Receipts ===== -->
+            <section id="c-rc" class="mb-8 scroll-mt-6">
+                <h2 class="app-h2"><i class="fas fa-receipt mr-2 text-sage-500 dark:text-sage-300"></i>Receipts</h2>
+                <dl class="cost-list">
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Read a receipt with AI</div>
+                            <div class="cost-note">Per file, uploaded or emailed in. A file that can't be read is refunded.</div></dt>
+                        <dd><span class="cost">1 credit <span class="cost-unit">per file</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Re-run a receipt</div></dt>
+                        <dd><span class="cost">1 credit <span class="cost-unit">per run</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Store receipts</div>
+                            <div class="cost-note">Originals, previews and the emails they came in. <a href="#c-shared" class="underline">Storage price</a>.</div></dt>
+                        <dd><span class="cost">Storage</span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Edit, search, export CSV, vendors</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                </dl>
+                <p class="out-of-credits"><i class="fas fa-circle-info mr-1"></i>Out of credits: storage pauses. You can still read, edit and export; uploads and downloads wait until you top up.</p>
+            </section>
+
+            <!-- ===== Short URLs ===== -->
+            <section id="c-su" class="mb-8 scroll-mt-6">
+                <h2 class="app-h2"><i class="fas fa-link mr-2 text-sage-500 dark:text-sage-300"></i>Short URLs</h2>
+                <p class="your-usage">12 of your 25 free active links are in use.</p>
+                <dl class="cost-list">
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Create and follow links</div>
+                            <div class="cost-note">The first 25 active links. Click counts included.</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Each active link beyond 25</div></dt>
+                        <dd><span class="cost">1 credit <span class="cost-unit">once per link</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Custom alias</div>
+                            <div class="cost-note">Choose the code yourself, like <span class="font-mono">/s/spring-sale</span>.</div></dt>
+                        <dd><span class="cost">1 credit <span class="cost-unit">once per link</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Password</div></dt>
+                        <dd><span class="cost">1 credit <span class="cost-unit">once per link</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Detailed statistics</div>
+                            <div class="cost-note">Countries, referrers, devices and browsers.</div></dt>
+                        <dd><span class="cost">1 credit <span class="cost-unit">once per link</span></span></dd>
+                    </div>
+                </dl>
+                <p class="out-of-credits"><i class="fas fa-circle-info mr-1"></i>No recurring charges: a link that paid for an extra keeps it.</p>
+            </section>
+
+            <!-- ===== To-do ===== -->
+            <section id="c-todo" class="mb-8 scroll-mt-6">
+                <h2 class="app-h2"><i class="fas fa-list-check mr-2 text-sage-500 dark:text-sage-300"></i>To-do</h2>
+                <p class="your-usage">This month: 4 of 10 free tasks used. The allowance starts again on 12/01/2026.</p>
+                <dl class="cost-list">
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Add a task</div>
+                            <div class="cost-note">The first 10 each month. Subtasks, emailed tasks and each repeat of a repeating task count.</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Each task beyond 10 in a month</div></dt>
+                        <dd><span class="cost">10 credits <span class="cost-unit">per task</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Attach files</div>
+                            <div class="cost-note"><a href="#c-shared" class="underline">Storage price</a>, also files on comments.</div></dt>
+                        <dd><span class="cost">Storage</span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Reading dates from a title, reminders, search, comments</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                </dl>
+                <p class="out-of-credits"><i class="fas fa-circle-info mr-1"></i>Out of credits: a repeating task's next one is still created and paid once you top up; new tasks wait until then.</p>
+            </section>
+
+            <!-- ===== Notes ===== -->
+            <section id="c-notes" class="mb-2 scroll-mt-6">
+                <h2 class="app-h2"><i class="fas fa-note-sticky mr-2 text-sage-500 dark:text-sage-300"></i>Notes</h2>
+                <p class="your-usage">You have 3 of 5 free notes.<br>2 paid notes renew every 365 days; the next renewal is on 03/04/2027 for 5 credits.</p>
+                <dl class="cost-list">
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Your first 5 notes</div>
+                            <div class="cost-note">Free for as long as they live. Trashing one frees its place.</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Each note beyond 5</div>
+                            <div class="cost-note">Duplicating, or restoring from the Trash into a full set, counts as a new note.</div></dt>
+                        <dd><span class="cost">1 credit <span class="cost-unit">to create</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Renewal of a paid note</div></dt>
+                        <dd><span class="cost">5 credits <span class="cost-unit">every 365 days</span></span></dd>
+                    </div>
+                    <div class="cost-row">
+                        <dt><div class="font-medium">Tags, history, sharing, search</div></dt>
+                        <dd><span class="cost cost-free">Free</span></dd>
+                    </div>
+                </dl>
+                <p class="out-of-credits"><i class="fas fa-circle-info mr-1"></i>Out of credits: a note whose renewal can't be paid is locked (read-only) until you top up.</p>
+            </section>
+
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
+                Prices can change. This page always shows the current ones.
+            </p>
+        </div>
+    </main>
+
+    <footer class="text-center text-sm text-gray-500 dark:text-gray-400 py-6">© 2026 ZipTrigo</footer>
+
+    <!-- Mock-only styles; in Django these would be plain Tailwind classes in a partial. -->
+    <style type="text/tailwindcss">
+        .app-h2 { @apply text-xl font-semibold mb-3 pb-2 border-b border-gray-200 dark:border-gray-700; }
+        .cost-list { @apply divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800; }
+        .cost-row { @apply flex items-start justify-between gap-4 px-4 py-3; }
+        .cost-row dt { @apply min-w-0; }
+        .cost-row dd { @apply shrink-0 text-right; }
+        .cost-note { @apply text-sm text-gray-600 dark:text-gray-300 mt-0.5; }
+        .cost { @apply inline-flex flex-col items-end rounded-lg px-2.5 py-1 text-sm font-semibold bg-sage-100 text-sage-800 dark:bg-sage-800 dark:text-sage-100 whitespace-nowrap; }
+        .cost-unit { @apply text-xs font-normal opacity-80; }
+        .cost-free { @apply bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 font-medium; }
+        .out-of-credits { @apply text-sm text-gray-500 dark:text-gray-400 mt-2; }
+        .your-usage { @apply text-sm text-gray-600 dark:text-gray-300 mb-3; }
+    </style>
+    <script>
+        function show(name) {
+            document.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
+            document.getElementById('screen-' + name).classList.remove('hidden');
+            window.scrollTo(0, 0);
+        }
+        document.querySelectorAll('[data-screen]').forEach((el) =>
+            el.addEventListener('click', (e) => { e.preventDefault(); show(el.dataset.screen); history.replaceState(null, '', '#' + el.dataset.screen); }));
+        show(location.hash === '#costs' ? 'costs' : 'account');
+    </script>
+</body>
+</html>
