@@ -14,6 +14,11 @@ The `apps/accounts` web UI, all under `/account/` unless noted:
   its owner gets a "Finish setting up" set-password link.
 - **Sign in / sign out** (`/account/login/`, `POST /account/logout/`; a GET of the logout URL only redirects to the login page): error messages, `next=`,
   mixed-case email domains, Google and Microsoft sign-in hidden when not configured.
+- **Sign in by emailed code or link** (`/account/login/code/`, `/account/login/code/verify/`,
+  `/account/login/link/<token>/`, issue #295): one email carries a code and a link, either signs in;
+  the answer never reveals whether an address has an account; an unconfirmed account gets nothing;
+  both are single use, short-lived and replaced by a newer one (ACC-51 to ACC-54; the email itself
+  is `emails.md` MAIL-26).
 - **Forgot / reset password** (`/account/forgot-password/`, `/account/reset-password/<token>/`):
   a reset confirms an unconfirmed address and retires its pending confirmation links; a link works
   once, and **any** password change (another link, the account page) retires every link issued
@@ -96,6 +101,7 @@ At the start of the run pick a short random token `<run>` (6 lowercase letters/d
 | MOVED | `qa.acc.<run>.moved@example.com` (UNC's address after ACC-41) |
 | TZ | `qa.acc.<run>.tz@example.com`, name `Acc Tz <run>`, password P-TZ `AccTz-2208` |
 | DEL | `qa.acc.<run>.del@example.com`, name `Acc Del <run>`, password P-DEL `AccDel-9051` |
+| OTPUNC | `qa.acc.<run>.otpunc@example.com`, name `Acc Otpunc <run>`, password `AccOtp-3381` (registered in ACC-51 and never confirmed) |
 | ADMIN | `qa.admin@example.com` / SEED (admin sign-in only; never change it) |
 | SEED | `QaE2e-Passw0rd!` (seeded accounts) |
 | LONG256 | the letter `N` repeated 256 times |
@@ -863,13 +869,74 @@ its acceptance, which is what an account made by Google sign-up looks like:
 | 8 | Sign in as TERMS again and set an older version instead: `...update(terms_version='2020-01-01')` (run the same command with that value), then open `/account/`. | The accept page, now headed `Our terms have changed` with `We updated our Terms of Use and Privacy Policy. Please review and accept them to keep using ZipTrigo.` Accept: `/account/` opens. |
 | 9 | Context B (`qa.admin`): clear the admin's own acceptance with the command (its address), then open `/admin/` and `/`. | `/admin/` opens (the admin is never gated); `/` shows the accept page. Accept it to restore the account for the other plans. |
 
+### ACC-51 Sign-in code: asking for one gives the same answer for every address
+
+**Purpose:** the "Email me a sign-in code" page, and that nothing on it tells whether an address has
+an account (issue #295). Only a confirmed, active account is emailed.
+**Preconditions:** signed out in Context A. Register OTPUNC on `/account/register/` (tick the terms
+checkbox) and do **not** confirm it.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | On `/account/login/` click `Email me a sign-in code` (it sits above `Forgot your password?`). | `/account/login/code/`, tab title `Email me a sign-in code`, heading `Email me a sign-in code`, a line saying no password is needed, an `Email` field (`type="email"`, required, focused), a `Back to sign in` link and an `Email me a code` button. |
+| 2 | Email `foo@bar`, click `Email me a code`. | Red block `Email: Enter a valid email address.` (also under the field). |
+| 3 | Email NOBODY, click `Email me a code`. | The browser goes to `/account/login/code/verify/`: tab title `Enter your sign-in code`, heading `Enter your sign-in code`, `If that address has an account, we've emailed it a code and a link. Type the code here, or open the link in the email. They expire in 10 minutes.`, the `Email` field already holding NOBODY, a `Code` field (`autocomplete="one-time-code"`, `inputmode="numeric"`, monospaced, focused), a `Send a new code` link and a `Sign in` button. |
+| 4 | Click `Send a new code`, then request a code for OTPUNC. | The same code page, same wording, with OTPUNC prefilled. Nothing differs from step 3 apart from the address. |
+| 5 | Request a code for `qa.user@example.com`. | Again the same code page. |
+| 6 | Mailbox `?to=<NOBODY>` and `?to=<OTPUNC>`, after waiting 30 seconds. | Neither has a sign-in email (`No emails.`; OTPUNC has only its confirmation email from registering). |
+| 7 | Mailbox `?to=qa.user@example.com`. | One email, subject `Your ZipTrigo sign-in code` (see `emails.md` MAIL-26 for its content). Record its code as `OTP_1` and its link as `LINK_1`. |
+| 8 | Open `/account/login/code/` with the address bar `?next=/links/`, request a code for NOBODY. | The code page's address ends `?next=%2Flinks%2F`. |
+
+### ACC-52 Sign in with the code
+
+**Purpose:** the right code signs in; every wrong one gets the same generic answer; the code works once.
+**Preconditions:** ACC-51; Context A signed out, on the code page for `qa.user@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Code `abcdef`, `Sign in`. | Red block `Code: Enter the code from the email: digits only.` (also under the field). |
+| 2 | Code `000000` (or any wrong 6 digits), `Sign in`. | Red block: `That code is not valid or has expired. Check it and try again, or request a new code.` Still signed out. |
+| 3 | Email NOBODY, code `000000`. | The very same red block, word for word. |
+| 4 | Email `qa.user@example.com`, `OTP_1` typed with a space in the middle (`123 456`), `Sign in`. | Signed in and on the home page `/`: the header shows the account icon. `/account/` opens, and its profile still says `QA User`. |
+| 5 | Sign out. Open the code page, email `qa.user@example.com`, code `OTP_1` again. | The same generic red block: a code works once. Still signed out. |
+| 6 | Sign in on `/account/login/` with `qa.user@example.com` / SEED. | Works: signing in by code changed nothing about the password. Sign out. |
+| 7 | Go to `/account/login/?next=/links/`, click `Email me a sign-in code`, request a code (wait a minute after step 1 of ACC-51's request for this address if the email does not come), enter it. | The browser ends on `/links/`. A `next` to another site (`/account/login/?next=https://evil.example/`) ends on `/` instead. |
+
+### ACC-53 The emailed link signs in only on the button, once
+
+**Purpose:** a link prefetch signs nobody in; the button does; the link works once and is replaced
+by a newer one (issue #295).
+**Preconditions:** ACC-52; signed out. Request a new code for `qa.user@example.com` (wait 60 seconds
+after the last one) and record the new email's link as `LINK_2` and its code as `OTP_2`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `LINK_2` (`/account/login/link/<token>/`). | Tab title `Sign in - ZipTrigo`, heading `Sign in to ZipTrigo`, `Press the button below to finish signing in.` and a `Sign in` button. The header still shows `Login`: opening the link signed nobody in. |
+| 2 | Reload the page, then press `Sign in`. | Signed in, on `/` (the reload did not use the link up). |
+| 3 | Sign out. Open `LINK_2` and press `Sign in`. | Redirected to `/account/login/code/` with a message `That sign-in link is not valid or has expired. Request a new code to sign in.`; signed out. |
+| 4 | On the code page enter `OTP_2` for `qa.user@example.com`. | The generic red block: the link already used the whole email (code and link are one). |
+| 5 | Request a code, wait 60 seconds, request another (two emails; record `LINK_3`, `LINK_4`). Open `LINK_3` and press `Sign in`. | The `not valid or has expired` message: only the newest code works. |
+| 6 | Open `LINK_4`, press `Sign in`. | Signed in. Sign out. |
+
+### ACC-54 Wrong codes burn the code; other emails' tokens do not work
+
+**Purpose:** guessing is limited per code, and an email-confirmation link or code cannot sign in (issue #295).
+**Preconditions:** ACC-53; signed out. OTPUNC still unconfirmed, with its confirmation email in the mailbox.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Request a code for `qa.user@example.com` (60 seconds after the last request) and record it as `OTP_3`. Enter `000000` five times (use a wrong code that is not `OTP_3`). | The generic red block each time. |
+| 2 | Enter `OTP_3`. | Still the generic red block: five wrong tries burned the code. Signed out. |
+| 3 | Take the confirmation link from OTPUNC's email (`/account/confirm-email/<token>/`) and replace `confirm-email` with `login/link` in the address. Open it and press `Sign in`. | The `not valid or has expired` message; signed out. The OTPUNC address still can't be signed in by any means: request a code for it and wait, no email arrives. |
+| 4 | Open the original confirmation link and press `Confirm my email` (OTPUNC is now confirmed), then request a sign-in code for OTPUNC. | Now a sign-in email arrives, and its code signs OTPUNC in. (The confirmation link still worked: the sign-in attempt in step 3 did not use it up.) Sign out. |
+
 ## Out of scope
 
 - "Sign in with Google" / "Sign in with Microsoft" flows (real identity providers), and the
   account-page and email variants only those accounts get (the `Password` note with `Set a
   password`, the Google/Microsoft wording of `You already have a ZipTrigo account`). On this server
   they are not configured; ACC-18 checks they fail gracefully.
-- The Turnstile captcha and every rate limit (`REFRESH_USER` (a 429 from refresh), `LOGIN_*`, `CHANGE_PASSWORD_USER`,
+- The Turnstile captcha and every rate limit (`REFRESH_USER` (a 429 from refresh), `LOGIN_*`, `LOGIN_OTP_*`, `CHANGE_PASSWORD_USER`,
   `SIGNUP_EXISTING_EMAIL*`, `ACCOUNT_TIMEZONE_USER`, ...): switched off on this server, unit-tested.
 - The JWT API (`/api/auth/...`, `PUT /api/account`) apart from ACC-47 (refresh token rotation, by
   `curl`), ACC-48 (the native Google endpoint's off state) and the `PUT /api/account` steps of

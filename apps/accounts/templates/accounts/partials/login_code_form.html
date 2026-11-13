@@ -1,0 +1,37 @@
+{% load field_errors %}<form id="login-code-form"
+      method="post"
+      action="{% url 'accounts:login-code' %}"
+      hx-post="{% url 'accounts:login-code' %}"
+      hx-target="this"
+      hx-swap="outerHTML"
+      hx-disabled-elt="find button[type='submit']">
+  {% csrf_token %}
+  {% field_errors form %}
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+
+  {% if form.errors %}
+    <div role="alert" class="mb-4 text-sm text-red-600 dark:text-red-400" style="white-space: pre-line">
+      {% for error in form.non_field_errors %}{{ error }}
+{% endfor %}{% for field in form %}{% for error in field.errors %}{{ field.label }}: {{ error }}
+{% endfor %}{% endfor %}</div>
+  {% endif %}
+
+  <label class="block mb-3">
+    <span class="block mb-1">Email</span>
+    <input type="email" name="email" required autocomplete="email" autofocus value="{{ form.email.value|default:'' }}"
+           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+  </label>
+
+  <div class="flex items-center justify-between gap-3 mt-4">
+    <a href="{% url 'accounts:login' %}{% if next %}?next={{ next|urlencode }}{% endif %}"
+       class="btn inline-flex justify-center items-center rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm">
+      Back to sign in
+    </a>
+
+    <button type="submit"
+            class="btn group inline-flex justify-center items-center rounded-lg bg-brand-primary text-gray-900 font-medium px-4 py-2 disabled:opacity-50 hover:bg-sage-400 text-sm">
+      <span class="group-disabled:hidden">Email me a code</span>
+      <span class="hidden group-disabled:flex items-center"><i class="fas fa-spinner fa-spin mr-2"></i>Sending...</span>
+    </button>
+  </div>
+</form>

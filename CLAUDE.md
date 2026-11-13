@@ -33,7 +33,7 @@ apps/core/            Site shell: base.html, landing page, the Privacy Policy an
                       shares (`core/js/components.js`: `copyText`, `confirmModal`,
                       `notificationBell`).
 apps/accounts/        User model, auth pages + API, JWT auth classes, the memory of confirmed
-                      addresses (`KnownEmail`, issue #160).
+                      addresses (`KnownEmail`, issue #160), sign-in by emailed code or link (#295).
 apps/billing/         CreditAccount (balance) + CreditTransaction (ledger), credit services, the
                       shared storage price (BillingSettings), promo codes (issue #70, see "Promo
                       codes": PromoCode + PromoRedemption, the redeem form and link, the admin
@@ -946,6 +946,56 @@ guidance is to identify users by `sub` or `oid` and never by email. So
 - The login and register pages render one "or" divider and the enabled buttons through
   `partials/social_buttons.html` (`google_button.html` and `microsoft_button.html` are the buttons
   alone, each taking `verb`).
+
+**Sign in by emailed code or link** (issue #295) is a fifth way in to the *web UI*, for any account whatever
+its password (Google/Microsoft-only accounts included). `/account/login/code/` (`accounts:login-code`, linked as
+"Email me a sign-in code" from the login page, which forwards `next`) takes an address and always answers with a
+redirect to `/account/login/code/verify/` (`login-code-verify`: address, prefilled from the session, plus the code);
+the emailed link is `/account/login/link/<token>/` (`login-link`). Both end in `django.contrib.auth.login()` with
+`google_oauth.LOGIN_BACKEND` (`EmailBackend`), so `user_logged_in` fires, a same-site `next` is honoured
+(`redirects.redirect_target`; carried through the pages and into the emailed link only as a same-site *path*,
+`notifications.is_safe_url`) and the terms gate applies as for any session. Web only: no JWT endpoint (a follow-up if
+the Android app wants one). Code: `services/login_otp.py` (its docstring is the long version), `views/login_code.py`,
+`forms/login_code.py`, templates `accounts/login_code*.html`, `login_link.html`, `emails/login_code.html`.
+
+- **Built on `core.services.email_verification`**, purpose `accounts.login_otp`, so an email-confirmation token or code
+  cannot sign anyone in and a sign-in token cannot confirm an email (a test per direction). One row holds both the
+  code and the link: using either burns the other. `start(..., validity=timedelta(minutes=
+  settings.LOGIN_OTP_VALIDITY_MINUTES))`, default **10 minutes** (env `LOGIN_OTP_VALIDITY_MINUTES`); the code length
+  is the shared `CoreSettings` one. Two small additions to core: `confirm_latest_by_code(email, code, purpose)` checks a
+  code against the *newest* row for the address (the request queued the send, so it never learned a row id; a newer code
+  replaces older ones, everything else is `confirm_by_code`'s: single use, `max_attempts` wrong codes burn the row,
+  expiry) and `confirm_by_token(..., single_use=True)` drops the token path's "works again within its window"
+  idempotence (a login link must not be reusable).
+- **Who gets a code: an active account (`is_active` and `status == ACTIVE`) with a *confirmed* email**
+  (`login_otp.can_sign_in_with_code`); staff and superusers like anyone (the admin login is separate). **An unconfirmed
+  account gets nothing**, even a legitimate one: whoever created it chose its password and may not own the address (the
+  "pre-hijack" under "no page reveals whether an address has an account"), so emailing the real owner a way into it
+  would put them in an account the attacker can also enter. Their way in is the "finish setting up" email or
+  forgot-password. Eligibility is checked again after the code or link is verified (the row is consumed either way).
+- **No enumeration.** `request_code` queues `send_login_code_email(email, next)` for **every** valid submission
+  (`enqueue_after_commit`, like forgot-password); the task looks the account up and returns without sending for an
+  unknown, inactive, deleted or unconfirmed one, and swallows the shared resend cooldown (60 s), the per-address daily cap
+  (`EMAIL_VERIFICATION_START_EMAIL`) and a failed send. The request's answer, the code page and every failure
+  (`INVALID_CODE_MESSAGE`: no account, no code started, wrong, expired, burned, replaced, used, no longer eligible) are
+  the same for every address, and the limits below count every address alike, so even a 429 says nothing. The address
+  typed is kept in the visitor's own session (`login_otp_email`) only to prefill the code page.
+- **The link** opens a page whose only content is a CSRF-protected "Sign in" button; only the POST consumes the token
+  (`confirm_email_page`'s pattern, a scanner's GET does nothing and doesn't read the token). A bad, expired, replaced or
+  used link is reported after the click by redirecting (PRG) to the request page with a message.
+- **Rate limits** (`RATELIMIT_RULES`, commented there): `LOGIN_OTP_REQUEST_IP` (10/h), `LOGIN_OTP_REQUEST_EMAIL_IP` (5/h per
+  address and IP) and `LOGIN_OTP_REQUEST_EMAIL` (10/h per address, any IP), all counted per valid submission; checking a code
+  has the `login_throttle` shape: `LOGIN_OTP_VERIFY_IP` (20/5 min) and the strict `LOGIN_OTP_VERIFY_EMAIL_IP` (10/5 min)
+  on every attempt, and the looser `LOGIN_OTP_VERIFY_EMAIL` (30/15 min, any IP) peeked first and counting failures
+  only, plus the row's own attempt limit. The link's POST is charged `LOGIN_OTP_VERIFY_IP` only (its token is 43
+  random characters); the GET is not. A refused form (bad address, non-digit code) spends nothing.
+- **Accepted trade-offs.** Someone who knows an address can supersede or burn its pending code (a request after the
+  cooldown, or five wrong guesses); the owner asks for a new one, the limits bound how often, and nothing locks the
+  account or touches its password. A successful sign-in this way never changes the password, never confirms an email
+  and never writes `google_sub`/`microsoft_id`. The email's subject is fixed with no code in it, the HTML is
+  autoescaped (`user.name` is free text), links are absolute (`BASE_URL`).
+- **Tests:** `apps/accounts/tests/test_login_otp.py`, `apps/core/tests/test_email_verification_otp.py`; AI plan cases
+  ACC-51 to ACC-54 and MAIL-26.
 
 **Privacy Policy, Terms of Use and accepting them** (issue #96).
 

@@ -30,6 +30,9 @@
         No account? <a href="{% url 'accounts:register' %}{% if request.GET.promo %}?promo={{ request.GET.promo|urlencode }}{% endif %}" class="text-sage-600 dark:text-sage-300 underline decoration-sage-300/70 dark:decoration-sage-500 underline-offset-2 hover:decoration-sage-600 dark:hover:decoration-sage-300 transition-colors">Create one</a>
       </p>
       <p>
+        <a href="{% url 'accounts:login-code' %}{% if next %}?next={{ next|urlencode }}{% endif %}" class="text-sage-600 dark:text-sage-300 underline decoration-sage-300/70 dark:decoration-sage-500 underline-offset-2 hover:decoration-sage-600 dark:hover:decoration-sage-300 transition-colors">Email me a sign-in code</a>
+      </p>
+      <p>
         <a href="{% url 'accounts:forgot-password' %}" class="text-sage-600 dark:text-sage-300 underline decoration-sage-300/70 dark:decoration-sage-500 underline-offset-2 hover:decoration-sage-600 dark:hover:decoration-sage-300 transition-colors">Forgot your password?</a>
       </p>
     </div>

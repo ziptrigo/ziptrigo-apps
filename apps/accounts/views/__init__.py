@@ -3,6 +3,7 @@ from .display_formats import formats_update
 from .forgot_password import forgot_password_page
 from .google import google_callback, google_login
 from .login import login_page, logout_page
+from .login_code import login_code_page, login_code_verify_page, login_link_page
 from .microsoft import microsoft_callback, microsoft_login
 from .pages import (
     account_created_page,
@@ -33,6 +34,9 @@ __all__ = [
     'forgot_password_page',
     'google_callback',
     'google_login',
+    'login_code_page',
+    'login_code_verify_page',
+    'login_link_page',
     'login_page',
     'logout_page',
     'microsoft_callback',
