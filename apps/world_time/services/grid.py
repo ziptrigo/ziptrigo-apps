@@ -176,6 +176,11 @@ def _offset_minutes(moment: datetime) -> int:
     return int(offset.total_seconds() // 60)
 
 
+def offset_minutes(moment: datetime) -> int:
+    """The UTC offset of an aware datetime, in minutes."""
+    return _offset_minutes(moment)
+
+
 def offset_text(minutes: int, *, prefix: str = '') -> str:
     """`+5`, `-3:30`, `+0` (with `prefix`: `UTC+5`)."""
     sign = '-' if minutes < 0 else '+'

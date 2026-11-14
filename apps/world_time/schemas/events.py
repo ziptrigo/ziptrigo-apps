@@ -9,7 +9,9 @@ from pydantic import ConfigDict
 
 class WorldTimeEventLocationSchema(Schema):
     """An event's time in one of the places it was shared with (a copy made when the event was
-    created). `starts_local` and `ends_local` are that place's wall clock (no offset)."""
+    created). `starts_local` and `ends_local` are that place's wall clock (no offset);
+    `utc_offset_minutes` is its offset at the start and `ends_utc_offset_minutes` at the end (they
+    differ when its clocks change during the event)."""
 
     name: str
     detail: str
@@ -18,6 +20,7 @@ class WorldTimeEventLocationSchema(Schema):
     starts_local: str
     ends_local: str
     utc_offset_minutes: int
+    ends_utc_offset_minutes: int
 
 
 class WorldTimeEventSchema(Schema):
@@ -37,7 +40,8 @@ class WorldTimeEventSchema(Schema):
 
 class WorldTimeEventCreateSchema(Schema):
     """Body for `POST /events`: the tab whose locations the event is shared with, a title (1 to 120
-    characters) and the two instants (ISO 8601 with an offset)."""
+    characters) and the two instants (ISO 8601 with an offset). A `tab` that isn't the caller's is a
+    400."""
 
     model_config = ConfigDict(extra='forbid')
 

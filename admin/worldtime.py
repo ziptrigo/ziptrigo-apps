@@ -282,7 +282,7 @@ def worldtime_now(
     select_environment(environment)
     found = _find_tab(tab)
     moment = _call('get', f'/tabs/{found["id"]}/times', params={'at': at} if at else None)
-    table = Table(title=found['name'])
+    table = Table(title=Text(found['name']))
     table.add_column('Location')
     table.add_column('Time', justify='right', no_wrap=True)
     table.add_column('Date', no_wrap=True)
@@ -311,7 +311,7 @@ def worldtime_locations(environment: EnvironmentAnnotation, tab: TabOption = Non
     """
     select_environment(environment)
     detail = _tab_detail(tab)
-    table = Table(title=detail['name'])
+    table = Table(title=Text(detail['name']))
     table.add_column('Location')
     table.add_column('Place')
     table.add_column('Time zone')
@@ -402,12 +402,13 @@ def worldtime_add(
         if len(results) > 1 and not first:
             for index, result in enumerate(results, start=1):
                 _say(f'{index}. {_result_text(result)}')
-            number = typer.prompt('Which one', type=int, default=1)
+            # No default: a bare Enter must not add whatever happens to be listed first.
+            number = typer.prompt('Which one (0 to cancel)', type=int)
             if not 1 <= number <= len(results):
                 raise _fail('Cancelled; nothing was added.')
             choice = results[number - 1]
         key = 'city' if choice['kind'] == 'city' else 'zone'
-        body: dict = {key: int(choice['value']) if key == 'city' else choice['value']}
+        body: dict = {key: choice['city_id'] if key == 'city' else choice['value']}
     else:
         body = {'city': city} if city else {'zone': zone}
     if label:

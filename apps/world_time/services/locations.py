@@ -64,6 +64,19 @@ def _add(tab: Tab, location: Location, duplicate) -> Location:
     return location
 
 
+def check_city(geoname_id: int) -> None:
+    """Refuse a city that is not in the city table. No lock, no write: an endpoint calls it before
+    it charges a rate limit (`add_city` decides again)."""
+    if not City.objects.filter(pk=geoname_id).exists():
+        raise _error('city', UNKNOWN_CITY_MESSAGE)
+
+
+def check_zone(zone: str) -> None:
+    """Refuse a zone no location can have. No lock, no write."""
+    if not zones.is_addable_zone(str(zone or '').strip()):
+        raise _error('zone', UNKNOWN_ZONE_MESSAGE)
+
+
 def add_city(tab: Tab, geoname_id: int) -> Location:
     """Add the city `geoname_id` (from the city table) to the end of the tab."""
     city = City.objects.filter(pk=geoname_id).first()

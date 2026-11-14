@@ -6550,8 +6550,8 @@ mounted at the site root; the JWT API is `api/` + `schemas/`, mounted at `/api/t
   `./manage.py world_time_build_cities` (a maintainer's tool, stdlib only) rebuilds it from the GeoNames dump
   (`cities15000.zip`, `countryInfo.txt`, `admin1CodesASCII.txt`; downloaded, or `--source <folder>`): other
   names only for cities of 100,000 or more, Latin script, at most 60 characters and 80 per city, airport
-  codes dropped, names with no capital dropped (romanisations of another script: `li si ben`, and `porto` for
-  Bordeaux), spellings that differ only by accents all kept (`Roma` and `Róma`: the file has no language
+  codes dropped, names with no capital anywhere dropped (romanisations of another script: `li si ben`, and `porto` for
+  Bordeaux; `'s-Gravenhage` stays), spellings that differ only by accents all kept (`Roma` and `Róma`: the file has no language
   to choose by), sections of a city (feature code `PPLX`) left out; deterministic
   (`mtime=0`), so an unchanged rebuild is no diff. `./manage.py world_time_seed_cities [--file] [--force]`
   (`cities.seed`) is **idempotent and a one-query no-op when `CityData.sha256` equals the file's**; otherwise,
@@ -6571,10 +6571,12 @@ mounted at the site root; the JWT API is `api/` + `schemas/`, mounted at `/api/t
   stored names and to the query. Cities whose name, or a later word of it, starts with the query, **together
   with** cities known by another name that starts with it (`CityMatch.matched_name`, shown as "(also Lisboa)";
   of two spellings the one typed): both sets are read before the cut, then a city whose **own** name is
-  the query comes first, then one known by exactly that name, then the rest, the most populous first in each:
+  the query comes first (those are read on their own, an equality on the indexed column, so a small city
+  whose whole name is a common prefix -- Pau, Man, Bo -- is found however many bigger ones start with it),
+  then one known by exactly that name, then the rest, the most populous first in each:
   `roma` offers Rome ahead of the smaller places that merely start with it, and `porto` offers Porto ahead
-  of a bigger city that some list also calls Porto. Two queries (an indexed prefix lookup over the other names, and a scan of the 32,000 short
-  city rows, since a later-word match has no btree index), none under 2 characters.
+  of a bigger city that some list also calls Porto. Three queries (the exact names, an indexed prefix lookup over the other names, and a scan of the
+  32,000 short city rows, since a later-word match has no btree index), none under 2 characters.
   **Time zones**: the zones a user can add are the account page's list (`timezone_choices()`: UTC and the
   canonical `Area/City` names), matched by a word of their name. **Abbreviations**
   (`zones.ABBREVIATIONS`: `PST`, `CET`, `IST` ...) are **only search aliases for real zones** -- `PST` offers
@@ -6730,9 +6732,10 @@ mounted at the site root; the JWT API is `api/` + `schemas/`, mounted at `/api/t
   - `GET|POST /tabs` (a first `GET` makes the first tab, as the website does; each with `location_count`),
     `GET|PATCH|DELETE /tabs/{id}` (`GET` and the writes answer the tab with its `locations`; `DELETE` is a
     204, a 400 for the last tab).
-  - `GET /search?q=` (`{kind, value, name, detail, hint}`; send `value` back as `city` or `zone`),
-    `POST /tabs/{id}/locations` (`city` **or** `zone`, both or neither a 400 `Send either city or zone, not
-    both.`, an optional `label`; the row and its label are one transaction), `PATCH
+  - `GET /search?q=` (`{kind, value, city_id, name, detail, hint}`; send `city_id` back as `city`, or
+    `value` as `zone`; a `q` under 2 characters answers `[]` and spends nothing),
+    `POST /tabs/{id}/locations` (`city` **or** `zone`: neither is a 400 `Send city or zone.`, both `Send
+    either city or zone, not both.`; an optional `label`; the row and its label are one transaction), `PATCH
     /tabs/{id}/locations/{location_id}` (`label`, `null` or empty clears it; `home: true` makes it the home,
     `false` is a 400; a body that changes nothing spends nothing), `DELETE` (204), `POST
     /tabs/{id}/locations/reorder` (`{ids}`, at most 500; answers every row in order).
@@ -6741,33 +6744,39 @@ mounted at the site root; the JWT API is `api/` + `schemas/`, mounted at `/api/t
     location, `zone_name`, `utc_offset_minutes`, `minutes_from_home`, `now_offset_minutes`, `steps` (the
     `[minute, offset]` pairs the website's script uses), `dst_note` and one tile per hour (`local` wall clock,
     `band`, `weekend`, `day_start`). `GET /tabs/{id}/times?at=` is every location at one instant (default
-    now; `at` without an offset is read on the home row's wall clock): what the CLI's `now` prints. Neither is
+    now; `at` without an offset is read on the home row's wall clock, where a time its clocks skip is a 400
+    and a repeated one its first occurrence; more than ten years from now is a 400, which also keeps the
+    conversions inside the calendar; the answer's `at` is always UTC): what the CLI's `now` prints. Neither is
     rate limited (no query beyond loading the rows).
   - `GET|POST /events` (`{tab, title, starts_at, ends_at}`; the list is not paged: the cap bounds it),
     `GET|PATCH|DELETE /events/{id}` (`PATCH`: title and/or both instants, an explicit `null` is "not sent";
     `DELETE` is never rate limited). An event is `{id, title, starts_at, ends_at, url, ended, locations,
-    created_at, updated_at}`, each location with its wall clocks (`starts_local`, `ends_local`) and offset.
+    created_at, updated_at}`, each location with its wall clocks (`starts_local`, `ends_local`) and its offset at the start and at
+    the end (`utc_offset_minutes`, `ends_utc_offset_minutes`).
     `GET /settings` is the caps, the caller's counts and `cities_loaded`.
   - *Status codes*: **400** a service `ValidationError` (`field: message`, a message that belongs to no field
-    plain) or a hand-read query parameter (`date`, `at`); **404** another user's tab, location or event,
-    also a foreign `tab` in `POST /events`; **422** ninja's own; **429** the site handler. No 402: the app is
+    plain) or a hand-read query parameter (`date`, `at`); a `tab` in the body of `POST /events` that isn't the caller's
+    (`tab: Choose one of your tabs.`, like the other products' body references); **404** another user's tab,
+    location or event in the path (also a row of another tab under the caller's own tab); **422** ninja's own; **429** the site handler. No 402: the app is
     free. *Rate limits* are the web's (`WT_EDIT_USER`, `WT_SEARCH_USER`, which the API answers with a 429
     where the website's search answers 204), charged after the checks that need no write (`clean_name`,
-    `clean_label`, `clean_title`, `clean_times`, "both ends of a new time"), so those refusals spend nothing;
-    what only the locked write can refuse (a duplicate, a full tab, the cap) is charged.
+    `clean_label`, `clean_title`, `clean_times`, "both ends of a new time", `locations.check_city` /
+    `check_zone`, `tabs.check_deletable`, a one-letter search, an empty reorder), so those refusals spend
+    nothing; what only the locked write can refuse (a duplicate, a full tab, the cap) is charged.
   - *Wall clocks and text.* Instants are ISO 8601; a location's local time is a wall clock,
     `YYYY-MM-DDTHH:MM` with no offset (`common.wall_clock`), never an instant in disguise. The one sentence
     the API returns, `dst_note`, is the **public wording** whatever the account's formats.
-  - *OpenAPI*: `docs/openapi.yml` is at **2.6.0** (a minor bump: 11 new paths, 18 new schemas, nothing
-    existing changed).
+  - *OpenAPI*: `docs/openapi.yml` is at **2.6.1** (2.6.0 added 11 paths and 18 schemas, nothing existing
+    changed; 2.6.1 is the review's wording and the two added fields).
   - *CLI* (`admin/worldtime.py`, `inv worldtime ...`; `WORLDTIME_PASSWORD`, token
     `~/.worldtime_token.<env>`; on `admin/utils.py`'s shared plumbing; the commands are in the "Commands"
     block). A tab is named by its name (ignoring case) or id, the first tab when `--tab` is left out; a
     location by what its row is called, its place name or its id (a name that fits two rows asks for the
     id). `now` prints a table of every location's time, date, offset from home and zone, for now or `--at`;
-    `add` searches and, when several places match, lists them and asks which (`--first` takes the first;
+    `add` searches and, when several places match, lists them and asks which (no default: a bare Enter
+    adds nothing, 0 cancels; `--first` takes the first;
     `--city` / `--zone` name one exactly); `tab-delete` and `remove` ask first (`--yes` skips). Names are
-    printed escaped (Rich markup in a tab's name shows as typed). **Events are in the API but not in the
+    printed escaped or as `Text` (Rich markup in a tab's name shows as typed, table titles included). **Events are in the API but not in the
     CLI** (the owner's choice). Tests: `admin/tests/test_worldtime.py` (HTTP mocked, no Django).
 - **Not done**: reordering tabs, an add-to-calendar export, events in the CLI, a staff delete for events.
 - **Tests**: `apps/world_time/tests/` (`test_cities.py`: the file, seeding, search; `test_zones.py`;

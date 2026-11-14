@@ -66,7 +66,8 @@ def rename_tab(request, tab_id: UUID, payload: WorldTimeTabWriteSchema):
 def delete_tab(request, tab_id: UUID):
     """Delete a tab and its locations. The last tab can't be deleted (400)."""
     tab = owned_tab(request, tab_id)
-    charge(request, 'WT_EDIT_USER')
     with mapped_errors():
+        tab_service.check_deletable(tab)  # a refusal here spends no budget
+        charge(request, 'WT_EDIT_USER')
         services.delete_tab(tab)
     return 204, None

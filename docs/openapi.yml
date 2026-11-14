@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.6.0
+  version: 2.6.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -5198,9 +5198,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorldTimeMomentSchema'
-      description: 'Every location of a tab at one instant: `at` (ISO 8601 with an offset, or without one to
+      description: 'Every location of a tab at one instant: `at`, ISO 8601 (default: now; a date alone means
 
-        mean the home row''s wall clock; default: now).'
+        midnight; within ten years of now). With an offset (`2026-10-09T15:00:00Z`,
+
+        `...+02:00`: percent-encode the `+` in a query string, where a raw one is a space) it is
+
+        that instant; without one it is read on the **home row''s wall clock** (a time its clocks skip
+
+        that day is a 400; one that happens twice is its first occurrence). The answer''s `at` is the
+
+        instant in UTC.'
       tags:
       - World Time
       security:
@@ -5235,7 +5243,7 @@ paths:
 
         matches, and for cities while the city list has not been loaded (`GET /settings`:
 
-        `cities_loaded`).'
+        `cities_loaded`). A `q` under 2 characters answers `[]` and spends no budget.'
       tags:
       - World Time
       security:
@@ -5263,7 +5271,9 @@ paths:
 
         name), with an optional `label`. The first row of an empty tab becomes its home. A place
 
-        already in the tab, a full tab, an unknown city or zone are 400s.'
+        already in the tab, a full tab, an unknown city or zone are 400s (an unknown city or zone
+
+        spends no rate-limit budget).'
       tags:
       - World Time
       requestBody:
@@ -11388,7 +11398,11 @@ components:
     WorldTimeEventLocationSchema:
       description: 'An event''s time in one of the places it was shared with (a copy made when the event was
 
-        created). `starts_local` and `ends_local` are that place''s wall clock (no offset).'
+        created). `starts_local` and `ends_local` are that place''s wall clock (no offset);
+
+        `utc_offset_minutes` is its offset at the start and `ends_utc_offset_minutes` at the end (they
+
+        differ when its clocks change during the event).'
       properties:
         name:
           title: Name
@@ -11411,6 +11425,9 @@ components:
         utc_offset_minutes:
           title: Utc Offset Minutes
           type: integer
+        ends_utc_offset_minutes:
+          title: Ends Utc Offset Minutes
+          type: integer
       required:
       - name
       - detail
@@ -11419,6 +11436,7 @@ components:
       - starts_local
       - ends_local
       - utc_offset_minutes
+      - ends_utc_offset_minutes
       title: WorldTimeEventLocationSchema
       type: object
     WorldTimeEventSchema:
@@ -11476,7 +11494,9 @@ components:
       additionalProperties: false
       description: 'Body for `POST /events`: the tab whose locations the event is shared with, a title (1 to 120
 
-        characters) and the two instants (ISO 8601 with an offset).'
+        characters) and the two instants (ISO 8601 with an offset). A `tab` that isn''t the caller''s is a
+
+        400.'
       properties:
         tab:
           format: uuid
@@ -11532,7 +11552,9 @@ components:
 
         a client can turn any instant of the day into this row''s wall clock. `dst_note` is a sentence
 
-        in the public wording when the row''s clocks change within 7 days, else empty.'
+        in the public wording when the row''s clocks change within 7 days **of now** (not of the `date`
+
+        shown), else empty.'
       properties:
         location:
           $ref: '#/components/schemas/WorldTimeLocationSchema'
@@ -11728,7 +11750,7 @@ components:
       title: WorldTimeMomentRowSchema
       type: object
     WorldTimeMomentSchema:
-      description: Every location of a tab at one instant (`at`).
+      description: 'Every location of a tab at one instant: `at`, in UTC.'
       properties:
         at:
           format: date-time
@@ -11745,9 +11767,11 @@ components:
       title: WorldTimeMomentSchema
       type: object
     WorldTimeSearchResultSchema:
-      description: 'A place the search offers. Send `value` back as `city` (when `kind` is `city`) or `zone`
+      description: 'A place the search offers. To add it, send `city_id` back as `city` (an integer; set when
 
-        (when it is `zone`) to add it. `hint` says why it matched when that is not obvious (`also
+        `kind` is `city`) or `value` as `zone` (when `kind` is `zone`). `value` is the same id or
+
+        zone as a string. `hint` says why it matched when that is not obvious (`also
 
         Lisboa`, `Time zone`).'
       properties:
@@ -11760,6 +11784,11 @@ components:
         value:
           title: Value
           type: string
+        city_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: City Id
         name:
           title: Name
           type: string
@@ -11772,6 +11801,7 @@ components:
       required:
       - kind
       - value
+      - city_id
       - name
       - detail
       - hint

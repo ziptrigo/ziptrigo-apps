@@ -59,7 +59,7 @@ def _other_names(name: str, raw: str) -> list[str]:
             or (other.isupper() and len(other) <= 4)
             # A name with no capital is a romanisation of another script (`li si ben`, and
             # `porto` for Bordeaux), not something that names the city in the Latin alphabet.
-            or not other[0].isupper()
+            or other == other.lower()
             or '|' in other
             or '\t' in other
         ):

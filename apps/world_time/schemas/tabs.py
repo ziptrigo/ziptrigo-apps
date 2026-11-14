@@ -90,12 +90,14 @@ class WorldTimeOrderSchema(Schema):
 
 
 class WorldTimeSearchResultSchema(Schema):
-    """A place the search offers. Send `value` back as `city` (when `kind` is `city`) or `zone`
-    (when it is `zone`) to add it. `hint` says why it matched when that is not obvious (`also
+    """A place the search offers. To add it, send `city_id` back as `city` (an integer; set when
+    `kind` is `city`) or `value` as `zone` (when `kind` is `zone`). `value` is the same id or
+    zone as a string. `hint` says why it matched when that is not obvious (`also
     Lisboa`, `Time zone`)."""
 
     kind: Literal['city', 'zone']
     value: str
+    city_id: int | None
     name: str
     detail: str
     hint: str
@@ -115,7 +117,8 @@ class WorldTimeGridRowSchema(Schema):
     """A location's hours for the day shown. `steps` are `[minute, offset]` pairs: the UTC offset
     (minutes) in force from that minute of the day (the first is minute 0), exact to the minute, so
     a client can turn any instant of the day into this row's wall clock. `dst_note` is a sentence
-    in the public wording when the row's clocks change within 7 days, else empty."""
+    in the public wording when the row's clocks change within 7 days **of now** (not of the `date`
+    shown), else empty."""
 
     location: WorldTimeLocationSchema
     zone_name: str
@@ -152,7 +155,7 @@ class WorldTimeMomentRowSchema(Schema):
 
 
 class WorldTimeMomentSchema(Schema):
-    """Every location of a tab at one instant (`at`)."""
+    """Every location of a tab at one instant: `at`, in UTC."""
 
     at: datetime
     rows: list[WorldTimeMomentRowSchema]

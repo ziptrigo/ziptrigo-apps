@@ -50,10 +50,18 @@ TOKYO = {
     'position': 1,
 }
 DETAIL = {'id': TAB_ID, 'name': 'My times', 'position': 0, 'locations': [LISBON, TOKYO]}
-PORTO = {'kind': 'city', 'value': '2735943', 'name': 'Porto', 'detail': 'Portugal', 'hint': ''}
+PORTO = {
+    'kind': 'city',
+    'value': '2735943',
+    'city_id': 2735943,
+    'name': 'Porto',
+    'detail': 'Portugal',
+    'hint': '',
+}
 PORTO_ALEGRE = {
     'kind': 'city',
     'value': '3452925',
+    'city_id': 3452925,
     'name': 'Porto Alegre',
     'detail': 'Rio Grande do Sul, Brazil',
     'hint': '',
@@ -61,6 +69,7 @@ PORTO_ALEGRE = {
 PACIFIC = {
     'kind': 'zone',
     'value': 'America/Los_Angeles',
+    'city_id': None,
     'name': 'Los Angeles',
     'detail': 'Pacific Time (PST)',
     'hint': 'Time zone',
@@ -213,9 +222,14 @@ class TestTabs:
         assert result.exit_code == 1 and 'Keep at least one tab.' in flat(result)
 
     def test_a_name_with_markup_is_shown_as_typed(self, api):
-        api.on('get', '/time/tabs', [{**TAB, 'name': '[bold]x[/]'}])
-        result = invoke('tabs', 'local')
-        assert result.exit_code == 0 and '[bold]x[/]' in result.output
+        hostile = '[/]'  # a closing tag with nothing to close crashes Rich when read as markup
+        api.on('get', '/time/tabs', [{**TAB, 'name': hostile}])
+        api.on('get', f'/time/tabs/{TAB_ID}', {**DETAIL, 'name': hostile})
+        api.on('get', f'/time/tabs/{TAB_ID}/times', TestNow.MOMENT)
+        for command in ('tabs', 'now', 'locations'):
+            result = invoke(command, 'local')
+            assert result.exit_code == 0, (command, result.output)
+            assert hostile in result.output, command
 
 
 class TestNow:
@@ -253,6 +267,9 @@ class TestNow:
         result = invoke('now', 'local', '--tab', 'Team', '--at', '2026-11-20T15:00')
         assert result.exit_code == 0, result.output
         assert api.sent('get', '/times')[0]['params'] == {'at': '2026-11-20T15:00'}
+        # An offset travels as a parameter, so the HTTP library encodes its `+`.
+        invoke('now', 'local', '--at', '2026-11-20T15:00+02:00')
+        assert api.sent('get', '/times')[-1]['params'] == {'at': '2026-11-20T15:00+02:00'}
 
     def test_offsets(self):
         assert [worldtime._offset(m) for m in (0, 540, -300, 345, -210)] == [
@@ -302,8 +319,10 @@ class TestSearchAndAdd:
         assert invoke('add', 'local', 'porto', '--first').exit_code == 0
         assert api.sent('post')[0]['json'] == {'city': 2735943}
         api.calls.clear()
-        result = invoke('add', 'local', 'porto', input='9\n')
-        assert result.exit_code == 1 and not api.writes()
+        for answer in ('9\n', '0\n'):
+            result = invoke('add', 'local', 'porto', input=answer)
+            assert result.exit_code == 1 and not api.writes()
+        assert 'Which one (0 to cancel)' in flat(result)
 
     def test_add_by_city_or_zone(self, api):
         api.on('post', f'/time/tabs/{TAB_ID}/locations', TOKYO, status=201)

@@ -2,21 +2,22 @@
 service the web pages use. Creating and changing spend `WT_EDIT_USER`, after the checks that need no
 write; deleting is never rate limited (it only takes something off the web)."""
 
-from datetime import timedelta
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.utils import timezone
+from ninja.errors import HttpError
 
-from ..models import Event
+from ..models import Event, Tab
 from ..schemas import (
     WorldTimeEventCreateSchema,
     WorldTimeEventSchema,
     WorldTimeEventUpdateSchema,
 )
 from ..services import events, zones
-from .common import charge, mapped_errors, owned_tab, wall_clock
+from ..services.grid import offset_minutes
+from .common import charge, mapped_errors, wall_clock
 from .router import router
 
 
@@ -40,9 +41,8 @@ def event_data(event: Event, now=None) -> dict:
                 'home': bool(row.get('home')),
                 'starts_local': wall_clock(start),
                 'ends_local': wall_clock(end),
-                'utc_offset_minutes': int(
-                    (start.utcoffset() or timedelta(0)).total_seconds() // 60
-                ),
+                'utc_offset_minutes': offset_minutes(start),
+                'ends_utc_offset_minutes': offset_minutes(end),
             }
         )
     return {
@@ -71,7 +71,11 @@ def create_event(request, payload: WorldTimeEventCreateSchema):
     """Share a time range: the event keeps a copy of the locations of `tab` (under the names the
     caller gave them), and anyone who has its `url` can see the title, the time and those places.
     The end must be after the start, at most 7 days later and not already past."""
-    tab = owned_tab(request, payload.tab)
+    # A `tab` that isn't the caller's is a 400 with a field message, like any reference in a body
+    # (the thing being made exists nowhere yet; it is the value that is refused).
+    tab = Tab.objects.select_related('user').filter(user=request.auth, pk=payload.tab).first()
+    if tab is None:
+        raise HttpError(400, 'tab: Choose one of your tabs.')
     with mapped_errors():
         events.clean_title(payload.title)  # a refusal here spends no budget
         events.clean_times(payload.starts_at, payload.ends_at)

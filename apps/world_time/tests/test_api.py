@@ -161,6 +161,12 @@ class TestTabs:
         limit_rule(settings, 'WT_EDIT_USER')
         for _ in range(3):
             assert post(client, '/tabs', auth, {'name': ''}).status_code == 400
+        # The last tab, an unknown city or zone, an empty order: none needs a write to refuse.
+        base = f'/tabs/{tab.pk}'
+        assert delete(client, base, auth).status_code == 400
+        assert post(client, f'{base}/locations', auth, {'city': 999}).status_code == 400
+        assert post(client, f'{base}/locations', auth, {'zone': 'Mars/Olympus'}).status_code == 400
+        assert post(client, f'{base}/locations/reorder', auth, {'ids': []}).status_code == 200
         assert post(client, '/tabs', auth, {'name': 'One'}).status_code == 201
         response = post(client, '/tabs', auth, {'name': 'Two'})
         assert response.status_code == 429 and 'Retry-After' in response
@@ -200,7 +206,7 @@ class TestLocations:
     @pytest.mark.parametrize(
         ('payload', 'status', 'detail'),
         [
-            ({}, 400, 'Send either city or zone, not both.'),
+            ({}, 400, 'Send city or zone.'),
             ({'city': 5, 'zone': 'UTC'}, 400, 'Send either city or zone, not both.'),
             ({'city': 999}, 400, 'city: Choose a place from the suggestions.'),
             ({'zone': 'Mars/Olympus'}, 400, 'zone: Unknown time zone.'),
@@ -271,6 +277,17 @@ class TestLocations:
         assert patch(client, path, auth, {'label': 'HQ'}).status_code == 200
         assert patch(client, path, auth, {'label': 'HQ2'}).status_code == 429
 
+    def test_a_location_of_another_tab_is_a_404(self, client, auth, tab, user, other_user):
+        # The caller's own tab in the path, with a row of their other tab, or of someone else's.
+        mine_elsewhere = make_location(make_tab(user, 'Other'), 'Paris', 'Europe/Paris')
+        theirs = make_location(make_tab(other_user), 'Rome', 'Europe/Rome')
+        for row in (mine_elsewhere, theirs):
+            path = f'/tabs/{tab.pk}/locations/{row.pk}'
+            assert patch(client, path, auth, {'label': 'x'}).status_code == 404
+            assert delete(client, path, auth).status_code == 404
+            row.refresh_from_db()
+            assert row.label == ''
+
     def test_remove_and_the_home_moves(self, client, auth, tab):
         make_location(tab, 'Tokyo', 'Asia/Tokyo')
         home = list_locations(tab)[0]
@@ -301,6 +318,7 @@ class TestSearch:
             {
                 'kind': 'city',
                 'value': '1',
+                'city_id': 1,
                 'name': 'Lisbon',
                 'detail': 'Portugal',
                 'hint': 'also Lisboa',
@@ -310,6 +328,7 @@ class TestSearch:
         assert first == {
             'kind': 'zone',
             'value': 'America/Los_Angeles',
+            'city_id': None,
             'name': 'Los Angeles',
             'detail': 'Pacific Time (PST)',
             'hint': 'Time zone',
@@ -319,6 +338,9 @@ class TestSearch:
 
     def test_it_is_rate_limited(self, client, auth, settings, ratelimit_clock):
         limit_rule(settings, 'WT_SEARCH_USER')
+        # A search that can match nothing runs no query and spends nothing.
+        for text in ('', 'z', '  ', '!'):
+            assert get(client, '/search', auth, q=text).json() == []
         assert get(client, '/search', auth, q='lis').status_code == 200
         assert get(client, '/search', auth, q='lisb').status_code == 429
 
@@ -424,6 +446,33 @@ class TestTimes:
         aware = get(client, f'/tabs/{tab.pk}/times', auth, at='2026-07-01T09:00:00+00:00').json()
         assert aware['rows'][1]['local'] == '2026-07-01T18:00'
 
+    def test_the_instant_is_answered_in_utc(self, client, auth, tab, now):
+        body = get(client, f'/tabs/{tab.pk}/times', auth, at='2026-07-01T09:00:00+02:00').json()
+        assert body['at'] == '2026-07-01T07:00:00Z'
+        naive = get(client, f'/tabs/{tab.pk}/times', auth, at='2026-07-01T09:00').json()
+        assert naive['at'] == '2026-07-01T08:00:00Z', 'Lisbon is on UTC+1 in July'
+        assert get(client, f'/tabs/{tab.pk}/times', auth, at='2026-07-01').json()['at'] == (
+            '2026-06-30T23:00:00Z'
+        )
+
+    @pytest.mark.parametrize(
+        'value',
+        ['0001-01-01T00:00', '9999-12-31T23:59', '0001-01-01T00:00+14:00', '2040-01-01T00:00Z'],
+    )
+    def test_a_moment_too_far_away_is_a_400_not_a_crash(self, client, auth, tab, now, value):
+        response = get(client, f'/tabs/{tab.pk}/times', auth, at=value)
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'at must be within ten years of now.'
+
+    def test_a_wall_time_the_home_clock_skips_is_refused(self, client, auth, tab, now):
+        # Lisbon, 29 March 2026: 1:00 becomes 2:00.
+        response = get(client, f'/tabs/{tab.pk}/times', auth, at='2026-03-29T01:30')
+        assert response.status_code == 400
+        assert "doesn't exist on the home location's clock" in response.json()['detail']
+        # The repeated hour of 25 October is its first occurrence (still summer time).
+        body = get(client, f'/tabs/{tab.pk}/times', auth, at='2026-10-25T01:30').json()
+        assert body['at'] == '2026-10-25T00:30:00Z'
+
     def test_a_bad_moment(self, client, auth, tab):
         response = get(client, f'/tabs/{tab.pk}/times', auth, at='soon')
         assert response.status_code == 400
@@ -456,6 +505,7 @@ class TestEvents:
                 'starts_local': '2026-12-10T09:00',
                 'ends_local': '2026-12-10T10:30',
                 'utc_offset_minutes': 0,
+                'ends_utc_offset_minutes': 0,
             },
             {
                 'name': 'Tokyo office',
@@ -465,6 +515,7 @@ class TestEvents:
                 'starts_local': '2026-12-10T18:00',
                 'ends_local': '2026-12-10T19:30',
                 'utc_offset_minutes': 540,
+                'ends_utc_offset_minutes': 540,
             },
         ]
         assert get(client, f'/events/{event.pk}', auth).json()['id'] == body['id']
@@ -563,7 +614,10 @@ class TestEvents:
         assert patch(client, f'/events/{theirs.pk}', auth, {'title': 'y'}).status_code == 404
         assert delete(client, f'/events/{theirs.pk}', auth).status_code == 404
         payload = {'tab': str(theirs_tab.pk), 'title': 'x', 'starts_at': START, 'ends_at': END}
-        assert post(client, '/events', auth, payload).status_code == 404
+        response = post(client, '/events', auth, payload)
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'tab: Choose one of your tabs.'
+        assert Event.objects.count() == 1
         assert get(client, '/events', auth).json() == []
         assert Event.objects.get(pk=theirs.pk).title == 'x'
 

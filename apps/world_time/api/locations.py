@@ -18,6 +18,7 @@ from ..schemas import (
     WorldTimeOrderSchema,
     WorldTimeSearchResultSchema,
 )
+from ..services import cities as city_service
 from ..services import locations as location_service
 from .common import charge, location_data, mapped_errors, owned_location, owned_tab
 from .router import router
@@ -29,17 +30,21 @@ def search(request, q: str = ''):
     abbreviation's zones first (`PST`, `IST`), then cities, most populous first (by name without
     accents, or by another name such as `Lisboa`), then time zones by name. Empty when nothing
     matches, and for cities while the city list has not been loaded (`GET /settings`:
-    `cities_loaded`)."""
+    `cities_loaded`). A `q` under 2 characters answers `[]` and spends no budget."""
+    text = ' '.join(q.split())[:SEARCH_QUERY_MAX]
+    if len(city_service.normalize(text)) < city_service.MIN_QUERY_CHARS:
+        return []  # nothing can match and no query runs: it spends no budget
     charge(request, 'WT_SEARCH_USER')
     return [
         {
             'kind': result.kind,
             'value': result.value,
+            'city_id': int(result.value) if result.kind == 'city' else None,
             'name': result.name,
             'detail': result.detail,
             'hint': result.hint,
         }
-        for result in services.search(q[:SEARCH_QUERY_MAX])
+        for result in services.search(text)
     ]
 
 
@@ -47,12 +52,21 @@ def search(request, q: str = ''):
 def add_location(request, tab_id: UUID, payload: WorldTimeLocationCreateSchema):
     """Add a place to the end of a tab: `city` (a GeoNames id from the search) or `zone` (an IANA
     name), with an optional `label`. The first row of an empty tab becomes its home. A place
-    already in the tab, a full tab, an unknown city or zone are 400s."""
+    already in the tab, a full tab, an unknown city or zone are 400s (an unknown city or zone
+    spends no rate-limit budget)."""
     tab = owned_tab(request, tab_id)
-    if (payload.city is None) == (not payload.zone):
+    if payload.city is None and not payload.zone:
+        raise HttpError(400, 'Send city or zone.')
+    if payload.city is not None and payload.zone:
         raise HttpError(400, 'Send either city or zone, not both.')
     with mapped_errors():
-        location_service.clean_label(payload.label)  # a refusal here spends no budget
+        # Refusals that need no write spend no budget: the label, and whether the place exists
+        # (the service decides again under its lock).
+        location_service.clean_label(payload.label)
+        if payload.city is not None:
+            location_service.check_city(payload.city)
+        else:
+            location_service.check_zone(payload.zone or '')
         charge(request, 'WT_EDIT_USER')
         with transaction.atomic():
             if payload.city is not None:
@@ -70,8 +84,9 @@ def reorder_locations(request, tab_id: UUID, payload: WorldTimeOrderSchema):
     """Put the tab's locations in the order given and answer them all, in order. Ids that aren't
     the tab's are ignored; rows left out keep their place among the others."""
     tab = owned_tab(request, tab_id)
-    charge(request, 'WT_EDIT_USER')
-    services.reorder_locations(tab, payload.ids)
+    if payload.ids:  # an empty list changes nothing and spends nothing
+        charge(request, 'WT_EDIT_USER')
+        services.reorder_locations(tab, payload.ids)
     return [location_data(row) for row in services.list_locations(tab)]
 
 

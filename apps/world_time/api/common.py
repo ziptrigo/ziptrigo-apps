@@ -6,13 +6,17 @@ Status codes (documented once, here):
 - **400** a `ValidationError` from a service (`field: message`, or the message alone for one that
   belongs to no field: a full tab, the last tab, a place already in the tab), or a query parameter
   read by hand (`date`, `at`). A reference in a body to something that doesn't exist (a `city`
-  that is not in the city list, an unknown `zone`) is a 400 too.
-- **404** a tab, location or event that isn't the caller's (never 403, so an id can't be probed).
+  that is not in the city list, an unknown `zone`, a `tab` that isn't the caller's in
+  `POST /events`) is a 400 too.
+- **404** a tab, location or event **in the path** that isn't the caller's (never 403, so an id
+  can't be probed).
 - **422** django-ninja's own validation, before an endpoint runs, with a *list-valued* `detail`: a
   malformed id in the path, a mistyped body field, an unknown key in a body (`extra='forbid'`).
 - **429** the site-wide rate limiter (`ratelimit.enforce`), with `Retry-After`. The rules, and so
   the budgets, are the web's: `WT_EDIT_USER` for every change (deleting an event is never limited)
-  and `WT_SEARCH_USER` for the search.
+  and `WT_SEARCH_USER` for the search. A refusal that needs no write spends nothing (a bad name,
+  label or title, an unknown city or zone, the last tab, a one-letter search); what only the locked
+  write can decide (a duplicate, a full tab, a cap) is charged.
 
 World Time is free: nothing here costs credits, so there is no 402.
 

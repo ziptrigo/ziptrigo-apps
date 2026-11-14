@@ -197,27 +197,34 @@ class CityMatch:
 def search_cities(query: str, limit: int) -> list[CityMatch]:
     """Cities matching `query`: those whose name (or a later word of it) starts with it, and those
     known by another name that starts with it, **together**: a city whose own name is the query
-    first, then one known by exactly that name, then the rest, the most populous first in each. Both sets are read before the cut, so a big city typed by
-    its local name (`Roma`) is not hidden behind smaller ones that merely start with it. Two
-    queries."""
+    first, then one known by exactly that name, then the rest, the most populous first in each.
+
+    Every set is read before the cut, so a big city typed by its local name (`Roma`) is not hidden
+    behind smaller ones that merely start with it; and the cities named exactly so are read on
+    their own (an equality on the indexed column), so a small one whose whole name is a common
+    prefix (`Pau`, `Man`, `Bo`) is found however many bigger cities start with it. Three queries."""
     needle = normalize(query[:SEARCH_QUERY_MAX])
     if len(needle) < MIN_QUERY_CHARS:
         return []
     typed = ' '.join(query.split()).casefold()
+    exact = City.objects.filter(search_name=needle).order_by('-population', 'geoname_id')[:limit]
+    # 0: the city's own name is the query; 1: another of its names is; 2: it only starts with it.
+    rank: dict[int, int] = {}
+    found: dict[int, CityMatch] = {}
+    for city in exact:
+        found[city.pk] = CityMatch(city)
+        rank[city.pk] = 0
     own = City.objects.filter(
         Q(search_name__startswith=needle) | Q(search_name__contains=f' {needle}')
     ).order_by('-population', 'geoname_id')[:limit]
-    found: dict[int, CityMatch] = {city.pk: CityMatch(city) for city in own}
+    for city in own:
+        found.setdefault(city.pk, CityMatch(city))
     # More rows than the limit: one city can match by several of its names.
     others = (
         CityName.objects.filter(search_name__startswith=needle)
         .select_related('city')
         .order_by('-city__population', 'city_id', 'name')[: limit * 8]
     )
-    # 0: the city's own name is the query; 1: another of its names is; 2: it only starts with it.
-    rank: dict[int, int] = {
-        pk: 0 for pk, match in found.items() if match.city.search_name == needle
-    }
     by_other = 0
     for other in others:
         if other.search_name == needle:
