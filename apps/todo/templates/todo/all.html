@@ -13,3 +13,8 @@
     {% include 'todo/partials/task_list.html' %}
 </div>
 {% endblock %}
+
+{% block todo_js_libs %}
+{% comment %}Only the Manual sort shows drag handles, but the list is swapped by htmx, so the helper is always there.{% endcomment %}
+{% include 'core/partials/sortable_script.html' %}
+{% endblock %}

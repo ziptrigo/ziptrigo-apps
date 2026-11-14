@@ -46,7 +46,7 @@ from . import attachments, blockers, comments, dates, events, reminders
 from . import recurrence as recurrence_service
 from .accounts import allocate_number, get_account, lock_account
 from .billing import cannot_afford, charge_task_creation
-from .dates import next_position, next_today_position
+from .dates import next_all_position, next_position, next_today_position
 from .limits import DESCRIPTION_MAX, TITLE_MAX
 from .references import sync_references
 from .task_state import lock_tasks, write_state
@@ -451,6 +451,7 @@ def create_task(
             unpaid_at=timezone.now() if unpaid else None,
             position=next_position(cleaned_parent),
             today_position=next_today_position(user, cleaned_date),
+            all_position=next_all_position(user),
         )
         task.save()
         _record_created(task, cleaned_parent, previous, cleaned_rule or _rule_of(recurrence))
@@ -1263,11 +1264,14 @@ def purge_trash() -> int:
 
 
 def reorder(user: User, *, scope: str, ids: list[UUID], parent: Task | None = None) -> int:
-    """Write `position = index` for the given ids, inside one transaction, ignoring ids that are
-    not in the set. `scope='today'` orders the tasks due today (`dates.todays_tasks`, the list the
-    page orders; the overdue ones keep the default sort) in `Task.today_position`; `'subtasks'`
-    orders the children of `parent` in `Task.position`. The two are separate columns, so ordering
-    one list never puts the other into manual order. Returns how many tasks were positioned."""
+    """Write the manual order, inside one transaction, ignoring ids that are not in the set.
+    `scope='today'` orders the tasks due today (`dates.todays_tasks`, the list the page orders; the
+    overdue ones keep the default sort) in `Task.today_position`; `'subtasks'` orders the children of
+    `parent` in `Task.position`; `'all'` orders the user's open tasks (the All tasks page, sort
+    Manual) in `Task.all_position`. The columns are separate, so ordering one list never puts
+    another into manual order. Returns how many tasks were positioned."""
+    if scope == 'all':
+        return _reorder_all(user, ids)
     if scope == 'today':
         allowed = dates.todays_tasks(user)
         field = 'today_position'
@@ -1291,3 +1295,28 @@ def reorder(user: User, *, scope: str, ids: list[UUID], parent: Task | None = No
         lock_account(user.pk)  # many task rows in one write: take turns with the rest
         Task.objects.bulk_update(changed, [field, 'updated_at'])
     return len(changed)
+
+
+def _reorder_all(user: User, ids: list[UUID]) -> int:
+    """The All tasks list is paged, so the ids sent are one page of it: they swap the places they
+    already hold in the user's whole manual order (the listed ones refill those places in the order
+    sent) and every task is then numbered by its place, which also settles tasks that tied at 0
+    before anyone ordered the list. Only the rows whose number changes are written."""
+    with transaction.atomic():
+        lock_account(user.pk)
+        current = list(
+            dates.order_tasks(dates.open_tasks(user), 'all_manual').values_list(
+                'pk', 'all_position'
+            )
+        )
+        order = [pk for pk, _ in current]
+        listed = set(ids) & set(order)
+        wanted = [pk for pk in dict.fromkeys(ids) if pk in listed]
+        slots = iter(wanted)
+        order = [next(slots) if pk in listed else pk for pk in order]
+        old = dict(current)
+        changed = [
+            Task(pk=pk, all_position=index) for index, pk in enumerate(order) if old[pk] != index
+        ]
+        Task.objects.bulk_update(changed, ['all_position'])
+    return len(wanted)

@@ -108,8 +108,8 @@
     </p>
     {% endif %}
     <div class="bg-white dark:bg-gray-800 shadow-sm overflow-visible sm:rounded-xl border border-gray-200 dark:border-gray-700">
-        <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list>
-            {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False %}
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-empty-list{% if sortable %} data-sortable data-reorder-url="{% url 'todo:reorder' %}" data-scope="all"{% endif %}>
+            {% for task in tasks %}{% include 'todo/partials/task_row.html' with oob_nav=False sortable=sortable %}
             {% empty %}
             <li data-empty class="px-4 py-12 text-center sm:px-6 text-sm text-gray-500 dark:text-gray-400">
                 {% if view == 'closed' %}{% if resolution == 'done' %}No tasks closed as done yet.{% elif resolution == 'wont_do' %}No tasks closed as won't do yet.{% else %}No closed tasks yet.{% endif %}{% elif view == 'trash' %}The trash is empty.{% else %}No open tasks. Add one above.{% endif %}

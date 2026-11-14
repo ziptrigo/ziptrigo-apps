@@ -65,6 +65,8 @@ from .comments import (
 )
 from .dates import (
     DEFAULT_DIRECTIONS,
+    LIST_SORTS,
+    MANUAL_SORT,
     SORT_DEFAULT,
     SORTS,
     UPCOMING_DAYS,
@@ -233,6 +235,8 @@ __all__ = [
     'MAX_REVISIONS',
     'POSTPONE_PRESETS',
     'DEFAULT_DIRECTIONS',
+    'LIST_SORTS',
+    'MANUAL_SORT',
     'SORTS',
     'SORT_DEFAULT',
     'TASK_URL_PATH',

@@ -12,7 +12,7 @@ from django.urls import reverse
 from apps.billing.services import add_credits, get_balance
 
 from ..models import Label, Task, TodoAccount
-from ..services import complete_task, create_task, get_account, trash_task
+from ..services import complete_task, create_task, dates, get_account, trash_task
 from .factories import make_label, make_task, make_user
 
 pytestmark = pytest.mark.django_db
@@ -72,7 +72,9 @@ class TestPages:
 
         assert client.get(reverse(name)).status_code == 200
 
-    @pytest.mark.parametrize('name', ['todo:today', 'todo:labels', 'todo:filters', 'todo:task'])
+    @pytest.mark.parametrize(
+        'name', ['todo:today', 'todo:all', 'todo:labels', 'todo:filters', 'todo:task']
+    )
     def test_the_reorderable_pages_load_the_shared_sortable_helper(self, web, funded_user, name):
         # Without it `makeSortable` returns early and ordering quietly stops working on the page.
         args = [create_task(funded_user, title='A task').number] if name == 'todo:task' else []
@@ -826,6 +828,95 @@ class TestSubtasks:
 
         assert response.status_code == 422
         assert 'A subtask cannot have subtasks.' in text(response)
+
+
+class TestManualSortOfAllTasks:
+    @pytest.fixture
+    def three(self, funded_user):
+        return [create_task(funded_user, title=t) for t in 'ABC']
+
+    def order(self, web, **params):
+        body = text(web.get(reverse('todo:list'), {'view': 'all', **params}, **HTMX))
+        found = [t for t in 'ABC' if f'>{t}<' in body]
+        return sorted(found, key=lambda t: body.index(f'>{t}<')), body
+
+    def test_manual_is_the_last_sort_and_shows_the_handles_only_when_selected(self, web, three):
+        plain, body = self.order(web)
+        assert 'drag-handle' not in body
+        manual, body = self.order(web, sort='manual')
+        assert 'drag-handle' in body and 'data-scope="all"' in body
+        assert body.index('>Title<') < body.index('>Manual<')
+        # reversed, a drag would mean the opposite: no handles
+        assert 'drag-handle' not in self.order(web, sort='manual', dir='desc')[1]
+
+    def test_dragging_saves_the_order_and_manual_shows_it(self, web, three):
+        a, b, c = three
+        response = web.post(
+            reverse('todo:reorder'),
+            {'scope': 'all', 'ids[]': [str(c.pk), str(a.pk), str(b.pk)]},
+            **HTMX,
+        )
+
+        assert response.status_code == 204
+        assert self.order(web, sort='manual')[0] == ['C', 'A', 'B']
+        # the other sorts and Today's column are untouched
+        assert self.order(web)[0] == ['A', 'B', 'C']
+        assert Task.objects.get(pk=c.pk).today_position == 0
+
+    def test_a_page_swaps_the_places_it_holds_in_the_whole_order(self, web, funded_user, three):
+        a, b, c = three
+        d = create_task(funded_user, title='D')
+        web.post(
+            reverse('todo:reorder'),
+            {'scope': 'all', 'ids[]': [str(x.pk) for x in (a, b, c, d)]},
+            **HTMX,
+        )
+        # only B and D were on "the page": they swap places, A and C stay put
+        web.post(reverse('todo:reorder'), {'scope': 'all', 'ids[]': [str(d.pk), str(b.pk)]}, **HTMX)
+
+        ordered = dates.order_tasks(dates.open_tasks(funded_user), 'all_manual')
+        assert [t.title for t in ordered] == ['A', 'D', 'C', 'B']
+        assert [t.all_position for t in ordered] == [0, 1, 2, 3]
+
+    def test_ids_that_are_not_the_users_open_tasks_are_ignored(self, web, funded_user, three):
+        a, b, c = three
+        theirs = make_task(make_user(email='other@example.com'), title='Theirs')
+        done = create_task(funded_user, title='Done')
+        complete_task(done)
+
+        web.post(
+            reverse('todo:reorder'),
+            {'scope': 'all', 'ids[]': [str(theirs.pk), str(done.pk), str(b.pk), str(a.pk)]},
+            **HTMX,
+        )
+
+        assert Task.objects.get(pk=theirs.pk).all_position == 0
+        assert self.order(web, sort='manual')[0] == ['B', 'A', 'C']
+
+    def test_a_new_task_goes_last_once_the_list_has_a_manual_order(self, web, funded_user, three):
+        a, b, c = three
+        web.post(
+            reverse('todo:reorder'),
+            {'scope': 'all', 'ids[]': [str(c.pk), str(b.pk), str(a.pk)]},
+            **HTMX,
+        )
+
+        create_task(funded_user, title='D')
+
+        body = self.order(web, sort='manual')[1]
+        assert body.index('>C<') < body.index('>B<') < body.index('>A<') < body.index('>D<')
+
+
+class TestRowClick:
+    def test_rows_are_clickable_and_the_script_ignores_interactive_elements(self):
+        from pathlib import Path
+
+        row = Path('apps/todo/templates/todo/partials/task_row.html').read_text()
+        script = Path('apps/todo/static/todo/js/tasks.js').read_text()
+
+        assert 'task-row' in row and 'cursor-pointer' in row and 'a.task-title' in script
+        for selector in ('a, button', '[x-data]', '.drag-handle'):
+            assert selector in script
 
 
 class TestReorder:

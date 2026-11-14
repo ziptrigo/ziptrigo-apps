@@ -637,7 +637,7 @@ class TestReorder:
 
         assert 'parent' in errors(reorder, user, scope='subtasks', ids=[], parent=theirs)
         assert 'parent' in errors(reorder, user, scope='subtasks', ids=[])
-        assert 'scope' in errors(reorder, user, scope='all', ids=[])
+        assert 'scope' in errors(reorder, user, scope='nope', ids=[])
 
     def test_a_manual_order_sorts_by_position(self, user, config, wednesday):
         a = make_task(user, due_date=wednesday, title='A')
