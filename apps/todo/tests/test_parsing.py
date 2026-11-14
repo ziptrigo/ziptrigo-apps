@@ -202,10 +202,15 @@ class TestParsedTitle:
         parsed = validated({'has_date': True, 'due_date': '2026-11-02', 'due_time': value})
         assert parsed.due_time == expected
 
-    def test_a_time_needs_a_date(self):
+    def test_a_time_with_no_date_is_a_time_of_day_even_if_the_model_did_not_say_so(self):
         parsed = validated({'has_date': True, 'due_time': '09:00', 'clean_title': 'x'})
-        assert parsed.due_time is None
-        assert parsed.has_date is False
+        assert parsed.time_only is True
+        assert parsed.due_time == time(9, 0)
+        assert parsed.has_date is True
+
+    def test_a_time_with_a_date_is_not_time_only(self):
+        parsed = validated({'has_date': True, 'due_date': '2026-11-02', 'due_time': '09:00'})
+        assert parsed.time_only is False
 
     def test_no_date_found_clears_everything(self):
         parsed = validated(
@@ -266,13 +271,22 @@ class TestParsedTitle:
 
     @pytest.mark.parametrize('value', ['true', 1, 'yes'])
     def test_time_only_must_be_true_itself(self, value):
-        parsed = validated({'has_date': True, 'due_time': '14:00', 'time_only': value})
+        """Not a flag the model sent, but a time with no date is a time of day all the same."""
+        parsed = validated(
+            {'has_date': True, 'due_date': '2026-11-02', 'due_time': '14:00', 'time_only': value}
+        )
         assert parsed.time_only is False
-        assert parsed.has_date is False
 
     def test_time_only_needs_a_time(self):
         parsed = validated({'has_date': True, 'due_date': '2026-11-02', 'time_only': True})
         assert parsed.time_only is False
+
+    def test_a_repeat_drops_a_relative_time(self):
+        parsed = validated(
+            {'has_date': True, 'in_minutes': 120, 'rrule': 'FREQ=DAILY', 'clean_title': 'x'}
+        )
+        assert parsed.in_minutes is None
+        assert parsed.due_date == TODAY  # the rule's first date
 
     def test_time_only_does_not_apply_to_a_repeat(self):
         parsed = validated(
@@ -656,7 +670,63 @@ class TestResolveWhen:
     def test_a_time_of_day_alone_is_today_unless_it_has_passed(self, at, expected):
         # The model's own date, if any, is not trusted for this.
         parsed = ParsedTitle(has_date=True, due_time=at, time_only=True, due_date=date(2030, 1, 1))
-        assert resolve_when(parsed, ask()) == (expected, at)
+        assert resolve_when(parsed, ask('call dad at 2pm')) == (expected, at)
+
+    def test_a_time_the_model_forgot_to_flag_is_still_a_time_of_day(self):
+        """No date and no `time_only` from the model: still today or tomorrow by the clock."""
+        parsed = validated({'has_date': True, 'due_time': '10:00', 'clean_title': 'x'})
+        assert resolve_when(parsed, ask('x at 10am')) == (date(2026, 10, 29), time(10, 0))
+
+    def test_a_past_time_the_model_put_on_today_goes_to_tomorrow(self):
+        """The model gave today's date with a time that has gone by and no flag: tomorrow."""
+        parsed = ParsedTitle(has_date=True, due_date=TODAY, due_time=time(10, 0))
+        assert resolve_when(parsed, ask('call dad at 10am')) == (date(2026, 10, 29), time(10, 0))
+
+    def test_a_time_still_ahead_on_todays_date_stays(self):
+        parsed = ParsedTitle(has_date=True, due_date=TODAY, due_time=time(18, 0))
+        assert resolve_when(parsed, ask('call dad at 6pm')) == (TODAY, time(18, 0))
+
+    @pytest.mark.parametrize(
+        'title',
+        [
+            'call dad today at 10am',
+            'call dad tonight at 1am',
+            'ligar ao pai hoje as 10',
+            'call dad on 10/28 at 10am',
+            'call dad on the 28th at 10am',
+            'call dad oct 28 at 10am',
+            'call dad may 28 at 10am',
+            'call dad on Wednesday at 10am',
+        ],
+    )
+    def test_a_title_that_names_the_day_keeps_the_models_date(self, title):
+        for flagged in (False, True):
+            parsed = ParsedTitle(
+                has_date=True, due_date=TODAY, due_time=time(10, 0), time_only=flagged
+            )
+            assert resolve_when(parsed, ask(title)) == (TODAY, time(10, 0)), title
+
+    def test_a_flagged_reading_that_names_a_day_with_no_date_still_gets_the_clock_rule(self):
+        parsed = ParsedTitle(has_date=True, due_time=time(10, 0), time_only=True)
+        assert resolve_when(parsed, ask('call dad tomorrow at 10am')) == (
+            date(2026, 10, 29),
+            time(10, 0),
+        )
+
+    def test_a_flagged_reading_for_tomorrow_keeps_tomorrow(self):
+        """The model flagged "tomorrow at 10am" but dated it right: its date is not overwritten
+        (here the clock rule would have said tomorrow too; 8 AM makes them differ)."""
+        parsed = ParsedTitle(
+            has_date=True, due_date=date(2026, 10, 29), due_time=time(18, 0), time_only=True
+        )
+        assert resolve_when(parsed, ask('call dad tomorrow at 6pm')) == (
+            date(2026, 10, 29),
+            time(18, 0),
+        )
+
+    def test_a_repeat_keeps_its_own_first_date(self):
+        parsed = ParsedTitle(has_date=True, due_date=TODAY, due_time=time(9, 0), rrule='FREQ=DAILY')
+        assert resolve_when(parsed, ask('stretch every day at 9am')) == (TODAY, time(9, 0))
 
     def test_seconds_of_now_do_not_push_the_same_minute_to_tomorrow(self):
         parsed = ParsedTitle(has_date=True, due_time=time(14, 30), time_only=True)
@@ -749,6 +819,40 @@ class TestRelativeAndTimeOfDay:
         fake_title_parser.replies['Call dad in 2 hours'] = parse_reply(raw, request)
         result = parse_title(request)
         assert (result.due_date, result.due_time) == (TODAY, time(15, 0))
+
+
+class TestNamesADay:
+    @pytest.mark.parametrize(
+        'title',
+        [
+            'call dad today',
+            'Call dad TONIGHT',
+            'ligar amanhã',
+            'dentist friday 3pm',
+            'taxes by April',
+            'party 12/25',
+            'party 25.12',
+            'start 2026-11-02',
+            'meet on the 3rd',
+            'trip may 3',
+        ],
+    )
+    def test_positives(self, title):
+        assert parsing.names_a_day(title) is True
+
+    @pytest.mark.parametrize(
+        'title',
+        [
+            'call dad at 2p',
+            'call dad in 2 hours',
+            'I may call dad at 10am',
+            'visit the sea (mar)',
+            'buy 2 apples at 5pm',
+            'read chapter 3 at 10',
+        ],
+    )
+    def test_negatives(self, title):
+        assert parsing.names_a_day(title) is False
 
 
 class TestSafeTitle:
@@ -980,6 +1084,7 @@ class TestEndpoint:
             'rrule_text': 'Every month on the 1st',
             'matched_text': 'every month on the 1st at 9am',
             'label': 'Sun 11/01, 9:00 AM · Every month on the 1st',
+            'relative': False,
         }
 
     def test_the_request_the_model_sees(self, web, fake_title_parser, funded_user):
@@ -1037,6 +1142,7 @@ class TestEndpoint:
         assert (body['due_date'], body['due_time']) == ('2026-10-28', '09:00')
         assert body['clean_title'] == 'Call dad'
         assert body['label'] == 'Today, 9:00 AM'
+        assert body['relative'] is True
 
     def test_a_time_of_day_already_past_is_tomorrow(self, web, fake_title_parser):
         """Now is 12:00 (UTC): 10 AM has passed."""

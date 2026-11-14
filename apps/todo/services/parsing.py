@@ -29,7 +29,10 @@ that does not fit costs the chip, never a wrong task.
 **Two readings are worked out here, not by the model** (it is told only what was written): a time
 relative to now ("call dad in 2 hours": `in_minutes`, added to the user's now in their zone, so the
 day rolls over past midnight and a clock change is honoured) and a time of day with no date ("at
-2pm": `time_only`, today when that time has not passed yet, else tomorrow). See `resolve_when`.
+2pm": `time_only`, today when that time has not passed yet, else tomorrow). See `resolve_when`,
+which also checks the model's flag against the title: a time of day with no date is `time_only`
+even when the model forgot to say so, and a flagged one whose title does name a day ("tomorrow at
+10am") keeps the day the model read.
 
 **A slow model must not take the web tier with it** (review of #198): the call is bounded by a short
 timeout (`TODO_AI_TIMEOUT_SECONDS`, 6 s, no SDK retries) and by `_slot`, a per-process
@@ -50,12 +53,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from apps.accounts.services.timezones import zone_named
 from apps.core.datetime_format import (
     PUBLIC,
     DisplayFormats,
@@ -127,6 +130,29 @@ DATE_WORDS = frozenset(
     """.split()
 )
 _DIGIT = re.compile(r'\d')
+
+#: Words that name a day (or a month): a title with one writes a date, so a time of day next to it
+#: is not "a time with no date" (`resolve_when`). `may` and `mar` are left out (a verb, and "sea"),
+#: so `_NUMERIC_DAY` also reads "may 3".
+_DAY_WORDS = frozenset(
+    """
+    today tonight tomorrow monday tuesday wednesday thursday friday saturday sunday
+    mon tue wed thu fri sat sun
+    january february march april june july august september october november december
+    jan feb apr jun jul aug sep sept oct nov dec
+    hoje amanha segunda terca quarta quinta sexta sabado domingo
+    """.split()
+)
+#: A numeric date (`10/28`, `28.10`, `2026-10-28`), an ordinal (`28th`) or "may 3".
+_NUMERIC_DAY = re.compile(r'\d{1,4}[/.\-]\d{1,2}|\b\d{1,2}(?:st|nd|rd|th)\b|\bmay\s+\d', re.I)
+
+
+def names_a_day(title: str) -> bool:
+    """Whether `title` writes a day (today, a weekday, a month, a numeric date), as opposed to
+    only a time of day or a relative time."""
+    if _NUMERIC_DAY.search(title):
+        return True
+    return any(word in _DAY_WORDS for word in normalize_for_search(title).split())
 
 
 def looks_dated(title: str) -> bool:
@@ -287,12 +313,18 @@ class ParsedTitle(BaseModel):
 
     @model_validator(mode='after')
     def _consistent(self, info: ValidationInfo) -> 'ParsedTitle':
-        """A time needs a date (unless it is relative to now, or a time of day whose date
-        `resolve_when` picks); a rule without a date gets its first one; `has_date` is true only
-        when something usable is left; the title is never empty (when the context has one)."""
+        """A time with no date is a time of day (`time_only`; `resolve_when` picks the day), unless
+        it is relative to now. A repeat has its own first date, so it takes neither: a rule with
+        `in_minutes` loses `in_minutes`. A rule without a date gets its first one; `has_date` is
+        true only when something usable is left; the title is never empty (when the context has
+        one)."""
+        if self.rrule is not None:
+            self.in_minutes = None
         relative = self.in_minutes is not None
         if relative or self.due_time is None or self.rrule is not None:
-            self.time_only = False  # a repeat has its own first date
+            self.time_only = False
+        elif self.due_date is None:
+            self.time_only = True  # a time and no date, whether or not the model said so
         if self.due_date is None:
             if not (relative or self.time_only):
                 self.due_time = None
@@ -325,6 +357,9 @@ class TitleParse:
     rrule_text: str | None = None
     matched_text: str = ''
     label: str = ''
+    #: The time is relative to now ("in 2 hours"): it is right for the moment it was read, so the
+    #: page shifts it by how long the chip waited (`title_parse.js`).
+    relative: bool = False
 
 
 # -- The AI client -------------------------------------------------------------------------------
@@ -348,7 +383,9 @@ Rules:
 - due_time is null unless a time is written ("at 9am", "18:30", "noon"). "morning" and the like are
   not times.
 - time_only is true when the title writes a time of day but no date and no repeat ("call dad at
-  2pm"): give due_time, and the date is worked out for you (due_date may be null). Otherwise false.
+  2pm"): give due_time, and the date is worked out for you (due_date may be null). If you give a
+  due_date for such a title anyway, it is today when that time is still ahead of now, otherwise
+  tomorrow. Otherwise false.
 - in_minutes is for a time relative to now in minutes or hours ("in 2 hours", "in 30 min", "in an
   hour and a half", "daqui a 2 horas"): the number of minutes from now, with due_date and due_time
   null and has_date true. Otherwise null. A relative number of days, weeks or months ("in 3 days")
@@ -526,33 +563,34 @@ def chip_text(
     return text
 
 
-def _zone(name: str) -> ZoneInfo:
-    try:
-        return ZoneInfo(name)
-    except ZoneInfoNotFoundError, ValueError:
-        return ZoneInfo('UTC')
-
-
 def resolve_when(parsed: ParsedTitle, request: ParseRequest) -> tuple[date | None, time | None]:
     """The due date and time of a reading, working out the two the model is not trusted with.
 
     - `in_minutes` ("in 2 hours"): the user's now plus that many minutes, counted in real time (in
       UTC) and read back on their clock, so it rolls over to tomorrow past midnight and a clock
       change is honoured.
-    - `time_only` ("at 2pm", no date written): today when that time is now or later on the user's
-      clock, else tomorrow ("at 10am" at 1pm is tomorrow morning).
+    - A time of day with no date written ("at 2pm"): today when that time is now or later on the
+      user's clock, else tomorrow ("at 10am" at 1pm is tomorrow morning). The model's flag
+      (`time_only`) is checked against the title in both directions, since the model gets either
+      wrong now and then: a flagged reading whose title names a day ("tomorrow at 10am") keeps the
+      model's date (when it gave one), and an unflagged one that puts a time that has already
+      passed on today, with no day named in the title, goes to tomorrow.
     - Otherwise what the model read."""
     if parsed.in_minutes is not None:
-        zone = _zone(request.timezone)
+        zone = zone_named(request.timezone)
+        # `fold=0` for the repeated hour when the clocks go back: "now" is its first occurrence.
         now = datetime.combine(request.today, request.now_local, tzinfo=zone)
         moment = (now.astimezone(UTC) + timedelta(minutes=parsed.in_minutes)).astimezone(zone)
         return moment.date(), time(moment.hour, moment.minute)
-    if parsed.time_only and parsed.due_time is not None:
+    at = parsed.due_time
+    if at is not None and parsed.rrule is None:
         now = time(request.now_local.hour, request.now_local.minute)
-        if parsed.due_time >= now:
-            return request.today, parsed.due_time
-        return request.today + timedelta(days=1), parsed.due_time
-    return parsed.due_date, parsed.due_time
+        written = names_a_day(request.title)
+        flagged = parsed.time_only and (parsed.due_date is None or not written)
+        missed = parsed.due_date == request.today and at < now and not written
+        if flagged or missed:
+            return (request.today if at >= now else request.today + timedelta(days=1)), at
+    return parsed.due_date, at
 
 
 def _tokens(text: str) -> set[str]:
@@ -613,4 +651,5 @@ def parse_title(request: ParseRequest, *, charge: Callable[[], bool] | None = No
         rrule_text=describe(parsed.rrule, wording) if parsed.rrule else None,
         matched_text=matched,
         label=chip_text(due_date, request.today, due_time, parsed.rrule, wording),
+        relative=parsed.in_minutes is not None,
     )

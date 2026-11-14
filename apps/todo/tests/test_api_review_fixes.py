@@ -562,5 +562,6 @@ class TestParseSchema:
             'rrule_text',
             'matched_text',
             'label',
+            'relative',
         }
         assert body['due_time'] is None and body['due_date'] == '2026-11-01'

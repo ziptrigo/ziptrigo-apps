@@ -5,13 +5,19 @@ swapped for a fake that understands one title (`todo_fakes.DATED_TITLE`), so no 
 """
 
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, expect
 
 from tests_e2e.conftest import ReceiptsServer
-from tests_e2e.todo_fakes import DATE_ONLY_TITLE, DATED_TITLE, RULE
+from tests_e2e.todo_fakes import (
+    DATE_ONLY_TITLE,
+    DATED_TITLE,
+    RELATIVE_TITLE,
+    RULE,
+    TIME_ONLY_TITLE,
+)
 
 
 def _wired(page: Page, field: str) -> None:
@@ -204,3 +210,84 @@ def test_the_chip_says_what_stays_when_the_text_has_no_time_or_repeat(
     zone = ZoneInfo(page.locator('html').get_attribute('data-user-timezone') or 'UTC')
     tomorrow = datetime.now(zone).date() + timedelta(days=1)
     expect(form.locator('input[name="due_date"]')).to_have_value(tomorrow.isoformat())
+
+
+def _zone(page: Page) -> ZoneInfo:
+    """The account's zone (the browser's, saved on the first sign-in; UTC if none yet)."""
+    return ZoneInfo(page.locator('html').get_attribute('data-user-timezone') or 'UTC')
+
+
+def _accepted_moment(page: Page) -> datetime:
+    form = page.locator('#quick-add-form')
+    day = date.fromisoformat(form.locator('input[name="due_date"]').input_value())
+    at = time.fromisoformat(form.locator('input[name="due_time"]').input_value())
+    return datetime.combine(day, at)
+
+
+def test_a_relative_time_is_counted_from_now(page: Page, receipts_server: ReceiptsServer):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    zone = _zone(page)
+
+    before = datetime.now(zone).replace(second=0, microsecond=0, tzinfo=None)
+    _type_title(page, RELATIVE_TITLE)
+    chip = page.locator('#quick-parse-chip')
+    expect(chip).to_be_visible()
+    expect(chip).to_have_attribute('title', 'in 2 hours')
+    chip.get_by_role('button', name='Accept').click()
+    after = datetime.now(zone).replace(second=0, microsecond=0, tzinfo=None)
+
+    expect(page.locator('#quick-title')).to_have_value('call dad')
+    # Two hours from now, to the minute (the clock may tick over while the test runs); a clock
+    # change within two hours would make the wall-clock sum differ, which the zones in use here
+    # don't have.
+    moment = _accepted_moment(page)
+    assert before + timedelta(hours=2) <= moment <= after + timedelta(hours=2, minutes=1)
+
+
+def test_a_time_with_no_day_is_today_unless_it_has_passed(
+    page: Page, receipts_server: ReceiptsServer
+):
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    zone = _zone(page)
+
+    _type_title(page, TIME_ONLY_TITLE)
+    chip = page.locator('#quick-parse-chip')
+    expect(chip).to_be_visible()
+    now = datetime.now(zone)
+    expected_day = now.date() if now.time() <= time(10, 0) else now.date() + timedelta(days=1)
+    expect(chip).to_contain_text('Today, 10:00 AM' if expected_day == now.date() else 'Tomorrow')
+    chip.get_by_role('button', name='Accept').click()
+
+    expect(page.locator('#quick-title')).to_have_value('call dad')
+    expect(page.locator('#quick-add-form input[name="due_time"]')).to_have_value('10:00')
+    # (If the minute rolled over 10:00 while the test ran, the other answer is the right one.)
+    actual = date.fromisoformat(
+        page.locator('#quick-add-form input[name="due_date"]').input_value()
+    )
+    assert actual in {expected_day, datetime.now(zone).date() + timedelta(days=1)}
+
+
+def test_a_chip_that_waited_moves_a_relative_time_on(page: Page, receipts_server: ReceiptsServer):
+    """The reading says "2 hours from when it was read": Accept shifts it by the minutes the chip
+    sat there (the browser's clock is moved on 10 minutes, no real wait)."""
+    receipts_server.login(page)
+    page.goto(f'{receipts_server.url}/todo/all/')
+    _wired(page, '#quick-title')
+    page.clock.install()
+    zone = _zone(page)
+
+    before = datetime.now(zone).replace(second=0, microsecond=0, tzinfo=None)
+    page.locator('#quick-title').press_sequentially(RELATIVE_TITLE)
+    page.clock.run_for(700)  # the script's pause after the last key
+    chip = page.locator('#quick-parse-chip')
+    expect(chip).to_be_visible()
+    page.clock.fast_forward('10:00')  # ten minutes pass in the page, not on the server
+    chip.get_by_role('button', name='Accept').click()
+    after = datetime.now(zone).replace(second=0, microsecond=0, tzinfo=None)
+
+    moment = _accepted_moment(page)
+    assert (
+        before + timedelta(hours=2, minutes=10) <= moment <= after + timedelta(hours=2, minutes=11)
+    )

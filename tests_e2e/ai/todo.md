@@ -733,7 +733,7 @@ past its time is skipped and says so; a completed task's reminder is not sent.
 **Purpose:** a date typed in the title is offered as a chip, applied only when accepted; the task page's "Or type a date"
 box sets only the date fields.
 **Preconditions:** signed in as `qa.user@example.com` on `/todo/all/`. The parser is the fake (see Preconditions): it
-reads only `pay rent every month on the 1st at 9am` and `call the bank tomorrow`.
+reads only the titles listed there (here `pay rent every month on the 1st at 9am`, `call the bank tomorrow`, `call dad in 2 hours` and `call dad at 10am`).
 
 | # | Action | Expected result |
 |---|---|---|
@@ -748,7 +748,8 @@ reads only `pay rent every month on the 1st at 9am` and `call the bank tomorrow`
 | 9 | Type `pay rent every month on the 1st at 9am` there and accept. | Date the 1st, Time 9:00 AM, Repeat "Every month on the 1st"; **Save** saves all three. |
 | 10 | In dark mode and at 375 px look at both chips. | Readable, dark background, within the screen. |
 | 11 | Back on `/todo/all/`, note the time now on the account's clock (its saved time zone, else UTC). Type `call dad in 2 hours`. | A chip with the time two hours from now, rounded down to the minute: `Today, <time>`, or `Tomorrow, <time>` when that is past midnight. **Accept**: the title is `call dad`, the Date and Time those. **Add task**: the task is due then. |
-| 12 | Type `call dad at 10am`. | The chip reads `Today, 10:00 AM` when 10:00 AM has not passed yet on the account's clock (10:00 itself counts as not passed), else `Tomorrow, 10:00 AM`: a time written without a day is never put in the past. **Accept** and **Add task**: the task has that date and 10:00 AM. |
+| 12 | (After clearing the form.) Type `call dad at 10am`. | The chip reads `Today, 10:00 AM` when 10:00 AM has not passed yet on the account's clock (10:00 itself counts as not passed), else `Tomorrow, 10:00 AM`: a time written without a day is never put in the past. **Accept** and **Add task**: the task has that date and 10:00 AM. |
+| 13 | Type `call dad in 2 hours`, wait for the chip, then wait **two minutes** before clicking **Accept**. | The chip still shows the time it was read at, but the Time field is two minutes later than the chip's time (a relative time is moved on by how long the chip waited); the Date follows if that crosses midnight. |
 
 ### TODO-35 Every repeat the popover builds
 
