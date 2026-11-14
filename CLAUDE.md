@@ -5151,7 +5151,7 @@ shared in `core`.
   `due_date` before 2000 or more than 10 years after the user's today is dropped, `due_time` is
   rounded to the minute, an `rrule` that `recurrence.parse_rule` refuses is **dropped, not an
   error** (and an accepted one is stored canonical), a rule with no date gets
-  `recurrence.first_date`, a time without a date is dropped, `has_date` ends up false when nothing
+  `recurrence.first_date`, a time without a date is dropped (unless it is `time_only`, below), `has_date` ends up false when nothing
   usable is left, `clean_title` has its whitespace collapsed and falls back to the original title
   when empty (the title and the user's today go in as pydantic validation context), `confidence` is
   clamped (a reply without one counts as 0, so it shows no chip). `_SYSTEM_PROMPT` tells the model today's date and weekday, the zone, the time now and
@@ -5170,7 +5170,32 @@ shared in `core`.
   asks `get_client()` first, so an unconfigured site answers the same whatever the title) and
   applies, in order: the **concurrency limit**, the **rate limits** (`charge`), the call, the
   **confidence** (under `MIN_CONFIDENCE`, 0.5, the answer is "no date" and there is no chip, as
-  Receipts sends a doubtful reading to review) and **`safe_title`**. `chip_text` builds the
+  Receipts sends a doubtful reading to review), **`resolve_when`** and **`safe_title`**.
+  **Two readings are worked out by the server, not the model** (the model only says what was
+  written): `ParsedTitle.in_minutes` is a time relative to now in minutes or hours ("call dad in 2
+  hours", 1 to `MAX_IN_MINUTES`, a year; "in 3 days" stays a `due_date`), which `resolve_when` adds
+  to the request's today and `now_local` in its zone, counted in UTC and read back on the user's
+  clock (rolls over past midnight, honours a clock change; an unknown zone is UTC); and
+  `ParsedTitle.time_only` (only a literal `true`, only with a `due_time` and no `rrule`) is a time of
+  day with no date written ("call dad at 2pm"), which `resolve_when` puts **today when that time is
+  now or later** on the user's clock (to the minute), **else tomorrow** (at 1 PM, "at 10am" is
+  tomorrow at 10:00) -- the model's own `due_date` is ignored for both. A time with no date is
+  `time_only` whether or not the model said so (`ParsedTitle._consistent`), and a repeat drops
+  `in_minutes` and `time_only` (it has its own first date). **The model's flag is checked against the
+  title** (`names_a_day(title)`: today, tonight, a weekday, a month, a numeric date, an ordinal or
+  "may 3"; `may`/`mar` alone are not day words): a flagged reading whose title names a day and
+  that has a `due_date` keeps the model's date ("tomorrow at 10am"), and an unflagged reading that puts
+  a time already past on today, with no day named, goes to tomorrow. A date the user wrote ("today
+  at 10am") is kept as read, even when it has passed. The zone comes from
+  `accounts.services.timezones.zone_named` (`user_tz` is that over a user). **A relative reading is
+  right for the moment it was read**: the web endpoint adds `relative: true`, and `title_parse.js`
+  moves the date and time on by the whole minutes the chip has been showing (the browser's own
+  clock, wall-clock fields, so a clock change inside those minutes is ignored; the chip's label stays
+  as it was read) when Accept, or a submit, applies it. The JWT API's `POST /parse`
+  carries the same `relative` flag (a minor bump of `docs/openapi.yml`), for a client that shows a
+  reading before applying it; `POST /tasks` applies the reading at once, so needs none. `DATE_WORDS` includes `hour`,
+  `minute` and their short forms (`hr`, `min`, Portuguese `hora`, `minuto`), so "in an hour" reaches
+  the model. `chip_text` builds the
   label in the user's formats: `Today`, `Tomorrow`, `Mon 11/03` within the next 6 days, else `11/03`
   (`11/03/2027` for another year), `, 9:00 AM` when timed and ` · <describe(rrule)>` when repeating.
   **The model is told how the user writes numeric dates** (issue #245): `ParseRequest.formats` (the
@@ -5253,7 +5278,7 @@ shared in `core`.
   limits, the concurrency slot, `safe_title`, confidence, log content and the page wiring),
   `apps/core/tests/test_ai.py`, and the Playwright `tests_e2e/test_todo_parse.py` (accept,
   dismiss/Escape, submit with the chip showing (applies it) or dismissed (as typed), the date box, the "kept" wording) on the shared e2e
-  server, whose `receipts_e2e.E2EConfig.ready` installs a `FakeTitleParser` that understands two
+  server, whose `receipts_e2e.E2EConfig.ready` installs a `FakeTitleParser` that understands five
   titles (`tests_e2e/todo_fakes.py`).
 
 #### Search and saved filters

@@ -18,7 +18,9 @@ class ParseAnswerSchema(Schema):
     - a title read: `available` and `has_date` true or false, and for a title with a date in it
       `clean_title` (the title without those words), `due_date` (`YYYY-MM-DD` or `null`), `due_time`
       (`HH:MM` or `null`), `rrule` and `rrule_text` (the repeat, empty for none), `matched_text`
-      (the words read) and `label` (the interpretation in words); a title with no date has
+      (the words read), `label` (the interpretation in words) and `relative` (true when the time is
+      relative to now, "in 2 hours": it is right for the moment of the answer, so a client that
+      shows it before applying it should move it on by the time that passes); a title with no date has
       `has_date` false and the same fields, with the title as it is;
     - `retry` true, with `available` true and `has_date` false: the call failed or the server is
       busy with another, try again in a minute;
@@ -35,3 +37,4 @@ class ParseAnswerSchema(Schema):
     rrule_text: str | None = None
     matched_text: str | None = None
     label: str | None = None
+    relative: bool | None = None

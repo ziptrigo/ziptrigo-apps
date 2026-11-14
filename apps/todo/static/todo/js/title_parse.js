@@ -16,6 +16,12 @@
  * it); a dismissed chip, or text still waiting for its answer, is sent as typed. The server never
  * re-parses: the form posts the explicit fields.
  *
+ * A time relative to now ("in 2 hours", `relative: true` in the answer) is right for the moment it
+ * was read, and a chip can wait: Accept (or submitting) moves it on by the whole minutes the chip
+ * has been showing, counted on the browser's own clock and added to the date and time as wall-clock
+ * fields (a clock change inside those few minutes is ignored). The chip's label is the reading as
+ * it was, so after a minute or more the fields show a later time than the chip did.
+ *
  * What Accept changes is exactly what the chip says. The date is always written; the time and the
  * repeat only when the text contains them. A time or repeat the text does not contain leaves the
  * form's own alone (a deliberate choice: typing "tomorrow" into a repeating task moves its date,
@@ -60,6 +66,18 @@
         input.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
+    // `date` (YYYY-MM-DD) and `time` (HH:MM) moved on by `minutes`, as wall-clock fields.
+    function addMinutes(date, time, minutes) {
+        var d = date.split('-').map(Number);
+        var t = time.split(':').map(Number);
+        var moved = new Date(Date.UTC(d[0], d[1] - 1, d[2], t[0], t[1]) + minutes * 60000);
+        var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+        return {
+            date: moved.getUTCFullYear() + '-' + pad(moved.getUTCMonth() + 1) + '-' + pad(moved.getUTCDate()),
+            time: pad(moved.getUTCHours()) + ':' + pad(moved.getUTCMinutes()),
+        };
+    }
+
     function setup(box) {
         if (box.dataset.parseWired) return;
         var input = box.querySelector('[data-parse-input]');
@@ -76,6 +94,7 @@
         var handled = '';   // the text last asked about or accepted: not asked again
         var dismissed = Object.create(null);  // the texts the user dismissed: not asked again either
         var result = null;
+        var shownAt = 0;    // when `result` arrived (`Date.now()`), for a relative time
 
         // What Accept leaves alone, in words: the form's own time or repeat the text lacks.
         function labelFor(data) {
@@ -153,6 +172,7 @@
                     return;
                 }
                 result = data;
+                shownAt = Date.now();
                 label.textContent = labelFor(data);
                 chip.title = data.matched_text || '';
                 chip.hidden = false;
@@ -166,8 +186,18 @@
         function accept() {
             if (!result) return;
             var data = result;
-            setValue(form.querySelector('[name="due_date"]'), data.due_date || '');
-            if (data.due_time) setValue(form.querySelector('[name="due_time"]'), data.due_time);
+            var dueDate = data.due_date || '';
+            var dueTime = data.due_time;
+            if (data.relative && dueDate && dueTime) {
+                var waited = Math.floor((Date.now() - shownAt) / 60000);
+                if (waited > 0) {
+                    var moved = addMinutes(dueDate, dueTime, waited);
+                    dueDate = moved.date;
+                    dueTime = moved.time;
+                }
+            }
+            setValue(form.querySelector('[name="due_date"]'), dueDate);
+            if (dueTime) setValue(form.querySelector('[name="due_time"]'), dueTime);
             if (data.rrule) {
                 var repeat = form.querySelector('[x-data="repeatControl"]');
                 var component = repeat && window.Alpine ? window.Alpine.$data(repeat) : null;

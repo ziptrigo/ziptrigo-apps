@@ -49,13 +49,13 @@ _ZONE_TAB = 'zone.tab'
 _warned: set[str] = set()
 
 
-def user_tz(user: User) -> ZoneInfo:
-    """The zone `user` lives in: `ZoneInfo(user.timezone)` when set and loadable, else UTC.
+def zone_named(name: str) -> ZoneInfo:
+    """The zone called `name` (an IANA name), else UTC for an empty or unknown one.
 
     Never raises. A value that no longer loads (a zone removed from the tz database since it was
-    saved) falls back to UTC and is logged as a warning, once per process per value.
+    saved) falls back to UTC and is logged as a warning, once per process per value. For code that
+    carries the name and not the user (the To-do title parser's request).
     """
-    name = getattr(user, 'timezone', '')
     if not name:
         return ZoneInfo('UTC')
     try:
@@ -65,6 +65,13 @@ def user_tz(user: User) -> ZoneInfo:
             _warned.add(name)
             logger.warning('Unknown time zone %r on a user; using UTC.', name)
         return ZoneInfo('UTC')
+
+
+def user_tz(user: User) -> ZoneInfo:
+    """The zone `user` lives in: `ZoneInfo(user.timezone)` when set and loadable, else UTC.
+
+    Never raises (see `zone_named`)."""
+    return zone_named(getattr(user, 'timezone', ''))
 
 
 def user_today(user: User) -> date:

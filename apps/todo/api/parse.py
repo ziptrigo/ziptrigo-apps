@@ -94,7 +94,7 @@ def parse(request, payload: ParseSchema):
     web endpoint's:
 
     - `{"available": true, "has_date": true, "clean_title", "due_date", "due_time", "rrule",
-      "rrule_text", "matched_text", "label"}` for a title with a date in it (`clean_title` is the
+      "rrule_text", "matched_text", "label", "relative"}` for a title with a date in it (`clean_title` is the
       title without those words; `label` is the interpretation in words);
     - `{"available": true, "has_date": false, ...}` for one without (`clean_title` is the title);
     - `{"available": true, "has_date": false, "retry": true}` when the call failed or the server
@@ -145,4 +145,5 @@ def parse(request, payload: ParseSchema):
         'rrule_text': result.rrule_text,
         'matched_text': result.matched_text,
         'label': result.label,
+        'relative': result.relative,
     }

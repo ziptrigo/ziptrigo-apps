@@ -126,5 +126,6 @@ def parse_view(request: AuthenticatedHttpRequest) -> HttpResponse:
             'rrule_text': result.rrule_text,
             'matched_text': result.matched_text,
             'label': result.label,
+            'relative': result.relative,
         }
     )

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.6.1
+  version: 2.7.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -3003,7 +3003,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParseAnswerSchema'
-      description: "Read a date, time and repeat out of a title, without creating anything. The answer is the\nweb endpoint's:\n\n- `{\"available\": true, \"has_date\": true, \"clean_title\", \"due_date\", \"due_time\", \"rrule\",\n  \"rrule_text\", \"matched_text\", \"label\"}` for a title with a date in it (`clean_title` is the\n  title without those words; `label` is the interpretation in words);\n- `{\"available\": true, \"has_date\": false, ...}` for one without (`clean_title` is the title);\n- `{\"available\": true, \"has_date\": false, \"retry\": true}` when the call failed or the server\n  is busy with another: try again in a minute;\n- `{\"available\": false}` when the date reader is not configured on this site.\n\nA 422 for an empty title or one over 500 characters; a 429 over `TODO_PARSE_USER` (per minute)\nor `TODO_PARSE_USER_DAY` (per day). Nothing is saved and no credits are charged."
+      description: "Read a date, time and repeat out of a title, without creating anything. The answer is the\nweb endpoint's:\n\n- `{\"available\": true, \"has_date\": true, \"clean_title\", \"due_date\", \"due_time\", \"rrule\",\n  \"rrule_text\", \"matched_text\", \"label\", \"relative\"}` for a title with a date in it (`clean_title` is the\n  title without those words; `label` is the interpretation in words);\n- `{\"available\": true, \"has_date\": false, ...}` for one without (`clean_title` is the title);\n- `{\"available\": true, \"has_date\": false, \"retry\": true}` when the call failed or the server\n  is busy with another: try again in a minute;\n- `{\"available\": false}` when the date reader is not configured on this site.\n\nA 422 for an empty title or one over 500 characters; a 429 over `TODO_PARSE_USER` (per minute)\nor `TODO_PARSE_USER_DAY` (per day). Nothing is saved and no credits are charged."
       tags:
       - To-do
       requestBody:
@@ -9110,7 +9110,7 @@ components:
       title: LabelUpdateSchema
       type: object
     ParseAnswerSchema:
-      description: "The answer of `POST /parse`, in one of three shapes (only the fields of that shape are sent):\n\n- a title read: `available` and `has_date` true or false, and for a title with a date in it\n  `clean_title` (the title without those words), `due_date` (`YYYY-MM-DD` or `null`), `due_time`\n  (`HH:MM` or `null`), `rrule` and `rrule_text` (the repeat, empty for none), `matched_text`\n  (the words read) and `label` (the interpretation in words); a title with no date has\n  `has_date` false and the same fields, with the title as it is;\n- `retry` true, with `available` true and `has_date` false: the call failed or the server is\n  busy with another, try again in a minute;\n- `available` false alone: the date reader is not configured on this site."
+      description: "The answer of `POST /parse`, in one of three shapes (only the fields of that shape are sent):\n\n- a title read: `available` and `has_date` true or false, and for a title with a date in it\n  `clean_title` (the title without those words), `due_date` (`YYYY-MM-DD` or `null`), `due_time`\n  (`HH:MM` or `null`), `rrule` and `rrule_text` (the repeat, empty for none), `matched_text`\n  (the words read), `label` (the interpretation in words) and `relative` (true when the time is\n  relative to now, \"in 2 hours\": it is right for the moment of the answer, so a client that\n  shows it before applying it should move it on by the time that passes); a title with no date has\n  `has_date` false and the same fields, with the title as it is;\n- `retry` true, with `available` true and `has_date` false: the call failed or the server is\n  busy with another, try again in a minute;\n- `available` false alone: the date reader is not configured on this site."
       properties:
         available:
           title: Available
@@ -9160,6 +9160,11 @@ components:
           - type: string
           - type: 'null'
           title: Label
+        relative:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Relative
       required:
       - available
       title: ParseAnswerSchema
