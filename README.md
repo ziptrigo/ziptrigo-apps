@@ -47,7 +47,8 @@ A single Django project (a "modular monolith") with one Django app per concern:
   time zones), each row showing the hours of the home row's day on its own clock, with working
   hours, nights and weekends shaded, daylight-saving changes announced a week ahead, and a time
   range picked by clicking or dragging that is shown, and copied, in every location's local time.
-  Free: no credits.
+  A range can be shared as an event: a title and a public `/w/<code>` page that shows the time in
+  the visitor's own zone. Free: no credits.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -120,7 +121,8 @@ apps/<app>/
 | `/todo/…` | todo: Today (`/todo/`), `upcoming/`, `all/`, `completed/`, `trash/`, a task's page (`<number>/`), `labels/`, `settings/` |
 | `/notes/…` | notes: the list (`/notes/`), `archived/`, `trash/`, `tags/`, `search/`, `filters/`, a note's page (`<id>/`), the editor (`new/`, `<id>/edit/`), history |
 | `/n/<code>` | notes: shared notes (`/n/<code>/raw`, `/download`, `/edit` for an editable link) — at the root because they're shared as addresses |
-| `/time/…` | world_time: the first tab's grid (`/time/`), a tab (`<id>/`, `?date=YYYY-MM-DD` for another day), the location search |
+| `/time/…` | world_time: the first tab's grid (`/time/`), a tab (`<id>/`, `?date=YYYY-MM-DD` for another day), the location search, the user's shared events (`events/`, `events/<id>/`) |
+| `/w/<code>` | world_time: a shared event, for anyone who has the link — at the root because it is shared as an address |
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
@@ -521,8 +523,10 @@ The build is deterministic (the same GeoNames files give the same bytes), so an 
 no diff and no re-seed. `--source <folder>` reads `cities15000.zip`, `countryInfo.txt` and
 `admin1CodesASCII.txt` from a folder instead of downloading them.
 
-The caps (10 tabs per user, 20 locations per tab) are in the admin, at
-`/admin/world_time/worldtimesettings/` (superusers).
+The caps (10 tabs per user, 20 locations per tab, 50 shared events per user) and how long after it
+ends a shared event is deleted (30 days) are in the admin, at
+`/admin/world_time/worldtimesettings/` (superusers). The daily `world_time.purge_events` job, which
+deletes ended events, runs inside the web workers like the other scheduled jobs.
 
 ### Notes
 

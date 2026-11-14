@@ -35,7 +35,7 @@ class TestWiring:
     def test_it_is_free_on_the_costs_page(self, user, web):
         section = cost_section(user)
         assert [(line.action, line.cost, line.free) for line in section.lines] == [
-            ('Tabs, locations and the time grid', 'Free', True)
+            ('Tabs, locations, the time grid and shared events', 'Free', True)
         ]
         body = web.get(reverse('billing:costs')).content.decode()
         assert 'World Time' in body and 'World Time is free.' in body
@@ -108,7 +108,12 @@ class TestAdmin:
         assert response.status_code == 200
         response = admin_client.post(
             '/admin/world_time/worldtimesettings/1/change/',
-            {'max_tabs_per_user': 4, 'max_locations_per_tab': 9},
+            {
+                'max_tabs_per_user': 4,
+                'max_locations_per_tab': 9,
+                'max_events_per_user': 5,
+                'event_purge_days': 7,
+            },
         )
         assert response.status_code == 302
         assert WorldTimeSettings.load().max_locations_per_tab == 9

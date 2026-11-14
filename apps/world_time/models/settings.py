@@ -36,6 +36,27 @@ class WorldTimeSettings(models.Model):
         ),
     )
 
+    max_events_per_user = cast(
+        int,
+        models.PositiveIntegerField(
+            default=50,
+            db_default=50,
+            validators=[MinValueValidator(1)],
+            help_text='Shared events a user may have at a time (ended ones count until they '
+            'are deleted).',
+        ),
+    )
+    event_purge_days = cast(
+        int,
+        models.PositiveIntegerField(
+            default=30,
+            db_default=30,
+            validators=[MinValueValidator(1)],
+            help_text='Days after a shared event ends before it is deleted and its link stops '
+            'working.',
+        ),
+    )
+
     class Meta:
         verbose_name = 'World Time settings'
         verbose_name_plural = 'World Time settings'

@@ -1,3 +1,4 @@
+from . import events
 from .accounts import get_account, lock_account
 from .cities import is_seeded, search_cities, seed
 from .grid import Grid, build_grid, home_today, parse_day
@@ -21,6 +22,7 @@ __all__ = [
     'build_grid',
     'create_tab',
     'delete_tab',
+    'events',
     'get_account',
     'get_tab',
     'home_today',

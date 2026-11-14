@@ -9,6 +9,10 @@
             {% endfor %}
         </nav>
         <div class="ml-auto flex items-center pb-1">
+            <a href="{% url 'world_time:events' %}"
+               class="btn mr-1 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <i class="fas fa-calendar-day mr-2" aria-hidden="true"></i>Events
+            </a>
             <button type="button" @click="renaming = !renaming; adding = false" :aria-expanded="renaming" aria-controls="wt-tab-rename"
                     aria-label="Rename the tab {{ tab.name }}" title="Rename this tab"
                     class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>

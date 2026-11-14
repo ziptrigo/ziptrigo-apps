@@ -11,5 +11,8 @@ SEARCH_ZONE_RESULTS = 4
 #: The longest id list the reorder endpoint takes: far above any sensible `max_locations_per_tab`,
 #: so raising that setting never silently stops a tab from being reordered.
 MAX_REORDER_IDS = 500
+EVENT_TITLE_MAX = 120
+#: The longest a shared event may last.
+EVENT_MAX_DAYS = 7
 #: How far from today the grid's date may be, in days either way.
 MAX_DATE_DISTANCE_DAYS = 3660

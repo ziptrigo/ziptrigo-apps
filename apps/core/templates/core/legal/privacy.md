@@ -17,7 +17,7 @@ ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ o
 - **Short links:** the destination address, title, tags and settings of each link, and an optional password (stored as a hash).
 - **To-do:** your tasks, descriptions, comments (including earlier versions of a comment you edited), labels, reminders, saved filters, and the files you attach. For tasks added by email we keep the sender's address and the subject.
 - **Notes:** the title and Markdown content of your notes, their tags, and the earlier versions that edits of a note keep (a limited number per note). If you share a note with a link, we also keep the link (with the label and expiry you set), and anyone who has the link can see the note without signing in. If someone changes a note through an editable link, we keep the earlier versions as for any edit; when that person was signed in, the version records their account, and the note's owner can see which account made it (a visitor who was not signed in appears only as someone using the link).
-- **World Time:** the tabs you create and the places you add to them (a city or a time zone, and the name you give it). We do not use your device's location: the first row comes from the time zone saved on your account.
+- **World Time:** the tabs you create and the places you add to them (a city or a time zone, and the name you give it). We do not use your device's location: the first row comes from the time zone saved on your account. If you share a time as an event, we keep its title, its start and end, a copy of the places of the tab it was made from, and its link; anyone who has the link can see them without signing in.
 - **Feedback and reports:** messages you send through the Feedback page, and abuse reports about a transfer, a short link or a shared note, which include the reason, any details you write and, optionally, your email address.
 
 ### 1.2 Information from Google and Microsoft
@@ -30,6 +30,7 @@ If you choose **Sign in with Microsoft**, Microsoft shares with us your name, yo
 
 - **Download records:** we record the IP address and time of each download of a transfer, so the sender can see download activity and we can investigate abuse.
 - **Shared notes:** when someone opens a shared note we do not record who they are; the page is not stored by search engines and is not cached. If a shared note is edited through an editable link, we record the time of the edit.
+- **Shared events:** when someone opens a shared World Time event we do not record who they are; the page is not stored by search engines and is not cached. The time in the visitor's own time zone is worked out in their browser.
 - **Short link clicks:** when someone follows a short link we record the time, the website they came from (its host name only), their country, their type of device, browser and operating system, and whether the visit looks automated. We do not store the visitor's IP address. We store a keyed, one-way hash of it that changes every day, used only to count unique visitors per day.
 - **QR code scans:** for tracked QR codes we count how many times a code was scanned. We do not record who scanned it.
 - **Abuse prevention:** we use IP addresses to enforce rate limits and usage caps. For rate limiting we store only a keyed, one-way hash, never the address itself. An abuse report stores the reporter's IP address.
@@ -86,6 +87,7 @@ We share personal information only:
 - **Transferred files:** deleted when the transfer ends, whether it expires, reaches its download limit, or is disabled or deleted by you, or by us after an abuse takedown. If a transfer is suspended because the account ran out of credits, its files are deleted after the grace period shown in the Service (7 days) unless credits are added. Unfinished uploads are deleted after about 24 hours.
 - **Transfer records:** the record of a transfer (file names, sizes, recipients, download history) is kept with your account after its files are deleted, so you can see your history. IP addresses are removed from download records after 90 days.
 - **Receipts, to-do items and notes:** kept until you delete them. Items in the Trash are deleted for good after the period shown in the Service (30 days unless stated otherwise). Emails you send to your Receipts or To-do address are deleted from our intake storage once processed.
+- **World Time:** tabs and places are kept until you delete them. A shared event is kept until you delete it, and is deleted automatically some time after it ends (30 days unless stated otherwise); its link then stops working.
 - **Short links:** kept until you delete them. The address of a deleted link is retired and never reused. Individual click records are deleted after about 90 days; daily totals without any visitor identifier are kept with the link.
 - **Notifications:** deleted after 90 days.
 - **Email confirmation codes:** deleted after about 30 days.

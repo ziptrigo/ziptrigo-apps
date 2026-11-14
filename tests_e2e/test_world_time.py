@@ -98,6 +98,9 @@ def test_the_grid(page: Page, receipts_server: ReceiptsServer):
         expect(page.locator('#wt-grid p.sr-only[aria-live]')).to_contain_text('Lisbon time')
 
         # An exact start, typed on the home row's clock; the length is kept.
+        # (The pointer is parked first: left where the drag ended, it can end up over the field's
+        # list of suggested times, and Enter then picks the suggestion under it.)
+        page.mouse.move(1, 1)
         start = page.get_by_label('Start')
         start.fill('10:10')
         start.press('Enter')
@@ -192,5 +195,74 @@ def test_a_clock_change_inside_a_tile(page: Page, receipts_server: ReceiptsServe
         tiles.nth(12).click(position={'x': 3, 'y': 10})
         expect(lines.nth(0)).to_contain_text('12:00 PM – 1:00 PM')
         expect(lines.nth(1)).to_contain_text('Sun 03/08/2026, 1:30 AM – 3:30 AM')
+    finally:
+        receipts_server.shell(CLEANUP)
+
+
+def test_share_a_range_as_an_event(page: Page, receipts_server: ReceiptsServer, browser):
+    """Pick a time, share it, open the link without a session, edit it and delete it."""
+    receipts_server.shell(HALF_HOUR_SETUP)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/time/?date=2027-03-10')
+        tiles = page.locator('#wt-grid [data-wt-tiles]').first.locator('.wt-tile')
+        tiles.nth(15).click(position={'x': 3, 'y': 10})  # 3 PM to 4 PM in Kolkata
+        page.get_by_label('Share this time as an event').fill('Design review')
+        page.get_by_role('button', name='Share as an event').click()
+        page.wait_for_url(re.compile(r'/time/events/[0-9a-f-]+/$'))
+        expect(page.get_by_role('heading', name='Design review', level=1)).to_be_visible()
+        expect(page.get_by_text('Event created. Anyone with its link can see it.')).to_be_visible()
+        rows = page.locator('[data-wt-event-rows] > li')
+        expect(rows.nth(0)).to_contain_text('Wed 03/10/2027, 3:00 PM – 4:00 PM')
+        expect(rows.nth(1)).to_contain_text('Wed 03/10/2027, 4:30 AM – 5:30 AM')
+        link = page.locator('code').first.inner_text()
+        path = '/w/' + link.rsplit('/w/', 1)[1]
+
+        # The QR code popup.
+        page.get_by_role('button', name='QR code').click()
+        expect(page.get_by_role('dialog').locator('img[data-qr-image]')).to_be_visible()
+        page.keyboard.press('Escape')
+
+        # Someone without a session opens the link: the public wording, their own zone, a countdown.
+        context = browser.new_context(timezone_id='Asia/Tokyo')
+        try:
+            visitor = context.new_page()
+            visitor.goto(f'{receipts_server.url}{path}')
+            expect(visitor.get_by_role('heading', name='Design review', level=1)).to_be_visible()
+            expect(visitor.locator('[data-wt-event-rows] > li').nth(0)).to_contain_text(
+                'Wed Mar 10, 2027, 3:00 PM – 4:00 PM'
+            )
+            expect(visitor.locator('time').first).to_contain_text('6:30 PM')
+            expect(visitor.locator('[data-wt-zone-note]')).to_contain_text('Asia/Tokyo')
+            expect(visitor.locator('[data-wt-countdown]')).to_contain_text('Starts in')
+
+            # The owner moves it; the same link shows the new time.
+            start = page.get_by_label('Start')
+            start.fill('16:00')
+            start.press('Tab')
+            end = page.get_by_label('End')
+            end.fill('17:30')
+            end.press('Tab')
+            page.get_by_label('Title').fill('Design review (moved)')
+            page.get_by_role('button', name='Save').click()
+            expect(page.get_by_text('Saved.')).to_be_visible()
+            visitor.reload()
+            expect(visitor.get_by_role('heading', level=1)).to_have_text('Design review (moved)')
+            expect(visitor.locator('[data-wt-event-rows] > li').nth(0)).to_contain_text(
+                '4:00 PM – 5:30 PM'
+            )
+
+            # Deleted: the link is the neutral page.
+            page.get_by_role('button', name='Delete').click()
+            page.get_by_role('dialog').get_by_role('button', name='Delete').click()
+            page.wait_for_url(re.compile(r'/time/events/$'))
+            expect(page.get_by_text('No events yet')).to_be_visible()
+            response = visitor.goto(f'{receipts_server.url}{path}')
+            assert response is not None and response.status == 404
+            expect(
+                visitor.get_by_role('heading', name="This event isn't available")
+            ).to_be_visible()
+        finally:
+            context.close()
     finally:
         receipts_server.shell(CLEANUP)
