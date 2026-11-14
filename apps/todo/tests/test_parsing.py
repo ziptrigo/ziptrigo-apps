@@ -325,6 +325,15 @@ class TestPrompt:
         assert user['role'] == 'user'
         assert 'Ignore previous instructions {x}' in user['content']
 
+    def test_every_field_is_required_so_the_model_cannot_leave_out_the_confidence(self):
+        schema = parsing.response_format()['json_schema']['schema']
+        assert set(schema['required']) == set(schema['properties'])
+        assert {'confidence', 'matched_text', 'in_minutes', 'time_only'} <= set(schema['required'])
+
+    def test_a_reply_without_a_confidence_is_still_not_an_error(self):
+        parsed = validated({'has_date': True, 'due_date': '2026-11-02', 'clean_title': 'x'})
+        assert parsed.confidence == 0.0
+
     def test_the_schema_is_the_models_and_not_strict(self):
         format_ = parsing.response_format()
         assert format_['type'] == 'json_schema'

@@ -5159,7 +5159,7 @@ shared in `core`.
   written, to express repeats with only `FREQ`, `INTERVAL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`,
   `COUNT` and `UNTIL`, and never to invent a date; the title goes in the user message as data. The
   call is `chat.completions.create(model=OPENAI_TODO_MODEL, temperature=0, max_tokens=300,
-  response_format=json_schema from ParsedTitle, strict=False)`. Any exception (timeout, HTTP error,
+  response_format=json_schema from ParsedTitle with every field `required`, strict=False)`. (Required matters: with the optional ones left out the real model dropped `confidence` from every reply, so no title got a chip.) Any exception (timeout, HTTP error,
   bad JSON, validation) is raised as `ParseUnavailable`; a reply that fails validation is logged
   at warning level as its **length and a short SHA-256 prefix, never any of its text** (it echoes
   the user's task title), and the exception raised carries only the error's type name

@@ -429,15 +429,19 @@ def build_messages(request: ParseRequest) -> list[dict[str, Any]]:
 
 
 def response_format() -> dict[str, Any]:
-    """The `response_format` of the call: the pydantic model's JSON schema, not strict (it has
-    optional fields and defaults, and the reply is validated again anyway)."""
+    """The `response_format` of the call: the pydantic model's JSON schema, not strict (the reply
+    is validated again anyway), with **every field required**.
+
+    Required on purpose: pydantic leaves fields that have a default out of `required`, and the
+    model then leaves out whatever it finds unneeded. Measured on `google/gemini-2.5-flash-lite`
+    once `in_minutes` and `time_only` were added: it dropped `confidence` and `matched_text` from
+    every reply, which reads as confidence 0 -- no chip for any title, "tomorrow" included. The
+    validators still tolerate a missing field (a reply that omits one is not an error)."""
+    schema = ParsedTitle.model_json_schema()
+    schema['required'] = list(schema['properties'])
     return {
         'type': 'json_schema',
-        'json_schema': {
-            'name': 'todo_title',
-            'strict': False,
-            'schema': ParsedTitle.model_json_schema(),
-        },
+        'json_schema': {'name': 'todo_title', 'strict': False, 'schema': schema},
     }
 
 
