@@ -29,6 +29,7 @@ from ..services.parsing import (
     looks_dated,
     parse_reply,
     parse_title,
+    resolve_when,
 )
 from .fakes import FakeTitleParser
 
@@ -36,14 +37,20 @@ TODAY = date(2026, 10, 28)  # a Wednesday
 MONTHLY = 'FREQ=MONTHLY;BYMONTHDAY=1'
 
 
-def ask(title: str = 'pay rent every month on the 1st at 9am') -> ParseRequest:
+def ask(
+    title: str = 'pay rent every month on the 1st at 9am',
+    *,
+    today: date = TODAY,
+    now: time = time(14, 30),
+    zone: str = 'America/Chicago',
+) -> ParseRequest:
     return ParseRequest(
         title=title,
-        today=TODAY,
-        weekday='Wednesday',
-        timezone='America/Chicago',
+        today=today,
+        weekday=parsing.WEEKDAY_NAMES[today.weekday()],
+        timezone=zone,
         default_time=time(9, 0),
-        now_local=time(14, 30),
+        now_local=now,
     )
 
 
@@ -71,6 +78,9 @@ class TestLooksDated:
             'Relatório do mês',
             'Take out the trash every Thursday',
             'lunch at noon',
+            'Call dad in an hour',
+            'Stretch in half an hour',
+            'Ligar ao pai daqui a uma hora',
         ],
     )
     def test_positives(self, title):
@@ -230,6 +240,53 @@ class TestParsedTitle:
     def test_the_confidence_is_clamped(self, value, expected):
         assert validated({'confidence': value}).confidence == expected
 
+    @pytest.mark.parametrize(
+        ('value', 'expected'),
+        [(120, 120), ('90', 90), (29.6, 30), (0, None), (-5, None), (True, None), ('soon', None)],
+    )
+    def test_in_minutes_is_whole_and_positive(self, value, expected):
+        parsed = validated({'has_date': True, 'in_minutes': value, 'clean_title': 'x'})
+        assert parsed.in_minutes == expected
+
+    def test_in_minutes_over_a_year_is_dropped(self):
+        too_many = parsing.MAX_IN_MINUTES + 1
+        assert validated({'has_date': True, 'in_minutes': too_many}).has_date is False
+
+    def test_a_relative_time_needs_no_date(self):
+        parsed = validated({'has_date': True, 'in_minutes': 120, 'clean_title': 'Call dad'})
+        assert parsed.has_date is True
+        assert parsed.in_minutes == 120
+        assert parsed.time_only is False
+
+    def test_a_time_of_day_alone_is_kept_when_time_only(self):
+        parsed = validated({'has_date': True, 'due_time': '14:00', 'time_only': True})
+        assert parsed.has_date is True
+        assert parsed.due_time == time(14, 0)
+        assert parsed.due_date is None
+
+    @pytest.mark.parametrize('value', ['true', 1, 'yes'])
+    def test_time_only_must_be_true_itself(self, value):
+        parsed = validated({'has_date': True, 'due_time': '14:00', 'time_only': value})
+        assert parsed.time_only is False
+        assert parsed.has_date is False
+
+    def test_time_only_needs_a_time(self):
+        parsed = validated({'has_date': True, 'due_date': '2026-11-02', 'time_only': True})
+        assert parsed.time_only is False
+
+    def test_time_only_does_not_apply_to_a_repeat(self):
+        parsed = validated(
+            {'has_date': True, 'due_time': '09:00', 'time_only': True, 'rrule': 'FREQ=DAILY'}
+        )
+        assert parsed.time_only is False
+        assert parsed.due_date == TODAY  # the rule's first date
+
+    def test_no_date_found_clears_the_new_fields_too(self):
+        parsed = validated(
+            {'has_date': False, 'in_minutes': 60, 'due_time': '14:00', 'time_only': True}
+        )
+        assert (parsed.in_minutes, parsed.time_only, parsed.due_time) == (None, False, None)
+
     def test_a_non_text_title_is_empty(self):
         assert validated(
             {'has_date': True, 'clean_title': ['x'], 'due_date': '2026-11-02'}
@@ -267,6 +324,8 @@ class TestPrompt:
             'rrule',
             'matched_text',
             'confidence',
+            'in_minutes',
+            'time_only',
         }
 
 
@@ -552,6 +611,146 @@ class TestParseTitle:
             parse_title(ask('pay tomorrow'))
 
 
+class TestResolveWhen:
+    """A relative time and a time of day alone are worked out here, not by the model."""
+
+    def test_a_reading_with_a_date_is_kept(self):
+        parsed = ParsedTitle(has_date=True, due_date=date(2026, 11, 2), due_time=time(9, 0))
+        assert resolve_when(parsed, ask()) == (date(2026, 11, 2), time(9, 0))
+
+    @pytest.mark.parametrize(
+        ('minutes', 'expected'),
+        [
+            (120, (TODAY, time(16, 30))),
+            (30, (TODAY, time(15, 0))),
+            (9 * 60 + 29, (TODAY, time(23, 59))),
+            (9 * 60 + 30, (date(2026, 10, 29), time(0, 0))),
+            (3 * 24 * 60, (date(2026, 10, 31), time(14, 30))),
+        ],
+    )
+    def test_in_minutes_is_added_to_now(self, minutes, expected):
+        parsed = ParsedTitle(has_date=True, in_minutes=minutes, due_date=date(2030, 1, 1))
+        assert resolve_when(parsed, ask()) == expected
+
+    def test_in_minutes_counts_real_time_across_a_clock_change(self):
+        # Chicago springs forward at 2:00 on 2027-03-14: an hour after 1:30 is 3:30.
+        request = ask(today=date(2027, 3, 14), now=time(1, 30))
+        parsed = ParsedTitle(has_date=True, in_minutes=60)
+        assert resolve_when(parsed, request) == (date(2027, 3, 14), time(3, 30))
+
+    def test_an_unknown_zone_is_read_as_utc(self):
+        parsed = ParsedTitle(has_date=True, in_minutes=60)
+        assert resolve_when(parsed, ask(zone='Not/AZone')) == (TODAY, time(15, 30))
+
+    @pytest.mark.parametrize(
+        ('at', 'expected'),
+        [
+            (time(15, 0), TODAY),  # later today
+            (time(14, 30), TODAY),  # now: still today
+            (time(23, 59), TODAY),
+            (time(14, 29), date(2026, 10, 29)),  # passed: tomorrow
+            (time(10, 0), date(2026, 10, 29)),
+            (time(0, 0), date(2026, 10, 29)),
+        ],
+    )
+    def test_a_time_of_day_alone_is_today_unless_it_has_passed(self, at, expected):
+        # The model's own date, if any, is not trusted for this.
+        parsed = ParsedTitle(has_date=True, due_time=at, time_only=True, due_date=date(2030, 1, 1))
+        assert resolve_when(parsed, ask()) == (expected, at)
+
+    def test_seconds_of_now_do_not_push_the_same_minute_to_tomorrow(self):
+        parsed = ParsedTitle(has_date=True, due_time=time(14, 30), time_only=True)
+        assert resolve_when(parsed, ask(now=time(14, 30, 45))) == (TODAY, time(14, 30))
+
+
+class TestRelativeAndTimeOfDay:
+    """The user's examples, through `parse_title`: now is 1 PM on Wednesday 2026-10-28."""
+
+    def test_call_dad_in_2_hours(self, fake_title_parser):
+        fake_title_parser.replies['Call dad in 2 hours'] = ParsedTitle(
+            has_date=True,
+            clean_title='Call dad',
+            in_minutes=120,
+            matched_text='in 2 hours',
+            confidence=0.9,
+        )
+        result = parse_title(ask('Call dad in 2 hours', now=time(13, 0)))
+        assert (result.has_date, result.clean_title) == (True, 'Call dad')
+        assert (result.due_date, result.due_time) == (TODAY, time(15, 0))
+        assert result.label == 'Today, 3:00 PM'
+
+    def test_late_in_the_day_it_is_tomorrow(self, fake_title_parser):
+        fake_title_parser.replies['Call dad in 2 hours'] = ParsedTitle(
+            has_date=True, clean_title='Call dad', in_minutes=120, confidence=0.9
+        )
+        result = parse_title(ask('Call dad in 2 hours', now=time(23, 15)))
+        assert (result.due_date, result.due_time) == (date(2026, 10, 29), time(1, 15))
+        assert result.label == 'Tomorrow, 1:15 AM'
+
+    def test_a_time_still_ahead_is_today(self, fake_title_parser):
+        fake_title_parser.replies['Call dad at 2p'] = ParsedTitle(
+            has_date=True,
+            clean_title='Call dad',
+            due_time=time(14, 0),
+            time_only=True,
+            confidence=0.9,
+        )
+        result = parse_title(ask('Call dad at 2p', now=time(13, 0)))
+        assert (result.due_date, result.due_time) == (TODAY, time(14, 0))
+        assert result.label == 'Today, 2:00 PM'
+
+    def test_a_time_already_past_is_tomorrow(self, fake_title_parser):
+        fake_title_parser.replies['Call dad at 10a'] = ParsedTitle(
+            has_date=True,
+            clean_title='Call dad',
+            due_time=time(10, 0),
+            time_only=True,
+            due_date=TODAY,
+            confidence=0.9,
+        )
+        result = parse_title(ask('Call dad at 10a', now=time(13, 0)))
+        assert (result.due_date, result.due_time) == (date(2026, 10, 29), time(10, 0))
+        assert result.label == 'Tomorrow, 10:00 AM'
+
+    def test_a_written_date_is_not_moved(self, fake_title_parser):
+        """ "today at 10am" at 1 PM stays today (overdue): the user wrote the day."""
+        fake_title_parser.replies['Call dad today at 10a'] = ParsedTitle(
+            has_date=True,
+            clean_title='Call dad',
+            due_date=TODAY,
+            due_time=time(10, 0),
+            confidence=0.9,
+        )
+        result = parse_title(ask('Call dad today at 10a', now=time(13, 0)))
+        assert (result.due_date, result.due_time) == (TODAY, time(10, 0))
+
+    def test_the_prompt_asks_for_both(self):
+        system, _ = build_messages(ask())
+        assert 'in_minutes' in system['content']
+        assert 'time_only' in system['content']
+        assert 'If only a time is written' not in system['content']
+
+    def test_through_the_model_reply(self, fake_title_parser):
+        """A raw reply, as the model sends it, is validated and resolved the same way."""
+        raw = json.dumps(
+            {
+                'has_date': True,
+                'clean_title': 'Call dad',
+                'due_date': None,
+                'due_time': None,
+                'rrule': None,
+                'in_minutes': 120,
+                'time_only': False,
+                'matched_text': 'in 2 hours',
+                'confidence': 0.95,
+            }
+        )
+        request = ask('Call dad in 2 hours', now=time(13, 0))
+        fake_title_parser.replies['Call dad in 2 hours'] = parse_reply(raw, request)
+        result = parse_title(request)
+        assert (result.due_date, result.due_time) == (TODAY, time(15, 0))
+
+
 class TestSafeTitle:
     ORIGINAL = 'pay rent every month on the 1st at 9am'
 
@@ -824,6 +1023,33 @@ class TestEndpoint:
         assert body['due_time'] is None
         assert body['rrule'] is None
         assert body['rrule_text'] is None
+
+    def test_a_relative_time_is_counted_from_the_users_now(
+        self, web, fake_title_parser, funded_user
+    ):
+        """12:00 UTC is 07:00 in Chicago: "in 2 hours" is 9:00 there."""
+        funded_user.timezone = 'America/Chicago'
+        funded_user.save()
+        fake_title_parser.replies['Call dad in 2 hours'] = ParsedTitle(
+            has_date=True, clean_title='Call dad', in_minutes=120, confidence=0.9
+        )
+        body = post(web, {'title': 'Call dad in 2 hours'}).json()
+        assert (body['due_date'], body['due_time']) == ('2026-10-28', '09:00')
+        assert body['clean_title'] == 'Call dad'
+        assert body['label'] == 'Today, 9:00 AM'
+
+    def test_a_time_of_day_already_past_is_tomorrow(self, web, fake_title_parser):
+        """Now is 12:00 (UTC): 10 AM has passed."""
+        fake_title_parser.replies['Call dad at 10a'] = ParsedTitle(
+            has_date=True,
+            clean_title='Call dad',
+            due_time=time(10, 0),
+            time_only=True,
+            confidence=0.9,
+        )
+        body = post(web, {'title': 'Call dad at 10a'}).json()
+        assert (body['due_date'], body['due_time']) == ('2026-10-29', '10:00')
+        assert body['label'] == 'Tomorrow, 10:00 AM'
 
     def test_a_title_without_a_date(self, web, fake_title_parser):
         body = post(web, {'title': 'Buy milk'}).json()

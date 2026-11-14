@@ -74,11 +74,13 @@ instead), a real AI model.
 - **Files** go to Floci (a local S3 at `http://localhost:4566`): an upload is a `PUT` from the browser to a
   presigned `localhost:4566` URL, and Download / Open redirect to one. Check what the user sees (the file
   downloads with its name and bytes, the image or PDF shows), not the URL.
-- **The AI date parser is a fake** (`tests_e2e/todo_fakes.py`). It understands exactly three titles:
+- **The AI date parser is a fake** (`tests_e2e/todo_fakes.py`). It understands exactly five titles:
   `pay rent every month on the 1st at 9am` (the next 1st on or after today, 09:00, repeating monthly on the 1st,
   cleaned title `pay rent`), `call the bank tomorrow` (tomorrow, no time, cleaned title `call the bank`) and
   `pay rent 5/11` (a numeric date in the account's order: May 11 for `mm/dd/yyyy`, 5 November for `dd/mm/yyyy`,
-  in the year after this one; TODO-41). Every other text has no date.
+  in the year after this one; TODO-41), `call dad in 2 hours` (two hours from now, cleaned title `call dad`) and
+  `call dad at 10am` (10:00 with no date written, cleaned title `call dad`; TODO-34). The last two are worked
+  out by the server from the account's own "now", not by the fake. Every other text has no date.
 - **Shell steps.** A step marked "(shell step)" runs a command from the repo root on the machine running the
   server, through the wrapper that uses the running server's exact environment (database, bucket, mail):
   `python tests_e2e/ai/manage.py [--port <port>] shell -c "..."` (pass `--port` when the server is not on 8765).
@@ -745,6 +747,8 @@ reads only `pay rent every month on the 1st at 9am` and `call the bank tomorrow`
 | 8 | In the same box type `buy milk` and press Enter. | "No date found." under the box. |
 | 9 | Type `pay rent every month on the 1st at 9am` there and accept. | Date the 1st, Time 9:00 AM, Repeat "Every month on the 1st"; **Save** saves all three. |
 | 10 | In dark mode and at 375 px look at both chips. | Readable, dark background, within the screen. |
+| 11 | Back on `/todo/all/`, note the time now on the account's clock (its saved time zone, else UTC). Type `call dad in 2 hours`. | A chip with the time two hours from now, rounded down to the minute: `Today, <time>`, or `Tomorrow, <time>` when that is past midnight. **Accept**: the title is `call dad`, the Date and Time those. **Add task**: the task is due then. |
+| 12 | Type `call dad at 10am`. | The chip reads `Today, 10:00 AM` when 10:00 AM has not passed yet on the account's clock (10:00 itself counts as not passed), else `Tomorrow, 10:00 AM`: a time written without a day is never put in the past. **Accept** and **Add task**: the task has that date and 10:00 AM. |
 
 ### TODO-35 Every repeat the popover builds
 

@@ -26,6 +26,11 @@ plausible, a reading the model is not sure of (`confidence` under `MIN_CONFIDENC
 the cleaned title is used only when it is the original with words taken out (`safe_title`). A reply
 that does not fit costs the chip, never a wrong task.
 
+**Two readings are worked out here, not by the model** (it is told only what was written): a time
+relative to now ("call dad in 2 hours": `in_minutes`, added to the user's now in their zone, so the
+day rolls over past midnight and a clock change is honoured) and a time of day with no date ("at
+2pm": `time_only`, today when that time has not passed yet, else tomorrow). See `resolve_when`.
+
 **A slow model must not take the web tier with it** (review of #198): the call is bounded by a short
 timeout (`TODO_AI_TIMEOUT_SECONDS`, 6 s, no SDK retries) and by `_slot`, a per-process
 `BoundedSemaphore(1)` taken without waiting, so a process never has more than one parse call open;
@@ -43,8 +48,9 @@ import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -69,6 +75,8 @@ MAX_YEARS_AHEAD = 10
 MIN_DATE = date(2000, 1, 1)
 #: A reading the model gives less confidence than this is not shown as a chip.
 MIN_CONFIDENCE = 0.5
+#: The most `in_minutes` a reading may say ("in 2 hours"): a year. More is a misreading, dropped.
+MAX_IN_MINUTES = 366 * 24 * 60
 _MAX_TOKENS = 300
 #: Sent to OpenRouter only (OpenAI's own API refuses the key). Explicit even for a model that
 #: does not think unless asked, such as the `google/gemini-2.5-flash-lite` the environments set
@@ -109,12 +117,13 @@ DATE_WORDS = frozenset(
     """
     today tomorrow tonight next every daily weekly monthly yearly annually weekday weekdays weekend
     week weeks month months year years day days morning noon midnight afternoon evening
+    hour hours hr hrs minute minutes min mins
     mon tue wed thu fri sat sun
     monday tuesday wednesday thursday friday saturday sunday
     jan feb mar apr may jun jul aug sep sept oct nov dec
     january february march april june july august september october november december
     hoje amanha semana semanas mes meses ano anos dia dias diario semanal mensal anual
-    segunda terca quarta quinta sexta sabado domingo manha tarde noite
+    segunda terca quarta quinta sexta sabado domingo manha tarde noite hora horas minuto minutos
     """.split()
 )
 _DIGIT = re.compile(r'\d')
@@ -175,6 +184,12 @@ class ParsedTitle(BaseModel):
     rrule: str | None = None
     matched_text: str = ''
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    #: A time relative to now ("in 2 hours"): the minutes from now. `due_date` and `due_time` are
+    #: then worked out by `resolve_when`, whatever the model put in them.
+    in_minutes: int | None = None
+    #: The title writes a time of day and no date and no repeat ("at 2pm"): `resolve_when` picks
+    #: today or tomorrow, whatever the model put in `due_date`.
+    time_only: bool = False
 
     @field_validator('due_date', mode='before')
     @classmethod
@@ -237,6 +252,23 @@ class ParsedTitle(BaseModel):
         except ValidationError:
             return None
 
+    @field_validator('in_minutes', mode='before')
+    @classmethod
+    def _in_minutes(cls, value: Any) -> int | None:
+        """Whole minutes from 1 to `MAX_IN_MINUTES`, else `None` (dropped, not an error)."""
+        if isinstance(value, bool) or not isinstance(value, int | float | str):
+            return None
+        try:
+            minutes = round(float(value))
+        except ValueError, OverflowError:
+            return None
+        return minutes if 1 <= minutes <= MAX_IN_MINUTES else None
+
+    @field_validator('time_only', mode='before')
+    @classmethod
+    def _time_only(cls, value: Any) -> bool:
+        return value is True
+
     @field_validator('clean_title', 'matched_text', mode='before')
     @classmethod
     def _text(cls, value: Any) -> str:
@@ -255,19 +287,25 @@ class ParsedTitle(BaseModel):
 
     @model_validator(mode='after')
     def _consistent(self, info: ValidationInfo) -> 'ParsedTitle':
-        """A time needs a date; a rule without a date gets its first one; `has_date` is true only
+        """A time needs a date (unless it is relative to now, or a time of day whose date
+        `resolve_when` picks); a rule without a date gets its first one; `has_date` is true only
         when something usable is left; the title is never empty (when the context has one)."""
+        relative = self.in_minutes is not None
+        if relative or self.due_time is None or self.rrule is not None:
+            self.time_only = False  # a repeat has its own first date
         if self.due_date is None:
-            self.due_time = None
+            if not (relative or self.time_only):
+                self.due_time = None
             if self.rrule is not None:
                 try:
                     self.due_date = first_date(self.rrule, _context_today(info))
                 except ValidationError:
                     self.rrule = None
-        if self.due_date is None and self.rrule is None:
+        if self.due_date is None and self.rrule is None and not (relative or self.time_only):
             self.has_date = False
         if not self.has_date:
-            self.due_date = self.due_time = self.rrule = None
+            self.due_date = self.due_time = self.rrule = self.in_minutes = None
+            self.time_only = False
             self.matched_text = ''
             self.clean_title = ''
         if not self.clean_title:
@@ -305,10 +343,16 @@ Rules:
   are null.
 - Reply with a JSON object with exactly these fields: has_date (boolean), clean_title (string),
   due_date (YYYY-MM-DD or null), due_time (HH:MM, 24-hour, or null), rrule (string or null),
-  matched_text (string) and confidence (number from 0 to 1).
+  in_minutes (integer or null), time_only (boolean), matched_text (string) and confidence (number
+  from 0 to 1).
 - due_time is null unless a time is written ("at 9am", "18:30", "noon"). "morning" and the like are
-  not times. If only a time is written, the date is today when that time is still ahead of now,
-  otherwise tomorrow.
+  not times.
+- time_only is true when the title writes a time of day but no date and no repeat ("call dad at
+  2pm"): give due_time, and the date is worked out for you (due_date may be null). Otherwise false.
+- in_minutes is for a time relative to now in minutes or hours ("in 2 hours", "in 30 min", "in an
+  hour and a half", "daqui a 2 horas"): the number of minutes from now, with due_date and due_time
+  null and has_date true. Otherwise null. A relative number of days, weeks or months ("in 3 days")
+  is a due_date, not in_minutes.
 - due_date is the first date the task is due, counted from today's date. Interpret "tomorrow",
   "next Monday", "in 3 days", "end of month" (the last day of this month), "the 1st" (the next
   1st), "Mon", "Tue" and so on (the next such weekday), and the same in the user's language when it
@@ -482,6 +526,35 @@ def chip_text(
     return text
 
 
+def _zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError, ValueError:
+        return ZoneInfo('UTC')
+
+
+def resolve_when(parsed: ParsedTitle, request: ParseRequest) -> tuple[date | None, time | None]:
+    """The due date and time of a reading, working out the two the model is not trusted with.
+
+    - `in_minutes` ("in 2 hours"): the user's now plus that many minutes, counted in real time (in
+      UTC) and read back on their clock, so it rolls over to tomorrow past midnight and a clock
+      change is honoured.
+    - `time_only` ("at 2pm", no date written): today when that time is now or later on the user's
+      clock, else tomorrow ("at 10am" at 1pm is tomorrow morning).
+    - Otherwise what the model read."""
+    if parsed.in_minutes is not None:
+        zone = _zone(request.timezone)
+        now = datetime.combine(request.today, request.now_local, tzinfo=zone)
+        moment = (now.astimezone(UTC) + timedelta(minutes=parsed.in_minutes)).astimezone(zone)
+        return moment.date(), time(moment.hour, moment.minute)
+    if parsed.time_only and parsed.due_time is not None:
+        now = time(request.now_local.hour, request.now_local.minute)
+        if parsed.due_time >= now:
+            return request.today, parsed.due_time
+        return request.today + timedelta(days=1), parsed.due_time
+    return parsed.due_date, parsed.due_time
+
+
 def _tokens(text: str) -> set[str]:
     return set(normalize_for_search(text).split())
 
@@ -524,17 +597,20 @@ def parse_title(request: ParseRequest, *, charge: Callable[[], bool] | None = No
         parsed = client.parse(request)
     finally:
         _slot.release()
-    if not parsed.has_date or parsed.due_date is None or parsed.confidence < MIN_CONFIDENCE:
+    if not parsed.has_date or parsed.confidence < MIN_CONFIDENCE:
+        return TitleParse(has_date=False, clean_title=title)
+    due_date, due_time = resolve_when(parsed, request)
+    if due_date is None:
         return TitleParse(has_date=False, clean_title=title)
     matched = parsed.matched_text if parsed.matched_text.lower() in title.lower() else ''
     wording = request.wording or request.formats
     return TitleParse(
         has_date=True,
         clean_title=safe_title(title, parsed.clean_title),
-        due_date=parsed.due_date,
-        due_time=parsed.due_time,
+        due_date=due_date,
+        due_time=due_time,
         rrule=parsed.rrule,
         rrule_text=describe(parsed.rrule, wording) if parsed.rrule else None,
         matched_text=matched,
-        label=chip_text(parsed.due_date, request.today, parsed.due_time, parsed.rrule, wording),
+        label=chip_text(due_date, request.today, due_time, parsed.rrule, wording),
     )
