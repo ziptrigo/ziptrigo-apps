@@ -169,6 +169,8 @@ def main() -> None:
 
     e2e_env.write_state(args.port, env)
     manage('migrate', '--noinput', '-v', '0')
+    # World Time's city tables (what the container's entrypoint does after `migrate`).
+    manage('world_time_seed_cities')
     manage('shell', '-c', SEED)
 
     preflight = [sys.executable, 'tests_e2e/ai/preflight.py', '--port', str(args.port)]

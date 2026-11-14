@@ -43,6 +43,11 @@ A single Django project (a "modular monolith") with one Django app per concern:
   can't be paid is locked, never deleted). Share links with public `/n/<code>` pages (read-only or
   editable), search and saved filters, a JWT API (`/api/notes/`) and the `admin/notes.py` CLI
   (`inv notes ...`).
+- **world_time** — a world clock (#269): tabs of locations (cities from a GeoNames extract, or bare
+  time zones), each row showing the hours of the home row's day on its own clock, with working
+  hours, nights and weekends shaded, daylight-saving changes announced a week ahead, and a time
+  range picked by clicking or dragging that is shown, and copied, in every location's local time.
+  Free: no credits.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -73,7 +78,8 @@ ziptrigo-apps/
 │   ├── receipts/
 │   ├── short_url/
 │   ├── todo/
-│   └── notes/
+│   ├── notes/
+│   └── world_time/
 ├── admin/                   # Project CLIs (lint, test, server, pip, qrcode, filetransfer, receipts, ...), run via `inv`
 ├── tests_e2e/               # Playwright end-to-end tests; ai/: test plans an AI agent runs in a browser
 ├── conftest.py              # Fixtures shared by every app's tests
@@ -114,6 +120,7 @@ apps/<app>/
 | `/todo/…` | todo: Today (`/todo/`), `upcoming/`, `all/`, `completed/`, `trash/`, a task's page (`<number>/`), `labels/`, `settings/` |
 | `/notes/…` | notes: the list (`/notes/`), `archived/`, `trash/`, `tags/`, `search/`, `filters/`, a note's page (`<id>/`), the editor (`new/`, `<id>/edit/`), history |
 | `/n/<code>` | notes: shared notes (`/n/<code>/raw`, `/download`, `/edit` for an editable link) — at the root because they're shared as addresses |
+| `/time/…` | world_time: the first tab's grid (`/time/`), a tab (`<id>/`, `?date=YYYY-MM-DD` for another day), the location search |
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
@@ -123,7 +130,7 @@ apps/<app>/
 ### Dependency rules
 
 ```
-qr_code, file_transfer, receipts, short_url, todo, notes   (products: may not import each other)
+qr_code, file_transfer, receipts, short_url, todo, notes, world_time   (products: may not import each other)
         ↓
  billing, feedback
         ↓
@@ -473,6 +480,47 @@ The Lookup API receives the destination URLs themselves, so the privacy policy s
 are checked with Google. Google offers it for non-commercial use; for commercial use it points to
 [Web Risk](https://cloud.google.com/web-risk), which has the same shape and would only change
 `apps/short_url/services/safe_browsing.py`.
+
+### World Time: the city list
+
+World Time has no environment variables and no external service. Its "Add a location" search reads
+two database tables (`world_time_city`, about 34,000 cities, and `world_time_cityname`, about 58,000
+other names such as "Lisboa" or "München") that are **seeded from a file in the repository**,
+`apps/world_time/data/cities.tsv.gz` (about 0.8 MB). The data lives in the database, not in memory,
+so it costs the web and queue workers nothing.
+
+**Seeding** is one command, and it is idempotent:
+
+```bash
+./manage.py world_time_seed_cities            # does nothing when the tables already hold this file
+./manage.py world_time_seed_cities --force    # seed again even though the file has not changed
+```
+
+- **Deployments need no manual step.** The container's entrypoint runs it after `migrate` on every
+  start (`docker-entrypoint.sh`, with `RUN_MIGRATIONS=1`). It compares the file's SHA-256 with the one
+  stored in the database (`/admin/world_time/citydata/`) and stops after that one query when they
+  match; when the file changed (or on the first deploy) it upserts every city, removes the ones no
+  longer in the file and replaces the other names, in one transaction (about 3 seconds).
+- **Locally**, run it once after `./manage.py migrate` (`tests_e2e/ai/serve.py` does it for the
+  AI-agent plans). Until then the search only finds time zones (`UTC`, `Europe/Lisbon`, `PST`) and
+  says the city list has not been loaded.
+- A user's locations are never touched by a seed: each keeps its own copy of the name, country and
+  time zone it shows.
+
+**Refreshing the data** (a maintainer's job, a few times a year at most): rebuild the file from
+[GeoNames](https://www.geonames.org/) (CC BY 4.0; the page credits it), commit it, deploy.
+
+```bash
+./manage.py world_time_build_cities           # downloads about 4 MB from download.geonames.org
+git add apps/world_time/data/cities.tsv.gz
+```
+
+The build is deterministic (the same GeoNames files give the same bytes), so an unchanged rebuild is
+no diff and no re-seed. `--source <folder>` reads `cities15000.zip`, `countryInfo.txt` and
+`admin1CodesASCII.txt` from a folder instead of downloading them.
+
+The caps (10 tabs per user, 20 locations per tab) are in the admin, at
+`/admin/world_time/worldtimesettings/` (superusers).
 
 ### Notes
 

@@ -31,6 +31,7 @@ urlpatterns = [
     path('links/', include('apps.short_url.urls')),
     path('todo/', include('apps.todo.urls')),
     path('notes/', include('apps.notes.urls')),
+    path('time/', include('apps.world_time.urls')),
     # QR code short links live at the root (`/go/<code>`), outside the `qr/` prefix: they're
     # printed on physical QR codes, so they must stay short and never move.
     path('', include('apps.qr_code.redirect_urls')),

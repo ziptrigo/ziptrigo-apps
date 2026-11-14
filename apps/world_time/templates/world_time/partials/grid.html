@@ -1,0 +1,147 @@
+{% load datetime_format %}
+{% comment %} The grid of a tab: one row per location (name, live clock, offset from the home row) and one tile per
+   hour of the home row's day. Re-rendered into #wt-grid after every change to the rows. The script
+   (world_time.js, `worldTimeGrid`) reads the JSON below: the first instant and each row's UTC offsets, with
+   which it draws the selection, the "now" line and the times of a selected range. {% endcomment %}
+<div x-data="worldTimeGrid" class="wt-grid" @wt-reordered="reordered($event.detail.ids)">
+    {{ grid.payload|json_script }}
+    {% if grid.rows %}
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+        <div x-ref="scroller" class="overflow-x-auto" tabindex="0" role="group"
+             aria-label="Hours of {{ grid.day|fdate:'heading' }}. Press Enter to select an hour, the left and right arrow keys to move the selection, Shift with an arrow key to make it longer or shorter, Escape to clear it."
+             @keydown="onKey($event)">
+            <div x-ref="canvas" class="relative inline-block min-w-full align-top select-none"
+                 @pointerdown="down($event)" @pointermove="move($event)" @pointerup="up($event)" @pointercancel="up($event)">
+                <ul class="divide-y divide-gray-200 dark:divide-gray-700" data-sortable
+                    data-reorder-url="{% url 'world_time:location-reorder' tab.pk %}" data-msg="#wt-msg">
+                    {% for row in grid.rows %}
+                    {% with location=row.location %}
+                    {% comment %} `menu`, not `open`: the confirmation modal around the page has an `open` of its own, and a row's would shadow it. {% endcomment %}
+                    <li data-sort-id="{{ location.pk }}" x-data="{ menu: false, editing: false }" class="flex items-stretch">
+                        <div class="wt-info border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-2">
+                            <div class="flex items-center gap-2">
+                                <span class="drag-handle cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" role="button" tabindex="0"
+                                      data-name="{{ location.title }}" aria-label="Reorder {{ location.title }}: use the up and down arrow keys" title="Drag to reorder, or use the up and down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+                                <span class="w-9 flex-shrink-0 text-center text-xs tabular-nums text-gray-500 dark:text-gray-400" title="{{ row.zone_title }}">
+                                    {% if location.is_home %}<i class="fas fa-house text-sage-500 dark:text-sage-300" aria-hidden="true"></i><span class="sr-only">Home</span>{% else %}{{ row.diff_text }}<span class="sr-only"> hours from home</span>{% endif %}
+                                </span>
+                                <div class="min-w-0 flex-1" title="{{ location.name }}{% if location.detail %}, {{ location.detail }}{% endif %} · {{ row.zone_title }}">
+                                    <p class="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{{ location.title }}</p>
+                                    <p class="truncate text-xs text-gray-500 dark:text-gray-400">
+                                        <span data-wt-clock="{{ location.pk }}" class="tabular-nums font-medium text-gray-700 dark:text-gray-300">{{ row.clock_text }}</span>
+                                        <span data-wt-clock-date="{{ location.pk }}" class="hidden sm:inline">{{ row.date_text }}</span>
+                                        <span class="hidden sm:inline">· {{ row.zone_name }}</span>
+                                    </p>
+                                </div>
+                                <button type="button" @click="menu = !menu; editing = false" :aria-expanded="menu" aria-controls="wt-actions-{{ location.pk }}"
+                                        aria-label="Actions for {{ location.title }}" title="Actions"
+                                        class="btn p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-ellipsis-vertical w-4 text-center text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                            </div>
+                            {% if row.dst_note %}
+                            <p class="mt-1 text-xs text-amber-700 dark:text-amber-300"><i class="fas fa-triangle-exclamation mr-1" aria-hidden="true"></i>{{ row.dst_note }}</p>
+                            {% endif %}
+                            <div id="wt-actions-{{ location.pk }}" x-show="menu" style="display: none" class="mt-2">
+                                <div x-show="!editing" class="flex flex-wrap gap-1">
+                                    {% if not location.is_home %}
+                                    <form method="post" action="{% url 'world_time:location-home' tab.pk location.pk %}"
+                                          hx-post="{% url 'world_time:location-home' tab.pk location.pk %}" hx-target="#wt-grid" hx-swap="innerHTML">
+                                        {% csrf_token %}<input type="hidden" name="date" value="{{ grid_date }}">
+                                        <button type="submit" class="btn inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-house mr-1" aria-hidden="true"></i>Make home</button>
+                                    </form>
+                                    {% endif %}
+                                    <button type="button" @click="editing = true"
+                                            class="btn inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen mr-1" aria-hidden="true"></i>Rename</button>
+                                    <button type="button" @click="show($el)"
+                                            data-url="{% url 'world_time:location-remove' tab.pk location.pk %}{% if grid_date %}?date={{ grid_date }}{% endif %}"
+                                            data-title="Remove location"
+                                            data-body="Remove {{ location.title }} from the tab {{ tab.name }}?"
+                                            data-label="Remove"
+                                            class="btn inline-flex items-center px-2 py-1 text-xs font-medium rounded-lg text-red-600 dark:text-red-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-trash mr-1" aria-hidden="true"></i>Remove</button>
+                                </div>
+                                <form x-show="editing" style="display: none" method="post" action="{% url 'world_time:location-label' tab.pk location.pk %}"
+                                      hx-post="{% url 'world_time:location-label' tab.pk location.pk %}" hx-target="#wt-grid" hx-swap="innerHTML"
+                                      @keydown.escape.stop="editing = false; $el.reset()" class="flex items-center gap-1">
+                                    {% csrf_token %}<input type="hidden" name="date" value="{{ grid_date }}">
+                                    <label for="wt-label-{{ location.pk }}" class="sr-only">Your name for {{ location.name }} (leave empty to use {{ location.name }})</label>
+                                    <input id="wt-label-{{ location.pk }}" name="label" type="text" value="{{ location.label }}" maxlength="60" placeholder="{{ location.name }}"
+                                           x-effect="if (editing) $nextTick(() => $el.focus())"
+                                           class="min-w-0 flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm">
+                                    <button type="submit" aria-label="Save the name" title="Save"
+                                            class="btn p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-check text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                                    <button type="button" @click="editing = false; $el.form.reset()" aria-label="Cancel renaming" title="Cancel"
+                                            class="btn p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-times text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="flex flex-1" data-wt-tiles>
+                            {% for tile in row.tiles %}<div class="wt-tile wt-tile--{{ tile.band }}{% if tile.weekend %} wt-tile--weekend{% endif %}{% if tile.day_start %} wt-tile--day-start{% endif %}{% if tile.tight %} wt-tile--tight{% endif %}" title="{{ tile.title }}"><span class="wt-tile-main">{{ tile.main }}</span><span class="wt-tile-sub">{{ tile.sub }}</span></div>{% endfor %}
+                        </div>
+                    </li>
+                    {% endwith %}
+                    {% endfor %}
+                </ul>
+                <div class="wt-selection" x-show="hasSelection" style="display: none" :style="selectionStyle" aria-hidden="true"></div>
+                <div class="wt-now bg-red-500" x-show="nowVisible" style="display: none" :style="nowStyle" aria-hidden="true"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400" aria-hidden="true">
+        <span class="inline-flex items-center gap-1.5"><span class="wt-tile--day inline-block h-3 w-3 rounded-sm border border-gray-300 dark:border-gray-600"></span>Working hours</span>
+        <span class="inline-flex items-center gap-1.5"><span class="wt-tile--edge inline-block h-3 w-3 rounded-sm border border-gray-300 dark:border-gray-600"></span>Early and late</span>
+        <span class="inline-flex items-center gap-1.5"><span class="wt-tile--night inline-block h-3 w-3 rounded-sm border border-gray-300 dark:border-gray-600"></span>Night</span>
+        <span class="inline-flex items-center gap-1.5"><span class="wt-tile--day wt-tile--weekend inline-block h-3 w-3 rounded-sm border border-gray-300 dark:border-gray-600"></span>Weekend</span>
+    </div>
+
+    <p x-show="!hasSelection" class="mt-4 text-sm text-gray-500 dark:text-gray-400">Click an hour, or drag across the hours, to pick a time range and see it in every location.</p>
+    <p class="sr-only" aria-live="polite" x-text="announcement"></p>
+
+    <section x-show="hasSelection" style="display: none" aria-labelledby="wt-selection-title"
+             class="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm p-4 sm:p-6">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+            <h2 id="wt-selection-title" class="text-xl font-semibold">Selected time</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400" x-text="durationText"></p>
+        </div>
+        <div class="mt-4 flex flex-wrap items-end gap-3">
+            <div class="w-32">
+                <label for="wt-start" class="block mb-1 text-sm font-medium">Start</label>
+                {% include 'core/components/time_field.html' with id='wt-start' x_model='startTime' compact=True describedby='wt-range-help' %}
+            </div>
+            <div class="w-32">
+                <label for="wt-end" class="block mb-1 text-sm font-medium">End</label>
+                {% include 'core/components/time_field.html' with id='wt-end' x_model='endTime' compact=True describedby='wt-range-help' %}
+            </div>
+            <div class="ml-auto flex flex-wrap gap-2">
+                <button type="button" @click="clear()"
+                        class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Clear</button>
+                <div x-data="copyText">
+                    <pre x-ref="text" class="sr-only" aria-hidden="true" x-text="summaryText"></pre>
+                    <button type="button" @click="copy()"
+                            class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+                        <i data-copy-icon class="fas mr-2" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i>
+                        <span x-text="copied ? 'Copied' : 'Copy times'">Copy times</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <p id="wt-range-help" class="mt-1 text-xs text-gray-500 dark:text-gray-400">Start and end are on <span x-text="homeTitle"></span>'s clock, within the day shown.</p>
+        <ul data-wt-lines class="mt-4 divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+            <template x-for="line in lines" :key="line.id">
+                <li class="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-baseline sm:gap-4">
+                    <span class="font-medium text-gray-900 dark:text-gray-100 sm:w-56 sm:flex-shrink-0 truncate" x-text="line.title"></span>
+                    <span class="tabular-nums text-gray-700 dark:text-gray-300" x-text="line.range"></span>
+                </li>
+            </template>
+        </ul>
+    </section>
+    {% else %}
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+        {% include 'core/partials/empty_state.html' with icon='fas fa-earth-americas' title='No locations in this tab yet' text='Search for a city or a time zone above to add the first one. It becomes the home row.' %}
+    </div>
+    {% endif %}
+</div>
+{% if clear_msg %}{% comment %} A success clears a refusal an earlier request left, and the suggestions of a place just added. {% endcomment %}
+<div id="wt-msg" hx-swap-oob="true" class="mb-4 text-sm" aria-live="polite"></div>
+<div id="wt-search-msg" hx-swap-oob="true" class="mt-1 text-sm" aria-live="polite"></div>
+<div id="wt-search-results" hx-swap-oob="innerHTML"></div>
+{% endif %}

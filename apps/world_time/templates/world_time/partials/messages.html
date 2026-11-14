@@ -1,0 +1,5 @@
+{% load field_errors %}{# The content of a message slot after a refused action (always sent with status 422). #}
+<div class="text-red-600 dark:text-red-400" role="alert">
+    {% for line in messages_list %}{{ line }}<br>{% endfor %}
+</div>
+{% field_errors messages_list %}

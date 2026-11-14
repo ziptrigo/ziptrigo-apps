@@ -1051,6 +1051,21 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 | 10 | Permissions (ADM-51's STAFF, Session B): give STAFF only "Notes | note | Can view note" and "Notes | note report | Can view note report". Open both lists. | Both load with **no** action menu entry for take down or dismiss; POSTing `action=take_down_action` / `dismiss_action` (devtools) changes nothing. |
 | 11 | Session A: add "Notes | note | Can take down notes and dismiss reports" to STAFF. Session B: reload. | The notes list offers **Take down selected note(s)** and the report list **Dismiss selected report(s)** and **Take down the reported note(s)**; they work and log in History. |
 
+### ADM-62 World Time admins and settings
+
+**Purpose:** the World Time admins are read-only, the city tables are reference data, and the settings singleton validates (issue #269).
+**Preconditions:** Session A (`qa.admin`); `world_time.md` WT-02 done as `qa.user@example.com`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/`, find the **World Time** group. | **World Time settings** (Change only, never Add), **Tabs** (View), **World Time accounts** (View), **Cities** (View), **City data** (View). |
+| 2 | `/admin/world_time/tab/`. | A list with **Name**, **User**, **Locations** (a count), **Position**, **Created at**; no **Add**; the search finds a tab's name and `qa.user@example.com`. Open a tab: read-only, no Save or Delete, and a **Locations** inline with each row's name, label, region, country, time zone, home flag and position. `/admin/world_time/tab/add/` is 403. |
+| 3 | `/admin/world_time/city/`. | Cities, most populous first (Shanghai, Beijing, ...), with region, country, time zone, population and GeoNames id; a filter by country code; searching `lisb` finds Lisbon. Open one: read-only. No Add, no Delete. |
+| 4 | `/admin/world_time/citydata/`. | One row: the number of cities, the number of other names, when the tables were seeded and the file's SHA-256. Read-only. |
+| 5 | `/admin/world_time/worldtimesettings/`. | Straight to the form: Max tabs per user 10, Max locations per tab 20, each with a plain help text. Set both to `0`, **Save**: `Ensure this value is greater than or equal to 1.` under each. Restore and save. |
+| 6 | As a **staff** user without permissions (ADM-51's user), open `/admin/world_time/worldtimesettings/`. | 403 / not shown (singletons are superuser-only). |
+| 7 | Delete a throwaway user who opened `/time/` (so has a tab) from `/admin/accounts/user/`. | The confirmation lists their World Time account, tab and locations; the delete succeeds. |
+
 ## Out of scope
 
 - The JWT API endpoints the admin uses or mirrors (`POST /api/billing/users/{id}/credits` and its `billing.add_credittransaction`

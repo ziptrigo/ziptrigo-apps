@@ -1,0 +1,19 @@
+{% comment %} The suggestions under "Add a location": each is a submit button of the form around them (#wt-add). {% endcomment %}
+{% if results %}
+<ul class="max-h-80 overflow-y-auto py-1 text-sm" aria-label="Suggestions">
+    {% for result in results %}
+    <li>
+        <button type="submit" name="{{ result.kind }}" value="{{ result.value }}" data-wt-suggestion
+                class="flex w-full items-baseline gap-2 px-3 py-2 text-left hover:bg-sage-100 dark:hover:bg-gray-700 focus:bg-sage-100 dark:focus:bg-gray-700">
+            <i class="{% if result.kind == 'zone' %}fas fa-clock{% else %}fas fa-location-dot{% endif %} w-4 flex-shrink-0 text-center text-sage-400" aria-hidden="true"></i>
+            <span class="min-w-0">
+                <span class="font-medium text-gray-900 dark:text-gray-100">{{ result.name }}</span>{% if result.detail %}<span class="text-gray-500 dark:text-gray-400">, {{ result.detail }}</span>{% endif %}
+                {% if result.hint %}<span class="ml-1 text-xs text-gray-500 dark:text-gray-400">({{ result.hint }})</span>{% endif %}
+            </span>
+        </button>
+    </li>
+    {% endfor %}
+</ul>
+{% elif query|length >= 2 %}
+<p class="px-3 py-3 text-sm text-gray-500 dark:text-gray-400">No place matches "{{ query }}".{% if not cities_seeded %} The city list has not been loaded yet, so only time zones (UTC, Europe/Lisbon, PST) can be found.{% endif %}</p>
+{% endif %}

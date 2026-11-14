@@ -91,6 +91,7 @@ INSTALLED_APPS = [
     'apps.short_url',
     'apps.todo',
     'apps.notes',
+    'apps.world_time',
     # Task queue: an ORM-backed store for `django.tasks` (Django 6's built-in task queue API).
     'django_tasks_db',
 ]
@@ -544,6 +545,14 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # a search scans the user's text columns with a regular expression, the one read that costs
     # real work. Saved-filter changes spend `NOTES_EDIT_USER`.
     'NOTES_SEARCH_USER': (60, 60),
+    # -- world_time (issue #269): the World Time pages --
+    # Every change (tabs, adding, renaming, removing and reordering locations, the home row): per
+    # user. Each is a small row write; dragging rows is a burst of them.
+    'WT_EDIT_USER': (240, 60),
+    # The "Add a location" suggestions, `GET /time/search/`: one indexed prefix query (and a scan
+    # of 34,000 short rows) per pause in typing, session bound. Over it the view answers 204 and
+    # the last suggestions stay.
+    'WT_SEARCH_USER': (120, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -1075,6 +1084,11 @@ JAZZMIN_SETTINGS = {
         'receipts.ReceiptsAccount': 'fas fa-inbox',
         'receipts.ReceiptsSettings': 'fas fa-sliders-h',
         'notes.Note': 'fas fa-note-sticky',
+        'world_time.Tab': 'fas fa-earth-americas',
+        'world_time.City': 'fas fa-city',
+        'world_time.CityData': 'fas fa-database',
+        'world_time.WorldTimeAccount': 'fas fa-inbox',
+        'world_time.WorldTimeSettings': 'fas fa-sliders-h',
         'notes.NotesAccount': 'fas fa-inbox',
         'notes.NotesSettings': 'fas fa-sliders-h',
         'notes.ShareLink': 'fas fa-link',
