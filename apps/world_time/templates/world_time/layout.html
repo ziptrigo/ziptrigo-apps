@@ -1,0 +1,18 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% comment %} Shared by every World Time page: the page-level message slot and the one confirmation modal the page shares. {% endcomment %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'world_time/css/world_time.css' %}">{% endblock %}
+
+{% block content %}
+<div x-data="confirmModal" class="container mx-auto px-4 py-6 max-w-6xl">
+    {% block wt_content %}{% endblock %}
+    {% include 'core/partials/confirm_modal.html' %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% include 'core/partials/sortable_script.html' %}
+{% comment %} A classic script, not deferred: its `alpine:init` listener has to exist before Alpine (deferred) starts. {% endcomment %}
+<script src="{% static 'world_time/js/world_time.js' %}"></script>
+{% endblock %}

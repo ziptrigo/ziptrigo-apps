@@ -610,7 +610,7 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | Look under the intro. | A row of chips: **Shared**, then one per app (QR Codes, File Transfer, Receipts, Short URLs, To-do, Notes, in the order the account's Apps section shows). Each chip jumps to its section. |
+| 1 | Look under the intro. | A row of chips: **Shared**, then one per app (QR Codes, File Transfer, Receipts, Short URLs, To-do, Notes, World Time, in the order the account's Apps section shows). Each chip jumps to its section. |
 | 2 | Look at **Shared by every app**. | A **File storage** card: "Files you keep in File Transfer, Receipts and To-do. Charged once a day ...", "Example: 2 GB kept for 30 days costs 6 credits.", and on the right **0.1 credits** / per GB per day. Under it **New accounts** "1,000 credits once the email address is confirmed." and **When credits run out**. |
 | 3 | Look at **QR Codes**. | One row, "Create, edit and download QR codes", **Free**. |
 | 4 | Look at **File Transfer**. | "Send a transfer" **Free** ("You need at least 1 credit to start one. ..."); "Keep the files available" **Storage** / per day ("Each transfer, for its size, while it is active.") with a **Storage price** link that jumps to the Shared section; `"Download all" as a zip` **Free**. Above the rows "You have no active transfers, so nothing is charged for them." or, with transfers, "You have N active transfers (size): ... a day." at the real rate: a few MB reads "less than 0.01 credits a day", never a 1-credit minimum. Under them "Out of credits: a transfer is suspended and its files are kept 7 days. Topping up turns it back on once your balance covers a day of its storage (at least 1 credit)." |
@@ -618,7 +618,8 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 6 | Look at **Short URLs**. | "N of your 25 free active links are in use." Rows: "Create and follow links" **Free**; "Each active link beyond 25", "Custom alias", "Password", "Detailed statistics", each **1 credit** / once per link. Footnote "You confirm the cost of a paid extra first. No recurring charges: ...". |
 | 7 | Look at **To-do**. | "This month: N of 10 free tasks used. The allowance starts again on <the 1st of next month, in the account's date format>." Rows: "Add a task" **Free** ("The first 10 each month. ..."); "Each task beyond 10 in a month" **10 credits** / per task ("Charged when the task is added."); "Attach files" **Storage**; a **Free** row for dates, reminders, comments and search. |
 | 8 | Look at **Notes**. | "You have N of 5 free notes." Rows: "Your first 5 notes" **Free**; "Each note beyond 5" **1 credit** / to create ("You confirm the cost first. ..."); "Renewal of a paid note" **5 credits** / every 365 days ("Taken automatically on the renewal date."); "Tags, history, sharing, search and saved filters" **Free**. With a paid note (NOTES cases), a line "1 paid note renews every 365 days; the next renewal is on <date> for 5 credits." |
-| 9 | Phone width (375 px) and dark mode. | Nothing scrolls sideways; each amount stays on the right of its row; every text is readable in dark mode. |
+| 9 | Look at **World Time**. | One row, "Tabs, locations and the time grid", **Free** ("World Time is free."). |
+| 10 | Phone width (375 px) and dark mode. | Nothing scrolls sideways; each amount stays on the right of its row; every text is readable in dark mode. |
 
 ### BILL-36 Prices follow the admin settings
 

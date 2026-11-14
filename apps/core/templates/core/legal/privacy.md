@@ -2,7 +2,7 @@
 
 **Effective date:** {{ effective_date }}
 
-This Privacy Policy explains what personal information ZipTrigo ("**ZipTrigo**", "**we**", "**us**") collects when you use the website and services at `ziptrigo.com` and its subdomains, and the ZipTrigo mobile app (together, the "**Service**"), why we collect it, and the choices you have. The Service includes QR codes, file transfer, receipts, short links, to-do lists and notes.
+This Privacy Policy explains what personal information ZipTrigo ("**ZipTrigo**", "**we**", "**us**") collects when you use the website and services at `ziptrigo.com` and its subdomains, and the ZipTrigo mobile app (together, the "**Service**"), why we collect it, and the choices you have. The Service includes QR codes, file transfer, receipts, short links, to-do lists, notes and a world clock.
 
 ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ operator_country }}. It is not operated by a company. For any privacy question or request, write to {{ contact_email }}.
 
@@ -17,6 +17,7 @@ ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ o
 - **Short links:** the destination address, title, tags and settings of each link, and an optional password (stored as a hash).
 - **To-do:** your tasks, descriptions, comments (including earlier versions of a comment you edited), labels, reminders, saved filters, and the files you attach. For tasks added by email we keep the sender's address and the subject.
 - **Notes:** the title and Markdown content of your notes, their tags, and the earlier versions that edits of a note keep (a limited number per note). If you share a note with a link, we also keep the link (with the label and expiry you set), and anyone who has the link can see the note without signing in. If someone changes a note through an editable link, we keep the earlier versions as for any edit; when that person was signed in, the version records their account, and the note's owner can see which account made it (a visitor who was not signed in appears only as someone using the link).
+- **World Time:** the tabs you create and the places you add to them (a city or a time zone, and the name you give it). We do not use your device's location: the first row comes from the time zone saved on your account.
 - **Feedback and reports:** messages you send through the Feedback page, and abuse reports about a transfer, a short link or a shared note, which include the reason, any details you write and, optionally, your email address.
 
 ### 1.2 Information from Google and Microsoft
@@ -112,7 +113,7 @@ We protect your information with encryption in transit (HTTPS), hashed passwords
 Depending on where you live, you may have the right to access, correct, delete or export your personal information, to object to or restrict certain processing, and to withdraw consent at any time. You can:
 
 - update your name, time zone and preferences on the **Account** page;
-- delete your transfers, receipts, short links, tasks, notes and files in the Service at any time;
+- delete your transfers, receipts, short links, tasks, notes, world clock tabs and files in the Service at any time;
 - request a copy of your data, or the deletion of your account and its data, by writing to {{ contact_email }} from the email address of your account. We act on a deletion request within 30 days.
 
 If you are in the EEA or the UK, you can also lodge a complaint with your local data protection authority.

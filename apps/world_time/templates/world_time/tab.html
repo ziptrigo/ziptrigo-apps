@@ -1,0 +1,56 @@
+{% extends 'world_time/layout.html' %}
+{% load datetime_format %}
+
+{% block title %}{{ tab.name }} - World Time - ZipTrigo{% endblock %}
+
+{% block wt_content %}
+<h1 class="mb-6 text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">World Time</h1>
+
+{% include 'world_time/partials/tabs.html' %}
+
+<div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    {% comment %} Add a location: the suggestions are submit buttons of this form (`city=<id>` or `zone=<name>`). {% endcomment %}
+    <form id="wt-add" method="post" action="{% url 'world_time:location-add' tab.pk %}"
+          hx-post="{% url 'world_time:location-add' tab.pk %}" hx-target="#wt-grid" hx-swap="innerHTML"
+          class="relative w-full lg:max-w-md" data-wt-search>
+        {% csrf_token %}
+        <input type="hidden" name="date" value="{{ grid_date }}">
+        <label for="wt-search" class="block mb-1 text-sm font-medium">Add a location</label>
+        <div class="relative">
+            <i class="fas fa-magnifying-glass pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" aria-hidden="true"></i>
+            <input id="wt-search" name="q" type="search" autocomplete="off" spellcheck="false" maxlength="60"
+                   placeholder="City or time zone: Porto, Tokyo, UTC, PST"
+                   aria-describedby="wt-search-help" aria-controls="wt-search-results"
+                   hx-get="{% url 'world_time:search' %}" hx-vals='{"tab": "{{ tab.pk }}"}'
+                   hx-trigger="input changed delay:250ms" hx-target="#wt-search-results" hx-swap="innerHTML" hx-sync="this:replace"
+                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 py-2 pl-9 pr-3">
+        </div>
+        <p id="wt-search-help" class="sr-only">Type at least two letters, then choose a suggestion. The down arrow moves to the suggestions.</p>
+        <p id="wt-search-status" class="sr-only" aria-live="polite"></p>
+        <div id="wt-search-results"
+             class="absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-xl border border-sage-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg empty:hidden"></div>
+        <div id="wt-search-msg" class="mt-1 text-sm" aria-live="polite"></div>
+    </form>
+
+    <nav aria-label="Day shown" class="flex flex-wrap items-center gap-2">
+        <a href="{% url 'world_time:tab' tab.pk %}?date={{ grid.previous_iso }}" aria-label="Previous day" title="Previous day"
+           class="btn inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-chevron-left" aria-hidden="true"></i></a>
+        <div class="w-40" data-wt-date data-url="{% url 'world_time:tab' tab.pk %}">
+            {% include 'core/components/date_picker.html' with id='wt-date' hidden_id='wt-date-value' value=grid.day_iso aria_label='Day shown' required=True compact=True %}
+        </div>
+        <a href="{% url 'world_time:tab' tab.pk %}?date={{ grid.next_iso }}" aria-label="Next day" title="Next day"
+           class="btn inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-chevron-right" aria-hidden="true"></i></a>
+        {% if not grid.is_today %}
+        <a href="{% url 'world_time:tab' tab.pk %}"
+           class="btn inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Today</a>
+        {% endif %}
+    </nav>
+</div>
+
+<div id="wt-msg" class="mb-4 text-sm" aria-live="polite"></div>
+<div id="wt-grid">
+    {% include 'world_time/partials/grid.html' %}
+</div>
+
+<p class="mt-8 text-xs text-gray-500 dark:text-gray-400">City data from <a href="https://www.geonames.org/" rel="noopener noreferrer" target="_blank" class="underline">GeoNames</a>, licensed CC BY 4.0.</p>
+{% endblock %}

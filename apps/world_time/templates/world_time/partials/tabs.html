@@ -1,0 +1,64 @@
+{% comment %} The user's tabs (each a set of locations), a "New tab" form, and Rename / Delete for the tab shown.
+   A refusal is a 422 into #wt-tab-msg. {% endcomment %}
+<div x-data="{ adding: false, renaming: false }" class="mb-6">
+    <div class="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-gray-200 dark:border-gray-700">
+        <nav data-tabs aria-label="Tabs" class="-mb-px flex flex-wrap gap-x-1">
+            {% for item in tabs %}
+            <a href="{% url 'world_time:tab' item.pk %}"{% if item.pk == tab.pk %} aria-current="page"{% endif %}
+               class="inline-flex items-center whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium {% if item.pk == tab.pk %}border-brand-primary text-gray-900 dark:text-gray-100{% else %}border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-200{% endif %}">{{ item.name }}</a>
+            {% endfor %}
+        </nav>
+        <div class="ml-auto flex items-center pb-1">
+            <button type="button" @click="renaming = !renaming; adding = false" :aria-expanded="renaming" aria-controls="wt-tab-rename"
+                    aria-label="Rename the tab {{ tab.name }}" title="Rename this tab"
+                    class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></button>
+            {% if tabs|length > 1 %}
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'world_time:tab-delete' tab.pk %}"
+                    data-title="Delete tab"
+                    data-body="Are you sure you want to delete the tab {{ tab.name }} and its locations?"
+                    data-label="Delete"
+                    aria-label="Delete the tab {{ tab.name }}" title="Delete this tab"
+                    class="btn p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-trash" aria-hidden="true"></i></button>
+            {% endif %}
+            <button type="button" @click="adding = !adding; renaming = false" :aria-expanded="adding" aria-controls="wt-tab-new"
+                    class="btn ml-1 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <i class="fas fa-plus mr-2" aria-hidden="true"></i>New tab
+            </button>
+        </div>
+    </div>
+
+    <form id="wt-tab-new" x-show="adding" style="display: none" method="post" action="{% url 'world_time:tab-create' %}"
+          hx-post="{% url 'world_time:tab-create' %}" hx-swap="none" hx-disabled-elt="find button[type='submit']"
+          @keydown.escape="adding = false" class="mt-3 flex flex-wrap items-end gap-2">
+        {% csrf_token %}
+        <div class="min-w-0 flex-1 sm:max-w-xs">
+            <label for="wt-tab-new-name" class="block mb-1 text-sm font-medium">Name of the new tab</label>
+            <input id="wt-tab-new-name" name="name" type="text" maxlength="50" required
+                   x-effect="if (adding) $nextTick(() => $el.focus())"
+                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+        </div>
+        <button type="button" @click="adding = false"
+                class="btn px-4 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Cancel</button>
+        <button type="submit"
+                class="btn px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Add tab</button>
+    </form>
+
+    <form id="wt-tab-rename" x-show="renaming" style="display: none" method="post" action="{% url 'world_time:tab-rename' tab.pk %}"
+          hx-post="{% url 'world_time:tab-rename' tab.pk %}" hx-swap="none" hx-disabled-elt="find button[type='submit']"
+          @keydown.escape="renaming = false" class="mt-3 flex flex-wrap items-end gap-2">
+        {% csrf_token %}
+        <input type="hidden" name="date" value="{{ grid_date }}">
+        <div class="min-w-0 flex-1 sm:max-w-xs">
+            <label for="wt-tab-rename-name" class="block mb-1 text-sm font-medium">Name of this tab</label>
+            <input id="wt-tab-rename-name" name="name" type="text" maxlength="50" required value="{{ tab.name }}"
+                   x-effect="if (renaming) $nextTick(() => { $el.focus(); $el.select() })"
+                   class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+        </div>
+        <button type="button" @click="renaming = false; $el.form.reset()"
+                class="btn px-4 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">Cancel</button>
+        <button type="submit"
+                class="btn px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary disabled:opacity-50 hover:bg-sage-400">Save</button>
+    </form>
+    <div id="wt-tab-msg" class="mt-2 text-sm" aria-live="polite"></div>
+</div>
