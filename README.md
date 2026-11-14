@@ -48,7 +48,8 @@ A single Django project (a "modular monolith") with one Django app per concern:
   hours, nights and weekends shaded, daylight-saving changes announced a week ahead, and a time
   range picked by clicking or dragging that is shown, and copied, in every location's local time.
   A range can be shared as an event: a title and a public `/w/<code>` page that shows the time in
-  the visitor's own zone. Free: no credits.
+  the visitor's own zone. A JWT API (`/api/time/`) and the `admin/worldtime.py` CLI
+  (`inv worldtime ...`). Free: no credits.
 
 `core`, `accounts` and `billing` are shared by every product. Products never import each other, so
 each can grow (or be removed) on its own; see [Dependency rules](#dependency-rules).
@@ -126,7 +127,7 @@ apps/<app>/
 | `/receipts/…` | receipts: dashboard (`/receipts/`), upload, a receipt's page (`<id>/`), trash, settings, CSV export |
 | `/transfer/…` | file_transfer: send page (`send/`) and anonymous send page (`send/anon/`), dashboard, upload endpoints |
 | `/t/<slug>/` | file_transfer public download links (and `/t/<slug>/manage/<token>/`, the anonymous manage link) — at the root, same reason as `/go/<code>` |
-| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…`, `/api/s/…` (short_url), `/api/todo/…`, `/api/notes/…` |
+| `/api/…` | the API: `/api/auth/…`, `/api/account`, `/api/billing/…`, `/api/qr/…`, `/api/ft/…`, `/api/receipts/…`, `/api/s/…` (short_url), `/api/todo/…`, `/api/notes/…`, `/api/time/…` (world_time) |
 | `/admin/` | Django admin (Jazzmin) |
 
 ### Dependency rules
@@ -486,9 +487,9 @@ are checked with Google. Google offers it for non-commercial use; for commercial
 ### World Time: the city list
 
 World Time has no environment variables and no external service. Its "Add a location" search reads
-two database tables (`world_time_city`, about 32,000 cities, and `world_time_cityname`, about 63,000
+two database tables (`world_time_city`, about 32,000 cities, and `world_time_cityname`, about 39,000
 other names such as "Lisboa" or "München") that are **seeded from a file in the repository**,
-`apps/world_time/data/cities.tsv.gz` (about 0.8 MB). The data lives in the database, not in memory,
+`apps/world_time/data/cities.tsv.gz` (about 0.7 MB). The data lives in the database, not in memory,
 so it costs the web and queue workers nothing.
 
 **Seeding** is one command, and it is idempotent:
@@ -527,6 +528,30 @@ The caps (10 tabs per user, 20 locations per tab, 50 shared events per user) and
 ends a shared event is deleted (30 days) are in the admin, at
 `/admin/world_time/worldtimesettings/` (superusers). The daily `world_time.purge_events` job, which
 deletes ended events, runs inside the web workers like the other scheduled jobs.
+
+### World Time: API and command line
+
+The API (`/api/time/`, documented in `docs/openapi.yml`) and the command line use the same JWT login
+as the other apps. Nothing costs credits.
+
+```bash
+export WORLDTIME_PASSWORD=...                       # or be asked, with the echo hidden
+inv worldtime login local me@example.com
+inv worldtime now local                             # the time in every location of your first tab
+inv worldtime now local --tab Team --at 2026-11-20T15:00   # a moment on the home location's clock
+inv worldtime search local porto                    # cities, time zones, abbreviations (PST)
+inv worldtime add local porto --tab Team --label "Porto office"   # asks which when several match
+inv worldtime add local --zone UTC
+inv worldtime locations local --tab Team            # the rows, with their ids
+inv worldtime label local Porto HQ                  # your own name for a row (leave it out to clear)
+inv worldtime home local Tokyo                      # the row the others are compared with
+inv worldtime reorder local Tokyo Lisbon
+inv worldtime remove local Tokyo                    # asks first (--yes skips)
+inv worldtime tabs local
+inv worldtime tab-add local Team Europe
+```
+
+Shared events have API endpoints (`/api/time/events`) but no commands.
 
 ### Notes
 

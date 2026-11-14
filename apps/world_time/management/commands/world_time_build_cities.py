@@ -41,7 +41,8 @@ def _is_latin(text: str) -> bool:
 
 def _other_names(name: str, raw: str) -> list[str]:
     """The other names worth searching by: Latin script, at least 3 characters, no digits, not an
-    all-capitals code, and different from the city's own name once normalised. Spellings that
+    all-capitals code, starting with a capital, and different from the city's own name once
+    normalised. Spellings that
     differ only by accents are all kept (`Roma` and `Róma`, `Munchen` and `München`): the file has
     no language to choose by, and the search shows the one that was typed."""
     own = normalize_for_search(name)
@@ -56,6 +57,9 @@ def _other_names(name: str, raw: str) -> list[str]:
             or not _is_latin(other)
             or any(char.isdigit() for char in other)
             or (other.isupper() and len(other) <= 4)
+            # A name with no capital is a romanisation of another script (`li si ben`, and
+            # `porto` for Bordeaux), not something that names the city in the Latin alphabet.
+            or other == other.lower()
             or '|' in other
             or '\t' in other
         ):

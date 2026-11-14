@@ -195,6 +195,6 @@ def test_the_apps_are_one_column(page: Page, receipts_server: ReceiptsServer):
     boxes = page.locator('[data-app]').evaluate_all(
         'tiles => tiles.map(tile => { const r = tile.getBoundingClientRect(); return [r.left, r.top]; })'
     )
-    assert len(boxes) == 6
+    assert len(boxes) == 7  # one tile per product
     assert len({left for left, _ in boxes}) == 1  # all the same left edge
     assert [top for _, top in boxes] == sorted(top for _, top in boxes)

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.5.0
+  version: 2.6.1
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -5011,6 +5011,514 @@ paths:
         as any change is: in the Trash (400), locked (402), taken down (409).'
       tags:
       - Notes
+      security:
+      - JWTAuth: []
+  /api/time/events:
+    get:
+      operationId: apps_world_time_api_events_list_events
+      summary: List Events
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/WorldTimeEventSchema'
+                title: Response
+                type: array
+      description: 'The caller''s events: those that have not ended first, soonest first, then the ended ones,
+
+        latest first. At most `max_events` (`GET /settings`), so the list is not paged.'
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+    post:
+      operationId: apps_world_time_api_events_create_event
+      summary: Create Event
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeEventSchema'
+      description: 'Share a time range: the event keeps a copy of the locations of `tab` (under the names the
+
+        caller gave them), and anyone who has its `url` can see the title, the time and those places.
+
+        The end must be after the start, at most 7 days later and not already past.'
+      tags:
+      - World Time
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorldTimeEventCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/time/events/{event_id}:
+    get:
+      operationId: apps_world_time_api_events_get_event
+      summary: Get Event
+      parameters:
+      - in: path
+        name: event_id
+        schema:
+          format: uuid
+          title: Event Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeEventSchema'
+      description: One of the caller's events.
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+    patch:
+      operationId: apps_world_time_api_events_update_event
+      summary: Update Event
+      parameters:
+      - in: path
+        name: event_id
+        schema:
+          format: uuid
+          title: Event Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeEventSchema'
+      description: 'Change the title and/or the time (send both `starts_at` and `ends_at` for a new time). The
+
+        link and the places stay. A body with nothing in it changes nothing and spends nothing; an
+
+        explicit `null` is read as "not sent".'
+      tags:
+      - World Time
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorldTimeEventUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_world_time_api_events_delete_event
+      summary: Delete Event
+      parameters:
+      - in: path
+        name: event_id
+        schema:
+          format: uuid
+          title: Event Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete an event: its link stops working. Never rate limited.'
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+  /api/time/tabs/{tab_id}/grid:
+    get:
+      operationId: apps_world_time_api_grid_grid
+      summary: Grid
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      - in: query
+        name: date
+        schema:
+          default: ''
+          title: Date
+          type: string
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeGridSchema'
+      description: 'The grid of a tab for `date` (`YYYY-MM-DD`; default: today on the home row''s clock; a date
+
+        more than ten years away is a 400): one tile per hour of **the home row''s** calendar day, in
+
+        every location''s own clock, with the daylight-saving rules of that date.'
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+  /api/time/tabs/{tab_id}/times:
+    get:
+      operationId: apps_world_time_api_grid_times
+      summary: Times
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      - in: query
+        name: at
+        schema:
+          default: ''
+          title: At
+          type: string
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeMomentSchema'
+      description: 'Every location of a tab at one instant: `at`, ISO 8601 (default: now; a date alone means
+
+        midnight; within ten years of now). With an offset (`2026-10-09T15:00:00Z`,
+
+        `...+02:00`: percent-encode the `+` in a query string, where a raw one is a space) it is
+
+        that instant; without one it is read on the **home row''s wall clock** (a time its clocks skip
+
+        that day is a 400; one that happens twice is its first occurrence). The answer''s `at` is the
+
+        instant in UTC.'
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+  /api/time/search:
+    get:
+      operationId: apps_world_time_api_locations_search
+      summary: Search
+      parameters:
+      - in: query
+        name: q
+        schema:
+          default: ''
+          title: Q
+          type: string
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/WorldTimeSearchResultSchema'
+                title: Response
+                type: array
+      description: 'Places matching `q` (at least 2 characters; longer than 60 is cut): a time zone
+
+        abbreviation''s zones first (`PST`, `IST`), then cities, most populous first (by name without
+
+        accents, or by another name such as `Lisboa`), then time zones by name. Empty when nothing
+
+        matches, and for cities while the city list has not been loaded (`GET /settings`:
+
+        `cities_loaded`). A `q` under 2 characters answers `[]` and spends no budget.'
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+  /api/time/tabs/{tab_id}/locations:
+    post:
+      operationId: apps_world_time_api_locations_add_location
+      summary: Add Location
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeLocationSchema'
+      description: 'Add a place to the end of a tab: `city` (a GeoNames id from the search) or `zone` (an IANA
+
+        name), with an optional `label`. The first row of an empty tab becomes its home. A place
+
+        already in the tab, a full tab, an unknown city or zone are 400s (an unknown city or zone
+
+        spends no rate-limit budget).'
+      tags:
+      - World Time
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorldTimeLocationCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/time/tabs/{tab_id}/locations/reorder:
+    post:
+      operationId: apps_world_time_api_locations_reorder_locations
+      summary: Reorder Locations
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/WorldTimeLocationSchema'
+                title: Response
+                type: array
+      description: 'Put the tab''s locations in the order given and answer them all, in order. Ids that aren''t
+
+        the tab''s are ignored; rows left out keep their place among the others.'
+      tags:
+      - World Time
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorldTimeOrderSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/time/tabs/{tab_id}/locations/{location_id}:
+    patch:
+      operationId: apps_world_time_api_locations_update_location
+      summary: Update Location
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      - in: path
+        name: location_id
+        schema:
+          format: uuid
+          title: Location Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeLocationSchema'
+      description: 'Change a row: its `label`, and/or make it the tab''s `home`. A body with nothing in it
+
+        changes nothing and spends nothing.'
+      tags:
+      - World Time
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorldTimeLocationUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_world_time_api_locations_remove_location
+      summary: Remove Location
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      - in: path
+        name: location_id
+        schema:
+          format: uuid
+          title: Location Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: Remove a row. If it was the home, the first remaining row becomes the home.
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+  /api/time/settings:
+    get:
+      operationId: apps_world_time_api_settings_settings
+      summary: Settings
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeSettingsSchema'
+      description: 'The site''s caps for World Time (tabs, locations per tab, shared events, and how many days
+
+        after it ends an event is deleted), how many tabs and events the caller has, and whether the
+
+        city list is loaded (while it is not, the search only finds time zones). World Time is free.'
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+  /api/time/tabs:
+    get:
+      operationId: apps_world_time_api_tabs_list_tabs
+      summary: List Tabs
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/WorldTimeTabSchema'
+                title: Response
+                type: array
+      description: 'The caller''s tabs in order. A caller who has none yet gets one, `My times`, whose only row
+
+        is the account''s time zone (UTC when it is not set), as on the website.'
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+    post:
+      operationId: apps_world_time_api_tabs_create_tab
+      summary: Create Tab
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeTabDetailSchema'
+      description: Add a tab at the end. It starts with one row, the account's time zone, as its home.
+      tags:
+      - World Time
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorldTimeTabWriteSchema'
+        required: true
+      security:
+      - JWTAuth: []
+  /api/time/tabs/{tab_id}:
+    get:
+      operationId: apps_world_time_api_tabs_get_tab
+      summary: Get Tab
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeTabDetailSchema'
+      description: A tab with its locations in order.
+      tags:
+      - World Time
+      security:
+      - JWTAuth: []
+    patch:
+      operationId: apps_world_time_api_tabs_rename_tab
+      summary: Rename Tab
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldTimeTabDetailSchema'
+      description: Rename a tab.
+      tags:
+      - World Time
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorldTimeTabWriteSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_world_time_api_tabs_delete_tab
+      summary: Delete Tab
+      parameters:
+      - in: path
+        name: tab_id
+        schema:
+          format: uuid
+          title: Tab Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: Delete a tab and its locations. The last tab can't be deleted (400).
+      tags:
+      - World Time
       security:
       - JWTAuth: []
 components:
@@ -10887,6 +11395,572 @@ components:
       - content
       title: NoteVersionSchema
       type: object
+    WorldTimeEventLocationSchema:
+      description: 'An event''s time in one of the places it was shared with (a copy made when the event was
+
+        created). `starts_local` and `ends_local` are that place''s wall clock (no offset);
+
+        `utc_offset_minutes` is its offset at the start and `ends_utc_offset_minutes` at the end (they
+
+        differ when its clocks change during the event).'
+      properties:
+        name:
+          title: Name
+          type: string
+        detail:
+          title: Detail
+          type: string
+        timezone:
+          title: Timezone
+          type: string
+        home:
+          title: Home
+          type: boolean
+        starts_local:
+          title: Starts Local
+          type: string
+        ends_local:
+          title: Ends Local
+          type: string
+        utc_offset_minutes:
+          title: Utc Offset Minutes
+          type: integer
+        ends_utc_offset_minutes:
+          title: Ends Utc Offset Minutes
+          type: integer
+      required:
+      - name
+      - detail
+      - timezone
+      - home
+      - starts_local
+      - ends_local
+      - utc_offset_minutes
+      - ends_utc_offset_minutes
+      title: WorldTimeEventLocationSchema
+      type: object
+    WorldTimeEventSchema:
+      description: 'A shared event. `url` is its public page (anyone who has it sees the title, the time and
+
+        the places); `ended` is whether it is over (it is deleted some days later).'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        title:
+          title: Title
+          type: string
+        starts_at:
+          format: date-time
+          title: Starts At
+          type: string
+        ends_at:
+          format: date-time
+          title: Ends At
+          type: string
+        url:
+          title: Url
+          type: string
+        ended:
+          title: Ended
+          type: boolean
+        locations:
+          items:
+            $ref: '#/components/schemas/WorldTimeEventLocationSchema'
+          title: Locations
+          type: array
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - id
+      - title
+      - starts_at
+      - ends_at
+      - url
+      - ended
+      - locations
+      - created_at
+      - updated_at
+      title: WorldTimeEventSchema
+      type: object
+    WorldTimeEventCreateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /events`: the tab whose locations the event is shared with, a title (1 to 120
+
+        characters) and the two instants (ISO 8601 with an offset). A `tab` that isn''t the caller''s is a
+
+        400.'
+      properties:
+        tab:
+          format: uuid
+          title: Tab
+          type: string
+        title:
+          title: Title
+          type: string
+        starts_at:
+          format: date-time
+          title: Starts At
+          type: string
+        ends_at:
+          format: date-time
+          title: Ends At
+          type: string
+      required:
+      - tab
+      - title
+      - starts_at
+      - ends_at
+      title: WorldTimeEventCreateSchema
+      type: object
+    WorldTimeEventUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /events/{id}`: only the fields present are applied. A new time needs both
+
+        `starts_at` and `ends_at`. The link and the places never change.'
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        starts_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Starts At
+        ends_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Ends At
+      title: WorldTimeEventUpdateSchema
+      type: object
+    WorldTimeGridRowSchema:
+      description: 'A location''s hours for the day shown. `steps` are `[minute, offset]` pairs: the UTC offset
+
+        (minutes) in force from that minute of the day (the first is minute 0), exact to the minute, so
+
+        a client can turn any instant of the day into this row''s wall clock. `dst_note` is a sentence
+
+        in the public wording when the row''s clocks change within 7 days **of now** (not of the `date`
+
+        shown), else empty.'
+      properties:
+        location:
+          $ref: '#/components/schemas/WorldTimeLocationSchema'
+        zone_name:
+          title: Zone Name
+          type: string
+        utc_offset_minutes:
+          title: Utc Offset Minutes
+          type: integer
+        minutes_from_home:
+          title: Minutes From Home
+          type: integer
+        now_offset_minutes:
+          title: Now Offset Minutes
+          type: integer
+        steps:
+          items:
+            items:
+              type: integer
+            type: array
+          title: Steps
+          type: array
+        dst_note:
+          title: Dst Note
+          type: string
+        tiles:
+          items:
+            $ref: '#/components/schemas/WorldTimeTileSchema'
+          title: Tiles
+          type: array
+      required:
+      - location
+      - zone_name
+      - utc_offset_minutes
+      - minutes_from_home
+      - now_offset_minutes
+      - steps
+      - dst_note
+      - tiles
+      title: WorldTimeGridRowSchema
+      type: object
+    WorldTimeGridSchema:
+      description: 'The grid of a tab for one calendar day **of its home row**: `start` is that day''s local
+
+        midnight as an instant, `minutes` its real length (1,380 or 1,500 on a day the home clocks
+
+        change) and `hours` the number of tiles per row.'
+      properties:
+        date:
+          format: date
+          title: Date
+          type: string
+        today:
+          format: date
+          title: Today
+          type: string
+        start:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Start
+        hours:
+          title: Hours
+          type: integer
+        minutes:
+          title: Minutes
+          type: integer
+        rows:
+          items:
+            $ref: '#/components/schemas/WorldTimeGridRowSchema'
+          title: Rows
+          type: array
+      required:
+      - date
+      - today
+      - start
+      - hours
+      - minutes
+      - rows
+      title: WorldTimeGridSchema
+      type: object
+    WorldTimeLocationSchema:
+      description: 'One row of a tab. `title` is what the row is called (the caller''s `label` when there is
+
+        one, else `name`); `geoname_id` is null for a row added as a bare time zone; exactly one row of
+
+        a tab that has any is `home`.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        title:
+          title: Title
+          type: string
+        name:
+          title: Name
+          type: string
+        label:
+          title: Label
+          type: string
+        region:
+          title: Region
+          type: string
+        country:
+          title: Country
+          type: string
+        country_code:
+          title: Country Code
+          type: string
+        timezone:
+          title: Timezone
+          type: string
+        geoname_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Geoname Id
+        home:
+          title: Home
+          type: boolean
+        position:
+          title: Position
+          type: integer
+      required:
+      - id
+      - title
+      - name
+      - label
+      - region
+      - country
+      - country_code
+      - timezone
+      - geoname_id
+      - home
+      - position
+      title: WorldTimeLocationSchema
+      type: object
+    WorldTimeTileSchema:
+      description: 'One hour of one row of the grid. `local` is the row''s wall clock at the tile''s start
+
+        (`2026-12-10T09:00`, no offset); `band` is `day` (8 to 18), `night` (22 to 6) or `edge`.'
+      properties:
+        local:
+          title: Local
+          type: string
+        band:
+          enum:
+          - day
+          - edge
+          - night
+          title: Band
+          type: string
+        weekend:
+          title: Weekend
+          type: boolean
+        day_start:
+          title: Day Start
+          type: boolean
+      required:
+      - local
+      - band
+      - weekend
+      - day_start
+      title: WorldTimeTileSchema
+      type: object
+    WorldTimeMomentRowSchema:
+      description: 'One location at one instant: its wall clock (`local`, no offset), its UTC offset and how
+
+        far it is from the home row.'
+      properties:
+        location:
+          $ref: '#/components/schemas/WorldTimeLocationSchema'
+        local:
+          title: Local
+          type: string
+        zone_name:
+          title: Zone Name
+          type: string
+        utc_offset_minutes:
+          title: Utc Offset Minutes
+          type: integer
+        minutes_from_home:
+          title: Minutes From Home
+          type: integer
+      required:
+      - location
+      - local
+      - zone_name
+      - utc_offset_minutes
+      - minutes_from_home
+      title: WorldTimeMomentRowSchema
+      type: object
+    WorldTimeMomentSchema:
+      description: 'Every location of a tab at one instant: `at`, in UTC.'
+      properties:
+        at:
+          format: date-time
+          title: At
+          type: string
+        rows:
+          items:
+            $ref: '#/components/schemas/WorldTimeMomentRowSchema'
+          title: Rows
+          type: array
+      required:
+      - at
+      - rows
+      title: WorldTimeMomentSchema
+      type: object
+    WorldTimeSearchResultSchema:
+      description: 'A place the search offers. To add it, send `city_id` back as `city` (an integer; set when
+
+        `kind` is `city`) or `value` as `zone` (when `kind` is `zone`). `value` is the same id or
+
+        zone as a string. `hint` says why it matched when that is not obvious (`also
+
+        Lisboa`, `Time zone`).'
+      properties:
+        kind:
+          enum:
+          - city
+          - zone
+          title: Kind
+          type: string
+        value:
+          title: Value
+          type: string
+        city_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: City Id
+        name:
+          title: Name
+          type: string
+        detail:
+          title: Detail
+          type: string
+        hint:
+          title: Hint
+          type: string
+      required:
+      - kind
+      - value
+      - city_id
+      - name
+      - detail
+      - hint
+      title: WorldTimeSearchResultSchema
+      type: object
+    WorldTimeLocationCreateSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tabs/{id}/locations`: **either** `city` (a GeoNames id from `GET /search`)
+
+        **or** `zone` (an IANA name such as `Europe/Lisbon`, or `UTC`), and optionally a `label`.'
+      properties:
+        city:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: City
+        zone:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Zone
+        label:
+          default: ''
+          title: Label
+          type: string
+      title: WorldTimeLocationCreateSchema
+      type: object
+    WorldTimeOrderSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tabs/{id}/locations/reorder`: the location ids in the new order (ids that
+
+        aren''t the tab''s are ignored; at most 500, a longer list is a 422).'
+      properties:
+        ids:
+          items:
+            format: uuid
+            type: string
+          maxItems: 500
+          title: Ids
+          type: array
+      required:
+      - ids
+      title: WorldTimeOrderSchema
+      type: object
+    WorldTimeLocationUpdateSchema:
+      additionalProperties: false
+      description: 'Body for `PATCH /tabs/{id}/locations/{location_id}`: only the fields present are applied.
+
+        `label` is the caller''s own name for the row (`null` or empty clears it); `home: true` makes
+
+        the row the tab''s home (`false` is refused: choose another row instead).'
+      properties:
+        label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Label
+        home:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Home
+      title: WorldTimeLocationUpdateSchema
+      type: object
+    WorldTimeSettingsSchema:
+      description: The caps (set by the site) and how much of them the caller uses. World Time is free.
+      properties:
+        max_tabs:
+          title: Max Tabs
+          type: integer
+        tabs:
+          title: Tabs
+          type: integer
+        max_locations_per_tab:
+          title: Max Locations Per Tab
+          type: integer
+        max_events:
+          title: Max Events
+          type: integer
+        events:
+          title: Events
+          type: integer
+        event_purge_days:
+          title: Event Purge Days
+          type: integer
+        cities_loaded:
+          title: Cities Loaded
+          type: boolean
+      required:
+      - max_tabs
+      - tabs
+      - max_locations_per_tab
+      - max_events
+      - events
+      - event_purge_days
+      - cities_loaded
+      title: WorldTimeSettingsSchema
+      type: object
+    WorldTimeTabSchema:
+      description: One of the caller's tabs, as the list shows it.
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        position:
+          title: Position
+          type: integer
+        location_count:
+          title: Location Count
+          type: integer
+      required:
+      - id
+      - name
+      - position
+      - location_count
+      title: WorldTimeTabSchema
+      type: object
+    WorldTimeTabDetailSchema:
+      description: A tab with its locations, in the caller's order.
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        position:
+          title: Position
+          type: integer
+        locations:
+          items:
+            $ref: '#/components/schemas/WorldTimeLocationSchema'
+          title: Locations
+          type: array
+      required:
+      - id
+      - name
+      - position
+      - locations
+      title: WorldTimeTabDetailSchema
+      type: object
+    WorldTimeTabWriteSchema:
+      additionalProperties: false
+      description: 'Body for `POST /tabs` and `PATCH /tabs/{id}`: the name (1 to 50 characters, unique among
+
+        the caller''s tabs ignoring case).'
+      properties:
+        name:
+          title: Name
+          type: string
+      required:
+      - name
+      title: WorldTimeTabWriteSchema
+      type: object
   securitySchemes:
     JWTAuth:
       type: http
@@ -10917,3 +11991,5 @@ tags:
   description: 'Tasks and subtasks with states (to do, in progress, on hold, blocked), resolutions (done, won''t do) and blockers, labels, comments, reminders, attachments, saved filters, settings and each task''s activity log. A task is addressed by its number, everything else by its id. Errors are `{"detail": ...}`: 400 a value refused (a service message, or a bad query parameter), 402 not enough credits or storage unpaid, 404 not yours or not there (never 403), 409 a conflict (creation blocked by an unpaid repeating task: also `unpaid_task_numbers`), 422 a malformed request, 429 rate limited (see `Retry-After`).'
 - name: Notes
   description: Markdown notes, their versions, tags, share links and saved filters.
+- name: World Time
+  description: 'The world clock: tabs of locations, the place search, the grid of a day across time zones, and shared events. Free: nothing here costs credits.'

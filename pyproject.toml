@@ -185,6 +185,7 @@ modules = [
     'admin.test',
     'admin.todo',
     'admin.users',
+    'admin.worldtime',
 ]
 
 # Dependency rules between apps (`inv lint imports`). Each app may only import from the layers

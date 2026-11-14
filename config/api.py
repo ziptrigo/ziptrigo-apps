@@ -11,6 +11,7 @@ from apps.qr_code.api import router as qr_code_router
 from apps.receipts.api import router as receipts_router
 from apps.short_url.api import router as short_url_router
 from apps.todo.api import router as todo_router
+from apps.world_time.api import router as world_time_router
 from config.api_version import API_VERSION
 
 # The spec's top-level `tags`: the order Swagger UI and generated clients group the endpoints in,
@@ -57,6 +58,11 @@ TAGS = [
         'name': 'Notes',
         'description': 'Markdown notes, their versions, tags, share links and saved filters.',
     },
+    {
+        'name': 'World Time',
+        'description': 'The world clock: tabs of locations, the place search, the grid of a '
+        'day across time zones, and shared events. Free: nothing here costs credits.',
+    },
 ]
 
 api = NinjaAPI(
@@ -74,6 +80,7 @@ api.add_router('/receipts/', receipts_router)
 api.add_router('/s/', short_url_router)
 api.add_router('/todo/', todo_router)
 api.add_router('/notes/', notes_router)
+api.add_router('/time/', world_time_router)
 
 
 @api.exception_handler(RateLimitExceeded)

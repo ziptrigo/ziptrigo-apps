@@ -3,7 +3,7 @@
 ## Scope
 
 The World Time product (`apps/world_time`, issue #269; PR 1 of 3: tabs, locations, the grid and picking a time
-range; PR 2: shared events). A world clock: named tabs of locations, each row showing the hours of the home row's day on its own clock.
+range; PR 2: shared events; PR 3: the JWT API and the `inv worldtime` CLI). A world clock: named tabs of locations, each row showing the hours of the home row's day on its own clock.
 Free: nothing here costs credits.
 
 - the page `/time/` (the first tab) and `/time/<tab id>/`, with `?date=YYYY-MM-DD` for another day;
@@ -20,7 +20,9 @@ Free: nothing here costs credits.
   countdown, each location, the neutral page of a dead link);
 - access control: logged-out visitors and another user's tabs.
 
-The admin side is in `admin.md` (ADM-62, ADM-63). The API and CLI (PR 3) are not built yet.
+- the JWT API `/api/time/` and the `inv worldtime` CLI (WT-12 to WT-14).
+
+The admin side is in `admin.md` (ADM-62, ADM-63).
 
 ## Preconditions
 
@@ -167,7 +169,7 @@ time zone saved yet (dismiss nothing: check `/account/` says "Not set (UTC)", or
 |---|---|---|
 | 1 | Type `porto` in **Add a location**. | "No place matches "porto". The city list has not been loaded yet, so only time zones (UTC, Europe/Lisbon, PST) can be found." |
 | 2 | Type `utc`. | **UTC** is suggested and can be added. Existing rows (cities included) still show: they keep their own copy of the place. |
-| 3 | Shell: `python tests_e2e/ai/manage.py world_time_seed_cities`, twice. | First "Seeded 31,821 cities and 63,077 other names." (the numbers follow the file), then "City data is up to date (31,821 cities)." `porto` finds Porto again. |
+| 3 | Shell: `python tests_e2e/ai/manage.py world_time_seed_cities`, twice. | First "Seeded 31,821 cities and 39,216 other names." (the numbers follow the file), then "City data is up to date (31,821 cities)." `porto` finds Porto again. |
 
 ### WT-08 Share a time range as an event
 
@@ -229,8 +231,57 @@ time zone saved yet (dismiss nothing: check `/account/` says "Not set (UTC)", or
 | 1 | `/time/events/` and the event's page. | **Ended** pill; the page says "Ended" and "It will be deleted 30 days after it ended."; its link still opens and says "Ended". |
 | 2 | Shell: `python tests_e2e/ai/manage.py shell -c "from apps.world_time import jobs; jobs.purge_events()"`. | The event is gone from the list; its link is the neutral page. An event that has not ended, or ended less than 30 days ago, is untouched. |
 
+### WT-12 The API: tabs, locations, search and times
+
+**Purpose:** a client with a token does what the website does, with a status code per kind of refusal.
+**Preconditions:** a token for the main user: `curl -s -X POST <site>/api/auth/login -H 'Content-Type: application/json' -d '{"email":"qa.user@example.com","password":"QaE2e-Passw0rd!"}'` (`TOKEN` = `access_token`); every call below sends `Authorization: Bearer TOKEN`. `/api/docs` lists the endpoints under **World Time**.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `GET /api/time/tabs` without the header, then with it. | 401; then 200 with the user's tabs, each `{id, name, position, location_count}`. |
+| 2 | `POST /api/time/tabs` `{"name":"API tab"}`; again with the same name; with `{"name":""}`; with `{"name":"x","colour":"red"}`. | 201 with the tab and its one location (the account's zone, `home: true`); 400 `name: You already have a tab with this name.`; 400 `name: Give the tab a name.`; 422 (unknown key). |
+| 3 | `GET /api/time/search?q=lisboa`, `?q=pst`, `?q=z`. | A list starting with `{"kind":"city","value":"<id>","city_id":<id>,"name":"Lisbon",...,"hint":"also Lisboa"}`; one starting with the zone `America/Los_Angeles`, detail `Pacific Time (PST)`; `[]`. |
+| 4 | `POST /api/time/tabs/<id>/locations` `{"city":<Lisbon's city_id>,"label":"HQ"}`; `{"zone":"Asia/Tokyo"}`; `{}`; `{"zone":"Mars/Olympus"}`; the same city again. | 201 with the row (`title: "HQ"`, `name: "Lisbon"`, `geoname_id` set); 201 (`geoname_id: null`); 400 `Send city or zone.`; 400 `zone: Unknown time zone.`; 400 `This location is already in the tab.` |
+| 5 | `PATCH .../locations/<Tokyo id>` `{"home":true}`; `{"home":false}`; `{"label":null}`. | 200 with `home: true` (the old home is no longer); 400 `home: Make another location the home instead.`; 200 with the label cleared. |
+| 6 | `POST .../locations/reorder` `{"ids":[<two ids, swapped>]}`. | 200 with every row in the new order. The website shows it after a reload. |
+| 7 | `GET /api/time/tabs/<id>/grid?date=2026-12-10`; `?date=tomorrow`; `?date=2099-01-01`. | 200: `date`, `start` (the home row's midnight as an instant), `hours: 24`, `minutes: 1440`, and per row `tiles` of `{local, band, weekend, day_start}`, `steps`, `utc_offset_minutes`, `minutes_from_home`; 400 `date must be a date like 2026-10-09.`; 400 `date must be within ten years of today.` |
+| 8 | `GET /api/time/tabs/<id>/times`; `?at=2026-07-01T09:00`; `?at=soon`. | Every location now (`local` like `2026-12-01T21:00`, no offset; `at` in UTC); the same moment read on the home row's wall clock; 400 `at must be a date and time like 2026-10-09T15:00.` Also `?at=9999-12-31T23:59`: 400 `at must be within ten years of now.` (never a 500). |
+| 9 | With the Other user's token: `GET`, `PATCH` and `DELETE /api/time/tabs/<main user's tab id>`. | 404 each. |
+| 10 | `DELETE /api/time/tabs/<API tab id>`; then delete tabs until one is left and delete that. | 204; the last one: 400 `Keep at least one tab.` |
+| 11 | `GET /api/time/settings`. | `{max_tabs: 10, tabs: N, max_locations_per_tab: 20, max_events: 50, events: N, event_purge_days: 30, cities_loaded: true}`. |
+
+### WT-13 The API: shared events
+
+**Purpose:** events can be made and changed by a client, with the same rules as the website.
+**Preconditions:** WT-12's token and a tab id `TAB`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `POST /api/time/events` `{"tab":"TAB","title":"API call","starts_at":"<tomorrow>T09:00:00Z","ends_at":"<tomorrow>T10:30:00Z"}`. | 201: `url` (`<site>/w/<code>`), `ended: false`, and `locations` with `starts_local` / `ends_local` wall clocks and `utc_offset_minutes` per place. Opening `url` without a session shows the event. |
+| 2 | The same with `ends_at` before `starts_at`; 8 days long; a range last year; a `tab` of the Other user; a title of 121 characters. | 400 `ends_at: The end must be after the start.`; 400 `ends_at: An event can last at most 7 days.`; 400 `ends_at: That time has already passed. Choose one that has not ended yet.`; 400 `tab: Choose one of your tabs.`; 400 `title: Keep the title to 120 characters or fewer.` |
+| 3 | `PATCH /api/time/events/<id>` `{"title":"Renamed"}`; `{"starts_at":"..."}` alone; both instants three days apart. | 200 with the new title and the same `url`; 400 `ends_at: Send both the start and the end.`; 200 (the website's event page then says "This event lasts more than a day ..."). |
+| 4 | `GET /api/time/events`. | The user's events, those not ended first, soonest first. |
+| 5 | `DELETE /api/time/events/<id>`; again. | 204; 404. The `url` now shows "This event isn't available". |
+
+### WT-14 The command line
+
+**Purpose:** `inv worldtime` drives the same API.
+**Preconditions:** a shell at the repository root with `API_BASE_URL=<site>` and `WORLDTIME_PASSWORD='QaE2e-Passw0rd!'`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `inv worldtime login local qa.user@example.com`. | "Successfully authenticated!"; `~/.worldtime_token.local` exists (mode 600). `inv worldtime login local qa.user@example.com secret` is a usage error: the password is never an argument. |
+| 2 | `inv worldtime tabs local`; `inv worldtime tab-add local CLI tab`. | A table of tabs with the number of locations and ids; "Added the tab CLI tab (<id>)." |
+| 3 | `inv worldtime search local porto`. | A numbered table: Porto, Portugal and others, each with `--city <id>`; time zones with `--zone <name>`. |
+| 4 | `inv worldtime add local porto --tab "CLI tab"` and answer `1` (a bare Enter asks again; `0` cancels); `inv worldtime add local --zone Asia/Tokyo --tab "CLI tab" --label "Tokyo office"`. | The matches are listed and "Which one (0 to cancel)" asked; "Added Porto (Porto, Portugal) to the tab CLI tab."; "Added Tokyo office (Asia/Tokyo) to the tab CLI tab." |
+| 5 | `inv worldtime now local --tab "CLI tab"`; `... --at 2026-07-01T09:00`. | A table: each location, its time (24-hour), weekday and date, hours from home, zone and UTC offset; the home row is marked "(home)". The second shows 09:00 on the home row. |
+| 6 | `inv worldtime home local "Tokyo office" --tab "CLI tab"`; `inv worldtime label local Porto HQ --tab "CLI tab"`; `inv worldtime reorder local "Tokyo office" HQ --tab "CLI tab"`. | "... is now the home of the tab CLI tab."; "Porto is now called HQ."; the tab's new order. The website shows all three after a reload. |
+| 7 | `inv worldtime remove local HQ --tab "CLI tab"`, answer `n`; again with `--yes`. | "Cancelled; nothing was changed." (exit 1); "Removed HQ from the tab CLI tab." |
+| 8 | `inv worldtime remove local Nowhere --tab "CLI tab" --yes`; `inv worldtime now local --tab Nope`. | "No location called "Nowhere" in the tab CLI tab. It has: ..." (exit 1); "No tab called "Nope". Your tabs: ..." (exit 1). |
+| 9 | `inv worldtime tab-delete local "CLI tab"`, answer `y`. | "Deleted the tab CLI tab." |
+
 ## Out of scope
 
-- The JWT API and the `inv worldtime` CLI: PR 3 of #269.
+- Events have no CLI commands (API only).
 - Rebuilding the city file from GeoNames (`./manage.py world_time_build_cities` downloads from geonames.org).
 - Rate limits (`WT_EDIT_USER`, `WT_SEARCH_USER`) are off on this server; unit tests cover them.

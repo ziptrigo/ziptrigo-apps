@@ -112,6 +112,13 @@ def rename_tab(tab: Tab, name: str) -> Tab:
     return tab
 
 
+def check_deletable(tab: Tab) -> None:
+    """Refuse deleting the user's last tab. No lock, no write: an endpoint calls it before it
+    charges a rate limit (`delete_tab` decides again under the lock)."""
+    if not Tab.objects.filter(user_id=tab.user_id).exclude(pk=tab.pk).exists():
+        raise _error('__all__', LAST_TAB_MESSAGE)
+
+
 def delete_tab(tab: Tab) -> None:
     """Delete the tab and its locations. The last tab can't go: there is always one to show."""
     get_account(tab.user)
