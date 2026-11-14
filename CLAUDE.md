@@ -663,7 +663,7 @@ registered product (checkbox, icon and name only, plus a drag handle; one column
 `JSONField`s, `User.app_order` (every product label in the user's order, switched-off apps keep their
 place) and `User.hidden_apps` (the labels switched off), both `default=list` and `db_default=[]` (the
 #102 lesson; migration `0007`). A switched-off app leaves the header menu and the home page cards and
-nothing else: its pages, emails, notifications, public links (`/go/`, `/s/`, `/t/`, `/n/`) and jobs keep
+nothing else: its pages, emails, notifications, public links (`/go/`, `/s/`, `/t/`, `/n/`, `/w/`) and jobs keep
 working and a direct link opens it. `core` can't import `accounts`, so
 `apps.core.products.products_for(user)` reads the two attributes off the user with `getattr` (the way
 `base.html` reads `user.theme`): every registered product as `(product, visible)` in the user's order,
@@ -1061,7 +1061,7 @@ the Android app wants one). Code: `services/login_otp.py` (its docstring is the 
   comes *from* the accept page: the bell's polling would reload it). Never gated: the accept page,
   logout, the two documents, `accounts:timezone`, `/admin/` (staff are never locked out of it; the
   site itself still asks them), `/__e2e__/` and `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`,
-  `/t/`, `/n/`, `/static/`, `/api/`, the service worker). **The JWT API is not gated** (decided: accounts
+  `/t/`, `/n/`, `/w/`, `/static/`, `/api/`, the service worker). **The JWT API is not gated** (decided: accounts
   are created in the browser), so the Android app works for an account that has yet to accept on
   the web.
 - *Tests.* The gate is **off in every test** (root `conftest.py` patches
@@ -6656,8 +6656,14 @@ mounted at the site root), `jobs.py`.
   `max_events_per_user` (50, ended ones count until deleted) and `event_purge_days` (30), both with a
   `db_default` (the #102 lesson).
   - *Services.* `create_event(user, tab, *, title, starts_at, ends_at)` (account lock; `Give the event a
-    title.`, `The end must be after the start.`, `An event can last at most 7 days.`, `Choose a date within
-    ten years of today.`, `You have too many events. Delete one first.`, `Add a location to the tab first.`),
+    title.`, `The end must be after the start.`, `An event can last at most 7 days.`, `That time has already
+    passed. Choose one that has not ended yet.` (a range that has ended would be purged at once, with nobody
+    told), `Choose a date within ten years of today.`, `You have too many events. Delete one first.`, `Add a
+    location to the tab first.`). **`clean_times` converts both instants to UTC before it judges them**: two
+    datetimes that share one `ZoneInfo` are compared and subtracted by Python on the wall clock, ignoring the
+    offset, so across a clock change an end could pass as after a start it precedes (found by the review of
+    #300). Titles, tab names and labels go through `services/text.clean_line` (control and format characters
+    dropped: a zero-width or bidi-override text would look empty or backwards on a public page).
     `update_event` (title and/or both instants; the link and the locations stay), `delete_event`
     (idempotent), `list_events` (those not ended first, soonest first, then the ended ones; each gets
     `.ended`), `get_available(code)` (the event or `None`), `event_url` (`BASE_URL` + `/w/<code>`, never from
@@ -6666,8 +6672,11 @@ mounted at the site root), `jobs.py`.
     `event_purge_days` ago, in batches). `event_rows(event, formats)` is the event's time in each snapshot
     location (`Thu 12/10/2026, 9:00 AM – 10:30 AM`, both dates across a midnight, and `WET · UTC+0`), tolerant
     of a damaged snapshot; `status_text` is `Starts in 3 h 20 min` / `Happening now: ends in 40 min` / `Ended`;
-    `local_range(zone, date, start, end)` turns the edit form's fields into two instants (an end at or before
-    the start is the next day).
+    `local_range(zone, date, start, end)` turns the edit form's fields into two UTC instants (an end that is
+    not after the start, as instants, is the next day's; a wall time the clocks skip that day is refused,
+    `That time doesn't exist on that day: ...`; one that happens twice is its first occurrence). The zone
+    label names both offsets when a location's clocks change during the event, and only `UTC+4` for a zone
+    with no abbreviation.
   - *Owner pages.* The **Selected time** card of the grid ends with a "Share this time as an event" form (a
     title; the script writes the two instants into hidden `start` / `end` inputs) posting
     `world_time:event-create` (`/time/<tab>/events/`), which redirects to the event's page with a flash.
@@ -6678,7 +6687,13 @@ mounted at the site root), `jobs.py`.
     self-contained) and **Open**; the time in each location, in the account's formats; the edit form: title,
     date, start and end **on the clock of the snapshot's home location**; Delete through the confirmation
     modal), `event-edit`, `event-delete`. Another user's event is a 404; a refusal is a 422 into
-    `#wt-event-msg` / `#wt-event-edit-msg`; the form is validated before `WT_EDIT_USER` is charged.
+    `#wt-event-msg` / `#wt-event-edit-msg`; the form is validated before `WT_EDIT_USER` is charged, and
+    **deleting is never rate limited** (it only takes something off the web). **An edit whose date and times
+    are as the page showed them saves only the title**: the form has one date and whole minutes, so
+    recomputing the instants would shrink an event longer than a day (the API will make those), drop its
+    seconds, or stretch one in the hour a clock repeats to 25 hours. The page tells the owner what is public
+    ("the title, the time and the places below (with the names you gave them)") and marks the home row; the
+    public page does **not** mark it (it would say where the owner is).
   - *The public page* (`/w/<code>`, `w:event`; `/w/` is in `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES`, so it is
     never terms-gated and renders the **public wording** for everyone, a signed-in owner included). GET only,
     no form. The title, the status line (kept current by `static/world_time/js/event.js`, with the server's
@@ -6689,8 +6704,11 @@ mounted at the site root), `jobs.py`.
     link that doesn't work** (unknown, deleted, purged) is the same standalone `world_time/unavailable.html`,
     404, rendered from no context. `WT_VIEW_IP` (120/min) is charged before the lookup; over it a plain 429
     page. A code is in access logs, as `/n/<code>` is.
-  - *No report form and no takedown* (the owner's decision: a title and a time are all an event carries;
-    the owner deletes the link). Staff can still see events in the read-only `EventAdmin`, which shows only
+  - *No report form and no takedown* (the owner's decision; the owner deletes the link). What an event
+    publishes is its title, its time and the snapshot's places **under the user's own labels** (free text),
+    so the only way staff can remove one today is deleting the user: an admin delete was suggested by the
+    review of #300 and left for the owner to decide. nginx counts `/w/` in its main zone (nothing changed in
+    the `infra` repo). Staff can still see events in the read-only `EventAdmin`, which shows only
     a code's first 6 characters and refuses any `code` lookup from the query string.
   - *Privacy Policy* gained the shared-event lines; `TERMS_VERSION` was **not** bumped: the owner decides.
 - **Not done yet**: the JWT API and `inv worldtime` (PR 3), reordering tabs, an add-to-calendar export.
@@ -6891,7 +6909,7 @@ on a page looks like; keep them apart:
   variable holds the formats active for the request (`activate`, `deactivate`, `get_active`, default
   `PUBLIC`, and the `override(formats)` context manager). `TimezoneMiddleware` activates the signed-in
   user's (`formats_for(user)`, duck-typed on `date_format` / `time_format`) and deactivates after the
-  response; it skips `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`, `/t/`, `/n/`, `/static/`, `/api/`), so
+  response; it skips `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` (`/go/`, `/s/`, `/t/`, `/n/`, `/w/`, `/static/`, `/api/`), so
   **public pages and the API render `PUBLIC` for everyone**, a signed-in owner included. Any other
   page an anonymous visitor reaches renders `PUBLIC` too. **Messages are always public**: an email, a
   notification or a push is written by a job or for someone who may have no account, so it passes

@@ -194,6 +194,15 @@ class TestLocations:
             set_label(location, 'x' * 61)
         assert 'Keep the label to 60 characters or fewer.' in message(excinfo)
 
+    def test_invisible_characters_are_dropped_from_names(self, tab, user):
+        location = list_locations(tab)[0]
+        set_label(location, 'Head\u202e office\u200b')
+        location.refresh_from_db()
+        assert location.label == 'Head office'
+        with pytest.raises(ValidationError) as excinfo:
+            create_tab(user, '\u200b\u2060')
+        assert 'Give the tab a name.' in message(excinfo)
+
     def test_set_home_moves_the_home(self, tab):
         tokyo = add_zone(tab, 'Asia/Tokyo')
         set_home(tokyo)

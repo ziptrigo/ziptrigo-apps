@@ -12,6 +12,7 @@ from ..limits import TAB_NAME_MAX
 from ..models import Location, Tab, WorldTimeSettings
 from . import zones
 from .accounts import get_account, lock_account
+from .text import clean_line
 
 DEFAULT_TAB_NAME = 'My times'
 DUPLICATE_MESSAGE = 'You already have a tab with this name.'
@@ -25,7 +26,7 @@ def _error(field: str, message: str) -> ValidationError:
 
 
 def clean_name(name: object) -> str:
-    cleaned = ' '.join(str(name or '').split())
+    cleaned = clean_line(name)
     if not cleaned:
         raise _error('name', 'Give the tab a name.')
     if len(cleaned) > TAB_NAME_MAX:

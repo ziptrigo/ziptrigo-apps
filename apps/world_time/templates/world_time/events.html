@@ -15,6 +15,7 @@
 <p class="mb-6 text-sm text-gray-500 dark:text-gray-400">An event is a time you picked on the grid, with a link anyone can open to see it in their own time zone. An event is deleted {{ purge_days }} day{{ purge_days|pluralize }} after it ends, and its link stops working.</p>
 
 <div id="wt-msg" class="mb-4 text-sm" aria-live="polite"></div>
+{% url 'world_time:home' as home_url %}
 <ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
     {% for row in rows %}
     <li class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
@@ -43,7 +44,7 @@
         </div>
     </li>
     {% empty %}
-    <li>{% include 'core/partials/empty_state.html' with icon='fas fa-calendar-day' title='No events yet' text='Pick a time range on the World Time grid, then choose "Share as an event" to get a link for it.' action_url='/time/' action_label='Open World Time' %}</li>
+    <li>{% include 'core/partials/empty_state.html' with icon='fas fa-calendar-day' title='No events yet' text='Pick a time range on the World Time grid, then choose "Share as an event" to get a link for it.' action_url=home_url action_label='Open World Time' %}</li>
     {% endfor %}
 </ul>
 {% endblock %}

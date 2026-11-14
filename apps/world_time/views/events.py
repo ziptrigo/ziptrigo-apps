@@ -2,9 +2,10 @@
 (its link, QR code and times; editing; deleting).
 
 Another user's event is a 404. A refusal is a 422 into the form's message slot; the form is
-validated before `WT_EDIT_USER` is charged.
+validated before `WT_EDIT_USER` is charged. Deleting is never rate limited.
 """
 
+from datetime import timedelta
 from uuid import UUID
 
 from django.contrib import messages
@@ -57,6 +58,7 @@ def _edit_values(event: Event) -> dict:
 
 def _event_context(event: Event, values: dict | None = None) -> dict:
     url = events.event_url(event)
+    now = timezone.now()
     return {
         'event': event,
         'rows': events.event_rows(event),
@@ -64,8 +66,9 @@ def _event_context(event: Event, values: dict | None = None) -> dict:
         'event_path': events.event_path(event),
         'qr_data_uri': events.qr_data_uri(url),
         'duration': events.duration_text(event),
-        'status': events.status_text(event),
-        'ended': event.ends_at <= timezone.now(),
+        'status': events.status_text(event, now),
+        'ended': events.has_ended(event, now),
+        'long': event.ends_at - event.starts_at > timedelta(days=1),
         'home_name': events.home_name(event),
         'values': values or _edit_values(event),
         'purge_days': WorldTimeSettings.load().event_purge_days,
@@ -144,16 +147,28 @@ def event_edit(request: AuthenticatedHttpRequest, event_id: UUID) -> HttpRespons
         return refuse(request, form_error_lines(form), retarget=EDIT_SLOT, fallback=fallback)
     if (response := limited(request, 'WT_EDIT_USER', retarget=EDIT_SLOT)) is not None:
         return response
-    starts_at, ends_at = events.local_range(
-        events.home_zone_name(event),
-        form.cleaned_data['date'],
-        form.cleaned_data['start_time'],
-        form.cleaned_data['end_time'],
-    )
+    posted = {
+        'date': form.cleaned_data['date'].isoformat(),
+        'start_time': form.cleaned_data['start_time'].isoformat('minutes'),
+        'end_time': form.cleaned_data['end_time'].isoformat('minutes'),
+    }
+    stored = _edit_values(event)
     try:
-        events.update_event(
-            event, title=form.cleaned_data['title'], starts_at=starts_at, ends_at=ends_at
-        )
+        if all(posted[key] == stored[key] for key in posted):
+            # The time fields are as the page showed them: only the title is saved. Recomputing
+            # the instants from them would change an event the form can't fully express (one
+            # longer than a day, one not on a whole minute, one in the hour a clock repeats).
+            events.update_event(event, title=form.cleaned_data['title'])
+        else:
+            starts_at, ends_at = events.local_range(
+                events.home_zone_name(event),
+                form.cleaned_data['date'],
+                form.cleaned_data['start_time'],
+                form.cleaned_data['end_time'],
+            )
+            events.update_event(
+                event, title=form.cleaned_data['title'], starts_at=starts_at, ends_at=ends_at
+            )
     except ValidationError as exc:
         lines = validation_lines(exc, EDIT_NAMES)
         return refuse(request, lines, retarget=EDIT_SLOT, fallback=fallback)
@@ -165,9 +180,8 @@ def event_edit(request: AuthenticatedHttpRequest, event_id: UUID) -> HttpRespons
 @require_POST
 def event_delete(request: AuthenticatedHttpRequest, event_id: UUID) -> HttpResponse:
     """From the confirmation modal: a plain POST that ends in a redirect with a flash message."""
+    # Not rate limited: deleting only takes something off the web, and must always work.
     event = owned_event(request, event_id)
-    if (response := limited(request, 'WT_EDIT_USER')) is not None:
-        return response
     title = event.title
     events.delete_event(event)
     messages.success(request, f'Deleted the event {title}. Its link no longer works.')

@@ -16,6 +16,7 @@ from ..limits import LOCATION_LABEL_MAX
 from ..models import City, Location, Tab, WorldTimeSettings
 from . import zones
 from .accounts import get_account, lock_account
+from .text import clean_line
 
 DUPLICATE_MESSAGE = 'This location is already in the tab.'
 TOO_MANY_MESSAGE = 'This tab is full. Remove a location first.'
@@ -29,7 +30,7 @@ def _error(field: str, message: str) -> ValidationError:
 
 
 def clean_label(label: object) -> str:
-    cleaned = ' '.join(str(label or '').split())
+    cleaned = clean_line(label)
     if len(cleaned) > LOCATION_LABEL_MAX:
         raise _error('label', f'Keep the label to {LOCATION_LABEL_MAX} characters or fewer.')
     return cleaned

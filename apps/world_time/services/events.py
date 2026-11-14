@@ -15,7 +15,7 @@ Writes take the account lock first, like every counting write of the app. Refusa
 import base64
 import secrets
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 
 from django.conf import settings
@@ -33,6 +33,7 @@ from . import zones
 from .accounts import get_account, lock_account
 from .grid import offset_text
 from .locations import list_locations
+from .text import clean_line
 
 TOO_MANY_MESSAGE = 'You have too many events. Delete one first.'
 GONE_MESSAGE = 'This event no longer exists.'
@@ -48,7 +49,7 @@ def _error(field: str, message: str) -> ValidationError:
 
 
 def clean_title(title: object) -> str:
-    cleaned = ' '.join(str(title or '').split())
+    cleaned = clean_line(title)
     if not cleaned:
         raise _error('title', 'Give the event a title.')
     if len(cleaned) > EVENT_TITLE_MAX:
@@ -56,25 +57,40 @@ def clean_title(title: object) -> str:
     return cleaned
 
 
+PAST_MESSAGE = 'That time has already passed. Choose one that has not ended yet.'
+
+
 def clean_times(starts_at: object, ends_at: object) -> tuple[datetime, datetime]:
-    """The two instants of an event, checked: both aware, the end after the start, at most
-    `EVENT_MAX_DAYS` long, and within ten years of now (the grid's own range)."""
+    """The two instants of an event, checked and returned **in UTC**: both aware, the end after
+    the start, at most `EVENT_MAX_DAYS` long, not already over, and within ten years of now.
+
+    Everything is judged on instants. Two datetimes that share one `ZoneInfo` are compared and
+    subtracted by Python on the *wall clock*, ignoring the offset, so across a clock change an end
+    could pass as "after" a start it precedes: hence the conversion first.
+
+    A range that has ended is refused: its link would be deleted by the purge soon after (or at
+    once), with nobody told."""
     if not isinstance(starts_at, datetime) or timezone.is_naive(starts_at):
         raise _error('starts_at', 'Choose when the event starts.')
     if not isinstance(ends_at, datetime) or timezone.is_naive(ends_at):
         raise _error('ends_at', 'Choose when the event ends.')
+    starts_at, ends_at = starts_at.astimezone(UTC), ends_at.astimezone(UTC)
     if ends_at <= starts_at:
         raise _error('ends_at', 'The end must be after the start.')
     if ends_at - starts_at > timedelta(days=EVENT_MAX_DAYS):
         raise _error('ends_at', f'An event can last at most {EVENT_MAX_DAYS} days.')
-    if abs(starts_at - timezone.now()) > timedelta(days=MAX_DATE_DISTANCE_DAYS):
+    now = timezone.now()
+    if ends_at <= now:
+        raise _error('ends_at', PAST_MESSAGE)
+    if starts_at - now > timedelta(days=MAX_DATE_DISTANCE_DAYS):
         raise _error('starts_at', 'Choose a date within ten years of today.')
     return starts_at, ends_at
 
 
 def snapshot(tab: Tab) -> list[dict]:
-    """What an event keeps of a tab: per location, the name shown (the user's label when there is
-    one), the place, the zone and whether it is the home row."""
+    """What an event keeps of a tab, and so **what anyone with the link sees**: per location, the
+    name shown (the user's own label when there is one), the place, the zone and whether it is the
+    home row (the public page does not mark it)."""
     rows = []
     for location in list_locations(tab):
         place = ', '.join(part for part in (location.name, location.detail) if part)
@@ -203,6 +219,8 @@ def purge_ended(now: datetime | None = None) -> int:
     cutoff = now - timedelta(days=WorldTimeSettings.load().event_purge_days)
     deleted = 0
     while True:
+        # Two queries per batch; the delete repeats the cutoff, so an event edited to a later end
+        # between them is spared.
         ids = list(
             Event.objects.filter(ends_at__lt=cutoff).values_list('pk', flat=True)[:_PURGE_BATCH]
         )
@@ -259,20 +277,32 @@ def home_name(event: Event) -> str:
     return str(home.get('name') or zones.place_name(str(home['timezone']))) if home else zones.UTC
 
 
+def _zone_label(moment: datetime) -> str:
+    """`WET · UTC+0`; only `UTC+3` for a zone with no abbreviation (its `tzname()` is the offset
+    again, `+03`)."""
+    offset = int((moment.utcoffset() or timedelta(0)).total_seconds() // 60)
+    name = moment.tzname() or ''
+    utc = offset_text(offset, prefix='UTC')
+    return utc if not name or name[0] in '+-' else f'{name} \u00b7 {utc}'
+
+
 def event_rows(event: Event, formats: DisplayFormats | None = None) -> list[EventRow]:
-    """The event's time in every location of its snapshot, in the given wording."""
+    """The event's time in every location of its snapshot, in the given wording. Where a
+    location's clocks change during the event, the label names both offsets."""
     rows = []
     for row in _snapshot_rows(event):
         zone = zones.tz(str(row['timezone']))
         start, end = event.starts_at.astimezone(zone), event.ends_at.astimezone(zone)
-        offset = int((start.utcoffset() or timedelta(0)).total_seconds() // 60)
+        label = _zone_label(start)
+        if end.utcoffset() != start.utcoffset():
+            label = f'{label}, then {_zone_label(end)}'
         rows.append(
             EventRow(
                 name=str(row.get('name') or zones.place_name(str(row['timezone']))),
                 detail=str(row.get('detail') or ''),
                 home=bool(row.get('home')),
                 text=range_text(start, end, formats),
-                zone_label=f'{start.tzname() or ""} \u00b7 {offset_text(offset, prefix="UTC")}',
+                zone_label=label,
             )
         )
     return rows
@@ -297,6 +327,10 @@ def duration_text(event: Event) -> str:
     return ' '.join(part for part in parts if part) or '0 min'
 
 
+def has_ended(event: Event, now: datetime | None = None) -> bool:
+    return (now or timezone.now()) >= event.ends_at
+
+
 def status_text(event: Event, now: datetime | None = None) -> str:
     """`Starts in 3 h 20 min`, `Happening now: ends in 40 min`, `Ended`: what the page says before
     its script takes over (and all a visitor without JavaScript sees)."""
@@ -319,12 +353,28 @@ def _span(delta: timedelta) -> str:
     return f'{mins} min'
 
 
+MISSING_TIME_MESSAGE = (
+    "That time doesn't exist on that day: the clocks go forward over it. Choose another."
+)
+
+
+def _instant(zone, day: date, moment: time, field: str) -> datetime:
+    """`day` at `moment` on `zone`'s clock, as an instant in UTC. A wall time the clocks skip that
+    day is refused; one that happens twice (the clocks go back) is its first occurrence."""
+    local = datetime.combine(day, moment, tzinfo=zone)
+    instant = local.astimezone(UTC)
+    if instant.astimezone(zone).replace(tzinfo=None) != local.replace(tzinfo=None):
+        raise _error(field, MISSING_TIME_MESSAGE)
+    return instant
+
+
 def local_range(zone_name: str, day: date, start: time, end: time) -> tuple[datetime, datetime]:
-    """The two instants of `day` from `start` to `end` on `zone_name`'s clock; an end at or before
-    the start is the next day's."""
+    """The two instants (UTC) of `day` from `start` to `end` on `zone_name`'s clock; an end that
+    is not after the start is the next day's. Compared as instants, never as two wall clocks of one
+    zone (see `clean_times`)."""
     zone = zones.tz(zone_name)
-    starts_at = datetime.combine(day, start, tzinfo=zone)
-    ends_at = datetime.combine(day, end, tzinfo=zone)
+    starts_at = _instant(zone, day, start, 'starts_at')
+    ends_at = _instant(zone, day, end, 'ends_at')
     if ends_at <= starts_at:
-        ends_at = datetime.combine(day + timedelta(days=1), end, tzinfo=zone)
+        ends_at = _instant(zone, day + timedelta(days=1), end, 'ends_at')
     return starts_at, ends_at

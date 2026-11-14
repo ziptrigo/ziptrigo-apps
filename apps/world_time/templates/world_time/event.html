@@ -30,11 +30,12 @@
             <i class="fas fa-arrow-up-right-from-square mr-2" aria-hidden="true"></i>Open</a>
     </div>
 </div>
-<p class="-mt-4 mb-6 text-xs text-gray-500 dark:text-gray-400">Anyone who has this link can see the title and the time, without signing in.</p>
+<p class="-mt-4 mb-6 text-xs text-gray-500 dark:text-gray-400">Anyone who has this link can see the title, the time and the places below (with the names you gave them), without signing in.</p>
 
 <section aria-labelledby="wt-event-times" class="mb-8">
     <h2 id="wt-event-times" class="pb-2 mb-2 text-xl font-semibold border-b border-sage-200 dark:border-sage-700">In each location</h2>
-    {% include 'world_time/partials/event_rows.html' %}
+    <p class="mb-2 text-sm text-gray-500 dark:text-gray-400">This is what people who open the link see: these places, under the names you gave them.</p>
+    {% include 'world_time/partials/event_rows.html' with show_home=True %}
 </section>
 
 <section aria-labelledby="wt-event-edit" class="mb-8">
@@ -63,7 +64,7 @@
                 {% include 'core/components/time_field.html' with name='end_time' id='wt-event-end' value=values.end_time required=True describedby='wt-event-time-help' %}
             </div>
         </div>
-        <p id="wt-event-time-help" class="mb-4 text-xs text-gray-500 dark:text-gray-400">On {{ home_name }}'s clock. An end at or before the start is the next day. The link stays the same; the locations are the ones the event was shared with.</p>
+        <p id="wt-event-time-help" class="mb-4 text-xs text-gray-500 dark:text-gray-400">On {{ home_name }}'s clock. An end at or before the start is the next day. The link stays the same; the locations are the ones the event was shared with.{% if long %} This event lasts more than a day: changing its time here makes it end within a day of the new start.{% endif %}</p>
         <div class="flex justify-end gap-3">
             <button type="button" @click="show($el)"
                     data-url="{% url 'world_time:event-delete' event.pk %}"

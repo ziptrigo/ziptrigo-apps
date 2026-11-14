@@ -2,8 +2,9 @@
 
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from html import unescape
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.messages import get_messages
@@ -17,7 +18,7 @@ from apps.core.scheduler import get_jobs
 
 from ..models import Event, Tab, WorldTimeSettings
 from ..services import events, list_tabs
-from .factories import make_location, make_tab, make_user
+from .factories import make_event, make_location, make_tab, make_user
 
 pytestmark = pytest.mark.django_db
 
@@ -181,19 +182,9 @@ class TestService:
         assert events.get_available('x' * 500) is None
 
     def test_list_puts_what_is_ahead_first(self, user, tab, now):
-        past = events.create_event(
-            user,
-            tab,
-            title='Past',
-            starts_at=now - timedelta(days=3),
-            ends_at=now - timedelta(days=3) + timedelta(hours=1),
-        )
-        older = events.create_event(
-            user,
-            tab,
-            title='Older',
-            starts_at=now - timedelta(days=9),
-            ends_at=now - timedelta(days=9) + timedelta(hours=1),
+        past = make_event(user, 'Past', now - timedelta(days=3), now - timedelta(days=3, hours=-1))
+        older = make_event(
+            user, 'Older', now - timedelta(days=9), now - timedelta(days=9, hours=-1)
         )
         later = events.create_event(user, tab, title='Later', starts_at=START, ends_at=END)
         soon = events.create_event(
@@ -264,21 +255,124 @@ class TestService:
         assert events.duration_text(event) == '2 days'
 
     def test_local_range(self):
-        from datetime import date, time
-
         starts, ends = events.local_range('Asia/Tokyo', date(2026, 12, 10), time(18), time(19, 30))
         assert (starts, ends) == (START, END)
         starts, ends = events.local_range('Asia/Tokyo', date(2026, 12, 10), time(23), time(1))
         assert ends - starts == timedelta(hours=2)
+
+    def test_a_range_across_a_clock_change_is_judged_on_instants(self):
+        # New York, 14 March 2027: 2:00 AM becomes 3:00 AM. 1:30 to 3:00 is half an hour.
+        starts, ends = events.local_range(
+            'America/New_York', date(2027, 3, 14), time(1, 30), time(3)
+        )
+        assert (starts, ends) == (
+            datetime(2027, 3, 14, 6, 30, tzinfo=UTC),
+            datetime(2027, 3, 14, 7, 0, tzinfo=UTC),
+        )
+        # 7 November 2027: 1:30 happens twice; the first is meant, and 1:30 to 1:30 is the next day.
+        starts, ends = events.local_range(
+            'America/New_York', date(2027, 11, 7), time(1, 30), time(1, 30)
+        )
+        assert starts == datetime(2027, 11, 7, 5, 30, tzinfo=UTC)
+        assert ends == datetime(2027, 11, 8, 6, 30, tzinfo=UTC)
+
+    @pytest.mark.parametrize(
+        ('start', 'end', 'field'),
+        [(time(2, 30), time(4), 'starts_at'), (time(1), time(2, 30), 'ends_at')],
+    )
+    def test_a_time_the_clocks_skip_is_refused(self, start, end, field):
+        with pytest.raises(ValidationError) as excinfo:
+            events.local_range('America/New_York', date(2027, 3, 14), start, end)
+        assert list(excinfo.value.message_dict) == [field]
+        assert "That time doesn't exist on that day" in message(excinfo)
+
+    def test_the_rules_compare_instants_not_wall_clocks(self, user, tab, now):
+        new_york = ZoneInfo('America/New_York')
+        # On the wall clock the end (3:00 AM) is after the start (2:30 AM, which that day lacks and
+        # reads as 3:30 AM EDT); as instants it is before.
+        with pytest.raises(ValidationError) as excinfo:
+            events.create_event(
+                user,
+                tab,
+                title='x',
+                starts_at=datetime(2027, 3, 14, 2, 30, tzinfo=new_york),
+                ends_at=datetime(2027, 3, 14, 3, 0, tzinfo=new_york),
+            )
+        assert 'The end must be after the start.' in message(excinfo)
+        # Seven wall-clock days across the change are 7 days less an hour: allowed, stored in UTC.
+        event = events.create_event(
+            user,
+            tab,
+            title='x',
+            starts_at=datetime(2027, 3, 10, 12, 0, tzinfo=new_york),
+            ends_at=datetime(2027, 3, 17, 12, 0, tzinfo=new_york),
+        )
+        assert event.ends_at - event.starts_at == timedelta(days=7, hours=-1)
+        with pytest.raises(ValidationError):  # 7 days and an hour
+            events.create_event(
+                user,
+                tab,
+                title='x',
+                starts_at=datetime(2027, 11, 3, 12, 0, tzinfo=new_york),
+                ends_at=datetime(2027, 11, 10, 12, 0, tzinfo=new_york),
+            )
+
+    def test_a_time_that_has_ended_cannot_be_shared(self, user, tab, now):
+        for ends in (now, now - timedelta(days=400)):
+            with pytest.raises(ValidationError) as excinfo:
+                events.create_event(
+                    user, tab, title='x', starts_at=ends - timedelta(hours=1), ends_at=ends
+                )
+            assert 'That time has already passed.' in message(excinfo)
+        # One in progress is fine.
+        events.create_event(
+            user,
+            tab,
+            title='x',
+            starts_at=now - timedelta(hours=1),
+            ends_at=now + timedelta(hours=1),
+        )
+
+    def test_an_ended_event_can_be_renamed_but_not_moved_within_the_past(self, user, now):
+        event = make_event(user, 'Old', now - timedelta(days=2), now - timedelta(days=2, hours=-1))
+        events.update_event(event, title='Older')
+        with pytest.raises(ValidationError):
+            events.update_event(
+                event, starts_at=now - timedelta(days=1), ends_at=now - timedelta(hours=20)
+            )
+
+    def test_invisible_characters_are_not_a_title(self, user, tab, now):
+        with pytest.raises(ValidationError) as excinfo:
+            events.create_event(user, tab, title='\u200b\u202e\u2060', starts_at=START, ends_at=END)
+        assert 'Give the event a title.' in message(excinfo)
+        event = events.create_event(
+            user, tab, title='Team\u202e call\u200b', starts_at=START, ends_at=END
+        )
+        assert event.title == 'Team call'
+
+    def test_the_zone_label_across_a_clock_change_and_without_an_abbreviation(self, user, now):
+        rows = [
+            {'name': 'New York', 'timezone': 'America/New_York', 'home': True},
+            {'name': 'Dubai', 'timezone': 'Asia/Dubai'},
+        ]
+        event = make_event(
+            user,
+            'x',
+            datetime(2027, 3, 14, 5, 0, tzinfo=UTC),
+            datetime(2027, 3, 14, 9, 0, tzinfo=UTC),
+            locations=rows,
+        )
+        new_york, dubai = events.event_rows(event, MDY_12)
+        assert new_york.zone_label == 'EST · UTC-5, then EDT · UTC-4'
+        assert new_york.text == 'Sun 03/14/2027, 12:00 AM – 5:00 AM'
+        assert dubai.zone_label == 'UTC+4'
 
 
 class TestPurge:
     def test_events_go_some_days_after_they_end(self, user, tab, now):
         def make(title, ended_days_ago):
             end = now - timedelta(days=ended_days_ago)
-            return events.create_event(
-                user, tab, title=title, starts_at=end - timedelta(hours=1), ends_at=end
-            )
+            return make_event(user, title, end - timedelta(hours=1), end)
 
         old, edge, recent = make('Old', 31), make('Edge', 30), make('Recent', 29)
         ahead = events.create_event(user, tab, title='Ahead', starts_at=START, ends_at=END)
@@ -289,7 +383,7 @@ class TestPurge:
 
     def test_the_period_is_the_admins(self, user, tab, now):
         end = now - timedelta(days=3)
-        events.create_event(user, tab, title='x', starts_at=end - timedelta(hours=1), ends_at=end)
+        make_event(user, 'x', end - timedelta(hours=1), end)
         config = WorldTimeSettings.load()
         config.event_purge_days = 2
         config.save()
@@ -359,13 +453,7 @@ class TestOwnerPages:
         assert expected in text(response) and not Event.objects.exists()
 
     def test_the_list(self, web, event, user, tab, now):
-        events.create_event(
-            user,
-            tab,
-            title='<b>Old</b>',
-            starts_at=now - timedelta(days=2),
-            ends_at=now - timedelta(days=2) + timedelta(hours=1),
-        )
+        make_event(user, '<b>Old</b>', now - timedelta(days=2), now - timedelta(days=2, hours=-1))
         response = web.get(url('events'))
         body = text(response)
         assert '<title>Events - World Time - ZipTrigo</title>' in body
@@ -387,7 +475,8 @@ class TestOwnerPages:
         assert 'name="date" value="2026-12-10"' in body
         assert 'name="start_time" value="09:00"' in body and 'name="end_time" value="10:30"' in body
         assert "On Lisbon's clock." in body
-        assert 'Anyone who has this link can see the title and the time' in body
+        assert 'Anyone who has this link can see the title, the time and the places below' in body
+        assert 'fa-house' in body, 'the owner sees which row is the home'
 
     def test_the_times_follow_the_accounts_formats(self, web, event, user):
         user.date_format, user.time_format = 'dmy', '24h'
@@ -405,6 +494,52 @@ class TestOwnerPages:
         assert event.title == 'Planning'
         assert event.starts_at == datetime(2026, 12, 11, 23, 0, tzinfo=UTC)
         assert event.ends_at == datetime(2026, 12, 12, 0, 30, tzinfo=UTC), 'the next day'
+
+    def test_saving_with_the_times_untouched_changes_only_the_title(self, web, user, now):
+        # Three days long, and not on a whole minute: the form can't express either.
+        starts = datetime(2026, 12, 10, 9, 0, 30, tzinfo=UTC)
+        event = make_event(user, 'Conference', starts, starts + timedelta(days=3))
+        shown = {'date': '2026-12-10', 'start_time': '09:00', 'end_time': '09:00'}
+        assert 'This event lasts more than a day' in text(web.get(url('event', event.pk)))
+        response = web.post(url('event-edit', event.pk), {'title': 'Summit', **shown}, **HTMX)
+        assert response.status_code == 200
+        event.refresh_from_db()
+        assert event.title == 'Summit'
+        assert (event.starts_at, event.ends_at) == (starts, starts + timedelta(days=3))
+
+    def test_the_repeated_hour_survives_an_untouched_save(self, web, user, now):
+        tab = make_tab(user, 'NY')
+        make_location(tab, 'New York', 'America/New_York')
+        # 1:30 AM EDT to 1:30 AM EST on 7 November 2027: one real hour.
+        starts = datetime(2027, 11, 7, 5, 30, tzinfo=UTC)
+        event = events.create_event(
+            user, tab, title='x', starts_at=starts, ends_at=starts + timedelta(hours=1)
+        )
+        web.post(
+            url('event-edit', event.pk),
+            {'title': 'y', 'date': '2027-11-07', 'start_time': '01:30', 'end_time': '01:30'},
+        )
+        event.refresh_from_db()
+        assert event.title == 'y' and event.ends_at - event.starts_at == timedelta(hours=1)
+
+    def test_an_edit_on_a_spring_forward_day(self, web, user, now):
+        tab = make_tab(user, 'NY')
+        make_location(tab, 'New York', 'America/New_York')
+        event = events.create_event(user, tab, title='x', starts_at=START, ends_at=END)
+        data = {'title': 'x', 'date': '2027-03-14', 'start_time': '02:30', 'end_time': '03:00'}
+        response = web.post(url('event-edit', event.pk), data, **HTMX)
+        assert response.status_code == 422
+        assert "Start: That time doesn't exist on that day" in text(response)
+        data['start_time'] = '01:30'
+        assert web.post(url('event-edit', event.pk), data, **HTMX).status_code == 200
+        event.refresh_from_db()
+        assert event.ends_at - event.starts_at == timedelta(minutes=30)
+
+    def test_a_past_range_cannot_be_shared_from_the_grid(self, web, tab, now):
+        data = {'title': 'x', 'start': '2025-01-10T09:00Z', 'end': '2025-01-10T10:00Z'}
+        response = web.post(url('event-create', tab.pk), data, **HTMX)
+        assert response.status_code == 422
+        assert 'End: That time has already passed.' in text(response)
 
     def test_the_home_clock_is_the_snapshots_home_zone(self, web, user, now):
         tab = make_tab(user, 'Asia')
@@ -464,6 +599,15 @@ class TestOwnerPages:
         assert web.get(url('event', uuid.uuid4())).status_code == 404
         assert Event.objects.get(pk=theirs.pk).title == 'x'
 
+    def test_deleting_is_never_rate_limited(self, web, user, tab, now, settings, ratelimit_clock):
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'WT_EDIT_USER': (1, 60)}
+        good = {'title': 'x', 'start': '2026-12-10T09:00Z', 'end': '2026-12-10T10:00Z'}
+        assert web.post(url('event-create', tab.pk), good, **HTMX).status_code == 200
+        event = Event.objects.get(user=user)
+        assert web.post(url('event-delete', event.pk)).status_code == 302
+        assert not Event.objects.exists()
+
     def test_rate_limit_after_validation(self, web, tab, now, settings, ratelimit_clock):
         settings.RATELIMIT_ENABLE = True
         settings.RATELIMIT_RULES = {**settings.RATELIMIT_RULES, 'WT_EDIT_USER': (1, 60)}
@@ -490,6 +634,7 @@ class TestPublicPage:
         assert 'data:image/png;base64,' in body and events.event_url(event) in body
         assert '<meta name="robots" content="noindex">' in body
         assert event.user.email not in body and event.user.name not in body
+        assert 'fa-house' not in body, 'the home row is not marked: it would say where the owner is'
         assert Client().get(f'/w/{event.code}/').status_code == 200
 
     def test_the_headers_keep_it_private(self, event):
@@ -502,6 +647,18 @@ class TestPublicPage:
         user.date_format, user.time_format = 'dmy', '24h'
         user.save()
         assert 'Thu Dec 10, 2026, 9:00 AM – 10:30 AM' in text(web.get(f'/w/{event.code}'))
+
+    def test_the_names_the_owner_gave_the_places_are_shown(self, event):
+        # Deliberate, and said on the owner's page and the share form: the snapshot is public.
+        body = text(Client().get(f'/w/{event.code}'))
+        assert 'Tokyo office' in body and 'Tokyo, Japan' in body
+
+    def test_a_place_whose_zone_no_longer_loads_reads_as_utc(self, user, now):
+        event = make_event(
+            user, 'x', START, END, locations=[{'name': 'Olympus', 'timezone': 'Mars/Olympus'}]
+        )
+        body = text(Client().get(f'/w/{event.code}'))
+        assert 'Olympus' in body and 'Thu Dec 10, 2026, 9:00 AM – 10:30 AM' in body
 
     def test_a_hostile_title_is_escaped(self, user, tab, now):
         event = events.create_event(
