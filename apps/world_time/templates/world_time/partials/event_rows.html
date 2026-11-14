@@ -1,0 +1,15 @@
+{% comment %} An event's time in each of its locations (`rows`: `services.events.EventRow`). Shared by the owner's page (the account's
+   formats; `show_home` marks the home row) and the public page (the public wording, no home mark: it would say where
+   the owner is). {% endcomment %}
+<ul class="divide-y divide-gray-200 dark:divide-gray-700 text-sm" data-wt-event-rows>
+    {% for row in rows %}
+    <li class="flex flex-col gap-0.5 py-2.5 sm:flex-row sm:items-baseline sm:gap-4">
+        <span class="min-w-0 sm:w-64 sm:flex-shrink-0">
+            <span class="font-medium text-gray-900 dark:text-gray-100">{{ row.name }}</span>{% if row.home and show_home %} <i class="fas fa-house text-xs text-sage-500 dark:text-sage-300" aria-hidden="true"></i><span class="sr-only">(where the time was picked)</span>{% endif %}
+            {% if row.detail %}<span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{ row.detail }}</span>{% endif %}
+        </span>
+        <span class="tabular-nums text-gray-700 dark:text-gray-300">{{ row.text }}</span>
+        <span class="text-xs text-gray-500 dark:text-gray-400 sm:ml-auto">{{ row.zone_label }}</span>
+    </li>
+    {% endfor %}
+</ul>

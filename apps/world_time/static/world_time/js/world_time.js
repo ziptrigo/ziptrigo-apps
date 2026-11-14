@@ -173,6 +173,11 @@
                     return [hours ? hours + ' h' : '', rest ? rest + ' min' : ''].filter(Boolean).join(' ');
                 },
 
+                // The two instants of the selection, for the "Share as an event" form.
+                get startIso() { return this.hasSelection ? new Date(this.start + this.a * MINUTE).toISOString() : ''; },
+
+                get endIso() { return this.hasSelection ? new Date(this.start + this.b * MINUTE).toISOString() : ''; },
+
                 get summaryText() {
                     return this.lines.map(function (line) { return line.title + ': ' + line.range; }).join('\n');
                 },

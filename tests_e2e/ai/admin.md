@@ -1058,13 +1058,25 @@ another note `Fine note` (as `qa.user`) with no reports; ADM-51's STAFF user for
 
 | # | Action | Expected result |
 |---|---|---|
-| 1 | `/admin/`, find the **World Time** group. | **World Time settings** (Change only, never Add), **Tabs** (View), **World Time accounts** (View), **Cities** (View), **City data** (View). |
+| 1 | `/admin/`, find the **World Time** group. | **World Time settings** (Change only, never Add), **Tabs** (View), **Events** (View), **World Time accounts** (View), **Cities** (View), **City data** (View). |
 | 2 | `/admin/world_time/tab/`. | A list with **Name**, **User**, **Locations** (a count), **Position**, **Created at**; no **Add**; the search finds a tab's name and `qa.user@example.com`. Open a tab: read-only, no Save or Delete, and a **Locations** inline with each row's name, label, region, country, time zone, home flag and position. `/admin/world_time/tab/add/` is 403. |
 | 3 | `/admin/world_time/city/`. | Cities, most populous first (Shanghai, Beijing, ...), with region, country, time zone, population and GeoNames id; a filter by country code; searching `lisb` finds Lisbon. Open one: read-only. No Add, no Delete. |
 | 4 | `/admin/world_time/citydata/`. | One row: the number of cities, the number of other names, when the tables were seeded and the file's SHA-256. Read-only. |
-| 5 | `/admin/world_time/worldtimesettings/`. | Straight to the form: Max tabs per user 10, Max locations per tab 20, each with a plain help text. Set both to `0`, **Save**: `Ensure this value is greater than or equal to 1.` under each. Restore and save. |
+| 5 | `/admin/world_time/worldtimesettings/`. | Straight to the form: Max tabs per user 10, Max locations per tab 20, Max events per user 50, Event purge days 30, each with a plain help text. Set all four to `0`, **Save**: `Ensure this value is greater than or equal to 1.` under each. Restore and save. |
 | 6 | As a **staff** user without permissions (ADM-51's user), open `/admin/world_time/worldtimesettings/`. | 403 / not shown (singletons are superuser-only). |
 | 7 | Delete a throwaway user who opened `/time/` (so has a tab) from `/admin/accounts/user/`. | The confirmation lists their World Time account, tab and locations; the delete succeeds. |
+
+### ADM-63 World Time events in the admin never show a code
+
+**Purpose:** a shared event's code opens its public page, so the admin shows only its start (issue #269, PR 2).
+**Preconditions:** Session A; `world_time.md` WT-08 done (an event `Team call`).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/admin/world_time/event/`. | A list with **Title**, **User**, **Starts at**, **Ends at**, **Code** (six characters and `...`), **Created at**; no Add; the search finds the title and the owner's email, not a code. |
+| 2 | Open the event. | Read-only: title, user, the two times, the code's first six characters, the stored locations, created and updated. The full code is nowhere in the page source. No Save, no Delete. |
+| 3 | `/admin/world_time/event/?code__startswith=<two characters>`. | Refused (Django's "disallowed lookup" answer), not a filtered list. |
+| 4 | `/admin/core/scheduledjob/`. | `world_time.purge_events` once the scheduler ran it; its page says "Deletes shared World Time events that ended longer ago than the purge period in the World Time settings; their links stop working." |
 
 ## Out of scope
 

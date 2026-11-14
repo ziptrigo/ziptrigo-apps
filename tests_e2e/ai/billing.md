@@ -618,7 +618,7 @@ settings pages in the admin, and a few lines about the signed-in user's own allo
 | 6 | Look at **Short URLs**. | "N of your 25 free active links are in use." Rows: "Create and follow links" **Free**; "Each active link beyond 25", "Custom alias", "Password", "Detailed statistics", each **1 credit** / once per link. Footnote "You confirm the cost of a paid extra first. No recurring charges: ...". |
 | 7 | Look at **To-do**. | "This month: N of 10 free tasks used. The allowance starts again on <the 1st of next month, in the account's date format>." Rows: "Add a task" **Free** ("The first 10 each month. ..."); "Each task beyond 10 in a month" **10 credits** / per task ("Charged when the task is added."); "Attach files" **Storage**; a **Free** row for dates, reminders, comments and search. |
 | 8 | Look at **Notes**. | "You have N of 5 free notes." Rows: "Your first 5 notes" **Free**; "Each note beyond 5" **1 credit** / to create ("You confirm the cost first. ..."); "Renewal of a paid note" **5 credits** / every 365 days ("Taken automatically on the renewal date."); "Tags, history, sharing, search and saved filters" **Free**. With a paid note (NOTES cases), a line "1 paid note renews every 365 days; the next renewal is on <date> for 5 credits." |
-| 9 | Look at **World Time**. | One row, "Tabs, locations and the time grid", **Free** ("World Time is free."). |
+| 9 | Look at **World Time**. | One row, "Tabs, locations, the time grid and shared events", **Free** ("World Time is free."). |
 | 10 | Phone width (375 px) and dark mode. | Nothing scrolls sideways; each amount stays on the right of its row; every text is readable in dark mode. |
 
 ### BILL-36 Prices follow the admin settings

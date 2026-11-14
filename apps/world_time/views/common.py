@@ -25,7 +25,20 @@ from apps.core.htmx import is_htmx
 from ..models import Location, Tab
 from ..services import build_grid, home_today, is_seeded, list_locations, parse_day
 
-FIELD_LABELS = {'name': 'Name', 'label': 'Label', 'city': 'Place', 'zone': 'Time zone'}
+FIELD_LABELS = {
+    'name': 'Name',
+    'label': 'Label',
+    'city': 'Place',
+    'zone': 'Time zone',
+    'title': 'Title',
+    'starts_at': 'Start',
+    'ends_at': 'End',
+    'start': 'Start',
+    'end': 'End',
+    'date': 'Date',
+    'start_time': 'Start',
+    'end_time': 'End',
+}
 PAGE_SLOT = '#wt-msg'
 
 

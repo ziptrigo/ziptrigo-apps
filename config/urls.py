@@ -42,6 +42,8 @@ urlpatterns = [
     path('', include('apps.short_url.redirect_urls')),
     # Shared notes live at the root (`/n/<code>`) as well: the address of a share link.
     path('', include('apps.notes.public_urls')),
+    # Shared World Time events live at the root too (`/w/<code>`).
+    path('', include('apps.world_time.public_urls')),
     path('', include('apps.core.urls')),
 ]
 

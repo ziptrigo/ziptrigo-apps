@@ -5,5 +5,5 @@ from apps.core.costs import CostSection, free
 
 def cost_section(user: object) -> CostSection:
     return CostSection(
-        lines=[free('Tabs, locations and the time grid', 'World Time is free.')],
+        lines=[free('Tabs, locations, the time grid and shared events', 'World Time is free.')],
     )

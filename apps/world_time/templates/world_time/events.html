@@ -1,0 +1,50 @@
+{% extends 'world_time/layout.html' %}
+{% load core_ui %}
+
+{% block title %}Events - World Time - ZipTrigo{% endblock %}
+
+{% block wt_content %}
+{% comment %} The user's shared events: each a time with a public link. Needs `rows` (dicts: `event`, `when`, `home_name`, `url`),
+   `purge_days` and `max_events`. Deleting goes through the shared confirmation modal. {% endcomment %}
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <h1 class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Events</h1>
+    <a href="{% url 'world_time:home' %}"
+       class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+        <i class="fas fa-earth-americas mr-2" aria-hidden="true"></i>World Time</a>
+</div>
+<p class="mb-6 text-sm text-gray-500 dark:text-gray-400">An event is a time you picked on the grid, with a link anyone can open to see it in their own time zone. An event is deleted {{ purge_days }} day{{ purge_days|pluralize }} after it ends, and its link stops working.</p>
+
+<div id="wt-msg" class="mb-4 text-sm" aria-live="polite"></div>
+{% url 'world_time:home' as home_url %}
+<ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+    {% for row in rows %}
+    <li class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
+        <div class="min-w-0 flex-1">
+            <p class="flex flex-wrap items-center gap-2">
+                <a href="{% url 'world_time:event' row.event.pk %}" class="truncate font-medium text-gray-900 dark:text-gray-100 hover:underline">{{ row.event.title }}</a>
+                {% if row.event.ended %}{% pill 'gray' 'Ended' %}{% endif %}
+            </p>
+            <p class="mt-0.5 text-sm tabular-nums text-gray-600 dark:text-gray-400">{{ row.when }} <span class="text-gray-500 dark:text-gray-400">({{ row.home_name }} time)</span></p>
+            <div x-data="copyText" class="mt-1 flex items-center gap-2">
+                <code x-ref="text" class="truncate font-mono text-xs text-gray-500 dark:text-gray-400">{{ row.url }}</code>
+                <button type="button" @click="copy()" aria-label="Copy the link of {{ row.event.title }}" title="Copy the link"
+                        class="btn p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i data-copy-icon class="fas text-gray-500 dark:text-gray-400" :class="copied ? 'fa-check' : 'fa-copy'" aria-hidden="true"></i></button>
+            </div>
+        </div>
+        <div class="flex flex-shrink-0 items-center gap-1">
+            <a href="{% url 'world_time:event' row.event.pk %}" aria-label="Edit {{ row.event.title }}" title="Edit"
+               class="btn p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-pen text-gray-500 dark:text-gray-400" aria-hidden="true"></i></a>
+            <button type="button" @click="show($el)"
+                    data-url="{% url 'world_time:event-delete' row.event.pk %}"
+                    data-title="Delete event"
+                    data-body="Delete {{ row.event.title }}? Its link will stop working for everyone who has it."
+                    data-label="Delete"
+                    aria-label="Delete {{ row.event.title }}" title="Delete"
+                    class="btn p-2 rounded-full text-red-600 dark:text-red-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"><i class="fas fa-trash" aria-hidden="true"></i></button>
+        </div>
+    </li>
+    {% empty %}
+    <li>{% include 'core/partials/empty_state.html' with icon='fas fa-calendar-day' title='No events yet' text='Pick a time range on the World Time grid, then choose "Share as an event" to get a link for it.' action_url=home_url action_label='Open World Time' %}</li>
+    {% endfor %}
+</ul>
+{% endblock %}

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from apps.accounts.models import User
 
-from ..models import City, CityName, Location, Tab
+from ..models import City, CityName, Event, Location, Tab
 from ..services import cities as city_service
 from ..services import get_account
 
@@ -31,6 +31,18 @@ def make_location(tab: Tab, name: str = 'Lisbon', timezone: str = 'Europe/Lisbon
     fields.setdefault('position', existing.count())
     fields.setdefault('is_home', not existing.filter(is_home=True).exists())
     return Location.objects.create(tab=tab, name=name, timezone=timezone, **fields)
+
+
+def make_event(user: User, title: str, starts_at, ends_at, **fields) -> Event:
+    """An event straight in the database (no services): one that has already ended, say."""
+    fields.setdefault('code', uuid.uuid4().hex[:22])
+    fields.setdefault(
+        'locations',
+        [{'name': 'Lisbon', 'detail': '', 'timezone': 'Europe/Lisbon', 'home': True}],
+    )
+    return Event.objects.create(
+        user=user, title=title, starts_at=starts_at, ends_at=ends_at, **fields
+    )
 
 
 def make_city(geoname_id: int, name: str, timezone: str = 'Europe/Lisbon', **fields) -> City:

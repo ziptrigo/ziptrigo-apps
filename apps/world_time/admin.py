@@ -8,16 +8,26 @@ Deleting a *user* still removes their rows through the cascade
 
 from django.contrib import admin
 from django.db.models import Count
+from django.db.models.constants import LOOKUP_SEP
 from django.http import HttpRequest
 
 from apps.core.admin_singleton import SingletonSettingsAdmin
 from apps.core.admin_site import custom_admin_site
 
-from .models import City, CityData, Location, Tab, WorldTimeAccount, WorldTimeSettings
+from .models import City, CityData, Event, Location, Tab, WorldTimeAccount, WorldTimeSettings
 
 
 class ReadOnlyModelAdmin(admin.ModelAdmin):
-    """No add, change or delete: everything is shown, nothing is edited."""
+    """No add, change or delete: everything is shown, nothing is edited.
+
+    **No lookup may reach an event's code** (`lookup_allowed`): Django accepts any lookup on a
+    model's own fields from the query string, so `?code__startswith=Ab` would narrow a full code
+    down one character at a time, however little the page shows of it (the Notes admins' rule)."""
+
+    def lookup_allowed(self, lookup: str, value, request: HttpRequest | None = None) -> bool:
+        if 'code' in lookup.split(LOOKUP_SEP):
+            return False
+        return super().lookup_allowed(lookup, value, request)
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
@@ -62,6 +72,30 @@ class TabAdmin(ReadOnlyModelAdmin):
         return obj._locations
 
 
+class EventAdmin(ReadOnlyModelAdmin):
+    """Shared events. The code is the capability that opens the public page, so only its first
+    characters are shown and it is in no search."""
+
+    list_display = ('title', 'user', 'starts_at', 'ends_at', 'code_start', 'created_at')
+    search_fields = ('title', 'user__email')
+    list_select_related = ('user',)
+    date_hierarchy = 'starts_at'
+    fields = (
+        'title',
+        'user',
+        'starts_at',
+        'ends_at',
+        'code_start',
+        'locations',
+        'created_at',
+        'updated_at',
+    )
+
+    @admin.display(description='Code')
+    def code_start(self, obj) -> str:
+        return f'{obj.code[:6]}...'
+
+
 class WorldTimeAccountAdmin(ReadOnlyModelAdmin):
     list_display = ('user', 'created_at')
     search_fields = ('user__email',)
@@ -84,6 +118,7 @@ class CityDataAdmin(ReadOnlyModelAdmin):
 
 custom_admin_site.register(WorldTimeSettings, WorldTimeSettingsAdmin)
 custom_admin_site.register(Tab, TabAdmin)
+custom_admin_site.register(Event, EventAdmin)
 custom_admin_site.register(WorldTimeAccount, WorldTimeAccountAdmin)
 custom_admin_site.register(City, CityAdmin)
 custom_admin_site.register(CityData, CityDataAdmin)

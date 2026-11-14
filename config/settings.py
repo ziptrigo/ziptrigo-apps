@@ -126,6 +126,7 @@ TIMEZONE_MIDDLEWARE_SKIP_PREFIXES = (
     '/s/',
     '/t/',
     '/n/',
+    '/w/',
     '/static/',
     '/api/',
     '/sw.js',
@@ -553,6 +554,10 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # of 32,000 short rows) per pause in typing, session bound. Over it the view answers 204 and
     # the last suggestions stay.
     'WT_SEARCH_USER': (120, 60),
+    # The shared event page, `GET /w/<code>` (PR 2): per IP, charged *before* the code is looked
+    # up so made-up codes spend it too. Over it a plain 429 page. Someone opening an event stays
+    # far below it; a script guessing codes (128 bits: it never will) does not.
+    'WT_VIEW_IP': (120, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --
     'FT_ANON_UPLOAD_IP': (90, 60),
     'FT_ANON_CONFIRM_START_IP': (10, 60 * 60),
@@ -1085,6 +1090,7 @@ JAZZMIN_SETTINGS = {
         'receipts.ReceiptsSettings': 'fas fa-sliders-h',
         'notes.Note': 'fas fa-note-sticky',
         'world_time.Tab': 'fas fa-earth-americas',
+        'world_time.Event': 'fas fa-calendar-day',
         'world_time.City': 'fas fa-city',
         'world_time.CityData': 'fas fa-database',
         'world_time.WorldTimeAccount': 'fas fa-inbox',
