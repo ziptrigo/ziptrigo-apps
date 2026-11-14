@@ -146,16 +146,20 @@ def remove_location(location: Location) -> None:
 
 
 def reorder_locations(tab: Tab, ids: Sequence[UUID]) -> int:
-    """Write `position = index` for the given ids (the tab's own; others are ignored)."""
+    """Put the given rows in the order given (the tab's own; other ids are ignored). The rows
+    named swap the positions they already hold among themselves, so a list posted from a stale
+    page (a row added since is missing from it) can't land two rows on one position; if the tab's
+    positions are not distinct to begin with, all its rows are renumbered first."""
     get_account(tab.user)
     with transaction.atomic():
         lock_account(tab.user_id)
-        own = {row.pk: row for row in Location.objects.filter(tab=tab, pk__in=ids)}
-        changed = []
-        for index, pk in enumerate(dict.fromkeys(ids)):
-            row = own.get(pk)
-            if row is not None:
+        rows = list(Location.objects.filter(tab=tab).order_by('position', 'created_at', 'pk'))
+        if len({row.position for row in rows}) != len(rows):
+            for index, row in enumerate(rows):
                 row.position = index
-                changed.append(row)
-        Location.objects.bulk_update(changed, ['position'])
-    return len(changed)
+        by_pk = {row.pk: row for row in rows}
+        named = [by_pk[pk] for pk in dict.fromkeys(ids) if pk in by_pk]
+        for row, position in zip(named, sorted(row.position for row in named), strict=True):
+            row.position = position
+        Location.objects.bulk_update(rows, ['position'])
+    return len(named)

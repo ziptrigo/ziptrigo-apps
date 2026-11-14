@@ -6533,30 +6533,36 @@ its Costs section is one "Free" line. Layout: `models/`, `services/`, `forms/`, 
   seeded from, the counts, when).
 - **City data** (`services/cities.py`, whose docstring is the long version; README "World Time: the city
   list" is the operator's). `apps/world_time/data/cities.tsv.gz` (about 0.8 MB, in the repository and the
-  image) is a GeoNames extract (CC BY 4.0, credited on the page): about 34,000 cities of 15,000 people or
+  image) is a GeoNames extract (CC BY 4.0, credited on the page): about 32,000 cities of 15,000 people or
   more, one per line, tab-separated (id, name, country code, country, region, zone, population, other names
   joined by `|`). **It lives in the database, not in memory** (the owner's decision: tens of MB per process
   across five processes for a little-used feature, against a few MB of Postgres disk).
   `./manage.py world_time_build_cities` (a maintainer's tool, stdlib only) rebuilds it from the GeoNames dump
   (`cities15000.zip`, `countryInfo.txt`, `admin1CodesASCII.txt`; downloaded, or `--source <folder>`): other
   names only for cities of 100,000 or more, Latin script, at most 60 characters and 80 per city, airport
-  codes dropped, of two spellings that normalise alike the accented one kept (`München`); deterministic
+  codes dropped, spellings that differ only by accents all kept (`Roma` and `Róma`: the file has no language
+  to choose by), sections of a city (feature code `PPLX`) left out; deterministic
   (`mtime=0`), so an unchanged rebuild is no diff. `./manage.py world_time_seed_cities [--file] [--force]`
   (`cities.seed`) is **idempotent and a one-query no-op when `CityData.sha256` equals the file's**; otherwise,
   in one transaction under a lock on the `CityData` row (created first, so two containers starting at once
-  take turns), it upserts every city (`bulk_create(update_conflicts=True)`), deletes the ones no longer in
-  the file (found in Python, deleted 500 at a time: one `NOT IN` of 34,000 ids is more parameters than SQLite
-  takes) and replaces the other names. About 3 s. **`docker-entrypoint.sh` runs it after `migrate`**
-  (`RUN_MIGRATIONS=1`), and `tests_e2e/ai/serve.py` after its own; `cities.is_seeded()` (a non-empty hash) is
+  take turns), it leaves out (and logs) a city whose zone this runtime's tz database lacks, deletes the other
+  names, upserts every city (`bulk_create(update_conflicts=True)`), deletes the ones no longer in
+  the file (found in Python, deleted 500 at a time: one `NOT IN` of 32,000 ids is more parameters than SQLite
+  takes) and inserts the other names. About 3 s. **`docker-entrypoint.sh` runs it after `migrate`**
+  (`RUN_MIGRATIONS=1`; the script is `set -e`, so the line swallows its own failure with `|| echo WARNING`:
+  a failed seed must never stop the site, it only feeds one search box), and `tests_e2e/ai/serve.py` after its own; `cities.is_seeded()` (a non-empty hash) is
   what the search's "the city list has not been loaded yet" line reads. Under pytest the tables are empty:
   tests build cities with `tests/factories.py` (`make_city`, `write_city_file`), and
   `test_cities.py::TestTheRepositoryFile` reads the committed file (every zone known to `zoneinfo`, ids
   unique and sorted, names within the columns).
 - **Search** (`services/search.py`, `cities.search_cities`, `services/zones.py`). `normalize` is
   `apps.core.markdown.normalize_for_search` (no accents, lower case, punctuation as spaces), applied to the
-  stored names and to the query. Cities whose name, or a later word of it, starts with the query, most
-  populous first; then, while there is room, cities known by another name that starts with it
-  (`CityMatch.matched_name`, shown as "(also Lisboa)"); at most three queries, none under 2 characters.
+  stored names and to the query. Cities whose name, or a later word of it, starts with the query, **together
+  with** cities known by another name that starts with it (`CityMatch.matched_name`, shown as "(also Lisboa)";
+  of two spellings the one typed): both sets are read before the cut, then a city whose whole name is the
+  query comes first and the rest by population, so `roma` offers Rome ahead of the smaller places that merely
+  start with it. Two queries (an indexed prefix lookup over the other names, and a scan of the 32,000 short
+  city rows, since a later-word match has no btree index), none under 2 characters.
   **Time zones**: the zones a user can add are the account page's list (`timezone_choices()`: UTC and the
   canonical `Area/City` names), matched by a word of their name. **Abbreviations**
   (`zones.ABBREVIATIONS`: `PST`, `CET`, `IST` ...) are **only search aliases for real zones** -- `PST` offers
@@ -6567,22 +6573,32 @@ its Costs section is one "Free" line. Layout: `models/`, `services/`, `forms/`, 
   none gets one, `My times`, whose only row is the account's time zone**, UTC when it is unset or not an
   addable zone, as the home), `create_tab` (a home row likewise; cap `You have too many tabs. Delete one
   first.`; `You already have a tab with this name.`), `rename_tab`, `delete_tab` (`Keep at least one tab.`).
+  An account zone saved under an old name (`US/Pacific`, `Asia/Calcutta`) is read as its canonical zone
+  (`zones.LEGACY_ZONES`, `addable_zone_for`).
   `locations.py`: `add_city(tab, geoname_id)` / `add_zone(tab, zone)` (`Choose a place from the
   suggestions.`, `Unknown time zone.`, `This location is already in the tab.`, `This tab is full. Remove a
   location first.`; the first row of an empty tab is its home), `set_label`, `set_home` (moves the flag),
   `remove_location` (idempotent; removing the home makes the first remaining row the home),
-  `reorder_locations`.
+  `reorder_locations` (the rows named swap the positions they already hold, so a list from a stale page
+  can't tie two rows; tied positions are renumbered first).
 - **The grid** (`services/grid.py`, pure functions, no queries; `build_grid(locations, day, now=, formats=)`).
   The day shown is the **home row's calendar day**, local midnight to local midnight (23 or 25 tiles on a day
   its clocks change), one tile per hour; every row shows the same instants on its own clock, with the
   daylight-saving rules **of the date shown**. A `Tile` is the hour in the account's clock (`3` + `pm`, `15`,
   `5:45` and `tight` in a zone off the hour; the weekday over a short date on the tile where a local day
-  starts), a `band` (`day` 8 to 18, `night` 22 to 6, else `edge`), `weekend`, and a `title` with the full local
-  date and time. A `Row` adds `offsets` (UTC offset in minutes at each tile's start plus one for the end),
-  `now_offset`, the zone's abbreviation, `utc_text`, `diff_text` (hours from home), the clock and date now, and
+  starts, which is the first tile whose local date differs from the hour before -- not "hour 0", which
+  happens twice or never where the clocks change at midnight -- and, off the hour, the weekday over the
+  time), a `band` (`day` 8 to 18, `night` 22 to 6, else `edge`), `weekend`, and a `title` with the full local
+  date and time. A `Row` adds `offsets` (UTC offset in minutes at each tile's start plus one for the end), `steps`
+  (`[minute, offset]` pairs **exact to the minute**, `offset_steps`: what the script reads, so a clock change
+  that falls inside a tile -- a row under a home zone off the hour -- is on the right side of it), a
+  screen-reader `summary`, `now_offset`, the zone's abbreviation, `utc_text`, `diff_text` (hours from home), the clock and date now, and
   `dst_note` (`Clocks go back 1 hour on Sun 10/25/2026` when the zone's clocks change within 7 days, found by
-  walking the hours ahead). `Grid.payload` (the first instant in ms, the number of tiles, each row's id, title,
-  offsets, `nowOffset`, `home`) is what the script gets: **the browser only does arithmetic with the server's
+  walking the hours ahead, `next_change`). `Grid.minutes` is the real length of the day (1,470 on Lord Howe
+  Island's 24.5-hour day, whose 25th tile runs past it: a selection is clamped to it) and `Grid.refresh_at`
+  when a page left open reloads itself (the end of a day shown as today, or a row's next clock change; not
+  while a range is selected or a field is focused). `Grid.payload` (the first instant in ms, the number of
+  tiles, `minutes`, `refreshAt`, each row's id, title, `steps`, `nowOffset`, `home`) is what the script gets: **the browser only does arithmetic with the server's
   offsets**, so the page can't disagree with the server about a zone. `parse_day` reads `?date=` (an ISO date
   within ten years of today, else today on the home row's clock, `home_today`). A stored zone that no longer
   loads is shown as UTC (`zones.tz`).
@@ -6598,14 +6614,16 @@ its Costs section is one "Free" line. Layout: `models/`, `services/`, `forms/`, 
 - **The page** (`tab.html`, `partials/`). Tabs (`data-tabs`) with **New tab**, a pencil (rename) and a delete
   button (hidden for a lone tab). **Add a location** is a form whose suggestions
   (`partials/search_results.html`, fetched by the input's `hx-get`) are its submit buttons; Enter picks the
-  first, the arrows walk them, Escape closes them. The day picker (core's date field; `world_time.js` opens the
+  first (only of the text as typed now: `data-wt-query`), the arrows walk them, Escape or a click elsewhere
+  closes them, and a screen reader hears only their number (`#wt-search-status`). The day picker (core's date field; `world_time.js` opens the
   chosen day) sits between previous / next links. The grid is a horizontally scrolling list (the location
   column sticky on the left; the tiles grow to fill the row, so a whole day fits a desktop page) of sortable
   rows: handle, house icon or offset from home (tooltip: zone, abbreviation, UTC offset), the title, a live
   clock, the amber daylight-saving note, and a three-dots button that opens **Make home**, **Rename** (the
   label) and **Remove** under the name (inline, since a dropdown would be clipped by the scroller). **A row's
   Alpine state is `menu`, never `open`**: the confirmation modal around the page has its own `open`, which a
-  row's would shadow (the modal then never opens). Colours are `world_time.css` (scheme variables only, no hex).
+  row's would shadow (the modal then never opens). After a row's own action the grid is replaced and the
+  script puts the focus back on that row's Actions button. Colours are `world_time.css` (scheme variables only, no hex).
 - **Picking a time range** (`static/world_time/js/world_time.js`, the Alpine `worldTimeGrid`, one per rendered
   grid; a classic script so its `alpine:init` listener exists before Alpine starts). A selection is two
   numbers, minutes from the first instant. A click selects the hour from the half hour clicked; a mouse or
@@ -6617,8 +6635,11 @@ its Costs section is one "Free" line. Layout: `models/`, `services/`, `forms/`, 
   account's formats (`ZTDateTime`), and **Copy times** copies those lines (the shared `copyText`). The
   selection survives a re-render of the grid (kept on `window` as two instants). Also there: the "now" line and
   the clocks (every 20 s), and reordering through core's `initSortableList` (the list gets
-  `data-sortable-ready` once wired, which the browser test waits for).
-- **Rate limits**: `WT_EDIT_USER` (240/min, every change, validated first and charged after) and
+  `data-sortable-ready` once wired, which the browser test waits for; only a 204 counts as saved, an
+  `HX-Redirect` answer -- a session that ended -- is followed, and only a 422 or 429 body is shown as it is).
+- **Rate limits**: `WT_EDIT_USER` (240/min, every change; the form is validated first, so a malformed
+  request spends nothing, while a refusal only the service can make -- a duplicate, a full tab -- is charged,
+  as in the other products' tag and label views) and
   `WT_SEARCH_USER` (120/min; over it the search answers 204 and the last suggestions stay).
 - **Admin**: the settings singleton, and read-only `TabAdmin` (locations inline), `WorldTimeAccountAdmin`,
   `CityAdmin` and `CityDataAdmin`. `world_time` is in `CASCADE_WITH_USER_APP_LABELS`.
@@ -6626,7 +6647,8 @@ its Costs section is one "Free" line. Layout: `models/`, `services/`, `forms/`, 
   locations; no report form and no takedown, the owner deletes the link), the JWT API and `inv worldtime`
   (PR 3), reordering tabs, an add-to-calendar export.
 - **Tests**: `apps/world_time/tests/` (`test_cities.py`: the file, seeding, search; `test_zones.py`;
-  `test_tabs_locations.py`; `test_grid.py`: zones, clock changes, formats, shading, the note;
+  `test_tabs_locations.py` (with a lock spy); `test_grid.py`: zones, clock changes inside a tile and at
+  midnight, formats, shading, the note;
   `test_views.py`; `test_wiring.py`), the Playwright `tests_e2e/test_world_time.py` (on the shared
   `receipts_server`) and the AI plan `tests_e2e/ai/world_time.md` (WT-01 to WT-07) with ADM-62 in `admin.md`.
 

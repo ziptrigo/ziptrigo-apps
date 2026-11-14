@@ -22,7 +22,7 @@ The admin side is in `admin.md` (ADM-62). Shared events (PR 2) and the API and C
 ## Preconditions
 
 - The server was started with `python tests_e2e/ai/serve.py` (it seeds the city tables; `/admin/world_time/citydata/`
-  shows about 34,000 cities).
+  shows about 32,000 cities).
 - Two browser contexts: **Context A** (the main user) and **Visitor** (nobody signed in).
 
 ## Test data
@@ -66,7 +66,7 @@ time zone saved yet (dismiss nothing: check `/account/` says "Not set (UTC)", or
 | 2 | Type `porto`. | A list appears under the box: **Porto**, Portugal first among several places starting with "Porto" (most populous first), each with a pin icon and its region and country; time zones (a clock icon, "(Time zone)") come last. |
 | 3 | Click **Porto**, Portugal. | A second row **Porto** appears, offset `+0`, with its own clock; the box is emptied and the list closes. No page reload. |
 | 4 | Type `sao paulo` (no accent) and press Enter. | The first suggestion, **São Paulo**, São Paulo, Brazil, is added (offset `-3` in November). |
-| 5 | Type `lisboa`. | **Lisbon**, Portugal is suggested with "(also Lisboa)". Press Escape: the list closes and the focus stays in the box. |
+| 5 | Type `roma`. | **Rome**, Lazio, Italy is the first suggestion, "(also Roma)", ahead of smaller places that start with "Roma". Then type `lisboa`. | **Lisbon**, Portugal is suggested with "(also Lisboa)". Press Escape: the list closes and the focus stays in the box. |
 | 6 | Type `münchen`, then replace it with `munchen`. | Both suggest **Munich**, Bavaria, Germany "(also München)". Add it. |
 | 7 | Type `pst`. | The first suggestion is **Los Angeles**, "Pacific Time (PST)" with a clock icon. Add it: the row is **Los Angeles** (hover the name: `America/Los Angeles`), not a fixed "PST" row. |
 | 8 | Type `ist`. | Three zones first: **Kolkata** "India Standard Time (IST)", **Dublin** "Irish Standard Time (IST)", **Jerusalem** "Israel Standard Time (IST)"; cities and **Istanbul** after them. |
@@ -94,6 +94,16 @@ time zone saved yet (dismiss nothing: check `/account/` says "Not set (UTC)", or
 | 10 | Shell: nothing. In a week when a row's clocks change within 7 days (e.g. the last week of October or March for Lisbon, early November or March for Los Angeles), open `/time/`. | That row shows an amber line under its name: "Clocks go back 1 hour on Sun 10/25/2026" (or "forward"). Outside such a week no row has the line. |
 | 11 | Narrow the window to a phone width (375 px). | The location column stays fixed on the left while the hour tiles scroll sideways under it; the page itself does not scroll sideways; the current time (or the morning) is in view. |
 | 12 | Switch the theme to Dark, then a different colour scheme, on `/account/`. | The tiles, the selection and the text stay readable in each; night tiles are the darkest in both themes. |
+
+### WT-03b A clock change in the middle of a tile
+
+**Purpose:** when the home row is off the hour, another row's clock change falls inside a tile; the times stay right.
+**Preconditions:** a new tab `Half hours` whose home is `Kolkata` (make it home, remove the first row) with a second row `New York`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open the tab with `?date=2026-03-08`; click the **right** half of Kolkata's `12 pm` tile. | Kolkata `Sun 03/08/2026, 12:30 PM – 1:30 PM`; New York `Sun 03/08/2026, 3:00 AM – 4:00 AM` (never 2:00 AM, which that day does not have in New York). |
+| 2 | Click the **left** half of the same tile. | Kolkata `12:00 PM – 1:00 PM`; New York `1:30 AM – 3:30 AM` (one real hour across the change). |
 
 ### WT-04 Pick a time range
 
@@ -154,7 +164,7 @@ time zone saved yet (dismiss nothing: check `/account/` says "Not set (UTC)", or
 |---|---|---|
 | 1 | Type `porto` in **Add a location**. | "No place matches "porto". The city list has not been loaded yet, so only time zones (UTC, Europe/Lisbon, PST) can be found." |
 | 2 | Type `utc`. | **UTC** is suggested and can be added. Existing rows (cities included) still show: they keep their own copy of the place. |
-| 3 | Shell: `python tests_e2e/ai/manage.py world_time_seed_cities`, twice. | First "Seeded 34,215 cities and 57,560 other names." (the numbers follow the file), then "City data is up to date (34,215 cities)." `porto` finds Porto again. |
+| 3 | Shell: `python tests_e2e/ai/manage.py world_time_seed_cities`, twice. | First "Seeded 31,821 cities and 63,077 other names." (the numbers follow the file), then "City data is up to date (31,821 cities)." `porto` finds Porto again. |
 
 ## Out of scope
 

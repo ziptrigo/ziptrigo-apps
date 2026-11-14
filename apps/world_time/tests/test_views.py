@@ -248,7 +248,7 @@ class TestLocations:
         assert response.status_code == 204
         assert [row.name for row in list_locations(tab)] == ['Tokyo', 'Lisbon']
 
-    @pytest.mark.parametrize('ids', [[], ['nope'], [str(uuid.uuid4())] * 201])
+    @pytest.mark.parametrize('ids', [[], ['nope'], [str(uuid.uuid4())] * 501])
     def test_an_unreadable_order_is_refused(self, web, tab, ids):
         response = web.post(url('location-reorder', tab.pk), {'ids[]': ids}, **HTMX)
         assert response.status_code == 422 and 'Could not read the new order.' in text(response)
@@ -261,6 +261,8 @@ class TestSearch:
         body = text(response)
         assert response.status_code == 200
         assert 'type="submit" name="city" value="1"' in body and '(also Lisboa)' in body
+        assert 'data-wt-query="lisboa"' in body
+        assert '1 suggestion. Use the down arrow to choose one.' in body
         response = web.get(url('search'), {'q': 'pst', 'tab': str(tab.pk)}, **HTMX)
         body = text(response)
         assert 'name="zone" value="America/Los_Angeles"' in body
@@ -284,7 +286,9 @@ class TestSearch:
 
     def test_a_short_query_shows_nothing(self, web, tab):
         response = web.get(url('search'), {'q': 'z', 'tab': str(tab.pk)}, **HTMX)
-        assert response.status_code == 200 and text(response).strip() == ''
+        body = text(response)
+        assert response.status_code == 200 and 'data-wt-suggestion' not in body
+        assert 'No place matches' not in body
 
     def test_a_query_is_escaped(self, web, tab):
         response = web.get(url('search'), {'q': '<b>zz</b>', 'tab': str(tab.pk)}, **HTMX)

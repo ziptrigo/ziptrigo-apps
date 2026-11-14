@@ -1,9 +1,12 @@
 """The city tables: searching them, and seeding them from the GeoNames extract in the repository.
 
-**Why a table and not the file in memory.** The extract is about 34,000 cities with 60,000 other
+**Why a table and not the file in memory.** The extract is about 32,000 cities with 63,000 other
 names. Held in Python that is tens of megabytes *per process* (three web workers and two queue
 workers each load their own copy), for a feature few requests use; in the database it costs disk
-only, and a prefix search over an indexed column is instant.
+only. The search (`search_cities`) is one indexed prefix lookup over the other names and one scan
+of the 32,000 short city rows (it also matches a later word of a name, which no btree index
+serves): a few milliseconds, and bounded by `WT_SEARCH_USER`. If it ever matters, store one row per
+word so both halves are index lookups.
 
 **The file** (`apps/world_time/data/cities.tsv.gz`, built by `./manage.py
 world_time_build_cities`): gzip, UTF-8, one city per line, tab-separated: GeoNames id, name,
@@ -22,6 +25,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from zoneinfo import available_timezones
 
 from django.db import transaction
 from django.db.models import Q
@@ -109,6 +113,21 @@ def seed(path: Path = DATA_FILE, *, force: bool = False) -> SeedResult:
         if state.sha256 == digest and not force:
             return SeedResult(False, state.city_count, state.name_count)
 
+        # A zone this runtime's tz database lacks would silently show as UTC on a user's row:
+        # leave such a city out, and say so.
+        known_zones = available_timezones()
+        skipped = [row for row in rows if row.timezone not in known_zones]
+        if skipped:
+            logger.warning(
+                'Skipped %d cities whose time zone this system does not know (e.g. %s, %s)',
+                len(skipped),
+                skipped[0].name,
+                skipped[0].timezone,
+            )
+            rows = [row for row in rows if row.timezone in known_zones]
+
+        # The other names first, so deleting a stale city has nothing to cascade to.
+        CityName.objects.all().delete()
         cities = [
             City(
                 geoname_id=row.geoname_id,
@@ -137,15 +156,14 @@ def seed(path: Path = DATA_FILE, *, force: bool = False) -> SeedResult:
                 'population',
             ],
         )
-        # Cities no longer in the file go (with their other names). Found in Python and deleted in
-        # small batches: one `NOT IN` of 34,000 ids is more parameters than SQLite takes.
+        # Cities no longer in the file go. Found in Python and deleted in small batches: one
+        # `NOT IN` of 32,000 ids is more parameters than SQLite takes.
         stale = sorted(
             set(City.objects.values_list('pk', flat=True)) - {row.geoname_id for row in rows}
         )
         for index in range(0, len(stale), _DELETE_BATCH):
             City.objects.filter(pk__in=stale[index : index + _DELETE_BATCH]).delete()
 
-        CityName.objects.all().delete()
         names = [
             CityName(city_id=row.geoname_id, name=name, search_name=normalize(name))
             for row in rows
@@ -153,15 +171,11 @@ def seed(path: Path = DATA_FILE, *, force: bool = False) -> SeedResult:
         ]
         CityName.objects.bulk_create(names, batch_size=_BATCH)
 
-        CityData.objects.update_or_create(
-            pk=1,
-            defaults={
-                'sha256': digest,
-                'city_count': len(cities),
-                'name_count': len(names),
-                'seeded_at': timezone.now(),
-            },
-        )
+        state.sha256 = digest
+        state.city_count = len(cities)
+        state.name_count = len(names)
+        state.seeded_at = timezone.now()
+        state.save()
     logger.info('Seeded %d cities and %d other names from %s', len(cities), len(names), path.name)
     return SeedResult(True, len(cities), len(names))
 
@@ -181,32 +195,42 @@ class CityMatch:
 
 
 def search_cities(query: str, limit: int) -> list[CityMatch]:
-    """Cities matching `query`, the most populous first: those whose name (or a word of it) starts
-    with it, then those known by another name that starts with it. At most three queries."""
+    """Cities matching `query`: those whose name (or a later word of it) starts with it, and those
+    known by another name that starts with it, **together**, a city whose whole name is the query
+    first and then the most populous. Both sets are read before the cut, so a big city typed by
+    its local name (`Roma`) is not hidden behind smaller ones that merely start with it. Two
+    queries."""
     needle = normalize(query[:SEARCH_QUERY_MAX])
     if len(needle) < MIN_QUERY_CHARS:
         return []
-    own = list(
-        City.objects.filter(
-            Q(search_name__startswith=needle) | Q(search_name__contains=f' {needle}')
-        ).order_by('-population', 'geoname_id')[:limit]
+    typed = ' '.join(query.split()).casefold()
+    own = City.objects.filter(
+        Q(search_name__startswith=needle) | Q(search_name__contains=f' {needle}')
+    ).order_by('-population', 'geoname_id')[:limit]
+    found: dict[int, CityMatch] = {city.pk: CityMatch(city) for city in own}
+    # More rows than the limit: one city can match by several of its names.
+    others = (
+        CityName.objects.filter(search_name__startswith=needle)
+        .select_related('city')
+        .order_by('-city__population', 'city_id', 'name')[: limit * 8]
     )
-    matches = [CityMatch(city) for city in own]
-    if len(matches) < limit:
-        found = {city.pk for city in own}
-        # More rows than needed: one city can match by several of its names.
-        others = (
-            CityName.objects.filter(search_name__startswith=needle)
-            .exclude(city_id__in=found)
-            .select_related('city')
-            .order_by('-city__population', 'city_id', 'name')[: limit * 6]
-        )
-        for other in others:
-            if other.city_id in found:
-                continue
-            found.add(other.city_id)
-            matches.append(CityMatch(other.city, other.name))
-            if len(matches) >= limit:
-                break
-    matches.sort(key=lambda match: (-match.city.population, match.city.pk))
-    return matches
+    exact: set[int] = {pk for pk, match in found.items() if match.city.search_name == needle}
+    by_other = 0
+    for other in others:
+        if other.search_name == needle:
+            exact.add(other.city_id)
+        known = found.get(other.city_id)
+        if known is not None:
+            # Of a city's spellings that match (`Roma`, `Róma`), show the one that was typed.
+            if known.matched_name and other.name.casefold() == typed:
+                found[other.city_id] = CityMatch(other.city, other.name)
+            continue
+        if by_other >= limit:
+            continue
+        by_other += 1
+        found[other.city_id] = CityMatch(other.city, other.name)
+    matches = sorted(
+        found.values(),
+        key=lambda match: (match.city.pk not in exact, -match.city.population, match.city.pk),
+    )
+    return matches[:limit]

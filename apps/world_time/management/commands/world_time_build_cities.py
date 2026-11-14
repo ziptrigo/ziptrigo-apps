@@ -10,7 +10,8 @@ What is kept per city: id, name, country, region, time zone, population, and, fo
 least `OTHER_NAMES_MIN_POPULATION` people, its other names in Latin script (`Lisboa`, `München`):
 GeoNames lists a city's names in every language and script with no marker in this file, so the
 search only takes the ones a Latin keyboard types, and only for the larger cities, which keeps the
-table small. Airport codes and names that normalise to the city's own are dropped.
+table small. Airport codes and names that normalise to the city's own are dropped, and so are
+sections of a city (GeoNames feature code `PPLX`).
 """
 
 import gzip
@@ -40,10 +41,11 @@ def _is_latin(text: str) -> bool:
 
 def _other_names(name: str, raw: str) -> list[str]:
     """The other names worth searching by: Latin script, at least 3 characters, no digits, not an
-    all-capitals code, and different from the city's own name once normalised. Of two spellings
-    that normalise alike the accented one is kept (`München`, not `Munchen`): it is what is shown."""
+    all-capitals code, and different from the city's own name once normalised. Spellings that
+    differ only by accents are all kept (`Roma` and `Róma`, `Munchen` and `München`): the file has
+    no language to choose by, and the search shows the one that was typed."""
     own = normalize_for_search(name)
-    kept: dict[str, str] = {}
+    kept: set[str] = set()
     for other in raw.split(','):
         other = other.strip()
         key = normalize_for_search(other)
@@ -58,9 +60,8 @@ def _other_names(name: str, raw: str) -> list[str]:
             or '\t' in other
         ):
             continue
-        if key not in kept or (kept[key].isascii() and not other.isascii()):
-            kept[key] = other
-    return [kept[key] for key in sorted(kept)][:MAX_OTHER_NAMES]
+        kept.add(other)
+    return sorted(kept, key=lambda other: (normalize_for_search(other), other))[:MAX_OTHER_NAMES]
 
 
 class Command(BaseCommand):
@@ -106,7 +107,9 @@ class Command(BaseCommand):
                 raise CommandError(f'Unexpected line in cities15000.txt: {line[:80]!r}')
             geoname_id, name, country_code = int(fields[0]), fields[1], fields[8]
             zone, population = fields[17], int(fields[14] or 0)
-            if zone not in known_zones or not name or '\t' in name:
+            # `PPLX` is a section of a city (Manhattan, a district of Turin): it would answer to
+            # the city's own names (`nyc`, `torino`) ahead of the city.
+            if zone not in known_zones or not name or '\t' in name or fields[7] == 'PPLX':
                 skipped += 1
                 continue
             region = regions.get(f'{country_code}.{fields[10]}', '')
@@ -147,6 +150,6 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f'Wrote {names:,} cities to {out} ({out.stat().st_size:,} bytes; '
-                f'{skipped} skipped for an unknown time zone).'
+                f'{skipped} skipped: a section of a city, or an unknown time zone).'
             )
         )

@@ -484,7 +484,7 @@ are checked with Google. Google offers it for non-commercial use; for commercial
 ### World Time: the city list
 
 World Time has no environment variables and no external service. Its "Add a location" search reads
-two database tables (`world_time_city`, about 34,000 cities, and `world_time_cityname`, about 58,000
+two database tables (`world_time_city`, about 32,000 cities, and `world_time_cityname`, about 63,000
 other names such as "Lisboa" or "München") that are **seeded from a file in the repository**,
 `apps/world_time/data/cities.tsv.gz` (about 0.8 MB). The data lives in the database, not in memory,
 so it costs the web and queue workers nothing.
@@ -497,7 +497,9 @@ so it costs the web and queue workers nothing.
 ```
 
 - **Deployments need no manual step.** The container's entrypoint runs it after `migrate` on every
-  start (`docker-entrypoint.sh`, with `RUN_MIGRATIONS=1`). It compares the file's SHA-256 with the one
+  start (`docker-entrypoint.sh`, with `RUN_MIGRATIONS=1`). If it ever fails, the site still starts
+  (the log has a `WARNING: world_time_seed_cities failed` line, and the search finds only time zones
+  until the next start or until you run the command by hand). It compares the file's SHA-256 with the one
   stored in the database (`/admin/world_time/citydata/`) and stops after that one query when they
   match; when the file changed (or on the first deploy) it upserts every city, removes the ones no
   longer in the file and replaces the other names, in one transaction (about 3 seconds).

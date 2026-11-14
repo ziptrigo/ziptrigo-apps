@@ -6,7 +6,16 @@ import pytest
 
 from apps.core.datetime_format import PUBLIC, DisplayFormats
 
-from ..services.grid import band_of, build_grid, dst_note, home_today, offset_text, parse_day
+from ..services.grid import (
+    band_of,
+    build_grid,
+    dst_note,
+    home_today,
+    next_change,
+    offset_steps,
+    offset_text,
+    parse_day,
+)
 from ..services.zones import tz
 from .factories import make_location, make_tab
 
@@ -165,7 +174,13 @@ def test_today_is_the_home_rows(rows):
 
 def test_an_empty_tab(user):
     grid = build_grid([], date(2026, 11, 19), now=NOW, formats=MDY_12)
-    assert grid.rows == [] and grid.payload == {'start': 0, 'hours': 24, 'rows': []}
+    assert grid.rows == [] and grid.payload == {
+        'start': 0,
+        'hours': 24,
+        'minutes': 1440,
+        'refreshAt': 0,
+        'rows': [],
+    }
     assert home_today([], NOW) == date(2026, 11, 19)
 
 
@@ -179,6 +194,8 @@ def test_the_payload(rows):
         ('Kathmandu', False, 345),
     ]
     assert payload['rows'][1]['id'] == str(rows[1].pk)
+    assert payload['minutes'] == 1440
+    assert [row['steps'] for row in payload['rows']] == [[[0, 0]], [[0, -300]], [[0, 345]]]
 
 
 def test_a_zone_that_no_longer_loads_is_shown_as_utc(user):
@@ -190,3 +207,85 @@ def test_a_zone_that_no_longer_loads_is_shown_as_utc(user):
 def test_building_a_grid_makes_no_queries(rows, django_assert_num_queries):
     with django_assert_num_queries(0):
         build_grid(rows, date(2026, 11, 19), now=NOW, formats=MDY_12)
+
+
+class TestClockChanges:
+    """What a review of the first version found: a change inside a tile, at midnight, and a day
+    that is not a whole number of hours."""
+
+    def test_a_change_inside_a_tile_is_exact_to_the_minute(self, user):
+        # Home is off the hour (India, +5:30), so New York's change at 07:00 UTC falls in the
+        # middle of a tile: the tile's first offset would give 2:00 AM, an hour that day lacks.
+        tab = make_tab(user)
+        rows = [
+            make_location(tab, 'Kolkata', 'Asia/Kolkata'),
+            make_location(tab, 'New York', 'America/New_York'),
+        ]
+        grid = build_grid(rows, date(2026, 3, 8), now=NOW, formats=MDY_12)
+        assert grid.start == datetime(2026, 3, 7, 18, 30, tzinfo=UTC)
+        new_york = grid.rows[1]
+        assert new_york.steps == [[0, -300], [750, -240]]
+        assert (new_york.offsets[12], new_york.offsets[13]) == (-300, -240)
+        assert grid.rows[0].steps == [[0, 330]]
+
+    def test_offset_steps(self):
+        start = datetime(2026, 10, 25, 0, 0, tzinfo=UTC)
+        assert offset_steps(tz('Europe/Lisbon'), start, 1440) == [[0, 60], [60, 0]]
+        assert offset_steps(tz('Asia/Tokyo'), start, 1440) == [[0, 540]]
+        # Lord Howe Island changes by half an hour.
+        lord_howe = offset_steps(
+            tz('Australia/Lord_Howe'), datetime(2026, 4, 4, 0, tzinfo=UTC), 1440
+        )
+        assert lord_howe == [[0, 660], [900, 630]]
+
+    def test_next_change_is_the_exact_instant(self):
+        found = next_change(tz('Europe/Lisbon'), datetime(2026, 10, 20, 12, 17, tzinfo=UTC), 7)
+        assert found == (datetime(2026, 10, 25, 1, 0, tzinfo=UTC), -60)
+        assert next_change(tz('Europe/Lisbon'), datetime(2026, 10, 10, tzinfo=UTC), 7) is None
+
+    @pytest.mark.parametrize(
+        ('zone', 'day'),
+        [
+            ('America/Havana', date(2026, 11, 1)),  # midnight happens twice
+            ('America/Havana', date(2026, 3, 8)),  # midnight is skipped: the day starts at 1:00
+            ('America/Santiago', date(2026, 9, 6)),
+        ],
+    )
+    def test_a_day_whose_clocks_change_at_midnight_starts_once(self, user, zone, day):
+        row = make_location(make_tab(user), 'Somewhere', zone)
+        grid = build_grid([row], day, now=NOW, formats=MDY_12)
+        starts = [tile for tile in grid.rows[0].tiles if tile.day_start]
+        assert len(starts) == 1 and starts[0] is grid.rows[0].tiles[0]
+        assert starts[0].main in ('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat')
+
+    def test_a_day_start_off_the_hour_keeps_its_time(self, rows):
+        grid = build_grid(rows, date(2026, 11, 19), now=NOW, formats=MDY_12)
+        kathmandu = grid.rows[2]
+        (start,) = [tile for tile in kathmandu.tiles if tile.day_start]
+        assert (start.main, start.sub) == ('Fri', '12:45')
+        assert start.title == 'Fri 11/20/2026, 12:45 AM'
+        lisbon_start = grid.rows[0].tiles[0]
+        assert (lisbon_start.main, lisbon_start.sub) == ('Thu', '11/19')
+
+    def test_a_day_of_24_and_a_half_hours(self, user):
+        row = make_location(make_tab(user), 'Lord Howe', 'Australia/Lord_Howe')
+        grid = build_grid([row], date(2026, 4, 5), now=NOW, formats=MDY_12)
+        assert (grid.hours, grid.minutes, grid.payload['minutes']) == (25, 1470, 1470)
+
+    def test_when_a_page_left_open_should_load_again(self, rows):
+        # Today: at the end of the home row's day.
+        today = build_grid(rows, date(2026, 11, 19), now=NOW, formats=MDY_12)
+        assert today.refresh_at == datetime(2026, 11, 20, 0, 0, tzinfo=UTC)
+        # Another day, no change ahead: never.
+        other = build_grid(rows, date(2026, 12, 1), now=NOW, formats=MDY_12)
+        assert other.refresh_at is None and other.payload['refreshAt'] == 0
+        # A row's clocks change first.
+        soon = datetime(2026, 10, 24, 22, 0, tzinfo=UTC)
+        grid = build_grid(rows, date(2026, 10, 24), now=soon, formats=MDY_12)
+        assert grid.is_today and grid.refresh_at == datetime(2026, 10, 24, 23, 0, tzinfo=UTC)
+        later = build_grid(rows, date(2026, 10, 30), now=soon, formats=MDY_12)
+        assert later.refresh_at == datetime(2026, 10, 25, 1, 0, tzinfo=UTC)
+
+    def test_each_row_says_when_its_day_starts(self, rows):
+        grid = build_grid(rows, date(2026, 11, 19), now=NOW, formats=MDY_12)
+        assert grid.rows[1].summary == 'The day shown starts at Wed 11/18/2026, 7:00 PM here.'

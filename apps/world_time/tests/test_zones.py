@@ -60,3 +60,12 @@ def test_zone_names_match_by_word_and_in_full():
 def test_a_zone_that_no_longer_loads_reads_as_utc():
     assert zones.tz('Mars/Olympus').key == 'UTC'
     assert zones.tz('Europe/Lisbon').key == 'Europe/Lisbon'
+
+
+def test_an_accounts_old_zone_name_maps_to_a_zone_a_location_can_have():
+    assert zones.addable_zone_for('Europe/Lisbon') == 'Europe/Lisbon'
+    assert zones.addable_zone_for('US/Eastern') == 'America/New_York'
+    assert zones.addable_zone_for('') == 'UTC' and zones.addable_zone_for('Etc/GMT+5') == 'UTC'
+    for old, new in zones.LEGACY_ZONES.items():
+        assert not zones.is_addable_zone(old) or old == new, old
+        assert zones.is_addable_zone(new), new

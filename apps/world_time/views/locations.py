@@ -1,7 +1,9 @@
 """A tab's locations: the search, adding, the label, the home row, removing and reordering.
 
 Every change answers the re-rendered grid for htmx (`#wt-grid`); a refusal is a 422 into the page's
-message slot. Validated first, charged after: a refused request spends no rate-limit budget.
+message slot. The form is validated first and the rate limit charged after, so a malformed request
+spends nothing; what only the service can refuse (a place already in the tab, a full tab, an
+unknown city) is charged, as in the other products' tag and label views.
 """
 
 from uuid import UUID

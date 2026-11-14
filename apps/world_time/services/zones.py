@@ -76,6 +76,57 @@ ABBREVIATIONS: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 
+#: Old names of zones a user's account may still hold (the account page keeps a saved one
+#: selectable), mapped to the zone a location can have. Only what is common; anything else that is
+#: not addable falls back to UTC for a new tab's home row.
+LEGACY_ZONES: dict[str, str] = {
+    'US/Alaska': 'America/Anchorage',
+    'US/Arizona': 'America/Phoenix',
+    'US/Central': 'America/Chicago',
+    'US/Eastern': 'America/New_York',
+    'US/Hawaii': 'Pacific/Honolulu',
+    'US/Mountain': 'America/Denver',
+    'US/Pacific': 'America/Los_Angeles',
+    'Canada/Atlantic': 'America/Halifax',
+    'Canada/Central': 'America/Winnipeg',
+    'Canada/Eastern': 'America/Toronto',
+    'Canada/Mountain': 'America/Edmonton',
+    'Canada/Newfoundland': 'America/St_Johns',
+    'Canada/Pacific': 'America/Vancouver',
+    'Brazil/East': 'America/Sao_Paulo',
+    'America/Buenos_Aires': 'America/Argentina/Buenos_Aires',
+    'Asia/Calcutta': 'Asia/Kolkata',
+    'Asia/Katmandu': 'Asia/Kathmandu',
+    'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+    'Asia/Rangoon': 'Asia/Yangon',
+    'Europe/Kiev': 'Europe/Kyiv',
+    'Australia/ACT': 'Australia/Sydney',
+    'Australia/NSW': 'Australia/Sydney',
+    'Australia/Victoria': 'Australia/Melbourne',
+    'Australia/Queensland': 'Australia/Brisbane',
+    'Australia/West': 'Australia/Perth',
+    'GB': 'Europe/London',
+    'Eire': 'Europe/Dublin',
+    'Japan': 'Asia/Tokyo',
+    'Singapore': 'Asia/Singapore',
+    'Hongkong': 'Asia/Hong_Kong',
+    'NZ': 'Pacific/Auckland',
+    'Etc/UTC': UTC,
+    'Etc/GMT': UTC,
+    'GMT': UTC,
+    'Zulu': UTC,
+}
+
+
+def addable_zone_for(name: str) -> str:
+    """The zone a location gets for an account's saved zone `name`: itself when addable, the
+    canonical zone of a known old name, else UTC."""
+    if name and is_addable_zone(name):
+        return name
+    mapped = LEGACY_ZONES.get(name, UTC)
+    return mapped if is_addable_zone(mapped) else UTC
+
+
 @dataclass(frozen=True, slots=True)
 class ZoneMatch:
     """A time zone the search offers. `hint` is why (`Pacific Time (PST)`), empty for a match by

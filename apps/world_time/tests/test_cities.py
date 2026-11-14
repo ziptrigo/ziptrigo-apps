@@ -36,9 +36,17 @@ class TestTheRepositoryFile:
 
     def test_it_knows_cities_by_their_local_names(self):
         by_name = {row.name: row for row in read_file(DATA_FILE) if row.population > 400_000}
+        assert 'Roma' in by_name['Rome'].other_names
+        assert 'New York City' in by_name
         assert 'Lisboa' in by_name['Lisbon'].other_names
         assert 'München' in by_name['Munich'].other_names
         assert by_name['Lisbon'].timezone == 'Europe/Lisbon'
+
+    def test_sections_of_cities_are_left_out(self):
+        # GeoNames lists districts (feature code PPLX) that answer to their city's names.
+        names = {row.name for row in read_file(DATA_FILE)}
+        assert not any(name.startswith('Circoscrizione') for name in names)
+        assert 'Turin' in names
 
     def test_a_malformed_line_is_refused(self, tmp_path):
         import gzip
@@ -108,6 +116,14 @@ class TestSeed:
         assert not City.objects.filter(pk=2).exists()
         assert Location.objects.get(pk=location.pk).name == 'Porto'
 
+    def test_a_city_whose_zone_this_system_lacks_is_left_out(self, tmp_path, caplog):
+        rows = [*ROWS, (9, 'Olympus', 'XX', 'Mars', '', 'Mars/Olympus', 5, ['Mons'])]
+        with caplog.at_level('WARNING'):
+            result = seed(write_city_file(tmp_path / 'c.tsv.gz', rows))
+        assert (result.cities, result.names) == (3, 3)
+        assert not City.objects.filter(pk=9).exists()
+        assert 'Skipped 1 cities whose time zone this system does not know' in caplog.text
+
     def test_is_seeded(self, tmp_path):
         assert cities.is_seeded() is False
         seed(write_city_file(tmp_path / 'c.tsv.gz', ROWS))
@@ -155,6 +171,28 @@ class TestSearchCities:
     def test_one_letter_and_nothing_find_nothing(self, django_assert_num_queries):
         with django_assert_num_queries(0):
             assert self.names('p') == [] and self.names('  ') == [] and self.names('!') == []
+
+    def test_a_big_city_by_another_name_is_not_hidden_by_small_ones(self):
+        # More own-name matches than the limit, all smaller than the city known as "Roma".
+        for index in range(10):
+            make_city(100 + index, f'Roman{index}', population=1000 + index)
+        make_city(200, 'Rome', 'Europe/Rome', population=2318895, other_names=['Roma'])
+        matches = search_cities('roma', 8)
+        assert (matches[0].city.name, matches[0].matched_name) == ('Rome', 'Roma')
+        assert len(matches) == 8
+
+    def test_of_two_spellings_the_one_typed_is_shown(self):
+        make_city(400, 'Rome', 'Europe/Rome', population=2318895, other_names=['Roma', 'Róma'])
+        assert search_cities('Róma', 8)[0].matched_name == 'Róma'
+        assert search_cities('roma', 8)[0].matched_name == 'Roma'
+
+    def test_a_whole_name_comes_before_bigger_cities_that_only_start_with_it(self):
+        make_city(300, 'Portobello', population=9_000_000)
+        assert self.names('porto')[:2] == ['Porto', 'Portobello']
+
+    def test_it_is_two_queries(self, django_assert_num_queries):
+        with django_assert_num_queries(2):
+            search_cities('port', 8)
 
     def test_the_limit(self):
         assert len(self.names('port', limit=2)) == 2

@@ -43,9 +43,27 @@ class TestTabs:
         (tab,) = list_tabs(make_user(timezone=''))
         assert list_locations(tab)[0].timezone == 'UTC'
 
-    def test_a_legacy_zone_falls_back_to_utc(self):
+    def test_an_old_zone_name_is_read_as_its_canonical_zone(self):
         (tab,) = list_tabs(make_user(timezone='US/Pacific'))
+        home = list_locations(tab)[0]
+        assert (home.timezone, home.name) == ('America/Los_Angeles', 'Los Angeles')
+        (tab,) = list_tabs(make_user(timezone='Asia/Calcutta'))
+        assert list_locations(tab)[0].timezone == 'Asia/Kolkata'
+
+    def test_a_zone_no_location_can_have_falls_back_to_utc(self):
+        (tab,) = list_tabs(make_user(timezone='Etc/GMT+5'))
         assert list_locations(tab)[0].timezone == 'UTC'
+
+    def test_a_tab_deleted_meanwhile_cannot_be_renamed_or_deleted_again(self, user):
+        create_tab(user, 'Keep')
+        tab = create_tab(user, 'Team')
+        Tab.objects.filter(pk=tab.pk).delete()
+        with pytest.raises(ValidationError) as excinfo:
+            rename_tab(tab, 'Work')
+        assert 'This tab no longer exists.' in message(excinfo)
+        with pytest.raises(ValidationError) as excinfo:
+            add_zone(tab, 'UTC')
+        assert 'This tab no longer exists.' in message(excinfo)
 
     def test_create(self, user):
         first = list_tabs(user)[0]
@@ -207,6 +225,25 @@ class TestLocations:
         stranger.refresh_from_db()
         assert stranger.position == 7
 
+    def test_a_partial_order_swaps_only_the_rows_named(self, tab):
+        tokyo, utc, paris = (add_zone(tab, z) for z in ('Asia/Tokyo', 'UTC', 'Europe/Paris'))
+        # A stale page that never saw Paris posts the other three.
+        lisbon = list_locations(tab)[0]
+        reorder_locations(tab, [utc.pk, tokyo.pk, lisbon.pk])
+        rows = list_locations(tab)
+        assert [row.name for row in rows] == ['UTC', 'Tokyo', 'Lisbon', 'Paris']
+        assert sorted(row.position for row in rows) == [0, 1, 2, 3], 'no two rows share a place'
+        reorder_locations(tab, [paris.pk, utc.pk])
+        assert [row.name for row in list_locations(tab)] == ['Paris', 'Tokyo', 'Lisbon', 'UTC']
+
+    def test_tied_positions_are_renumbered_first(self, tab):
+        tokyo, utc = add_zone(tab, 'Asia/Tokyo'), add_zone(tab, 'UTC')
+        Location.objects.filter(tab=tab).update(position=0)
+        reorder_locations(tab, [utc.pk, tokyo.pk])
+        rows = list_locations(tab)
+        assert sorted(row.position for row in rows) == [0, 1, 2]
+        assert [row.name for row in rows].index('UTC') < [row.name for row in rows].index('Tokyo')
+
     def test_a_removed_row_cannot_be_changed(self, tab):
         tokyo = add_zone(tab, 'Asia/Tokyo')
         Location.objects.filter(pk=tokyo.pk).delete()
@@ -214,3 +251,57 @@ class TestLocations:
             with pytest.raises(ValidationError) as excinfo:
                 change()
             assert 'This location no longer exists.' in message(excinfo)
+
+
+class TestLocking:
+    """SQLite has no row locks, so the order is pinned by watching it: every write that counts
+    tabs or locations, or moves the home row, takes the account lock, and before it touches a tab
+    or a location inside its transaction."""
+
+    @pytest.fixture
+    def calls(self, monkeypatch):
+        from ..services import accounts, locations, tabs
+
+        seen: list[str] = []
+        real = accounts.lock_account
+
+        def spy(user_id):
+            seen.append('lock')
+            return real(user_id)
+
+        monkeypatch.setattr(locations, 'lock_account', spy)
+        monkeypatch.setattr(tabs, 'lock_account', spy)
+        return seen
+
+    def test_every_write_locks_the_account(self, user, calls):
+        tab = create_tab(user, 'Team')
+        other = create_tab(user, 'Other')
+        tokyo = add_zone(tab, 'Asia/Tokyo')
+        make_city(5, 'Austin', 'America/Chicago')
+        writes = [
+            lambda: add_city(tab, 5),
+            lambda: set_label(tokyo, 'Office'),
+            lambda: set_home(tokyo),
+            lambda: reorder_locations(tab, [tokyo.pk]),
+            lambda: remove_location(tokyo),
+            lambda: rename_tab(tab, 'Work'),
+            lambda: delete_tab(other),
+        ]
+        assert calls == ['lock', 'lock', 'lock'], 'the two tabs and the zone'
+        for write in writes:
+            calls.clear()
+            write()
+            assert calls == ['lock'], write
+
+    def test_the_lock_is_taken_inside_the_writes_transaction(self, user, monkeypatch):
+        from django.db import connection
+
+        from ..services import locations
+
+        tab = create_tab(user, 'Team')
+        inside: list[bool] = []
+        monkeypatch.setattr(
+            locations, 'lock_account', lambda user_id: inside.append(connection.in_atomic_block)
+        )
+        add_zone(tab, 'Asia/Tokyo')
+        assert inside == [True]

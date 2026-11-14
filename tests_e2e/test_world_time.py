@@ -157,3 +157,40 @@ def test_the_grid(page: Page, receipts_server: ReceiptsServer):
         assert _rows(page) == ['Lisbon']
     finally:
         receipts_server.shell(CLEANUP)
+
+
+HALF_HOUR_SETUP = (
+    'import os\n'
+    'from apps.accounts.models import User\n'
+    'from apps.world_time.models import Location, Tab\n'
+    "user = User.objects.get(email=os.environ['E2E_EMAIL'])\n"
+    'Tab.objects.filter(user=user).delete()\n'
+    "tab = Tab.objects.create(user=user, name='Half hours')\n"
+    "Location.objects.create(tab=tab, name='Kolkata', timezone='Asia/Kolkata', is_home=True,"
+    ' position=0)\n'
+    "Location.objects.create(tab=tab, name='New York', timezone='America/New_York', position=1)\n"
+)
+
+
+def test_a_clock_change_inside_a_tile(page: Page, receipts_server: ReceiptsServer):
+    """The home row is off the hour (India), so New York's change on 8 March 2026 (2:00 AM becomes
+    3:00 AM, at 07:00 UTC) falls in the middle of a tile. The second half of that tile is after
+    the change: 3:00 AM, never 2:00 AM, an hour that day does not have."""
+    receipts_server.shell(HALF_HOUR_SETUP)
+    try:
+        receipts_server.login(page)
+        page.goto(f'{receipts_server.url}/time/?date=2026-03-08')
+        tiles = page.locator('#wt-grid [data-wt-tiles]').first.locator('.wt-tile')
+        box = tiles.nth(12).bounding_box()
+        assert box is not None
+        # The right half of Kolkata's 12 PM tile: 12:30 PM to 1:30 PM there.
+        tiles.nth(12).click(position={'x': box['width'] * 0.75, 'y': 10})
+        lines = page.locator('#wt-grid [data-wt-lines] > li')
+        expect(lines.nth(0)).to_contain_text('Sun 03/08/2026, 12:30 PM – 1:30 PM')
+        expect(lines.nth(1)).to_contain_text('Sun 03/08/2026, 3:00 AM – 4:00 AM')
+        # The left half is before it: 1:30 AM to 3:30 AM on the clock, one real hour.
+        tiles.nth(12).click(position={'x': 3, 'y': 10})
+        expect(lines.nth(0)).to_contain_text('12:00 PM – 1:00 PM')
+        expect(lines.nth(1)).to_contain_text('Sun 03/08/2026, 1:30 AM – 3:30 AM')
+    finally:
+        receipts_server.shell(CLEANUP)

@@ -7,8 +7,9 @@
     {{ grid.payload|json_script }}
     {% if grid.rows %}
     <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+        <p id="wt-hours-help" class="sr-only">Press Enter to select an hour, the left and right arrow keys to move the selection, Shift with an arrow key to make it longer or shorter, and Escape to clear it. The selected time is listed for every location below the hours.</p>
         <div x-ref="scroller" class="overflow-x-auto" tabindex="0" role="group"
-             aria-label="Hours of {{ grid.day|fdate:'heading' }}. Press Enter to select an hour, the left and right arrow keys to move the selection, Shift with an arrow key to make it longer or shorter, Escape to clear it."
+             aria-label="Hours of {{ grid.day|fdate:'heading' }}" aria-describedby="wt-hours-help"
              @keydown="onKey($event)">
             <div x-ref="canvas" class="relative inline-block min-w-full align-top select-none"
                  @pointerdown="down($event)" @pointermove="move($event)" @pointerup="up($event)" @pointercancel="up($event)">
@@ -27,6 +28,7 @@
                                 </span>
                                 <div class="min-w-0 flex-1" title="{{ location.name }}{% if location.detail %}, {{ location.detail }}{% endif %} · {{ row.zone_title }}">
                                     <p class="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{{ location.title }}</p>
+                                    <p class="sr-only">{{ row.summary }}</p>
                                     <p class="truncate text-xs text-gray-500 dark:text-gray-400">
                                         <span data-wt-clock="{{ location.pk }}" class="tabular-nums font-medium text-gray-700 dark:text-gray-300">{{ row.clock_text }}</span>
                                         <span data-wt-clock-date="{{ location.pk }}" class="hidden sm:inline">{{ row.date_text }}</span>

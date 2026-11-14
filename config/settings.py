@@ -550,7 +550,7 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # user. Each is a small row write; dragging rows is a burst of them.
     'WT_EDIT_USER': (240, 60),
     # The "Add a location" suggestions, `GET /time/search/`: one indexed prefix query (and a scan
-    # of 34,000 short rows) per pause in typing, session bound. Over it the view answers 204 and
+    # of 32,000 short rows) per pause in typing, session bound. Over it the view answers 204 and
     # the last suggestions stay.
     'WT_SEARCH_USER': (120, 60),
     # -- file_transfer: anonymous sending (issue #55 phase 2) --

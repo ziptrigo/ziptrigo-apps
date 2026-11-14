@@ -1,6 +1,6 @@
 {% comment %} The suggestions under "Add a location": each is a submit button of the form around them (#wt-add). {% endcomment %}
 {% if results %}
-<ul class="max-h-80 overflow-y-auto py-1 text-sm" aria-label="Suggestions">
+<ul class="max-h-80 overflow-y-auto py-1 text-sm" aria-label="Suggestions" data-wt-query="{{ query }}">
     {% for result in results %}
     <li>
         <button type="submit" name="{{ result.kind }}" value="{{ result.value }}" data-wt-suggestion
@@ -17,3 +17,5 @@
 {% elif query|length >= 2 %}
 <p class="px-3 py-3 text-sm text-gray-500 dark:text-gray-400">No place matches "{{ query }}".{% if not cities_seeded %} The city list has not been loaded yet, so only time zones (UTC, Europe/Lisbon, PST) can be found.{% endif %}</p>
 {% endif %}
+{% comment %} What a screen reader hears after a pause in typing: the number of suggestions, not the whole list. {% endcomment %}
+<p id="wt-search-status" hx-swap-oob="true" class="sr-only" aria-live="polite">{% if results %}{{ results|length }} suggestion{{ results|length|pluralize }}. Use the down arrow to choose one.{% elif query|length >= 2 %}No place matches.{% endif %}</p>

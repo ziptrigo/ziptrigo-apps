@@ -65,6 +65,12 @@ class Row:
     tiles: list[Tile]
     offsets: list[int]
     """UTC offset in minutes at each tile's start, plus one for the end of the last tile."""
+    steps: list[list[int]]
+    """`[minute, offset]` pairs for the script: the UTC offset in force from that minute of the
+    day shown (the first is minute 0). Exact to the minute, so a clock change that falls *inside*
+    a tile (a row under a home zone off the hour) is not read with the tile's first offset."""
+    summary: str
+    """For screen readers: the local time at which the day shown starts in this row."""
     now_offset: int
     """UTC offset in minutes right now (for the live clock, whatever date is shown)."""
     zone_name: str
@@ -90,6 +96,11 @@ class Grid:
     rows: list[Row] = field(default_factory=list)
     start: datetime | None = None
     hours: int = 24
+    minutes: int = 24 * 60
+    """The real length of the day shown (1,470 on a 24.5-hour day, whose last tile runs past it)."""
+    refresh_at: datetime | None = None
+    """When a page left open should load again: the end of the day shown when that is today, or
+    the next clock change of a row, whichever is first."""
 
     @property
     def is_today(self) -> bool:
@@ -122,11 +133,13 @@ class Grid:
         return {
             'start': int(self.start.timestamp() * 1000) if self.start else 0,
             'hours': self.hours,
+            'minutes': self.minutes,
+            'refreshAt': int(self.refresh_at.timestamp() * 1000) if self.refresh_at else 0,
             'rows': [
                 {
                     'id': str(row.location.pk),
                     'title': row.location.title,
-                    'offsets': row.offsets,
+                    'steps': row.steps,
                     'nowOffset': row.now_offset,
                     'home': row.location.is_home,
                 }
@@ -178,17 +191,26 @@ def _short_date(day: date, formats: DisplayFormats) -> str:
     return f'{first}/{second}'
 
 
-def _tile(local: datetime, formats: DisplayFormats, today: date) -> Tile:
+def _tile(instant: datetime, zone, formats: DisplayFormats, today: date) -> Tile:
+    local = instant.astimezone(zone)
     hour, minute = local.hour, local.minute
-    day_start = hour == 0
-    if day_start:
-        main, sub = WEEKDAY_ABBR[local.weekday()], _short_date(local.date(), formats)
-    elif formats.clock == '24h':
-        main, sub = (f'{hour}:{minute:02d}' if minute else str(hour)), ''
+    # A new local day starts on the first tile whose date differs from the hour before. Not "the
+    # hour is 0": where the clocks change at midnight (Havana, Santiago) hour 0 happens twice or
+    # not at all.
+    day_start = local.date() != (instant - HOUR).astimezone(zone).date()
+    if formats.clock == '24h':
+        clock, half = (f'{hour}:{minute:02d}' if minute else str(hour)), ''
     else:
         shown = hour % 12 or 12
-        main = f'{shown}:{minute:02d}' if minute else str(shown)
-        sub = 'am' if hour < 12 else 'pm'
+        clock = f'{shown}:{minute:02d}' if minute else str(shown)
+        half = 'am' if hour < 12 else 'pm'
+    if day_start:
+        # The weekday over the date; in a zone off the hour the time stays (`Tue` over `12:30`),
+        # since it is not midnight, and the date is in the tooltip.
+        main = WEEKDAY_ABBR[local.weekday()]
+        sub = clock if minute else _short_date(local.date(), formats)
+    else:
+        main, sub = clock, half
     naive = local.replace(tzinfo=None)
     return Tile(
         main=main,
@@ -202,22 +224,52 @@ def _tile(local: datetime, formats: DisplayFormats, today: date) -> Tile:
     )
 
 
+def offset_steps(zone, start: datetime, minutes: int) -> list[list[int]]:
+    """`[minute, offset]` for `zone` over the `minutes` after `start`: the offset at minute 0 and
+    one entry per clock change, at the exact minute it happens. Hours are compared first and only
+    an hour that holds a change is walked minute by minute."""
+    steps = [[0, _offset_minutes(start.astimezone(zone))]]
+    for hour_start in range(0, minutes, 60):
+        hour_end = min(hour_start + 60, minutes)
+        if _offset_minutes((start + timedelta(minutes=hour_end)).astimezone(zone)) == steps[-1][1]:
+            continue
+        for minute in range(hour_start + 1, hour_end + 1):
+            offset = _offset_minutes((start + timedelta(minutes=minute)).astimezone(zone))
+            if offset != steps[-1][1]:
+                steps.append([minute, offset])
+    return steps
+
+
+def next_change(zone, now: datetime, days: int) -> tuple[datetime, int] | None:
+    """The instant (to the minute) of `zone`'s next clock change within `days` days of `now`, and
+    the change in minutes (positive: clocks go forward); None when there is none. Found by walking
+    the hours ahead: `zoneinfo` has no list of transitions."""
+    base = now.replace(second=0, microsecond=0)
+    current = _offset_minutes(base.astimezone(zone))
+    for step in range(1, days * 24 + 1):
+        if _offset_minutes((base + step * HOUR).astimezone(zone)) == current:
+            continue
+        hour_start = base + (step - 1) * HOUR
+        for minute in range(1, 61):
+            moment = hour_start + timedelta(minutes=minute)
+            offset = _offset_minutes(moment.astimezone(zone))
+            if offset != current:
+                return moment, offset - current
+    return None
+
+
 def dst_note(zone, now: datetime, formats: DisplayFormats, today: date) -> str:
     """`Clocks go back 1 hour on Sun 11/01/2026` when `zone`'s clocks change within the next
-    `DST_WARNING_DAYS` days, else empty. Found by walking the hours ahead: `zoneinfo` has no list
-    of transitions."""
-    current = _offset_minutes(now.astimezone(zone))
-    for step in range(1, DST_WARNING_DAYS * 24 + 1):
-        local = (now + step * HOUR).astimezone(zone)
-        offset = _offset_minutes(local)
-        if offset != current:
-            change = offset - current
-            amount = offset_text(abs(change))[1:]
-            unit = 'hour' if abs(change) == 60 else ('hours' if abs(change) % 60 == 0 else 'h')
-            direction = 'forward' if change > 0 else 'back'
-            when = format_date(local.date(), 'weekday', formats, today=today)
-            return f'Clocks go {direction} {amount} {unit} on {when}'
-    return ''
+    `DST_WARNING_DAYS` days, else empty. The date is the local one just after the change."""
+    found = next_change(zone, now, DST_WARNING_DAYS)
+    if found is None:
+        return ''
+    moment, change = found
+    amount = offset_text(abs(change))[1:]
+    unit = 'hour' if abs(change) == 60 else ('hours' if abs(change) % 60 == 0 else 'h')
+    direction = 'forward' if change > 0 else 'back'
+    when = format_date(moment.astimezone(zone).date(), 'weekday', formats, today=today)
+    return f'Clocks go {direction} {amount} {unit} on {when}'
 
 
 def build_grid(
@@ -240,31 +292,43 @@ def build_grid(
     start = datetime(day.year, day.month, day.day, tzinfo=home_zone).astimezone(UTC)
     following = day + timedelta(days=1)
     end = datetime(following.year, following.month, following.day, tzinfo=home_zone).astimezone(UTC)
+    minutes = max(60, int((end - start).total_seconds() // 60))
     hours = max(1, ceil((end - start) / HOUR))
     instants = [start + index * HOUR for index in range(hours + 1)]
-    grid.start, grid.hours = start, hours
+    grid.start, grid.hours, grid.minutes = start, hours, minutes
     home_offset = _offset_minutes(start.astimezone(home_zone))
 
-    notes: dict[str, str] = {}
+    # Per zone, not per row: two rows of one zone share the walk ahead.
+    changes: dict[str, tuple[datetime, int] | None] = {}
+    refresh = [end] if grid.is_today else []
     for location in locations:
         zone = zones.tz(location.timezone)
         locals_ = [instant.astimezone(zone) for instant in instants]
         offsets = [_offset_minutes(local) for local in locals_]
         here = now.astimezone(zone)
-        if location.timezone not in notes:
-            notes[location.timezone] = dst_note(zone, now, formats, here.date())
+        if location.timezone not in changes:
+            change = next_change(zone, now, DST_WARNING_DAYS)
+            changes[location.timezone] = change
+            if change is not None:
+                refresh.append(change[0])
+        tiles = [_tile(instant, zone, formats, here.date()) for instant in instants[:-1]]
         grid.rows.append(
             Row(
                 location=location,
-                tiles=[_tile(local, formats, here.date()) for local in locals_[:-1]],
+                tiles=tiles,
                 offsets=offsets,
+                steps=offset_steps(zone, start, hours * 60),
+                summary=f'The day shown starts at {tiles[0].title} here.',
                 now_offset=_offset_minutes(here),
                 zone_name=locals_[0].tzname() or '',
                 utc_text=offset_text(offsets[0], prefix='UTC'),
                 diff_text='' if location.pk == home.pk else offset_text(offsets[0] - home_offset),
                 clock_text=format_time(here.replace(tzinfo=None).time(), formats),
                 date_text=format_date(here.date(), 'weekday', formats, today=here.date()),
-                dst_note=notes[location.timezone],
+                dst_note=dst_note(zone, now, formats, here.date())
+                if changes[location.timezone] is not None
+                else '',
             )
         )
+    grid.refresh_at = min(refresh) if refresh else None
     return grid

@@ -49,6 +49,13 @@ class TestWiring:
             'manage.py world_time_seed_cities'
         )
 
+    def test_a_failed_seed_does_not_stop_the_site_from_starting(self):
+        # The entrypoint runs under `set -e`: the seed line must swallow its own failure.
+        entrypoint = (ROOT / 'docker-entrypoint.sh').read_text()
+        assert 'set -e' in entrypoint
+        seed_line = entrypoint[entrypoint.index('python manage.py world_time_seed_cities') :]
+        assert seed_line.split('fi')[0].count('||') == 1 and 'WARNING' in seed_line
+
     def test_the_city_file_ships_in_the_image(self):
         ignored = (ROOT / '.dockerignore').read_text() if (ROOT / '.dockerignore').exists() else ''
         assert 'apps/world_time/data' not in ignored and '*.gz' not in ignored

@@ -4,8 +4,8 @@
  *
  *  - `worldTimeGrid` (Alpine): one per rendered grid (world_time/partials/grid.html; htmx swaps a new
  *    one in after every change to the rows). It reads the JSON the server put in the grid -- the
- *    first instant of the day shown, the number of hour tiles, and per row the UTC offset (minutes)
- *    at each tile's start -- and does only arithmetic with it: the server computed every zone, so
+ *    first instant of the day shown, its length in minutes, and per row `steps`, the UTC offset
+ *    (minutes) in force from each minute a clock changes -- and does only arithmetic with it: the server computed every zone, so
  *    the page can't disagree with it. It draws the selected range and the "now" line, keeps each
  *    row's clock current, and writes the selected range in every location's local time.
  *
@@ -34,6 +34,8 @@
             return {
                 start: 0,
                 hours: 24,
+                minutes: 1440,
+                refreshAt: 0,
                 rows: [],
                 a: null,
                 b: null,
@@ -53,6 +55,8 @@
                     const data = script ? JSON.parse(script.textContent) : {};
                     this.start = data.start || 0;
                     this.hours = data.hours || 24;
+                    this.minutes = data.minutes || this.hours * 60;
+                    this.refreshAt = data.refreshAt || 0;
                     this.rows = data.rows || [];
                     if (!this.rows.length) return;
                     this.$nextTick(() => {
@@ -75,7 +79,9 @@
 
                 // -- geometry --------------------------------------------------------------------
 
-                get total() { return this.hours * 60; },
+                // The real length of the day shown: a selection never runs past it, even where the
+                // last tile does (a 24.5-hour day has 25 tiles).
+                get total() { return this.minutes; },
 
                 measure() {
                     const strip = this.$root.querySelector('[data-wt-tiles]');
@@ -105,9 +111,18 @@
                 // -- time arithmetic -------------------------------------------------------------
 
                 // The wall clock of row `row` at `minutes` from the start: {y, m, d, hour, minute}.
+                // The UTC offset of `row` at `minutes` from the start: the last step at or before it.
+                // Exact to the minute, so a clock change inside a tile is read on the right side.
+                offsetAt(row, minutes) {
+                    let offset = row.steps[0][1];
+                    for (let i = 1; i < row.steps.length && row.steps[i][0] <= minutes; i += 1) {
+                        offset = row.steps[i][1];
+                    }
+                    return offset;
+                },
+
                 wall(row, minutes) {
-                    const index = Math.min(this.hours, Math.max(0, Math.floor(minutes / 60)));
-                    const offset = row.offsets[index];
+                    const offset = this.offsetAt(row, minutes);
                     const shifted = new Date(this.start + minutes * MINUTE + offset * MINUTE);
                     return {
                         y: shifted.getUTCFullYear(),
@@ -312,6 +327,17 @@
 
                 tick() {
                     this.now = Date.now();
+                    // A page left open: once the day shown as "today" has ended, or a row's clocks
+                    // have changed, what the server rendered is stale. Load again, unless the
+                    // person is typing or has a range selected (then at the next tick they aren't).
+                    if (this.refreshAt && this.now >= this.refreshAt && !this.hasSelection) {
+                        const active = document.activeElement;
+                        if (!active || !/^(INPUT|TEXTAREA)$/.test(active.tagName)) {
+                            this.refreshAt = 0;
+                            window.location.reload();
+                            return;
+                        }
+                    }
                     this.rows.forEach((row) => {
                         const shifted = new Date(this.now + row.nowOffset * MINUTE);
                         const clock = this.$root.querySelector('[data-wt-clock="' + row.id + '"]');
@@ -347,9 +373,12 @@
                 event.preventDefault();
             }
         } else if (event.target === input && event.key === 'Enter') {
-            // Enter in the box picks the first suggestion; with none there is nothing to add.
+            // Enter in the box picks the first suggestion, but only of the text as it is now: the
+            // list of an earlier text (the request for this one has not answered yet) is not it.
             event.preventDefault();
-            if (items.length) items[0].click();
+            const list = form.querySelector('[data-wt-query]');
+            const typed = input.value.trim().split(/\s+/).join(' ');
+            if (items.length && list && list.dataset.wtQuery === typed) items[0].click();
         } else if (event.key === 'ArrowDown' && items.length) {
             event.preventDefault();
             items[Math.min(items.length - 1, index + 1)].focus();
@@ -359,13 +388,39 @@
         }
     });
 
-    // Suggestions close when the focus leaves the search.
-    document.addEventListener('focusin', function (event) {
+    // Suggestions close when the focus leaves the search, or on a click anywhere else.
+    function closeSuggestions(event) {
         document.querySelectorAll('[data-wt-search]').forEach(function (form) {
             if (form.contains(event.target)) return;
             const results = form.querySelector('#wt-search-results');
             if (results) results.replaceChildren();
         });
+    }
+    document.addEventListener('focusin', closeSuggestions);
+    document.addEventListener('pointerdown', closeSuggestions);
+
+    // After a row's own action (make home, rename) the grid is replaced: put the keyboard focus
+    // back on that row's Actions button (the hours when the row is gone) instead of dropping it.
+    let actedOn = null;
+    document.addEventListener('htmx:beforeRequest', function (event) {
+        const row = event.target.closest ? event.target.closest('#wt-grid [data-sort-id]') : null;
+        actedOn = row ? row.dataset.sortId : null;
+    });
+    document.addEventListener('htmx:afterSettle', function (event) {
+        if (!actedOn || event.target.id !== 'wt-grid') return;
+        const id = actedOn;
+        actedOn = null;
+        const button = event.target.querySelector('[aria-controls="wt-actions-' + CSS.escape(id) + '"]');
+        const fallback = event.target.querySelector('[x-ref="scroller"]');
+        const target = button || fallback;
+        if (target) target.focus({ preventScroll: true });
+    });
+
+    // An answer with no suggestion in it (a one-letter query) leaves only white space behind, which
+    // would keep the box from collapsing (`empty:hidden` needs it truly empty).
+    document.addEventListener('htmx:afterSwap', function (event) {
+        const results = event.target;
+        if (results && results.id === 'wt-search-results' && !results.childElementCount) results.replaceChildren();
     });
 
     document.addEventListener('htmx:afterRequest', function (event) {
@@ -385,6 +440,8 @@
     });
 
     // -- reordering rows -----------------------------------------------------------------------
+
+    const NOT_SAVED = '<p class="text-red-600 dark:text-red-400" role="alert">Could not save the new order.</p>';
 
     function showProblem(list, html) {
         const slot = document.querySelector(list.dataset.msg || '#wt-msg');
@@ -409,12 +466,25 @@
             body: body,
             credentials: 'same-origin',
         }).then(function (response) {
-            if (!response.ok) return response.text().then(function (html) { showProblem(list, html); });
-            showProblem(list, '');
-            // The grid's own data (the lines of a selected range) follows the new order.
-            list.dispatchEvent(new CustomEvent('wt-reordered', { bubbles: true, detail: { ids: ids } }));
+            // A session that has ended answers 200 with `HX-Redirect` (to the sign-in page), which
+            // `fetch` does not follow: only a 204 means the order was saved.
+            const redirect = response.headers.get('HX-Redirect');
+            if (redirect) { window.location.assign(redirect); return null; }
+            if (response.status === 204) {
+                showProblem(list, '');
+                // The grid's own data (the lines of a selected range) follows the new order.
+                list.dispatchEvent(new CustomEvent('wt-reordered', { bubbles: true, detail: { ids: ids } }));
+                return null;
+            }
+            // Only the site's own message partials (a refusal, a rate limit) are shown as they are;
+            // any other answer (an error page) is not markup for this slot.
+            if (response.status === 422 || response.status === 429) {
+                return response.text().then(function (html) { showProblem(list, html); });
+            }
+            showProblem(list, NOT_SAVED);
+            return null;
         }).catch(function () {
-            showProblem(list, '<p class="text-red-600 dark:text-red-400" role="alert">Could not save the new order.</p>');
+            showProblem(list, NOT_SAVED);
         });
     }
 

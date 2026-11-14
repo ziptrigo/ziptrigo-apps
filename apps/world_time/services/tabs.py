@@ -35,9 +35,8 @@ def clean_name(name: object) -> str:
 
 def home_zone_for(user: User) -> str:
     """The zone a new tab's home row gets: the account's time zone when it is one a location can
-    have, else UTC."""
-    name = getattr(user, 'timezone', '') or ''
-    return name if name and zones.is_addable_zone(name) else zones.UTC
+    have (an old name such as `US/Pacific` is read as its canonical zone), else UTC."""
+    return zones.addable_zone_for(getattr(user, 'timezone', '') or '')
 
 
 def _home_location(tab: Tab, user: User) -> Location:
