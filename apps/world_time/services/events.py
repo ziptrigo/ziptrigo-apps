@@ -258,7 +258,7 @@ def range_text(start: datetime, end: datetime, formats: DisplayFormats | None = 
     return text + format_time(last.time(), formats)
 
 
-def _snapshot_rows(event: Event) -> list[dict]:
+def snapshot_rows(event: Event) -> list[dict]:
     """The stored locations, tolerating a row that is not what `snapshot` writes."""
     rows = event.locations if isinstance(event.locations, list) else []
     return [row for row in rows if isinstance(row, dict) and row.get('timezone')]
@@ -266,13 +266,13 @@ def _snapshot_rows(event: Event) -> list[dict]:
 
 def home_zone_name(event: Event) -> str:
     """The zone the owner picked the time in: the snapshot's home row, else its first, else UTC."""
-    rows = _snapshot_rows(event)
+    rows = snapshot_rows(event)
     home = next((row for row in rows if row.get('home')), rows[0] if rows else None)
     return str(home['timezone']) if home else zones.UTC
 
 
 def home_name(event: Event) -> str:
-    rows = _snapshot_rows(event)
+    rows = snapshot_rows(event)
     home = next((row for row in rows if row.get('home')), rows[0] if rows else None)
     return str(home.get('name') or zones.place_name(str(home['timezone']))) if home else zones.UTC
 
@@ -290,7 +290,7 @@ def event_rows(event: Event, formats: DisplayFormats | None = None) -> list[Even
     """The event's time in every location of its snapshot, in the given wording. Where a
     location's clocks change during the event, the label names both offsets."""
     rows = []
-    for row in _snapshot_rows(event):
+    for row in snapshot_rows(event):
         zone = zones.tz(str(row['timezone']))
         start, end = event.starts_at.astimezone(zone), event.ends_at.astimezone(zone)
         label = _zone_label(start)

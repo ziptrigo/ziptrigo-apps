@@ -37,6 +37,9 @@ class TestTheRepositoryFile:
     def test_it_knows_cities_by_their_local_names(self):
         by_name = {row.name: row for row in read_file(DATA_FILE) if row.population > 400_000}
         assert 'Roma' in by_name['Rome'].other_names
+        assert all(name[0].isupper() for row in by_name.values() for name in row.other_names), (
+            'no romanisations of other scripts'
+        )
         assert 'New York City' in by_name
         assert 'Lisboa' in by_name['Lisbon'].other_names
         assert 'München' in by_name['Munich'].other_names
@@ -189,6 +192,12 @@ class TestSearchCities:
     def test_a_whole_name_comes_before_bigger_cities_that_only_start_with_it(self):
         make_city(300, 'Portobello', population=9_000_000)
         assert self.names('porto')[:2] == ['Porto', 'Portobello']
+
+    def test_a_city_named_exactly_so_comes_before_one_merely_also_called_so(self):
+        # Porto is smaller than a city some list also calls "Porto".
+        make_city(500, 'Bordeaux', 'Europe/Paris', population=265328, other_names=['Porto'])
+        names = self.names('porto')
+        assert names[:2] == ['Porto', 'Bordeaux']
 
     def test_it_is_two_queries(self, django_assert_num_queries):
         with django_assert_num_queries(2):

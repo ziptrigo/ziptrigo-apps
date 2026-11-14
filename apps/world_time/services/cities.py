@@ -1,6 +1,6 @@
 """The city tables: searching them, and seeding them from the GeoNames extract in the repository.
 
-**Why a table and not the file in memory.** The extract is about 32,000 cities with 63,000 other
+**Why a table and not the file in memory.** The extract is about 32,000 cities with 39,000 other
 names. Held in Python that is tens of megabytes *per process* (three web workers and two queue
 workers each load their own copy), for a feature few requests use; in the database it costs disk
 only. The search (`search_cities`) is one indexed prefix lookup over the other names and one scan
@@ -196,8 +196,8 @@ class CityMatch:
 
 def search_cities(query: str, limit: int) -> list[CityMatch]:
     """Cities matching `query`: those whose name (or a later word of it) starts with it, and those
-    known by another name that starts with it, **together**, a city whose whole name is the query
-    first and then the most populous. Both sets are read before the cut, so a big city typed by
+    known by another name that starts with it, **together**: a city whose own name is the query
+    first, then one known by exactly that name, then the rest, the most populous first in each. Both sets are read before the cut, so a big city typed by
     its local name (`Roma`) is not hidden behind smaller ones that merely start with it. Two
     queries."""
     needle = normalize(query[:SEARCH_QUERY_MAX])
@@ -214,11 +214,14 @@ def search_cities(query: str, limit: int) -> list[CityMatch]:
         .select_related('city')
         .order_by('-city__population', 'city_id', 'name')[: limit * 8]
     )
-    exact: set[int] = {pk for pk, match in found.items() if match.city.search_name == needle}
+    # 0: the city's own name is the query; 1: another of its names is; 2: it only starts with it.
+    rank: dict[int, int] = {
+        pk: 0 for pk, match in found.items() if match.city.search_name == needle
+    }
     by_other = 0
     for other in others:
         if other.search_name == needle:
-            exact.add(other.city_id)
+            rank.setdefault(other.city_id, 1)
         known = found.get(other.city_id)
         if known is not None:
             # Of a city's spellings that match (`Roma`, `Róma`), show the one that was typed.
@@ -231,6 +234,6 @@ def search_cities(query: str, limit: int) -> list[CityMatch]:
         found[other.city_id] = CityMatch(other.city, other.name)
     matches = sorted(
         found.values(),
-        key=lambda match: (match.city.pk not in exact, -match.city.population, match.city.pk),
+        key=lambda match: (rank.get(match.city.pk, 2), -match.city.population, match.city.pk),
     )
     return matches[:limit]
