@@ -81,6 +81,9 @@
    marking the uploads as done (the design system's confirmation modal, driven from script instead of a
    form post, since both are answered by JSON or htmx).{% endcomment %}
 <div x-data="{ open: false, title: '', body: '', label: '', resolve: null,
+               init() {
+                   window.ftAsk = (title, body, label) => this.ask(title, body, label);
+               },
                ask(title, body, label) {
                    this.title = title; this.body = body; this.label = label; this.open = true;
                    this.$nextTick(() => { if (this.open) this.$refs.cancel.focus(); });
@@ -90,8 +93,7 @@
                    this.open = false;
                    const resolve = this.resolve; this.resolve = null;
                    if (resolve) resolve(value);
-               } }"
-     x-init="window.ftAsk = (title, body, label) => ask(title, body, label)">
+               } }">
     <div x-show="open" style="display: none"
          @keydown.escape.window="if (open) answer(false)" @click.self="answer(false)"
          x-transition:enter="transition-opacity duration-[220ms] ease-out"
