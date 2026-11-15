@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: ZipTrigo API
-  version: 2.7.0
+  version: 2.8.0
   description: API for every ZipTrigo app. Authenticate with a JWT from `/api/auth/login`.
 paths:
   /api/account:
@@ -638,6 +638,337 @@ paths:
       responses:
         '204':
           description: No Content
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests:
+    post:
+      operationId: apps_file_transfer_api_requests_create_request
+      summary: Create Request
+      parameters: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      description: 'Create a file request: a link for other people to upload files to you. Free to create (the
+
+        balance only needs the 1-credit minimum a send needs); what is uploaded is billed to you per
+
+        day like a transfer''s storage. Uploading is for the people you share the link with, in the
+
+        browser.'
+      tags:
+      - File Transfer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileRequestCreateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    get:
+      operationId: apps_file_transfer_api_requests_list_requests
+      summary: List Requests
+      parameters:
+      - in: query
+        name: filter
+        schema:
+          default: active
+          title: Filter
+          type: string
+        required: false
+      - in: query
+        name: limit
+        schema:
+          default: 20
+          title: Limit
+          type: integer
+        required: false
+      - in: query
+        name: offset
+        schema:
+          default: 0
+          title: Offset
+          type: integer
+        required: false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestListSchema'
+      description: List the caller's file requests, active or ended (or all), newest first.
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}:
+    get:
+      operationId: apps_file_transfer_api_requests_get_request
+      summary: Get Request
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      description: 'One request with the files uploaded so far (who uploaded each, never an IP), its invitees
+
+        and whether it is open or done.'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+    patch:
+      operationId: apps_file_transfer_api_requests_update_request
+      summary: Update Request
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      description: 'Change a request: title, message, audience and invitees, limits (never below what is
+
+        already uploaded), expiry and password -- only the fields sent, all or nothing.'
+      tags:
+      - File Transfer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileRequestUpdateSchema'
+        required: true
+      security:
+      - JWTAuth: []
+    delete:
+      operationId: apps_file_transfer_api_requests_delete_request
+      summary: Delete Request
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: 'Delete a request now: its files are removed immediately.'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}/done:
+    post:
+      operationId: apps_file_transfer_api_requests_mark_request_done
+      summary: Mark Request Done
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      description: 'Mark the request done (allowed with no files; nobody is notified): no more uploads, and
+
+        the link shows the download view. Done is not an error when it already is.'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}/reopen:
+    post:
+      operationId: apps_file_transfer_api_requests_reopen_request
+      summary: Reopen Request
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      description: 'Reopen a done request: the link accepts uploads again and the files stay.'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}/disable:
+    post:
+      operationId: apps_file_transfer_api_requests_disable_request
+      summary: Disable Request
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}/reenable:
+    post:
+      operationId: apps_file_transfer_api_requests_reenable_request
+      summary: Reenable Request
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}/invites/{invite_id}/resend:
+    post:
+      operationId: apps_file_transfer_api_requests_resend_invite
+      summary: Resend Invite
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      - in: path
+        name: invite_id
+        schema:
+          format: uuid
+          title: Invite Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestSchema'
+      description: 'Email one invitee again (a 10 minute cooldown per person; spends the same per-user email
+
+        budget as resending a transfer''s recipient).'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}/files/{file_id}/url:
+    get:
+      operationId: apps_file_transfer_api_requests_file_url
+      summary: File Url
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      - in: path
+        name: file_id
+        schema:
+          format: uuid
+          title: File Id
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRequestFileUrlSchema'
+      description: 'A short-lived presigned URL to download one uploaded file (counted in the request''s
+
+        download log). Not available while the request is on hold or has ended.'
+      tags:
+      - File Transfer
+      security:
+      - JWTAuth: []
+  /api/ft/requests/{request_id}/files/{file_id}:
+    delete:
+      operationId: apps_file_transfer_api_requests_remove_request_file
+      summary: Remove Request File
+      parameters:
+      - in: path
+        name: request_id
+        schema:
+          format: uuid
+          title: Request Id
+          type: string
+        required: true
+      - in: path
+        name: file_id
+        schema:
+          format: uuid
+          title: File Id
+          type: string
+        required: true
+      responses:
+        '204':
+          description: No Content
+      description: Remove one file from a request, open or done (it is deleted for good).
       tags:
       - File Transfer
       security:
@@ -6147,6 +6478,356 @@ components:
       - part_number
       - etag
       title: CompletedPartSchema
+      type: object
+    FileRequestFileSchema:
+      description: 'One file uploaded to a request, with who uploaded it. The uploader''s IP is never in the API
+
+        (staff see it in the admin).'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        name:
+          title: Name
+          type: string
+        size:
+          title: Size
+          type: integer
+        uploaded:
+          title: Uploaded
+          type: boolean
+        uploaded_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Uploaded At
+        uploader_name:
+          title: Uploader Name
+          type: string
+        uploader_email:
+          title: Uploader Email
+          type: string
+        created_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Created At
+      required:
+      - id
+      - name
+      - size
+      - uploaded
+      - uploaded_at
+      - uploader_name
+      - uploader_email
+      - created_at
+      title: FileRequestFileSchema
+      type: object
+    FileRequestInviteSchema:
+      description: 'One person a request is for (the audience `selected`): enough for a client to resend their
+
+        invite email.'
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        email:
+          title: Email
+          type: string
+        last_sent_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Last Sent At
+      required:
+      - id
+      - email
+      - last_sent_at
+      title: FileRequestInviteSchema
+      type: object
+    FileRequestSchema:
+      description: One file request, as every read and write endpoint returns it. Never the password.
+      properties:
+        id:
+          format: uuid
+          title: Id
+          type: string
+        status:
+          title: Status
+          type: string
+        title:
+          title: Title
+          type: string
+        message:
+          title: Message
+          type: string
+        upload_audience:
+          title: Upload Audience
+          type: string
+        max_files:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Files
+        max_total_size_bytes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Total Size Bytes
+        effective_max_files:
+          title: Effective Max Files
+          type: integer
+        effective_max_total_size_bytes:
+          title: Effective Max Total Size Bytes
+          type: integer
+        is_open:
+          title: Is Open
+          type: boolean
+        done_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Done At
+        done_by:
+          title: Done By
+          type: string
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Expires At
+        has_password:
+          title: Has Password
+          type: boolean
+        size_bytes:
+          title: Size Bytes
+          type: integer
+        file_count:
+          title: File Count
+          type: integer
+        uploader_count:
+          title: Uploader Count
+          type: integer
+        download_count:
+          title: Download Count
+          type: integer
+        credits_charged:
+          title: Credits Charged
+          type: integer
+        url:
+          title: Url
+          type: string
+        created_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Created At
+        files:
+          items:
+            $ref: '#/components/schemas/FileRequestFileSchema'
+          title: Files
+          type: array
+        invites:
+          items:
+            $ref: '#/components/schemas/FileRequestInviteSchema'
+          title: Invites
+          type: array
+      required:
+      - id
+      - status
+      - title
+      - message
+      - upload_audience
+      - max_files
+      - max_total_size_bytes
+      - effective_max_files
+      - effective_max_total_size_bytes
+      - is_open
+      - done_at
+      - done_by
+      - expires_at
+      - has_password
+      - size_bytes
+      - file_count
+      - uploader_count
+      - download_count
+      - credits_charged
+      - url
+      - created_at
+      - files
+      - invites
+      title: FileRequestSchema
+      type: object
+    FileRequestCreateSchema:
+      description: 'Body for `POST /requests`: what the web form collects, validated by the same service
+
+        (`services.requests.create_request`). `emails` is the invitee list for the audience
+
+        `selected` (and ignored otherwise); `max_files` and `max_total_size_bytes` left out mean the
+
+        site''s maximum; the expiry is as in `PATCH /transfers`.'
+      properties:
+        title:
+          title: Title
+          type: string
+        message:
+          default: ''
+          title: Message
+          type: string
+        upload_audience:
+          default: anyone
+          title: Upload Audience
+          type: string
+        emails:
+          default: []
+          items:
+            type: string
+          title: Emails
+          type: array
+        max_files:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Files
+        max_total_size_bytes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Total Size Bytes
+        expiry_choice:
+          default: none
+          title: Expiry Choice
+          type: string
+        expiry_date:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          description: 'The expiry for `expiry_choice: "custom"`. An ISO 8601 date-time; one without a UTC offset ("2027-12-31T18:00:00") is read in the server''s time zone (settings.TIME_ZONE, UTC by default). A date alone ("2027-12-31") means the end of that day in that time zone, like the web date picker.'
+          title: Expiry Date
+        password:
+          default: ''
+          title: Password
+          type: string
+      required:
+      - title
+      title: FileRequestCreateSchema
+      type: object
+    FileRequestListSchema:
+      description: A page of `FileRequestSchema`.
+      properties:
+        count:
+          title: Count
+          type: integer
+        limit:
+          title: Limit
+          type: integer
+        offset:
+          title: Offset
+          type: integer
+        results:
+          items:
+            $ref: '#/components/schemas/FileRequestSchema'
+          title: Results
+          type: array
+      required:
+      - count
+      - limit
+      - offset
+      - results
+      title: FileRequestListSchema
+      type: object
+    FileRequestUpdateSchema:
+      description: 'Body for `PATCH /requests/{id}`. Every field is optional and only the ones present are
+
+        applied, all or nothing (`payload.dict(exclude_unset=True)`): omitting a field leaves it as it
+
+        is, an explicit `null` clears `max_files` and `max_total_size_bytes` (the site''s maximum
+
+        again). `emails` replaces the whole invitee list (new addresses are emailed). A blank
+
+        `password` is a no-op; `remove_password: true` clears it.'
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        upload_audience:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Upload Audience
+        emails:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Emails
+        max_files:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Files
+        max_total_size_bytes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Total Size Bytes
+        expiry_choice:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expiry Choice
+        expiry_date:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          description: 'The expiry for `expiry_choice: "custom"`. An ISO 8601 date-time; one without a UTC offset ("2027-12-31T18:00:00") is read in the server''s time zone (settings.TIME_ZONE, UTC by default). A date alone ("2027-12-31") means the end of that day in that time zone, like the web date picker.'
+          title: Expiry Date
+        password:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Password
+        remove_password:
+          default: false
+          title: Remove Password
+          type: boolean
+      title: FileRequestUpdateSchema
+      type: object
+    FileRequestFileUrlSchema:
+      description: A short-lived presigned download URL for one file of a request (never the storage key).
+      properties:
+        url:
+          title: Url
+          type: string
+        filename:
+          title: Filename
+          type: string
+        expires_in:
+          title: Expires In
+          type: integer
+      required:
+      - url
+      - filename
+      - expires_in
+      title: FileRequestFileUrlSchema
       type: object
     RecipientSchema:
       description: 'One recipient on a sent transfer -- enough for a client (the CLI''s `resend`) to resend that
@@ -11987,7 +12668,7 @@ tags:
 - name: QR Codes
   description: 'QR codes, tracked or not: create, edit, preview, images.'
 - name: File Transfer
-  description: 'Send files: drafts, resumable uploads to S3, recipients, the transfers you sent.'
+  description: 'Send files: drafts, resumable uploads to S3, recipients, the transfers you sent. Request files: links for other people to upload files to you, with the files they uploaded.'
 - name: Receipts
   description: 'Receipts and invoices: uploads, the fields read from them, vendors, categories, the CSV export and the inbox address.'
 - name: Short URLs
