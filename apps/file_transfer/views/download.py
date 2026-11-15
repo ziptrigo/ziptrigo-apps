@@ -4,9 +4,9 @@ suspended, deleted, or its limit reached all render the same neutral page).
 """
 
 import base64
+import re
 from functools import lru_cache
 
-from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -21,15 +21,10 @@ from apps.core.services.qr_image import render_png
 from .. import services
 from ..forms import AbuseReportForm, DownloadPasswordForm
 from ..models import Transfer, TransferFile, ZipStatus
+from ..services.request_access import Access, check_access, is_owner
 from ..services.zip import ensure_zip_build_started
-
-
-class PublicHttpRequest(HttpRequest):
-    """`HttpRequest` typed with `.session`, added by `SessionMiddleware` for every request --
-    unlike `apps.accounts.http.AuthenticatedHttpRequest`, this doesn't require login: these are
-    the public, unauthenticated download-page views."""
-
-    session: SessionBase
+from . import request_public
+from .types import PublicHttpRequest
 
 
 def _unavailable(request: HttpRequest) -> HttpResponse:
@@ -62,6 +57,15 @@ def _password_gated_transfer(request: PublicHttpRequest, slug: str) -> Transfer 
     transfer = Transfer.objects.filter(slug=slug).first()
     if transfer is None or not services.is_available(transfer):
         return _unavailable(request)
+    if transfer.is_request:
+        # A file request (issue #306): the whole access check (password, then audience) gates
+        # every download, and only the owner may download while it is still open -- everyone else
+        # once it is done. Anything refused goes back to the page, which says what is needed.
+        if check_access(transfer, request.user, request.session) != Access.OK or not (
+            transfer.is_done or is_owner(transfer, request.user)
+        ):
+            return redirect(reverse('t:download', args=[slug]))
+        return transfer
     if services.requires_password(transfer) and not services.is_unlocked_in_session(
         request.session, transfer.id, transfer.password_hash
     ):
@@ -122,8 +126,24 @@ def download_page(request: PublicHttpRequest, slug: str) -> HttpResponse:
     if transfer is None or not services.is_available(transfer):
         return _unavailable(request)
 
+    if transfer.is_request:
+        return request_public.render_request_page(request, transfer)
     return render(
         request, 'file_transfer/download.html', _context(request, transfer, DownloadPasswordForm())
+    )
+
+
+def _render_unlock(
+    request: PublicHttpRequest, transfer: Transfer, form: DownloadPasswordForm, status: int
+) -> HttpResponse:
+    """The page again with the password form's errors: a request's own page (issue #306), else the
+    transfer's download page."""
+    if transfer.is_request:
+        return request_public.render_request_page(
+            request, transfer, password_form=form, status=status
+        )
+    return render(
+        request, 'file_transfer/download.html', _context(request, transfer, form), status=status
     )
 
 
@@ -151,9 +171,7 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
         form = DownloadPasswordForm()
         form.cleaned_data = {}
         form.add_error('password', 'Too many attempts. Please wait a moment and try again.')
-        response = render(
-            request, 'file_transfer/download.html', _context(request, transfer, form), status=429
-        )
+        response = _render_unlock(request, transfer, form, 429)
         response['Retry-After'] = str(limited.retry_after)
         return response
 
@@ -166,9 +184,7 @@ def unlock(request: PublicHttpRequest, slug: str) -> HttpResponse:
     # above -- never before it, and never for a right password (see the comment above `hit_ip`).
     ratelimit.hit_value(transfer.slug, 'FT_UNLOCK_TRANSFER')
     form.add_error('password', 'Incorrect password.')
-    return render(
-        request, 'file_transfer/download.html', _context(request, transfer, form), status=422
-    )
+    return _render_unlock(request, transfer, form, 422)
 
 
 @require_GET
@@ -196,6 +212,10 @@ def download_file(request: PublicHttpRequest, slug: str, file_id: str) -> HttpRe
 #: forever.
 _MAX_AUTO_ZIP_POLLS = 30
 
+#: The id of the element a "download all" widget swaps itself into: `zip-area` on the download page,
+#: `zip-area-<transfer id>` on a dashboard row (several can be open at once, issue #306).
+_ZIP_AREA_RE = re.compile(r'zip-area(-[0-9a-f-]{36})?')
+
 
 @require_GET
 def zip_status(request: PublicHttpRequest, slug: str) -> HttpResponse:
@@ -220,8 +240,10 @@ def zip_status(request: PublicHttpRequest, slug: str) -> HttpResponse:
     except ValueError:
         polls = 0
 
+    area = request.GET.get('area', '')
     context = {
         'transfer': transfer,
+        'area_id': area if _ZIP_AREA_RE.fullmatch(area) else 'zip-area',
         'next_poll': polls + 1,
         'poll_cap_reached': (
             transfer.zip_status == ZipStatus.BUILDING and polls >= _MAX_AUTO_ZIP_POLLS

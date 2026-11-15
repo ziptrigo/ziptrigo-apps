@@ -14,7 +14,7 @@ notification**, each in its own case: welcome credits, a promo code granted at s
 transfer suspended (and the notice removed when it is re-enabled), Receipts storage paused (and
 removed on unfreeze), a To-do reminder delivered in-app, To-do storage paused (and removed), a
 To-do repeating task whose next occurrence could not be created, and To-do "emailed tasks were not
-created", the two blocker notices (a task no longer blocked, a blocker reopened) the three Notes renewal notices (a note locked, the renewal warning, and the locked notice going when credits arrive) and the Notes "edited through a shared link" notice (NOTIF-30). Also **Web Push** (issue #239): the service worker and manifest at the root, the account
+created", the two blocker notices (a task no longer blocked, a blocker reopened) the three Notes renewal notices (a note locked, the renewal warning, and the locked notice going when credits arrive), the two file request notices (new files, debounced; and Done: NOTIF-31, NOTIF-32) and the Notes "edited through a shared link" notice (NOTIF-30). Also **Web Push** (issue #239): the service worker and manifest at the root, the account
 page's **Notifications on this device** section, the answer endpoint and sign-out (NOTIF-19 to
 NOTIF-22). The read-only admin of notifications is in `admin.md` (ADM-32), push in ADM-54. The emails these events
 send are checked here only for arrival, subject and links; `emails.md` has them in full.
@@ -523,6 +523,40 @@ owner's session in another context; the bell empty of `Shared note` notices.
 | 6 | Another note with a 100-character title is edited through a link. | The notification's title carries the title cut to 60 characters: `Your note "<60 characters>" was edited through a shared link`. A title with markup (`<i>x</i>`) shows as text. |
 | 7 | `/__e2e__/mail/?to=qa.user@example.com`. | No email about the edits (there is no email channel for this notice). |
 | 8 | Deactivate the owner (`User.objects.filter(email=...).update(status='INACTIVE')`) and edit through the link. | The edit is saved; no notification is written for the account (and nothing fails). Reactivate it. |
+
+### NOTIF-31 File request: new files arrive as one debounced notice
+
+**Purpose:** uploads to a request tell the owner, in the app only, once the last upload of a batch is 15 minutes old: one notice per batch, replaced by the next (issue #306). The full flow is `file_transfer.md` FT-56 to FT-58.
+**Preconditions:** `qa.user@example.com` has an open request `QA notice` (anyone with the link; no password); a visitor context; a shell; the bell empty of `QA notice` notices.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: type the name `Jane`, upload `qa-report.txt` and `qa-notes.txt`. | Nothing in the owner's bell yet (the notice waits for 15 minutes of quiet). |
+| 2 | (Shell step) Run the job at once: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.file_transfer.services.request_notices import send_due_notices; print(send_due_notices(now=timezone.now() + timedelta(minutes=16)))"` | Prints `1`. |
+| 3 | The owner's bell and `/notifications/`. | One notification **2 new files in "QA notice"**, body **From Jane**, linking to `/transfer/?kind=request` (the Requests tab); clicking it opens that tab and marks it read. No email arrives. |
+| 4 | Run the same command again. | Prints `0`; still one notification (the batch is claimed once). |
+| 5 | Visitor: upload one more file; run the command with `minutes=16` again. | The earlier notice is **replaced**: one notification **1 new file in "QA notice"** (singular), new again. |
+| 6 | Visitor: upload two files, then remove both before running the job; run the job. | No notification for that batch (removed files are not counted). |
+| 7 | A signed-in uploader (`qa.broke`) and an unnamed anonymous one upload to the request, then run the job. | Body "From <qa.broke's name or email> and 1 other" (an anonymous uploader with no name only counts as "other"). |
+| 8 | The owner uploads a file to their own request. | No notification (an owner's own upload is not "someone else"). |
+| 9 | Upload a file, then run the shell step with `minutes=10` (inside the 15). | Nothing is sent yet; with `minutes=16` it is. |
+| 10 | A request titled with 100 characters and one upload; run the job. | The notification title stays within 140 characters: `1 new file in "<title>"`, the request title cut with an ellipsis only if needed; a title with markup shows as text. |
+| 11 | Deactivate the owner (`User.objects.filter(email=...).update(status='INACTIVE')`), upload, run the job. | No notification is written (and nothing fails). Reactivate. |
+| 12 | `/__e2e__/mail/?to=qa.user@example.com` after a minute. | No email about new files at all. |
+
+### NOTIF-32 File request: Done is one notice, with an email, and folds in the new-files notice
+
+**Purpose:** when an uploader marks the request done, the owner gets a Done notice (and an email, MAIL-28); the pending "new files" notice is removed; the owner's own Done sends nothing (issue #306).
+**Preconditions:** NOTIF-31 step 5 state (a `1 new file in "QA notice"` notice exists); `qa.user@example.com` signed in.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | The visitor (who uploaded) marks the request done. | Within a minute the bell has **"QA notice" is done**, body **<n> files, <size>. Marked done by Jane.** (**by someone** when the visitor typed no name; the account's name or email for a signed-in uploader), linking to `/transfer/?kind=request`. |
+| 2 | `/notifications/`. | The `new file(s) in "QA notice"` notice is **gone** (folded into Done); only the Done notice remains. |
+| 3 | Reopen the request (row > **Reopen**) and mark it done again from the owner's row. | No new notification and no email: the owner's own action. |
+| 4 | Reopen; the visitor marks it done again. | The Done notice is **replaced** (one `"QA notice" is done` notification, new again). |
+| 5 | Run the NOTIF-31 job command while the request is Done. | Nothing is sent for it (a done request is skipped). |
+| 6 | Escaping: a request titled `<b>x</b>` marked done. | The notification title shows `"<b>x</b>" is done` as text. |
 
 ## Out of scope
 

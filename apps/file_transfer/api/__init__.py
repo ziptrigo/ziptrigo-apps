@@ -6,6 +6,7 @@ share one `Router` instance instead of nesting sub-routers.
 """
 
 from . import files as _files  # noqa: F401 -- imported for its side effect (registers endpoints)
+from . import requests as _requests  # noqa: F401 -- same
 from . import transfers as _transfers  # noqa: F401 -- same
 from .router import router
 

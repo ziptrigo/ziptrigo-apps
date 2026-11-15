@@ -1,0 +1,6 @@
+{% autoescape off %}Your file request "{{ title }}" is done.
+
+{{ file_count }} {{ files_noun }}, {{ size_text }}. Marked done by {{ who }}.
+
+Download the files from your dashboard: {{ dashboard_link }}
+{% endautoescape %}

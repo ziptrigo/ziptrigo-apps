@@ -596,6 +596,24 @@ RATELIMIT_RULES: dict[str, tuple[int, int]] = {
     # one transfer can accumulate per hour.
     'FT_REPORT_IP': (5, 60 * 60),
     'FT_REPORT_TRANSFER': (20, 60 * 60),
+    # -- file_transfer: file requests (issue #306) --
+    # Creating a request, per user, charged after the form validated (a refused one spends
+    # nothing). A request costs nothing to create, so this is what keeps one account from
+    # minting links (and, with "Only these people", invite emails) without bound; a real owner
+    # creates a handful an hour at most. The invite emails it sends are *also* charged to
+    # `FT_RECIPIENT_EMAIL_USER`, one hit each, before anything is created.
+    'FT_REQUEST_CREATE_USER': (30, 60 * 60),
+    # Every upload JSON call of a request link (`/t/<slug>/upload/...`: add a file, presign parts,
+    # resume, complete, remove), per IP: the twin of `FT_ANON_UPLOAD_IP` (a multi-file upload
+    # legitimately calls it often in a short span, a part batch at a time).
+    'FT_REQUEST_UPLOAD_IP': (90, 60),
+    # The same calls, per request across every IP, so one link can't be hammered from many
+    # addresses at once (an anyone-with-the-link request has no other gate). Charged only after
+    # the access check passed, so someone who may not use the link can't spend it. Sized for a
+    # large batch: a small file is about three calls (add, part URLs, complete), so a 200-photo
+    # wedding upload by a few guests in an hour is under 1,000 calls; 3,000 leaves room for
+    # retries, resumes and several guests at once while still bounding one link.
+    'FT_REQUEST_UPLOAD_TRANSFER': (3000, 60 * 60),
     # -- feedback (issue #82) --
     # Logged-in only, so keyed per user. Every submission emails every superuser, so without a cap
     # one account could flood the admins' inboxes; a real user sends a message or two, ever.

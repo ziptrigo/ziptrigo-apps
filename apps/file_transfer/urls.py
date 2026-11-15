@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import views
 from .views import anonymous as anon_views
+from .views import request_owner
 
 app_name = 'file_transfer'
 
@@ -44,6 +45,34 @@ urlpatterns = [
         '<uuid:transfer_id>/recipients/<uuid:recipient_id>/resend/',
         views.resend_recipient,
         name='resend-recipient',
+    ),
+    # File requests (issue #306), the owner's side: create one, the "created" page, and the
+    # dashboard row's own actions (disable, re-enable and delete now are the transfer actions
+    # above, which answer a request's row too).
+    path('request/new/', request_owner.request_new, name='request-new'),
+    path(
+        'requests/<uuid:transfer_id>/created/',
+        request_owner.request_created,
+        name='request-created',
+    ),
+    path('requests/<uuid:transfer_id>/done/', request_owner.request_mark_done, name='request-done'),
+    path(
+        'requests/<uuid:transfer_id>/reopen/', request_owner.request_reopen, name='request-reopen'
+    ),
+    path(
+        'requests/<uuid:transfer_id>/settings/',
+        request_owner.request_update_settings,
+        name='request-settings',
+    ),
+    path(
+        'requests/<uuid:transfer_id>/files/<uuid:file_id>/remove/',
+        request_owner.request_remove_file,
+        name='request-remove-file',
+    ),
+    path(
+        'requests/<uuid:transfer_id>/invites/<uuid:invite_id>/resend/',
+        request_owner.request_resend_invite,
+        name='request-resend-invite',
     ),
     # Anonymous send flow (spec section 2 phase 2): session-owned, not login-owned -- see
     # views/anonymous.py. One page (anon-send) renders whichever step the session's current

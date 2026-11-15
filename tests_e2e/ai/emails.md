@@ -12,8 +12,9 @@ every email follows:
   address being confirmed; nothing is sent for an address that has no account (forgot password,
   resend confirmation).
 - **Subject.** A fixed text, or the owner's own words (a file transfer's file name, a to-do
-  title). Never text a stranger wrote (a feedback message, an inbound email's subject, a takedown
-  reason, a typed name).
+  title, a file request's title in the transfer emails that name a transfer). Never text a stranger
+  wrote (a feedback message, an inbound email's subject, a takedown reason, a typed name, an invite's
+  title or message, the name of whoever marked a request done).
 - **Escaping.** Free text in an HTML body (a name, a file name, a feedback message, an email
   subject, a reason, a task title) is shown as text: the source has `&lt;b&gt;`, never a raw
   `<b>` or `<script>`. A text-only email has **no** HTML part at all.
@@ -57,6 +58,8 @@ Subjects are quoted from the code; `<...>` is filled in at send time.
 | 24 | `Reminder: <task title>` | A to-do reminder with channel Email or Both comes due (shell step) | The owner, if confirmed | MAIL-22 |
 | 25 | `Some of your notes are locked` | The Notes renewal job can't pay a renewal and locks notes (shell step), one email per user per run | The owner, if confirmed | MAIL-24 |
 | 26 | `Your notes renew soon` | The Notes renewal job finds the balance short of the renewals due within 7 days (shell step), once per window | The owner, if confirmed | MAIL-25 |
+| 27 | `You've been asked to upload files` | A file request for "Only these people" is created, an address is added to it, or **Resend** on an invitee | Each invitee address | MAIL-27 |
+| 28 | `Your file request is done` | Someone **other than the owner** marks a file request done | The owner, if confirmed | MAIL-28 |
 
 Out of scope (see the end of the file): the Google / Microsoft wording of email 2, delivery
 failures, and rate-limited sends.
@@ -526,17 +529,50 @@ two paid notes; the admin spends the balance down to exactly 7; shell access.
 
 ## Cross-checks
 
+### MAIL-27 File request: "You've been asked to upload files"
+
+**Purpose:** each invitee of a request for "Only these people" gets one email with the title and message in the body (autoescaped), a fixed subject, and an absolute link (issue #306).
+**Preconditions:** logged in as `qa.user@example.com`; `MAIL_INV` = `qa.mail.inv.<r>@example.com` (any address; it need not have an account).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/transfer/request/new/`: Title `MAIL <b>photos</b> & co`, Message `Hello <i>there</i> & welcome`, **Only these people**, the address `MAIL_INV`, **Create the request**. Record the request's slug as `MAIL_REQ_SLUG` (from the created page's link). | The created page says "We emailed 1 person the link." |
+| 2 | `/__e2e__/mail/?to=<MAIL_INV>` (reload until it arrives). | Exactly one email, subject exactly `You've been asked to upload files` (neither the title nor the owner's name is in the subject). |
+| 3 | Text body. | `<owner name> is asking you for files.`, a blank line, `MAIL <b>photos</b> & co`, a blank line, `Hello <i>there</i> & welcome` (as typed), `Upload them here: <BASE>/t/<MAIL_REQ_SLUG>/` and `Sign in or create a ZipTrigo account with this address to upload.` (plus "This link expires on Mon D, YYYY, h:mm AM/PM UTC." when the request has an expiry). If the owner has no name it reads "Someone is asking you for files." (never the owner's email). |
+| 4 | HTML source. | "`<owner name> is asking you for files`" as a heading; the title as `MAIL &lt;b&gt;photos&lt;/b&gt; &amp; co`; the message in a block as `Hello &lt;i&gt;there&lt;/i&gt; &amp; welcome`; a link "Upload files" to `<BASE>/t/<MAIL_REQ_SLUG>/`. A raw `<b>` or `<i>` is a **FAIL**. |
+| 5 | Click the link in a logged-out window. | Sent to `/account/login/?next=/t/<MAIL_REQ_SLUG>/` (the audience needs sign-in). |
+| 6 | Owner: Requests tab > the request > **Manage** > Invited people > **Resend** (after 10 minutes, `FT-55`). | A second identical email arrives. Resending within 10 minutes is refused in the row ("This person was emailed recently; you can resend in N minutes."). |
+| 7 | Add a second address in **Settings** and **Save**; remove `MAIL_INV` from the box and **Save**. | Only the new address is emailed; `MAIL_INV` gets nothing more, and an invite email still queued for a removed address is not sent. |
+| 8 | Create a request for **Anyone with the link** and one for **Anyone signed in**. | No invitation email for either (there is no one to invite). |
+
+### MAIL-28 File request: "Your file request is done"
+
+**Purpose:** when an uploader marks a request done, the owner gets one email with who and how much; the owner's own Done sends none (issue #306).
+**Preconditions:** logged in as `qa.user@example.com`; a request `MAIL done <b>x</b>` (anyone with the link) with two files uploaded in a visitor context (sizes known, e.g. 3,000 and 1,500 bytes) by a visitor who typed the name `Sam <i>S</i>`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | The visitor marks the request done (FT-58). | The page switches to the download view. |
+| 2 | `/__e2e__/mail/?to=qa.user@example.com` (reload until it arrives). | Exactly one new email, subject exactly `Your file request is done` (no title in it). |
+| 3 | Text body. | `Your file request "MAIL done <b>x</b>" is done.`, a blank line, `2 files, 4.4 KB. Marked done by Sam <i>S</i>.`, a blank line, `Download the files from your dashboard: <BASE>/transfer/?kind=request`. |
+| 4 | HTML source. | "Your file request is done" as a heading, the title as `MAIL done &lt;b&gt;x&lt;/b&gt;`, `2 files, 4.4 KB. Marked done by Sam &lt;i&gt;S&lt;/i&gt;.` and a link "Open your dashboard" to the URL above. |
+| 5 | Click the link. | The dashboard's Requests tab with the request marked Done. |
+| 6 | Reopen it, then mark it done yourself from the row. | No new email (the owner's own action). |
+| 7 | Reopen; a signed-in uploader (`qa.broke`) marks it done. | An email whose second line ends "Marked done by <name of qa.broke>." (the account's name, or its email when it has none). |
+| 8 | Un-confirm the owner (shell: `User.objects.filter(email='qa.user@example.com').update(email_confirmed=False)`), reopen, a visitor marks it done. | The bell has the Done notice (NOTIF-32) but **no email** (confirmed addresses only). Re-confirm afterwards. |
+| 9 | The other request emails for a request: its suspension, expiry and files-deleted emails (FT-61). | They name the request by its **title** (`Your transfer "MAIL done <b>x</b>" ...`, the owner's own words) and are text only, like a transfer's. |
+
 ### MAIL-23 Every email of the run follows the rules
 
 **Purpose:** a final sweep over everything this file made the site send.
-**Preconditions:** MAIL-01 to MAIL-26 have run.
+**Preconditions:** MAIL-01 to MAIL-28 have run.
 
 | # | Action | Expected result |
 |---|---|---|
 | 1 | Open `/__e2e__/mail/` (no filter) and go through every email from this file's addresses. | Every link in every text and HTML body starts with `<BASE>` (no `http://localhost:8000`, no `example.com` link that the site made, no relative `/...` link). Every link opened during this file landed on the page described. |
 | 2 | Same list. | No email contains `None`, `undefined`, `{{`, `{%` or an empty greeting such as `Hi ,`. Each has a non-empty subject and text body. |
 | 3 | Same list, subjects only. | No subject contains text a stranger chose (a feedback message, `Someone <i>Else</i>`, `Invoice <b>October</b>`, a takedown reason); the only free text in subjects is a transfer's file name and a to-do title, both the owner's own. |
-| 4 | Same list, HTML parts. | Wherever free text appears in an HTML part it is escaped (`&lt;`, `&amp;`); the emails without an HTML part are exactly the file transfer ones and the admin test email. |
+| 4 | Same list, HTML parts. | Wherever free text appears in an HTML part it is escaped (`&lt;`, `&amp;`); the emails without an HTML part are exactly the file transfer ones (a transfer's, not the two file request emails of MAIL-27 and MAIL-28, which have one) and the admin test email. |
 
 ## Out of scope
 

@@ -5,7 +5,9 @@ File Transfer CLI
 Command line interface for the file_transfer JWT API (`/api/ft/`, issue #55 phase 3), on the model
 of `admin/qrcode.py`: log in, send files or folders with resumable direct-to-S3 multipart uploads,
 and manage existing transfers (list, inspect, disable/enable, delete, change expiry/max
-downloads/password, add recipients, resend).
+downloads/password, add recipients, resend). File requests (issue #306, `request-*` commands): ask
+other people to upload files to you, follow what arrives, mark a request done or reopen it, and
+download everything that was uploaded. Uploading *to* a request stays in the browser.
 """
 
 import base64
@@ -15,10 +17,13 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
 from .utils import (
     EnvironmentAnnotation,
+    api_error_text,
     api_url,
     get_headers,
     logger,
@@ -673,6 +678,456 @@ def filetransfer_delete(environment: EnvironmentAnnotation, transfer_id: str):
     if response.status_code != 204:
         _raise_for_api_error(response)
     logger.info(f'{transfer_id} deleted.')
+
+
+# -- File requests (issue #306) --
+
+#: Where the password of a request's link comes from when `--password` is given: never an
+#: argument (it would sit in the shell history), else a hidden prompt.
+LINK_PASSWORD_ENV = 'FILETRANSFER_LINK_PASSWORD'
+
+_GB = 1024**3
+
+#: The expiry choices the API takes as a plain word; anything else is read as a date.
+_EXPIRY_WORDS = ('1', '5', '15', '30', 'none')
+
+
+def _expiry_payload(expires: str) -> dict:
+    """`--expires`: 1, 5, 15, 30 (days), "none", or an ISO date or date-time (a date alone means
+    the end of that day)."""
+    if expires in _EXPIRY_WORDS:
+        return {'expiry_choice': expires}
+    from datetime import datetime
+
+    try:
+        datetime.fromisoformat(expires)
+    except ValueError:
+        raise typer.BadParameter(
+            'use 1, 5, 15 or 30 (days), "none", or an ISO date like 2026-12-31.'
+        ) from None
+    return {'expiry_choice': 'custom', 'expiry_date': expires}
+
+
+def _audience_payload(anyone: bool, signed_in: bool, to: list[str] | None) -> dict:
+    """The audience flags: `--anyone`, `--signed-in`, or `--to` addresses (only those people).
+    At most one kind; none means leave it as it is (a new request defaults to anyone)."""
+    chosen = [bool(anyone), bool(signed_in), bool(to)]
+    if sum(chosen) > 1:
+        raise typer.BadParameter('Choose one of --anyone, --signed-in or --to.')
+    if anyone:
+        return {'upload_audience': 'anyone'}
+    if signed_in:
+        return {'upload_audience': 'signed_in'}
+    if to:
+        return {'upload_audience': 'selected', 'emails': list(to)}
+    return {}
+
+
+def _gb_to_bytes(gb: float) -> int:
+    return int(gb * _GB)
+
+
+def _link_password() -> str:
+    return password_from_prompt_or_env(None, LINK_PASSWORD_ENV)
+
+
+def _print_request(request: dict) -> None:
+    console = Console()
+    state = 'open' if request['is_open'] else 'done'
+    console.print(f'[cyan]ID:[/cyan] {request["id"]}')
+    console.print(f'[cyan]Title:[/cyan] {escape(request["title"])}')
+    console.print(f'[cyan]State:[/cyan] {state} ({request["status"]})')
+    if request['done_at']:
+        console.print(
+            f'[cyan]Done:[/cyan] {request["done_at"]} by {escape(request["done_by"] or "someone")}'
+        )
+    audience = {
+        'anyone': 'anyone with the link',
+        'signed_in': 'anyone signed in to ZipTrigo',
+        'selected': 'only the invited people',
+    }.get(request['upload_audience'], request['upload_audience'])
+    console.print(f'[cyan]Who can upload:[/cyan] {audience}')
+    if request['message']:
+        console.print(f'[cyan]Message:[/cyan] {escape(request["message"])}')
+    console.print(
+        f'[cyan]Limits:[/cyan] {request["effective_max_files"]} files, '
+        f'{request["effective_max_total_size_bytes"]} bytes in total'
+    )
+    console.print(f'[cyan]Expires:[/cyan] {request["expires_at"] or "never"}')
+    console.print(f'[cyan]Password protected:[/cyan] {request["has_password"]}')
+    console.print(
+        f'[cyan]Uploaded:[/cyan] {request["file_count"]} files, {request["size_bytes"]} bytes, '
+        f'{request["uploader_count"]} uploaders'
+    )
+    console.print(f'[cyan]Credits charged:[/cyan] {request["credits_charged"]}')
+    console.print(f'[cyan]Link:[/cyan] {request["url"]}')
+    if request['invites']:
+        console.print('[cyan]Invited:[/cyan]')
+        for invite in request['invites']:
+            sent = invite['last_sent_at'] or 'never'
+            console.print(f'  - {invite["email"]} (id: {invite["id"]}, last sent: {sent})')
+    for file in request['files']:
+        who = file['uploader_name'] or 'someone'
+        if file['uploader_email']:
+            who = (
+                f'{who} <{file["uploader_email"]}>'
+                if file['uploader_name']
+                else file['uploader_email']
+            )
+        console.print(
+            f'  - {escape(file["name"])} ({file["size"]} bytes) by {escape(who)}, '
+            f'{file["uploaded_at"] or "-"} (id: {file["id"]})'
+        )
+
+
+def _request_url(request_id: str, suffix: str = '') -> str:
+    return api_url(f'/ft/requests/{request_id}{suffix}')
+
+
+@app.command(name='request-create')
+def filetransfer_request_create(
+    environment: EnvironmentAnnotation,
+    title: str = typer.Argument(..., help="The request's title (1 to 100 characters)."),
+    message: str = typer.Option('', '--message', '-m', help='Message shown on the upload page.'),
+    anyone: bool = typer.Option(False, '--anyone', help='Anyone with the link (the default).'),
+    signed_in: bool = typer.Option(False, '--signed-in', help='Only people signed in to ZipTrigo.'),
+    to: list[str] | None = typer.Option(
+        None, '--to', help='Only this person (repeatable); each is emailed the link.'
+    ),
+    max_files: int | None = typer.Option(
+        None, '--max-files', help="Most files accepted (default: the site's maximum)."
+    ),
+    max_gb: float | None = typer.Option(
+        None, '--max-gb', help="Most GB accepted in total (default: the site's maximum)."
+    ),
+    expires: str = typer.Option(
+        'none', '--expires', help='1, 5, 15 or 30 (days), "none", or an ISO date.'
+    ),
+    password: bool = typer.Option(
+        False,
+        '--password',
+        help=f'Protect the link with a password, asked with a hidden prompt or {LINK_PASSWORD_ENV}.',
+    ),
+):
+    """
+    Create a file request: a link for other people to upload files to you.
+
+    It is free to create; what they upload is billed to you per day like a transfer's storage.
+    People upload in their browser; follow progress with `request-get`, close it with
+    `request-done` and fetch everything with `request-download`.
+
+    Example:
+        filetransfer request-create local "Wedding photos" --message "Send yours by Friday"
+        filetransfer request-create local "Contracts" --to a@example.com --to b@example.com
+        filetransfer request-create local "Receipts" --signed-in --max-files 20 --expires 30
+    """
+    select_environment(environment)
+    payload: dict = {'title': title, 'message': message}
+    payload.update(_audience_payload(anyone, signed_in, to))
+    if max_files is not None:
+        payload['max_files'] = max_files
+    if max_gb is not None:
+        payload['max_total_size_bytes'] = _gb_to_bytes(max_gb)
+    payload.update(_expiry_payload(expires))
+    if password:
+        payload['password'] = _link_password()
+
+    response = _request('post', api_url('/ft/requests'), json=payload, headers=get_headers(CLI))
+    _raise_for_api_error(response)
+    request = response.json()
+    logger.info(f'Created request {request["id"]}.')
+    logger.info(f'Link: {request["url"]}')
+
+
+@app.command(name='requests')
+def filetransfer_requests(
+    environment: EnvironmentAnnotation,
+    filter: str = typer.Option(  # noqa: A002 -- matches the API's own `?filter=` query param
+        'active', '--filter', help='"active", "ended" or "all".'
+    ),
+    limit: int = typer.Option(20, '--limit', help='Max requests to show.'),
+    offset: int = typer.Option(0, '--offset', help='Number of requests to skip.'),
+):
+    """
+    List your file requests.
+
+    Example:
+        filetransfer requests local
+        filetransfer requests local --filter ended
+    """
+    select_environment(environment)
+    response = _request(
+        'get',
+        api_url('/ft/requests'),
+        params={'filter': filter, 'limit': limit, 'offset': offset},
+        headers=get_headers(CLI),
+    )
+    _raise_for_api_error(response)
+    body = response.json()
+    results = body['results']
+
+    if not results:
+        logger.info('No requests found.')
+        return
+
+    table = Table(title='Your Requests')
+    table.add_column('ID', style='cyan', no_wrap=True)
+    table.add_column('Title', style='white')
+    table.add_column('State', style='green')
+    table.add_column('Files', style='magenta')
+    table.add_column('Uploaders', style='magenta')
+    table.add_column('Expires', style='blue')
+    for request in results:
+        state = 'open' if request['is_open'] else 'done'
+        if request['status'] != 'active':
+            state = f'{state}, {request["status"]}'
+        table.add_row(
+            request['id'],
+            Text(request['title']),
+            state,
+            str(request['file_count']),
+            str(request['uploader_count']),
+            request['expires_at'] or 'never',
+        )
+    Console().print(table)
+
+    shown_through = body['offset'] + len(results)
+    if shown_through < body['count']:
+        logger.info(
+            f'Showing {body["offset"] + 1}-{shown_through} of {body["count"]}. '
+            f'Use --offset {shown_through} to see more.'
+        )
+
+
+@app.command(name='request-get')
+def filetransfer_request_get(environment: EnvironmentAnnotation, request_id: str):
+    """
+    Show a file request: its settings, who is invited and every file with who uploaded it.
+
+    Example:
+        filetransfer request-get local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    response = _request('get', _request_url(request_id), headers=get_headers(CLI))
+    _raise_for_api_error(response)
+    _print_request(response.json())
+
+
+@app.command(name='request-edit')
+def filetransfer_request_edit(
+    environment: EnvironmentAnnotation,
+    request_id: str,
+    title: str | None = typer.Option(None, '--title', help='A new title.'),
+    message: str | None = typer.Option(None, '--message', '-m', help='A new message.'),
+    anyone: bool = typer.Option(False, '--anyone', help='Anyone with the link.'),
+    signed_in: bool = typer.Option(False, '--signed-in', help='Only people signed in.'),
+    to: list[str] | None = typer.Option(
+        None, '--to', help='Only these people (repeatable; replaces the invited list).'
+    ),
+    max_files: int | None = typer.Option(None, '--max-files', help='Most files accepted.'),
+    clear_max_files: bool = typer.Option(
+        False, '--clear-max-files', help="Back to the site's maximum."
+    ),
+    max_gb: float | None = typer.Option(None, '--max-gb', help='Most GB accepted in total.'),
+    clear_max_gb: bool = typer.Option(False, '--clear-max-gb', help="Back to the site's maximum."),
+    expires: str | None = typer.Option(
+        None, '--expires', help='1, 5, 15 or 30 (days), "none", or an ISO date.'
+    ),
+    password: bool = typer.Option(
+        False, '--password', help=f'Set a password (hidden prompt or {LINK_PASSWORD_ENV}).'
+    ),
+    remove_password: bool = typer.Option(False, '--remove-password', help='Remove the password.'),
+):
+    """
+    Change a file request; only what you pass changes, all or nothing.
+
+    Limits cannot go below what is already uploaded.
+
+    Example:
+        filetransfer request-edit local 1b6e2f4a-... --title "Wedding photos 2" --max-files 50
+        filetransfer request-edit local 1b6e2f4a-... --to a@example.com --to c@example.com
+        filetransfer request-edit local 1b6e2f4a-... --expires none --remove-password
+    """
+    select_environment(environment)
+    if (max_files is not None and clear_max_files) or (max_gb is not None and clear_max_gb):
+        raise typer.BadParameter('Use either a limit or its --clear option, not both.')
+    if password and remove_password:
+        raise typer.BadParameter('Use either --password or --remove-password, not both.')
+
+    payload: dict = {}
+    if title is not None:
+        payload['title'] = title
+    if message is not None:
+        payload['message'] = message
+    payload.update(_audience_payload(anyone, signed_in, to))
+    if max_files is not None:
+        payload['max_files'] = max_files
+    if clear_max_files:
+        payload['max_files'] = None
+    if max_gb is not None:
+        payload['max_total_size_bytes'] = _gb_to_bytes(max_gb)
+    if clear_max_gb:
+        payload['max_total_size_bytes'] = None
+    if expires is not None:
+        payload.update(_expiry_payload(expires))
+    if password:
+        payload['password'] = _link_password()
+    if remove_password:
+        payload['remove_password'] = True
+    if not payload:
+        logger.error('Nothing to change: pass at least one option.')
+        raise typer.Exit(1)
+
+    response = _request('patch', _request_url(request_id), json=payload, headers=get_headers(CLI))
+    _raise_for_api_error(response)
+    logger.info(f'{request_id} updated.')
+
+
+@app.command(name='request-done')
+def filetransfer_request_done(environment: EnvironmentAnnotation, request_id: str):
+    """
+    Mark a request done: no more uploads, and its link shows the download view.
+
+    Example:
+        filetransfer request-done local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    response = _request('post', _request_url(request_id, '/done'), headers=get_headers(CLI))
+    _raise_for_api_error(response)
+    logger.info(f'{request_id} marked as done.')
+
+
+@app.command(name='request-reopen')
+def filetransfer_request_reopen(environment: EnvironmentAnnotation, request_id: str):
+    """
+    Reopen a done request: its link accepts uploads again and the files stay.
+
+    Example:
+        filetransfer request-reopen local 1b6e2f4a-...
+    """
+    select_environment(environment)
+    response = _request('post', _request_url(request_id, '/reopen'), headers=get_headers(CLI))
+    _raise_for_api_error(response)
+    logger.info(f'{request_id} reopened.')
+
+
+def _local_name(name: str, used: set[str]) -> str:
+    """A file name safe to create inside the output folder: no path separators, never empty,
+    `name (1).ext` when two uploaded files share a name."""
+    flat = name.replace('\\', '_').replace('/', '_').lstrip('.') or 'file'
+    candidate = flat
+    stem, dot, ext = flat.rpartition('.')
+    if not dot:
+        stem, ext = flat, ''
+    counter = 1
+    while candidate in used:
+        candidate = f'{stem} ({counter}).{ext}' if ext else f'{stem} ({counter})'
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+def _stream_to(url: str, target: Path) -> None:
+    """Download `url` (a presigned URL: no API token is sent) to `.<name>.part` next to `target`,
+    renaming it into place only when it is complete, so a dropped connection never leaves a
+    cut-off file under the real name."""
+    import requests
+
+    part = target.with_name(f'.{target.name}.part')
+    try:
+        with requests.get(url, stream=True, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            response.raise_for_status()
+            with part.open('wb') as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    handle.write(chunk)
+        part.replace(target)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+
+
+@app.command(name='request-download')
+def filetransfer_request_download(
+    environment: EnvironmentAnnotation,
+    request_id: str,
+    out: Path = typer.Option(..., '--out', help='Folder to download every file into.'),
+    force: bool = typer.Option(False, '--force', help='Overwrite files that already exist.'),
+):
+    """
+    Download every uploaded file of a request into a folder.
+
+    Each file is written to a temporary `.part` file and renamed when complete, and nothing is
+    overwritten unless you pass --force. Files that share a name get `(1)`, `(2)` ...
+
+    Example:
+        filetransfer request-download local 1b6e2f4a-... --out ./photos
+    """
+    import requests
+
+    select_environment(environment)
+    headers = get_headers(CLI)
+    response = _request('get', _request_url(request_id), headers=headers)
+    _raise_for_api_error(response)
+    files = response.json()['files']
+    if not files:
+        logger.info('Nothing has been uploaded yet.')
+        return
+
+    used: set[str] = set()
+    plan = [(file, out / _local_name(file['name'], used)) for file in files]
+    existing = [target.name for _file, target in plan if target.exists()]
+    if existing and not force:
+        logger.error(
+            f'{", ".join(existing)} already exist{"s" if len(existing) == 1 else ""} in {out}. '
+            'Use --force to overwrite.'
+        )
+        raise typer.Exit(1)
+    out.mkdir(parents=True, exist_ok=True)
+
+    failures = 0
+    for file, target in plan:
+        url_response = _request(
+            'get', _request_url(request_id, f'/files/{file["id"]}/url'), headers=headers
+        )
+        if not url_response.ok:
+            logger.error(f'{file["name"]}: {api_error_text(url_response)}')
+            failures += 1
+            continue
+        try:
+            _stream_to(url_response.json()['url'], target)
+        except (requests.exceptions.RequestException, OSError) as exc:
+            logger.error(f'{file["name"]}: download failed: {exc}')
+            failures += 1
+            continue
+        logger.info(f'{target.name}: downloaded')
+    if failures:
+        raise typer.Exit(1)
+    logger.info(f'Downloaded {len(plan)} file{"s" if len(plan) != 1 else ""} to {out}.')
+
+
+@app.command(name='request-delete')
+def filetransfer_request_delete(
+    environment: EnvironmentAnnotation,
+    request_id: str,
+    yes: bool = typer.Option(False, '--yes', '-y', help='Do not ask first.'),
+):
+    """
+    Delete a request now: its files are removed immediately and for good.
+
+    Example:
+        filetransfer request-delete local 1b6e2f4a-...
+        filetransfer request-delete local 1b6e2f4a-... --yes
+    """
+    select_environment(environment)
+    if not yes and not typer.confirm(
+        f'Delete request {request_id} and every file uploaded to it? This cannot be undone.'
+    ):
+        logger.info('Not deleted.')
+        raise typer.Exit(1)
+    response = _request('delete', _request_url(request_id), headers=get_headers(CLI))
+    if response.status_code != 204:
+        _raise_for_api_error(response)
+    logger.info(f'{request_id} deleted.')
 
 
 if __name__ == '__main__':

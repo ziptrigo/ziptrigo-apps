@@ -31,7 +31,8 @@ TAGS = [
     {
         'name': 'File Transfer',
         'description': 'Send files: drafts, resumable uploads to S3, recipients, the transfers '
-        'you sent.',
+        'you sent. Request files: links for other people to upload files to you, with the '
+        'files they uploaded.',
     },
     {
         'name': 'Receipts',

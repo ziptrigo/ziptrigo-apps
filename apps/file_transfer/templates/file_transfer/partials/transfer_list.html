@@ -6,10 +6,12 @@
 
 <div class="space-y-4">
     {% for transfer in transfers %}
-        {% include 'file_transfer/partials/transfer_row.html' %}
+        {% if transfer.is_request %}{% include 'file_transfer/partials/request_row.html' %}{% else %}{% include 'file_transfer/partials/transfer_row.html' %}{% endif %}
     {% empty %}
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl border border-gray-200 dark:border-gray-700">
-        {% if filter == 'ended' %}{% include 'core/partials/empty_state.html' with icon='fas fa-box-archive' title='No ended transfers' text='Transfers that expire or are deleted appear here.' %}
+        {% if kind == 'request' and filter == 'ended' %}{% include 'core/partials/empty_state.html' with icon='fas fa-box-archive' title='No ended requests' text='Requests that expire or are deleted appear here.' %}
+        {% elif kind == 'request' %}{% url 'file_transfer:request-new' as request_url %}{% include 'core/partials/empty_state.html' with icon='fas fa-inbox' title='No requests yet' text='Ask anyone to upload files to you with a link.' action_url=request_url action_label='Request files' %}
+        {% elif filter == 'ended' %}{% include 'core/partials/empty_state.html' with icon='fas fa-box-archive' title='No ended transfers' text='Transfers that expire or are deleted appear here.' %}
         {% else %}{% url 'file_transfer:send' as send_url %}{% include 'core/partials/empty_state.html' with icon='fas fa-paper-plane' title='No transfers yet' text='Send a file to anyone with a link that expires.' action_url=send_url action_label='Send files' %}{% endif %}
     </div>
     {% endfor %}

@@ -75,6 +75,26 @@ class ZipStatus(models.TextChoices):
     FAILED = 'failed', 'Failed'
 
 
+class TransferKind(models.TextChoices):
+    """What a `Transfer` row is (issue #306): a `SEND` (the owner uploads files and sends a link
+    to the people who download them) or a `REQUEST` (the owner sends a link so *other people*
+    upload files to the owner). A request reuses everything a transfer has -- storage, metering,
+    the download page and its zip, expiry, suspension, takedown, auto-hold and the block list --
+    so it is the same table with this discriminator; see `apps.file_transfer.services.requests`."""
+
+    SEND = 'send', 'Send'
+    REQUEST = 'request', 'Request'
+
+
+class UploadAudience(models.TextChoices):
+    """Who may use a request's link (issue #306): anyone who has it, anyone signed in to ZipTrigo,
+    or only the people the owner invited by email (`RequestInvite`). The owner always may."""
+
+    ANYONE = 'anyone', 'Anyone with the link'
+    SIGNED_IN = 'signed_in', 'Anyone signed in to ZipTrigo'
+    SELECTED = 'selected', 'Only these people'
+
+
 class Transfer(models.Model):
     """A WeTransfer-style file transfer: one message, a set of files, a public download link.
 
@@ -92,6 +112,7 @@ class Transfer(models.Model):
     recipients: ClassVar['Manager']
     download_events: ClassVar['Manager']
     reports: ClassVar['Manager']
+    invites: ClassVar['Manager']
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = cast(
@@ -328,6 +349,109 @@ class Transfer(models.Model):
     # `apps.file_transfer.services.hold`.
     held_for_review_at = cast(datetime | None, models.DateTimeField(null=True, blank=True))
 
+    # File requests (issue #306). Every column has a `db_default` as well (the #102 lesson: the
+    # container still serving while the migration runs doesn't know these columns and keeps
+    # inserting transfers).
+    kind = cast(
+        str,
+        models.CharField(
+            max_length=16,
+            choices=TransferKind.choices,
+            default=TransferKind.SEND,
+            db_default=TransferKind.SEND,
+            help_text='`send`: the owner uploads and sends a link. `request`: the owner sends a '
+            'link so other people upload files to them.',
+        ),
+    )
+    title = cast(
+        str,
+        models.CharField(
+            max_length=100,
+            blank=True,
+            default='',
+            db_default='',
+            help_text="A request's title (required for a request, blank for a send).",
+        ),
+    )
+    upload_audience = cast(
+        str,
+        models.CharField(
+            max_length=16,
+            choices=UploadAudience.choices,
+            default=UploadAudience.ANYONE,
+            db_default=UploadAudience.ANYONE,
+            help_text='Requests only: who may upload to (and, once done, download from) the link.',
+        ),
+    )
+    max_files = cast(
+        'int | None',
+        models.PositiveIntegerField(
+            null=True,
+            blank=True,
+            help_text="Requests only: the most files the link accepts. Null is the site's "
+            '`logged_in_max_files`.',
+        ),
+    )
+    max_total_size_bytes = cast(
+        'int | None',
+        models.PositiveBigIntegerField(
+            null=True,
+            blank=True,
+            help_text='Requests only: the most bytes the link accepts in total. Null is the '
+            "site's `logged_in_max_total_size_bytes`.",
+        ),
+    )
+    done_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='Requests only: when the request was marked done. Null means it is open '
+            '(accepting files). Open vs done is this column, not a status.',
+        ),
+    )
+    done_by_user = cast(
+        'User | None',
+        models.ForeignKey(
+            settings.AUTH_USER_MODEL,
+            null=True,
+            blank=True,
+            on_delete=models.SET_NULL,
+            related_name='+',
+            help_text='Who marked it done, when they were signed in (the owner or an uploader).',
+        ),
+    )
+    done_by_user_id: UUID | None
+    done_by_name = cast(
+        str,
+        models.CharField(
+            max_length=100,
+            blank=True,
+            default='',
+            db_default='',
+            help_text="The anonymous uploader's typed name, if they gave one.",
+        ),
+    )
+    upload_notice_due_at = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='Requests only: when the debounced "new files" notice for the owner is '
+            'due. Pushed back 15 minutes by every completed upload; cleared by '
+            '`file_transfer.send_request_notices` and by marking the request done.',
+        ),
+    )
+    upload_notice_since = cast(
+        datetime | None,
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text='Requests only: where the batch of files the next "new files" notice '
+            'covers starts.',
+        ),
+    )
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
@@ -337,6 +461,13 @@ class Transfer(models.Model):
             # Looked up by services.anon_limits when checking the per-IP-per-day caps.
             models.Index(fields=['sender_ip', 'created_at']),
             models.Index(fields=['anon_cookie_id', 'created_at']),
+            # Read by `file_transfer.send_request_notices` every minute: only the rows that have a
+            # notice waiting, so it stays tiny however many requests there are.
+            models.Index(
+                fields=['upload_notice_due_at'],
+                name='ft_transfer_notice_due',
+                condition=models.Q(upload_notice_due_at__isnull=False),
+            ),
         ]
         permissions = [
             (
@@ -348,6 +479,49 @@ class Transfer(models.Model):
 
     def __str__(self) -> str:
         return f'Transfer {self.id} ({self.status})'
+
+    @property
+    def is_request(self) -> bool:
+        return self.kind == TransferKind.REQUEST
+
+    @property
+    def is_open(self) -> bool:
+        """A request that is still accepting files (not marked done). Always false for a send."""
+        return self.is_request and self.done_at is None
+
+    @property
+    def is_done(self) -> bool:
+        return self.is_request and self.done_at is not None
+
+    @property
+    def effective_max_files(self) -> int:
+        """The most files a request accepts: its own limit, else the site's."""
+        if self.max_files is not None:
+            return self.max_files
+        from .settings import FileTransferSettings
+
+        return FileTransferSettings.load().logged_in_max_files
+
+    @property
+    def effective_max_total_size_bytes(self) -> int:
+        """The most bytes a request accepts in total: its own limit, else the site's."""
+        if self.max_total_size_bytes is not None:
+            return self.max_total_size_bytes
+        from .settings import FileTransferSettings
+
+        return FileTransferSettings.load().logged_in_max_total_size_bytes
+
+    @property
+    def uploader_count(self) -> int:
+        """How many distinct people uploaded files to a request (a signed-in uploader by account,
+        an anonymous one by browser). Reads `files` through `.all()`, so a prefetch is used."""
+        keys = {f.uploader_key for f in self.files.all() if f.uploaded}
+        keys.discard('')
+        return len(keys)
+
+    @property
+    def uploaded_file_count(self) -> int:
+        return sum(1 for f in self.files.all() if f.uploaded)
 
     @property
     def is_ended(self) -> bool:
@@ -376,6 +550,8 @@ class Transfer(models.Model):
         cache the caller set up (e.g. the dashboard list, `apps.file_transfer.views.dashboard`)
         and re-querying per transfer.
         """
+        if self.is_request:
+            return self.title or 'Untitled request'
         first = self.files.first()
         return first.name if first else 'Untitled transfer'
 

@@ -1,0 +1,164 @@
+{% extends 'core/base.html' %}
+{% load local_time static %}
+
+{% block title %}{{ transfer.title }} - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl" x-data="{ reportOpen: false }">
+    <div class="mb-6">
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ owner_name }} is asking for files</p>
+        <h1 class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">{{ transfer.title }}</h1>
+        {% if transfer.message %}
+        <p class="mt-3 text-gray-700 dark:text-gray-300 whitespace-pre-line">{{ transfer.message }}</p>
+        {% endif %}
+        <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
+            Up to {{ max_files_text }}, {{ max_total_text }} in total, {{ max_file_text }} per file.
+            {% if transfer.expires_at %}Available until {% local_time transfer.expires_at %}.{% endif %}
+        </p>
+    </div>
+
+    {% comment %}Where a message from the page lands (a refused "Mark as done"); the upload script's own errors have their own live regions.{% endcomment %}
+    <div id="request-msg"></div>
+
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 mb-6 border border-gray-200 dark:border-gray-700">
+        {% if uploader.is_signed_in %}
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">The owner will see your name and email next to your files.</p>
+        {% elif transfer.upload_audience == 'anyone' %}
+        <div class="mb-4">
+            <label for="uploader-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Your name (optional)</label>
+            <input type="text" id="uploader-name" name="name" maxlength="100" value="{{ uploader.name }}" autocomplete="name"
+                   class="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Shown to {{ owner_name }} next to your files.</p>
+        </div>
+        {% endif %}
+
+        <p class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Your files</p>
+        <div id="drop-zone"
+             class="flex flex-col items-center justify-center gap-3 text-center rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 px-4 py-8 transition-colors">
+            <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 dark:text-gray-500"></i>
+            <p class="text-sm text-gray-700 dark:text-gray-300">Drag &amp; drop files or folders here, or</p>
+            <input type="file" id="file-input" multiple class="hidden">
+            <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
+            <div class="flex items-center gap-3">
+                <button type="button" id="pick-files-btn"
+                        class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                    <i class="fas fa-file mr-1"></i>Choose files
+                </button>
+                <button type="button" id="pick-folder-btn"
+                        class="btn px-3 py-1.5 rounded-lg text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap">
+                    <i class="fas fa-folder-open mr-1"></i>Add folder
+                </button>
+            </div>
+        </div>
+        <ul id="file-list" class="mt-4 space-y-2" aria-label="The files you uploaded"></ul>
+    </div>
+
+    <form id="request-done-form" method="post" action="{% url 't:request-done' transfer.slug %}"
+          hx-post="{% url 't:request-done' transfer.slug %}" hx-include="#uploader-name" hx-target="#request-msg" hx-swap="innerHTML"
+          class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+        {% csrf_token %}
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            When you have added everything, mark the uploads as done: {{ owner_name }} is told and no one can add more files.
+        </p>
+        <button type="submit" id="request-done-btn"
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+            <i class="fas fa-check mr-2"></i>Mark as done
+        </button>
+    </form>
+
+    <div class="mt-6 pt-4">
+        <button type="button" @click="reportOpen = !reportOpen"
+                class="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+            <i class="fas fa-flag mr-1"></i>Report this link
+        </button>
+        <div x-show="reportOpen" x-cloak class="mt-3">
+            {% include 'file_transfer/partials/report_box.html' %}
+        </div>
+    </div>
+</div>
+
+{% comment %}The confirmation dialog the upload script asks through (`window.ftAsk`): removing a file and
+   marking the uploads as done (the design system's confirmation modal, driven from script instead of a
+   form post, since both are answered by JSON or htmx).{% endcomment %}
+<div x-data="{ open: false, title: '', body: '', label: '', resolve: null,
+               init() {
+                   window.ftAsk = (title, body, label) => this.ask(title, body, label);
+               },
+               ask(title, body, label) {
+                   this.title = title; this.body = body; this.label = label; this.open = true;
+                   this.$nextTick(() => { if (this.open) this.$refs.cancel.focus(); });
+                   return new Promise((resolve) => { this.resolve = resolve; });
+               },
+               answer(value) {
+                   this.open = false;
+                   const resolve = this.resolve; this.resolve = null;
+                   if (resolve) resolve(value);
+               } }">
+    <div x-show="open" style="display: none"
+         @keydown.escape.window="if (open) answer(false)" @click.self="answer(false)"
+         x-transition:enter="transition-opacity duration-[220ms] ease-out"
+         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+         x-transition:leave="transition-opacity duration-[140ms] ease-in"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/70 backdrop-blur-[2px]">
+        <div role="dialog" aria-modal="true" aria-labelledby="request-modal-title"
+             class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
+            <p id="request-modal-title" x-text="title" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2"></p>
+            <p x-text="body" class="text-sm text-gray-600 dark:text-gray-400 mb-6 break-words"></p>
+            <div class="flex justify-end gap-3">
+                <button type="button" x-ref="cancel" @click="answer(false)"
+                        class="btn px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">Cancel</button>
+                <button type="button" @click="answer(true)" x-text="label"
+                        :class="label === 'Remove' ? 'text-white bg-red-600 hover:bg-red-700' : 'text-gray-900 bg-brand-primary hover:bg-sage-400'"
+                        class="btn px-4 py-2 text-sm font-medium rounded-lg transition-colors"></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{ existing_files|json_script:"existing-files-data" }}
+<script src="{% static 'core/js/drop_zone.js' %}"></script>
+<script src="{% static 'file_transfer/js/resumable_upload.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const fileInput = document.getElementById('file-input');
+    const folderInput = document.getElementById('folder-input');
+    const nameInput = document.getElementById('uploader-name');
+    const existingFiles = JSON.parse(document.getElementById('existing-files-data').textContent);
+
+    const upload = initFileTransferUpload({
+        base: "{{ upload_base }}",
+        fileListEl: document.getElementById('file-list'),
+        submitBtn: null,
+        csrftoken: getCookie('csrftoken'),
+        existingFiles: existingFiles,
+        formId: 'request-done-form',
+        extraAddBody: function () {
+            return nameInput ? { uploader_name: nameInput.value } : {};
+        },
+        confirmRemove: function (name) {
+            return window.ftAsk('Remove this file?', name, 'Remove');
+        },
+        confirmSubmit: function (unfinished) {
+            let body = 'No one will be able to add files after this.';
+            if (unfinished > 0) {
+                body += ' Files that have not finished uploading will be left out.';
+            }
+            return window.ftAsk('Mark these uploads as done?', body, 'Mark as done');
+        },
+    });
+
+    document.getElementById('pick-files-btn').addEventListener('click', function () { fileInput.click(); });
+    document.getElementById('pick-folder-btn').addEventListener('click', function () { folderInput.click(); });
+    fileInput.addEventListener('change', function () {
+        upload.handleFileSelection(fileInput.files);
+        fileInput.value = '';
+    });
+    folderInput.addEventListener('change', function () {
+        upload.handleFileSelection(folderInput.files);
+        folderInput.value = '';
+    });
+    initDropZone(document.getElementById('drop-zone'), upload.handleFileSelection);
+});
+</script>
+{% endblock %}

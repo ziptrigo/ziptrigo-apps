@@ -1,0 +1,11 @@
+{% autoescape off %}{{ owner_name }} is asking you for files.
+
+{{ title }}
+{% if message %}
+{{ message }}
+{% endif %}
+Upload them here: {{ link }}
+
+Sign in or create a ZipTrigo account with this address to upload.
+{% if expires_at %}This link expires on {{ expires_at }}.
+{% endif %}{% endautoescape %}

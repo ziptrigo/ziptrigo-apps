@@ -1,0 +1,83 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Request files - ZipTrigo{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+    <h1 class="text-3xl font-semibold tracking-tight mb-2 text-gray-900 dark:text-gray-100">Request files</h1>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+        Get a link that lets other people upload files to you. It is free to create; what they upload is stored on your account and billed to you per day like a transfer's storage.
+        Your balance: {{ balance }} credit{{ balance|pluralize }}. A request needs at least {{ min_balance_to_send }}.
+        {% if balance < min_balance_to_send %}
+        <a href="{% url 'billing:credits-history' %}" class="text-sage-600 dark:text-sage-300 hover:underline">Buy credits</a>.
+        {% endif %}
+    </p>
+
+    <div id="send-errors"></div>
+
+    <form id="request-form" method="post" action="{% url 'file_transfer:request-new' %}"
+          hx-post="{% url 'file_transfer:request-new' %}" hx-target="#send-errors" hx-swap="innerHTML"
+          x-data="{ audience: '{{ form.upload_audience.value }}' }"
+          class="bg-white dark:bg-gray-800 shadow-sm rounded-xl p-6 space-y-4 border border-gray-200 dark:border-gray-700">
+        {% csrf_token %}
+        <div>
+            <label for="{{ form.title.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Title</label>
+            {{ form.title }}
+        </div>
+        <div>
+            <label for="{{ form.message.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Message (optional)</label>
+            {{ form.message }}
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ form.message.help_text }}</p>
+        </div>
+
+        <fieldset @change="if ($event.target.name === 'upload_audience') audience = $event.target.value">
+            <legend class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Who can upload</legend>
+            <div class="space-y-1">
+                {% for radio in form.upload_audience %}
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    {{ radio.tag }} {{ radio.choice_label }}
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        <div x-show="audience === 'selected'" style="display: none">
+            <label for="{{ form.emails.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.emails.label }}</label>
+            {{ form.emails }}
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ form.emails.help_text }}</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label for="{{ form.max_files.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.max_files.label }}</label>
+                {{ form.max_files }}
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Up to {{ settings.logged_in_max_files }}. {{ form.max_files.help_text }}</p>
+            </div>
+            <div>
+                <label for="{{ form.max_total_gb.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ form.max_total_gb.label }}</label>
+                {{ form.max_total_gb }}
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ form.max_total_gb.help_text }}</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div x-data="{ choice: '{{ form.expiry_choice.value }}' }"
+                 @change="if ($event.target.name === 'expiry_choice') choice = $event.target.value">
+                <label for="{{ form.expiry_choice.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Expiry</label>
+                {{ form.expiry_choice }}
+                <div x-show="choice === 'custom'" style="display: none" class="mt-2">
+                    {{ form.expiry_date }}
+                </div>
+            </div>
+            <div>
+                <label for="{{ form.password.id_for_label }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password (optional)</label>
+                {% include 'file_transfer/partials/password_field.html' with field=form.password %}
+            </div>
+        </div>
+
+        <button type="submit"
+                class="btn inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-gray-900 bg-brand-primary hover:bg-sage-400">
+            <i class="fas fa-inbox mr-2"></i>Create the request
+        </button>
+    </form>
+</div>
+{% endblock %}

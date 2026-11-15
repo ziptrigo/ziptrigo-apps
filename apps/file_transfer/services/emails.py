@@ -9,7 +9,10 @@ backend persists them between enqueue and execution.
 """
 
 from django.conf import settings
+from django.db.models import Sum
 from django.tasks import task
+from django.template.defaultfilters import filesizeformat
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from apps.core.datetime_format import format_utc
@@ -216,3 +219,76 @@ def send_files_deleted_notification(transfer_id: str) -> None:
         ]
 
     send_email(to=to_email, subject=subject, text_body='\n'.join(body_lines))
+
+
+def _owner_name(transfer: Transfer) -> str:
+    """The owner as an invitee reads it: the account name, never the email (it would show an
+    address the owner never chose to share)."""
+    owner = transfer.owner
+    return (owner.name if owner else '') or 'Someone'
+
+
+@task
+def send_request_invite(transfer_id: str, email: str) -> None:
+    """ "<owner> is asking you for files" -- to one person a file request is for (issue #306), at
+    creation, when the address is added later and on a resend. The subject is fixed (no title and
+    nothing the owner typed in it); the title and message are in the body, autoescaped."""
+    try:
+        transfer = Transfer.objects.select_related('owner').get(id=transfer_id)
+    except Transfer.DoesNotExist:
+        return
+    if not transfer.is_request or not transfer.invites.filter(email__iexact=email).exists():
+        # Gone from the invitee list (or the request) since this was queued.
+        return
+    if transfer.is_ended:
+        return
+
+    context = {
+        'owner_name': _owner_name(transfer),
+        'title': transfer.title,
+        'message': transfer.message,
+        'link': transfer.absolute_download_url,
+        'expires_at': format_utc(transfer.expires_at) + ' UTC' if transfer.expires_at else '',
+    }
+    send_email(
+        to=email,
+        subject="You've been asked to upload files",
+        text_body=render_to_string('file_transfer/emails/request_invite.txt', context),
+        html_body=render_to_string('file_transfer/emails/request_invite.html', context),
+    )
+
+
+@task
+def send_request_done_email(transfer_id: str) -> None:
+    """ "Your file request is done" -- to the owner, when someone *other than the owner* marked
+    their request done (issue #306). Only to a confirmed address, autoescaped, no title in the
+    subject."""
+    try:
+        transfer = Transfer.objects.select_related('owner', 'done_by_user').get(id=transfer_id)
+    except Transfer.DoesNotExist:
+        return
+    owner = transfer.owner
+    if owner is None or not owner.email or not owner.email_confirmed:
+        return
+    if transfer.done_at is None:
+        return
+
+    files = transfer.files.filter(uploaded=True)
+    count = files.count()
+    size = files.aggregate(total=Sum('size'))['total'] or 0
+    by = transfer.done_by_user
+    who = (by.name or by.email) if by is not None else (transfer.done_by_name or 'someone')
+    context = {
+        'title': transfer.title,
+        'file_count': count,
+        'files_noun': 'file' if count == 1 else 'files',
+        'size_text': str(filesizeformat(size)).replace('\xa0', ' '),
+        'who': who,
+        'dashboard_link': f'{dashboard_url()}?kind=request',
+    }
+    send_email(
+        to=owner.email,
+        subject='Your file request is done',
+        text_body=render_to_string('file_transfer/emails/request_done.txt', context),
+        html_body=render_to_string('file_transfer/emails/request_done.html', context),
+    )

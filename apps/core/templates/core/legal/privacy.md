@@ -13,6 +13,7 @@ ZipTrigo is operated by **{{ operator_name }}**, an individual based in the {{ o
 - **Account information:** your email address, your name and your password. We store only a one-way hash of your password, never the password itself. We also store the preferences you set, such as your time zone, theme, and date and time format, and the date and version of the Terms of Use you accepted.
 - **QR codes:** the content each code encodes (such as a URL or text) and its settings.
 - **File transfers:** the files you upload with their names and sizes, the recipient email addresses, the optional message, the expiry and download-limit settings, and an optional download password (stored as a hash). If you send a transfer without an account, we collect the email address you give us so we can confirm it before the transfer is sent.
+- **File requests:** if you ask other people for files with a request link, the title, message and settings of the request, an optional password (stored as a hash), and the email addresses of the people you invite. When someone uploads to your request, we store the files and the name they give or, if they are signed in, their account name and email address, and show them to you next to each file. We also store the IP address the upload came from; only our staff can see it, and it is removed after 90 days. If you upload to someone else's request, that person (and our staff, for abuse and support) can see this information.
 - **Receipts:** the receipts and invoices you upload or send by email, the details read from them (vendor, amount, date, category and, where present, the last 4 digits of a payment method), and your notes. For receipts sent by email we also keep the sender's address, the subject, and a copy of the message with its attachments removed.
 - **Short links:** the destination address, title, tags and settings of each link, and an optional password (stored as a hash).
 - **To-do:** your tasks, descriptions, comments (including earlier versions of a comment you edited), labels, reminders, saved filters, and the files you attach. For tasks added by email we keep the sender's address and the subject.
@@ -28,7 +29,7 @@ If you choose **Sign in with Microsoft**, Microsoft shares with us your name, yo
 
 ### 1.3 Information collected automatically
 
-- **Download records:** we record the IP address and time of each download of a transfer, so the sender can see download activity and we can investigate abuse.
+- **Download records:** we record the IP address and time of each download of a transfer, so the sender can see download activity and we can investigate abuse. We keep the same record when files are downloaded from a file request.
 - **Shared notes:** when someone opens a shared note we do not record who they are; the page is not stored by search engines and is not cached. If a shared note is edited through an editable link, we record the time of the edit.
 - **Shared events:** when someone opens a shared World Time event we do not record who they are; the page is not stored by search engines and is not cached. The time in the visitor's own time zone is worked out in their browser.
 - **Short link clicks:** when someone follows a short link we record the time, the website they came from (its host name only), their country, their type of device, browser and operating system, and whether the visit looks automated. We do not store the visitor's IP address. We store a keyed, one-way hash of it that changes every day, used only to count unique visitors per day.
@@ -69,7 +70,7 @@ ZipTrigo's use of information received from Google APIs adheres to the [Google A
 
 We share personal information only:
 
-- **With the people you choose:** the recipients of a transfer receive an email with your name or email address, your message and a download link. Anyone who has the address of a short link, a tracked QR code, a transfer or a shared note can follow it.
+- **With the people you choose:** the recipients of a transfer receive an email with your name or email address, your message and a download link. Anyone who has the address of a short link, a tracked QR code, a transfer, a file request or a shared note can follow it; a file request's owner chooses who may upload to it (anyone with the link, anyone signed in, or only the people invited).
 - **With service providers** that process data for us:
     - Amazon Web Services (file storage, and sending and receiving email);
     - a server hosting provider in the United States;
@@ -85,7 +86,7 @@ We share personal information only:
 
 - **Account information:** for as long as your account exists.
 - **Transferred files:** deleted when the transfer ends, whether it expires, reaches its download limit, or is disabled or deleted by you, or by us after an abuse takedown. If a transfer is suspended because the account ran out of credits, its files are deleted after the grace period shown in the Service (7 days) unless credits are added. Unfinished uploads are deleted after about 24 hours.
-- **Transfer records:** the record of a transfer (file names, sizes, recipients, download history) is kept with your account after its files are deleted, so you can see your history. IP addresses are removed from download records after 90 days.
+- **Transfer records:** the record of a transfer (file names, sizes, recipients, download history) is kept with your account after its files are deleted, so you can see your history. IP addresses are removed from download records, and from the uploads to a file request, after 90 days.
 - **Receipts, to-do items and notes:** kept until you delete them. Items in the Trash are deleted for good after the period shown in the Service (30 days unless stated otherwise). Emails you send to your Receipts or To-do address are deleted from our intake storage once processed.
 - **World Time:** tabs and places are kept until you delete them. A shared event is kept until you delete it, and is deleted automatically some time after it ends (30 days unless stated otherwise); its link then stops working.
 - **Short links:** kept until you delete them. The address of a deleted link is retired and never reused. Individual click records are deleted after about 90 days; daily totals without any visitor identifier are kept with the link.
