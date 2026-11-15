@@ -64,6 +64,7 @@ def _kind(request: AuthenticatedHttpRequest) -> str:
 def _transfers_for(user, filter_value: str, kind: str = SENT_TAB):
     qs = (
         Transfer.objects.filter(owner=user, kind=kind)
+        .select_related('done_by_user')
         .exclude(status__in=_UNLISTED_STATUSES)
         # Avoids a `COUNT` query per row for `Transfer.download_count` (used by both
         # `download_count` and `downloads_remaining`); `files`/`recipients` are prefetched

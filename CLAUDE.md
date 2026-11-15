@@ -2732,6 +2732,8 @@ from the dashboard at any time. Only signed-in users create requests.
   request-edit|request-done|request-reopen|request-download|request-delete` (the link password via
   `FILETRANSFER_LINK_PASSWORD`, never an argument; `request-download` writes `.part` files, never overwrites without
   `--force`, flattens names). OpenAPI 2.8.0.
+- **nginx** counts `/t/<slug>/upload/...` in its main per-IP zone like the other `/t/` shapes (nothing changed in the
+  `infra` repo); the app's own `FT_REQUEST_UPLOAD_*` rules are the real limits.
 - **Not done / accepted.** A "download all" zip being built while a file changes can be stale (the build uses its own
   snapshot; `invalidate_zip` leaves a `BUILDING` zip alone). A request cannot be marked done by an uploader while
   it is disabled or suspended (the link is unavailable). `TERMS_VERSION` was **not** bumped for the Privacy Policy lines

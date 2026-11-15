@@ -4,6 +4,7 @@
 from datetime import timedelta
 
 import pytest
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
@@ -232,6 +233,8 @@ def test_a_failing_request_does_not_stop_the_others(
 def test_the_job_is_registered_with_a_description():
     from apps.core.scheduler import registry
 
+    # Other tests clear the registry: register this app's jobs again, as `ready()` does.
+    apps.get_app_config('file_transfer')._register_jobs()
     spec = registry.get_job('file_transfer.send_request_notices')
     assert spec is not None
     assert spec.func is jobs.send_request_notices
