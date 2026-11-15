@@ -52,6 +52,9 @@ DEFAULT_DIRECTIONS = {
     'created': 'desc',
     'title': 'asc',
     MANUAL_SORT: 'asc',
+    # The internal keys of the manual orders, so `order_tasks` can reverse them like any other sort.
+    'all_manual': 'asc',
+    'today_manual': 'asc',
 }
 UPCOMING_DAYS = 14
 
@@ -318,8 +321,10 @@ def next_position(parent: Task | None) -> int:
 
 
 def next_all_position(user: User) -> int:
-    """`Task.all_position` of a new task: after the others when the user's open tasks already have a
-    manual order, else 0 (the default sort applies)."""
+    """`Task.all_position` of a new task: after the others when the user's open tasks (subtasks
+    included, the set the All list shows) already have a manual order, else 0 (the default sort
+    applies). A closed or trashed task keeps the number it had, so a reopened or restored one can
+    tie with a live task; ties fall back to the default order."""
     return after_the_others(open_tasks(user), 'all_position')
 
 

@@ -12,7 +12,7 @@ from django.urls import reverse
 from apps.billing.services import add_credits, get_balance
 
 from ..models import Label, Task, TodoAccount
-from ..services import complete_task, create_task, dates, get_account, trash_task
+from ..services import complete_task, create_task, dates, get_account, reorder, trash_task
 from .factories import make_label, make_task, make_user
 
 pytestmark = pytest.mark.django_db
@@ -846,8 +846,34 @@ class TestManualSortOfAllTasks:
         manual, body = self.order(web, sort='manual')
         assert 'drag-handle' in body and 'data-scope="all"' in body
         assert body.index('>Title<') < body.index('>Manual<')
-        # reversed, a drag would mean the opposite: no handles
-        assert 'drag-handle' not in self.order(web, sort='manual', dir='desc')[1]
+
+    def test_manual_has_no_direction_to_reverse(self, web, funded_user, three):
+        a, b, c = three
+        web.post(
+            reverse('todo:reorder'),
+            {'scope': 'all', 'ids[]': [str(c.pk), str(a.pk), str(b.pk)]},
+            **HTMX,
+        )
+
+        # a stale `dir=desc` is ignored: still the saved order, still draggable, no arrow, no flip link
+        order, body = self.order(web, sort='manual', dir='desc')
+        assert order == ['C', 'A', 'B'] and 'drag-handle' in body
+        assert 'sorted descending' not in body and 'sorted ascending' not in body
+        html = body.replace('&amp;', '&')
+        assert 'hx-get="/todo/list/?view=all&sort=manual"' in html
+        response = web.get(reverse('todo:list'), {'view': 'all', 'sort': 'manual'}, **HTMX)
+        assert response['HX-Push-Url'] == f'{reverse("todo:all")}?sort=manual'
+
+    def test_order_tasks_reverses_the_manual_orders_like_any_sort(self, funded_user, three):
+        a, b, c = three
+        reorder(funded_user, scope='all', ids=[c.pk, a.pk, b.pk])
+        queryset = dates.open_tasks(funded_user)
+
+        def titles(sort, direction=None):
+            return [t.title for t in dates.order_tasks(queryset, sort, direction)]
+
+        assert titles('all_manual') == ['C', 'A', 'B']
+        assert titles('all_manual', 'desc') == ['B', 'A', 'C']
 
     def test_dragging_saves_the_order_and_manual_shows_it(self, web, three):
         a, b, c = three

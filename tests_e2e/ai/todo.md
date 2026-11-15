@@ -1210,8 +1210,8 @@ one`; a second user (Session B) with a task.
 | # | Step | Expected |
 |---|------|----------|
 | 1 | Open **All tasks** with at least four open tasks. | The "Sort by" bar reads Due date, Priority, Newest, Title, **Manual** (Manual last); no drag handles on the rows. |
-| 2 | Click **Manual**. | The URL gets `?sort=manual`; every row shows a drag handle (grip icon, left of the circle). Clicking **Manual** again reverses the list (arrow down) and the handles disappear. |
-| 3 | Back on the ascending Manual order, drag the last row to the top, then reload. | The order is kept after the reload. **Title**, **Newest** and **Today** show their own orders, unchanged by the drag. |
+| 2 | Click **Manual**. | The URL gets `?sort=manual`; every row shows a drag handle (grip icon, left of the circle). Manual has no arrow: clicking it again changes nothing, and adding `&dir=desc` to the URL is ignored. |
+| 3 | On Manual, drag the last row to the top, then reload. | The order is kept after the reload. **Title**, **Newest** and **Today** show their own orders, unchanged by the drag. |
 | 4 | Focus a handle and press the Up / Down arrow keys. | The row moves and the order is saved (as on Today). |
 | 5 | Add a new task above, with Manual selected. | The new task is at the end of the list. |
 | 6 | With more than 50 open tasks, drag a row on page 1 to a different place on that page, then open page 2. | Page 2's tasks keep their order; the tasks on page 1 follow the new order. |

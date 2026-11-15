@@ -163,8 +163,15 @@
     // menu (the state and Postpone menus), so closing a menu never opens the task.
     const INTERACTIVE = 'a, button, input, select, textarea, label, summary, [role="button"], ' +
         '[role="menu"], [role="menuitem"], [role="menuitemradio"], [role="listbox"], [x-data], .drag-handle';
+    // A press that lands while a menu is open only closes it (the menu's own outside-click runs before
+    // the click does, so ask at press time).
+    let menuWasOpen = false;
+    document.addEventListener('pointerdown', function () {
+        menuWasOpen = !!document.querySelector('.task-row [aria-expanded="true"]');
+    }, true);
     document.addEventListener('click', function (event) {
         if (event.defaultPrevented || event.button !== 0) return;
+        if (menuWasOpen) { menuWasOpen = false; return; }
         const target = event.target;
         if (!(target instanceof Element)) return;
         const row = target.closest('.task-row');
@@ -175,10 +182,10 @@
         if (selection && !selection.isCollapsed && row.contains(selection.anchorNode)) return;
         const link = row.querySelector('a.task-title');
         if (!link) return;
-        link.dispatchEvent(new MouseEvent('click', {
-            bubbles: true, cancelable: true, view: window, button: 0,
-            ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey, altKey: event.altKey,
-        }));
+        // Ctrl/Cmd-click opens a new tab like the link does, by asking for it outright (a synthetic click
+        // on the link could be treated as a popup); anything else is a plain visit.
+        if (event.ctrlKey || event.metaKey) window.open(link.href, '_blank', 'noopener');
+        else link.click();
     });
 
     // The tab title follows an inline rename of the task page.

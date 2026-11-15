@@ -1318,5 +1318,6 @@ def _reorder_all(user: User, ids: list[UUID]) -> int:
         changed = [
             Task(pk=pk, all_position=index) for index, pk in enumerate(order) if old[pk] != index
         ]
-        Task.objects.bulk_update(changed, ['all_position'])
+        # Batched: the first drag numbers every open task (up to the cap) at once.
+        Task.objects.bulk_update(changed, ['all_position'], batch_size=500)
     return len(wanted)
