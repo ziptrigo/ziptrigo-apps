@@ -43,7 +43,8 @@ apps/feedback/        Footer "Feedback" page: saves a user's message, emails a r
                       to superusers; admin triage by status.
 apps/qr_code/         QR codes: dashboard/editor pages, API, `/go/<code>` short links.
 apps/file_transfer/   File transfer: logged-in + anonymous sending, dashboard/download pages,
-                      S3 uploads, metering, "download all" zip, jobs.
+                      S3 uploads, metering, "download all" zip, jobs, and file requests (issue
+                      #306: a link for other people to upload files to you, see "File requests").
 apps/receipts/        Receipts (issue #98): receipts and invoices in, extracted fields out. Models,
                       uploads, email intake, AI extraction, billing, jobs, admin, the web pages, the
                       JWT API (`/api/receipts/`) and the `admin/receipts.py` CLI (see "Receipts").
@@ -103,6 +104,9 @@ inv api generate [--bump patch|minor|major]   # docs/openapi.yml; bumps the vers
 inv api generate --check      # exit 1 if docs/openapi.yml is out of date; writes nothing
 inv qrcode login local <email>                  # JWT CLIs over /api/qr/, /api/ft/, /api/receipts/, /api/s/, /api/todo/, /api/notes/, /api/time/
 inv filetransfer send local report.pdf --to a@example.com
+inv filetransfer request-create local "Wedding photos" [--message ... --anyone | --signed-in | --to a@x --to b@y --max-files N --max-gb N --expires 30|none|2026-12-31 --password]   # file requests (issue #306); the password via FILETRANSFER_LINK_PASSWORD or a hidden prompt
+inv filetransfer requests local [--filter active|ended|all] | request-get local <id> | request-edit local <id> [--title ... --to a@x --clear-max-files ...]
+inv filetransfer request-done local <id> | request-reopen local <id> | request-download local <id> --out ./photos [--force] | request-delete local <id> [--yes]
 inv receipts login local <email>                # password: prompt, or RECEIPTS_PASSWORD
 inv receipts upload local invoice.pdf ./scans   # files or folders; unsupported types are skipped
 inv receipts list local --status needs_review --from 2026-10-01 --to 2026-10-31 [--vendor <id>]
@@ -1745,7 +1749,8 @@ reader every per-IP rule uses, moved here from `file_transfer` for this issue) n
   even from many IPs -- and the manage link), plus abuse reports (issue #59: `FT_REPORT_IP` strict
   per IP, `FT_REPORT_TRANSFER` a looser per-transfer ceiling, same split reasoning as the download
   password), and `FT_RECIPIENT_EMAIL_USER` (30/hour per user: "Resend" and "Add recipients" on an
-  existing transfer, web and `/api/ft/` sharing one budget). It is charged **one hit per email
+  existing transfer, web and `/api/ft/` sharing one budget; a file request's invites and resends spend
+  it too, see "File requests"). It is charged **one hit per email
   queued** (a resend is 1, an add is one per new address), so 30 is the most such emails an account
   sends an hour, not calls. The charge is a `charge=` callback
   (`services.actions.charge_recipient_emails`, bound to the user by the dashboard view and the API
@@ -1845,6 +1850,8 @@ version from `API_VERSION`; its message says to run `inv api generate`. JSON is 
 `openapi_extra`), gives the groups their order and a description each, and the same test fails
 when a router uses a tag that isn't in it, so **a new app's router adds its tag to `TAGS`**.
 Tests of the command: `admin/tests/test_api.py`.
+
+`apps/file_transfer/api/` also has the file request endpoints (`/api/ft/requests`, issue #306): see "File requests".
 
 `apps/file_transfer/api/` (issue #55 phase 3) is JWT-only (logged-in users; anonymous sending stays
 web-only) and mirrors the web send/dashboard flow endpoint-for-endpoint, calling the exact same
@@ -2593,6 +2600,148 @@ entries. `take_down_action`, `release_hold_action` (both on `TransferAdmin`) and
 check in this project. `take_down_action` and `block_sender_action` go through an intermediate
 confirmation page before applying; `release_hold_action` and `dismiss_action` apply immediately
 from the changelist, same as Django's own built-in actions.
+
+### File requests
+
+Issue #306 (`models/request_invite.py`, `services/requests.py`, `request_access.py`, `request_uploader.py`,
+`request_upload.py`, `request_invites.py`, `request_notices.py`, `views/request_public.py`,
+`request_upload.py`, `request_owner.py`, `api/requests.py`, `schemas/request.py`, `forms/request.py`,
+`templatetags/ft_ui.py`, migration `0009_file_requests`). A **request** is a link the owner (signed in) sends
+so that *other people* upload files to them. While it is **Open** people with access upload and remove their
+own files; once it is **Done** the same link shows the download view to the same people. The owner downloads
+from the dashboard at any time. Only signed-in users create requests.
+
+- **A request is a `Transfer`** with `kind='request'` (`TransferKind`; `send` is the default), so storage,
+  metering, the download page and its zip, expiry, suspension, takedown, auto-hold and the block list apply
+  unchanged. New `Transfer` columns (all with a `db_default`, the #102 lesson): `kind`, `title` (100),
+  `upload_audience` (`anyone` / `signed_in` / `selected`: `UploadAudience`), `max_files` and
+  `max_total_size_bytes` (null = the site's `logged_in_max_files` / `logged_in_max_total_size_bytes`,
+  `Transfer.effective_max_files` / `effective_max_total_size_bytes`), `done_at` (**Open vs Done is this
+  column, not a status**), `done_by_user` / `done_by_name`, `upload_notice_due_at` / `upload_notice_since`
+  (the debounce, below; a partial index on the first). A request is `ACTIVE` from creation (no draft),
+  `completed_at` and `last_billed_at` set then, `max_downloads` null and `notify_on_download` false.
+  `Transfer.display_name` is the title for a request, so the emails and the metering line that name a transfer
+  name it. `TransferFile` gained `uploaded_at` (set for **both** kinds by `complete_file_upload`),
+  `uploader_user` (SET_NULL), `uploader_name`, `uploader_email` (copies at upload time),
+  `uploader_token_hash` (an anonymous uploader's browser, the `anon_session` HMAC pattern) and
+  `uploader_ip`. `RequestInvite` (a separate model from `TransferRecipient`, so a send's recipients and a
+  request's invitees never mix; unique on `(transfer, Lower(email))`). `size_bytes` is always the sum of the
+  *uploaded* files (`requests.refresh_size`), so the owner is billed for what is stored; no creation price,
+  uploaders never pay. **The sends' surfaces list sends only**: the dashboard's Sent tab, `GET /api/ft/transfers`
+  and the transfers endpoints by id filter `kind='send'`, and `update_settings`, `add_recipients` and
+  `resend_recipient` 404 a request.
+- **Creating** (`services.requests.create_request(owner, RequestOptions, ip=, charge=)`, shared by the form and
+  `POST /api/ft/requests`): the title (control characters removed, stripped, 1 to 100), the message
+  (`validate_message`), the audience, the invitees (the `limits.validate_recipients` rules, at most
+  `logged_in_max_recipients`, normalised by `request_invites.normalize_invite_email`: domain lower-cased;
+  required for "Only these people", ignored otherwise), `max_files` 1 to the site's, `max_total_size_bytes` 1
+  to the site's, the expiry (`resolve_expiry`) and the password. Then the block list (the owner's email and the
+  client IP, `BlockedSenderError`: 403 page / API 403) and a balance of at least `MIN_BALANCE_TO_SEND`
+  (`InsufficientCreditsError`: 422 with the message / 402). `charge` is called with the invite count after every
+  check and before anything is created: `requests.charge_request_creation(user, n)` spends one hit of
+  **`FT_REQUEST_CREATE_USER`** (30/hour per user) and `n` hits of `FT_RECIPIENT_EMAIL_USER`, so a refused request
+  spends nothing and one over the budget creates nothing (429). A field problem is a `ValidationError` **keyed by
+  the field name** (`{'title': ...}`), which `forms.request.add_service_errors` shows under the field and the API
+  turns into `field: message`. The invite email is `emails.send_request_invite` on commit.
+- **Access** (`services/request_access.py`, `check_access(transfer, user, session) -> Access`), in this order for
+  every request page and endpoint (upload, remove, done, download, zip, unlock): the owner, signed in, passes
+  everything (never asked for the password); a **password**, if set, is the existing unlock page and rules
+  (`FT_UNLOCK_IP` / `FT_UNLOCK_TRANSFER`); then the **audience**: `anyone` needs nothing, `signed_in` a session
+  (`NEEDS_SIGN_IN` redirects to the login page with `next=/t/<slug>/`, the terms gate not applying to `/t/`), `selected`
+  a session whose account's email matches an invite ignoring case **and** is confirmed (a matching unconfirmed
+  account is `NEEDS_CONFIRMED_EMAIL`: "Confirm your email address to use this link." with the resend link; anyone
+  else `NOT_INVITED`: "This link is for specific people." and a Sign out button, naming no invitee). The same
+  audience applies to downloading after Done; there is no separate setting.
+- **The link** is the existing `/t/<slug>/` (so nginx, `TIMEZONE_MIDDLEWARE_SKIP_PREFIXES` and the terms gate
+  already treat it right). `views.download.download_page` and `unlock` branch on `transfer.is_request` into
+  `views.request_public.render_request_page`: the gate (`request_gate.html`, 200 for the password, 403 for the
+  other two), the **upload page** (`request_upload.html`, while Open) or `download.html` (Done, with the uploader
+  names shown only to the owner). Every unavailable state is the same neutral page as a transfer's
+  (`downloads.is_available`). `_password_gated_transfer` (zip, per-file download) applies `check_access` and also
+  requires Done, **except for the owner**, who may download an Open request through the same endpoints (so the
+  dashboard's Download and Download all reuse them; the zip widget takes `?area=zip-area-<id>` so several rows can
+  have one, validated by `_ZIP_AREA_RE`). `PublicHttpRequest` moved to `views/types.py` and gained `.user`.
+- **Uploading** (`services/request_upload.py`, JSON endpoints `/t/<slug>/upload/files/...` in
+  `views/request_upload.py`: add, `parts/`, `resume/`, `complete/`, `remove/`, the same shape as the anonymous send
+  ones, driven by `resumable_upload.js`, whose options gained `formId`, `confirmSubmit`, `confirmRemove` and
+  `extraAddBody`). Each call spends `FT_REQUEST_UPLOAD_IP` (90/min) and, once the request is found,
+  `FT_REQUEST_UPLOAD_TRANSFER` (600/hour per request across IPs; a made-up slug creates no key); a signed-in
+  uploader also spends `FT_UPLOAD_USER`. `add_file` and `complete_file` run **under the request's row lock**: the
+  request must be open and available (`NOT_ACCEPTING_MESSAGE`, "This link is not accepting files right now."),
+  the per-file limit is the site's, `max_files` and `max_total_size_bytes` count **every** file of the request
+  (every uploader's, finished or in progress; messages "This request accepts at most 10 files." / "... at most 2.0
+  GB in total."), the block list is checked (the uploader's IP and, signed in, the account email: 403, the neutral
+  message). `complete_file` also recomputes `size_bytes`, forgets a stale zip (`invalidate_zip`) and, unless the
+  owner uploaded it, starts or pushes back the notice debounce (`uploaded_at` is the batch's clock). An **uploader
+  only ever sees and removes their own files** (`request_uploader.own_files`: this account, or this browser's
+  token, which is made on the first upload and kept in the session as a raw token with only its digest stored;
+  another person's file id is a 404); the typed name is remembered in the session. An unfinished upload older than
+  a day is deleted by `cleanup_drafts` (`requests.cleanup_abandoned_files`): they count toward the limits, so a
+  closed browser would otherwise use up the request for good.
+- **Done and reopen** (`requests.mark_done`, `owner_mark_done`, `reopen`). `mark_done` is one conditional `UPDATE ...
+  WHERE done_at IS NULL AND status = ACTIVE` under the row lock; losing the race is a no-op answered as success. An
+  uploader needs at least one uploaded file in the request ("Upload at least one file first."); the owner may do it
+  with none. In the same transaction every file that is not `uploaded` yet (all uploaders') is deleted (their
+  multipart uploads are aborted after commit), the pending notice is cleared and **only when someone other than the
+  owner** did it the owner's in-app notice and email are queued. `reopen` is the owner's (dashboard, API): files
+  stay, nothing is sent. The upload page's "Mark as done" and "Remove" go through a script-driven confirmation
+  dialog (`window.ftAsk`, an Alpine `init()` method: an `x-init` expression that evaluates to a function is
+  *called* by Alpine, which opened the dialog on load); Done is an htmx form (`HX-Redirect` back to the page with
+  the flash "Thanks, <owner name> has been told."). The owner is named by the account name, never the email.
+- **Notices to the owner.** *New files*: in-app only, **debounced**: every finished upload by anyone but the owner
+  sets `upload_notice_due_at = uploaded_at + 15 min` (`request_upload.NOTICE_DEBOUNCE`) and `upload_notice_since`
+  if the batch has not started; the job **`file_transfer.send_request_notices`** (every minute, lease 5 minutes,
+  `jobs.send_request_notices` -> `request_notices.send_due_notices`) claims each due open request with a conditional
+  `UPDATE` clearing `upload_notice_due_at`, counts the files uploaded since `upload_notice_since` (removed ones
+  are not counted), resets it and writes one notification `3 new files in "Title"` (title cut to stay within 140;
+  body "From Jane, john@example.com and 1 other"; url the dashboard's Requests tab; key
+  `transfer_request_uploads:<id>`, `delete_for_key` then `notify`); an inactive owner is not told. *Done*:
+  `transfer_request_done:<id>`, body `7 files, 1.2 GB. Marked done by Jane.` (`by someone` when anonymous without a
+  name), which also deletes the pending uploads notice, and the email `emails.send_request_done_email` ("Your file
+  request is done", the owner's **confirmed** address only, autoescaped HTML, nothing in the subject). Invite emails:
+  fixed subject "You've been asked to upload files", title and message in the autoescaped body.
+- **Invites** (`services/request_invites.py`): sent at creation and when an address is added; **Resend** per invitee
+  has the same `actions.RESEND_COOLDOWN` and `FT_RECIPIENT_EMAIL_USER` budget as a transfer recipient's and the same
+  refusals before the charge (actionable, not held, owner not blocked, cooldown). Removing an invitee stops their
+  access; files they uploaded stay. The settings form's textarea is the whole invitee list (new addresses are invited,
+  missing ones removed); invitees are kept while the audience is not "Only these people".
+- **Changing** (`requests.update_request(transfer, data, ip=, charge=)`, one transaction with the row locked): only the
+  keys in `data`; limits never below what is already uploaded ("Already N files uploaded; choose at least N.",
+  "Already X uploaded; choose at least X."); switching to "Only these people" needs an address; the web form posts
+  every field (a blank limit clears it, a blank password keeps it, `remove_password` clears it). A held request is
+  frozen except disabling it (`TransferHeldError`: 409 on the API).
+- **Dashboard.** `?kind=send|request` (default Sent) with **Sent | Requests** underline tabs (`data-tabs`) above the
+  Active/Ended control, a **Request files** button next to **Send files**, `partials/request_row.html` for a request
+  (Open/Done, status, file count and size, distinct uploaders, expiry, who marked it done; Manage: link + QR popup
+  (`partials/request_qr.html`), the files with uploader and time, Download, a Remove per file, Download all, the
+  settings form, the invitees with Resend, the download log). Disable, re-enable and delete now are the transfer
+  actions and answer a request's row (`_row_template`); a non-htmx action redirects to the Requests tab. The row's
+  Alpine state is `manage`, never `open`. Owner actions: `request-done`, `request-reopen`, `request-settings`,
+  `request-remove-file`, `request-resend-invite`, the create page and `request-created`.
+- **Billing, expiry, suspension, abuse**: exactly a transfer's (see above). The Costs page has the line "Request files
+  from others: free to create; what they upload is billed to you per day like a transfer's storage." and counts
+  requests with transfers ("active transfers and requests"). `TransferAdmin` shows `kind`, `title`, audience and Done
+  (filter by `kind`), the file inline shows the uploader's name, email and **IP (staff only; `purge_download_ips`
+  nulls it after 90 days)**, and a read-only invite inline; a taken-down request refuses uploads.
+- **JWT API** (`api/requests.py`, `/api/ft/requests`, the same services; every schema is `FileRequest...`):
+  `POST /requests` (201), `GET /requests` (`filter`, `limit`, `offset`), `GET|PATCH|DELETE /requests/{id}`,
+  `POST /requests/{id}/done|reopen|disable|reenable`, `POST /requests/{id}/invites/{invite_id}/resend`,
+  `GET /requests/{id}/files/{file_id}/url` (presigned, counted in the download log), `DELETE /requests/{id}/files/{file_id}`.
+  400 validation (`field: message`), 402 credits, 403 blocked, 404 another user's (never 403), 409 held, 429.
+  **Uploading through a request is web only.** CLI: `admin/filetransfer.py` `request-create|requests|request-get|
+  request-edit|request-done|request-reopen|request-download|request-delete` (the link password via
+  `FILETRANSFER_LINK_PASSWORD`, never an argument; `request-download` writes `.part` files, never overwrites without
+  `--force`, flattens names). OpenAPI 2.8.0.
+- **Not done / accepted.** A "download all" zip being built while a file changes can be stale (the build uses its own
+  snapshot; `invalidate_zip` leaves a `BUILDING` zip alone). A request cannot be marked done by an uploader while
+  it is disabled or suspended (the link is unavailable). `TERMS_VERSION` was **not** bumped for the Privacy Policy lines
+  about request uploaders (the owner decides). Out of scope: uploading through the API/CLI, emailing invitees when it
+  is done, per-uploader limits, a separate download audience, max downloads, malware scanning.
+- **Tests**: `apps/file_transfer/tests/test_requests_service.py`, `test_request_access.py` (the audience x password x
+  visitor matrix), `test_request_upload_service.py`, `test_request_notices.py` (the debounce job, invites),
+  `test_request_views.py`, `test_request_owner_views.py`, `test_request_api.py`, `test_request_admin_costs.py`,
+  `admin/tests/test_filetransfer_requests.py`, the Playwright `tests_e2e/test_file_requests.py`, and the AI plan cases
+  FT-54 to FT-63, MAIL-27, MAIL-28, NOTIF-31, NOTIF-32 and ADM-64.
 
 ### Promo codes
 
@@ -6899,7 +7048,7 @@ succeeded and failed alike, in batches; ready/running rows never) and `core.clea
 `SessionStore.clear_expired()`; nothing else purges `django_session`). A third daily one,
 `core.purge_old_notifications` (90 days, see "Notifications"), does the same for in-app notifications.
 
-`file_transfer`'s four jobs (`apps/file_transfer/jobs.py`): `meter_transfers` (daily -- charges at
+`file_transfer`'s five jobs (`apps/file_transfer/jobs.py`; the fifth, `send_request_notices`, is under "File requests"): `meter_transfers` (daily -- charges at
 the shared `BillingSettings` storage price, suspends, re-enables as a fallback -- only transfers
 already suspended when the run started, never one it suspended itself --, deletes files past the
 suspension grace period),
@@ -6907,8 +7056,10 @@ suspension grace period),
 `cleanup_drafts` (hourly; deletes a draft or unconfirmed transfer idle for 24 h, i.e.
 `Transfer.last_activity_at`, which `uploads.touch_draft` bumps on add/presign/resume/complete/remove
 file -- a column with a `db_default`, so an old container keeps inserting; `abort_draft`'s claim
-re-checks the idleness via `only_if`, so a draft touched after the job's snapshot is kept),
-`purge_download_ips` (daily). Each wraps its
+re-checks the idleness via `only_if`, so a draft touched after the job's snapshot is kept; it also deletes the
+unfinished uploads of file requests older than a day, `requests.cleanup_abandoned_files`),
+`purge_download_ips` (daily; also nulls a file request's `TransferFile.uploader_ip` after 90 days) and
+`send_request_notices` (every minute). Each wraps its
 per-transfer work in
 `try`/`except Exception: logger.exception(...)` so one bad row can't abort the rest of that run's
 batch the way an uncaught exception would (which, since `last_started_at` is already stamped by

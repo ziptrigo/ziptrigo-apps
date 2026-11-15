@@ -69,7 +69,8 @@ class FileTransferConfig(AppConfig):
                 func=jobs.cleanup_drafts,
                 description=(
                     'Deletes draft and unconfirmed transfers that have been idle for '
-                    '24 hours, aborting their unfinished uploads.'
+                    '24 hours, aborting their unfinished uploads, and deletes unfinished '
+                    'uploads to file requests that are over a day old.'
                 ),
                 interval=timedelta(hours=1),
                 lease=timedelta(minutes=30),

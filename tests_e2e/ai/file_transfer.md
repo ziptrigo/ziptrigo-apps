@@ -26,6 +26,13 @@ The `apps/file_transfer` web UI, against the real local S3 (Floci) and real emai
 - anonymous sending `/transfer/send/anon/` (off by default, switched on in the admin), its email
   confirmation by code and by link, resending the code, the anonymous limits, the anonymous sent
   page, the one-time manage link, and claim on login (including the zero-balance deferral);
+- **file requests** (issue #306): the **Request files** page `/transfer/request/new/`, the created page,
+  the link `/t/<slug>/` as an upload page while the request is open and as the download page once it is
+  done, the three audiences (anyone, anyone signed in, only invited people), the password and the
+  access order, uploading and removing one's own files, the limits, "Mark as done" by an uploader or
+  the owner, reopen, the dashboard's **Sent | Requests** tabs and a request row (files with their
+  uploaders, download, remove, download all, settings, invitees, the log), expiry, metering and
+  suspension (FT-54 to FT-63);
 - access control (logged out, another user's transfer), phone width and dark mode.
 
 Out of scope here (see the end of the file): rate limits, the admin moderation tools (takedown,
@@ -103,6 +110,7 @@ Write these down as you go; later cases use them:
 | `SLUG_E` | FT-41 |
 | `FT_USER`, `SLUG_M` | FT-42 (the fresh account and its transfer M); `URL_M` in FT-45 |
 | `SLUG_M2` | FT-46 |
+| `REQ_1_ID`, `REQ_1_SLUG` | FT-54 (the request `QA photos`); `REQ_2_SLUG` (`QA private`) in FT-55 |
 
 A slug is 22 letters/digits.
 
@@ -1001,6 +1009,179 @@ the Appearance settings of ACC-46.
 | 5 | Read the recipient email of A (FT-08) and the "expires tomorrow" email (FT-41). | "This link expires on Mon D, YYYY, h:mm AM/PM UTC." and "(Mon D, YYYY, h:mm AM/PM UTC)": never in the owner's format. |
 | 6 | Restore `mm/dd/yyyy` + `12-hour`. | - |
 
+## File requests
+
+A request is a link the owner sends so that *other people* upload files to them. While it is **Open**,
+anyone the link lets in uploads and removes their own files; once it is **Done** the link shows the
+download view to the same people. Seeded accounts: `qa.user@example.com` owns the requests,
+`qa.broke@example.com` is a signed-in uploader (confirmed, 0 credits, which is fine: uploaders never
+pay). Use the **Visitor window** for the anonymous uploader and a second private context ("Visitor
+2") for a second anonymous person. Test files are added through `#file-input` as in "Test data".
+
+### FT-54 Create a request: the form, its refusals and the created page
+
+**Purpose:** the Request files page validates every field and creates an open request (issue #306).
+**Preconditions:** logged in as `qa.user@example.com`; no requests yet (`/transfer/?kind=request` is empty).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Open `/transfer/`. | Next to **Send files** (green) a grey **Request files** button. Under the heading two tabs, **Sent** (current) and **Requests**. |
+| 2 | Click **Requests**. | `/transfer/?kind=request`: the **Active | Ended** control, and the empty state "No requests yet" ("Ask anyone to upload files to you with a link.") with a **Request files** button. **Ended** says "No ended requests". |
+| 3 | Click **Request files**. | `/transfer/request/new/`: heading **Request files**, "It is free to create; what they upload is stored on your account and billed to you per day like a transfer's storage." and "Your balance: N credits. A request needs at least 1." Fields: **Title**, **Message (optional)**, **Who can upload** (radios **Anyone with the link** selected, **Anyone signed in to ZipTrigo**, **Only these people**), **Max files** ("Up to 100. Blank: the site maximum."), **Max total size (GB)** ("Blank: the site maximum."), **Expiry** (No expiration selected), **Password (optional)** with a show/hide eye, and **Create the request**. The email box is hidden. |
+| 4 | Pick **Only these people**. | A **Their email addresses** box appears ("One email address per line (or separated by commas). They are emailed the link, and need an account with that address to upload."). Back to **Anyone with the link**: it hides again. |
+| 5 | **Create the request** with everything empty. | Red box "Title: This field is required." and the same message under Title (red border). Nothing is created. |
+| 6 | Title of 101 characters (`'T'.repeat(101)` typed or pasted into the box, whose `maxlength` is 100: remove it first with `document.getElementById('id_title').removeAttribute('maxlength')`). | "Title: Keep the title to 100 characters or fewer." |
+| 7 | Title `QA photos`, Max files `0`. | "Max files: Ensure this value is greater than or equal to 1." With `101`: "Max files: Max files must be between 1 and 100." |
+| 8 | Max files empty, Max total size `0`, then `21`. | "Max total size (GB): Ensure this value is greater than or equal to 0.01." then "Max total size (GB): Max total size must be at most 20.0 GB." |
+| 9 | Max total size empty. Expiry **Set a date** with no date. | "Expiry date: Provide a date for a custom expiry." |
+| 10 | Expiry back to **No expiration**. Pick **Only these people**, leave the emails empty. | "Their email addresses: Add at least one email address." With `not-an-address`: `Their email addresses: "not-an-address" is not a valid email address.` |
+| 11 | Pick **Anyone with the link**; Title `QA photos`, Message `Please send yours <b>today</b>`, Max files `3`, Max total size `0.5`, Expiry **30 days**, Password `sekret1`. **Create the request**. | Redirected to `/transfer/requests/<REQ_1_ID>/created/`: heading **Your request is ready**, "Share this link with the people you want files from: QA photos.", a readonly box with `http://localhost:8765/t/<REQ_1_SLUG>/`, **Copy link** (the label becomes "Copied" for two seconds) and a **QR code** button. No "We emailed ..." line. Record `REQ_1_ID` and `REQ_1_SLUG` (22 letters/digits). |
+| 12 | Click **QR code**. | A dialog "QR code" with a black-on-white image of 240 px, "Scan it with a phone to open this link." and the link in mono type; **Close** is focused; Tab stays on it; Escape closes it and focus returns to the button. |
+| 13 | Click **Back to your requests**. | `/transfer/?kind=request`: one row, **QA photos**, "OPEN", "ACTIVE", "0 files, 0 bytes", "0 uploaders"; "Created <time>", "Expires: <date in 30 days>", "Anyone with the link", "Credits charged: 0"; buttons **Copy link**, **Mark as done**, **Disable**, **Manage**, **Delete**. |
+| 14 | Open the account page `/account/` > Credits. | The balance is unchanged: creating a request costs nothing. |
+| 15 | Log in as `qa.broke@example.com`, open `/transfer/request/new/`, create a request titled `QA broke`. | Allowed only with at least 1 credit: "You need at least 1 credit to request files." in the red box (the balance is 0). Nothing is created. Log back in as `qa.user`. |
+
+### FT-55 Only these people: invitees, their email, and who may enter
+
+**Purpose:** the audience "Only these people" lets in only the owner and accounts whose confirmed email matches an invite.
+**Preconditions:** FT-54; `qa.broke@example.com` has 0 credits (it must be able to sign in).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | As `qa.user`: `/transfer/request/new/`, Title `QA private`, **Only these people**, emails `qa.broke@example.com` and `someone.else@example.com` on two lines, **Create the request**. Record the slug as `REQ_2_SLUG`. | The created page says "We emailed 2 people the link." |
+| 2 | `/__e2e__/mail/?to=qa.broke@example.com`. | One email, subject exactly `You've been asked to upload files` (no title in it); `emails.md` MAIL-27 has its body. |
+| 3 | Visitor window (logged out): open `/t/<REQ_2_SLUG>/`. | Redirected to `/account/login/?next=/t/<REQ_2_SLUG>/`. After signing in as `qa.broke` it returns to the upload page. |
+| 4 | (Shell step) Un-confirm `qa.broke` while it has a session: `python tests_e2e/ai/manage.py shell -c "from apps.accounts.models import User; User.objects.filter(email='qa.broke@example.com').update(email_confirmed=False)"`, then reload `/t/<REQ_2_SLUG>/` in its window. | 403 page "Confirm your email address to use this link." with a button **Send the confirmation email again** (to `/account/resend-confirmation/`). No title, no upload form. Re-confirm it with `.update(email_confirmed=True)` and reload: the upload page. |
+| 5 | Sign in as `qa.admin@example.com` (not invited), open `/t/<REQ_2_SLUG>/`. | 403 page "This link is for specific people." / "Sign in with the address it was sent to." and a **Sign out** button. It says nothing about who is invited and does not show the title. **Sign out** signs out and goes to the home page. |
+| 6 | As `qa.user` (the owner), open the link. | The upload page itself (the owner always passes, no password asked). |
+| 7 | As `qa.broke`, open `/t/<REQ_2_SLUG>/`. | The upload page: "<owner name> is asking for files", **QA private**, and "The owner will see your name and email next to your files." (no name field). |
+| 8 | As `qa.user`: Requests tab > QA private > **Manage** > "Invited people" lists both addresses with **Resend**. **Resend** `qa.broke@example.com` at once. | A red "This person was emailed recently; you can resend in N minutes." (cooldown 10 minutes from the creation email). After 10 minutes, **Resend** shows "Sent the email to qa.broke@example.com again." and a second email arrives. |
+| 9 | Remove `someone.else@example.com` from the emails box, **Save**. | The row reloads without that address; no email is sent. Replace the box with nothing and **Save**: "Add at least one email address." |
+| 10 | Remove `qa.broke@example.com` from the list (keep another address), **Save**; then, as `qa.broke`, reload the link. | The 403 "This link is for specific people." page: removing an invitee stops their access. |
+
+### FT-56 Anyone with the link: upload, remove, and only your own files
+
+**Purpose:** an anonymous uploader types an optional name, uploads, sees only their own files and can remove them.
+**Preconditions:** FT-54 (`REQ_1_SLUG` is password protected: unlock it with `sekret1` where asked); Visitor and Visitor 2 contexts logged out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open `/t/<REQ_1_SLUG>/`. | The password page: title **QA photos**, "This link is password protected. Enter the password to continue." and **Unlock**. No files, no form, no message. |
+| 2 | Type `wrong`, **Unlock**. | "Incorrect password." under the box (status 422). |
+| 3 | Type `sekret1`, **Unlock**. | The upload page: "<owner name> is asking for files", heading **QA photos**, the message `Please send yours <b>today</b>` as text, "Up to 3 files, 512.0 MB in total, 5.0 GB per file. Available until <date in 30 days>." (the owner's own email is nowhere on the page). **Your name (optional)** with "Shown to <owner name> next to your files.", **Your files** with the drop zone ("Drag & drop files or folders here, or" **Choose files** / **Add folder**), an empty list, a **Mark as done** section and a small **Report this link** at the bottom. |
+| 4 | Type `Jane <i>Doe</i>` in the name, add `qa-report.txt`. | The row shows `qa-report.txt (2.9 KB)`, a progress bar and a green check. No dialog. |
+| 5 | Reload the page. | The same row is listed with its check (the file is remembered for this browser), and the name box still reads `Jane <i>Doe</i>`. |
+| 6 | Visitor 2: unlock and open the link; add `qa-notes.txt`. | Visitor 2's list shows only `qa-notes.txt`; Visitor's `qa-report.txt` is not listed, counted or mentioned. Reloading Visitor still shows only `qa-report.txt`. |
+| 7 | Visitor: click the trash button on `qa-report.txt`. | A dialog "Remove this file?" with the file name and **Cancel** / **Remove** (red); Cancel is focused. **Cancel** or Escape closes it and keeps the file. |
+| 8 | Click the trash button again, **Remove**. | The row disappears. Visitor 2's file is untouched. |
+| 9 | (Shell step) Check the stored uploader: `python tests_e2e/ai/manage.py shell -c "from apps.file_transfer.models import TransferFile; print([(f.name, f.uploader_name, f.uploader_email, f.uploader_ip) for f in TransferFile.objects.filter(transfer__title='QA photos')])"` | One file, `qa-notes.txt`, an empty name (Visitor 2 gave none), no email, and the IP `127.0.0.1`. |
+| 10 | As `qa.user`: Requests tab. | The row says "1 file, 1.5 KB" and "1 uploader". |
+| 11 | Visitor: `fetch('/t/<REQ_1_SLUG>/upload/files/<id of Visitor 2's file>/remove/', {method: 'POST', headers: {'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)[1]}}).then(r => r.status)` (the id is in the owner's dashboard download link). | `404`: another uploader's file is never reachable. |
+
+### FT-57 The limits and their messages
+
+**Purpose:** the request's own limits count every uploader's files, finished or not, and name the request in the message.
+**Preconditions:** FT-56 (QA photos allows 3 files and 512 MB in total; `qa-notes.txt` is in it); Visitor unlocked.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: add `qa-report.txt` and `qa-limit.txt`. | Both upload (3 files in the request now). |
+| 2 | Add `qa-remove-me.txt`. | A red line above the list: "Could not add qa-remove-me.txt: This request accepts at most 3 files." |
+| 3 | Remove `qa-limit.txt` (dialog **Remove**), then add a file of 600 MB (`new File([new ArrayBuffer(600*1024*1024)], 'big.bin')`, or any file over 512 MB). | "Could not add big.bin: This request accepts at most 512.0 MB in total." (nothing is stored). |
+| 4 | Add an empty file `empty.txt`. | "Could not add empty.txt: File is empty." |
+| 5 | As `qa.user`: Manage > Max files `2`, **Save**. | A red "Already 3 files uploaded; choose at least 3." in the row (nothing saved); with `3` it saves. Max total size `0.01` saves (the files are a few KB); blank clears the limit ("the site maximum"). The smallest the form takes is `0.01` GB; below what is stored the row says "Already <size> uploaded; choose at least <size>." |
+| 6 | Create a request with Max files `1` and add two files from one browser at once (select both). | One is added, the other shows "This request accepts at most 1 file." (the limit is checked under the request's lock, so two parallel adds cannot both pass). |
+
+### FT-58 Mark as done by an uploader
+
+**Purpose:** an uploader closes the request; the owner is told; nothing can be added afterwards; the link switches to the download view.
+**Preconditions:** FT-56 and FT-57 (QA photos has files from Visitor and Visitor 2); the owner's bell is empty of QA photos notices.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Create a request `QA empty` (anyone, no password) and, in Visitor, open it and click **Mark as done**, then **Mark as done** in the dialog. | The dialog "Mark these uploads as done?" says "No one will be able to add files after this." After confirming: a red box "Upload at least one file first." and the page stays in upload mode. |
+| 2 | On QA photos in Visitor 2: start adding a large file (or add one and, before it finishes, continue), then click **Mark as done**. | The dialog adds "Files that have not finished uploading will be left out." |
+| 3 | Confirm. | The page reloads as the download view with a green "Thanks, <owner name> has been told." The list shows every uploaded file of the request (all uploaders') with name and size only, **Download** buttons, **Download all (.zip)** (more than one file), the **QR code** button and **Report this transfer**. No "Mark as done", no drop zone, no uploader names. |
+| 4 | Visitor (the first uploader): reload the link. | The same download view (this visitor is let in the same way), not the upload page. |
+| 5 | Visitor: `fetch('/t/<REQ_1_SLUG>/upload/files/', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': document.cookie.match(/csrftoken=([^;]+)/)[1]}, body: JSON.stringify({name: 'late.txt', size: 5})}).then(r => r.json())` | `{error: "This link is not accepting files right now."}` (status 422). |
+| 6 | As `qa.user`: the bell and `/transfer/?kind=request`. | `NOTIF-31`/`NOTIF-32` have the notice; the QA photos row says "DONE", "Done <time> by Jane <i>Doe</i> ..." (or "by someone" when Visitor 2 marked it), and shows **Reopen** instead of **Mark as done**. |
+| 7 | `/__e2e__/mail/?to=qa.user@example.com`. | The "Your file request is done" email (`emails.md` MAIL-28). |
+| 8 | Click **Download** on a file in Visitor. | A 302 to a presigned URL; the saved file has the original name and bytes. The download is logged: the owner's Manage panel > **Download log** lists it with the IP. |
+| 9 | Click **Download all (.zip)** in Visitor. | "Preparing the zip..." then **Download all (.zip)**; the zip has every file once (duplicate names become `name (1).ext`). |
+| 10 | Mark a request done yourself as the owner (`QA empty`: Requests tab > **Mark as done**, confirm the browser's question). | The row says "DONE" and "by <your name>"; **no** notification and **no** email for it (the owner's own action). With no files it is allowed. |
+
+### FT-59 The owner's dashboard row and actions
+
+**Purpose:** everything the owner can do to a request from the Requests tab.
+**Preconditions:** FT-58 (QA photos is Done with files); logged in as `qa.user`.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | `/transfer/?kind=request` > QA photos > **Manage**. | The panel shows the link with a **QR code** button; **Files** (with **Download all (.zip)** when there is more than one) listing each uploaded file with size, **uploader** (`Jane <i>Doe</i>` as text; a signed-in uploader as `Name (email)`; an unnamed anonymous one as "Someone") and the upload time `YYYY-MM-DD h:mm AM/PM`, a **Download** button and a trash button each; a **Settings** form; and the **Download log** (if anything was downloaded). |
+| 2 | Click **Download** on a file. | The file downloads (the owner downloads at any time). Click **Download all (.zip)**: it shows "Preparing the zip..." in place, then the link. |
+| 3 | Click a file's trash button, confirm the browser's question. | The row reloads with "File removed." and one file fewer; the row's file count and size drop. The request stays Done. |
+| 4 | Click **Reopen**. | The row says "OPEN" and shows **Mark as done** again. In Visitor, reload the link: the upload page is back; Visitor sees their own files (same browser) and can add and remove again. Nothing was emailed. |
+| 5 | **Disable**. | "DISABLED"; Visitor's link is the neutral "This transfer is no longer available" page (the same page as an expired or deleted one). **Re-enable** (needs at least a day's cost of credits) restores it. |
+| 6 | Settings: Title `QA photos 2`, Message empty, **Save**. | The row title changes; the upload page shows it. |
+| 7 | Settings: choose **Only these people** with no addresses, **Save**. | "Add at least one email address." in the row. With one address it saves and emails it. Set it back to **Anyone with the link**. |
+| 8 | Settings: Expiry **Set a date**. | The date picker refuses a past date (greyed days). A future date saves: "Expires: <that day, end of day>"; today is allowed (the end of today). |
+| 9 | Settings: Password `new-pass`, **Save**; reload the link in Visitor 2 (previously unlocked). | The password page again (a changed password locks every session). **Remove password**, **Save**: no password asked. |
+| 10 | **Delete**, confirm. | The row disappears from Active and appears under **Ended** with "DELETED" and an "Ended:" time; the link is the neutral page; the files are gone from S3. |
+| 11 | Open the **Sent** tab. | The request is not listed there; the Sent list never shows requests. |
+| 12 | `/api/ft/transfers/` (with a token) and the dashboard Sent tab. | Only sends; requests are at `/api/ft/requests` (unit tests cover the API and CLI). |
+
+### FT-60 Signed in and password, before and after done
+
+**Purpose:** the access order is password first, then the audience, and it applies to downloading too.
+**Preconditions:** `qa.user` creates a request `QA signed in` with **Anyone signed in to ZipTrigo** and Password `pw-1234`; Visitor logged out; `qa.broke` signed in in a third context.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: open the link. | The **password** page first (before sign-in). Enter `pw-1234`: redirected to `/account/login/?next=/t/<slug>/`. |
+| 2 | Sign in as `qa.broke` in the same window. | Back on the upload page (the password is remembered for the session). |
+| 3 | Upload a file and **Mark as done**. | Download view. In a context that has not unlocked: the password page, never the file list. |
+| 4 | Visitor 2 (logged out, password entered): open the link after done. | Redirected to sign in again (the audience applies to downloading too); after signing in as `qa.admin` the file list shows and **Download** works. |
+| 5 | In Visitor 2 before signing in: `fetch('/t/<slug>/files/<file id>/').then(r => r.url)`. | A URL containing `/account/login/` (the download is redirected to the page, which redirects to sign-in): no download without access. |
+| 6 | As the owner, open the link and click Download on the list of the Manage panel. | Works without the password (the owner is never asked). |
+
+### FT-61 Expiry, storage billing and suspension (shell steps)
+
+**Purpose:** a request is metered, expires and is suspended exactly like a transfer; "the files" are the owner's storage.
+**Preconditions:** a fresh account `FT_REQ_USER` registered on `/account/register/` with 3 credits is plenty (welcome credits apply: note the balance); it has a request `QA metered` with one uploaded file (use another context to upload `qa-report.txt`); shell available.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | The Costs page `/billing/costs/` > File Transfer. | A line **Request files from others** with cost "Free" and the note "Free to create; what they upload is billed to you per day like a transfer's storage."; the usage says "You have 1 active transfer or request (<size>): <rate>." (requests and transfers count together). |
+| 2 | (Shell) Make the request's billing due and run the job: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import meter_transfers; Transfer.objects.filter(title='QA metered').update(last_billed_at=timezone.now()-timedelta(days=2)); meter_transfers()"` | No traceback. The Credits history may show nothing (a tiny file costs a fraction of a credit per day) -- the row's "Credits charged" stays 0 until a whole credit accrues. |
+| 3 | (Shell) Give it a big size and no credits so a day costs at least 1: set `size_bytes` to 5 GB and the balance to 0 (spend it with the admin adjustment tool), then run `meter_transfers()` again with `last_billed_at` two days ago. | The request is **SUSPENDED**: the owner's bell has "Transfer suspended: QA metered" (the title is the name), the email `Your transfer "QA metered" was suspended (out of credits)` arrives, and the public link is the neutral page (uploads and downloads refused). |
+| 4 | Add credits (admin tool) enough for a day's cost. | The request goes back to **ACTIVE** and its notice is removed; the link works again. |
+| 5 | (Shell) Set its `expires_at` to 10 minutes ago and run `from apps.file_transfer.jobs import expire_transfers; expire_transfers()`. | The request is **EXPIRED**: under **Ended**, the link is the neutral page, its files are deleted, and the email `Files for "QA metered" have been deleted` arrives. |
+| 6 | (Shell) A request created three days ago that expires in 20 hours: `python tests_e2e/ai/manage.py shell -c "from datetime import timedelta; from django.utils import timezone; from apps.file_transfer.models import Transfer; from apps.file_transfer.jobs import expire_transfers; Transfer.objects.filter(title='QA signed in').update(completed_at=timezone.now()-timedelta(days=3), expires_at=timezone.now()+timedelta(hours=20), expiry_notified_at=None, status='active'); expire_transfers()"` | The email `Your transfer "QA signed in" expires tomorrow` is sent to the owner once. |
+
+### FT-62 Abuse: report, takedown and the block list
+
+**Purpose:** the transfer abuse tools apply to a request.
+**Preconditions:** an open request `QA abuse` and an active one done (`QA photos 2` or any); Visitor logged out.
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | Visitor: on the upload page of an open request click **Report this link**. | The same report form as FT-28 (Reason, Details, Your email). Submit with "Phishing or spam": "Thank you, your report has been submitted." The report link on a Done request's page reads **Report this transfer**. |
+| 2 | Admin (ADM-64): take the request down with a reason. | The link is the neutral page for everyone, the owner's Ended list shows "TAKEN DOWN" and "This request was taken down: <reason>"; an upload attempt fails with "This link is not accepting files right now." |
+| 3 | Admin: add the visitor's IP (`127.0.0.1`) to the block list and, in another window, try to upload. | The add-file call answers 403 with "Sorry, you can't send transfers at this time." and the row shows that message; remove the entry afterwards. Signing in as an account whose email is on the block list does the same. |
+| 4 | Owner whose email is blocked: open `/transfer/request/new/`. | The 403 "Sending isn't available" page. |
+
+### FT-63 Request pages: phone width, dark mode and keyboard
+
+**Purpose:** the new pages follow the site's layout rules.
+**Preconditions:** FT-54 to FT-58 (an open request and a done one).
+
+| # | Action | Expected result |
+|---|---|---|
+| 1 | At 375 px wide: the create page, the created page, the upload page, the download view and a request row's **Manage** panel. | No horizontal scroll (the long link wraps), buttons wrap, the radios and the two-column limit boxes stay usable, the upload list rows wrap. |
+| 2 | Dark mode for the same pages. | Readable text, the dialogs (Remove, Mark as done, QR) dark with the QR image still black on white. |
+| 3 | Keyboard only on the upload page: Tab to the buttons and the trash button, Enter on trash. | The "Remove this file?" dialog takes focus on **Cancel**; Escape closes it; Enter on **Remove** removes. **Mark as done** is reachable and its dialog behaves the same. |
+| 4 | The upload and request pages' title (browser tab). | `<request title> - ZipTrigo` and `Request files - ZipTrigo`; the dashboard tab's links have `aria-current="page"` on the chosen tab. |
+
 ## Out of scope
 
 - **Rate limits** (`FT_UPLOAD_USER`, `FT_DOWNLOAD_IP`, `FT_UNLOCK_*`, `FT_REPORT_*`,
@@ -1015,4 +1196,7 @@ the Appearance settings of ACC-46.
 - **`purge_download_ips`** (nulls a download's IP after 90 days): nothing visible in a run.
 - **Files of several GB**, the per-file and total size limits (5 GB / 20 GB): impractical in a
   browser test; the 70 MiB file of FT-39 exercises the multipart path the same way.
-- **The JWT API `/api/ft/` and the `inv filetransfer` CLI**: unit tests.
+- **The JWT API `/api/ft/` (requests included, `/api/ft/requests`) and the `inv filetransfer` CLI (`request-*`)**: unit tests.
+- **Rate limits of requests** (`FT_REQUEST_CREATE_USER`, `FT_REQUEST_UPLOAD_IP`, `FT_REQUEST_UPLOAD_TRANSFER`): unit tests.
+- **The debounced "new files" job and the 24-hour cleanup of abandoned request uploads**: NOTIF-31 runs the job
+  with a shell step; the cleanup is unit tested.
